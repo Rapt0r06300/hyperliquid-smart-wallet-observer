@@ -337,7 +337,7 @@ jobs:
   recover-one:
     # No extra runner on pushes. This action requires a named operator-selected
     # candidate and never touches the existing collection/control plane.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.hydrate_candidate_id != '' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.hydrate_candidate_id != '') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'recovery-pilot:')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 18
     permissions:
@@ -363,13 +363,26 @@ jobs:
           SELECTED_DATASET_ID: ${{ inputs.hydrate_candidate_id }}
         run: |
           set -euo pipefail
-          test -n "$SELECTED_DATASET_ID"
           OUTPUT="$RUNNER_TEMP/alina-selected-quarantine"
           mkdir -p "$OUTPUT"
+          LIMIT=100000000
+          if [ -z "$SELECTED_DATASET_ID" ]; then
+            # Auto-pilot is enabled only by an explicit recovery-pilot:
+            # commit. Resolve a live, small and SHA-bound candidate first.
+            LIMIT=4000000
+            python tools/recover_one_quarantined_shard.py \
+              --select-pilot \
+              --max-source-bytes "$LIMIT" \
+              --max-live-attempts 12 \
+              > "$OUTPUT/PILOT_SELECTION.json"
+            SELECTED_DATASET_ID="$(python -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["status"] == "LIVE_SOURCE_MATCHED_NOT_DOWNLOADED"; assert p["source_asset_bytes"] <= 4000000; print(p["dataset_id"])' "$OUTPUT/PILOT_SELECTION.json")"
+          fi
+          test -n "$SELECTED_DATASET_ID"
+          echo "SELECTED_DATASET_ID=$SELECTED_DATASET_ID" >> "$GITHUB_ENV"
           python tools/recover_one_quarantined_shard.py \
             --dataset-id "$SELECTED_DATASET_ID" \
             --destination "$OUTPUT" \
-            --max-source-bytes 100000000 \
+            --max-source-bytes "$LIMIT" \
             --download > "$OUTPUT/RECOVERY_RESULT.json"
           python - <<'PY'
           import json,os,hashlib
@@ -419,8 +432,6 @@ jobs:
 
       - name: Reinspect recovered shard content with original replay verifier
         shell: bash
-        env:
-          SELECTED_DATASET_ID: ${{ inputs.hydrate_candidate_id }}
         run: |
           set -euo pipefail
           OUTPUT="$RUNNER_TEMP/alina-selected-quarantine"
