@@ -106,3 +106,21 @@ def test_hydration_plan_has_exact_bounded_asset_identities_and_fails_closed():
         h.select_assets(rows(), {}, max_assets=1001)
     with __import__("pytest").raises(InventoryError, match="HYDRATE_INVALID_BYTE_LIMIT"):
         h.select_assets(rows(), {}, max_bytes=10_000_000_001)
+
+
+def test_shared_zip_with_disagreeing_shard_identity_must_fail_before_hydration():
+    from tools.preservation_inventory import InventoryError
+    import pytest
+    index = rows()
+    index["shards"][1]["release_remote_digest"] = "sha256:" + SHA_A
+    with pytest.raises(InventoryError, match="HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT"):
+        h.select_assets(index, {("tag", "pack.zip"): (100, SHA_B)})
+
+
+def test_shared_zip_with_conflicting_size_must_fail_even_after_first_match():
+    from tools.preservation_inventory import InventoryError
+    import pytest
+    index = rows()
+    index["shards"][1]["release_remote_size"] = 101
+    with pytest.raises(InventoryError, match="HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT"):
+        h.select_assets(index, {("tag", "pack.zip"): (100, SHA_B)})

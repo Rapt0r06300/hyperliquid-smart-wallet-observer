@@ -63,8 +63,6 @@ def select_assets(index: Mapping[str, Any],
         tag = row["release_tag"]
         outer = row.get("release_container_asset") or row["release_asset"]
         key = (tag, outer)
-        if key in seen:
-            continue
         if key not in assets:
             reasons["NOT_LISTED_IN_SNAPSHOT"] += 1
             continue
@@ -77,7 +75,13 @@ def select_assets(index: Mapping[str, Any],
         expected_hash = raw.get("release_remote_digest") if packed else raw.get("sha256")
         expected_hash = expected_hash.removeprefix("sha256:").lower() if isinstance(expected_hash, str) else ""
         if expected_size != size or expected_hash != digest:
+            # The same outer Release archive must never be selected based
+            # on one matching shard while another indexed shard disagrees.
+            if key in seen:
+                raise InventoryError("HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT")
             reasons["OUTER_IDENTITY_CONFLICT"] += 1
+            continue
+        if key in seen:
             continue
         seen.add(key)
         eligible_seen += 1
