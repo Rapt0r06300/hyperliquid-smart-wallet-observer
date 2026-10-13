@@ -13042,6 +13042,25 @@ immutable identity, changed quality status or unbound legacy receipt
 fails closed; none of these checks permits SAFE promotion, backtest use
 or proof of cross-shard continuity.
 
+For manual, bounded Bitget historical trade gap recovery, the existing
+`tools/recheck_recovered_trade_reference.py` may use
+`--reference-gap-export-limit N` (0 by default; at most 128) after the
+original quarantined shard has passed both outer Release SHA-256 and
+inner shard SHA-256 checks. Missing IDs from Bitget's public REST
+reference are retained as `BITGET_PUBLIC_REST_REFERENCE_ONLY` rows
+with a reproducible SHA-256, separate from the captured WebSocket stream.
+They MUST NOT be injected into the original tape, counted as recovered
+WS messages, promoted to SAFE, or used for backtest/OOS certification.
+A missing/corrupt/miscounted reference evidence receipt fails closed;
+an oversized gap is reported without exposing unchecked rows.
+
+The selected GitHub-hosted quarantine workflow may export REST-only gaps
+manually with `reference_gap_export_limit`. The byte-verified quarantine
+artifact MUST still be published when later content or REST rechecks fail,
+provided *both* original byte-validation steps succeeded. A failed SHA
+validation never qualifies an artifact for publication. Loss of optional
+public REST access may not destroy already SHA-verified original bytes.
+
 The one-way legacy `tools/enforce_safe_replay_invariant.py` demotion path
 must likewise archive original SAFE manifests under
 `datasets/quarantine/reclassification-history/<sha256>.original`
