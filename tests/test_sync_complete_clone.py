@@ -173,7 +173,7 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
         "catalog_verification": {"source_index_sha256": catalog_sha},
     }), encoding="utf-8")
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
-    assert module.main([]) == 0
+    assert module.main(["--download-safe"]) == 0
     path = tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json"
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["git_head"] == "a" * 40
@@ -194,7 +194,7 @@ def test_zero_restore_exit_without_complete_report_fails_closed(monkeypatch, tmp
     catalog.parent.mkdir(parents=True)
     catalog.write_text('{"shards":[]}', encoding="utf-8")
 
-    assert module.main([]) == 2
+    assert module.main(["--download-safe"]) == 2
     checkpoint = json.loads(
         (tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json")
         .read_text(encoding="utf-8")
@@ -311,3 +311,46 @@ def test_catalog_budget_cli_does_not_touch_git_or_network(monkeypatch, tmp_path,
                         lambda *_a, **_k: {"status": "CATALOG_ONLY_NOT_RESTORED"})
     assert module.main(["--catalog-budget"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "CATALOG_ONLY_NOT_RESTORED"
+
+def test_default_sync_is_preflight_only_without_market_payload_download(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "f" * 40)
+    report_dir = tmp_path / "runtime" / "recovery" / "full"
+    report_dir.mkdir(parents=True)
+    catalog = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"shards":[]}', encoding="utf-8")
+    (report_dir / "RESTORE_PREFLIGHT.json").write_text(json.dumps({
+        "status": "PREFLIGHT_READY_NOT_RESTORED",
+        "repository": module.REPOSITORY,
+        "source_inventory_sha256": "a" * 64,
+    }), encoding="utf-8")
+    calls = []
+    def preview_only(*_args, **kwargs):
+        calls.append(kwargs)
+        return 0
+    monkeypatch.setattr(module, "restore_published", preview_only)
+    assert module.main([]) == 0
+    assert len(calls) == 1
+    assert calls[0]["preflight"] is True
+    assert calls[0]["max_download_gib"] is None
+    checkpoint = json.loads((report_dir / "SYNC_REPORT.json").read_text(encoding="utf-8"))
+    assert checkpoint["status"] == "RESTORE_INCOMPLETE"
+    assert checkpoint["market_payload_download_opt_in"] is False
+
+
+def test_download_safe_forwards_hard_limit_and_rejects_invalid_limit(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("GH_TOKEN", "token-for-test")
+    commands = []
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=3)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.restore_published(tmp_path, max_download_gib=3) == 3
+    assert commands[0][commands[0].index("--max-download-gib") + 1] == "3"
+    assert "--replay-ready" in commands[0]
+    assert "--everything" not in commands[0]
+    with pytest.raises(module.SyncError, match="download cap"):
+        module.restore_published(tmp_path, max_download_gib=0)

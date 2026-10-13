@@ -77,7 +77,8 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
 
 
 def restore_published(root: Path, *, preflight: bool = False,
-                      snapshot: bool = True) -> int:
+                      snapshot: bool = True,
+                      max_download_gib: int | None = None) -> int:
     """Delegate all byte-verification and SAFE gates to the ONE restore engine."""
     root = root.resolve()
     cmd = [
@@ -89,6 +90,10 @@ def restore_published(root: Path, *, preflight: bool = False,
     ]
     if preflight:
         cmd.append("--preflight-only")
+    elif max_download_gib is not None:
+        if type(max_download_gib) is not int or max_download_gib <= 0:
+            raise SyncError("download cap must be a positive whole number of GiB")
+        cmd.extend(("--max-download-gib", str(max_download_gib)))
     # Workspace snapshots and historical recovery capsules belong to the
     # explicit full-archive profile, not the clean replay/backtest corpus.
     env = os.environ.copy()
@@ -244,6 +249,16 @@ def main(argv: list[str] | None = None) -> int:
         help="keep ignored workspace files intact; still download snapshot assets",
     )
     parser.add_argument(
+        "--download-safe", action="store_true",
+        help="explicit opt-in to download SAFE/replay-compatible assets; "
+             "by default only inventory and preflight run",
+    )
+    parser.add_argument(
+        "--max-download-gib", type=int, default=8,
+        help="limit NEW SAFE payload transfers to this many GiB (default 8); "
+             "requires --download-safe to transfer data",
+    )
+    parser.add_argument(
         "--catalog-budget", action="store_true",
         help="offline SAFE/PARTIAL/REJECT and replay-ready byte accounting; "
              "no git fetch, GitHub API, payload download or local mutations",
@@ -261,6 +276,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
+    if args.max_download_gib <= 0:
+        print("ALINA_SYNC_FAIL: --max-download-gib must be positive", file=sys.stderr)
+        return 2
+    if args.download_safe and args.preflight_only:
+        print("ALINA_SYNC_FAIL: choose --download-safe OR --preflight-only", file=sys.stderr)
+        return 2
+    effective_preflight = not args.download_safe
     if sys.version_info < (3, 10):
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
@@ -268,9 +290,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         head = synchronize_main(root, update=not args.skip_update)
         print(f"ALINA_MAIN_SHA={head}", flush=True)
+        if effective_preflight:
+            print("ALINA_PREVIEW_ONLY: no market payload download. "
+                  "Use --download-safe for bounded SAFE-only restoration.", flush=True)
         code = restore_published(
-            root, preflight=args.preflight_only,
+            root, preflight=effective_preflight,
             snapshot=not args.no_snapshot_materialization,
+            max_download_gib=args.max_download_gib if args.download_safe else None,
         )
     except SyncError as exc:
         print(f"ALINA_SYNC_FAIL: {exc}", file=sys.stderr)
@@ -280,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         report_dir = root / "runtime" / "recovery" / "full"
         report_dir.mkdir(parents=True, exist_ok=True)
         report_name = (
-            "RESTORE_PREFLIGHT.json" if args.preflight_only else "RESTORE_REPORT.json"
+            "RESTORE_PREFLIGHT.json" if effective_preflight else "RESTORE_REPORT.json"
         )
         index_file = root / "catalog" / "DATA_INDEX.json"
         catalog_sha256 = hashlib.sha256(index_file.read_bytes()).hexdigest()
@@ -289,13 +315,13 @@ def main(argv: list[str] | None = None) -> int:
             expected_catalog_sha256=catalog_sha256 if not args.preflight_only else None,
         )
         certified = (
-            not args.preflight_only
+            not effective_preflight
             and code == 0
             and restore_status == "REPLAY_READY_COMPLETE"
             and report_error is None
         )
         effective_code = code
-        if not args.preflight_only and code == 0 and not certified:
+        if not effective_preflight and code == 0 and not certified:
             effective_code = 2
         checkpoint = {
             "schema": "alina.main_sync.v1",
@@ -304,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             "git_head": head,
             "catalog_index_sha256": catalog_sha256,
             "restore_exit_code": code,
+            "market_payload_download_opt_in": bool(args.download_safe),
+            "download_cap_gib": args.max_download_gib if args.download_safe else None,
             "status": "REPLAY_READY_COMPLETE" if certified else "RESTORE_INCOMPLETE",
             "restore_report": report_name,
             "restore_report_status": restore_status,

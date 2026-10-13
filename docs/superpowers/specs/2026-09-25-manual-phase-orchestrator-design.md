@@ -50,6 +50,20 @@ local checkout. This updates `main` by fast-forward only and calls the single
 size/SHA-256 identity, resumable verified downloads, SAFE/quarantine gates,
 and a durable `SYNC_REPORT.json` plus `RESTORE_REPORT.json`.
 
+The local `ALINA_SYNC_COMPLETE` entrypoints run **preflight by default**:
+they fast-forward the canonical checkout and inventory the current SHA-bound
+SAFE working set but **do not download market payloads**. Restoring selected
+SAFE/replay-compatible assets requires an explicit `--download-safe` opt-in.
+Even then, the default new-download budget is **8 GiB**, configurable only by
+explicit `--max-download-gib N`; the existing restore engine refuses the
+entire transfer **before the first payload download** if it would exceed
+the budget. The direct restore CLI also enforces a hard bound. Never equate
+an 800+ GB historical Release archive with the replayable dataset; assets
+outside the SHA-bound SAFE selection are not fetched, and verified unselected
+local cache copies may be pruned without deleting GitHub sources or uncertain
+repair evidence. None of these commands are remotely invoked on the user's PC.
+
+
 For local `--preflight-only`, distinguish the **full historical archive**
 (`full_archive_asset_bytes`) from the **SHA-bound SAFE/replay-ready working set**
 (`source_asset_bytes`) and the archive bytes excluded from that working set.
