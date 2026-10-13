@@ -1,0 +1,69 @@
+name: Alina verified capsule cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_tag:
+        description: "Exact alina-recovery-* release tag to validate"
+        type: string
+        required: true
+      execute:
+        description: "Delete ONLY after full SHA-256 parity and expected ID/SHA approval"
+        type: boolean
+        default: false
+        required: true
+      expected_release_id:
+        description: "Verified GitHub recovery Release ID (required to delete)"
+        type: string
+        required: false
+      expected_canonical_sha256:
+        description: "Verified canonical RUN_MANIFEST SHA-256 (required to delete)"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: alina-verified-capsule-cleanup
+  cancel-in-progress: false
+
+jobs:
+  verify-and-clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RECOVERY_TAG: ${{ inputs.recovery_tag }}
+      EXECUTE_DELETE: ${{ inputs.execute }}
+      EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}
+      EXPECTED_CANONICAL_SHA: ${{ inputs.expected_canonical_sha256 }}
+      REAL_MAINNET_TRADING: "false"
+      ENABLE_REAL_ORDERS: "0"
+    steps:
+      - name: Checkout main (cloud only)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Use pinned Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Verify source bytes and optionally delete the exact redundant Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RECOVERY_TAG" in
+            alina-recovery-*) ;;
+            *) echo "NOT_A_RECOVERY_CAPSULE" >&2; exit 2 ;;
+          esac
+          ARGS=(--recovery-tag "$RECOVERY_TAG" --max-cloud-verify-gib 2)
+          if [[ "$EXECUTE_DELETE" == "true" ]]; then
+            [[ "$EXPECTED_RELEASE_ID" =~ ^[0-9]+$ ]] || exit 2
+            [[ "$EXPECTED_CANONICAL_SHA" =~ ^[0-9a-f]{64}$ ]] || exit 2
+            ARGS+=(--execute --expected-release-id "$EXPECTED_RELEASE_ID"
+              --expected-canonical-sha256 "$EXPECTED_CANONICAL_SHA")
+          fi
+          python tools/prune_verified_recovery_capsule.py "${ARGS[@]}" |
+            tee "$RUNNER_TEMP/alina-capsule-cleanup.json"
+          cat "$RUNNER_TEMP/alina-capsule-cleanup.json" >> "$GITHUB_STEP_SUMMARY"
