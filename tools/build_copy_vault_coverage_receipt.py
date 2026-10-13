@@ -102,6 +102,17 @@ def build_receipt(*, campaign_dir: Path, phase_path: Path, output: Path) -> dict
         shard_count = cursor.get("vault_shard_count")
         shard_index = cursor.get("vault_shard_index")
         universe_count = cursor.get("max_vaults")
+        mode = cursor.get("copy_vault_mode") or "legacy_sharded_ws"
+        ws_cap = cursor.get("max_ws_vaults")
+        if mode not in {"legacy_sharded_ws", "two_speed_broad_rest_priority_ws"}:
+            invalid_manifests.append(str(path))
+            continue
+        if mode == "two_speed_broad_rest_priority_ws" and (
+            shard_count != 1 or shard_index != 0
+            or type(ws_cap) is not int or not 1 <= ws_cap <= 10
+        ):
+            invalid_manifests.append(str(path))
+            continue
         if (
             len(selection_sha) != 64
             or not selection_file
@@ -126,15 +137,17 @@ def build_receipt(*, campaign_dir: Path, phase_path: Path, output: Path) -> dict
             "shard_count": shard_count,
             "shard_index": shard_index,
             "universe_count": universe_count,
+            "collection_mode": mode,
+            "max_ws_vaults": ws_cap if mode == "two_speed_broad_rest_priority_ws" else None,
             "created_at": str(row.get("created_at") or ""),
         })
 
-    plans: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    plans: dict[tuple[str, int, str], list[dict[str, Any]]] = defaultdict(list)
     for row in candidates:
-        plans[(row["selection_sha256"], row["shard_count"])].append(row)
+        plans[(row["selection_sha256"], row["shard_count"], row["collection_mode"])].append(row)
 
     plan_summaries: list[dict[str, Any]] = []
-    for (selection_sha, shard_count), rows in plans.items():
+    for (selection_sha, shard_count, mode), rows in plans.items():
         rows.sort(key=lambda x: (x["created_at"], str(x["manifest"].get("campaign_id") or "")))
         universe_values = {int(x["universe_count"]) for x in rows}
         selection_files = {str(x["selection_file"]) for x in rows}
@@ -142,6 +155,19 @@ def build_receipt(*, campaign_dir: Path, phase_path: Path, output: Path) -> dict
         universe_count = max(universe_values) if universe_values else 0
         users_per_largest_lane = (
             (universe_count + shard_count - 1) // shard_count if shard_count else universe_count
+        )
+        # A two-speed lane REST-scans the entire universe, but WebSocket user
+        # subscriptions are limited to its explicit, bounded priority shortlist.
+        # The 10-user/IP WS cap must NEVER be applied to broad REST observations.
+        ws_caps = {row["max_ws_vaults"] for row in rows}
+        ws_users_per_largest_lane = (
+            next(iter(ws_caps)) if mode == "two_speed_broad_rest_priority_ws"
+            and len(ws_caps) == 1 else users_per_largest_lane
+        )
+        ws_budget_verified = (
+            len(ws_caps) == 1
+            and 1 <= ws_users_per_largest_lane <= 10
+            and (mode != "two_speed_broad_rest_priority_ws" or shard_count == 1)
         )
 
         selection_verified = False
@@ -208,7 +234,7 @@ def build_receipt(*, campaign_dir: Path, phase_path: Path, output: Path) -> dict
             len(universe_values) == 1
             and len(selection_files) == 1
             and selection_verified
-            and users_per_largest_lane <= 10
+            and ws_budget_verified
             and not duplicate_indices
             and not missing_indices
             and not out_of_range_indices
@@ -245,7 +271,13 @@ def build_receipt(*, campaign_dir: Path, phase_path: Path, output: Path) -> dict
             "declared_universe_count": universe_count,
             "scheduled_lane_count": shard_count,
             "manifest_lane_count": len(rows),
+            "collection_mode": mode,
             "users_per_largest_lane": users_per_largest_lane,
+            "ws_users_per_largest_lane": ws_users_per_largest_lane,
+            "ws_subscription_limit_verified": ws_budget_verified,
+            "broad_rest_universe_count": (
+                universe_count if mode == "two_speed_broad_rest_priority_ws" else None
+            ),
             "max_users_per_lane_contract": 10,
             "lane_indices": sorted(indices),
             "duplicate_lane_indices": duplicate_indices,
@@ -291,7 +323,7 @@ def build_receipt(*, campaign_dir: Path, phase_path: Path, output: Path) -> dict
             "selection_verified": bool(authoritative and authoritative["selection_verified"]),
             "sharding_present": bool(authoritative and authoritative["scheduled_lane_count"] > 0),
             "ten_user_limit_respected": bool(
-                authoritative and authoritative["users_per_largest_lane"] <= 10
+                authoritative and authoritative["ws_subscription_limit_verified"]
             ),
             "all_lane_indices_accounted": bool(
                 authoritative

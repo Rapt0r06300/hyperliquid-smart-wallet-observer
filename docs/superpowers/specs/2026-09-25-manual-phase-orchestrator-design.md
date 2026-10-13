@@ -429,6 +429,18 @@ The implementation must:
 
 The goal is not to subscribe to all vaults. The goal is to observe the complete universe efficiently and devote low-latency resources where they create the most economic information.
 
+Coverage certification must distinguish the one-lane
+`two_speed_broad_rest_priority_ws` design from legacy
+`legacy_sharded_ws` fan-out. A two-speed lane may REST-observe thousands of
+public vault states while its user-specific WebSocket priority shortlist is
+bounded to **at most ten distinct wallets per IP**. The coverage receipt must
+validate the explicitly frozen `max_ws_vaults` value in the campaign cursor
+and the single-broad-lane coordinates rather than incorrectly applying the
+ten-user WebSocket cap to the broad REST universe. A missing, unknown, or
+oversized WebSocket budget remains blocked; valid sharding does **not**
+certify missing publications or incomplete observation.
+
+
 #### Binance hardening
 
 Production Binance USD-M collection must include, according to module/tier need:
