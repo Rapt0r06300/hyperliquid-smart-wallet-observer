@@ -253,7 +253,11 @@ jobs:
           elif indexed_bytes >= 65 * 1024 * 1024:
               batch_size = 2
           else:
-              batch_size = 8
+              # The index is partitioned: its small root size no longer
+              # predicts the size of a newly imported manifest wave.
+              # Four Releases bound commit size and reduce races with active
+              # collector checkpoints without discarding backlog entries.
+              batch_size = 4
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
@@ -360,7 +364,9 @@ jobs:
               published=true
               break
             fi
-            git commit -m "data: reconcile V2 catalog from canonical releases"
+            # A full new Release can add thousands of manifest receipts.
+            # Suppress per-file commit output (previously tens of MiB of logs).
+            git -c core.quotePath=false commit -q -m "data: reconcile V2 catalog from canonical releases"
             if git push origin HEAD:main; then
               echo "Durable reconciliation pushed: $(git rev-parse HEAD)"
               published=true
