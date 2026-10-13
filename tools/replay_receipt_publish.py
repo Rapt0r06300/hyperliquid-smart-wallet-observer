@@ -74,7 +74,7 @@ def capture(path: Path) -> int:
     before = _previous_results()
     patch = replay._load_patch()
     now = patch.get("results")
-    index = replay._load_json(replay.INDEX_PATH)
+    index = replay.read_index(replay.INDEX_PATH)
     if not isinstance(now, dict) or not isinstance(index.get("shards"), list):
         raise replay.BackfillError("invalid replay patch or index")
     rows = {
@@ -104,7 +104,7 @@ def apply(path: Path) -> int:
     receipts = bundle.get("receipts")
     if bundle.get("schema") != "alina.replay_publish_bundle.v1" or not isinstance(receipts, dict):
         raise replay.BackfillError("unrecognized replay receipt bundle")
-    index = replay._load_json(replay.INDEX_PATH)
+    index = replay.read_index(replay.INDEX_PATH)
     rows = index.get("shards")
     if not isinstance(rows, list):
         raise replay.BackfillError("invalid current index")
