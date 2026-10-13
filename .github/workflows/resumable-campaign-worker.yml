@@ -562,6 +562,39 @@ jobs:
           MANIFEST_SHA="$(sha256sum "$M" | cut -d' ' -f1)"
           python tools/record_publication_receipt.py             --campaign-id "$CAMPAIGN_ID"             --unit-id "$UNIT"             --kind "$KIND"             --status "$STATUS"             --phase "$PHASE"             --phase-epoch "$PHASE_EPOCH"             --code-sha "$CODE_SHA"             --dataset-generation "$GENERATION"             --source-collection-epoch "$SOURCE_EPOCH"             --collection-cutoff-at-utc "$CUTOFF"             --dataset-selection-id "$SELECTION"             --checkpoint-id "$CHECKPOINT"             --alina-head "$CODE_SHA"             --dataset-head "$DATASET_HEAD"             --manifest-sha256 "$MANIFEST_SHA"             --release-tag "$RELEASE_TAG"             --evidence-tag "$EVIDENCE_TAG"             --result "$RUNNER_TEMP/result.json"
 
+      - id: rescue_failed_publish
+        name: Preserve bounded unpublished candidates in cloud quarantine
+        if: ${{ always() && steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true' && steps.durable.outcome == 'failure' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="$(PYTHONPATH=src python tools/preserve_failed_publish_payload.py \
+            --result "$RUNNER_TEMP/result.json" \
+            --output "$RUNNER_TEMP/alina-failed-publish-quarantine.tgz" \
+            --max-bytes 134217728)"
+          printf '%s\n' "$REPORT"
+          if python - "$REPORT" <<'PY'
+          import json
+          import sys
+          result = json.loads(sys.argv[1])
+          sys.exit(0 if result.get("status") == "QUARANTINE_ARCHIVED" else 1)
+          PY
+          then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload short-lived failed-publish quarantine (no PC)
+        if: ${{ always() && steps.rescue_failed_publish.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alina-durable-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/alina-failed-publish-quarantine.tgz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
       - name: Downgrade result when durability failed
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true' && steps.durable.outcome == 'failure' && always()
         shell: bash
