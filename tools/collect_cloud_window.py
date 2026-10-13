@@ -66,6 +66,9 @@ from hl_observer.datasets.v2_pipeline import (
     V2_SCHEMA,
     attach_reconciliation,
     finalize_manifest,
+    locally_replay_admissible,
+    admission_rejection,
+    summarize_admission_rejections,
 )
 from hl_observer.realtime.feed_quality import FeedEventKind
 
@@ -1966,6 +1969,7 @@ async def collect(
     orphan_drops = orphaned_queue_drops(
         [manifest for _shard, manifest in shard_preliminaries], sink.drops,
     )
+    rejected_admission: list[dict[str, Any]] = []
     for (shard, manifest), drops in zip(shard_preliminaries, drop_attribution):
         if drops:
             manifest["integrity"]["gap_count"] = (
@@ -2058,6 +2062,10 @@ async def collect(
                     },
                 )
 
+        if not locally_replay_admissible(manifest):
+            rejected_admission.append(admission_rejection(manifest))
+            asset_path.unlink()
+            continue
         manifest_path = manifests_root / f"{manifest['dataset_id']}.json"
         write_manifest(manifest, manifest_path)
         manifests.append(manifest)
@@ -2076,6 +2084,10 @@ async def collect(
         "required": bool(require_l2),
     }
     bundle_index["replay_grade_coverage"] = replay_grade_coverage
+    bundle_index["source_admission"] = {
+        "mode": "replay_only",
+        **summarize_admission_rejections(rejected_admission),
+    }
     bundle_index["unattributed_queue_drops"] = orphan_drops
     bundle_index["collection_window_integrity_verified"] = not any(sink.drops.values())
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
@@ -2100,6 +2112,7 @@ async def collect(
             "|".join(key): value for key, value in sorted(sink.drops.items())
         },
         "asset_count": len(manifests),
+        "source_admission": bundle_index["source_admission"],
         "l2_coverage": {
             **l2_coverage,
             "required": bool(require_l2),
