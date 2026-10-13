@@ -120,3 +120,56 @@ def test_quarantine_coverage_tracks_verified_bytes_by_family_without_loss_claim(
     }
     assert report["unknown_unverified_compressed_bytes"] is True
     assert report["all_exploitable_data_restored"] is False
+
+
+def test_recovery_audit_refuses_symlinked_quarantine_parent(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    real = root / "quarantine"
+    saved = tmp_path / "original-quarantine"
+    real.rename(saved)
+    real.symlink_to(saved, target_is_directory=True)
+    with __import__("pytest").raises(audit.InventoryError, match="UNSAFE_QUARANTINE"):
+        audit.verify_quarantine(root, index, "a" * 64)
+    assert next(saved.rglob("*.receipt.json")).is_file()
+
+
+def test_recovery_audit_rejects_receipt_alias_without_deleting(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    directory = root / "quarantine" / "source_verified_non_replay"
+    proof = next(directory.glob("*.receipt.json"))
+    alias = directory / "unrelated-alias.receipt.json"
+    proof.rename(alias)
+    report = audit.verify_quarantine(root, index, "a" * 64)
+    assert report["byte_verified_non_safe_shards"] == 0
+    assert report["invalid_or_stale_receipts"] == 1
+    assert "RECEIPT_FILENAME_NOT_BOUND_TO_DATASET" in str(report["invalid_reason_counts"])
+    assert alias.exists()
+
+
+def test_recovery_audit_requires_inner_member_in_hashed_zip(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    directory = root / "quarantine" / "source_verified_non_replay"
+    receipt_path = next(directory.glob("*.receipt.json"))
+    receipt = json.loads(receipt_path.read_text())
+    outer = root / "releases" / "tag" / "bundle.zip"
+    logical = next(directory.glob("*.jsonl.gz")).read_bytes()
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("not-the-catalog-member.jsonl.gz", logical)
+    new_outer = output.getvalue()
+    sha = hashlib.sha256(new_outer).hexdigest()
+    outer.write_bytes(new_outer)
+    row = index["shards"][0]
+    row["release_remote_size"] = len(new_outer)
+    row["release_remote_digest"] = "sha256:" + sha
+    receipt["outer_bytes"] = len(new_outer)
+    receipt["outer_sha256"] = sha
+    receipt["immutable_candidate_sha256"] = recovery.immutable_candidate_sha256(
+        recovery.candidate_from_index(index, row["dataset_id"])
+    )
+    receipt_path.write_text(json.dumps(receipt))
+    result = audit.verify_quarantine(root, index, "b" * 64)
+    assert result["byte_verified_non_safe_shards"] == 0
+    assert result["invalid_or_stale_receipts"] == 1
+    assert "SOURCE_ZIP_MEMBER_NOT_UNIQUE_OR_SIZE_CONFLICT" in str(result["invalid_reason_counts"])
+    assert next(directory.glob("*.jsonl.gz")).read_bytes() == logical

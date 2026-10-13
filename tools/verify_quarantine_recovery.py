@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
@@ -42,7 +43,9 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
         unresolved.add(ident)
         unresolved_by_family[str(candidate.get("family") or "unknown")] += 1
     directory = root / "quarantine" / "source_verified_non_replay"
-    if directory.is_symlink():
+    if (root.joinpath("quarantine").is_symlink()
+            or directory.is_symlink()
+            or not directory.resolve().is_relative_to(root.resolve())):
         raise InventoryError("RECOVERY_COVERAGE_UNSAFE_QUARANTINE")
     receipts = sorted(directory.glob("*.receipt.json")) if directory.is_dir() else []
     seen = set()
@@ -110,6 +113,8 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
                 raise ValueError("OUTER_CATALOG_IDENTITY_MISMATCH")
             name = _safe_component(ident) + "." + logical_sha[:16] + ".jsonl.gz"
             recovered = directory / name
+            if receipt_path.name != name + ".receipt.json":
+                raise ValueError("RECEIPT_FILENAME_NOT_BOUND_TO_DATASET")
             if (receipt.get("quarantine_file") != str(recovered.relative_to(root)).replace("\\", "/")
                     or recovered.is_symlink() or not recovered.is_file()):
                 raise ValueError("MISSING_OR_UNSAFE_SHARD")
@@ -125,6 +130,31 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
                 outer_cache[key] = (outer.stat().st_size, _sha256(outer))
             if outer_cache[key] != (remote_size, remote_digest):
                 raise ValueError("SOURCE_ASSET_BYTES_CORRUPT")
+            if row.get("release_container_asset"):
+                # Independently bind the recovered shard to its exact ZIP
+                # member. Matching two separate hashes does not establish
+                # that the inner shard was inside the claimed outer archive.
+                member = row.get("release_asset")
+                if not isinstance(member, str) or not member:
+                    raise ValueError("SOURCE_ZIP_MEMBER_IDENTITY_MISSING")
+                try:
+                    with zipfile.ZipFile(outer) as archive:
+                        matches = [info for info in archive.infolist()
+                                   if info.filename == member]
+                        if len(matches) != 1 or matches[0].file_size != logical_bytes:
+                            raise ValueError("SOURCE_ZIP_MEMBER_NOT_UNIQUE_OR_SIZE_CONFLICT")
+                        digest = hashlib.sha256()
+                        count = 0
+                        with archive.open(matches[0]) as stream:
+                            while chunk := stream.read(1024 * 1024):
+                                count += len(chunk)
+                                if count > logical_bytes:
+                                    raise ValueError("SOURCE_ZIP_MEMBER_EXCEEDS_INDEX_SIZE")
+                                digest.update(chunk)
+                        if count != logical_bytes or digest.hexdigest() != logical_sha:
+                            raise ValueError("SOURCE_ZIP_MEMBER_DIGEST_MISMATCH")
+                except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, EOFError) as exc:
+                    raise ValueError("SOURCE_ZIP_MEMBER_UNREADABLE") from exc
             verified_outer_assets.add(key)
             verified += 1
             verified_bytes += logical_bytes
