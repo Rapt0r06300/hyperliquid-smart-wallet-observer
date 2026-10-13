@@ -5,6 +5,7 @@ from pathlib import Path
 
 from tools.augment_campaign_result import (
     annotate_collection,
+    annotate_rejected_collection,
     annotate_evidence,
     mark_durability_failure,
 )
@@ -80,3 +81,40 @@ def test_durability_failure_preserves_bounded_publication_detail(tmp_path):
     assert "HTTP 403" in row["payload"]["publication_error_detail"]
     assert len(row["payload"]["publication_error_detail"]) <= 2000
 
+
+
+def test_zero_viable_result_is_durable_partial_without_phantom_release(tmp_path):
+    result = tmp_path / "result.json"
+    diagnostic = tmp_path / "diagnostic.json"
+    _result(result)
+    diagnostic.write_text(json.dumps({
+        "schema": "alina.dataset_publication_skipped.v1",
+        "status": "NO_REPLAY_ADMISSIBLE_SHARDS",
+        "excluded_payload_count": 7,
+        "source_admission": {"excluded_shards": 7},
+        "read_only": True, "real_execution": False,
+    }))
+    row = annotate_rejected_collection(result, diagnostic)
+    assert row["status"] == "PARTIAL"
+    assert row["progressed"] is False
+    assert row["payload"]["release_tag"] is None
+    assert row["payload"]["excluded_payload_count"] == 7
+    assert row["payload"]["durable_persisted"] is False
+    assert len(row["sha256"]) == 64
+    assert json.loads(result.read_text()) == row
+
+
+def test_zero_viable_receipt_cannot_claim_real_execution(tmp_path):
+    import pytest
+    result = tmp_path / "result.json"
+    diagnostic = tmp_path / "diagnostic.json"
+    _result(result)
+    diagnostic.write_text(json.dumps({
+        "schema": "alina.dataset_publication_skipped.v1",
+        "status": "NO_REPLAY_ADMISSIBLE_SHARDS",
+        "excluded_payload_count": 1,
+        "read_only": True, "real_execution": True,
+    }))
+    with pytest.raises(ValueError, match="INVALID_ZERO_VIABLE"):
+        annotate_rejected_collection(result, diagnostic)
+    assert json.loads(result.read_text())["status"] == "COMPLETE"

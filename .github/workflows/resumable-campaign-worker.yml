@@ -406,6 +406,13 @@ jobs:
                 echo "Durable release publication exhausted bounded transient retries." >&2
                 exit 2
               fi
+              if [ -f "$BUNDLE/PUBLISH_DIAGNOSTIC.json" ]; then
+                python tools/augment_campaign_result.py rejected-collection \
+                  --result "$RESULT" \
+                  --diagnostic "$BUNDLE/PUBLISH_DIAGNOSTIC.json"
+                echo "ZERO_VIABLE_COLLECTION_RECORDED_WITHOUT_RELEASE"
+                exit 0
+              fi
               test -f "$BUNDLE/RUN_MANIFEST.json"
               python - "$BUNDLE/RUN_MANIFEST.json" <<'PY'
               import json

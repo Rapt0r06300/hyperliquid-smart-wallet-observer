@@ -749,6 +749,8 @@ def publish_bundle(
             f"{V2_REPOSITORY}"
         )
     root = Path(bundle_root)
+    diagnostic_path = root / "PUBLISH_DIAGNOSTIC.json"
+    diagnostic_path.unlink(missing_ok=True)
     index_path = root / "BUNDLE_INDEX.json"
     if not index_path.is_file():
         raise PublishError(f"Missing bundle index: {index_path}")
@@ -789,9 +791,10 @@ def publish_bundle(
     filtered_index["reject_count"] = 0
 
     if not manifests:
-        # An unhealthy collection must not create empty durable Releases.
-        # Its runner retains only payload-free diagnostic counts.
-        return {
+        # No market payload or empty GitHub Release; keep a local diagnostic
+        # for the durable campaign checkpoint only.
+        (root / "RUN_MANIFEST.json").unlink(missing_ok=True)
+        report = {
             "schema": "alina.dataset_publication_skipped.v1",
             "status": "NO_REPLAY_ADMISSIBLE_SHARDS",
             "requested_release_tag": tag,
@@ -800,6 +803,10 @@ def publish_bundle(
             "read_only": True,
             "real_execution": False,
         }
+        diagnostic_path.write_text(
+            json.dumps(report, sort_keys=True) + "\n", encoding="utf-8",
+        )
+        return report
 
     recovery_capsule = (
         publish_recovery_capsule(

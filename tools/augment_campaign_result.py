@@ -135,6 +135,37 @@ def annotate_evidence(
     return row
 
 
+def annotate_rejected_collection(result_path: Path, diagnostic_path: Path) -> dict[str, Any]:
+    """Terminate an unusable unit without suggesting its Release exists."""
+    row = _load(result_path)
+    diagnosis = _load(diagnostic_path)
+    count = diagnosis.get("excluded_payload_count")
+    if (
+        row.get("status") != "COMPLETE"
+        or diagnosis.get("schema") != "alina.dataset_publication_skipped.v1"
+        or diagnosis.get("status") != "NO_REPLAY_ADMISSIBLE_SHARDS"
+        or diagnosis.get("read_only") is not True
+        or diagnosis.get("real_execution") is not False
+        or type(count) is not int or count < 0
+    ):
+        raise ValueError("INVALID_ZERO_VIABLE_COLLECTION_RECEIPT")
+    payload = row.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("result payload must be an object")
+    payload.update({
+        "reason": "NO_REPLAY_ADMISSIBLE_SHARDS",
+        "excluded_payload_count": count,
+        "source_admission": diagnosis.get("source_admission"),
+        "durable_persisted": False,
+        "replay_eligible": False,
+        "release_tag": None,
+    })
+    row["status"] = "PARTIAL"
+    row["progressed"] = False
+    _write_result(result_path, row)
+    return row
+
+
 def mark_durability_failure(
     result_path: Path,
     *,
@@ -185,6 +216,10 @@ def main(argv: list[str] | None=None) -> int:
     evidence.add_argument("--tag",required=True)
     evidence.add_argument("--repository",required=True)
 
+    rejected=sub.add_parser("rejected-collection")
+    rejected.add_argument("--result",required=True)
+    rejected.add_argument("--diagnostic",required=True)
+
     failure=sub.add_parser("durability-failure")
     failure.add_argument("--result",required=True)
     failure.add_argument("--detail-file")
@@ -203,6 +238,8 @@ def main(argv: list[str] | None=None) -> int:
             tag=args.tag,
             repository=args.repository,
         )
+    elif args.command=="rejected-collection":
+        row=annotate_rejected_collection(Path(args.result),Path(args.diagnostic))
     else:
         row=mark_durability_failure(
             Path(args.result),

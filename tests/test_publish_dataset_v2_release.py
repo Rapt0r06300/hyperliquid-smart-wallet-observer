@@ -272,6 +272,8 @@ def test_publish_zero_safe_uploads_only_diagnostics_and_manifest(tmp_path, monke
     )
 
     assert uploaded == []
+    assert json.loads((bundle / "PUBLISH_DIAGNOSTIC.json").read_text()) == result
+    assert not (bundle / "RUN_MANIFEST.json").exists()
     assert result["status"] == "NO_REPLAY_ADMISSIBLE_SHARDS"
     assert result["excluded_payload_count"] == 1
     assert result["real_execution"] is False
