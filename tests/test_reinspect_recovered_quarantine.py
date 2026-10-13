@@ -133,3 +133,24 @@ def test_sparse_checkout_reads_original_manifest_from_git_object(tmp_path, monke
     assert any("cat-file" in c for c in calls)
     assert any("show" in c for c in calls)
     assert not manifest_path.exists()
+
+
+def test_manifest_global_drop_counter_does_not_override_event_gap_or_promote(tmp_path, monkeypatch):
+    payload = (b'{"timestamp_ms":1000,"source_id":"fixture","gap_count":0,'
+               b'"parsed_summary":{"action":"snapshot"}}\n')
+    index, cache, repo, manifest_path, _ = _fixture(tmp_path, monkeypatch, payload)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["integrity"]["gap_count"] = 961
+    manifest["collection_queue_drops"] = 961
+    manifest_path.write_text(json.dumps(manifest))
+    receipt = check.reinspect(index, "f" * 64, cache, "demo", repo_root=repo)
+    assert receipt["manifest_integrity_gap_count"] == 961
+    assert receipt["manifest_collection_queue_drops"] == 961
+    assert receipt["observed_event_gap_signals"]["explicit_event_gap_total"] == 0
+    assert receipt["observed_event_gap_signals"]["explicit_event_gap_marker_rows"] == 1
+    assert receipt["observed_event_gap_signals"]["reported_snapshot_rows"] == 1
+    assert receipt["manifest_gap_exceeds_explicit_event_markers"] is True
+    assert receipt["gap_provenance_reconciled"] is False
+    assert receipt["status"] == "CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE"
+    assert receipt["reclassified_safe"] is False
+    assert receipt["validation_allowed"] is False

@@ -55,6 +55,47 @@ def _bounded_uncompressed_size(path: Path, *, max_bytes: int) -> int:
         raise ValueError("REINSPECTION_INVALID_GZIP_STREAM") from exc
 
 
+
+def _embedded_gap_signals(path: Path, *, max_bytes: int) -> dict[str, Any]:
+    """Report only explicit per-record markers, not proof of continuous capture."""
+    records_with_markers = 0
+    explicit_gap_events = 0
+    snapshot_markers = 0
+    rows_without_markers = 0
+    unparsable_rows = 0
+    scanned = 0
+    with gzip.open(path, "rt", encoding="utf-8") as source:
+        for line in source:
+            scanned += len(line.encode("utf-8"))
+            if scanned > max_bytes:
+                raise ValueError("REINSPECTION_EMBEDDED_GAP_SCAN_EXCEEDED")
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                unparsable_rows += 1
+                continue
+            if not isinstance(event, Mapping):
+                unparsable_rows += 1
+                continue
+            gap = event.get("gap_count")
+            if type(gap) is int and gap >= 0:
+                records_with_markers += 1
+                explicit_gap_events += gap
+            else:
+                rows_without_markers += 1
+            summary = event.get("parsed_summary")
+            if isinstance(summary, Mapping) and summary.get("action") == "snapshot":
+                snapshot_markers += 1
+    return {
+        "explicit_event_gap_marker_rows": records_with_markers,
+        "explicit_event_gap_total": explicit_gap_events,
+        "rows_without_explicit_gap_marker": rows_without_markers,
+        "unparsed_row_count": unparsable_rows,
+        "reported_snapshot_rows": snapshot_markers,
+        "absence_of_source_gaps_proven": False,
+    }
+
+
 def reinspect(index: Mapping[str, Any], index_sha: str,
               root: Path, dataset_id: str, *, repo_root: Path = ROOT,
               max_uncompressed_bytes: int = MAX_UNCOMPRESSED) -> dict[str, Any]:
@@ -127,6 +168,14 @@ def reinspect(index: Mapping[str, Any], index_sha: str,
             or _sha256(path) != logical_sha):
         raise ValueError("REINSPECTION_LOGICAL_SHARD_NOT_VERIFIED")
     uncompressed_size = _bounded_uncompressed_size(path, max_bytes=max_uncompressed_bytes)
+    event_gap_signals = _embedded_gap_signals(path, max_bytes=max_uncompressed_bytes)
+    manifest_integrity = manifest.get("integrity")
+    reported_gap = manifest_integrity.get("gap_count") if isinstance(manifest_integrity, Mapping) else None
+    reported_drops = manifest.get("collection_queue_drops")
+    if (reported_gap is not None and (type(reported_gap) is not int or reported_gap < 0)):
+        raise ValueError("REINSPECTION_INVALID_MANIFEST_GAP_COUNTER")
+    if (reported_drops is not None and (type(reported_drops) is not int or reported_drops < 0)):
+        raise ValueError("REINSPECTION_INVALID_QUEUE_DROP_COUNTER")
     parsed = inspect_asset(path, manifest)
     if (not isinstance(parsed, dict)
             or parsed.get("verifier_version") != VERIFIER_VERSION
@@ -154,6 +203,14 @@ def reinspect(index: Mapping[str, Any], index_sha: str,
         "replay_verifier_version": VERIFIER_VERSION,
         "isolated_parse_chronology_compatible": isolated_replay_ok,
         "inspection": parsed,
+        "observed_event_gap_signals": event_gap_signals,
+        "manifest_integrity_gap_count": reported_gap,
+        "manifest_collection_queue_drops": reported_drops,
+        "manifest_gap_exceeds_explicit_event_markers": (
+            reported_gap > event_gap_signals["explicit_event_gap_total"]
+            if type(reported_gap) is int and event_gap_signals["explicit_event_gap_marker_rows"] else None
+        ),
+        "gap_provenance_reconciled": False,
         "replay_certified": False,
         "reclassified_safe": False,
         "validation_allowed": False,
