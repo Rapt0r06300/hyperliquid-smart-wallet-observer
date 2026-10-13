@@ -25,6 +25,7 @@ from hl_observer.datasets.replay_coverage import build_safe_coverage_matrix
 from hl_observer.datasets.v2_pipeline import (
     V2_REPOSITORY,
     finalize_manifest,
+    locally_replay_admissible,
     verify_remote_asset,
     write_manifest,
 )
@@ -97,13 +98,7 @@ def partition_publishable_manifests(
         permitted_status = status == "SAFE" or (
             status == "PARTIAL" and reasons == {"REMOTE_ASSET_NOT_VERIFIED"}
         )
-        locally_verified = finalize_manifest({**row, "asset_verified": True})
-        if (
-            permitted_status
-            and row.get("replay_compatible") is True
-            and locally_verified.get("quality_status") == "SAFE"
-            and locally_verified.get("replay_compatible") is True
-        ):
+        if permitted_status and locally_replay_admissible(row):
             eligible.append(row)
             continue
         row["validation_allowed"] = False
@@ -792,6 +787,19 @@ def publish_bundle(
     filtered_index["safe_count"] = len(manifests)
     filtered_index["partial_count"] = 0
     filtered_index["reject_count"] = 0
+
+    if not manifests:
+        # An unhealthy collection must not create empty durable Releases.
+        # Its runner retains only payload-free diagnostic counts.
+        return {
+            "schema": "alina.dataset_publication_skipped.v1",
+            "status": "NO_REPLAY_ADMISSIBLE_SHARDS",
+            "requested_release_tag": tag,
+            "excluded_payload_count": len(rejected_manifests),
+            "source_admission": index.get("source_admission"),
+            "read_only": True,
+            "real_execution": False,
+        }
 
     recovery_capsule = (
         publish_recovery_capsule(
