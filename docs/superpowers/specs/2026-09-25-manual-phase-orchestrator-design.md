@@ -12965,6 +12965,16 @@ deduplication, and replay gates succeed. Missing cached files are NOT proof of
 irrecoverability. This tool does not download anything and does not change
 quarantine or SAFE classification.
 
+An actual GitHub-hosted source-recovery pilot (run
+`38387188689`, job `recover-one`, 2026-10-13) hydrated and SHA-verified
+`bitget-public-ws-bbo-eurusdusdt-1791482498780-1791482498780-183da827eff3`.
+The immutable manifest classifies this one-event, 877-byte compressed BBO
+as REJECT with `gap_count=961` and `RECONCILIATION_UNVERIFIED`.
+The existing replay parser independently reports `GAP`. This demonstrates
+physical byte recovery, NOT replay-grade eligibility: keep the evidence in
+quarantine. The duplicate pilot-test worker has been removed; follow-up
+single-shard tests prioritize the PARTIAL population before REJECT.
+
 The manually exported recovery evidence bundle MUST include
 `WORK_RECOVERY_BUNDLE.json`, generated and verified by
 `python tools/verify_recovery_bundle.py --root <artifact-directory> --write`

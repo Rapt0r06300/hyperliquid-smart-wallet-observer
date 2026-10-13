@@ -302,16 +302,26 @@ def select_pilot_candidate(
             continue
         if not row.get("release_tag") or not row.get("release_asset"):
             continue
-        # Prefer recent market-context observations over massive old trade
-        # payloads; order is only a deterministic selection, not a quality rank.
+        logical_sha = row.get("sha256")
+        outer_sha = row.get("release_remote_digest") if packed else logical_sha
+        if (not isinstance(logical_sha, str)
+                or not SHA.fullmatch(logical_sha.lower())
+                or not isinstance(outer_sha, str)
+                or not SHA.fullmatch(outer_sha.removeprefix("sha256:").lower())):
+            continue
+        # Prioritize PARTIAL evidence before known REJECT gaps; no candidate
+        # is assumed SAFE, and source freshness is only a tie-breaker.
+        quality_priority = {"PARTIAL": 0, "STALE": 1, "REJECT": 2,
+                            "SAFE": 3}[row["quality_status"]]
         priority = {"bbo": 0, "l2book": 1, "trades": 2}[row["family"]]
         start = row.get("start_ts_ms")
         timestamp = start if type(start) is int and start >= 0 else 0
-        eligible.append((priority, -timestamp, size, str(row["dataset_id"])))
+        eligible.append((quality_priority, priority, -timestamp, size,
+                         str(row["dataset_id"])))
     eligible.sort()
     attempted = 0
     reasons: dict[str, int] = {}
-    for _priority, _negtime, _size, dataset_id in eligible:
+    for _quality_priority, _priority, _negtime, _size, dataset_id in eligible:
         if attempted >= max_live_attempts:
             break
         attempted += 1

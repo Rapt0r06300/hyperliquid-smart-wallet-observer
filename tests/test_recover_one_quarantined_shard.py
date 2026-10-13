@@ -185,3 +185,17 @@ def test_recovery_pilot_refuses_unbounded_or_unverifiable_sources(monkeypatch, t
                         lambda *_a, **_kw: (_ for _ in ()).throw(ValueError("offline")))
     with pytest.raises(ValueError, match="NO_VERIFIABLE_LIVE_SOURCE"):
         recovery.select_pilot_candidate(index, max_source_bytes=1_000_000)
+
+
+def test_pilot_prioritizes_partial_over_newer_reject(monkeypatch, tmp_path):
+    index, _candidate, _asset, _outer, _logical, _root = fixture(tmp_path)
+    partial = dict(index["shards"][0], dataset_id="older-partial",
+                   family="bbo", start_ts_ms=100, quality_status="PARTIAL")
+    rejected = dict(index["shards"][0], dataset_id="newer-reject",
+                    family="bbo", start_ts_ms=200, quality_status="REJECT")
+    index["shards"] = [rejected, partial]
+    monkeypatch.setattr(recovery, "live_asset", lambda candidate, **_kw: {
+        "id": 50, "size": candidate["outer_bytes"]})
+    report = recovery.select_pilot_candidate(index, max_source_bytes=10_000)
+    assert report["dataset_id"] == "older-partial"
+    assert report["validation_allowed"] is False
