@@ -283,6 +283,7 @@ def test_recovery_resume_across_unrelated_catalog_changes_keeps_old_proof(tmp_pa
     assert second["immutable_candidate_sha256"] == first["immutable_candidate_sha256"]
     assert second["source_cached_before_run"] is True
     replaced = dict(candidate, quality_status="REJECT")
+    replaced["immutable_candidate_sha256"] = recovery.immutable_candidate_sha256(replaced)
     with pytest.raises(ValueError, match="RECEIPT_CONFLICT"):
         recovery.hydrate_candidate(
             replaced, asset, root, download=True,
