@@ -50,6 +50,17 @@ local checkout. This updates `main` by fast-forward only and calls the single
 size/SHA-256 identity, resumable verified downloads, SAFE/quarantine gates,
 and a durable `SYNC_REPORT.json` plus `RESTORE_REPORT.json`.
 
+For local `--preflight-only`, distinguish the **full historical archive**
+(`full_archive_asset_bytes`) from the **SHA-bound SAFE/replay-ready working set**
+(`source_asset_bytes`) and the archive bytes excluded from that working set.
+These counters describe *published and selected* assets, not restored or
+economically certified data. A preflight may exit zero **only** with status
+`PREFLIGHT_READY_NOT_RESTORED`: insufficient disk, unverifiable assets,
+missing analysis evidence, conflicting provenance or any other incomplete
+working-set status must exit nonzero, even when the available disk appears
+sufficient. Never delete unselected Release evidence automatically and never
+claim a restored or profitable corpus from metadata-only checks.
+
 Git LFS is not part of the operational backup, clone or restoration path:
 no smudge/mirror/migration workflow, no LFS object as a required source.
 Legacy LFS read compatibility is disabled by default and must never be

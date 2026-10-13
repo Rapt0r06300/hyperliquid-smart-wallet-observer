@@ -2773,6 +2773,9 @@ def main(argv: list[str] | None = None) -> int:
             "release_count": report.get("release_count"),
             "asset_count": report.get("asset_count"),
             "source_asset_bytes": report.get("source_asset_bytes"),
+            "full_archive_asset_count": report.get("full_archive_asset_count"),
+            "full_archive_asset_bytes": report.get("full_archive_asset_bytes"),
+            "excluded_full_archive_bytes": report.get("excluded_full_archive_bytes"),
             "pending_download_bytes": report.get("pending_download_bytes"),
             "pending_materialization_bytes": report.get("pending_materialization_bytes"),
             "required_free_destination_bytes": report.get("required_free_destination_bytes"),
@@ -2780,10 +2783,9 @@ def main(argv: list[str] | None = None) -> int:
             "enough_disk_for_release_assets": report.get("enough_disk_for_release_assets"),
             "unverified_source_asset_count": report.get("unverified_source_asset_count", 0),
         }, indent=2, sort_keys=True))
-        return 0 if (
-            report["enough_disk_for_release_assets"]
-            and not report.get("unverified_source_asset_count", 0)
-        ) else 3
+        # The status is the contract: available disk and valid asset hashes
+        # alone cannot certify a plan with missing analysis provenance.
+        return 0 if report.get("status") == "PREFLIGHT_READY_NOT_RESTORED" else 3
 
     failures = (
         len(report["failures"])

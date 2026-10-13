@@ -2546,3 +2546,57 @@ def test_materialize_analysis_evidence_accepts_tar_root_and_legacy_preannotation
         (Path(restored["destination"]) / "CERTIFIED_EVIDENCE.json").read_text()
     )
     assert proof["receipt_binding"] == "LEGACY_PREANNOTATION_RECONSTRUCTED"
+
+
+def test_preflight_cli_refuses_missing_analysis_evidence_even_if_disk_is_sufficient(
+    tmp_path, monkeypatch, capsys,
+):
+    module = _module()
+    def fake_restore(*_args, **kwargs):
+        assert kwargs["preflight_only"] is True
+        return {
+            "status": "PREFLIGHT_WORKING_SET_INCOMPLETE",
+            "enough_disk_for_release_assets": True,
+            "unverified_source_asset_count": 0,
+            "full_archive_asset_bytes": 861_000,
+            "source_asset_bytes": 120_000,
+            "excluded_full_archive_bytes": 741_000,
+        }
+    monkeypatch.setattr(module, "restore_everything", fake_restore)
+    result = module.main(["--replay-ready", "--preflight-only",
+                          "--destination", str(tmp_path / "restore")])
+    assert result == 3
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "PREFLIGHT_WORKING_SET_INCOMPLETE"
+    assert output["full_archive_asset_bytes"] == 861_000
+    assert output["source_asset_bytes"] == 120_000
+    assert output["excluded_full_archive_bytes"] == 741_000
+
+
+def test_preflight_cli_ready_only_certifies_a_plan_not_a_restore(
+    tmp_path, monkeypatch, capsys,
+):
+    module = _module()
+    def fake_restore(*_args, **kwargs):
+        assert kwargs["preflight_only"] is True
+        return {
+            "status": "PREFLIGHT_READY_NOT_RESTORED",
+            "enough_disk_for_release_assets": True,
+            "unverified_source_asset_count": 0,
+            "full_archive_asset_count": 2,
+            "full_archive_asset_bytes": 500,
+            "excluded_full_archive_bytes": 400,
+            "asset_count": 1,
+            "source_asset_bytes": 100,
+        }
+    monkeypatch.setattr(module, "restore_everything", fake_restore)
+    result = module.main(["--replay-ready", "--preflight-only",
+                          "--destination", str(tmp_path / "restore")])
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "PREFLIGHT_READY_NOT_RESTORED"
+    assert output["full_archive_asset_count"] == 2
+    assert output["full_archive_asset_bytes"] == 500
+    assert output["asset_count"] == 1
+    assert output["source_asset_bytes"] == 100
+    assert output["excluded_full_archive_bytes"] == 400
