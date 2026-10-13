@@ -62,6 +62,37 @@ def _make(tmp_path):
         "candidate_count": 2, "recovered_shards": None,
         "all_exploitable_data_restored": False,
     }))
+    selected = [{
+        "release_tag": "test", "asset_name": "source.zip",
+        "size_bytes": 50, "sha256": "b" * 64,
+        "source_url": (
+            "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer"
+            "/releases/download/test/source.zip"
+        ),
+    }]
+    (tmp_path / "hydration-plan.json").write_text(json.dumps({
+        "catalog_index_sha256": CATALOG,
+        "source_inventory_file_sha256": arch_sha,
+        "selection": {
+            "status": "HYDRATION_PLAN_NOT_REPLAY_CERTIFIED",
+            "replay_certified": False, "complete_coverage_claimed": False,
+            "selected_unique_outer_assets": 1,
+            "selected_source_asset_bytes": 50,
+            "selection": selected,
+        },
+        "hydration": {
+            "status": "CACHED_RELEASE_BYTES_ONLY_NOT_REPLAY_CERTIFIED",
+            "executed": False, "replay_certified": False,
+            "all_exploitable_data_restored": False,
+            "downloaded_or_reused_verified_assets": 0,
+            "source_assets_selected": 1,
+            "source_asset_outcomes": [{
+                "release_tag": "test", "asset_name": "source.zip",
+                "expected_size": 50, "expected_sha256": "b" * 64,
+                "status": "NOT_DOWNLOADED_DRY_RUN",
+            }],
+        },
+    }))
     return details
 
 
@@ -115,3 +146,25 @@ def test_bundle_blocks_missing_file_and_unsafe_candidate(tmp_path):
     path.write_bytes(path.read_bytes().replace(b'"NOT_ASSESSED"', b'"RECOVERED"', 1))
     with pytest.raises(BundleError, match="UNSAFE_OR_DUPLICATE_CANDIDATE"):
         write_bundle(tmp_path)
+
+
+def test_work_bundle_hydration_plan_rejects_fake_download_and_external_asset(tmp_path):
+    _make(tmp_path)
+    assert inspect_bundle(tmp_path)["hydration_plan_assets"] == 1
+    path = tmp_path / "hydration-plan.json"
+    original = json.loads(path.read_text())
+    data = json.loads(path.read_text())
+    data["hydration"]["executed"] = True
+    path.write_text(json.dumps(data))
+    with pytest.raises(BundleError, match="NOT_READ_ONLY"):
+        inspect_bundle(tmp_path)
+    data = json.loads(json.dumps(original))
+    data["selection"]["selection"][0]["source_url"] = "https://other.example/source"
+    path.write_text(json.dumps(data))
+    with pytest.raises(BundleError, match="EXTERNAL_SOURCE"):
+        inspect_bundle(tmp_path)
+    data = json.loads(json.dumps(original))
+    data["selection"]["selected_source_asset_bytes"] = 49
+    path.write_text(json.dumps(data))
+    with pytest.raises(BundleError, match="BYTES_MISMATCH"):
+        inspect_bundle(tmp_path)

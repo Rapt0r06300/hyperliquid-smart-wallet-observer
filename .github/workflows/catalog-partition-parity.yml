@@ -190,6 +190,22 @@ jobs:
           print("UNRESOLVED_SOURCE_LOCATORS_COMPARED", comparison["candidate_count"])
           PY
 
+      - name: Export bounded read-only source asset hydration plan
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/alina-preservation-evidence"
+          mkdir "$OUT/empty-download-cache"
+          python tools/hydrate_recovery_assets.py \
+            --triage-jsonl "$OUT/recovery-triage.jsonl" \
+            --source-inventory "$OUT/RESTORE_INVENTORY.json.gz" \
+            --releases-root "$OUT/empty-download-cache" \
+            --max-assets 100 --max-bytes 1000000000 \
+            > "$OUT/hydration-plan.json"
+          # No --execute: the plan may not materialize raw market assets.
+          test -z "$(ls -A "$OUT/empty-download-cache")"
+
       - name: Seal and verify Work recovery transfer receipt
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
         shell: bash

@@ -26,6 +26,7 @@ FILES = (
     "RESTORE_INVENTORY.json.gz",
     "source-comparison.jsonl",
     "source-comparison-report.json",
+    "hydration-plan.json",
 )
 RECEIPT = "WORK_RECOVERY_BUNDLE.json"
 
@@ -117,6 +118,7 @@ def inspect_bundle(root: Path) -> dict[str, Any]:
     triage = _json(root, "triage-verification.json")
     published = _json(root, "published-inventory-source.json")
     source = _json(root, "source-comparison-report.json")
+    hydration_plan = _json(root, "hydration-plan.json")
     index_sha = census.get("catalog_index_sha256")
     initial = census.get("triage")
     verification = triage.get("triage")
@@ -158,6 +160,60 @@ def inspect_bundle(root: Path) -> dict[str, Any]:
             or source.get("recovered_shards") is not None
             or source.get("all_exploitable_data_restored") is not False):
         raise BundleError("BUNDLE_SOURCE_RECEIPT_PARITY_FAILED")
+    selected = hydration_plan.get("selection")
+    dry = hydration_plan.get("hydration")
+    if (hydration_plan.get("catalog_index_sha256") != index_sha
+            or hydration_plan.get("source_inventory_file_sha256") != inventory_file["sha256"]
+            or not isinstance(selected, dict) or not isinstance(dry, dict)
+            or selected.get("status") != "HYDRATION_PLAN_NOT_REPLAY_CERTIFIED"
+            or selected.get("replay_certified") is not False
+            or selected.get("complete_coverage_claimed") is not False
+            or dry.get("status") != "CACHED_RELEASE_BYTES_ONLY_NOT_REPLAY_CERTIFIED"
+            or dry.get("executed") is not False
+            or dry.get("replay_certified") is not False
+            or dry.get("all_exploitable_data_restored") is not False
+            or dry.get("downloaded_or_reused_verified_assets") != 0):
+        raise BundleError("BUNDLE_HYDRATION_PLAN_NOT_READ_ONLY")
+    planned = selected.get("selection")
+    receipts = dry.get("source_asset_outcomes")
+    count_selected = selected.get("selected_unique_outer_assets")
+    bytes_selected = selected.get("selected_source_asset_bytes")
+    if (not isinstance(planned, list) or not isinstance(receipts, list)
+            or type(count_selected) is not int or not 0 <= count_selected <= 100
+            or type(bytes_selected) is not int or not 0 <= bytes_selected <= 1_000_000_000
+            or len(planned) != count_selected or len(receipts) != count_selected
+            or dry.get("source_assets_selected") != count_selected):
+        raise BundleError("BUNDLE_HYDRATION_PLAN_CARDINALITY_MISMATCH")
+    seen_assets = set()
+    checked_bytes = 0
+    for item, receipt in zip(planned, receipts):
+        if not isinstance(item, dict) or not isinstance(receipt, dict):
+            raise BundleError("BUNDLE_HYDRATION_PLAN_INVALID_ASSET")
+        tag, name = item.get("release_tag"), item.get("asset_name")
+        sha, size = item.get("sha256"), item.get("size_bytes")
+        if (not isinstance(tag, str) or not tag
+                or not isinstance(name, str) or not name
+                or not isinstance(sha, str) or not SHA256.fullmatch(sha)
+                or type(size) is not int or size < 0
+                or (tag, name) in seen_assets
+                or receipt.get("release_tag") != tag
+                or receipt.get("asset_name") != name
+                or receipt.get("expected_size") != size
+                or receipt.get("expected_sha256") != sha
+                or receipt.get("status") != "NOT_DOWNLOADED_DRY_RUN"):
+            raise BundleError("BUNDLE_HYDRATION_PLAN_UNVERIFIED_SOURCE")
+        from urllib.parse import quote
+        expected_url = (
+            "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/download/"
+            + quote(tag, safe="") + "/" + quote(name, safe="")
+        )
+        if item.get("source_url") != expected_url:
+            raise BundleError("BUNDLE_HYDRATION_PLAN_EXTERNAL_SOURCE")
+        checked_bytes += size
+        seen_assets.add((tag, name))
+    if checked_bytes != bytes_selected:
+        raise BundleError("BUNDLE_HYDRATION_PLAN_BYTES_MISMATCH")
+
     return {
         "schema": "alina.work_recovery_bundle.v1",
         "status": "EVIDENCE_COMPLETE_NOT_RESTORED",
@@ -166,6 +222,8 @@ def inspect_bundle(root: Path) -> dict[str, Any]:
         "candidate_count": count,
         "source_inventory_sha256": inventory_file["sha256"],
         "source_comparison_jsonl_sha256": source_sha,
+        "hydration_plan_assets": count_selected,
+        "hydration_plan_bytes": bytes_selected,
         "files": file_receipts,
         "paper_only": True,
         "read_only": True,

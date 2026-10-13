@@ -13005,6 +13005,13 @@ physical byte recovery, NOT replay-grade eligibility: keep the evidence in
 quarantine. The duplicate pilot-test worker has been removed; follow-up
 single-shard tests prioritize the PARTIAL population before REJECT.
 
+The Work/Codex handoff also includes `hydration-plan.json`: a bounded,
+read-only list of up to 100 deduplicated outer Release assets (at most
+1 GB planned), with exact SHA-256, byte size, and canonical source URL.
+No raw payload is fetched in this step. The handoff seal rejects a
+missing/modified plan, unsupported source, false byte-count claim,
+or a plan claiming downloads or SAFE/replay certification.
+
 The manually exported recovery evidence bundle MUST include
 `WORK_RECOVERY_BUNDLE.json`, generated and verified by
 `python tools/verify_recovery_bundle.py --root <artifact-directory> --write`
