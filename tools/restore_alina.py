@@ -2795,8 +2795,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--retain-unselected-cache", action="store_true",
-        help="opt out of SAFE-mode removal of old local Release copies that "
-             "are SHA-verified and still published on GitHub",
+        help="legacy compatibility flag; historical cache is retained by default",
     )
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--destination", default="runtime/recovery/full")
@@ -2847,14 +2846,10 @@ def main(argv: list[str] | None = None) -> int:
             recover_verifiable=args.recover_verifiable,
             optional_local_snapshot=args.materialize_available_local_snapshot,
             profile="replay-ready" if args.replay_ready else "full-archive",
-            # Keep the operational cache compact by default. Only delete local
-            # SHA-matched copies still available in immutable GitHub Releases;
-            # never delete GitHub sources or unverified local recovery files.
-            prune_unselected=(
-                args.replay_ready
-                and not args.preflight_only
-                and not args.retain_unselected_cache
-            ),
+            # Historical caches are evidence and are never removed as a side
+            # effect of synchronization/restoration. The separate explicit
+            # cache-only mode can prune only SHA-matched remote-backed copies.
+            prune_unselected=args.prune_cache_only,
             prune_only=args.prune_cache_only,
             max_download_bytes=0 if args.prune_cache_only else args.max_download_gib * (1024 ** 3),
             workspace=(

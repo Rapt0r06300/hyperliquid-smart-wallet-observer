@@ -2684,7 +2684,7 @@ def test_preflight_cli_ready_only_certifies_a_plan_not_a_restore(
     assert output["source_asset_bytes"] == 100
     assert output["excluded_full_archive_bytes"] == 400
 
-def test_replay_restore_default_cli_compacts_sha_verified_cache(monkeypatch, tmp_path):
+def test_replay_restore_default_cli_preserves_historical_cache(monkeypatch, tmp_path):
     module = _module()
     seen = {}
 
@@ -2694,7 +2694,7 @@ def test_replay_restore_default_cli_compacts_sha_verified_cache(monkeypatch, tmp
 
     monkeypatch.setattr(module, "restore_everything", capture)
     assert module.main(["--replay-ready", "--destination", str(tmp_path)]) == 2
-    assert seen["prune_unselected"] is True
+    assert seen["prune_unselected"] is False
     assert seen["max_download_bytes"] == 8 * (1024 ** 3)
 
     seen.clear()
