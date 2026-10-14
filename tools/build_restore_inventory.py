@@ -112,10 +112,18 @@ def _fetch_all_releases(
 
     def fetch(tag: str) -> tuple[str, Mapping[str, Any]]:
         quoted = urllib.parse.quote(tag, safe="")
-        payload = _json(
-            f"https://api.github.com/repos/{repository}/releases/tags/{quoted}",
-            token=token,
-        )
+        url = f"https://api.github.com/repos/{repository}/releases/tags/{quoted}"
+        for attempt in range(4):
+            try:
+                payload = _json(url, token=token)
+                break
+            except RestoreError as exc:
+                # GitHub can transiently return 404 for an existing Release
+                # while thousands of tags/Releases are being updated. Never
+                # omit that tag from a supposedly complete inventory; retry a
+                # small fixed number, then preserve the explicit failure.
+                if "HTTP 404" not in str(exc) or attempt == 3:
+                    raise
         if not isinstance(payload, Mapping):
             raise RestoreError(f"invalid Release payload for {tag}")
         return tag, payload

@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 def _module():
     path = Path(__file__).parents[1] / "tools" / "build_restore_inventory.py"
@@ -55,3 +57,32 @@ def test_build_inventory_is_complete_minimal_and_excludes_prior_inventory_releas
             ),
         }],
     }]
+
+
+def test_fetch_all_releases_retries_transient_tag_lookup_404(monkeypatch):
+    module = _module()
+    calls = []
+
+    def flaky_json(url, **_kwargs):
+        calls.append(url)
+        if len(calls) == 1:
+            raise module.RestoreError("HTTP 404 for release tag")
+        return {"id": 7, "tag_name": "data-one", "assets": []}
+
+    monkeypatch.setattr(module, "_json", flaky_json)
+    found = module._fetch_all_releases("o/r", ["data-one"], "token", 1)
+    assert found["data-one"]["id"] == 7
+    assert len(calls) == 2
+
+
+def test_fetch_all_releases_never_silently_drops_persistent_404(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            module.RestoreError("HTTP 404 for release tag")
+        ),
+    )
+    with pytest.raises(module.RestoreError, match="HTTP 404"):
+        module._fetch_all_releases("o/r", ["data-one"], "token", 1)
