@@ -146,6 +146,12 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
             # Halve only the failed request window, preserving its absolute
             # offset; never silently treat an incomplete listing as complete.
             message = str(exc).lower()
+            if page > 1 and "http 404" in message:
+                # Page 1 already proved that the repository and endpoint are
+                # reachable. GitHub/gh can nevertheless return a spurious 404
+                # for a deeper moving page; enumerate immutable recovery tags
+                # and verify each corresponding Release instead of truncating.
+                return _recovery_releases_from_git_refs(repository)
             transient_listing = any(term in message for term in (
                 "http 504", "http 502", "stream error",
                 "received from peer", "connection reset",

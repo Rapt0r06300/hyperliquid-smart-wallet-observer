@@ -289,6 +289,50 @@ def test_recovery_stream_cancel_falls_back_to_verified_refs(monkeypatch):
     ]
     assert calls == ["owner/repo"]
 
+
+def test_recovery_deep_page_404_falls_back_to_verified_refs(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
+    calls = []
+
+    def fake_api(path):
+        calls.append(path)
+        if "page=1" in path:
+            return [
+                {"id": 2, "tag_name": "ordinary-two"},
+                {"id": 1, "tag_name": "ordinary-one"},
+            ]
+        raise module.RecoveryError("gh api failed: Not Found (HTTP 404)")
+
+    fallback_calls = []
+    monkeypatch.setattr(module, "_json_api", fake_api)
+    monkeypatch.setattr(
+        module,
+        "_recovery_releases_from_git_refs",
+        lambda repository: fallback_calls.append(repository) or [
+            {"id": 99, "tag_name": "alina-recovery-verified"}
+        ],
+    )
+    assert module.list_recovery_releases("owner/repo") == [
+        {"id": 99, "tag_name": "alina-recovery-verified"}
+    ]
+    assert fallback_calls == ["owner/repo"]
+
+
+def test_recovery_first_page_404_remains_fatal(monkeypatch):
+    import pytest
+
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "_json_api",
+        lambda _path: (_ for _ in ()).throw(
+            module.RecoveryError("gh api failed: Not Found (HTTP 404)")
+        ),
+    )
+    with pytest.raises(module.RecoveryError, match="HTTP 404"):
+        module.list_recovery_releases("owner/repo")
+
 def test_recovery_deep_offset_failure_switches_to_verified_git_refs(monkeypatch):
     module = _module()
     import subprocess
