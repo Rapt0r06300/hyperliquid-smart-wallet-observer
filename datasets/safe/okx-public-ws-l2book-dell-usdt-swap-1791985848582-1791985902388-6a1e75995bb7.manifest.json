@@ -1,0 +1,116 @@
+{
+  "asset_verified": true,
+  "bytes": 67361,
+  "collection_run_id": "market-e8-8-2026101413-v7-0",
+  "collector_version": "0531451bc2a12ca9d0326318c677d1607b060943",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-dell-usdt-swap-1791985848582-1791985902388-6a1e75995bb7",
+  "end_ts_ms": 1791985902388,
+  "event_count": 363,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 363,
+  "release": {
+    "asset_id": 640748154,
+    "asset_name": "packed-shards-0086.zip",
+    "member_name": "okx-public-ws-l2book-dell-usdt-swap-1791985848582-1791985902388-6a1e75995bb7.jsonl.gz",
+    "release_id": 412856813,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101413-v7-u0",
+    "remote_digest": "sha256:ad297c237d7f9b062419c739b9b7510b1aff667042a40ad6bb2cf6a742d3137d",
+    "remote_size": 4280502,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-l2book-dell-usdt-swap-1791985848582-1791985902388-6a1e75995bb7.jsonl.gz",
+  "release_asset_id": 640748154,
+  "release_container_asset": "packed-shards-0086.zip",
+  "release_id": 412856813,
+  "release_member": "okx-public-ws-l2book-dell-usdt-swap-1791985848582-1791985902388-6a1e75995bb7.jsonl.gz",
+  "release_remote_digest": "sha256:ad297c237d7f9b062419c739b9b7510b1aff667042a40ad6bb2cf6a742d3137d",
+  "release_remote_size": 4280502,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101413-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6a1e75995bb73f8b26a1bc2f7b1a57257885c9ffcbb0940dcb666a793eb5123e",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791985848582,
+  "symbol": "DELL-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 363,
+      "max": 34.0,
+      "min": 17.0,
+      "p50": 17.0,
+      "p95": 34.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-e2821b682b944b8eb4283197a152a202"
+    ],
+    "first_exchange_ts_ms": 1791985848302,
+    "last_exchange_ts_ms": 1791985891302,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 363,
+      "max": 11870.0,
+      "min": 87.0,
+      "p50": 3206.0,
+      "p95": 11261.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 363,
+      "max": 2889.575961,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 2889.575961
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 763932,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}

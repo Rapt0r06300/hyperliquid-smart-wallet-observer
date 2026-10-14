@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 28765,
+  "collection_run_id": "market-e8-8-2026101413-v7-0",
+  "collector_version": "0531451bc2a12ca9d0326318c677d1607b060943",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-strkusdt-1791987568134-1791987694322-4169f474acfc",
+  "end_ts_ms": 1791987694322,
+  "event_count": 313,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 313,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 313,
+    "missing_from_live": 0,
+    "reference_count": 313,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 313,
+  "release": {
+    "asset_id": 640745700,
+    "asset_name": "packed-shards-0056.zip",
+    "member_name": "bitget-public-ws-trades-strkusdt-1791987568134-1791987694322-4169f474acfc.jsonl.gz",
+    "release_id": 412856813,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101413-v7-u0",
+    "remote_digest": "sha256:1c6cb90bd329f0046a5b94dece05c613d7ca63972d58f2800277a4db9c945100",
+    "remote_size": 667062,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-strkusdt-1791987568134-1791987694322-4169f474acfc.jsonl.gz",
+  "release_asset_id": 640745700,
+  "release_container_asset": "packed-shards-0056.zip",
+  "release_id": 412856813,
+  "release_member": "bitget-public-ws-trades-strkusdt-1791987568134-1791987694322-4169f474acfc.jsonl.gz",
+  "release_remote_digest": "sha256:1c6cb90bd329f0046a5b94dece05c613d7ca63972d58f2800277a4db9c945100",
+  "release_remote_size": 667062,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101413-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4169f474acfc38a7c2060d751d1d86586a999d17f265d16916fdcceb12680a01",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791987568134,
+  "symbol": "STRKUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 313,
+      "max": 94.0,
+      "min": 78.0,
+      "p50": 78.0,
+      "p95": 94.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-10466f80885043dab66a4c7a3a3a321f"
+    ],
+    "first_exchange_ts_ms": 1791987472873,
+    "last_exchange_ts_ms": 1791987694244,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 313,
+      "max": 95261.0,
+      "min": 71.0,
+      "p50": 108.0,
+      "p95": 83669.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 313,
+      "max": 174.043453,
+      "min": 0.0,
+      "p50": 163.454708,
+      "p95": 173.522874
+    }
+  },
+  "trade_count": 313,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 313,
+  "trade_identity_set_sha256": "78c6c764a4592cebb651d3bb69d3ac6a5f917f7f959f53ec55d78fc4685ad95e",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 504628,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 313,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
