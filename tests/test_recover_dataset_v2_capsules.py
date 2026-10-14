@@ -159,6 +159,57 @@ def test_recovery_pages_halve_on_504_without_skipping_or_repeating(monkeypatch):
     assert calls == [(4, 1), (4, 2), (2, 3), (2, 4)]
 
 
+def test_recovery_listing_tolerates_same_release_id_on_overlapping_pages(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
+    pages = {
+        1: [
+            {"id": 103, "tag_name": "alina-recovery-three", "created_at": "2026-10-03T00:00:00Z"},
+            {"id": 102, "tag_name": "alina-recovery-two", "created_at": "2026-10-02T00:00:00Z"},
+        ],
+        # A new Release inserted before page 2 shifts release 102 into both pages.
+        2: [
+            {"id": 102, "tag_name": "alina-recovery-two", "created_at": "2026-10-02T00:00:00Z"},
+            {"id": 101, "tag_name": "alina-recovery-one", "created_at": "2026-10-01T00:00:00Z"},
+        ],
+        3: [],
+    }
+
+    def fake_api(path):
+        from urllib.parse import parse_qs
+        page = int(parse_qs(path.split("?", 1)[1])["page"][0])
+        return pages[page]
+
+    monkeypatch.setattr(module, "_json_api", fake_api)
+    found = module.list_recovery_releases("owner/repo")
+    assert [(row["id"], row["tag_name"]) for row in found] == [
+        (101, "alina-recovery-one"),
+        (102, "alina-recovery-two"),
+        (103, "alina-recovery-three"),
+    ]
+
+
+def test_recovery_listing_rejects_same_tag_with_distinct_release_ids(monkeypatch):
+    import pytest
+
+    module = _module()
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 1)
+    pages = {
+        1: [{"id": 101, "tag_name": "alina-recovery-collision"}],
+        2: [{"id": 202, "tag_name": "alina-recovery-collision"}],
+        3: [],
+    }
+
+    def fake_api(path):
+        from urllib.parse import parse_qs
+        page = int(parse_qs(path.split("?", 1)[1])["page"][0])
+        return pages[page]
+
+    monkeypatch.setattr(module, "_json_api", fake_api)
+    with pytest.raises(module.RecoveryError, match="distinct release IDs"):
+        module.list_recovery_releases("owner/repo")
+
+
 def test_recovery_listing_504_at_min_page_never_returns_partial(monkeypatch):
     module = _module()
     import pytest

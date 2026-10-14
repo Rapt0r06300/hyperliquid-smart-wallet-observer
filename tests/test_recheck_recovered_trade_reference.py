@@ -161,7 +161,8 @@ def test_recovery_hosted_manual_bitget_reference_gap_export_is_bounded():
     ).read_text(encoding="utf-8")
     assert "reference_gap_export_limit:" in workflow
     assert "type: number" in workflow
-    assert "REFERENCE_GAP_EXPORT_LIMIT: ${{ inputs.reference_gap_export_limit || 0 }}" in workflow
+    assert "startsWith(github.event.head_commit.message, 'recovery-pilot:')" in workflow
+    assert "&& 8 || inputs.reference_gap_export_limit || 0" in workflow
     assert '--reference-gap-export-limit "$REFERENCE_GAP_EXPORT_LIMIT"' in workflow
     assert 'result.get("missing_trade_events_reconstructed", 0) == 0' in workflow
 

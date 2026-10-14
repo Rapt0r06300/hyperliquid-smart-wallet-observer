@@ -135,7 +135,8 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
     releases: list[Mapping[str, Any]] = []
     page_size = RECOVERY_RELEASE_PAGE_SIZE
     page = 1
-    seen_tags: set[str] = set()
+    seen_tags: dict[str, object] = {}
+    seen_release_ids: dict[object, str] = {}
     while True:
         path = f"repos/{repository}/releases?per_page={page_size}&page={page}"
         try:
@@ -170,8 +171,26 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
                 tag = str(row.get("tag_name") or "")
                 if tag.startswith(RECOVERY_PREFIX):
                     if tag in seen_tags:
-                        raise RecoveryError(f"duplicate recovery Release in paged inventory: {tag}")
-                    seen_tags.add(tag)
+                        release_id = row.get("id")
+                        if release_id is not None and seen_tags[tag] == release_id:
+                            # GitHub orders this endpoint newest-first. A Release
+                            # created between requests can shift the page boundary,
+                            # so the same immutable Release ID may legitimately be
+                            # returned on two adjacent pages.
+                            continue
+                        raise RecoveryError(
+                            "duplicate recovery Release tag with distinct release IDs: "
+                            f"{tag}"
+                        )
+                    release_id = row.get("id")
+                    if release_id is not None and release_id in seen_release_ids:
+                        raise RecoveryError(
+                            "recovery Release ID reused by distinct tags: "
+                            f"{release_id} ({seen_release_ids[release_id]}, {tag})"
+                        )
+                    seen_tags[tag] = release_id
+                    if release_id is not None:
+                        seen_release_ids[release_id] = tag
                     releases.append(row)
         if len(payload) < page_size:
             break

@@ -82,7 +82,8 @@ def test_replay_ready_preflight_keeps_verified_cache(monkeypatch, tmp_path):
 
     def fake_restore(repository, destination, **options):
         actual["prune_unselected"] = options["prune_unselected"]
-        return {"enough_disk_for_release_assets": True,
+        return {"status": "PREFLIGHT_READY_NOT_RESTORED",
+                "enough_disk_for_release_assets": True,
                 "unverified_source_asset_count": 0}
 
     monkeypatch.setattr(restore_alina, "restore_everything", fake_restore)

@@ -2850,7 +2850,11 @@ def main(argv: list[str] | None = None) -> int:
             # Keep the operational cache compact by default. Only delete local
             # SHA-matched copies still available in immutable GitHub Releases;
             # never delete GitHub sources or unverified local recovery files.
-            prune_unselected=args.replay_ready and not args.retain_unselected_cache,
+            prune_unselected=(
+                args.replay_ready
+                and not args.preflight_only
+                and not args.retain_unselected_cache
+            ),
             prune_only=args.prune_cache_only,
             max_download_bytes=0 if args.prune_cache_only else args.max_download_gib * (1024 ** 3),
             workspace=(

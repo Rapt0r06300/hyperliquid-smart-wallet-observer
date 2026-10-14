@@ -50,3 +50,22 @@ def test_firewall_rejects_legacy_lfs_workflow_file_even_without_known_command(
     monkeypatch.setattr(sys, "argv", ["validator", "--root", str(tmp_path)])
     with pytest.raises(SystemExit, match="LEGACY_LFS_WORKFLOW_FORBIDDEN"):
         module.main()
+
+
+def test_firewall_rejects_checkout_lfs_materialization(tmp_path, monkeypatch) -> None:
+    (tmp_path / "portable.yml").write_text(
+        """name: portable
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@immutable-sha
+        with:
+          lfs: true
+""",
+        encoding="utf-8",
+    )
+    module = _module()
+    monkeypatch.setattr(sys, "argv", ["validator", "--root", str(tmp_path)])
+    with pytest.raises(SystemExit, match="LEGACY_LFS_WORKFLOW_FORBIDDEN"):
+        module.main()

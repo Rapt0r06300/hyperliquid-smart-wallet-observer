@@ -395,6 +395,6 @@ def test_download_safe_forwards_hard_limit_and_rejects_invalid_limit(monkeypatch
 def test_sync_refuses_conflicting_preview_download_and_nonpositive_cap(capsys):
     module = _module()
     assert module.main(["--download-safe", "--preflight-only"]) == 2
-    assert "choose --download-safe OR --preflight-only" in capsys.readouterr().err
+    assert "choose exactly one of --download-safe, --preflight-only or --prune-cache-only" in capsys.readouterr().err
     assert module.main(["--max-download-gib", "0"]) == 2
     assert "--max-download-gib must be positive" in capsys.readouterr().err

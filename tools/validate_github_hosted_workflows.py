@@ -34,7 +34,10 @@ def main() -> int:
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            if any(command in stripped for command in LEGACY_LFS_COMMANDS):
+            if (
+                stripped.casefold() == "lfs: true"
+                or any(command in stripped for command in LEGACY_LFS_COMMANDS)
+            ):
                 lfs_violations.append(f"{path}:{line_number}")
     if violations:
         raise SystemExit("SELF_HOSTED_RUNNER_FORBIDDEN: " + ", ".join(violations))

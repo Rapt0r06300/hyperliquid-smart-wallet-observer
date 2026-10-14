@@ -2695,7 +2695,7 @@ def test_replay_restore_default_cli_compacts_sha_verified_cache(monkeypatch, tmp
     monkeypatch.setattr(module, "restore_everything", capture)
     assert module.main(["--replay-ready", "--destination", str(tmp_path)]) == 2
     assert seen["prune_unselected"] is True
-    assert seen["max_download_bytes"] == 64 * (1024 ** 3)
+    assert seen["max_download_bytes"] == 8 * (1024 ** 3)
 
     seen.clear()
     assert module.main([
