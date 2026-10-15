@@ -907,7 +907,13 @@ def publish_bundle(
     # campaign-pinned exporter and quarantine any failing shard individually.
     checked_entries: list[tuple[Path, dict[str, Any]]] = []
     for source_path, row in eligible_entries:
-        if validate_v2_jsonl_frames(root, row):
+        # A real V2 bundle must not downgrade its individual shard schema
+        # to bypass the independent raw-frame validation.
+        known_v2 = index.get("schema") == "alina.dataset_bundle.v2"
+        if (
+            (not known_v2 or row.get("schema") == "alina.shard_manifest.v2")
+            and validate_v2_jsonl_frames(root, row)
+        ):
             checked_entries.append((source_path, row))
         else:
             bad = dict(row)
