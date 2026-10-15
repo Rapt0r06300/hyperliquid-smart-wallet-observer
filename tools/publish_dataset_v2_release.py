@@ -269,6 +269,47 @@ def build_compacted_assets(
     return rows
 
 
+def validate_v2_jsonl_frames(root: Path, manifest: Mapping[str, Any]) -> bool:
+    """Independently recheck source frames, including old pinned collectors.
+
+    The current publisher runs on main even when a campaign's exporter is
+    pinned to older code that silently ignored malformed event records.
+    This scan is strictly local and precedes every network publication.
+    """
+    if manifest.get("schema") != "alina.shard_manifest.v2":
+        return True  # Older synthetic/legacy manifests use other contracts.
+    name = str(manifest.get("release_asset") or "")
+    if not name or Path(name).name != name:
+        return False
+    path = root / "assets" / name
+    if not path.is_file() or path.is_symlink():
+        return False
+    expected_events = manifest.get("event_count")
+    if type(expected_events) is not int or expected_events <= 0:
+        return False
+    count = 0
+    try:
+        with gzip.open(path, "rb") as stream:
+            for line in stream:
+                if not line.strip():
+                    return False
+                record = json.loads(line.decode("utf-8"))
+                if not isinstance(record, dict):
+                    return False
+                if (
+                    record.get("source_id") != manifest.get("source")
+                    or record.get("channel") != manifest.get("family")
+                    or record.get("instrument") != manifest.get("symbol")
+                ):
+                    return False
+                count += 1
+                if count > expected_events:
+                    return False
+    except (OSError, EOFError, UnicodeDecodeError, ValueError):
+        return False
+    return count == expected_events
+
+
 def _direct_upload_assets(root: Path, manifests: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Preflight *all* local asset bytes before the first GitHub Release write."""
     rows: list[dict[str, Any]] = []
@@ -813,6 +854,21 @@ def publish_bundle(
     eligible_entries, rejected_entries = partition_manifest_entries(
         manifest_paths, manifests
     )
+    # An immutable SHA is necessary but cannot prove that the gzip JSONL
+    # content is complete. Recheck every real V2 payload independently of the
+    # campaign-pinned exporter and quarantine any failing shard individually.
+    checked_entries: list[tuple[Path, dict[str, Any]]] = []
+    for source_path, row in eligible_entries:
+        if validate_v2_jsonl_frames(root, row):
+            checked_entries.append((source_path, row))
+        else:
+            bad = dict(row)
+            bad["quality_status"] = "REJECT"
+            bad["quality_reasons"] = ["LOCAL_JSONL_REPLAY_VALIDATION_FAILED"]
+            bad["validation_allowed"] = False
+            bad["replay_compatible"] = False
+            rejected_entries.append((source_path, bad))
+    eligible_entries = checked_entries
     eligible_manifest_paths = [path for path, _row in eligible_entries]
     eligible_manifests = [row for _path, row in eligible_entries]
     rejected_manifests = [row for _path, row in rejected_entries]
