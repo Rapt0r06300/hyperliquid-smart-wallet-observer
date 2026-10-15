@@ -210,6 +210,7 @@ def test_recovery_pilot_has_one_worker_and_bounded_identified_candidate():
     assert workflow.count("\n  recover-one:") == 1
     assert "\n  recovery-pilot:" not in workflow
     assert "startsWith(github.event.head_commit.message, 'recovery-pilot:')" in workflow
+    assert "      - 'catalog/RECOVERY_PILOT_HISTORY.json'" in workflow
     assert "LIMIT=4000000" in workflow
     assert "--select-pilot" in workflow
     assert "--max-live-attempts 12" in workflow
