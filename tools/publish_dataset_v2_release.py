@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.datasets.replay_coverage import build_safe_coverage_matrix
+from hl_observer.datasets.v2_export import build_manifest_from_tick_shard
 from hl_observer.datasets.v2_pipeline import (
     V2_REPOSITORY,
     finalize_manifest,
@@ -307,7 +308,54 @@ def validate_v2_jsonl_frames(root: Path, manifest: Mapping[str, Any]) -> bool:
                     return False
     except (OSError, EOFError, UnicodeDecodeError, ValueError):
         return False
-    return count == expected_events
+    if count != expected_events:
+        return False
+    # Re-grade raw frames using the current exporter. Campaigns may be
+    # pinned to an older exporter that overlooked gaps, duplicates or source
+    # provenance. A self-declared SAFE flag is never independent evidence.
+    try:
+        rebuilt = build_manifest_from_tick_shard(
+            path, collector_version=str(manifest.get("collector_version") or ""),
+        )
+    except (OSError, EOFError, UnicodeDecodeError, ValueError, KeyError, TypeError):
+        return False
+    if rebuilt.get("replay_compatible") is not True:
+        return False
+    for key in (
+        "sha256", "bytes", "event_count", "trade_count", "source",
+        "family", "venue", "symbol", "start_ts_ms", "end_ts_ms",
+    ):
+        if rebuilt.get(key) != manifest.get(key):
+            return False
+    if not locally_replay_admissible({
+        **rebuilt,
+        "asset_verified": True,
+        "reconciliation": manifest.get("reconciliation"),
+        "required_channels": manifest.get("required_channels"),
+        "observed_channels": manifest.get("observed_channels"),
+        "cost_model": manifest.get("cost_model"),
+    }):
+        return False
+    original_integrity = manifest.get("integrity")
+    observed_integrity = rebuilt.get("integrity")
+    if not isinstance(original_integrity, Mapping) or not isinstance(observed_integrity, Mapping):
+        return False
+    for key in (
+        "gap_count", "duplicate_count", "regression_count",
+        "missing_timestamp_count", "missing_monotonic_count", "desync_count",
+    ):
+        if original_integrity.get(key) != observed_integrity.get(key):
+            return False
+    if (
+        (manifest.get("provenance") or {}).get("public_data_only")
+        != (rebuilt.get("provenance") or {}).get("public_data_only")
+        or (manifest.get("provenance") or {}).get("authenticated")
+        != (rebuilt.get("provenance") or {}).get("authenticated")
+        or (manifest.get("provenance") or {}).get("real_execution")
+        != (rebuilt.get("provenance") or {}).get("real_execution")
+    ):
+        return False
+    return True
 
 
 def _direct_upload_assets(root: Path, manifests: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
