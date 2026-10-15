@@ -110,6 +110,12 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         if any(
             type(integrity.get(name)) is not int or integrity[name] < 0
             for name in required_integrity
+        ) or (
+            "invalid_record_count" in integrity
+            and (
+                type(integrity["invalid_record_count"]) is not int
+                or integrity["invalid_record_count"] < 0
+            )
         ):
             severe.append("INCOMPLETE_OR_INVALID_INTEGRITY_COUNTERS")
         for key, reason in (
@@ -118,13 +124,13 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             ("desync_count", "DESYNC"),
             ("invalid_record_count", "INVALID_EVENT_RECORD"),
         ):
-            if int(integrity.get(key) or 0) > 0:
+            if (_int(integrity.get(key)) or 0) > 0:
                 severe.append(reason)
-        if int(integrity.get("duplicate_count") or 0) > 0:
+        if (_int(integrity.get("duplicate_count")) or 0) > 0:
             reasons.append("DUPLICATES_PRESENT")
-        if int(integrity.get("missing_timestamp_count") or 0) > 0:
+        if (_int(integrity.get("missing_timestamp_count")) or 0) > 0:
             reasons.append("MISSING_EXCHANGE_OR_RECEIVE_TIMESTAMP")
-        if int(integrity.get("missing_monotonic_count") or 0) > 0:
+        if (_int(integrity.get("missing_monotonic_count")) or 0) > 0:
             reasons.append("MISSING_MONOTONIC_TIMESTAMP")
 
     provenance = manifest.get("provenance")
