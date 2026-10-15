@@ -473,6 +473,26 @@ def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_dat
     assert [row["dataset_id"] for row in result["manifests"]] == ["good"]
 
 
+def test_real_v2_bundle_refuses_missing_shard_schema(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [
+        {"dataset_id": "old-schema-less", "quality_status": "SAFE"},
+    ])
+    index_path = bundle / "BUNDLE_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["schema"] = "alina.dataset_bundle.v2"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    uploads = []
+    _mock_release_io(module, monkeypatch, uploads)
+    result = module.publish_bundle(
+        bundle, repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-no-schema-bypass", target="main", title="no bypass",
+    )
+    assert uploads == []
+    assert result["status"] == "NO_REPLAY_ADMISSIBLE_SHARDS"
+    assert result["excluded_payload_count"] == 1
+
+
 def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
     module = _module()
     root = tmp_path / "bundle"
