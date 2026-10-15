@@ -830,6 +830,15 @@ def publish_bundle(
         )
         return report
 
+    # Preflight every local payload and SHA before *any* remote write,
+    # including optional recovery capsules (not just canonical releases).
+    upload_assets = (
+        build_compacted_assets(root, manifests)
+        if len(manifests) >= COMPACTION_MIN_SHARDS
+        else _direct_upload_assets(root, manifests)
+    )
+
+
     recovery_capsule = (
         publish_recovery_capsule(
             root,
@@ -844,12 +853,6 @@ def publish_bundle(
         if manifests
         else None
     )
-    upload_assets = (
-        build_compacted_assets(root, manifests)
-        if len(manifests) >= COMPACTION_MIN_SHARDS
-        else _direct_upload_assets(root, manifests)
-    )
-
     # Small bundles stay on one canonical Release exactly as before. Large
     # replay-grade windows may exceed GitHub's hard 1000-assets-per-Release
     # limit. For those only, use the requested tag as data part 0, spill the
