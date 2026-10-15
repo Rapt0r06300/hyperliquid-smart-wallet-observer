@@ -43,7 +43,7 @@ def _fixture(tmp_path: Path, monkeypatch):
     }
     index_path = catalog / "DATA_INDEX.json"
     patch_path = catalog / "REPLAY_COMPAT_PATCH.json"
-    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
+    index_path.write_text(json.dumps({"schema": "alina.data_index.v2", "shards": [row]}), encoding="utf-8")
     patch_path.write_text(json.dumps({"results": {dataset_id: proof}}), encoding="utf-8")
     monkeypatch.setattr(replay, "ROOT", tmp_path)
     monkeypatch.setattr(replay, "INDEX_PATH", index_path)
