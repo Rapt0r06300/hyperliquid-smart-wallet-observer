@@ -95,8 +95,13 @@ def partition_publishable_manifests(
     for raw in manifests:
         row = dict(raw)
         status = str(row.get("quality_status") or "").upper()
-        reasons = {str(value) for value in row.get("quality_reasons", [])}
-        permitted_status = status == "SAFE" or (
+        raw_reasons = row.get("quality_reasons")
+        reasons = (
+            {str(value) for value in raw_reasons}
+            if isinstance(raw_reasons, list)
+            else None
+        )
+        permitted_status = (status == "SAFE" and reasons == set()) or (
             status == "PARTIAL" and reasons == {"REMOTE_ASSET_NOT_VERIFIED"}
         )
         if permitted_status and locally_replay_admissible(row):
