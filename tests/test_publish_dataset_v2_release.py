@@ -354,7 +354,13 @@ def test_direct_publication_checks_every_local_asset_before_any_remote_write(
 
     uploaded: list[Path] = []
     releases: list[str] = []
+    capsules: list[bool] = []
     _mock_release_io(module, monkeypatch, uploaded)
+    monkeypatch.setenv("ALINA_RECOVERY_CAPSULE", "1")
+    monkeypatch.setattr(
+        module, "publish_recovery_capsule",
+        lambda *_args, **_kwargs: capsules.append(True) or None,
+    )
     monkeypatch.setattr(
         module, "ensure_release",
         lambda **kw: releases.append(kw["tag"]) or {"id": 77, "assets": []},
@@ -370,6 +376,7 @@ def test_direct_publication_checks_every_local_asset_before_any_remote_write(
         )
     assert uploaded == []
     assert releases == []
+    assert capsules == []
 
 
 def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
