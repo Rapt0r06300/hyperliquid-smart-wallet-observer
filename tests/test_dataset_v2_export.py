@@ -62,7 +62,7 @@ def test_malformed_jsonl_frames_make_shard_non_replayable(tmp_path) -> None:
     # Appended gzip members are valid gzip, but invalid JSONL records
     # must never silently disappear from the replay-admission audit.
     with gzip.open(shard, "ab") as handle:
-        handle.write(b"\\nnull\\nnot-json\\n")
+        handle.write(b"\nnull\nnot-json\n")
 
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["event_count"] == 1
