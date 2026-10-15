@@ -329,7 +329,7 @@ def test_publish_mixed_bundle_filters_payload_and_capsule_inputs(tmp_path, monke
     assert result["quality_register"]["row_count"] == 1
 
 
-@pytest.mark.parametrize("failure", ["changed_bytes", "missing_file", "wrong_manifest_sha", "duplicate_name"])
+@pytest.mark.parametrize("failure", ["changed_bytes", "missing_file", "wrong_manifest_sha", "duplicate_name", "symlink"])
 def test_direct_publication_checks_every_local_asset_before_any_remote_write(
     tmp_path, monkeypatch, failure,
 ) -> None:
@@ -344,6 +344,11 @@ def test_direct_publication_checks_every_local_asset_before_any_remote_write(
         source.write_bytes(b"X" * source.stat().st_size)
     elif failure == "missing_file":
         source.unlink()
+    elif failure == "symlink":
+        destination = bundle / "linked-payload"
+        destination.write_bytes(source.read_bytes())
+        source.unlink()
+        source.symlink_to(destination)
     else:
         row = json.loads(manifest.read_text(encoding="utf-8"))
         if failure == "wrong_manifest_sha":
@@ -491,6 +496,22 @@ def test_real_v2_bundle_refuses_missing_shard_schema(tmp_path, monkeypatch) -> N
     assert uploads == []
     assert result["status"] == "NO_REPLAY_ADMISSIBLE_SHARDS"
     assert result["excluded_payload_count"] == 1
+
+
+def test_compacted_payload_cannot_follow_local_symlink(tmp_path) -> None:
+    module = _module()
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    payload = tmp_path / "outside.jsonl.gz"
+    payload.write_bytes(b"trusted")
+    (assets / "linked.jsonl.gz").symlink_to(payload)
+    with pytest.raises(module.PublishError, match="unsafe upload file"):
+        module.build_compacted_assets(tmp_path, [{
+            "dataset_id": "linked",
+            "release_asset": "linked.jsonl.gz",
+            "bytes": len(payload.read_bytes()),
+            "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+        }])
 
 
 def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
