@@ -13,15 +13,33 @@ def make_bundle(tmp_path):
     root = tmp_path / "bundle"
     (root / "assets").mkdir(parents=True)
     (root / "manifests").mkdir()
-    raw = gzip.compress(b'{"event_ts_ms":1000}\n')
+    frame = {
+        "source_id": "bybit_public_ws",
+        "channel": "l2Book",
+        "instrument": "BTCUSDT",
+        "event_kind": "SNAPSHOT",
+        "exchange_ts_ms": 1000,
+        "received_ts_ms": 1000,
+        "local_monotonic_ns": 1000000,
+        "connection_id": "ws-1",
+        "sequence": 1,
+        "raw_sha256": hashlib.sha256(b"market-frame").hexdigest(),
+        "provenance": {
+            "access": "read_only", "authenticated": False, "transport": "websocket",
+        },
+        "real_execution": False,
+    }
+    raw = gzip.compress((json.dumps(frame) + "\n").encode("utf-8"))
     safe_sha = hashlib.sha256(raw).hexdigest()
 
     def manifest(dataset_id, filename, quality, reasons, compatible):
         return {
+            "schema": "alina.shard_manifest.v2",
             "dataset_id": dataset_id,
             "family": "l2Book", "venue": "bybit", "symbol": "BTCUSDT",
-            "start_ts_ms": 1000, "end_ts_ms": 1001,
+            "start_ts_ms": 1000, "end_ts_ms": 1000,
             "sha256": safe_sha, "bytes": len(raw), "event_count": 1,
+            "trade_count": 0,
             "collector_version": "b" * 40, "source": "bybit_public_ws",
             "quality_status": quality, "quality_reasons": reasons,
             "release_asset": filename, "asset_verified": False,
@@ -132,6 +150,19 @@ def test_failed_publish_fallback_refuses_partial_transfer_when_over_budget(tmp_p
 def test_failed_publish_fallback_rejects_corrupted_candidate_bytes(tmp_path):
     root, result = make_bundle(tmp_path)
     (root / "assets" / "safe.jsonl.gz").write_bytes(b"wrong")
-    with pytest.raises(ValueError, match="QUARANTINE_ASSET_SHA_MISMATCH"):
-        module.preserve(result, tmp_path / "invalid.tgz")
+    report = module.preserve(result, tmp_path / "invalid.tgz")
+    assert report["status"] == "NO_LOCALLY_REPLAY_ADMISSIBLE_CANDIDATES"
+    assert report["excluded"] == 2
     assert not (tmp_path / "invalid.tgz").exists()
+
+
+def test_failed_publish_fallback_rejects_missing_source_proof(tmp_path):
+    root, result = make_bundle(tmp_path)
+    manifest = root / "manifests" / "safe.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data.pop("schema")
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    report = module.preserve(result, tmp_path / "unproven.tgz")
+    assert report["status"] == "NO_LOCALLY_REPLAY_ADMISSIBLE_CANDIDATES"
+    assert report["excluded"] == 2
+    assert not (tmp_path / "unproven.tgz").exists()
