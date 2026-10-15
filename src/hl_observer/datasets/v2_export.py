@@ -95,6 +95,7 @@ def build_manifest_from_tick_shard(
     missing_timestamp_count = 0
     missing_monotonic_count = 0
     desync_count = 0
+    invalid_record_count = 0
     event_count = 0
     trade_count = 0
     uncompressed_bytes = 0
@@ -123,9 +124,18 @@ def build_manifest_from_tick_shard(
         for raw_line in handle:
             uncompressed_bytes += len(raw_line)
             if not raw_line.strip():
+                invalid_record_count += 1
+                gap_count += 1
                 continue
-            record = json.loads(raw_line.decode("utf-8"))
+            try:
+                record = json.loads(raw_line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                invalid_record_count += 1
+                gap_count += 1
+                continue
             if not isinstance(record, dict):
+                invalid_record_count += 1
+                gap_count += 1
                 continue
             event_count += 1
             source = str(record.get("source_id") or "")
@@ -365,6 +375,8 @@ def build_manifest_from_tick_shard(
         replay_reasons.append("MISSING_MONOTONIC_TIMESTAMP")
     if desync_count > 0:
         replay_reasons.append("DESYNC")
+    if invalid_record_count > 0:
+        replay_reasons.append("INVALID_EVENT_RECORD")
     replay_compatible = not replay_reasons
 
     return {
@@ -420,6 +432,7 @@ def build_manifest_from_tick_shard(
             "missing_timestamp_count": missing_timestamp_count,
             "missing_monotonic_count": missing_monotonic_count,
             "desync_count": desync_count,
+            "invalid_record_count": invalid_record_count,
             "duplicates_deduped": duplicate_count == 0,
         },
         "synchronization": {
