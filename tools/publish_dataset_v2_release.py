@@ -247,8 +247,8 @@ def build_compacted_assets(
                     raise PublishError(f"invalid or duplicate compacted member: {member!r}")
                 seen.add(member)
                 source = root / "assets" / member
-                if not source.is_file():
-                    raise PublishError(f"Missing upload file: {source}")
+                if source.is_symlink() or not source.is_file():
+                    raise PublishError(f"Missing or unsafe upload file: {source}")
                 expected_size = int(manifest.get("bytes") or 0)
                 expected_sha = str(manifest.get("sha256") or "").lower()
                 if source.stat().st_size != expected_size or _sha256_file(source) != expected_sha:
@@ -372,6 +372,7 @@ def _direct_upload_assets(root: Path, manifests: list[Mapping[str, Any]]) -> lis
         if (
             expected_size <= 0
             or len(expected_sha) != 64
+            or source.is_symlink()
             or not source.is_file()
             or source.stat().st_size != expected_size
             or _sha256_file(source) != expected_sha
@@ -887,7 +888,10 @@ def publish_bundle(
         ):
             raise PublishError("unsafe manifest reference")
         path = root / relative
-        if path.is_symlink() or not path.is_file():
+        if (
+            path.is_symlink() or not path.is_file()
+            or not path.resolve().is_relative_to(root.resolve())
+        ):
             raise PublishError("manifest missing or unsafe")
         manifest_paths.append(path)
     if len(manifest_paths) != len(set(manifest_paths)):
