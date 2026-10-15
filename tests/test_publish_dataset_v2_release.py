@@ -397,14 +397,14 @@ def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_dat
     }
     for dataset_id in ("good", "bad"):
         path = bundle / "assets" / f"{dataset_id}.jsonl.gz"
-        original = json.dumps(frame, sort_keys=True).encode() + b"\\n"
+        original = json.dumps(frame, sort_keys=True).encode() + b"\n"
         if dataset_id == "bad":
             if corruption == "malformed":
-                original += b"not valid json\\n"
+                original += b"not valid json\n"
             elif corruption == "non_object":
-                original += b"null\\n"
+                original += b"null\n"
             elif corruption == "foreign_instrument":
-                original = json.dumps({**frame, "instrument": "ETHUSDT"}).encode() + b"\\n"
+                original = json.dumps({**frame, "instrument": "ETHUSDT"}).encode() + b"\n"
             else:
                 original = b""
         with gzip.open(path, "wb") as stream:
