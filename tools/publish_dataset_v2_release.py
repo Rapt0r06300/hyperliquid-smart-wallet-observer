@@ -142,6 +142,8 @@ def assert_safe_final_manifests(manifests: list[Mapping[str, Any]]) -> None:
         if (
             row.get("quality_status") != "SAFE"
             or row.get("replay_compatible") is not True
+            or row.get("asset_verified") is not True
+            or row.get("validation_allowed") is not True
         ):
             raise PublishError(
                 "final manifest is not SAFE/replayable: "
@@ -265,13 +267,33 @@ def build_compacted_assets(
 
 
 def _direct_upload_assets(root: Path, manifests: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    return [{
-        "name": str(row.get("release_asset") or ""),
-        "path": root / "assets" / str(row.get("release_asset") or ""),
-        "bytes": int(row.get("bytes") or 0),
-        "sha256": str(row.get("sha256") or "").lower(),
-        "manifests": [row],
-    } for row in manifests]
+    """Preflight *all* local asset bytes before the first GitHub Release write."""
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in manifests:
+        name = str(row.get("release_asset") or "")
+        if not name or Path(name).name != name or name in seen:
+            raise PublishError(f"invalid or duplicate direct upload asset: {name!r}")
+        source = root / "assets" / name
+        expected_size = int(row.get("bytes") or 0)
+        expected_sha = str(row.get("sha256") or "").lower()
+        if (
+            expected_size <= 0
+            or len(expected_sha) != 64
+            or not source.is_file()
+            or source.stat().st_size != expected_size
+            or _sha256_file(source) != expected_sha
+        ):
+            raise PublishError(f"local shard identity mismatch: {name}")
+        seen.add(name)
+        rows.append({
+            "name": name,
+            "path": source,
+            "bytes": expected_size,
+            "sha256": expected_sha,
+            "manifests": [row],
+        })
+    return rows
 
 
 def overflow_release_tag(base_tag: str, part_index: int) -> str:
