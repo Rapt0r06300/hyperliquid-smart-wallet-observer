@@ -380,7 +380,11 @@ def test_direct_publication_checks_every_local_asset_before_any_remote_write(
 
 
 @pytest.mark.parametrize(
-    "corruption", ["malformed", "non_object", "missing_event", "foreign_instrument"]
+    "corruption", [
+        "malformed", "non_object", "missing_event", "foreign_instrument",
+        "undisclosed_gap", "nonpublic_source", "real_execution",
+        "missing_exchange_time", "desynced_book",
+    ]
 )
 def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_data(
     tmp_path, monkeypatch, corruption,
@@ -417,6 +421,20 @@ def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_dat
                 original += b"null\n"
             elif corruption == "foreign_instrument":
                 original = json.dumps({**frame, "instrument": "ETHUSDT"}).encode() + b"\n"
+            elif corruption == "undisclosed_gap":
+                original = json.dumps({**frame, "event_kind": "GAP"}).encode() + b"\n"
+            elif corruption == "nonpublic_source":
+                original = json.dumps({
+                    **frame, "provenance": {**frame["provenance"], "access": "private"},
+                }).encode() + b"\n"
+            elif corruption == "real_execution":
+                original = json.dumps({**frame, "real_execution": True}).encode() + b"\n"
+            elif corruption == "missing_exchange_time":
+                original = json.dumps({**frame, "exchange_ts_ms": None}).encode() + b"\n"
+            elif corruption == "desynced_book":
+                original = json.dumps({
+                    **frame, "parsed_summary": {"book_state": "DESYNC"},
+                }).encode() + b"\n"
             else:
                 original = b""
         with gzip.open(path, "wb") as stream:
