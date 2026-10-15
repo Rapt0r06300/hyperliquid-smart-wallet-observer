@@ -214,6 +214,9 @@ def build_compacted_assets(
             str(row.get("dataset_id") or ""),
         ),
     )
+    asset_names = [str(row.get("release_asset") or "") for row in ordered]
+    if len(asset_names) != len(set(asset_names)):
+        raise PublishError("duplicate compacted asset filename")
     groups: list[list[Mapping[str, Any]]] = []
     current: list[Mapping[str, Any]] = []
     current_bytes = 0
