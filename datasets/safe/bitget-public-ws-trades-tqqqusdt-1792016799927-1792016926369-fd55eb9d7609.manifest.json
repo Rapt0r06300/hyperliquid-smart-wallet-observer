@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 24453,
+  "collection_run_id": "market-e8-8-2026101422-v7-0",
+  "collector_version": "0317221b45bcafdee8054ba383d725c155c37828",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-tqqqusdt-1792016799927-1792016926369-fd55eb9d7609",
+  "end_ts_ms": 1792016926369,
+  "event_count": 281,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 281,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 281,
+    "missing_from_live": 0,
+    "reference_count": 281,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 281,
+  "release": {
+    "asset_id": 642036456,
+    "asset_name": "packed-shards-0055.zip",
+    "member_name": "bitget-public-ws-trades-tqqqusdt-1792016799927-1792016926369-fd55eb9d7609.jsonl.gz",
+    "release_id": 413276112,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101422-v7-u0",
+    "remote_digest": "sha256:d0b2870a6b87fdf2a20cbb855dddea7f5e4109311b77f27a23096f5833fd3214",
+    "remote_size": 728308,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-tqqqusdt-1792016799927-1792016926369-fd55eb9d7609.jsonl.gz",
+  "release_asset_id": 642036456,
+  "release_container_asset": "packed-shards-0055.zip",
+  "release_id": 413276112,
+  "release_member": "bitget-public-ws-trades-tqqqusdt-1792016799927-1792016926369-fd55eb9d7609.jsonl.gz",
+  "release_remote_digest": "sha256:d0b2870a6b87fdf2a20cbb855dddea7f5e4109311b77f27a23096f5833fd3214",
+  "release_remote_size": 728308,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101422-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "fd55eb9d76096e0d04f8b172334f57747803ab5907368f510e9930bfc391482c",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1792016799927,
+  "symbol": "TQQQUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 281,
+      "max": 145.5,
+      "min": -379.0,
+      "p50": 145.5,
+      "p95": 145.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-e2e89ea430ee419fb62e285ffc43847b"
+    ],
+    "first_exchange_ts_ms": 1792016716347,
+    "last_exchange_ts_ms": 1792016926252,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 281,
+      "max": 83580.0,
+      "min": 73.0,
+      "p50": 83.0,
+      "p95": 59249.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 281,
+      "max": 158.586171,
+      "min": 0.0,
+      "p50": 154.23728,
+      "p95": 158.586171
+    }
+  },
+  "trade_count": 281,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 281,
+  "trade_identity_set_sha256": "dd168ba41083441707f9f7577e255b86d0fb68497b0f09ba9578f89a40dec6df",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 460962,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 281,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
