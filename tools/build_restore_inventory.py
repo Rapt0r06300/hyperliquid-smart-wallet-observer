@@ -6,6 +6,7 @@ import argparse
 import concurrent.futures
 import datetime as dt
 import gzip
+import hashlib
 import json
 import os
 import subprocess
@@ -15,9 +16,21 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 try:
-    from tools.restore_alina import RestoreError, _json, _validate_release_asset
+    from tools.restore_alina import (
+        RestoreError,
+        _expected_digest,
+        _json,
+        _request,
+        _validate_release_asset,
+    )
 except ModuleNotFoundError:
-    from restore_alina import RestoreError, _json, _validate_release_asset
+    from restore_alina import (
+        RestoreError,
+        _expected_digest,
+        _json,
+        _request,
+        _validate_release_asset,
+    )
 
 
 INVENTORY_TAG_PREFIX = "alina-restore-inventory-"
@@ -139,6 +152,72 @@ def _fetch_all_releases(
     return found
 
 
+def _load_base_inventory(
+    repository: str, tags: list[str], token: str,
+) -> dict[str, Mapping[str, Any]]:
+    """Load the newest SHA-bound inventory so unchanged Releases cost no API calls."""
+    inventory_tags = sorted(
+        (tag for tag in tags if tag.startswith(INVENTORY_TAG_PREFIX)), reverse=True,
+    )
+    if not inventory_tags:
+        return {}
+    tag = inventory_tags[0]
+    quoted = urllib.parse.quote(tag, safe="")
+    release = _json(
+        f"https://api.github.com/repos/{repository}/releases/tags/{quoted}",
+        token=token,
+    )
+    if not isinstance(release, Mapping):
+        raise RestoreError(f"invalid inventory Release payload for {tag}")
+    minimal = _minimal_release(release)
+    if minimal["tag_name"] != tag:
+        raise RestoreError(f"inventory Release tag mismatch for {tag}")
+    matches = [
+        asset for asset in minimal["assets"]
+        if asset["name"] == INVENTORY_ASSET_NAME
+    ]
+    if len(matches) != 1:
+        raise RestoreError(f"inventory Release {tag} has no unique inventory asset")
+    asset = matches[0]
+    raw = _request(asset["browser_download_url"], token=token)
+    if len(raw) != asset["size"]:
+        raise RestoreError("published base inventory failed size verification")
+    expected = _expected_digest(asset)
+    actual = hashlib.sha256(raw).hexdigest()
+    if expected is None or actual != expected:
+        raise RestoreError("published base inventory failed SHA-256 verification")
+    try:
+        payload = json.loads(gzip.decompress(raw).decode("utf-8"))
+    except (gzip.BadGzipFile, json.JSONDecodeError, UnicodeError) as exc:
+        raise RestoreError("published base inventory is malformed") from exc
+    if not isinstance(payload, Mapping):
+        raise RestoreError("published base inventory root is invalid")
+    if payload.get("schema") != "alina.restore_inventory.v1":
+        raise RestoreError("unsupported published base inventory schema")
+    if payload.get("repository") != repository:
+        raise RestoreError("published base inventory repository mismatch")
+    releases = payload.get("releases")
+    if not isinstance(releases, list):
+        raise RestoreError("published base inventory has no Release list")
+    found: dict[str, Mapping[str, Any]] = {}
+    seen_ids: set[int] = set()
+    for row in releases:
+        if not isinstance(row, Mapping):
+            raise RestoreError("malformed Release in published base inventory")
+        checked = _minimal_release(row)
+        row_tag = checked["tag_name"]
+        if row_tag.startswith(INVENTORY_TAG_PREFIX):
+            raise RestoreError("base inventory recursively contains a control Release")
+        if checked["id"] in seen_ids or row_tag in found:
+            raise RestoreError("duplicate Release in published base inventory")
+        seen_ids.add(checked["id"])
+        found[row_tag] = checked
+    declared_count = payload.get("release_count")
+    if declared_count is not None and declared_count != len(found):
+        raise RestoreError("published base inventory Release count mismatch")
+    return found
+
+
 def _write_gzip_json(path: Path, payload: Mapping[str, Any]) -> None:
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     partial = path.with_suffix(path.suffix + ".partial")
@@ -163,7 +242,26 @@ def main(argv: list[str] | None = None) -> int:
     if not 1 <= args.workers <= 16:
         parser.error("--workers must be between 1 and 16")
     tags = _remote_tags(args.remote)
-    fetched = _fetch_all_releases(args.repository, tags, token, args.workers)
+    wanted = {
+        tag for tag in tags if not tag.startswith(INVENTORY_TAG_PREFIX)
+    }
+    fetched = _load_base_inventory(args.repository, tags, token)
+    stale = sorted(set(fetched) - wanted)
+    if stale:
+        raise RestoreError(
+            "published base inventory contains tags missing from the Git remote: "
+            + ", ".join(stale[:10])
+        )
+    missing = sorted(wanted - set(fetched))
+    if missing:
+        fetched.update(
+            _fetch_all_releases(args.repository, missing, token, args.workers)
+        )
+    print(
+        f"inventory base_reused={len(fetched) - len(missing)} "
+        f"new_release_fetches={len(missing)}",
+        file=sys.stderr,
+    )
     generated_at = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     payload = build_inventory(
         args.repository, tags, fetched.__getitem__, generated_at=generated_at,

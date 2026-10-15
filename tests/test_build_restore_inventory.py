@@ -1,4 +1,7 @@
 import importlib.util
+import gzip
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -86,3 +89,67 @@ def test_fetch_all_releases_never_silently_drops_persistent_404(monkeypatch):
     )
     with pytest.raises(module.RestoreError, match="HTTP 404"):
         module._fetch_all_releases("o/r", ["data-one"], "token", 1)
+
+
+def test_load_base_inventory_verifies_asset_and_reuses_historical_releases(monkeypatch):
+    module = _module()
+    inventory = {
+        "schema": "alina.restore_inventory.v1",
+        "repository": "o/r",
+        "releases": [{"id": 7, "tag_name": "data-one", "assets": []}],
+    }
+    raw = gzip.compress(
+        json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode(),
+        mtime=0,
+    )
+    digest = hashlib.sha256(raw).hexdigest()
+    release = {
+        "id": 9,
+        "tag_name": "alina-restore-inventory-123-1",
+        "assets": [{
+            "id": 10,
+            "name": "RESTORE_INVENTORY.json.gz",
+            "size": len(raw),
+            "digest": f"sha256:{digest}",
+            "state": "uploaded",
+            "browser_download_url": "https://example.invalid/inventory.gz",
+        }],
+    }
+    calls = []
+
+    def fake_json(url, **_kwargs):
+        calls.append(url)
+        return release
+
+    monkeypatch.setattr(module, "_json", fake_json)
+    monkeypatch.setattr(module, "_request", lambda *_args, **_kwargs: raw)
+
+    found = module._load_base_inventory(
+        "o/r", ["data-one", release["tag_name"]], "token"
+    )
+
+    assert found == {"data-one": inventory["releases"][0]}
+    assert len(calls) == 1
+
+
+def test_load_base_inventory_rejects_corrupt_published_bytes(monkeypatch):
+    module = _module()
+    release = {
+        "id": 9,
+        "tag_name": "alina-restore-inventory-123-1",
+        "assets": [{
+            "id": 10,
+            "name": "RESTORE_INVENTORY.json.gz",
+            "size": 3,
+            "digest": "sha256:" + "a" * 64,
+            "state": "uploaded",
+            "browser_download_url": "https://example.invalid/inventory.gz",
+        }],
+    }
+    monkeypatch.setattr(module, "_json", lambda *_args, **_kwargs: release)
+    monkeypatch.setattr(module, "_request", lambda *_args, **_kwargs: b"bad")
+
+    with pytest.raises(module.RestoreError, match="SHA-256"):
+        module._load_base_inventory(
+            "o/r", ["data-one", release["tag_name"]], "token"
+        )
