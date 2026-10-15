@@ -783,11 +783,26 @@ def publish_bundle(
     if not isinstance(index, Mapping):
         raise PublishError("Invalid bundle index.")
 
-    manifest_paths = [
-        root / str(value)
-        for value in index.get("manifests", [])
-        if str(value).strip()
-    ]
+    references = index.get("manifests")
+    if not isinstance(references, list) or not all(isinstance(v, str) for v in references):
+        raise PublishError("invalid manifest references")
+    manifest_paths: list[Path] = []
+    for reference in references:
+        relative = Path(reference)
+        if (
+            relative.is_absolute()
+            or relative.suffix != ".json"
+            or not relative.parts
+            or relative.parts[0] != "manifests"
+            or any(part in ("..", ".") for part in relative.parts)
+        ):
+            raise PublishError("unsafe manifest reference")
+        path = root / relative
+        if path.is_symlink() or not path.is_file():
+            raise PublishError("manifest missing or unsafe")
+        manifest_paths.append(path)
+    if len(manifest_paths) != len(set(manifest_paths)):
+        raise PublishError("duplicate manifest references")
     manifests: list[dict[str, Any]] = []
     for path in manifest_paths:
         payload = json.loads(path.read_text(encoding="utf-8"))
