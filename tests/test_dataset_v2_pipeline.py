@@ -642,3 +642,27 @@ def test_queue_loss_attached_after_export_invalidates_old_replay_receipt(tmp_pat
     assert repaired["replay_compatible"] is False
     assert "QUEUE_DROPS" in repaired["replay_reason"]
     assert repaired["validation_allowed"] is False
+
+
+def test_corrupt_integrity_proof_cannot_become_safe(tmp_path) -> None:
+    import json
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks")
+    writer.append(_event(1000))
+    writer.rotate_all()
+    build_bundle(tmp_path / "ticks", tmp_path / "bundle", collector_version="a" * 40)
+    manifest_path = next((tmp_path / "bundle" / "manifests").glob("*.json"))
+    row = json.loads(manifest_path.read_text(encoding="utf-8"))
+    row["asset_verified"] = True
+    assert finalize_manifest(row)["quality_status"] == "SAFE"
+
+    for name, value in (
+        ("gap_count", None),
+        ("regression_count", "0"),
+        ("duplicate_count", -1),
+        ("invalid_record_count", "unknown"),
+    ):
+        altered = {**row, "integrity": {**row["integrity"], name: value}}
+        verdict = finalize_manifest(altered)
+        assert verdict["quality_status"] == "REJECT"
+        assert verdict["validation_allowed"] is False
+        assert "INCOMPLETE_OR_INVALID_INTEGRITY_COUNTERS" in verdict["quality_reasons"]
