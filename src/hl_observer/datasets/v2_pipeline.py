@@ -100,6 +100,18 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     if not isinstance(integrity, Mapping):
         severe.append("MISSING_INTEGRITY")
     else:
+        # A missing counter is not proof of zero loss. Older shard manifests
+        # always provide these six core counters, including explicit zeros.
+        required_integrity = (
+            "gap_count", "regression_count", "desync_count",
+            "duplicate_count", "missing_timestamp_count",
+            "missing_monotonic_count",
+        )
+        if any(
+            type(integrity.get(name)) is not int or integrity[name] < 0
+            for name in required_integrity
+        ):
+            severe.append("INCOMPLETE_OR_INVALID_INTEGRITY_COUNTERS")
         for key, reason in (
             ("gap_count", "SEQUENCE_OR_QUEUE_GAP"),
             ("regression_count", "TIME_OR_SEQUENCE_REGRESSION"),
