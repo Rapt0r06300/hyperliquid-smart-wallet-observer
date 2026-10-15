@@ -379,6 +379,67 @@ def test_direct_publication_checks_every_local_asset_before_any_remote_write(
     assert capsules == []
 
 
+@pytest.mark.parametrize(
+    "corruption", ["malformed", "non_object", "missing_event", "foreign_instrument"]
+)
+def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_data(
+    tmp_path, monkeypatch, corruption,
+) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [
+        {"dataset_id": "good"},
+        {"dataset_id": "bad"},
+    ])
+    frame = {
+        "source_id": "bybit_public_ws",
+        "channel": "l2Book",
+        "instrument": "BTCUSDT",
+    }
+    for dataset_id in ("good", "bad"):
+        path = bundle / "assets" / f"{dataset_id}.jsonl.gz"
+        original = json.dumps(frame, sort_keys=True).encode() + b"\\n"
+        if dataset_id == "bad":
+            if corruption == "malformed":
+                original += b"not valid json\\n"
+            elif corruption == "non_object":
+                original += b"null\\n"
+            elif corruption == "foreign_instrument":
+                original = json.dumps({**frame, "instrument": "ETHUSDT"}).encode() + b"\\n"
+            else:
+                original = b""
+        with gzip.open(path, "wb") as stream:
+            stream.write(original)
+        manifest_path = bundle / "manifests" / f"{dataset_id}.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update({
+            "schema": "alina.shard_manifest.v2",
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "source": "bybit_public_ws",
+            "event_count": 1,
+        })
+        manifest_path.write_text(json.dumps(manifest))
+
+    monkeypatch.setenv("ALINA_RECOVERY_CAPSULE", "0")
+    uploads = []
+    _mock_release_io(module, monkeypatch, uploads)
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-corrupt-frames",
+        target="main",
+        title="real frame preflight",
+    )
+    assert [path.name for path in uploads] == [
+        "good.jsonl.gz", "QUALITY_REJECTIONS.json.gz", "RUN_MANIFEST.json",
+    ]
+    assert result["safe_count"] == 1
+    assert result["partial_count"] == 0
+    assert result["reject_count"] == 0
+    assert result["excluded_payload_count"] == 1
+    assert [row["dataset_id"] for row in result["manifests"]] == ["good"]
+
+
 def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
     module = _module()
     root = tmp_path / "bundle"
