@@ -2794,6 +2794,11 @@ def main(argv: list[str] | None = None) -> int:
              "never download market payloads or claim a completed restoration",
     )
     parser.add_argument(
+        "--prune-unselected-cache", action="store_true",
+        help="during a replay-ready restore, remove locally SHA-verified Release "
+             "cache assets not selected by the SAFE/replayable catalog",
+    )
+    parser.add_argument(
         "--retain-unselected-cache", action="store_true",
         help="legacy compatibility flag; historical cache is retained by default",
     )
@@ -2827,10 +2832,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.prune_cache_only and (
         not args.replay_ready or args.preflight_only
         or args.retain_unselected_cache
+        or args.prune_unselected_cache
         or args.materialize_local_snapshot
         or args.materialize_available_local_snapshot
     ):
         parser.error("--prune-cache-only requires --replay-ready with no other restore mode")
+    if args.prune_unselected_cache and (
+        not args.replay_ready or args.preflight_only or args.retain_unselected_cache
+    ):
+        parser.error(
+            "--prune-unselected-cache requires a replay-ready download restore"
+        )
 
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     destination = Path(args.destination).resolve()
@@ -2849,7 +2861,9 @@ def main(argv: list[str] | None = None) -> int:
             # Historical caches are evidence and are never removed as a side
             # effect of synchronization/restoration. The separate explicit
             # cache-only mode can prune only SHA-matched remote-backed copies.
-            prune_unselected=args.prune_cache_only,
+            prune_unselected=(
+                args.prune_cache_only or args.prune_unselected_cache
+            ),
             prune_only=args.prune_cache_only,
             max_download_bytes=0 if args.prune_cache_only else args.max_download_gib * (1024 ** 3),
             workspace=(

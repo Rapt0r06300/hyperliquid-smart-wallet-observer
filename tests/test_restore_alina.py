@@ -2706,6 +2706,25 @@ def test_replay_restore_default_cli_preserves_historical_cache(monkeypatch, tmp_
     assert seen["max_download_bytes"] == 3 * (1024 ** 3)
 
 
+def test_replay_restore_can_prune_verified_non_safe_cache_during_restore(
+    monkeypatch, tmp_path,
+):
+    module = _module()
+    seen = {}
+
+    def capture(*_args, **kwargs):
+        seen.update(kwargs)
+        raise module.RestoreError("STOP_BEFORE_NETWORK")
+
+    monkeypatch.setattr(module, "restore_everything", capture)
+    assert module.main([
+        "--replay-ready", "--prune-unselected-cache",
+        "--destination", str(tmp_path),
+    ]) == 2
+    assert seen["prune_unselected"] is True
+    assert seen["prune_only"] is False
+
+
 def test_replay_download_budget_is_checked_before_pruning_or_any_payload(
     monkeypatch, tmp_path,
 ):

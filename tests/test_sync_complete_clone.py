@@ -121,6 +121,7 @@ def test_restore_delegates_to_existing_engine_and_propagates_failure(monkeypatch
     assert "--everything" not in command
     assert "--clone-root" not in command  # Legacy LFS reuse is disabled.
     assert "--recover-verifiable" in command
+    assert "--prune-unselected-cache" in command
     assert "--materialize-available-local-snapshot" not in command
     assert "--preflight-only" not in command
     assert kwargs["cwd"] == tmp_path.resolve()
@@ -178,6 +179,7 @@ def test_preflight_never_downloads_and_avoids_snapshot_mutation(monkeypatch, tmp
     assert module.restore_published(tmp_path, preflight=True) == 3
     assert len(commands) == 1
     assert "--preflight-only" in commands[0]
+    assert "--prune-unselected-cache" not in commands[0]
     assert "--materialize-available-local-snapshot" not in commands[0]
 
 

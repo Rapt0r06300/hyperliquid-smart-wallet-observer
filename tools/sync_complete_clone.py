@@ -97,10 +97,15 @@ def restore_published(root: Path, *, preflight: bool = False,
         cmd.extend(("--prune-cache-only", "--max-download-gib", "0"))
     elif preflight:
         cmd.append("--preflight-only")
-    elif max_download_gib is not None:
-        if type(max_download_gib) is not int or max_download_gib <= 0:
-            raise SyncError("download cap must be a positive whole number of GiB")
-        cmd.extend(("--max-download-gib", str(max_download_gib)))
+    else:
+        # The canonical hydrated corpus contains SAFE_REPLAY only. Remove old
+        # unselected cache copies solely after proving they are byte-identical
+        # to recoverable GitHub Release assets; never touch unknown local data.
+        cmd.append("--prune-unselected-cache")
+        if max_download_gib is not None:
+            if type(max_download_gib) is not int or max_download_gib <= 0:
+                raise SyncError("download cap must be a positive whole number of GiB")
+            cmd.extend(("--max-download-gib", str(max_download_gib)))
     # Workspace snapshots and historical recovery capsules belong to the
     # explicit full-archive profile, not the clean replay/backtest corpus.
     env = os.environ.copy()
