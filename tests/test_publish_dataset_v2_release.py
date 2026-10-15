@@ -394,6 +394,18 @@ def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_dat
         "source_id": "bybit_public_ws",
         "channel": "l2Book",
         "instrument": "BTCUSDT",
+        "event_kind": "UPDATE",
+        "exchange_ts_ms": 1000,
+        "received_ts_ms": 1005,
+        "local_monotonic_ns": 1000000,
+        "connection_id": "ws-1",
+        "sequence": 1,
+        "raw_sha256": hashlib.sha256(b"frame").hexdigest(),
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "websocket",
+        },
+        "real_execution": False,
     }
     for dataset_id in ("good", "bad"):
         path = bundle / "assets" / f"{dataset_id}.jsonl.gz"
@@ -416,7 +428,10 @@ def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_dat
             "bytes": path.stat().st_size,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "source": "bybit_public_ws",
+            "start_ts_ms": 1005,
+            "end_ts_ms": 1005,
             "event_count": 1,
+            "trade_count": 0,
         })
         manifest_path.write_text(json.dumps(manifest))
 
