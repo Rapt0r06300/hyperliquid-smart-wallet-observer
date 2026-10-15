@@ -19,9 +19,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
-    from tools.publish_dataset_v2_release import partition_manifest_entries
+    from tools.publish_dataset_v2_release import partition_manifest_entries, validate_v2_jsonl_frames
 except ModuleNotFoundError:
-    from publish_dataset_v2_release import partition_manifest_entries
+    from publish_dataset_v2_release import partition_manifest_entries, validate_v2_jsonl_frames
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 MAX_BYTES = 128 * 1024 * 1024
@@ -68,6 +68,20 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
     if not all(isinstance(m, dict) for m in manifests):
         raise ValueError("QUARANTINE_INVALID_MANIFEST")
     eligible, rejected = partition_manifest_entries(manifest_paths, manifests)
+    if index.get("schema") != "alina.dataset_bundle.v2":
+        raise ValueError("QUARANTINE_UNSUPPORTED_BUNDLE_SCHEMA")
+    # A temporary GitHub Actions artifact must never become a side-channel
+    # for bad payloads rejected by the current production publisher.
+    verified = []
+    for manifest_path, row in eligible:
+        if (
+            row.get("schema") == "alina.shard_manifest.v2"
+            and validate_v2_jsonl_frames(root, row)
+        ):
+            verified.append((manifest_path, row))
+        else:
+            rejected.append((manifest_path, row))
+    eligible = verified
     if not eligible:
         return {"status": "NO_LOCALLY_REPLAY_ADMISSIBLE_CANDIDATES", "excluded": len(rejected)}
 
