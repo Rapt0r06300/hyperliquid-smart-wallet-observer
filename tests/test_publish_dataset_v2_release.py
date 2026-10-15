@@ -75,8 +75,8 @@ def test_release_capacity_reserves_run_manifest_slot() -> None:
 def test_partition_publishable_manifests_requires_explicit_safe_replayable() -> None:
     module = _module()
     rows = [
-        _locally_valid_manifest("eligible", quality_status="SAFE"),
-        _locally_valid_manifest("safe-unproven", quality_status="SAFE", replay_compatible=False),
+        _locally_valid_manifest("eligible", quality_status="SAFE", quality_reasons=[]),
+        _locally_valid_manifest("safe-unproven", quality_status="SAFE", quality_reasons=[], replay_compatible=False),
         _locally_valid_manifest("partial", quality_reasons=["COST_MODEL_NOT_READY"]),
         _locally_valid_manifest("reject", quality_status="REJECT", replay_compatible=False),
         _locally_valid_manifest("unknown", quality_status="MYSTERY"),
@@ -90,6 +90,22 @@ def test_partition_publishable_manifests_requires_explicit_safe_replayable() -> 
     ]
     assert all(row["validation_allowed"] is False for row in diagnostic)
     assert all(row["replay_compatible"] is False for row in diagnostic)
+
+
+def test_safe_label_cannot_hide_unresolved_quality_reasons() -> None:
+    module = _module()
+    rows = [
+        _locally_valid_manifest(
+            "fake-safe", quality_status="SAFE", quality_reasons=["GAP"],
+        ),
+        _locally_valid_manifest(
+            "missing-reasons", quality_status="SAFE", quality_reasons=None,
+        ),
+    ]
+    eligible, rejected = module.partition_publishable_manifests(rows)
+    assert eligible == []
+    assert len(rejected) == 2
+    assert all(row["validation_allowed"] is False for row in rejected)
 
 
 def test_partition_allows_only_remote_verification_pending_candidate() -> None:
@@ -481,7 +497,7 @@ def test_real_v2_payload_filter_quarantines_bad_frames_without_blocking_safe_dat
 def test_real_v2_bundle_refuses_missing_shard_schema(tmp_path, monkeypatch) -> None:
     module = _module()
     bundle = _write_safe_only_test_bundle(tmp_path, [
-        {"dataset_id": "old-schema-less", "quality_status": "SAFE"},
+        {"dataset_id": "old-schema-less", "quality_status": "SAFE", "quality_reasons": []},
     ])
     index_path = bundle / "BUNDLE_INDEX.json"
     index = json.loads(index_path.read_text(encoding="utf-8"))
