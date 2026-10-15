@@ -600,7 +600,7 @@ def _file_identity(path: Path) -> dict[str, Any]:
     return {
         "release_asset": path.name,
         "bytes": path.stat().st_size,
-        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "sha256": _sha256_file(path),
     }
 
 
@@ -685,7 +685,7 @@ def _build_recovery_capsules(
             {
                 "name": path.name,
                 "bytes": path.stat().st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "sha256": _sha256_file(path),
             }
             for path in parts
         ],
