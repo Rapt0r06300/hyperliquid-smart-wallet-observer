@@ -138,9 +138,18 @@ def test_partition_preserves_manifest_path_binding_for_duplicate_identity(tmp_pa
 
 def test_final_publication_inventory_must_be_safe_and_replayable() -> None:
     module = _module()
-    module.assert_safe_final_manifests([
-        {"dataset_id": "safe", "quality_status": "SAFE", "replay_compatible": True}
-    ])
+    safe = {
+        "dataset_id": "safe",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "asset_verified": True,
+        "validation_allowed": True,
+    }
+    module.assert_safe_final_manifests([safe])
+
+    for required in ("asset_verified", "validation_allowed"):
+        with pytest.raises(module.PublishError, match="final manifest is not SAFE"):
+            module.assert_safe_final_manifests([{**safe, required: False}])
 
     with pytest.raises(module.PublishError, match="final manifest is not SAFE"):
         module.assert_safe_final_manifests([
@@ -318,6 +327,49 @@ def test_publish_mixed_bundle_filters_payload_and_capsule_inputs(tmp_path, monke
     ]
     assert result["shard_count"] == 1
     assert result["quality_register"]["row_count"] == 1
+
+
+@pytest.mark.parametrize("failure", ["changed_bytes", "missing_file", "wrong_manifest_sha", "duplicate_name"])
+def test_direct_publication_checks_every_local_asset_before_any_remote_write(
+    tmp_path, monkeypatch, failure,
+) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [
+        {"dataset_id": "safe-first"},
+        {"dataset_id": "tampered-last"},
+    ])
+    source = bundle / "assets" / "tampered-last.jsonl.gz"
+    manifest = bundle / "manifests" / "tampered-last.json"
+    if failure == "changed_bytes":
+        source.write_bytes(b"X" * source.stat().st_size)
+    elif failure == "missing_file":
+        source.unlink()
+    else:
+        row = json.loads(manifest.read_text(encoding="utf-8"))
+        if failure == "wrong_manifest_sha":
+            row["sha256"] = "0" * 64
+        else:
+            row["release_asset"] = "safe-first.jsonl.gz"
+        manifest.write_text(json.dumps(row), encoding="utf-8")
+
+    uploaded: list[Path] = []
+    releases: list[str] = []
+    _mock_release_io(module, monkeypatch, uploaded)
+    monkeypatch.setattr(
+        module, "ensure_release",
+        lambda **kw: releases.append(kw["tag"]) or {"id": 77, "assets": []},
+    )
+
+    with pytest.raises(module.PublishError, match="local shard identity mismatch|duplicate direct upload"):
+        module.publish_bundle(
+            bundle,
+            repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+            tag="data-v2-fail-closed-local-bytes",
+            target="main",
+            title="local preflight",
+        )
+    assert uploaded == []
+    assert releases == []
 
 
 def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
