@@ -55,6 +55,23 @@ def test_manifest_is_derived_from_real_partitioned_shard(tmp_path) -> None:
     assert manifest["integrity"]["missing_monotonic_count"] == 0
 
 
+def test_malformed_jsonl_frames_make_shard_non_replayable(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(_event(1000))
+    [shard] = writer.rotate_all()
+    # Appended gzip members are valid gzip, but invalid JSONL records
+    # must never silently disappear from the replay-admission audit.
+    with gzip.open(shard, "ab") as handle:
+        handle.write(b"\\nnull\\nnot-json\\n")
+
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["event_count"] == 1
+    assert manifest["integrity"]["invalid_record_count"] == 3
+    assert manifest["integrity"]["gap_count"] >= 3
+    assert manifest["replay_compatible"] is False
+    assert "INVALID_EVENT_RECORD" in manifest["replay_reason"]
+
+
 def test_mixed_shard_is_refused(tmp_path) -> None:
     from hl_observer.collection.tick_dataset import TickDatasetWriter
 
