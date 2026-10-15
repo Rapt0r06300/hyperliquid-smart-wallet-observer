@@ -104,6 +104,7 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             ("gap_count", "SEQUENCE_OR_QUEUE_GAP"),
             ("regression_count", "TIME_OR_SEQUENCE_REGRESSION"),
             ("desync_count", "DESYNC"),
+            ("invalid_record_count", "INVALID_EVENT_RECORD"),
         ):
             if int(integrity.get(key) or 0) > 0:
                 severe.append(reason)
@@ -202,7 +203,7 @@ def finalize_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     integrity = integrity if isinstance(integrity, Mapping) else {}
     invalid_replay = [
         name
-        for name in ("gap_count", "regression_count", "desync_count")
+        for name in ("gap_count", "regression_count", "desync_count", "invalid_record_count")
         if (_int(integrity.get(name)) or 0) > 0
     ]
     if (_int(result.get("collection_queue_drops")) or 0) > 0:
