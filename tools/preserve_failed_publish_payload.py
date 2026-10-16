@@ -19,9 +19,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
-    from tools.publish_dataset_v2_release import partition_manifest_entries, validate_v2_jsonl_frames
+    from tools.publish_dataset_v2_release import partition_and_repair_v2_entries, persist_requalified_receipts, validate_v2_jsonl_frames
 except ModuleNotFoundError:
-    from publish_dataset_v2_release import partition_manifest_entries, validate_v2_jsonl_frames
+    from publish_dataset_v2_release import partition_and_repair_v2_entries, persist_requalified_receipts, validate_v2_jsonl_frames
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 MAX_BYTES = 128 * 1024 * 1024
@@ -67,7 +67,9 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
     manifests = [json.loads(p.read_text(encoding="utf-8")) for p in manifest_paths]
     if not all(isinstance(m, dict) for m in manifests):
         raise ValueError("QUARANTINE_INVALID_MANIFEST")
-    eligible, rejected = partition_manifest_entries(manifest_paths, manifests)
+    eligible, rejected, recovered_paths = partition_and_repair_v2_entries(
+        index, manifest_paths, manifests
+    )
     if index.get("schema") != "alina.dataset_bundle.v2":
         raise ValueError("QUARANTINE_UNSUPPORTED_BUNDLE_SCHEMA")
     # A temporary GitHub Actions artifact must never become a side-channel
@@ -84,6 +86,10 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
     eligible = verified
     if not eligible:
         return {"status": "NO_LOCALLY_REPLAY_ADMISSIBLE_CANDIDATES", "excluded": len(rejected)}
+
+    # The quarantine must contain exactly the same independently verified
+    # requalified receipts as the primary publisher, never stale labels.
+    persist_requalified_receipts(eligible, recovered_paths)
 
     originals: list[tuple[Path, str]] = []
     assets_seen: dict[str, tuple[int, str]] = {}

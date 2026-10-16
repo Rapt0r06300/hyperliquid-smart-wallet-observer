@@ -163,6 +163,17 @@ jobs:
           }, indent=2))
           PY
 
+      # Collection remains pinned for reproducibility; only the publication
+      # control plane is refreshed after the entire collection has finished.
+      - name: Checkout latest validation publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: current-publisher
+          persist-credentials: false
+          fetch-depth: 1
+
       - name: Publish and remotely verify immutable V2 release
         shell: bash
         env:
@@ -170,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.collector }}"
-          python alina/tools/publish_dataset_v2_release.py             "$BUNDLE"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina dataset V2 ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT} ${{ matrix.collector }}"
+          PYTHONPATH=current-publisher/src python current-publisher/tools/publish_dataset_v2_release.py             "$BUNDLE"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina dataset V2 ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT} ${{ matrix.collector }}"
 
       - name: Fail closed if collector itself failed
         if: always()

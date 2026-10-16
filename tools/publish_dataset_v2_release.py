@@ -142,6 +142,76 @@ def partition_manifest_entries(
     return sorted(eligible, key=key), sorted(diagnostic, key=key)
 
 
+
+# Only stale, independently re-provable metadata reasons can be reconsidered.
+# Gaps, sequence loss, checksum failure and unknown reasons remain fail-closed.
+REPAIRABLE_PARTIAL_REASONS = frozenset({
+    "REMOTE_ASSET_NOT_VERIFIED",
+    "RECONCILIATION_NOT_VERIFIED",
+    "RECONCILIATION_MATCH_REQUIRED",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "COST_MODEL_NOT_READY",
+    "REQUIRED_CHANNEL_MISSING",
+})
+
+
+def partition_and_repair_v2_entries(
+    index: Mapping[str, Any],
+    manifest_paths: list[Path],
+    manifests: list[Mapping[str, Any]],
+) -> tuple[list[tuple[Path, dict[str, Any]]], list[tuple[Path, dict[str, Any]]], set[Path]]:
+    """Requalify only stale PARTIAL receipts after current deterministic checks.
+
+    No raw market bytes are repaired or fabricated. REJECT is terminal. A
+    requalified candidate must still pass the full independent source-frame
+    preflight and local SHA checks before it can reach any GitHub upload.
+    """
+    eligible, rejected = partition_manifest_entries(manifest_paths, manifests)
+    recovered: set[Path] = set()
+    if index.get("schema") != "alina.dataset_bundle.v2":
+        return eligible, rejected, recovered
+    already = {path for path, _ in eligible}
+    for path, original in zip(manifest_paths, manifests, strict=True):
+        raw_reasons = original.get("quality_reasons")
+        if (
+            original.get("schema") != "alina.shard_manifest.v2"
+            or original.get("quality_status") != "PARTIAL"
+            or not isinstance(raw_reasons, list)
+            or not raw_reasons
+            or any(
+                not isinstance(reason, str)
+                or reason not in REPAIRABLE_PARTIAL_REASONS
+                for reason in raw_reasons
+            )
+            or path in already
+        ):
+            continue
+        refreshed = finalize_manifest({**original, "asset_verified": False})
+        if (
+            refreshed.get("quality_status") == "PARTIAL"
+            and refreshed.get("quality_reasons") == ["REMOTE_ASSET_NOT_VERIFIED"]
+            and locally_replay_admissible(refreshed)
+        ):
+            eligible.append((path, refreshed))
+            recovered.add(path)
+    if recovered:
+        rejected = [(path, row) for path, row in rejected if path not in recovered]
+        eligible.sort(key=lambda item: (
+            str(item[1].get("dataset_id") or ""), str(item[0])
+        ))
+    return eligible, rejected, recovered
+
+
+def persist_requalified_receipts(
+    verified_entries: list[tuple[Path, dict[str, Any]]],
+    recovered_paths: set[Path],
+) -> None:
+    """Bind the pre-publication archive to freshly requalified V2 receipts."""
+    for path, row in verified_entries:
+        if path in recovered_paths:
+            write_manifest(row, path)
+
+
 def assert_safe_final_manifests(manifests: list[Mapping[str, Any]]) -> None:
     """Enforce the canonical consumer boundary after remote verification."""
     for row in manifests:
@@ -908,41 +978,9 @@ def publish_bundle(
             raise PublishError(f"Invalid manifest: {path}")
         manifests.append(payload)
 
-    eligible_entries, rejected_entries = partition_manifest_entries(
-        manifest_paths, manifests
+    eligible_entries, rejected_entries, recovered_paths = partition_and_repair_v2_entries(
+        index, manifest_paths, manifests
     )
-    # An old collector may leave a PARTIAL status after its evidence became
-    # complete. Repair only that stale classification, never the market bytes:
-    # freshly re-grade the original V2 metadata, then independently re-parse
-    # and re-grade the raw frames below before a single remote API write.
-    # REJECT is terminal; a genuinely incomplete PARTIAL is never promoted.
-    if index.get("schema") == "alina.dataset_bundle.v2":
-        recovered_paths: set[Path] = set()
-        for source_path, original in zip(manifest_paths, manifests, strict=True):
-            if (
-                original.get("schema") != "alina.shard_manifest.v2"
-                or original.get("quality_status") != "PARTIAL"
-                or not isinstance(original.get("quality_reasons"), list)
-                or not original["quality_reasons"]
-                or source_path in {path for path, _ in eligible_entries}
-            ):
-                continue
-            refreshed = finalize_manifest({**original, "asset_verified": False})
-            if (
-                refreshed.get("quality_status") == "PARTIAL"
-                and refreshed.get("quality_reasons") == ["REMOTE_ASSET_NOT_VERIFIED"]
-                and locally_replay_admissible(refreshed)
-            ):
-                eligible_entries.append((source_path, refreshed))
-                recovered_paths.add(source_path)
-        if recovered_paths:
-            rejected_entries = [
-                (path, row) for path, row in rejected_entries
-                if path not in recovered_paths
-            ]
-            eligible_entries.sort(key=lambda entry: (
-                str(entry[1].get("dataset_id") or ""), str(entry[0])
-            ))
     # An immutable SHA is necessary but cannot prove that the gzip JSONL
     # content is complete. Recheck every real V2 payload independently of the
     # campaign-pinned exporter and quarantine any failing shard individually.
@@ -964,6 +1002,9 @@ def publish_bundle(
             bad["replay_compatible"] = False
             rejected_entries.append((source_path, bad))
     eligible_entries = checked_entries
+    # Repair receipts only after source-frame and replay preflight passes.
+    # The recovery TAR must never carry the stale PARTIAL metadata.
+    persist_requalified_receipts(eligible_entries, recovered_paths)
     eligible_manifest_paths = [path for path, _row in eligible_entries]
     eligible_manifests = [row for _path, row in eligible_entries]
     rejected_manifests = [row for _path, row in rejected_entries]

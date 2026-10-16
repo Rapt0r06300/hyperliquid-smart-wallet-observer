@@ -1353,3 +1353,14 @@ def test_partial_repair_refuses_raw_preflight_failure_before_any_upload(tmp_path
     assert result["status"] == "NO_REPLAY_ADMISSIBLE_SHARDS"
     assert result["excluded_payload_count"] == 1
     assert published == []
+
+
+def test_all_collection_publication_workflows_refresh_current_policy() -> None:
+    worker = (ROOT / ".github/workflows/resumable-campaign-worker.yml").read_text(encoding="utf-8")
+    legacy = (ROOT / ".github/workflows/collect-and-publish-v2.yml").read_text(encoding="utf-8")
+    assert "path: current-publisher" in worker
+    assert "current-publisher/tools/publish_dataset_v2_release.py" in worker
+    assert "current-publisher/tools/preserve_failed_publish_payload.py" in worker
+    assert "path: current-publisher" in legacy
+    assert "current-publisher/tools/publish_dataset_v2_release.py" in legacy
+    assert "python alina/tools/publish_dataset_v2_release.py" not in legacy

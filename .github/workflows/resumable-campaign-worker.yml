@@ -340,6 +340,18 @@ jobs:
           open(path,"w",encoding="utf-8").write(json.dumps(row,sort_keys=True)+"\n")
           PY
 
+      # The multi-hour collector runs pinned source; validation and GitHub
+      # publication always use the newest control-plane policy from main.
+      - name: Checkout current publication control plane
+        if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: current-publisher
+          persist-credentials: false
+          fetch-depth: 1
+
       - id: durable
         name: Persist collection data or analysis evidence
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
@@ -377,7 +389,7 @@ jobs:
                 # durable publication is control-plane infrastructure and must
                 # use the current main publisher so retry-safety fixes apply to
                 # old campaigns without rewriting their collection semantics.
-                PUBLISH_OUTPUT="$(PYTHONPATH=src python tools/publish_dataset_v2_release.py \
+                PUBLISH_OUTPUT="$(PYTHONPATH=current-publisher/src python current-publisher/tools/publish_dataset_v2_release.py \
                   "$BUNDLE" \
                   --repository "$GITHUB_REPOSITORY" \
                   --tag "$TAG" \
@@ -569,7 +581,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REPORT="$(PYTHONPATH=src python tools/preserve_failed_publish_payload.py \
+          REPORT="$(PYTHONPATH=current-publisher/src python current-publisher/tools/preserve_failed_publish_payload.py \
             --result "$RUNNER_TEMP/result.json" \
             --output "$RUNNER_TEMP/alina-failed-publish-quarantine.tgz" \
             --max-bytes 134217728)"

@@ -166,3 +166,34 @@ def test_failed_publish_fallback_rejects_missing_source_proof(tmp_path):
     assert report["status"] == "NO_LOCALLY_REPLAY_ADMISSIBLE_CANDIDATES"
     assert report["excluded"] == 2
     assert not (tmp_path / "unproven.tgz").exists()
+
+
+def test_failed_publish_fallback_regrades_repairable_partial_only(tmp_path):
+    root, result = make_bundle(tmp_path)
+    partial = root / "manifests" / "safe.json"
+    record = json.loads(partial.read_text(encoding="utf-8"))
+    record["quality_reasons"] = ["RECONCILIATION_NOT_VERIFIED"]
+    partial.write_text(json.dumps(record), encoding="utf-8")
+    output = tmp_path / "requalified.tgz"
+    report = module.preserve(result, output)
+    assert report["status"] == "QUARANTINE_ARCHIVED"
+    assert report["candidate_shards"] == 1
+    assert report["excluded"] == 1
+    with tarfile.open(output, "r:gz") as archive:
+        assert "assets/bad.jsonl.gz" not in archive.getnames()
+        manifest = json.load(archive.extractfile("manifests/safe.json"))
+        assert manifest["quality_reasons"] == ["REMOTE_ASSET_NOT_VERIFIED"]
+        assert manifest["replay_compatible"] is True
+
+
+def test_failed_publish_fallback_refuses_unproven_partial(tmp_path):
+    root, result = make_bundle(tmp_path)
+    partial = root / "manifests" / "safe.json"
+    record = json.loads(partial.read_text(encoding="utf-8"))
+    record["quality_reasons"] = ["UNKNOWN_REASON"]
+    partial.write_text(json.dumps(record), encoding="utf-8")
+    output = tmp_path / "not-approved.tgz"
+    report = module.preserve(result, output)
+    assert report["status"] == "NO_LOCALLY_REPLAY_ADMISSIBLE_CANDIDATES"
+    assert report["excluded"] == 2
+    assert not output.exists()
