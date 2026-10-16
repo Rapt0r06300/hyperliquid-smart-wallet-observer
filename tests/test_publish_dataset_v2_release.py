@@ -1356,6 +1356,10 @@ def test_partial_repair_refuses_raw_preflight_failure_before_any_upload(tmp_path
 
 
 def test_all_collection_publication_workflows_refresh_current_policy() -> None:
+    # The recovery-contract workflow intentionally sparse-checks out only
+    # tools/tests/src; code tests must not require workflows absent there.
+    if not (ROOT / ".github/workflows/resumable-campaign-worker.yml").is_file():
+        pytest.skip("workflow files unavailable in sparse recovery checkout")
     worker = (ROOT / ".github/workflows/resumable-campaign-worker.yml").read_text(encoding="utf-8")
     legacy = (ROOT / ".github/workflows/collect-and-publish-v2.yml").read_text(encoding="utf-8")
     smoke = (ROOT / ".github/workflows/dataset-v2-smoke.yml").read_text(encoding="utf-8")
