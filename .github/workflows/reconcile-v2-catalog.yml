@@ -26,9 +26,12 @@ permissions:
 # A high-frequency metrics/identity writer must not replace a queued
 # historical reconciler. Reconciliation rebuilds every candidate publication
 # from the latest main and retries conflicting pushes, so keep its own lane.
+# Code fixes on main supersede an older reconciler; scheduled/manual
+# reconciliations never interrupt an active run. Collector jobs have their
+# own independent concurrency groups and are never cancelled by this key.
 concurrency:
   group: dataset-v2-catalog-reconcile
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   reconcile:
@@ -255,9 +258,9 @@ jobs:
           else:
               # The index is partitioned: its small root size no longer
               # predicts the size of a newly imported manifest wave.
-              # Four Releases bound commit size and reduce races with active
-              # collector checkpoints without discarding backlog entries.
-              batch_size = 4
+              # A two-Release wave bounds reindex CPU/memory and lowers
+              # conflicting publication cost. The backlog resumes after push.
+              batch_size = 2
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
@@ -265,6 +268,15 @@ jobs:
               env.write(f"NEW_RELEASE_TAGS={len(batch)}\n")
               env.write(f"REMAINING_NEW_TAGS={remaining}\n")
           print(f"new_release_tags_total={len(new_tags)} batch={len(batch)} remaining={remaining}")
+          # GitHub job summary remains readable without job-log download links.
+          # This step finishes before the potentially expensive index publish.
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(
+                  f"### Reconciliation batch\n"
+                  f"- New immutable production Releases: {len(new_tags)}\n"
+                  f"- Selected for this bounded wave: {len(batch)}\n"
+                  f"- Deferred for later waves: {remaining}\n"
+              )
           PY
           if [ ! -s "$TAGS" ]; then
             echo "RUN_MANIFEST_COUNT=0" >> "$GITHUB_ENV"
@@ -353,14 +365,25 @@ jobs:
           published=false
           for attempt in 1 2 3 4 5; do
             git fetch origin main
-            git reset --hard origin/main
-            python tools/index_run_manifest.py "${MANIFESTS[@]}"
-            python tools/build_catalog_metrics.py
-            python tools/build_quarantine_audit.py
-            python tools/check_dataset_quality.py
+            REMOTE_SHA="$(git rev-parse origin/main)"
+            # Earlier steps already rebuilt and validated this exact working
+            # tree. Skip a costly duplicate reindex when main is unchanged.
+            # Any change to main forces a fresh, fail-closed rebuild instead
+            # of rebasing stale generated catalog data.
+            if [ "$attempt" -eq 1 ] && [ "$(git rev-parse HEAD)" = "$REMOTE_SHA" ]; then
+              echo "RECONCILE_REUSE_VALIDATED_HEAD=$REMOTE_SHA"
+            else
+              echo "RECONCILE_REBUILD_HEAD=$REMOTE_SHA attempt=$attempt"
+              git reset --hard "$REMOTE_SHA"
+              python tools/index_run_manifest.py "${MANIFESTS[@]}"
+              python tools/build_catalog_metrics.py
+              python tools/build_quarantine_audit.py
+              python tools/check_dataset_quality.py
+            fi
             git add catalog datasets
             if git diff --cached --quiet; then
               echo "Catalog already durably reconciled at $(git rev-parse HEAD)."
+              echo "### Reconciliation publication\n- Result: no changes required\n- Verified HEAD: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
               published=true
               break
             fi
@@ -369,6 +392,7 @@ jobs:
             git -c core.quotePath=false commit -q -m "data: reconcile V2 catalog from canonical releases"
             if git push origin HEAD:main; then
               echo "Durable reconciliation pushed: $(git rev-parse HEAD)"
+              echo "### Reconciliation publication\n- Result: SHA-bound catalog published\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
               published=true
               break
             fi
@@ -379,6 +403,7 @@ jobs:
               fi
               if git push origin HEAD:main; then
                 echo "Durable reconciliation published after safe campaign-only rebase."
+                echo "### Reconciliation publication\n- Result: safely rebased campaign checkpoints\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
                 published=true
                 break
               fi
