@@ -48,10 +48,21 @@ jobs:
           SOURCE_SHA="$(git -C alina rev-parse HEAD)"
           python alina/tools/collect_cloud_window.py             --output "$RUNNER_TEMP/dataset-v2-smoke"             --coins "BTC,ETH"             --duration-s 120             --collector-version "$SOURCE_SHA"             --rotate-mb 32
 
+      # The collector stays source-pinned, but a smoke payload must pass the
+      # exact same current-main gate as every scheduled dataset publication.
+      - name: Checkout latest publication validation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: current-publisher
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Publish verified smoke release
         env:
-          PYTHONPATH: alina/src:alina
+          PYTHONPATH: current-publisher/src
         run: |
           set -euo pipefail
           TAG="smoke-v2-${GITHUB_RUN_ID}"
-          python alina/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/dataset-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Dataset V2 smoke ${GITHUB_RUN_ID}"
+          python current-publisher/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/dataset-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Dataset V2 smoke ${GITHUB_RUN_ID}"
