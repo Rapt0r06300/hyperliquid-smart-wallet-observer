@@ -911,6 +911,38 @@ def publish_bundle(
     eligible_entries, rejected_entries = partition_manifest_entries(
         manifest_paths, manifests
     )
+    # An old collector may leave a PARTIAL status after its evidence became
+    # complete. Repair only that stale classification, never the market bytes:
+    # freshly re-grade the original V2 metadata, then independently re-parse
+    # and re-grade the raw frames below before a single remote API write.
+    # REJECT is terminal; a genuinely incomplete PARTIAL is never promoted.
+    if index.get("schema") == "alina.dataset_bundle.v2":
+        recovered_paths: set[Path] = set()
+        for source_path, original in zip(manifest_paths, manifests, strict=True):
+            if (
+                original.get("schema") != "alina.shard_manifest.v2"
+                or original.get("quality_status") != "PARTIAL"
+                or not isinstance(original.get("quality_reasons"), list)
+                or not original["quality_reasons"]
+                or source_path in {path for path, _ in eligible_entries}
+            ):
+                continue
+            refreshed = finalize_manifest({**original, "asset_verified": False})
+            if (
+                refreshed.get("quality_status") == "PARTIAL"
+                and refreshed.get("quality_reasons") == ["REMOTE_ASSET_NOT_VERIFIED"]
+                and locally_replay_admissible(refreshed)
+            ):
+                eligible_entries.append((source_path, refreshed))
+                recovered_paths.add(source_path)
+        if recovered_paths:
+            rejected_entries = [
+                (path, row) for path, row in rejected_entries
+                if path not in recovered_paths
+            ]
+            eligible_entries.sort(key=lambda entry: (
+                str(entry[1].get("dataset_id") or ""), str(entry[0])
+            ))
     # An immutable SHA is necessary but cannot prove that the gzip JSONL
     # content is complete. Recheck every real V2 payload independently of the
     # campaign-pinned exporter and quarantine any failing shard individually.

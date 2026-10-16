@@ -1271,3 +1271,85 @@ def test_recovery_capsule_persists_exact_bundle_before_canonical_upload(tmp_path
     assert "BUNDLE_INDEX.json" in names
     assert "manifests/dataset-recovery.json" in names
     assert "assets/trades.jsonl.gz" in names
+
+
+def test_repair_stale_v2_partial_only_after_full_raw_preflight(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [
+        {
+            "dataset_id": "repaired",
+            "schema": "alina.shard_manifest.v2",
+            "quality_status": "PARTIAL",
+            "quality_reasons": ["STALE_LEGACY_REASON"],
+        },
+        {
+            "dataset_id": "rejected",
+            "schema": "alina.shard_manifest.v2",
+            "quality_status": "REJECT",
+            "quality_reasons": ["SEQUENCE_OR_QUEUE_GAP"],
+        },
+        {
+            "dataset_id": "broken-partial",
+            "schema": "alina.shard_manifest.v2",
+            "quality_status": "PARTIAL",
+            "quality_reasons": ["SEQUENCE_OR_QUEUE_GAP"],
+            "integrity": {**_locally_valid_manifest("x")["integrity"], "gap_count": 1},
+        },
+    ])
+    index_path = bundle / "BUNDLE_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["schema"] = "alina.dataset_bundle.v2"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    checked = []
+    monkeypatch.setattr(
+        module, "validate_v2_jsonl_frames",
+        lambda root, manifest: checked.append(manifest["dataset_id"]) or True,
+    )
+    monkeypatch.setattr(module, "publish_recovery_capsule", lambda *_args, **_kwargs: None)
+    uploaded = []
+    _mock_release_io(module, monkeypatch, uploaded)
+
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-strict-repair",
+        target="main",
+        title="repair only independently valid partial",
+    )
+
+    assert checked == ["repaired"]
+    assert [path.name for path in uploaded] == [
+        "repaired.jsonl.gz", "QUALITY_REJECTIONS.json.gz", "RUN_MANIFEST.json",
+    ]
+    assert result["shard_count"] == 1
+    assert result["manifests"][0]["quality_status"] == "SAFE"
+    assert result["quality_register"]["row_count"] == 2
+
+
+def test_partial_repair_refuses_raw_preflight_failure_before_any_upload(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [{
+        "dataset_id": "stale-but-corrupt",
+        "schema": "alina.shard_manifest.v2",
+        "quality_status": "PARTIAL",
+        "quality_reasons": ["STALE_LEGACY_REASON"],
+    }])
+    index_path = bundle / "BUNDLE_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["schema"] = "alina.dataset_bundle.v2"
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    monkeypatch.setattr(module, "validate_v2_jsonl_frames", lambda *_args: False)
+    published = []
+    monkeypatch.setattr(module, "ensure_release", lambda **kwargs: published.append(kwargs))
+    monkeypatch.setattr(module, "upload_file", lambda **kwargs: published.append(kwargs))
+
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-no-corrupt",
+        target="main",
+        title="corrupt partial",
+    )
+    assert result["status"] == "NO_REPLAY_ADMISSIBLE_SHARDS"
+    assert result["excluded_payload_count"] == 1
+    assert published == []
