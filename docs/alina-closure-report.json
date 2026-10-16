@@ -2285,7 +2285,7 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "917e0273eda923042901b382f7a975697c3a7844",
   "copy_vault_coverage_receipt": {
-    "digest": "1bbee0e822574ee228977908172a12ac9754e0da324b1f1bb7abab30de3c56a7",
+    "digest": "59af53b0a8b6b678ad22d522a824d349ab4f52df18ca039e2b863a2f19ea6171",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
@@ -2326,7 +2326,7 @@
     "raw_trade_count": 29498958,
     "rejected_shard_count": 67410,
     "replay_compatible_shard_count": 441169,
-    "replay_unclassified_candidate_count": 444,
+    "replay_unclassified_candidate_count": 390,
     "safe_shard_count": 441169,
     "status": "NOT_ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
@@ -2338,9 +2338,9 @@
     "valid_record_count": 227781935,
     "valid_record_ratio": 0.47038991
   },
-  "dataset_health_digest": "cfa179faf2a607a2a7d6ea5f5a473e0a701f2740443598181a7776c192d46933",
+  "dataset_health_digest": "472cab186922289fb05ec003743b4cc80dd721ab80cd8a7728130666e7fafd25",
   "dataset_selection_id": null,
-  "dataset_v2_head": "5d1df5ccc2dbcfe0263b57c43c32aaf85aa54781",
+  "dataset_v2_head": "e23cdcf28b209535d88829b9de0f4b6eb922e57b",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "5320828cd21fc8db75aeee138f8f22602b3d7417f35ba8726e62ac9eec17c541",
@@ -2373,7 +2373,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-16T21:51:40.122655Z",
+  "generated_at_utc": "2026-10-16T22:09:28.584332Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -2400,7 +2400,7 @@
     },
     {
       "id": "BLOCKER-04",
-      "reason": "SAFE to replay-compatible migration has 444 unclassified candidates",
+      "reason": "SAFE to replay-compatible migration has 390 unclassified candidates",
       "status": "UNRESOLVED"
     },
     {
@@ -2410,7 +2410,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "5d1df5ccc2dbcfe0263b57c43c32aaf85aa54781",
+  "main_alina_head": "e23cdcf28b209535d88829b9de0f4b6eb922e57b",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -2445,17 +2445,17 @@
   "raw_record_count": 484240686,
   "raw_trade_count": 29498958,
   "real_execution_reachable": false,
-  "receipt_digest": "11c4e0b851c28c2253b0033f0f72f76e6c21263dd8b0dce99a6eec3c29b16a48",
+  "receipt_digest": "392f6847cd29c74644f92dbfc38e28dbe80ae1c05c75afccfe8f4bcd73d3e4fc",
   "rejected_count": 67410,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
     "global unique trade count coverage is incomplete",
-    "SAFE to replay-compatible migration has 444 unclassified candidates",
+    "SAFE to replay-compatible migration has 390 unclassified candidates",
     "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 441169,
-  "replay_remaining_candidates": 444,
+  "replay_remaining_candidates": 390,
   "safe_count": 441169,
   "schema_version": "alina.final_closure_receipt.v1",
   "scoreboard_artifact": null,
