@@ -13506,6 +13506,27 @@ point-in-time inventory preflight accounts for every required SAFE byte.
 
 ### Source-publication contract
 
+All collection publication paths (scheduled resumable campaigns and manual
+Dataset V2 fallback alike) MUST load the current `main` control-plane
+publisher and validation dependencies **after** the pinned collection window
+has finished and **before** any GitHub Release write. Collection stays pinned
+for deterministic provenance; an older collector SHA is never permitted to
+bypass a newly tightened publication policy. The cloud-only failed-publication
+quarantine MUST reuse the same admissibility function and raw-frame checks.
+An already-started workflow using an older workflow snapshot cannot be
+retroactively certified by editing `main`: a live-run receipt and immutable
+remote identities are required before declaring that historical run clean.
+
+`REJECT` is terminal for automatic payload admission. An unresolved
+`PARTIAL` is excluded; only a stale metadata reason in the publisher's
+explicit repairable-reason allowlist may be requalified, and only when the
+current policy plus full independent raw JSONL, L2/trade continuity, local
+size and SHA-256 checks prove replay-grade admission. The refreshed receipt
+must be persisted before packaging a recovery capsule or failure artifact.
+Never infer, interpolate, zero-impute or otherwise fabricate missing market
+events to create `SAFE`. For non-admissible shards, only bounded,
+non-consumable, payload-free diagnostic identities may remain on GitHub.
+
 Collection and qualification continue on the ephemeral GitHub-hosted runner,
 but the publisher MUST partition the resulting manifests before any Release
 payload is uploaded:
