@@ -194,7 +194,7 @@ jobs:
           python tools/download_release_manifests.py \
             --repository "$GITHUB_REPOSITORY" \
             --list-tags-output "$ALL_TAGS" \
-            --list-page-size 50 \
+            --list-page-size 100 \
             --reconcile-index catalog/DATA_INDEX.json
           python - <<'PY' "$ALL_TAGS" "$TAGS"
           import json, os, re, sys
@@ -258,10 +258,12 @@ jobs:
           # remote index-pack failure after a fully successful rebuild. The
           # relay/checkpoint resumes the remaining backlog after each durable
           # publication, so this bound trades latency for reliable atomicity.
-          batch_size = 1
+          # Download candidates once, then enforce shard/byte budgets before indexing.
+          batch_size = 32
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
+          out_path.with_suffix(".count").write_text(str(len(new_tags)), encoding="utf-8")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
               env.write(f"NEW_RELEASE_TAGS={len(batch)}\n")
               env.write(f"REMAINING_NEW_TAGS={remaining}\n")
@@ -282,9 +284,15 @@ jobs:
             exit 0
           fi
           python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 2
+          python tools/select_reconciliation_batch.py \
+            --root "$ROOT" \
+            --tags-file "$TAGS" \
+            --total-file "${TAGS%.*}.count" \
+            --github-env "$GITHUB_ENV" \
+            --max-shards 50000 \
+            --max-manifest-bytes 83886080
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
-          echo "RUN_MANIFEST_COUNT=$COUNT" >> "$GITHUB_ENV"
-          echo "canonical run manifests found: $COUNT"
+          echo "canonical run manifests selected: $COUNT"
 
       - name: Prove deterministic complete partitioning before import
         if: env.RUN_MANIFEST_COUNT != '0'
@@ -342,7 +350,7 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q             tests/test_partitioned_data_index.py             tests/test_restore_alina.py             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
+          python -m pytest -q             tests/test_partitioned_data_index.py             tests/test_restore_alina.py             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_reconciliation_fast_batch.py             tests/test_collection_metrics.py
           # Tests must never become publication inputs. Rebuild every derived
           # control-plane receipt after the suite, then prove that metrics are
           # bound to the exact partitioned index bytes and complete shard set.
@@ -372,7 +380,7 @@ jobs:
           )
           [ "${#MANIFESTS[@]}" -gt 0 ] || { echo "No Release manifests for commit"; exit 1; }
           published=false
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8; do
             git fetch origin main
             REMOTE_SHA="$(git rev-parse origin/main)"
             # Earlier steps already rebuilt and validated this exact working
@@ -384,6 +392,10 @@ jobs:
             else
               echo "RECONCILE_REBUILD_HEAD=$REMOTE_SHA attempt=$attempt"
               git reset --hard "$REMOTE_SHA"
+              # Failed oversized pushes can leave untracked staged receipts.
+              # Cleaning only generated paths in this disposable checkout prevents
+              # discarded manifest proofs from leaking into a smaller retry.
+              git clean -fd -- catalog/data-index-parts datasets/sharded >/dev/null
               python tools/index_run_manifest.py "${MANIFESTS[@]}"
               python tools/build_catalog_metrics.py
               python tools/build_quarantine_audit.py
@@ -399,25 +411,43 @@ jobs:
             # A full new Release can add thousands of manifest receipts.
             # Suppress per-file commit output (previously tens of MiB of logs).
             git -c core.quotePath=false commit -q -m "data: reconcile V2 catalog from canonical releases"
-            if git push --no-thin origin HEAD:main; then
+            if git push --no-thin origin HEAD:main 2>&1 | tee "$RUNNER_TEMP/alina-reconcile-push.log"; then
               echo "Durable reconciliation pushed: $(git rev-parse HEAD)"
               echo "### Reconciliation publication\n- Result: SHA-bound catalog published\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
               published=true
               break
             fi
-            for race in 1 2 3 4 5; do
-              git fetch origin main
-              if ! python tools/rebase_disjoint_catalog_publication.py --remote origin/main; then
-                break
-              fi
-              if git push --no-thin origin HEAD:main; then
-                echo "Durable reconciliation published after safe campaign-only rebase."
-                echo "### Reconciliation publication\n- Result: safely rebased campaign checkpoints\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
-                published=true
-                break
-              fi
-            done
+            PACK_FAILURE=false
+            if grep -Eiq 'remote unpack failed|index-pack failed|tree.*too large|pack exceeds|pack.*too large|unpacker error' "$RUNNER_TEMP/alina-reconcile-push.log"; then
+              PACK_FAILURE=true
+            fi
+            if [ "$PACK_FAILURE" != true ]; then
+              for race in 1 2 3 4 5; do
+                git fetch origin main
+                if ! python tools/rebase_disjoint_catalog_publication.py --remote origin/main; then
+                  break
+                fi
+                if git push --no-thin origin HEAD:main; then
+                  echo "Durable reconciliation published after safe campaign-only rebase."
+                  echo "### Reconciliation publication\n- Result: safely rebased campaign checkpoints\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+                  published=true
+                  break
+                fi
+              done
+            fi
             [ "$published" = true ] && break
+            if [ "$PACK_FAILURE" = true ]; then
+              old_count="${#MANIFESTS[@]}"
+              if [ "$old_count" -le 1 ]; then
+                echo "::error::Single Release Git pack rejected; no unverifiable publication permitted"
+                exit 1
+              fi
+              retained=$(( (old_count + 1) / 2 ))
+              MANIFESTS=( "${MANIFESTS[@]:0:retained}" )
+              REMAINING_NEW_TAGS=$(( REMAINING_NEW_TAGS + old_count - retained ))
+              echo "REMAINING_NEW_TAGS=$REMAINING_NEW_TAGS" >> "$GITHUB_ENV"
+              echo "::warning::Git rejected pack; retrying verified prefix with $retained/$old_count Releases"
+            fi
             echo "Concurrent update detected; rebuilding from immutable manifests (attempt $attempt)."
             sleep $((attempt * 3))
           done

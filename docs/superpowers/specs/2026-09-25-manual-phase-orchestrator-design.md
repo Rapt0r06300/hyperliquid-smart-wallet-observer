@@ -13771,3 +13771,30 @@ sur le SHA exact ; publication réelle d'un lot historique ; absence de nouvel
 La réussite du commit du correctif n'est pas la preuve de la réconciliation.
 Aucune interruption des collecteurs, aucun runner local ou self-hosted et
 aucun ordre réel.
+
+
+### 2026-10-17 — Réconciliation rapide par lots bornés
+
+Pour réduire la latence du backlog historique sans PC, le reconciler
+énumère les Releases sur GitHub-hosted (pages de 100 avec repli contrôlé)
+et précharge au plus 32 candidats par vague. Avant tout import, un planificateur
+déterministe sélectionne un préfixe de manifests immuables dans les limites
+de 50 000 shards et 80 MiB de JSON de run-manifests. Chaque manifest doit
+être présent, conforme à son schéma et issu du dépôt canonique ; une anomalie
+bloque la vague. Aucun Release n'est sauté : tout candidat non retenu reste
+dans le backlog et doit être retrouvé à la prochaine énumération complète.
+
+Le catalogue résultant conserve les exigences SHA-bound, les classes de qualité
+SAFE/PARTIAL/REJECT, les validations et l'admission uniquement SAFE.
+La publication Git se fait exclusivement sur main, par push non forcé. Si
+GitHub refuse le pack ou l'objet tree, la vague réduit automatiquement son
+préfixe de moitié, reconstruit à partir du dernier HEAD et invalide les
+manifests non retenus avant le nouvel index. La taille restante est relayée
+pour les prochaines vagues. Un unique Release trop volumineux doit échouer
+fermement et faire l'objet d'une correction distincte ; aucune preuve n'est
+silencieusement écartée. Les collecteurs restent indépendants et actifs.
+
+Le succès de la modification du workflow ou d'une vague ne certifie pas
+l'épuisement du backlog. Mesurer le débit et les taux d'échec réels sur
+GitHub Actions après activation avant d'annoncer un délai de clôture.
+Aucun ordre réel, aucun self-hosted runner, aucune dépendance au PC.
