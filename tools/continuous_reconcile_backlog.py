@@ -164,14 +164,20 @@ def select_with_bounded_oversized_retry(
 
 
 def next_shard_budget(current: int, requested: int, published: int) -> int:
-    """Increase only after proven full publications; decrease on a pack retry."""
-    if not 5000 <= current <= 60000 or requested < 1 or not 1 <= published <= requested:
+    """Retire temporary oversized staging allowance after proven publication.
+
+    An individually oversized Release may temporarily require 80k or 100k
+    shards. Such a one-off must not crash the next adaptive wave, nor let the
+    normal steady-state budget exceed 60k.
+    """
+    if not 5000 <= current <= 100000 or requested < 1 or not 1 <= published <= requested:
         raise ValueError("invalid adaptive wave progress")
+    steady = min(current, 60000)
     if published < requested:
-        return max(5000, current // 2)
+        return max(5000, steady // 2)
     if published >= 2:
-        return min(60000, current + max(5000, current // 3))
-    return current
+        return min(60000, steady + max(5000, steady // 3))
+    return steady
 
 
 def load_current_quarantine() -> set[str]:

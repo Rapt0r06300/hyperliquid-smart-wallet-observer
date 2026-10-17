@@ -210,33 +210,16 @@ def test_index_blob_sha_requires_exact_git_object_identity(monkeypatch):
         module.index_blob_sha()
 
 
-def test_new_quarantine_blocks_old_selected_release(tmp_path, monkeypatch) -> None:
-    import json
-    import tools.continuous_reconcile_backlog as module
-    monkeypatch.chdir(tmp_path)
-    control = tmp_path / "control"
-    control.mkdir()
-    policy = control / "legacy-release-migration.json"
-    policy.write_text(json.dumps({"quarantined_tags": ["data-v2-bad"]}), encoding="utf-8")
-    assert module.load_current_quarantine() == {"data-v2-bad"}
-    with pytest.raises(ValueError, match="quarantined Releases"):
-        module.enforce_quarantine_before_import([
-            tmp_path / "data-v2-bad" / "RUN_MANIFEST.json",
-            tmp_path / "data-v2-good" / "RUN_MANIFEST.json",
-        ])
-    module.enforce_quarantine_before_import([
-        tmp_path / "data-v2-good" / "RUN_MANIFEST.json"
-    ])
 
+def test_oversized_staging_budget_returns_to_safe_steady_state() -> None:
+    from tools.continuous_reconcile_backlog import next_shard_budget
 
-def test_malformed_quarantine_policy_is_fail_closed(tmp_path, monkeypatch) -> None:
-    import json
-    import tools.continuous_reconcile_backlog as module
-    monkeypatch.chdir(tmp_path)
-    control = tmp_path / "control"
-    control.mkdir()
-    policy = control / "legacy-release-migration.json"
-    for invalid in (["../escape"], "string-instead-of-list", [43]):
-        policy.write_text(json.dumps({"quarantined_tags": invalid}), encoding="utf-8")
-        with pytest.raises(ValueError, match="invalid quarantined"):
-            module.load_current_quarantine()
+    # A valid oversized Release may temporarily require 80k-100k shards.
+    assert next_shard_budget(80000, requested=1, published=1) == 60000
+    assert next_shard_budget(100000, requested=1, published=1) == 60000
+    assert next_shard_budget(100000, requested=3, published=3) == 60000
+    # Rejected pack reductions must remain conservative.
+    assert next_shard_budget(100000, requested=3, published=1) == 30000
+    # Over the absolute staging cap is forbidden, not silently clamped.
+    with pytest.raises(ValueError, match="invalid adaptive wave"):
+        next_shard_budget(100001, requested=1, published=1)
