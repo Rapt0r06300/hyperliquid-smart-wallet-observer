@@ -69,3 +69,46 @@ def test_terminal_requires_current_full_release_verification():
     assert gc._terminal_rows([row], {"reject": stale}) == {}
     assert gc._terminal_rows([row], {"reject": retryable}) == {}
     assert set(gc._terminal_rows([row], {"reject": _result(row)})) == {"reject"}
+
+
+def test_terminal_receipt_keeps_legacy_oversized_flat_tree(monkeypatch, tmp_path):
+    receipt = tmp_path / "datasets" / "rejected" / "terminal.manifest.json"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text('{"quality_status":"REJECT"}', encoding="utf-8")
+    monkeypatch.setattr(gc, "_oversized_legacy_stage", lambda root, stage: stage == "rejected")
+    assert gc._remove_terminal_receipt(
+        tmp_path, "datasets/rejected/terminal.manifest.json",
+    ) is False
+    assert receipt.is_file()
+
+
+def test_terminal_receipt_removes_only_safe_bounded_paths(monkeypatch, tmp_path):
+    flat = tmp_path / "datasets" / "rejected" / "terminal.manifest.json"
+    sharded = tmp_path / "datasets" / "sharded" / "rejected" / "aa" / "bb" / "t.manifest.json"
+    for path in (flat, sharded):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(gc, "_oversized_legacy_stage", lambda root, stage: stage == "rejected")
+    assert gc._remove_terminal_receipt(tmp_path, "datasets/sharded/rejected/aa/bb/t.manifest.json")
+    assert not sharded.exists()
+    assert not gc._remove_terminal_receipt(tmp_path, "datasets/rejected/terminal.manifest.json")
+    assert flat.exists()
+    monkeypatch.setattr(gc, "_oversized_legacy_stage", lambda root, stage: False)
+    assert gc._remove_terminal_receipt(tmp_path, "datasets/rejected/terminal.manifest.json")
+    assert not flat.exists()
+
+
+def test_terminal_receipt_rejects_path_traversal_or_symlink(tmp_path):
+    import pytest
+    for path in ("../../outside", "catalog/DATA_INDEX.json", "datasets/rejected/../safe/x",
+                 "/tmp/outside", "datasets/untrusted/file.manifest.json"):
+        with pytest.raises(gc.Refuse):
+            gc._remove_terminal_receipt(tmp_path, path)
+    outside = tmp_path / "outside"
+    outside.write_text("secret", encoding="utf-8")
+    link = tmp_path / "datasets" / "rejected" / "link.manifest.json"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+    with pytest.raises(gc.Refuse):
+        gc._remove_terminal_receipt(tmp_path, "datasets/rejected/link.manifest.json")
+    assert outside.read_text(encoding="utf-8") == "secret"
