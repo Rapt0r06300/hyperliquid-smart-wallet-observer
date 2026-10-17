@@ -46,10 +46,22 @@ jobs:
           SOURCE_SHA="$(git -C alina rev-parse HEAD)"
           python alina/tools/collect_cloud_copy_vault.py             --output "$RUNNER_TEMP/copy-vault-v2-smoke"             --duration-s 90             --collector-version "$SOURCE_SHA"             --max-vaults 5             --rotate-mb 16
 
-      - name: Publish verified Copy-Vault smoke release
+      # Validation is a collector finalization stage. Refresh only this policy
+      # code after capture so a long-running collector cannot publish through a
+      # stale gate. Non-SAFE bytes remain runner-local and are never uploaded.
+      - name: Checkout current fail-closed certification policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: current-publisher
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Certify then publish SAFE-only Copy-Vault release
         env:
-          PYTHONPATH: alina/src:alina/tools:alina
+          PYTHONPATH: current-publisher/src
         run: |
           set -euo pipefail
           TAG="copy-vault-smoke-v2-${GITHUB_RUN_ID}"
-          python alina/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/copy-vault-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Copy-Vault V2 smoke ${GITHUB_RUN_ID}"
+          python current-publisher/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/copy-vault-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Copy-Vault V2 smoke ${GITHUB_RUN_ID}"

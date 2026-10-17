@@ -340,8 +340,9 @@ jobs:
           open(path,"w",encoding="utf-8").write(json.dumps(row,sort_keys=True)+"\n")
           PY
 
-      # The multi-hour collector runs pinned source; validation and GitHub
-      # publication always use the newest control-plane policy from main.
+      # This is part of collector finalization, not a later catalog cleanup.
+      # Raw bytes stay runner-local until the newest main policy proves the
+      # exact payload SAFE and replay-compatible; only then may GitHub receive it.
       - name: Checkout current publication control plane
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -353,7 +354,7 @@ jobs:
           fetch-depth: 1
 
       - id: durable
-        name: Persist collection data or analysis evidence
+        name: Persist collection data or analysis evidence (SAFE certification first)
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
         continue-on-error: true
         shell: bash

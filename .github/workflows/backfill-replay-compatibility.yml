@@ -96,6 +96,10 @@ jobs:
           python tools/backfill_replay_compatibility.py             --limit 18             --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
           # Historical Cross-Venue observations: strict two-leg receipt, never parent L2/PnL proof.
           python tools/backfill_replay_compatibility.py             --limit 18             --families "cross_venue_capacity_tape"
+          # Exhaustive bounded tail: every accessible PARTIAL/REJECT family
+          # receives a current verifier receipt, including newly introduced
+          # families not yet present in the priority waves above.
+          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families ""
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py

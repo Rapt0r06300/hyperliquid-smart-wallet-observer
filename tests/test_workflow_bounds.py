@@ -231,6 +231,28 @@ def test_resumable_worker_fails_closed_on_non_safe_publication_manifest():
     assert "QUALITY_REGISTER_CONSUMABLE" in worker
 
 
+def test_terminal_cleanup_is_sha_bound_safe_protecting_and_post_repair():
+    cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
+    assert "runs-on: ubuntu-latest" in cleanup
+    assert "principal-dataset-terminal-cleanup" in cleanup
+    assert "workflows: [backfill-replay-compatibility]" in cleanup
+    assert "prune_irrecoverable_dataset.py prepare" in cleanup
+    assert "git add catalog/DATA_DELETION_PLAN.json" in cleanup
+    assert cleanup.index("git add catalog/DATA_DELETION_PLAN.json") < cleanup.index(
+        "prune_irrecoverable_dataset.py execute"
+    )
+    assert "--expected-plan-digest" in cleanup
+    assert "prune_irrecoverable_dataset.py finalize" in cleanup
+    assert "tests/test_prune_irrecoverable_dataset.py" in cleanup
+    assert "self-hosted" not in cleanup
+
+
+def test_replay_backfill_has_exhaustive_family_tail_before_cleanup():
+    replay = _workflow("backfill-replay-compatibility.yml")
+    assert '--families ""' in replay
+    assert "build_quarantine_audit.py" in replay
+
+
 def test_resumable_worker_binds_annotated_result_inside_evidence_archive():
     worker = _workflow("resumable-campaign-worker.yml")
     annotate = worker.index("python tools/augment_campaign_result.py evidence")

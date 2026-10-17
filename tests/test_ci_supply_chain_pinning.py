@@ -27,6 +27,7 @@ PINNED = {
 # its mutation requirement is reviewed and added here.
 MUTATING_WORKFLOWS = frozenset({
     "advance-analysis-stage.yml",
+    "alina-capsule-cleanup.yml",
     "alina-operator-dispatch.yml",
     "analysis-stage-controller.yml",
     "backfill-exact-trade-counts.yml",
@@ -58,6 +59,8 @@ MUTATING_WORKFLOWS = frozenset({
     "clone-lfs-probe.yml",
     "clone-payload-lfs-mirror.yml",
     "collect-two-segment-resume-smoke.yml",
+    "cleanup-incomplete-v2-releases.yml",
+    "publish-restore-inventory.yml",
     "quarantine-audit.yml",
     "recover-durable-publication.yml",
 })

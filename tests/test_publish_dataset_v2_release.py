@@ -1363,6 +1363,7 @@ def test_all_collection_publication_workflows_refresh_current_policy() -> None:
     worker = (ROOT / ".github/workflows/resumable-campaign-worker.yml").read_text(encoding="utf-8")
     legacy = (ROOT / ".github/workflows/collect-and-publish-v2.yml").read_text(encoding="utf-8")
     smoke = (ROOT / ".github/workflows/dataset-v2-smoke.yml").read_text(encoding="utf-8")
+    copy_smoke = (ROOT / ".github/workflows/copy-vault-v2-smoke.yml").read_text(encoding="utf-8")
     assert "path: current-publisher" in smoke
     assert "current-publisher/tools/publish_dataset_v2_release.py" in smoke
     assert "python alina/tools/publish_dataset_v2_release.py" not in smoke
@@ -1372,3 +1373,6 @@ def test_all_collection_publication_workflows_refresh_current_policy() -> None:
     assert "path: current-publisher" in legacy
     assert "current-publisher/tools/publish_dataset_v2_release.py" in legacy
     assert "python alina/tools/publish_dataset_v2_release.py" not in legacy
+    assert "path: current-publisher" in copy_smoke
+    assert "current-publisher/tools/publish_dataset_v2_release.py" in copy_smoke
+    assert "python alina/tools/publish_dataset_v2_release.py" not in copy_smoke

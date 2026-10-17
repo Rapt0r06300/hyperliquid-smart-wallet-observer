@@ -59,7 +59,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Publish verified smoke release
+      - name: Certify locally then publish SAFE-only smoke release
         env:
           PYTHONPATH: current-publisher/src
         run: |

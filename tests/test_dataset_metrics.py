@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from tools.build_catalog_metrics import build
 from tools.partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -108,8 +107,14 @@ def test_replayable_totals_exclude_non_safe_compatible_shards(tmp_path, monkeypa
     assert totals["TOTAL_REPLAYABLE_RECORDS"] == 2
 
 
-def test_metrics_file_is_machine_readable_and_counts_shards():
-    out = build()
+def test_metrics_file_is_machine_readable_and_counts_shards(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+
+    # A read/shape test must never rewrite the canonical metrics as a side
+    # effect, especially in sparse checkouts where historical manifests are
+    # intentionally absent.
+    monkeypatch.setattr(metrics, "METRICS", tmp_path / "DATA_METRICS.json")
+    out = metrics.build()
     idx = read_index(ROOT / "catalog" / "DATA_INDEX.json")
     totals = out["totals"]
     assert totals["TOTAL_SHARDS"] == len(idx.get("shards") or [])

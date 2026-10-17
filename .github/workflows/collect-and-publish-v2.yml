@@ -174,7 +174,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Publish and remotely verify immutable V2 release
+      - name: Certify locally then publish and remotely verify SAFE-only release
         shell: bash
         env:
           BUNDLE: ${{ steps.collection.outputs.bundle }}

@@ -13691,3 +13691,45 @@ fresh-clone and incremental-update restoration, exact catalog parity and a
 frozen remote inventory. Collector-yield improvements remain the final
 workstream after restoration stability; they must not change phase or fabricate
 missing observations.
+
+## 2026-10-17 — terminal non-viable deletion and collector admission authority
+
+The operator has now explicitly authorized the separate purge anticipated by
+the 2026-10-13 preservation hold. This section supersedes that hold only for
+payloads which a current deterministic verifier proves terminally non-viable;
+it does not weaken any SAFE protection or authorize deletion of active capture.
+
+The durable principal dataset is SAFE-only. Every collection lane performs the
+admission sequence as part of collector finalization on its GitHub-hosted
+runner: capture to runner-local storage, deterministic validation, bounded
+repair, SHA/size-bound certification, then publication only for manifests that
+are `SAFE`, `replay_compatible=true`, `asset_verified=true` and
+`validation_allowed=true`. A PARTIAL or REJECT payload is never uploaded to a
+replay/backtest Release, never indexed as viable, and never admitted to a
+replay/backtest selection. Payload-free diagnostic metadata may be retained.
+Any inability to execute the current certification policy fails closed.
+
+Historical PARTIAL rows receive a real repair/verifier attempt against their
+canonical principal-repository source. A successful repair follows
+`PARTIAL -> REPAIRED -> VERIFIED -> SAFE`. A current, exact release verification
+that cannot establish the certified replay/backtest contract is terminal. Both
+terminal REJECT and irreparable PARTIAL payloads are deleted; there is no
+published third class. Temporary API/rate-limit failures remain blocked and are
+retried, never promoted and never deleted as though they were terminal.
+
+Destructive cleanup is a resumable three-phase transaction. It first commits a
+plan bound to the canonical index SHA, dataset SHA/size, current verifier
+version and exact GitHub Release asset identity. It then revalidates and deletes
+only those exact assets, emits a deletion receipt, and finally removes their
+manifest/index references while updating cumulative metrics and deletion
+history. A physical ZIP or Release asset containing any SAFE, changed, active,
+unverified or still-repairable member is protected in full. Mixed containers
+may be deleted only after a separately verified SAFE-preserving reconstruction;
+the cleanup pilot never assumes logical deletion removed physical bytes.
+
+The final storage invariant is therefore strict: every market payload retained
+as principal replay/backtest data is viable for its explicitly certified usage,
+replay-reproducible and backtest-admissible. Labels alone are not evidence. L2
+requires a valid synchronization boundary, sufficient depth/freshness and
+continuous applicable deltas; trades-only evidence cannot claim L2 execution
+replay. Missing observations are never interpolated or fabricated.
