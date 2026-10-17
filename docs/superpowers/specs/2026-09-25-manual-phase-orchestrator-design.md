@@ -13925,3 +13925,16 @@ Les tags mal formés ou une politique mal formée provoquent aussi un refus.
 La séquence de publication non forcée vérifie toujours le SHA descendant
 sur `main`. Aucune suppression de données historiques ni interruption
 des collecteurs ne découle de ce garde-fou.
+
+
+### 2026-10-17 — Réinitialisation du budget après une grosse Release
+
+Lorsqu'une Release historiquement surdimensionnée demande un plafond temporaire
+entre 60 001 et 100 000 shards, sa publication doit être validée par le SHA
+réel sur main. La vague suivante revient automatiquement au plafond normal
+maximal de 60 000 shards. Le cas de préfixe réduit par refus de pack ramène
+ce budget à 30 000 shards au plus. Il est interdit d'échouer après une
+publication certifiée simplement parce que le budget temporaire était
+supérieur à 60 000. Tout budget dépassant le plafond absolu de 100 000
+reste refusé explicitement (fail-closed). Des tests déterministes couvrent
+la publication normale, le lot réduit et le budget interdit.
