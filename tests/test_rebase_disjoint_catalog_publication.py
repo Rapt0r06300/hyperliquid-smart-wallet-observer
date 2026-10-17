@@ -63,5 +63,7 @@ def test_allowed_report_overlap_still_blocks_rebase(monkeypatch):
             )
         raise AssertionError(f"unexpected command {args}")
 
+    # main() is a CLI entrypoint: isolate argparse from pytest -q arguments.
+    monkeypatch.setattr(module.sys, "argv", ["rebase_disjoint_catalog_publication.py"])
     monkeypatch.setattr(module, "git", fake_git)
     assert module.main() == 3
