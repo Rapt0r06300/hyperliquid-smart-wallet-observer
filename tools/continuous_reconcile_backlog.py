@@ -99,6 +99,7 @@ def publish(paths: list[Path]) -> int:
     candidates = list(paths)
     for attempt in range(1, 9):
         synced()
+        enforce_quarantine_before_import(candidates)
         run("python", "tools/index_run_manifest.py", *map(str, candidates))
         for tool in ("build_catalog_metrics.py", "build_quarantine_audit.py", "check_dataset_quality.py"):
             run("python", f"tools/{tool}")
@@ -173,6 +174,30 @@ def next_shard_budget(current: int, requested: int, published: int) -> int:
     return current
 
 
+def load_current_quarantine() -> set[str]:
+    """Reload the live, typed quarantine policy from the synced checkout."""
+    path = Path("control/legacy-release-migration.json")
+    if not path.is_file():
+        return set()
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        raise ValueError("invalid legacy Release migration policy")
+    raw = doc.get("quarantined_tags") or []
+    if not isinstance(raw, list) or any(
+        not isinstance(tag, str) or not TAG.fullmatch(tag) for tag in raw
+    ):
+        raise ValueError("invalid quarantined Release tag list")
+    return set(raw)
+
+
+def enforce_quarantine_before_import(paths: list[Path]) -> None:
+    """Keep newly quarantined immutable Releases out of staged publications."""
+    quarantined = load_current_quarantine()
+    blocked = sorted({path.parent.name for path in paths}.intersection(quarantined))
+    if blocked:
+        raise ValueError(f"quarantined Releases cannot be imported: {blocked[:5]}")
+
+
 def index_blob_sha() -> str:
     """Git-address the exact tracked index; never rely on an mtime."""
     sha = run("git", "rev-parse", "HEAD:catalog/DATA_INDEX.json").stdout.strip()
@@ -203,18 +228,21 @@ def main() -> int:
     if not 1 <= a.max_minutes <= 280 or not 1 <= a.max_waves <= 100:
         raise SystemExit("invalid runner budget")
     start = time.monotonic()
-    document = json.loads(Path("control/legacy-release-migration.json").read_text()) if Path("control/legacy-release-migration.json").is_file() else {}
-    quarantine = set(document.get("quarantined_tags") or [])
     snapshot = a.inventory.read_text(encoding="utf-8")
     a.work_root.mkdir(parents=True, exist_ok=True)
     waves = 0
     shard_budget = 20000
     cache_blob_sha: str | None = None
     cache_tags: list[str] | None = None
+    cache_quarantine: frozenset[str] | None = None
     completed_releases = 0
     try:
         while waves < a.max_waves and time.monotonic() - start < a.max_minutes * 60:
             synced()
+            quarantine = load_current_quarantine()
+            if cache_quarantine != frozenset(quarantine):
+                cache_blob_sha = None
+                cache_tags = None
             blob_sha = index_blob_sha()
             tags = current_pending(
                 snapshot, quarantine, blob_sha, cache_blob_sha, cache_tags,
@@ -250,6 +278,7 @@ def main() -> int:
             imported_tags = set(selected[:published])
             cache_tags = [tag for tag in tags if tag not in imported_tags]
             cache_blob_sha = index_blob_sha()
+            cache_quarantine = frozenset(quarantine)
             completed_releases += published
             elapsed_minutes = max((time.monotonic() - start) / 60, 1e-6)
             print(
@@ -262,6 +291,7 @@ def main() -> int:
             )
             waves += 1
         synced()
+        quarantine = load_current_quarantine()
         remaining = len(pending(snapshot, read_index(Path("catalog/DATA_INDEX.json")), quarantine))
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"HISTORICAL_RECONCILE_FAIL_CLOSED {exc}", file=sys.stderr)
