@@ -38,7 +38,7 @@ concurrency:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
 
@@ -253,16 +253,12 @@ jobs:
           # Near the 85 MiB atomic index guard, a two-Release wave
           # exceeded capacity (verified 2026-10-10). Try a single
           # immutable Release first; retain all other tags as backlog.
-          if indexed_bytes >= 75 * 1024 * 1024:
-              batch_size = 1
-          elif indexed_bytes >= 65 * 1024 * 1024:
-              batch_size = 2
-          else:
-              # The index is partitioned: its small root size no longer
-              # predicts the size of a newly imported manifest wave.
-              # A two-Release wave bounds reindex CPU/memory and lowers
-              # conflicting publication cost. The backlog resumes after push.
-              batch_size = 2
+          # One immutable Release per wave is deliberate. Two Releases added
+          # ~10k receipt blobs and GitHub rejected the resulting push pack with
+          # remote index-pack failure after a fully successful rebuild. The
+          # relay/checkpoint resumes the remaining backlog after each durable
+          # publication, so this bound trades latency for reliable atomicity.
+          batch_size = 1
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
@@ -403,7 +399,7 @@ jobs:
             # A full new Release can add thousands of manifest receipts.
             # Suppress per-file commit output (previously tens of MiB of logs).
             git -c core.quotePath=false commit -q -m "data: reconcile V2 catalog from canonical releases"
-            if git push origin HEAD:main; then
+            if git push --no-thin origin HEAD:main; then
               echo "Durable reconciliation pushed: $(git rev-parse HEAD)"
               echo "### Reconciliation publication\n- Result: SHA-bound catalog published\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
               published=true
@@ -414,7 +410,7 @@ jobs:
               if ! python tools/rebase_disjoint_catalog_publication.py --remote origin/main; then
                 break
               fi
-              if git push origin HEAD:main; then
+              if git push --no-thin origin HEAD:main; then
                 echo "Durable reconciliation published after safe campaign-only rebase."
                 echo "### Reconciliation publication\n- Result: safely rebased campaign checkpoints\n- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
                 published=true
