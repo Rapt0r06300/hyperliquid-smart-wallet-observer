@@ -173,6 +173,26 @@ def next_shard_budget(current: int, requested: int, published: int) -> int:
     return current
 
 
+def index_blob_sha() -> str:
+    """Git-address the exact tracked index; never rely on an mtime."""
+    sha = run("git", "rev-parse", "HEAD:catalog/DATA_INDEX.json").stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("invalid canonical index Git blob identity")
+    return sha
+
+
+def current_pending(
+    inventory: str, quarantine: set[str], blob_sha: str,
+    cache_blob_sha: str | None, cache_tags: list[str] | None,
+) -> list[str]:
+    """Cache only when immutable Git index bytes have not changed."""
+    if blob_sha == cache_blob_sha and cache_tags is not None:
+        return list(cache_tags)
+    return pending(
+        inventory, read_index(Path("catalog/DATA_INDEX.json")), quarantine,
+    )
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--inventory", type=Path, required=True)
@@ -189,10 +209,16 @@ def main() -> int:
     a.work_root.mkdir(parents=True, exist_ok=True)
     waves = 0
     shard_budget = 20000
+    cache_blob_sha: str | None = None
+    cache_tags: list[str] | None = None
+    completed_releases = 0
     try:
         while waves < a.max_waves and time.monotonic() - start < a.max_minutes * 60:
             synced()
-            tags = pending(snapshot, read_index(Path("catalog/DATA_INDEX.json")), quarantine)
+            blob_sha = index_blob_sha()
+            tags = current_pending(
+                snapshot, quarantine, blob_sha, cache_blob_sha, cache_tags,
+            )
             if not tags:
                 break
             next_tags = tags[:24]
@@ -218,9 +244,21 @@ def main() -> int:
             shard_budget = next_shard_budget(
                 shard_budget, requested=len(selected), published=published,
             )
+            # Publication is already SHA-verified by publish(). Drop only its
+            # proven prefix, then pin this cache to the local published index
+            # blob. Any concurrent index update invalidates it next iteration.
+            imported_tags = set(selected[:published])
+            cache_tags = [tag for tag in tags if tag not in imported_tags]
+            cache_blob_sha = index_blob_sha()
+            completed_releases += published
+            elapsed_minutes = max((time.monotonic() - start) / 60, 1e-6)
             print(
                 f"HISTORICAL_ADAPTIVE_PROOF published_releases={published} "
-                f"next_shard_budget={shard_budget}", flush=True,
+                f"next_shard_budget={shard_budget} "
+                f"total_published_this_runner={completed_releases} "
+                f"snapshot_remaining={len(cache_tags)} "
+                f"throughput_releases_per_hour={completed_releases * 60 / elapsed_minutes:.2f}",
+                flush=True,
             )
             waves += 1
         synced()
