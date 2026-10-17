@@ -13855,8 +13855,12 @@ forcé, aucun collecteur interrompu et aucun runner self-hosted.
 
 ### 2026-10-17 — Publication initiale rapide et débit auto-adaptatif
 
-La première publication du reconciler GitHub-hosted est limitée à deux Releases,
-12 000 shards et 16 Mio de RUN_MANIFEST. Elle doit terminer rapidement son
+La première publication du reconciler GitHub-hosted est limitée à une Release,
+60 000 shards et 64 Mio de RUN_MANIFEST. Ce nouveau plafond a été ajusté
+après l'échec vérifié du run #206 : sa première Release avait un
+RUN_MANIFEST.json de 22 899 498 octets, incompatible avec l'ancien plafond
+de 16 Mio. Une seule Release réduit le risque de rejet du pack ; les vagues
+multi-Releases adaptatives commencent immédiatement après cette publication. Elle doit terminer rapidement son
 checkpoint SHA-bound avant d'exécuter la boucle continue sur le même runner.
 Ensuite le pilote examine au plus 24 candidats par vague, commence à 20 000
 shards et augmente son budget après une publication multi-Release prouvée,
