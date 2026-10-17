@@ -13896,3 +13896,18 @@ un dépassement au plafond ultime ou un manifest invalide provoque un refus
 fail-closed. Une augmentation du budget d'index ne garantit jamais que le
 push Git de cette Release sera possible. Aucun ordre réel, aucune dépendance
 au PC et aucune interruption des collecteurs.
+
+
+### 2026-10-17 — Cache des vagues historiquement réconciliées lié au blob Git
+
+Le pilote GitHub-hosted lit l'inventaire complet historique seulement lorsque
+le SHA de l'objet Git `catalog/DATA_INDEX.json` réellement suivi sur `main`
+a changé. Après une publication vérifiée par ascendance Git, les seules
+Releases retirées de l'inventaire en cache sont celles explicitement comprises
+dans le préfixe dont le commit a été prouvé. Une écriture concurrente de
+l'index change son SHA et force une nouvelle lecture complète (fail-closed).
+Ce cache est strictement intra-runner, sans stockage persistant ni nouveau
+système. Les rapports de progression indiquent le débit prouvé et le backlog
+correspondant à l'inventaire de départ ; toute estimation de délai reste
+conditionnelle à la couverture complète de cet inventaire et à l'intégrité
+des Releases.
