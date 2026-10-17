@@ -13806,3 +13806,14 @@ rebuild SHA-bound et aux reprises sans interrompre les collecteurs.
 L'index et les preuves sont reconstruits à chaque changement de HEAD ;
 les lots irréconciliables restent explicitement en attente. Les délais
 réels ne seront réévalués qu'après une publication réussie d'un lot élargi.
+
+
+### 2026-10-17 — Téléchargements concurrents mais publication mono-écrivain
+
+Le reconciler télécharge jusqu'à quatre RUN_MANIFESTs immuables en parallèle
+avec ThreadPoolExecutor (workers <= 8) ; la sélection des Release tags,
+leur ordre, le classement fail-closed, l'indexation, la validation, la
+construction des métriques SHA-bound et le commit Git restent strictement
+sérialisés. Un téléchargement manquant bloque la vague plutôt que de
+supprimer une Release du plan. Le débit réel est à mesurer sur les
+GitHub-hosted runs ; aucun gain n'est présumé.

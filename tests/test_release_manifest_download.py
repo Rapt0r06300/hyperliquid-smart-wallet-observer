@@ -431,3 +431,35 @@ def test_reconcile_known_tags_supports_partitioned_index_and_detects_tampering(t
     first.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="PARTITION_PARITY_(SIZE|DIGEST)_MISMATCH"):
         _known_tags_from_index(index_path)
+
+
+def test_parallel_download_preserves_release_order_and_manifest_bytes(tmp_path) -> None:
+    import threading
+    from download_release_manifests import download_release_manifests
+
+    lock = threading.Lock()
+    tags = ["data-v2-x", "data-v2-y", "data-v2-z"]
+    calls = []
+
+    def runner(command, **_):
+        import subprocess
+        tag = command[3] if command[:3] == ["gh", "release", "view"] else command[3]
+        with lock:
+            calls.append((tuple(command[:3]), tag))
+        if command[:3] == ["gh", "release", "view"]:
+            return subprocess.CompletedProcess(command, 0, "RUN_MANIFEST.json\n", "")
+        assert command[:3] == ["gh", "release", "download"]
+        root = Path(command[command.index("--dir") + 1])
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "RUN_MANIFEST.json").write_text(tag, encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    result = download_release_manifests(
+        repository="owner/repo", tags=tags, destination=tmp_path,
+        workers=3, runner=runner, attempts=1, poll_seconds=0,
+    )
+    assert result.downloaded == tuple(tags)
+    assert result.missing == ()
+    assert len(calls) == 2 * len(tags)
+    for tag in tags:
+        assert (tmp_path / tag / "RUN_MANIFEST.json").read_text() == tag

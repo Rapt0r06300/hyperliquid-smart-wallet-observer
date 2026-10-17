@@ -277,7 +277,7 @@ jobs:
             echo "No new canonical production releases to reconcile."
             exit 0
           fi
-          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 2
+          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 2             --workers 4
           python tools/select_reconciliation_batch.py \
             --root "$ROOT" \
             --tags-file "$TAGS" \

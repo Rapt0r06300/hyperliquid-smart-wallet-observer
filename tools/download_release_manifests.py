@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -127,12 +128,15 @@ def download_release_manifests(
     poll_seconds: float = 10.0,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     sleeper: Callable[[float], object] = time.sleep,
+    workers: int = 1,
 ) -> DownloadSummary:
     """Poll all pending tags in rounds and download only real, non-empty manifests."""
     if attempts < 1:
         raise ValueError("attempts must be at least 1")
     if poll_seconds < 0:
         raise ValueError("poll_seconds must be non-negative")
+    if not 1 <= workers <= 8:
+        raise ValueError("workers must be in 1..8")
 
     ordered_tags = _unique_tags(tags)
     destination.mkdir(parents=True, exist_ok=True)
@@ -145,16 +149,25 @@ def download_release_manifests(
             break
         attempts_used = attempt
         next_pending: list[str] = []
-        for tag in pending:
+        def fetch(tag: str) -> bool:
             if not _asset_is_visible(repository, tag, runner=runner):
-                next_pending.append(tag)
-                continue
-            if _download_one(repository, tag, destination, runner=runner):
+                return False
+            return _download_one(repository, tag, destination, runner=runner)
+
+        # Independent immutable Releases can be downloaded concurrently.
+        # executor.map preserves input order; commit/index writes stay serial.
+        if workers > 1 and len(pending) > 1:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                outcomes = list(executor.map(fetch, pending))
+        else:
+            outcomes = [fetch(tag) for tag in pending]
+        for tag, ready in zip(pending, outcomes):
+            if ready:
                 downloaded.add(tag)
                 print(f"release manifest ready: {tag}")
             else:
                 next_pending.append(tag)
-                print(f"release manifest listed but not downloadable yet: {tag}")
+                print(f"release manifest not ready: {tag}")
         pending = next_pending
         if pending and attempt < attempts:
             print(
@@ -399,6 +412,7 @@ def main() -> int:
     parser.add_argument("--tags-file", action="append", type=Path, default=[])
     parser.add_argument("--attempts", type=int, default=12)
     parser.add_argument("--poll-seconds", type=float, default=10.0)
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
     if args.list_tags_output is not None:
@@ -433,6 +447,7 @@ def main() -> int:
             destination=args.destination,
             attempts=args.attempts,
             poll_seconds=args.poll_seconds,
+            workers=args.workers,
         )
     except ValueError as exc:
         parser.error(str(exc))
