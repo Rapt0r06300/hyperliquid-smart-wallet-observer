@@ -13869,3 +13869,17 @@ suivies ; les collecteurs, Releases immuables et anciens manifests ne sont
 pas effacés. Une modification du workflow peut remplacer un reconcileur
 bloqué, sans stopper les collecteurs indépendants. Le débit doit être mesuré
 sur un lot élargi publié avant toute nouvelle promesse de délai.
+
+
+### 2026-10-17 — Rebase sûr des rapports non canoniques
+
+Pendant la réconciliation continue, des rapports opérationnels concurrents
+indépendants pouvaient provoquer un coûteux rebuild du catalogue malgré
+l'absence de conflit avec ses données. La liste autorisée de rebase inclut
+désormais uniquement des rapports opérationnels explicitement nommés,
+outre les checkpoints de campagnes historiques. Le pilote refuse tout
+chevauchement entre les chemins modifiés à distance et ceux publiés localement,
+**même sur un rapport autorisé**. DATA_INDEX, DATA_METRICS, partitions de
+données, patchs de correction, code, workflow et spec demeurent interdits.
+Rebase non forcé et vérification de l'ascendance SHA restent obligatoires.
+Aucun collecteur n'est interrompu.
