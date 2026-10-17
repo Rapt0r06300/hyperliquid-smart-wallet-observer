@@ -66,3 +66,14 @@ def test_invalid_tag_cannot_escape_download_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="invalid or repeated"):
         select_prefix(["okay", "../outside"], tmp_path,
                       max_shards=100, max_manifest_bytes=100000)
+
+
+def test_byte_budget_bounds_prefix_even_when_shard_budget_has_room(tmp_path: Path) -> None:
+    write_manifest(tmp_path, "a", 2)
+    write_manifest(tmp_path, "b", 2)
+    bytes_first = (tmp_path / "a" / "RUN_MANIFEST.json").stat().st_size
+    assert select_prefix(
+        ["a", "b"], tmp_path, max_shards=100,
+        max_manifest_bytes=bytes_first,
+    ) == (["a"], 2)
+    assert (tmp_path / "b" / "RUN_MANIFEST.json").is_file()

@@ -13777,9 +13777,9 @@ aucun ordre réel.
 
 Pour réduire la latence du backlog historique sans PC, le reconciler
 énumère les Releases sur GitHub-hosted (pages de 100 avec repli contrôlé)
-et précharge au plus 32 candidats par vague. Avant tout import, un planificateur
+et précharge au plus 96 candidats par vague. Avant tout import, un planificateur
 déterministe sélectionne un préfixe de manifests immuables dans les limites
-de 50 000 shards et 80 MiB de JSON de run-manifests. Chaque manifest doit
+de 100 000 shards et 128 MiB de JSON de run-manifests. Chaque manifest doit
 être présent, conforme à son schéma et issu du dépôt canonique ; une anomalie
 bloque la vague. Aucun Release n'est sauté : tout candidat non retenu reste
 dans le backlog et doit être retrouvé à la prochaine énumération complète.
@@ -13798,3 +13798,11 @@ Le succès de la modification du workflow ou d'une vague ne certifie pas
 l'épuisement du backlog. Mesurer le débit et les taux d'échec réels sur
 GitHub Actions après activation avant d'annoncer un délai de clôture.
 Aucun ordre réel, aucun self-hosted runner, aucune dépendance au PC.
+
+Cette enveloppe est un plafond de **candidats**, pas un débit garanti : la
+publication Git peut réduire la vague par moitiés. Le budget par job est
+porté à 345 minutes (GitHub-hosted uniquement), pour laisser le temps au
+rebuild SHA-bound et aux reprises sans interrompre les collecteurs.
+L'index et les preuves sont reconstruits à chaque changement de HEAD ;
+les lots irréconciliables restent explicitement en attente. Les délais
+réels ne seront réévalués qu'après une publication réussie d'un lot élargi.

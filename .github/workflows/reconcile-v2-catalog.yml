@@ -38,7 +38,7 @@ concurrency:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 345
     env:
       GH_TOKEN: ${{ github.token }}
 
@@ -249,17 +249,11 @@ jobs:
           # Never repeatedly build a lot that cannot fit GitHub's 100 MiB
           # single-blob hard limit. Keep all pending tags discoverable so the
           # next run resumes, and fail closed at the indexer's 85 MiB guard.
-          indexed_bytes = Path("catalog/DATA_INDEX.json").stat().st_size
-          # Near the 85 MiB atomic index guard, a two-Release wave
-          # exceeded capacity (verified 2026-10-10). Try a single
-          # immutable Release first; retain all other tags as backlog.
-          # One immutable Release per wave is deliberate. Two Releases added
-          # ~10k receipt blobs and GitHub rejected the resulting push pack with
-          # remote index-pack failure after a fully successful rebuild. The
-          # relay/checkpoint resumes the remaining backlog after each durable
-          # publication, so this bound trades latency for reliable atomicity.
-          # Download candidates once, then enforce shard/byte budgets before indexing.
-          batch_size = 32
+          # Select up to 96 immutable candidate Releases; the deterministic
+          # planner below admits only a bounded prefix. Large Git packs
+          # automatically shrink to a smaller proven prefix before retrying.
+          # Old flat receipt trees are immutable; new receipts are hash-sharded.
+          batch_size = 96
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
@@ -289,8 +283,8 @@ jobs:
             --tags-file "$TAGS" \
             --total-file "${TAGS%.*}.count" \
             --github-env "$GITHUB_ENV" \
-            --max-shards 50000 \
-            --max-manifest-bytes 83886080
+            --max-shards 100000 \
+            --max-manifest-bytes 134217728
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "canonical run manifests selected: $COUNT"
 
@@ -452,7 +446,7 @@ jobs:
             sleep $((attempt * 3))
           done
           if [ "$published" != true ]; then
-            echo "::error::Reconciliation not published after 5 independent rebuilds"
+            echo "::error::Reconciliation not published after bounded retries and adaptive pack reductions"
             exit 1
           fi
 
