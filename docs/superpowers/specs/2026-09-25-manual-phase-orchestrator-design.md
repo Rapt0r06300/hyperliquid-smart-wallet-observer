@@ -13953,3 +13953,25 @@ sur `main`. Les collecteurs restent dans leurs groupes indépendants, sans
 runner self-hosted ni PC utilisateur. Un test déterministe du workflow empêche
 le retour accidentel de l'annulation des vagues actives. Cette correction
 n'est pas une preuve de fermeture du backlog ni de certification replay-grade.
+
+
+### 2026-10-17 — Nettoyage terminal sans réécrire les arbres Git historiques
+
+La suppression finale d'un asset terminal `PARTIAL` irréparable ou `REJECT`
+ne doit jamais recréer un objet Git `tree` géant en effaçant un reçu d'un
+répertoire historique plat `datasets/safe`, `datasets/quarantine` ou
+`datasets/rejected` ayant au moins 4 096 entrées. Après la transaction en trois
+phases, les références de ces datasets sont retirées du catalogue, l'identité
+de chaque asset supprimé est liée aux preuves SHA/size/version, et l'ancien
+reçu plat demeure uniquement comme métadonnée historique **non indexée**.
+Il ne peut plus autoriser replay/backtest : seule l'admission SHA-bound par
+l'index courant fait foi. Les reçus sous `datasets/sharded` et les répertoires
+plats bornés peuvent être supprimés physiquement lorsque leurs chemins sont
+sûrs. Toute tentative de sortie de `datasets/`, tout lien symbolique de
+cible et tout stade inconnu doivent échouer fermement avant suppression.
+
+Les containers physiques mixtes contenant des SAFE ou des PARTIAL encore
+réparables restent protégés. L'objectif final de nettoyage des métadonnées
+historiques non référencées exige une migration prouvée distincte ; la
+suppression logique ne doit jamais être présentée comme une suppression
+historique totale de tous les objets Git.
