@@ -463,3 +463,70 @@ def test_parallel_download_preserves_release_order_and_manifest_bytes(tmp_path) 
     assert len(calls) == 2 * len(tags)
     for tag in tags:
         assert (tmp_path / tag / "RUN_MANIFEST.json").read_text() == tag
+
+
+def test_parallel_truncated_asset_lookups_preserve_tag_order():
+    """Require concurrent remote checks while preserving deterministic order."""
+    import json
+    import threading
+    from download_release_manifests import list_release_manifest_tags
+
+    ready = threading.Barrier(3)
+
+    def runner(command, **_):
+        endpoint = command[-1]
+        if "/assets?" in endpoint:
+            ready.wait(timeout=5)
+            release_id = int(endpoint.split("/releases/")[1].split("/assets")[0])
+            name = "RUN_MANIFEST.json" if release_id != 2 else "other.zip"
+            return subprocess.CompletedProcess(command, 0, json.dumps([{"name": name}]), "")
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"id": 1, "tag_name": "data-v2-first",
+             "assets": [{"name": str(n)} for n in range(30)]},
+            {"id": 2, "tag_name": "data-v2-second",
+             "assets": [{"name": str(n)} for n in range(30)]},
+            {"id": 3, "tag_name": "data-v2-third",
+             "assets": [{"name": str(n)} for n in range(30)]},
+        ]), "")
+
+    assert list_release_manifest_tags(
+        "owner/repo", runner=runner, asset_workers=3,
+    ) == [
+        ("data-v2-first", True),
+        ("data-v2-second", False),
+        ("data-v2-third", True),
+    ]
+
+
+def test_parallel_asset_lookup_failure_never_produces_partial_inventory():
+    import json
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+
+    def runner(command, **_):
+        endpoint = command[-1]
+        if "/releases/2/assets" in endpoint:
+            return subprocess.CompletedProcess(command, 1, "", "HTTP 404 missing asset list")
+        if "/releases/1/assets" in endpoint:
+            return subprocess.CompletedProcess(command, 0, json.dumps([
+                {"name": "RUN_MANIFEST.json"},
+            ]), "")
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"id": 1, "tag_name": "data-v2-first",
+             "assets": [{"name": str(n)} for n in range(30)]},
+            {"id": 2, "tag_name": "data-v2-second",
+             "assets": [{"name": str(n)} for n in range(30)]},
+        ]), "")
+
+    with pytest.raises(RuntimeError, match="failed after 1 attempt"):
+        list_release_manifest_tags(
+            "owner/repo", runner=runner, attempts=1, asset_workers=2,
+        )
+
+
+def test_parallel_asset_lookup_worker_limit_is_bounded():
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+
+    with pytest.raises(ValueError, match="asset_workers"):
+        list_release_manifest_tags("owner/repo", asset_workers=9)

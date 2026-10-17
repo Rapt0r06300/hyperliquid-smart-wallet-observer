@@ -234,6 +234,32 @@ def _api_page(
     raise RuntimeError("unreachable GitHub page retry state")
 
 
+def _deep_release_manifest_visible(
+    repository: str,
+    release_id: int,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    sleeper: Callable[[float], object],
+    attempts: int,
+) -> bool:
+    """Inspect a truncated asset list, failing closed on any unreadable page."""
+    page_number = 1
+    found = False
+    while True:
+        assets = _api_page(
+            f"repos/{repository}/releases/{release_id}/assets"
+            f"?per_page=100&page={page_number}",
+            runner=runner, sleeper=sleeper, attempts=attempts,
+        )
+        if not all(isinstance(a.get("name"), str) for a in assets):
+            raise RuntimeError(f"malformed asset listing for Release id {release_id}")
+        if any(a["name"] == MANIFEST_NAME for a in assets):
+            found = True
+        if len(assets) < 100:
+            return found
+        page_number += 1
+
+
 def list_release_manifest_tags(
     repository: str,
     *,
@@ -244,6 +270,7 @@ def list_release_manifest_tags(
     page_size: int = 50,
     attempts: int = 5,
     max_pages: int = 2000,
+    asset_workers: int = 4,
 ) -> list[tuple[str, bool]]:
     """Enumerate all Release identities, but inspect only new production assets.
 
@@ -254,6 +281,8 @@ def list_release_manifest_tags(
         raise ValueError("page_size must be in 1..100")
     if max_pages < 1:
         raise ValueError("max_pages must be positive")
+    if not 1 <= asset_workers <= 8:
+        raise ValueError("asset_workers must be in 1..8")
     pages = 0
     offset = 0
     active_page_size = page_size
@@ -288,6 +317,7 @@ def list_release_manifest_tags(
             raise
         current_page_ids: set[int] = set()
         current_page_tags: set[str] = set()
+        page_candidates: list[tuple[str, int, bool | None]] = []
         for release in page:
             ident = release.get("id")
             tag = release.get("tag_name")
@@ -326,24 +356,26 @@ def list_release_manifest_tags(
                 isinstance(asset, dict) and asset.get("name") == MANIFEST_NAME
                 for asset in assets
             )
-            if len(assets) >= 30 and not visible:
-                all_assets: list[dict[str, object]] = []
-                asset_page = 1
-                while True:
-                    batch = _api_page(
-                        f"repos/{repository}/releases/{ident}/assets"
-                        f"?per_page=100&page={asset_page}",
-                        runner=runner, sleeper=sleeper, attempts=attempts,
-                    )
-                    all_assets.extend(batch)
-                    if len(batch) < 100:
-                        break
-                    asset_page += 1
-                assets = all_assets
             if not all(isinstance(a, dict) and isinstance(a.get("name"), str) for a in assets):
                 raise RuntimeError(f"malformed asset listing for Release {tag}")
-            has_manifest = any(a["name"] == MANIFEST_NAME for a in assets)
-            rows.append((tag, has_manifest))
+            # GitHub embeds at most 30 assets. Verify larger Releases in a
+            # bounded parallel pool, but commit results in original page order.
+            # A failed lookup aborts the entire inventory; nothing is skipped.
+            page_candidates.append((tag, ident, None if len(assets) >= 30 and not visible else visible))
+        deep = [(tag, ident) for tag, ident, visible in page_candidates if visible is None]
+        if deep:
+            with ThreadPoolExecutor(max_workers=asset_workers) as pool:
+                futures = {
+                    tag: pool.submit(
+                        _deep_release_manifest_visible, repository, ident,
+                        runner=runner, sleeper=sleeper, attempts=attempts,
+                    )
+                    for tag, ident in deep
+                }
+                for tag, _ident, visible in page_candidates:
+                    rows.append((tag, futures[tag].result() if visible is None else visible))
+        else:
+            rows.extend((tag, bool(visible)) for tag, _ident, visible in page_candidates)
         if len(page) == active_page_size:
             # Concurrent Releases can shift offsets. Two complete pages with
             # zero new IDs indicate a stuck service; fail closed, never spin.
@@ -407,6 +439,7 @@ def main() -> int:
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--list-tags-output", type=Path)
     parser.add_argument("--list-page-size", type=int, default=50)
+    parser.add_argument("--asset-workers", type=int, default=4)
     parser.add_argument("--reconcile-index", type=Path,
                         help="inspect deep assets only for unindexed production releases")
     parser.add_argument("--tags-file", action="append", type=Path, default=[])
@@ -423,6 +456,7 @@ def main() -> int:
             inventory = list_release_manifest_tags(
                 args.repository, page_size=args.list_page_size,
                 skip_tags=known, only_production=args.reconcile_index is not None,
+                asset_workers=args.asset_workers,
             )
         except (RuntimeError, ValueError, OSError, json.JSONDecodeError) as exc:
             print(f"RELEASE_INVENTORY_INCOMPLETE: {exc}", file=sys.stderr)
