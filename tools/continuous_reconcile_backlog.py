@@ -135,6 +135,33 @@ def publish(paths: list[Path]) -> int:
     raise RuntimeError("publication retries exhausted")
 
 
+def select_with_bounded_oversized_retry(
+    tags: list[str], root: Path, *, shard_budget: int
+) -> tuple[list[str], int, int]:
+    """Boundedly retry a large first Release; never skip it."""
+    budget = shard_budget
+    if not 5000 <= budget <= 100000:
+        raise ValueError("invalid bounded reconciliation budget")
+    while True:
+        try:
+            selected, count = select_prefix(
+                tags, root, max_shards=budget,
+                max_manifest_bytes=64 * 1024 * 1024,
+            )
+            return selected, count, budget
+        except ValueError as exc:
+            if "single Release exceeds safe publication budget" not in str(exc):
+                raise
+            if budget >= 100000:
+                raise
+            increased = min(100000, max(budget + 5000, budget * 2))
+            print(
+                f"HISTORICAL_SINGLE_RELEASE_BUDGET_RAISED "
+                f"from={budget} to={increased}", flush=True,
+            )
+            budget = increased
+
+
 def next_shard_budget(current: int, requested: int, published: int) -> int:
     """Increase only after proven full publications; decrease on a pack retry."""
     if not 5000 <= current <= 60000 or requested < 1 or not 1 <= published <= requested:
@@ -177,10 +204,10 @@ def main() -> int:
                     "--repository", REPO, "--destination", str(a.work_root),
                     "--tags-file", str(tags_file), "--attempts", "3",
                     "--poll-seconds", "2", "--workers", "4")
-            selected, shard_count = select_prefix(
-                next_tags, a.work_root, max_shards=shard_budget,
-                max_manifest_bytes=64 * 1024 * 1024,
+            selected, shard_count, used_budget = select_with_bounded_oversized_retry(
+                next_tags, a.work_root, shard_budget=shard_budget,
             )
+            shard_budget = used_budget
             print(
                 f"HISTORICAL_BATCH_READY wave={waves+1} releases={len(selected)} "
                 f"shards={shard_count} shard_budget={shard_budget}", flush=True,
