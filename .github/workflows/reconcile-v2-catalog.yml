@@ -250,10 +250,11 @@ jobs:
           # Never repeatedly build a lot that cannot fit GitHub's 100 MiB
           # single-blob hard limit. Keep all pending tags discoverable so the
           # next run resumes, and fail closed at the indexer's 85 MiB guard.
-          # Publish a small verified starter wave so the hosted continuous
-          # reconciler can checkpoint successive adaptive waves promptly.
-          # A huge starter pack previously stalled before the loop could run.
-          batch_size = 2
+          # Publish ONE complete SHA-verified starter Release before the
+          # continuous runner handles adaptive multi-Release waves.
+          # Real RUN_MANIFEST.json assets exceed 16 MiB, so size limits must
+          # admit them without allowing an unbounded first Git push.
+          batch_size = 1
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
@@ -283,8 +284,8 @@ jobs:
             --tags-file "$TAGS" \
             --total-file "${TAGS%.*}.count" \
             --github-env "$GITHUB_ENV" \
-            --max-shards 12000 \
-            --max-manifest-bytes 16777216
+            --max-shards 60000 \
+            --max-manifest-bytes 67108864
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "canonical run manifests selected: $COUNT"
 
