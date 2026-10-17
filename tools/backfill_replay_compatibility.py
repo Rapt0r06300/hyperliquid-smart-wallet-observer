@@ -11,16 +11,22 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from typing import Any, Mapping
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
+from index_run_manifest import (
+    _publish_canonical_index,
+    compact_index_rows,
+    hydrate_default_release_repository,
+)
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
-from index_run_manifest import compact_index_rows, hydrate_default_release_repository, _publish_canonical_index
+
 try:
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
@@ -107,12 +113,72 @@ def _load_patch() -> dict[str,Any]:
             "schema":"alina.replay_compat_patch.v1",
             "method":"verified_release_asset_parse_chronology_smoke",
             "results":{},
+            "transient_failures":{},
+            "progress_by_filter":{},
         }
     value=_load_json(PATCH_PATH)
     value.setdefault("schema","alina.replay_compat_patch.v1")
     value.setdefault("method","verified_release_asset_parse_chronology_smoke")
     value.setdefault("results",{})
+    value.setdefault("transient_failures",{})
+    value.setdefault("progress_by_filter",{})
     return value
+
+
+def _build_progress(
+    results: Mapping[str, Any],
+    transient_failures: Mapping[str, Any],
+    progress_by_filter: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive honest cumulative counters from durable per-shard receipts."""
+    verified = [
+        row for row in results.values()
+        if isinstance(row, Mapping) and row.get("verified_from_release") is True
+    ]
+    replay_verified = [row for row in verified if row.get("replay_compatible") is True]
+    rejected = [row for row in verified if row.get("replay_compatible") is not True]
+    repaired_safe = [
+        row for row in replay_verified
+        if str(row.get("quality_status_before") or "").upper() != "SAFE"
+        and str(row.get("quality_status_after") or "").upper() == "SAFE"
+    ]
+    definitive_rejects = [
+        row for row in rejected
+        if str(row.get("quality_status_after") or "").upper() == "REJECT"
+    ]
+    remaining = sum(
+        max(0, int(row.get("remaining") or 0))
+        for row in progress_by_filter.values()
+        if isinstance(row, Mapping)
+    )
+    known_scope_total = sum(
+        max(0, int(row.get("candidate_total") or 0))
+        for row in progress_by_filter.values()
+        if isinstance(row, Mapping)
+    )
+    known_scope_done = max(0, known_scope_total - remaining)
+    return {
+        "repair_attempts_unique": len(set(results) | set(transient_failures)),
+        "replay_verified": len(replay_verified),
+        "repaired_safe": len(repaired_safe),
+        "certification_rejected": len(rejected),
+        "definitive_rejects": len(definitive_rejects),
+        "reject_payloads_deleted": 0,
+        "temporarily_blocked": len(transient_failures),
+        "remaining_candidates_known": remaining,
+        "known_scope_candidate_total": known_scope_total,
+        "known_scope_processed": known_scope_done,
+        "progress_percent_known_scope": (
+            round(100.0 * known_scope_done / known_scope_total, 6)
+            if known_scope_total else None
+        ),
+        "volume_analyzed_bytes": sum(max(0, int(row.get("asset_size") or 0)) for row in verified),
+        "volume_recovered_bytes": sum(max(0, int(row.get("asset_size") or 0)) for row in repaired_safe),
+        "volume_rejected_bytes": sum(max(0, int(row.get("asset_size") or 0)) for row in definitive_rejects),
+        "volume_deleted_bytes": 0,
+        "eta_seconds": None,
+        "eta_available": False,
+    }
 
 
 def _manifest_for_row(row: Mapping[str,Any]) -> dict[str,Any] | None:
@@ -677,6 +743,12 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     known=patch.get("results")
     if not isinstance(known,dict):
         raise BackfillError("invalid replay patch results")
+    transient_failures=patch.get("transient_failures")
+    if not isinstance(transient_failures,dict):
+        raise BackfillError("invalid replay patch transient failures")
+    progress_by_filter=patch.get("progress_by_filter")
+    if not isinstance(progress_by_filter,dict):
+        raise BackfillError("invalid replay patch filter progress")
 
     unique_rows=_load_global_unique_rows(root=ROOT)
     candidates=[
@@ -684,6 +756,7 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
         if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
     ]
     candidates.sort(key=_candidate_sort_key)
+    candidate_total=len(candidates)
     candidates=candidates[:max(1,int(limit))]
 
     updated=0
@@ -706,26 +779,59 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
                 before=str(row.get("quality_status") or "")
                 _apply_result(row,result,root=ROOT)
                 after=str(row.get("quality_status") or "")
+                result["quality_status_before"]=before
+                result["quality_status_after"]=after
                 known[dataset_id]=dict(result)
+                transient_failures.pop(dataset_id,None)
                 updated+=1
                 replayable+=int(result.get("replay_compatible") is True)
                 demoted+=int(before=="SAFE" and after!="SAFE")
             except Exception as exc:
-                failed.append({
+                failure={
                     "dataset_id":dataset_id,
                     "error":type(exc).__name__,
                     "detail":str(exc)[-500:],
-                })
+                }
+                failed.append(failure)
+                previous=transient_failures.get(dataset_id)
+                previous=previous if isinstance(previous,Mapping) else {}
+                transient_failures[dataset_id]={
+                    **failure,
+                    "attempt_count":max(0,int(previous.get("attempt_count") or 0))+1,
+                    "retryable":True,
+                    "github_run_id":os.environ.get("GITHUB_RUN_ID"),
+                    "github_run_attempt":os.environ.get("GITHUB_RUN_ATTEMPT"),
+                }
             finally:
                 shutil.rmtree(tmp_root/dataset_id,ignore_errors=True)
 
     patch["results"]=dict(sorted(known.items()))
+    patch["transient_failures"]=dict(sorted(transient_failures.items()))
     patch["processed_assets"]=len(known)
     remaining=sum(
         1 for row in rows
         if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
     )
     patch["remaining_candidates_for_filter"]=remaining
+    filter_key=",".join(sorted(families)) or "all"
+    previous_filter=progress_by_filter.get(filter_key)
+    previous_filter=previous_filter if isinstance(previous_filter,Mapping) else {}
+    processed_cumulative=(
+        max(0,int(previous_filter.get("processed_cumulative") or 0))
+        + max(0,candidate_total-remaining)
+    )
+    progress_by_filter[filter_key]={
+        "candidate_total":processed_cumulative+remaining,
+        "processed_cumulative":processed_cumulative,
+        "attempted_this_run":len(candidates),
+        "updated_this_run":updated,
+        "failed_this_run":len(failed),
+        "remaining":remaining,
+        "github_run_id":os.environ.get("GITHUB_RUN_ID"),
+        "source_commit":os.environ.get("GITHUB_SHA"),
+    }
+    patch["progress_by_filter"]=dict(sorted(progress_by_filter.items()))
+    patch["progress"]=_build_progress(known,transient_failures,progress_by_filter)
     _write_json(PATCH_PATH,patch)
     # No verified repair means no change to the canonical data index. Avoid
     # rewriting tens of MiB in every bounded replay wave.

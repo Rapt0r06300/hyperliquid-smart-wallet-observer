@@ -96,7 +96,7 @@ Snapshots of ignored local files are restored only if verifiably published.
 The recovery process does not stop cloud collection, operate the user's PC
 remotely, require another dataset repository, or execute trading orders.
 
-Historical assets from the retired Dataset V2 repository are **not** an operational dependency and are **not** to be migrated into the canonical repository. The accepted architecture is fresh-main-only:
+The former external Dataset V2 repository has been deleted and is **nonexistent** for operational purposes. Its historical assets are not an operational dependency, must never be queried or recreated, and are **not** to be migrated into the canonical repository. The accepted architecture is fresh-main-only:
 
 - new collection, manifests, catalogs, replay inputs, backtests and durability checkpoints originate only from `Rapt0r06300/hyperliquid-smart-wallet-observer`;
 - `control/unified-repository.json` must keep `collection_origin_policy="fresh-main-only"`, `external_dataset_repository_required=false`, `dataset_v2_import_allowed=false`, `historical_external_import_allowed=false`, and `legacy_imported_releases_present=false`;
@@ -105,7 +105,7 @@ Historical assets from the retired Dataset V2 repository are **not** an operatio
 - no collector, reconciler, validator, replay, backtest, analysis workflow, or repair path may query or require the retired Dataset V2 repository;
 - historical Dataset V2 releases that were never imported are intentionally abandoned and are outside the canonical evidence set.
 
-This fresh-only policy supersedes the earlier migration-completion requirement. Deleting or retaining the retired external repository is therefore an archival choice only and must not affect Alina runtime correctness. Current collection must continue independently throughout cleanup, and no cleanup action may interrupt `COLLECT`.
+This fresh-only policy supersedes the earlier migration-completion requirement. The deleted external repository must remain absent and its absence must not affect Alina runtime correctness. Current collection must continue independently throughout cleanup, and no cleanup action may interrupt `COLLECT`.
 
 Create:
 
@@ -11872,7 +11872,7 @@ Alina uses a **single-repository control and data contract**.
 - Collection/replay/backtest workers use the same repository SHA and the same campaign identity. No cross-repository synchronization, bridge token or second repository is required.
 - Existing Dataset V2 schemas and SAFE/PARTIAL/REJECT/UNMEASURABLE semantics are retained as data-format contracts; “Dataset V2” no longer implies a separate GitHub repository.
 - Current autonomous cloud operation remains GitHub-hosted only. Nothing authorizes a self-hosted runner, PC wake-up or dependency on the user's machine.
-- The former `Rapt0r06300/alina-smartflow-datasets-v2` repository is legacy/inert after migration and must not be used for new collection or analysis.
+- The former `Rapt0r06300/alina-smartflow-datasets-v2` repository has been deleted. It is nonexistent for runtime purposes and must never be queried, recreated, imported, or used for collection, repair, replay, backtest, or analysis.
 
 Canonical cloud orchestration is concentrated in:
 

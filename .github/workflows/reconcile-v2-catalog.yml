@@ -345,6 +345,17 @@ jobs:
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
           python -m pytest -q             tests/test_partitioned_data_index.py             tests/test_restore_alina.py             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
+          # Tests must never become publication inputs. Rebuild every derived
+          # control-plane receipt after the suite, then prove that metrics are
+          # bound to the exact partitioned index bytes and complete shard set.
+          python tools/build_catalog_metrics.py
+          python tools/build_quarantine_audit.py
+          python tools/check_dataset_quality.py
+          python - <<'PY'
+          from tools.build_catalog_metrics import verify_metrics_source
+          proof = verify_metrics_source()
+          print("RECONCILE_METRICS_SOURCE_VERIFIED", proof)
+          PY
 
       - name: Commit reconciled catalog
         if: env.RUN_MANIFEST_COUNT != '0'

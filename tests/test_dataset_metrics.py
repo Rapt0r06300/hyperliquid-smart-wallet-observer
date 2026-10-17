@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -601,8 +601,11 @@ def test_new_exact_shards_are_not_discarded_from_total_bytes_by_stale_patch(tmp_
 
 
 def test_gap_totals_use_original_sha_bound_manifest_not_a_fake_zero(tmp_path, monkeypatch):
-    import tools.build_catalog_metrics as metrics
     import json
+
+    import tools.build_catalog_metrics as metrics
+    production_metrics = metrics.METRICS
+    production_metrics_before = production_metrics.read_bytes()
     root = tmp_path
     cat = root / "catalog"
     cat.mkdir()
@@ -618,6 +621,7 @@ def test_gap_totals_use_original_sha_bound_manifest_not_a_fake_zero(tmp_path, mo
     }]}))
     monkeypatch.setattr(metrics, "ROOT", root)
     monkeypatch.setattr(metrics, "INDEX", cat / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", cat / "DATA_METRICS.json")
     monkeypatch.setattr(metrics, "UNIQUE_PATCH", cat / "no-unique.json")
     monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", cat / "no-trades.json")
     monkeypatch.setattr(metrics, "RECORD_PATCH", cat / "no-records.json")
@@ -630,12 +634,14 @@ def test_gap_totals_use_original_sha_bound_manifest_not_a_fake_zero(tmp_path, mo
     assert totals["TOTAL_GAP_RECORDS"] == 0
     assert totals["GAP_COUNT_COVERAGE_COMPLETE"] is False
     assert totals["GAP_COUNT_MISSING_SHARDS"] == 1
+    assert production_metrics.read_bytes() == production_metrics_before
 
 
 
 def test_metrics_ignore_stale_record_and_size_patch_sha(tmp_path, monkeypatch):
-    import tools.build_catalog_metrics as metrics
     import json
+
+    import tools.build_catalog_metrics as metrics
 
     cat = tmp_path / "catalog"
     cat.mkdir()

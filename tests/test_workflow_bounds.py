@@ -210,7 +210,7 @@ def test_reconcile_covers_all_production_release_families_and_pins_actions():
     assert "Download new Dataset principal run manifests (bounded batch)" in text
     assert "known={" in text
     assert "group: dataset-v2-catalog-reconcile" in text
-    assert "cancel-in-progress: false" in text
+    assert "cancel-in-progress: ${{ github.event_name == 'push' }}" in text
 
 
 def test_resumable_worker_preserves_frozen_cursor_and_retry_policy():
@@ -386,6 +386,16 @@ def test_reconcile_regenerates_from_release_manifests_after_concurrent_commit():
     assert 'python tools/index_run_manifest.py "${MANIFESTS[@]}"' in text
     assert "git push origin HEAD:main" in text
     assert 'if [ "$published" != true ]; then' in text
+
+
+def test_reconcile_rebuilds_and_sha_verifies_metrics_after_mutating_tests():
+    text = _workflow("reconcile-v2-catalog.yml")
+    validate = text.split("- name: Validate rebuilt control plane", 1)[1]
+    publish = validate.split("- name: Commit reconciled catalog", 1)[0]
+    pytest_at = publish.index("python -m pytest -q")
+    rebuild_at = publish.index("python tools/build_catalog_metrics.py", pytest_at)
+    verify_at = publish.index("verify_metrics_source", rebuild_at)
+    assert pytest_at < rebuild_at < verify_at
 
 
 def test_recovery_contract_finishes_even_when_main_advances():

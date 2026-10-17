@@ -459,11 +459,54 @@ def test_no_candidate_replay_wave_preserves_exact_index_bytes(monkeypatch, tmp_p
     assert result["updated"] == 0
     assert index.read_text(encoding="utf-8") == original
     assert patch.is_file()
+    saved = json.loads(patch.read_text(encoding="utf-8"))
+    assert saved["progress"]["repair_attempts_unique"] == 0
+    assert saved["progress"]["temporarily_blocked"] == 0
+    assert saved["progress"]["eta_seconds"] is None
+
+
+def test_replay_progress_counts_outcomes_without_false_repair_claims():
+    progress = backfill._build_progress(
+        {
+            "safe": {
+                "verified_from_release": True,
+                "replay_compatible": True,
+                "asset_size": 10,
+                "quality_status_before": "PARTIAL",
+                "quality_status_after": "SAFE",
+            },
+            "still-partial": {
+                "verified_from_release": True,
+                "replay_compatible": True,
+                "asset_size": 20,
+                "quality_status_before": "PARTIAL",
+                "quality_status_after": "PARTIAL",
+            },
+            "reject": {
+                "verified_from_release": True,
+                "replay_compatible": False,
+                "asset_size": 30,
+                "quality_status_before": "PARTIAL",
+                "quality_status_after": "REJECT",
+            },
+        },
+        {"api-blocked": {"attempt_count": 2}},
+        {"trades": {"remaining": 4}},
+    )
+    assert progress["repair_attempts_unique"] == 4
+    assert progress["replay_verified"] == 2
+    assert progress["repaired_safe"] == 1
+    assert progress["certification_rejected"] == 1
+    assert progress["temporarily_blocked"] == 1
+    assert progress["volume_analyzed_bytes"] == 60
+    assert progress["remaining_candidates_known"] == 4
+    assert progress["eta_seconds"] is None
 
 
 def test_replay_refresh_preserves_reversible_compaction(tmp_path):
     from index_run_manifest import (
-        CANONICAL_DATA_REPOSITORY, hydrate_default_release_repository,
+        CANONICAL_DATA_REPOSITORY,
+        hydrate_default_release_repository,
     )
     catalog = tmp_path / "catalog"
     catalog.mkdir()

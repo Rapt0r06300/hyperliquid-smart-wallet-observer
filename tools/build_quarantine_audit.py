@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections import Counter, defaultdict
+from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 try:
     from tools.manifest_policy import classify_manifest, is_official_historical_archive
@@ -132,6 +133,42 @@ def _add_bucket(
     row["records"] += records
 
 
+def _dependencies(manifest: Mapping[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("parent_l2_dataset_id", "parent_dataset_id"):
+        value = manifest.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    for key in ("source_dataset_ids", "dependencies"):
+        value = manifest.get(key)
+        if isinstance(value, list):
+            values.extend(str(item).strip() for item in value if str(item).strip())
+    return sorted(set(values))
+
+
+def _repair_state(
+    current_status: str,
+    *,
+    replay_result: Mapping[str, Any] | None,
+    transient_failure: Mapping[str, Any] | None,
+    manifest_readable: bool,
+    raw_payload_available: bool,
+) -> str:
+    if current_status == "SAFE":
+        return "VERIFIED_SAFE_PENDING_RECLASSIFICATION"
+    if isinstance(replay_result, Mapping):
+        if replay_result.get("replay_compatible") is True:
+            return "REPLAY_VERIFIED_EVIDENCE_INCOMPLETE"
+        return "REPAIR_ATTEMPTED_CERTIFICATION_FAILED"
+    if isinstance(transient_failure, Mapping):
+        return "TEMPORARILY_BLOCKED"
+    if not manifest_readable:
+        return "BLOCKED_UNREADABLE_MANIFEST"
+    if not raw_payload_available:
+        return "BLOCKED_SOURCE_UNAVAILABLE"
+    return "PENDING"
+
+
 def build(root: str | Path = ROOT) -> dict[str, Any]:
     base = Path(root)
     index_path = base / "catalog" / "DATA_INDEX.json"
@@ -147,6 +184,13 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
         raise ValueError(f"QUARANTINE_INVALID_INDEX:{exc}") from exc
     metrics = _load(metrics_path, {})
     record_patch = _load(record_patch_path, {})
+    replay_patch = _load(base / "catalog" / "REPLAY_COMPAT_PATCH.json", {})
+    replay_results = replay_patch.get("results") if isinstance(replay_patch, Mapping) else {}
+    replay_failures = replay_patch.get("transient_failures") if isinstance(replay_patch, Mapping) else {}
+    if not isinstance(replay_results, Mapping):
+        replay_results = {}
+    if not isinstance(replay_failures, Mapping):
+        replay_failures = {}
     record_rows = record_patch.get("records") if isinstance(record_patch, Mapping) else {}
     if not isinstance(record_rows, Mapping):
         record_rows = {}
@@ -193,6 +237,7 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     reason_records: Counter[str] = Counter()
     current_reason_shards: Counter[str] = Counter()
     current_reason_records: Counter[str] = Counter()
+    partial_repair_states: dict[str, dict[str, int]] = {}
     rows_out: list[dict[str, Any]] = []
 
     quarantine_records = 0
@@ -277,6 +322,34 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
         integrity = manifest.get("integrity") if isinstance(manifest, Mapping) else {}
         integrity = integrity if isinstance(integrity, Mapping) else {}
         gap_count = _count(integrity.get("gap_count"))
+        release = manifest.get("release") if isinstance(manifest, Mapping) else {}
+        release = release if isinstance(release, Mapping) else {}
+        sha256 = str(row.get("sha256") or manifest.get("sha256") or "")
+        size = _count(row.get("bytes") or manifest.get("bytes"))
+        raw_payload_available = (
+            len(sha256) == 64
+            and size > 0
+            and str(
+                row.get("release_repository")
+                or manifest.get("release_repository")
+                or release.get("repository")
+                or ""
+            ) == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+            and bool(row.get("release_tag") or manifest.get("release_tag") or release.get("tag") or release.get("release_tag"))
+            and bool(row.get("release_asset") or manifest.get("release_asset") or release.get("asset_name"))
+        )
+        dataset_id = str(row.get("dataset_id") or "")
+        replay_result = replay_results.get(dataset_id)
+        transient_failure = replay_failures.get(dataset_id)
+        repair_state = _repair_state(
+            current_status,
+            replay_result=replay_result if isinstance(replay_result, Mapping) else None,
+            transient_failure=transient_failure if isinstance(transient_failure, Mapping) else None,
+            manifest_readable=isinstance(manifest, Mapping) and bool(manifest),
+            raw_payload_available=raw_payload_available,
+        )
+        if stored_status in QUARANTINE_STATUSES:
+            _add_bucket(partial_repair_states, repair_state, records=records)
         rows_out.append({
             "collection_queue_drops": drop_count,
             "integrity_gap_count": gap_count,
@@ -285,9 +358,16 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
                 if isinstance(manifest, Mapping) else None
             ),
             "dataset_id": row.get("dataset_id"),
+            "initial_status": stored_status,
             "venue": row.get("venue"),
             "family": row.get("family"),
+            "data_type": row.get("family"),
             "symbol": row.get("symbol"),
+            "start_ts_ms": row.get("start_ts_ms") or manifest.get("start_ts_ms"),
+            "end_ts_ms": row.get("end_ts_ms") or manifest.get("end_ts_ms"),
+            "source": row.get("source") or manifest.get("source"),
+            "bytes": size,
+            "sha256": sha256,
             "record_count": records,
             "quality_status": stored_status,
             "current_classification": current_status,
@@ -297,6 +377,11 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
             "stored_reasons": stored_reasons,
             "current_reasons": list(current_reasons),
             "manifest_path": row.get("manifest_path"),
+            "raw_payload_available": raw_payload_available,
+            "dependencies": _dependencies(manifest if isinstance(manifest, Mapping) else {}),
+            "repair_state": repair_state,
+            "repair_attempted": isinstance(replay_result, Mapping),
+            "temporary_block": transient_failure if isinstance(transient_failure, Mapping) else None,
         })
 
     metric_totals = metrics.get("totals") if isinstance(metrics, Mapping) else {}
@@ -326,6 +411,8 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
         ),
         "source_shard_count": len(shards),
         "non_safe_shard_count": len(rows_out),
+        "partial_inventory_count": actual_partial,
+        "partial_repair_state_counts": dict(sorted(partial_repair_states.items())),
         "quarantined_record_count": quarantine_records,
         "metrics_quarantined_record_count": metric_quarantine_records,
         "quarantine_total_matches_metrics": quarantine_records == metric_quarantine_records,

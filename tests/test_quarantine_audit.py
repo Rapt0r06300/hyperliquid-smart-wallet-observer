@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -112,6 +112,23 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
     assert report["potential_false_non_safe_count"] == 1
     assert report["by_category"]["HISTORICAL_LIVE_RULE_FALSE_QUARANTINE"]["shards"] == 1
     assert report["by_category"]["PARTIAL_EVIDENCE"]["shards"] == 1
+    assert report["partial_inventory_count"] == 2
+    assert report["partial_repair_state_counts"] == {
+        "PENDING": {"shards": 1, "records": 10},
+        "VERIFIED_SAFE_PENDING_RECLASSIFICATION": {"shards": 1, "records": 10},
+    }
+    inventory = {row["dataset_id"]: row for row in report["non_safe_shards"]}
+    row = inventory["historical-real-partial"]
+    assert row["initial_status"] == "PARTIAL"
+    assert row["start_ts_ms"] == 1000
+    assert row["end_ts_ms"] == 2000
+    assert row["source"] == "bybit_official_archive"
+    assert row["bytes"] == 100
+    assert row["sha256"] == "a" * 64
+    assert row["data_type"] == "trades"
+    assert row["raw_payload_available"] is True
+    assert row["repair_state"] == "PENDING"
+    assert row["repair_attempted"] is False
 
 
 

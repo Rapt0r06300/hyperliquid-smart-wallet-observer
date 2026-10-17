@@ -1280,7 +1280,7 @@ def test_repair_stale_v2_partial_only_after_full_raw_preflight(tmp_path, monkeyp
             "dataset_id": "repaired",
             "schema": "alina.shard_manifest.v2",
             "quality_status": "PARTIAL",
-            "quality_reasons": ["STALE_LEGACY_REASON"],
+            "quality_reasons": ["REPLAY_COMPATIBILITY_NOT_PROVEN"],
         },
         {
             "dataset_id": "rejected",
