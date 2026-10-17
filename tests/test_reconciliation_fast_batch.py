@@ -101,6 +101,8 @@ def test_historical_workflow_never_cancels_active_reconciliation() -> None:
     assert "Continue certified historical waves on the same hosted runner" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'push' }}" not in workflow
     assert "runs-on: ubuntu-latest" in workflow
+    assert "fetch-depth: 0" in workflow
+    assert "filter: blob:none" in workflow
     assert "self-hosted" not in workflow.split("runs-on: ubuntu-latest")[1].split("steps:")[0]
 
 
