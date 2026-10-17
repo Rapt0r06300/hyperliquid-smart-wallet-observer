@@ -57,14 +57,41 @@ def select_prefix(tags: list[str], root: Path, *, max_shards: int,
 
 
 def apply_plan(root: Path, tags_file: Path, total_file: Path, env_file: Path,
-               *, max_shards: int, max_manifest_bytes: int) -> tuple[int, int]:
+               *, max_shards: int, max_manifest_bytes: int,
+               max_first_shards: int | None = None) -> tuple[int, int]:
     tags = tags_file.read_text(encoding="utf-8").splitlines()
     total = int(total_file.read_text(encoding="utf-8"))
     if not tags or total < len(tags) or total < 0:
         raise ValueError("invalid candidate/total Release counts")
-    selected, shard_count = select_prefix(
-        tags, root, max_shards=max_shards, max_manifest_bytes=max_manifest_bytes
-    )
+    # Validate *all* names before pruning downloaded, disposable manifests.
+    # select_prefix() may stop early at the byte/shard budget.
+    if any(not TAG.fullmatch(tag) for tag in tags) or len(set(tags)) != len(tags):
+        raise ValueError("invalid or repeated deferred Release tag")
+    if max_first_shards is not None and not (
+        max_shards <= max_first_shards <= 100000
+    ):
+        raise ValueError("invalid bounded first-Release shard cap")
+    try:
+        selected, shard_count = select_prefix(
+            tags, root, max_shards=max_shards,
+            max_manifest_bytes=max_manifest_bytes,
+        )
+    except ValueError as exc:
+        # Exceptional first Release: retry ONLY its exact immutable manifest.
+        # Never skip a candidate or apply the elevated cap to an entire batch.
+        if (max_first_shards is None
+                or "single Release exceeds safe publication budget:" not in str(exc)
+                or max_first_shards == max_shards):
+            raise
+        selected, shard_count = select_prefix(
+            tags[:1], root, max_shards=max_first_shards,
+            max_manifest_bytes=max_manifest_bytes,
+        )
+        print(
+            f"RECONCILE_OVERSIZED_FIRST_RELEASE accepted={selected[0]} "
+            f"shards={shard_count} cap={max_first_shards}",
+            flush=True,
+        )
     if not selected:
         raise ValueError("no durable Release selected")
     # No mutation until the full prefix is validated and within both limits.
@@ -93,11 +120,14 @@ def main() -> None:
     parser.add_argument("--total-file", type=Path, required=True)
     parser.add_argument("--github-env", type=Path, required=True)
     parser.add_argument("--max-shards", type=int, default=50000)
+    parser.add_argument("--max-first-shards", type=int, default=None)
     parser.add_argument("--max-manifest-bytes", type=int, default=80 * 1024 * 1024)
     args = parser.parse_args()
     apply_plan(
         args.root, args.tags_file, args.total_file, args.github_env,
-        max_shards=args.max_shards, max_manifest_bytes=args.max_manifest_bytes
+        max_shards=args.max_shards,
+        max_manifest_bytes=args.max_manifest_bytes,
+        max_first_shards=args.max_first_shards,
     )
 
 

@@ -13993,3 +13993,18 @@ pour les données réellement ajoutées. En présence d'un vrai diff, métriques
 audit de quarantaine et qualité sont recalculés puis validés AVANT tout
 commit. Aucun collecteur, contrat replay-grade, ni garde-fou fail-closed
 n'est modifié par cette optimisation.
+
+
+### 2026-10-17 — Reprise du lot initial après erreur prouvée sur 12 000 shards
+
+Le run #206 a échoué avant indexation parce que sa première Release historique
+excédait la limite de 12 000 shards du sélecteur. Le workflow a ensuite retenu
+un premier lot d'une seule Release et un budget initial de 60 000 shards.
+Pour éviter qu'une Release plus grosse bloque encore le pipeline, le sélecteur
+accepte désormais un plafond exceptionnel explicite de 100 000 shards pour
+cette première Release seulement. L'échec au-delà de ce plafond est
+fail-closed : pas de skip silencieux, pas de marqueur d'import fictif.
+Chaque chemin de Release, y compris différé, est validé avant tout nettoyage
+du cache éphémère, afin d'exclure les traversées de répertoires et les noms
+dupliqués. Toute publication durable reste subordonnée aux mêmes preuves
+SHA, vérifications de qualité et contrôles de push sans force.

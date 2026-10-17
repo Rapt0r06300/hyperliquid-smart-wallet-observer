@@ -290,6 +290,7 @@ jobs:
             --total-file "${TAGS%.*}.count" \
             --github-env "$GITHUB_ENV" \
             --max-shards 60000 \
+            --max-first-shards 100000 \
             --max-manifest-bytes 67108864
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "canonical run manifests selected: $COUNT"
