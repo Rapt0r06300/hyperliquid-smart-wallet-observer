@@ -70,7 +70,20 @@ assert reg["active_dataset"]["validation_allowed"] is (expected_active == "SAFE"
 assert reg["active_dataset"]["proof_of_pnl_allowed"] is False
 assert cat["active_data_status"] == expected_active
 assert int(cat.get("indexed_shard_count") or 0) == len(shards)
-assert int(cat.get("safe_shard_count") or 0) == sum(
-    1 for row in shards if row["quality_status"] == "SAFE"
-)
+# Never certify catalog-wide counters from a SAFE-only spot check.
+# All four shard classes must agree with the exact SHA-bound index.
+from collections import Counter
+counts = Counter(row["quality_status"] for row in shards)
+assert set(counts).issubset({"SAFE", "PARTIAL", "REJECT", "STALE"}), "index contains non-shard status"
+assert sum(counts.values()) == len(shards)
+for status, catalog_key, registry_key in (
+    ("SAFE", "safe_shard_count", "safe_count"),
+    ("PARTIAL", "partial_shard_count", "partial_count"),
+    ("REJECT", "reject_shard_count", "reject_count"),
+    ("STALE", "stale_shard_count", "stale_count"),
+):
+    expected = counts[status]
+    assert cat.get(catalog_key) == expected, f"catalog {status} count differs from index"
+    assert reg["active_dataset"].get(registry_key) == expected, f"registry {status} count differs from index"
+assert reg["active_dataset"].get("indexed_shards") == len(shards)
 print("Alina dataset V2 policy: OK")

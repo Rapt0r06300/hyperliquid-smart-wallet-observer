@@ -30,6 +30,23 @@ def test_active_status_matches_index():
     assert REG["active_dataset"]["proof_of_pnl_allowed"] is False
 
 
+def test_every_status_counter_is_index_bound():
+    from collections import Counter
+
+    counts = Counter(row["quality_status"] for row in INDEX.get("shards") or [])
+    assert set(counts).issubset({"SAFE", "PARTIAL", "REJECT", "STALE"})
+    assert sum(counts.values()) == CAT["indexed_shard_count"]
+    assert REG["active_dataset"]["indexed_shards"] == CAT["indexed_shard_count"]
+    for status, catalog_key, registry_key in (
+        ("SAFE", "safe_shard_count", "safe_count"),
+        ("PARTIAL", "partial_shard_count", "partial_count"),
+        ("REJECT", "reject_shard_count", "reject_count"),
+        ("STALE", "stale_shard_count", "stale_count"),
+    ):
+        assert counts[status] == CAT[catalog_key]
+        assert counts[status] == REG["active_dataset"][registry_key]
+
+
 def test_empty_repository_is_no_data():
     if not (INDEX.get("shards") or []):
         assert INDEX["active_data_status"] == "NO_DATA"
