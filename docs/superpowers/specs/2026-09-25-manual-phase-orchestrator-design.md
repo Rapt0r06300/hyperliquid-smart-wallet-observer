@@ -13733,3 +13733,41 @@ replay-reproducible and backtest-admissible. Labels alone are not evidence. L2
 requires a valid synchronization boundary, sufficient depth/freshness and
 continuous applicable deltas; trades-only evidence cannot claim L2 execution
 replay. Missing observations are never interpolated or fabricated.
+
+
+### 2026-10-17 — Publication des manifests sans arbre Git surdimensionné
+
+La réconciliation historique a rencontré un refus serveur de publication lié
+à un objet Git `tree` surdimensionné (~52,7 Mo), malgré le partitionnement
+déjà validé de `catalog/DATA_INDEX.json`. Le problème distinct vient des
+répertoires plats historiques `datasets/safe`, `datasets/quarantine` et
+`datasets/rejected`, dont les dizaines ou centaines de milliers de reçus
+font grossir l'objet `tree` à chaque nouvel ajout.
+
+Le producteur canonique `tools/index_run_manifest.py` conserve les
+chemins historiques **en lecture**, mais dès qu'un répertoire historique
+contient au moins 4 096 entrées, les nouveaux reçus et leurs mises à jour sont
+écrits dans `datasets/sharded/<stage>/<sha256-id[0:2]>/<sha256-id[2:4]>/<dataset_id>.manifest.json`.
+Le champ `manifest_path` de l'index SHA-bound désigne explicitement le
+nouveau chemin ; les lecteurs doivent continuer à consommer ce chemin exact,
+jamais à supposer un répertoire plat ni à promouvoir des fichiers non indexés.
+La classification SAFE, le replay compatibility check, la mesure des coûts et
+les contrôles fail-closed restent inchangés.
+
+Les anciens reçus plats ne sont ni déplacés ni supprimés par ce correctif :
+cela recréerait immédiatement leur énorme objet Git et risquerait de
+reprovoquer le rejet. Lors d'un changement de classification, une ancienne
+copie plate peut donc rester **non référencée** dans l'historique Git jusqu'à
+une migration/épuration dédiée, réversible et certifiée ; elle n'est pas une
+preuve d'admission au catalogue exploitable. Les reçus sharded obsolètes
+peuvent être enlevés sous contrôle. Il reste impératif de terminer séparément
+la réparation des PARTIAL, la suppression prouvée des irréparables et la
+protection de la base SAFE-only.
+
+Preuves requises avant fermeture : tests de non-régression sur l'intégrité du
+répertoire plat, idempotence et partitionnement déterministe ; run GitHub-hosted
+sur le SHA exact ; publication réelle d'un lot historique ; absence de nouvel
+échec `tree too large` ; vérification du catalogue distant et du backlog.
+La réussite du commit du correctif n'est pas la preuve de la réconciliation.
+Aucune interruption des collecteurs, aucun runner local ou self-hosted et
+aucun ordre réel.
