@@ -164,3 +164,47 @@ def test_invalid_release_never_triggers_budget_growth(tmp_path, monkeypatch) -> 
         module.select_with_bounded_oversized_retry(
             ["invalid"], tmp_path, shard_budget=20000,
         )
+
+
+def test_pending_cache_reuses_exact_git_blob_only(monkeypatch):
+    import tools.continuous_reconcile_backlog as module
+    calls = []
+
+    def fake_read(_):
+        calls.append("read")
+        return {"shards": []}
+
+    monkeypatch.setattr(module, "read_index", fake_read)
+    sha_old = "a" * 40
+    sha_new = "b" * 40
+    expected = ["data-v2-first"]
+    assert module.current_pending(
+        "invalid-inventory-because-cache-is-valid",
+        set(), sha_old, sha_old, expected,
+    ) == expected
+    assert calls == []
+    expected.append("data-v2-mutated")
+    assert module.current_pending(
+        "invalid-inventory-because-cache-is-valid",
+        set(), sha_old, sha_old, expected,
+    ) is not expected
+    assert module.current_pending(
+        "data-v2-fresh\ttrue\n", set(), sha_new, sha_old, expected,
+    ) == ["data-v2-fresh"]
+    assert calls == ["read"]
+
+
+def test_index_blob_sha_requires_exact_git_object_identity(monkeypatch):
+    import subprocess
+    import tools.continuous_reconcile_backlog as module
+    monkeypatch.setattr(
+        module, "run",
+        lambda *args, **kw: subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", ""),
+    )
+    assert module.index_blob_sha() == "a" * 40
+    monkeypatch.setattr(
+        module, "run",
+        lambda *args, **kw: subprocess.CompletedProcess(args, 0, "bad-sha", ""),
+    )
+    with pytest.raises(RuntimeError, match="invalid canonical index"):
+        module.index_blob_sha()
