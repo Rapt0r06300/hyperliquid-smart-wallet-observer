@@ -13836,3 +13836,18 @@ suivant. Le relais n'est déclenché qu'après les checkpoints de ce runner,
 et les tests de la première vague ne sont pas supprimés. Un lot non viable
 reste non-SAFE selon la classification canonique. Aucun PC, aucun runner
 self-hosted, aucun ordre réel.
+
+
+### 2026-10-17 — Reprises de publication des vagues continues
+
+Dans le reconciler continu sur GitHub-hosted, un refus Git normal n'implique
+pas automatiquement une reconstruction coûteuse du catalogue. Le pilote
+vérifie d'abord par fetch et ascendance Git si son SHA est déjà durablement
+sur main (réponse réseau potentiellement perdue). Sinon il tente un rebase
+seulement si tools/rebase_disjoint_catalog_publication.py établit que
+TOUTES les modifications distantes sont des checkpoints de campagnes
+indépendants. Une modification de catalogue, code ou politique refuse
+ce rebase et force une reconstruction fail-closed sur le HEAD réel.
+Tout refus de pack Git continue à réduire le préfixe sans perdre une Release.
+Chaque publication recontrôle l'ascendance Git du SHA exact ; aucun push
+forcé, aucun collecteur interrompu et aucun runner self-hosted.

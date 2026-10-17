@@ -62,6 +62,38 @@ def synced() -> None:
     run("git", "clean", "-fd", "--", "datasets/sharded", "catalog/data-index-parts")
 
 
+def remote_contains_head() -> bool:
+    """Verify publication with Git object ancestry, even after a lost response."""
+    run("git", "fetch", "origin", "main")
+    sha = run("git", "rev-parse", "HEAD").stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("invalid local publication SHA")
+    return run(
+        "git", "merge-base", "--is-ancestor", sha, "origin/main", check=False
+    ).returncode == 0
+
+
+def try_disjoint_campaign_rebase() -> tuple[bool, bool]:
+    """Retry only across previously proven, non-overlapping campaign paths.
+
+    Returns (published, pack_failure). Never force-push and never accept
+    rebase across catalog/data, metadata, or code changes.
+    """
+    for _ in range(5):
+        safe = run(
+            "python", "tools/rebase_disjoint_catalog_publication.py",
+            "--remote", "origin/main", check=False,
+        )
+        if safe.returncode:
+            return False, False
+        pushed = run("git", "push", "--no-thin", "origin", "HEAD:main", check=False)
+        if remote_contains_head():
+            return True, False
+        if PACK.search(pushed.stdout + pushed.stderr):
+            return False, True
+    return False, False
+
+
 def publish(paths: list[Path]) -> int:
     candidates = list(paths)
     for attempt in range(1, 9):
@@ -76,14 +108,22 @@ def publish(paths: list[Path]) -> int:
         run("git", "commit", "-q", "-m", "data: historical V2 checkpoint")
         sha = run("git", "rev-parse", "HEAD").stdout.strip()
         result = run("git", "push", "--no-thin", "origin", "HEAD:main", check=False)
-        if result.returncode == 0:
-            run("git", "fetch", "origin", "main")
-            if run("git", "merge-base", "--is-ancestor", sha, "origin/main", check=False).returncode:
-                raise RuntimeError("GitHub publication SHA not found on main")
+        if remote_contains_head():
+            sha = run("git", "rev-parse", "HEAD").stdout.strip()
             print(f"HISTORICAL_BATCH_PUBLISHED sha={sha} releases={len(candidates)}", flush=True)
             return len(candidates)
         output = result.stderr + result.stdout
-        if PACK.search(output):
+        pack_failure = bool(PACK.search(output))
+        if not pack_failure:
+            rebased, pack_failure = try_disjoint_campaign_rebase()
+            if rebased:
+                sha = run("git", "rev-parse", "HEAD").stdout.strip()
+                print(
+                    f"HISTORICAL_BATCH_PUBLISHED sha={sha} "
+                    f"releases={len(candidates)} disjoint_rebase=verified", flush=True,
+                )
+                return len(candidates)
+        if pack_failure:
             if len(candidates) == 1:
                 raise RuntimeError("single Release pack rejected; do not skip")
             candidates = candidates[:(len(candidates) + 1) // 2]
