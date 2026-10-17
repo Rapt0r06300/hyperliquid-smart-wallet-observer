@@ -13883,3 +13883,16 @@ chevauchement entre les chemins modifiés à distance et ceux publiés localemen
 données, patchs de correction, code, workflow et spec demeurent interdits.
 Rebase non forcé et vérification de l'ascendance SHA restent obligatoires.
 Aucun collecteur n'est interrompu.
+
+
+### 2026-10-17 — Reprise fail-closed d'une Release isolée surdimensionnée
+
+Le pilote continu reprend exactement la première Release en attente lorsque sa
+taille dépasse le budget courant de 20 000 shards : la sélection déterministe
+augmente progressivement et uniquement le plafond temporaire d'import jusqu'à
+100 000 shards, sans sauter la Release ou certifier un statut artificiel. Les
+contrôles SHA-bound/replay-grade et la limite des manifests restent imposés ;
+un dépassement au plafond ultime ou un manifest invalide provoque un refus
+fail-closed. Une augmentation du budget d'index ne garantit jamais que le
+push Git de cette Release sera possible. Aucun ordre réel, aucune dépendance
+au PC et aucune interruption des collecteurs.
