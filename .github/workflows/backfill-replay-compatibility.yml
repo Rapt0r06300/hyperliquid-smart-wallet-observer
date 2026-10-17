@@ -11,12 +11,14 @@ on:
       - 'tools/replay_compatibility.py'
       - 'tools/build_replay_compatibility_reasons.py'
       - 'tools/build_quarantine_audit.py'
+      - 'tools/rebase_disjoint_catalog_publication.py'
       - 'tools/index_run_manifest.py'
       - 'tests/test_manifest_policy.py'
       - 'tests/test_replay_compatibility.py'
       - 'tests/test_backfill_replay_compatibility_candidates.py'
       - 'tests/test_replay_receipt_publish.py'
       - 'tests/test_quarantine_audit.py'
+      - 'tests/test_rebase_disjoint_catalog_publication.py'
       - '.github/workflows/backfill-replay-compatibility.yml'
   schedule:
     - cron: '12,32,52 * * * *'
@@ -126,13 +128,18 @@ jobs:
               echo "Replay proof durably published at $(git rev-parse HEAD)"
               exit 0
             fi
+            git fetch origin main
+            if python tools/rebase_disjoint_catalog_publication.py --remote origin/main \
+                && git push origin HEAD:main; then
+              echo "Replay proof safely rebased across campaign-only checkpoints"
+              exit 0
+            fi
             if [ "$attempt" -eq 8 ]; then
               break
             fi
             # Rebuild on the actual latest main, never git merge/rebase the
             # generated DATA_INDEX. Reapply only immutable receipts whose
             # manifest, source locator, SHA, size and verifier still match.
-            git fetch origin main
             git reset --hard origin/main
             python tools/replay_receipt_publish.py apply "$RECEIPTS"
             python tools/build_replay_compatibility_reasons.py

@@ -11,10 +11,12 @@ on:
       - 'catalog/UNCOMPRESSED_SIZE_PATCH.json'
       - 'tools/build_catalog_metrics.py'
       - 'tools/build_quarantine_audit.py'
+      - 'tools/rebase_disjoint_catalog_publication.py'
       - 'tools/build_collection_metrics.py'
       - 'tools/build_replay_compatibility_reasons.py'
       - 'tests/test_build_replay_compatibility_reasons.py'
       - 'tests/test_collection_metrics.py'
+      - 'tests/test_rebase_disjoint_catalog_publication.py'
       - '.github/workflows/dataset-metrics-v2.yml'
   schedule:
     - cron: '53 * * * *'
@@ -87,6 +89,13 @@ jobs:
             git commit -q -m "data: refresh exact dataset metrics"
             if git push origin HEAD:main; then
               published=true
+              break
+            fi
+            git fetch origin main
+            if python tools/rebase_disjoint_catalog_publication.py --remote origin/main \
+                && git push origin HEAD:main; then
+              published=true
+              echo "Exact metrics safely rebased across campaign-only checkpoints"
               break
             fi
             echo "Concurrent catalog update; rebuilding metrics from latest main (attempt $attempt)."
