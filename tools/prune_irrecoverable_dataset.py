@@ -20,6 +20,7 @@ from typing import Any
 try:
     from tools.index_run_manifest import (
         _atomic_json,
+        _oversized_legacy_stage,
         _publish_canonical_index,
         compact_index_rows,
         hydrate_default_release_repository,
@@ -36,6 +37,7 @@ try:
 except ModuleNotFoundError:
     from index_run_manifest import (
         _atomic_json,
+        _oversized_legacy_stage,
         _publish_canonical_index,
         compact_index_rows,
         hydrate_default_release_repository,
@@ -294,6 +296,38 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
     return receipt
 
 
+def _remove_terminal_receipt(root: Path, manifest_path: str) -> bool:
+    """Unindex verified terminal shards without rewriting huge legacy Git trees.
+
+    When an old flat receipt directory is oversized, the obsolete receipt is
+    preserved as non-admissible history; replay selectors trust only the index.
+    """
+    relative = Path(manifest_path)
+    if (
+        relative.is_absolute()
+        or len(relative.parts) < 3
+        or relative.parts[0] != "datasets"
+        or any(part in (".", "..") for part in relative.parts)
+    ):
+        raise Refuse("DELETION_UNSAFE_MANIFEST_PATH")
+    stage = relative.parts[1]
+    if stage not in ("safe", "quarantine", "rejected", "sharded"):
+        raise Refuse("DELETION_UNKNOWN_RECEIPT_STAGE")
+    target = root / relative
+    if target.is_symlink() or not target.resolve().is_relative_to(
+        (root / "datasets").resolve()
+    ):
+        raise Refuse("DELETION_UNSAFE_RECEIPT_TARGET")
+    # Touching even one historical flat entry would reconstruct the enormous
+    # Git tree that caused the reconciliation publication failure.
+    if len(relative.parts) == 3 and _oversized_legacy_stage(root, stage):
+        return False
+    if target.is_file():
+        target.unlink()
+        return True
+    return False
+
+
 def finalize(receipt_path: Path) -> dict[str, Any]:
     receipt = _load(receipt_path)
     plan = _load(PLAN)
@@ -321,9 +355,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
             for key in ("sha256", "bytes", "quality_status", "manifest_path")
         ):
             raise Refuse("DELETION_FINALIZE_TARGET_CHANGED")
-        manifest = ROOT / str(row.get("manifest_path") or "")
-        if manifest.is_file():
-            manifest.unlink()
+        _remove_terminal_receipt(ROOT, str(row.get("manifest_path") or ""))
         removed.append(expected)
     if len(removed) != len(frozen):
         raise Refuse("DELETION_FINALIZE_INCOMPLETE")
