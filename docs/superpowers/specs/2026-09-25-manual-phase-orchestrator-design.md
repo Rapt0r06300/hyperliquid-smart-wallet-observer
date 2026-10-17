@@ -13851,3 +13851,21 @@ ce rebase et force une reconstruction fail-closed sur le HEAD réel.
 Tout refus de pack Git continue à réduire le préfixe sans perdre une Release.
 Chaque publication recontrôle l'ascendance Git du SHA exact ; aucun push
 forcé, aucun collecteur interrompu et aucun runner self-hosted.
+
+
+### 2026-10-17 — Publication initiale rapide et débit auto-adaptatif
+
+La première publication du reconciler GitHub-hosted est limitée à deux Releases,
+12 000 shards et 16 Mio de RUN_MANIFEST. Elle doit terminer rapidement son
+checkpoint SHA-bound avant d'exécuter la boucle continue sur le même runner.
+Ensuite le pilote examine au plus 24 candidats par vague, commence à 20 000
+shards et augmente son budget après une publication multi-Release prouvée,
+sans dépasser 60 000 shards. Sur refus de pack avec réduction de préfixe,
+il abaisse immédiatement ce budget. Aucune donnée n'est admise sans les
+validations existantes, aucun candidat différé n'est abandonné, et la preuve
+reste l'ascendance Git du commit réellement publié sur main.
+Le nettoyage du checkout éphémère inclut les partitions d'audit générées non
+suivies ; les collecteurs, Releases immuables et anciens manifests ne sont
+pas effacés. Une modification du workflow peut remplacer un reconcileur
+bloqué, sans stopper les collecteurs indépendants. Le débit doit être mesuré
+sur un lot élargi publié avant toute nouvelle promesse de délai.

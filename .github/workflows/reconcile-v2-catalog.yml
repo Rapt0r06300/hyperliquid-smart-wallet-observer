@@ -249,11 +249,10 @@ jobs:
           # Never repeatedly build a lot that cannot fit GitHub's 100 MiB
           # single-blob hard limit. Keep all pending tags discoverable so the
           # next run resumes, and fail closed at the indexer's 85 MiB guard.
-          # Select up to 96 immutable candidate Releases; the deterministic
-          # planner below admits only a bounded prefix. Large Git packs
-          # automatically shrink to a smaller proven prefix before retrying.
-          # Old flat receipt trees are immutable; new receipts are hash-sharded.
-          batch_size = 96
+          # Publish a small verified starter wave so the hosted continuous
+          # reconciler can checkpoint successive adaptive waves promptly.
+          # A huge starter pack previously stalled before the loop could run.
+          batch_size = 2
           batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
@@ -283,8 +282,8 @@ jobs:
             --tags-file "$TAGS" \
             --total-file "${TAGS%.*}.count" \
             --github-env "$GITHUB_ENV" \
-            --max-shards 100000 \
-            --max-manifest-bytes 134217728
+            --max-shards 12000 \
+            --max-manifest-bytes 16777216
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "canonical run manifests selected: $COUNT"
 
@@ -389,7 +388,7 @@ jobs:
               # Failed oversized pushes can leave untracked staged receipts.
               # Cleaning only generated paths in this disposable checkout prevents
               # discarded manifest proofs from leaking into a smaller retry.
-              git clean -fd -- catalog/data-index-parts datasets/sharded >/dev/null
+              git clean -fd -- catalog/data-index-parts catalog/quarantine-audit-parts datasets/sharded >/dev/null
               python tools/index_run_manifest.py "${MANIFESTS[@]}"
               python tools/build_catalog_metrics.py
               python tools/build_quarantine_audit.py

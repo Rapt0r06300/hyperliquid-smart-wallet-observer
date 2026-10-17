@@ -100,3 +100,19 @@ def test_disjoint_rebase_published_requires_remote_ancestry(monkeypatch):
     monkeypatch.setattr(module, "remote_contains_head", lambda: True)
     assert module.try_disjoint_campaign_rebase() == (True, False)
     assert any(args[:3] == ("git", "push", "--no-thin") for args in seen)
+
+
+def test_budget_grows_after_proven_multi_release_publication() -> None:
+    from tools.continuous_reconcile_backlog import next_shard_budget
+    assert next_shard_budget(20000, 4, 4) == 26666
+    assert next_shard_budget(60000, 4, 4) == 60000
+    assert next_shard_budget(20000, 1, 1) == 20000
+
+
+def test_budget_shrinks_on_rejected_pack_and_rejects_missing_proof() -> None:
+    from tools.continuous_reconcile_backlog import next_shard_budget
+    assert next_shard_budget(30000, 6, 3) == 15000
+    assert next_shard_budget(5000, 2, 1) == 5000
+    for args in ((20000, 4, 0), (20000, 4, 5), (4000, 2, 2)):
+        with pytest.raises(ValueError, match="adaptive wave"):
+            next_shard_budget(*args)

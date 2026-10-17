@@ -59,7 +59,8 @@ def synced() -> None:
     run("git", "fetch", "origin", "main")
     run("git", "reset", "--hard", "origin/main")
     # Only untracked generated receipts in this ephemeral GitHub-hosted checkout.
-    run("git", "clean", "-fd", "--", "datasets/sharded", "catalog/data-index-parts")
+    run("git", "clean", "-fd", "--", "datasets/sharded", "catalog/data-index-parts",
+        "catalog/quarantine-audit-parts")
 
 
 def remote_contains_head() -> bool:
@@ -134,6 +135,17 @@ def publish(paths: list[Path]) -> int:
     raise RuntimeError("publication retries exhausted")
 
 
+def next_shard_budget(current: int, requested: int, published: int) -> int:
+    """Increase only after proven full publications; decrease on a pack retry."""
+    if not 5000 <= current <= 60000 or requested < 1 or not 1 <= published <= requested:
+        raise ValueError("invalid adaptive wave progress")
+    if published < requested:
+        return max(5000, current // 2)
+    if published >= 2:
+        return min(60000, current + max(5000, current // 3))
+    return current
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--inventory", type=Path, required=True)
@@ -149,13 +161,14 @@ def main() -> int:
     snapshot = a.inventory.read_text(encoding="utf-8")
     a.work_root.mkdir(parents=True, exist_ok=True)
     waves = 0
+    shard_budget = 20000
     try:
         while waves < a.max_waves and time.monotonic() - start < a.max_minutes * 60:
             synced()
             tags = pending(snapshot, read_index(Path("catalog/DATA_INDEX.json")), quarantine)
             if not tags:
                 break
-            next_tags = tags[:96]
+            next_tags = tags[:24]
             missing = [tag for tag in next_tags if not (a.work_root / tag / "RUN_MANIFEST.json").is_file()]
             if missing:
                 tags_file = a.work_root / "pending-tags.txt"
@@ -164,10 +177,24 @@ def main() -> int:
                     "--repository", REPO, "--destination", str(a.work_root),
                     "--tags-file", str(tags_file), "--attempts", "3",
                     "--poll-seconds", "2", "--workers", "4")
-            selected, shard_count = select_prefix(next_tags, a.work_root,
-                    max_shards=100000, max_manifest_bytes=80 * 1024 * 1024)
-            print(f"HISTORICAL_BATCH_READY wave={waves+1} releases={len(selected)} shards={shard_count}", flush=True)
-            publish([a.work_root / tag / "RUN_MANIFEST.json" for tag in selected])
+            selected, shard_count = select_prefix(
+                next_tags, a.work_root, max_shards=shard_budget,
+                max_manifest_bytes=64 * 1024 * 1024,
+            )
+            print(
+                f"HISTORICAL_BATCH_READY wave={waves+1} releases={len(selected)} "
+                f"shards={shard_count} shard_budget={shard_budget}", flush=True,
+            )
+            published = publish([
+                a.work_root / tag / "RUN_MANIFEST.json" for tag in selected
+            ])
+            shard_budget = next_shard_budget(
+                shard_budget, requested=len(selected), published=published,
+            )
+            print(
+                f"HISTORICAL_ADAPTIVE_PROOF published_releases={published} "
+                f"next_shard_budget={shard_budget}", flush=True,
+            )
             waves += 1
         synced()
         remaining = len(pending(snapshot, read_index(Path("catalog/DATA_INDEX.json")), quarantine))
