@@ -87,6 +87,10 @@ def test_historical_workflow_never_cancels_active_reconciliation() -> None:
     ).read_text(encoding="utf-8")
     assert "group: dataset-v2-catalog-reconcile" in workflow
     assert "cancel-in-progress: false" in workflow
+    assert "batch_size = 1" in workflow
+    assert "--max-shards 60000" in workflow
+    assert "--max-manifest-bytes 67108864" in workflow
+    assert "Continue certified historical waves on the same hosted runner" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'push' }}" not in workflow
     assert "runs-on: ubuntu-latest" in workflow
     assert "self-hosted" not in workflow.split("runs-on: ubuntu-latest")[1].split("steps:")[0]
