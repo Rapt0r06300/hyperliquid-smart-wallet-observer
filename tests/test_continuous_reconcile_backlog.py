@@ -116,3 +116,51 @@ def test_budget_shrinks_on_rejected_pack_and_rejects_missing_proof() -> None:
     for args in ((20000, 4, 0), (20000, 4, 5), (4000, 2, 2)):
         with pytest.raises(ValueError, match="adaptive wave"):
             next_shard_budget(*args)
+
+
+def test_large_first_release_grows_staging_budget_without_skipping(
+    tmp_path, monkeypatch,
+) -> None:
+    import tools.continuous_reconcile_backlog as module
+    attempted = []
+
+    def fake_select(tags, root, *, max_shards, max_manifest_bytes):
+        attempted.append(max_shards)
+        if max_shards < 33000:
+            raise ValueError("single Release exceeds safe publication budget: first")
+        return [tags[0]], 33000
+
+    monkeypatch.setattr(module, "select_prefix", fake_select)
+    assert module.select_with_bounded_oversized_retry(
+        ["first", "second"], tmp_path, shard_budget=20000,
+    ) == (["first"], 33000, 40000)
+    assert attempted == [20000, 40000]
+
+
+def test_oversized_release_fails_closed_at_hard_cap(tmp_path, monkeypatch) -> None:
+    import tools.continuous_reconcile_backlog as module
+    attempted = []
+
+    def fake_select(tags, root, *, max_shards, max_manifest_bytes):
+        attempted.append(max_shards)
+        raise ValueError("single Release exceeds safe publication budget: massive")
+
+    monkeypatch.setattr(module, "select_prefix", fake_select)
+    with pytest.raises(ValueError, match="single Release"):
+        module.select_with_bounded_oversized_retry(
+            ["massive"], tmp_path, shard_budget=20000,
+        )
+    assert attempted == [20000, 40000, 80000, 100000]
+
+
+def test_invalid_release_never_triggers_budget_growth(tmp_path, monkeypatch) -> None:
+    import tools.continuous_reconcile_backlog as module
+
+    def fake_select(tags, root, *, max_shards, max_manifest_bytes):
+        raise ValueError("invalid immutable Release manifest")
+
+    monkeypatch.setattr(module, "select_prefix", fake_select)
+    with pytest.raises(ValueError, match="invalid immutable"):
+        module.select_with_bounded_oversized_retry(
+            ["invalid"], tmp_path, shard_budget=20000,
+        )
