@@ -7,6 +7,10 @@ on:
     paths:
       - '.github/workflows/reconcile-v2-catalog.yml'
       - 'tools/index_run_manifest.py'
+      - 'tools/select_reconciliation_batch.py'
+      - 'tests/test_reconciliation_fast_batch.py'
+      - 'tools/continuous_reconcile_backlog.py'
+      - 'tests/test_continuous_reconcile_backlog.py'
       - 'tools/rebase_disjoint_catalog_publication.py'
       - 'tests/test_rebase_disjoint_catalog_publication.py'
       - 'tools/download_release_manifests.py'

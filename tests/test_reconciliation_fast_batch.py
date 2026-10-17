@@ -87,6 +87,14 @@ def test_historical_workflow_never_cancels_active_reconciliation() -> None:
     ).read_text(encoding="utf-8")
     assert "group: dataset-v2-catalog-reconcile" in workflow
     assert "cancel-in-progress: false" in workflow
+    push_paths = workflow.split("  push:", 1)[1].split("  schedule:", 1)[0]
+    for path in (
+        "tools/select_reconciliation_batch.py",
+        "tests/test_reconciliation_fast_batch.py",
+        "tools/continuous_reconcile_backlog.py",
+        "tests/test_continuous_reconcile_backlog.py",
+    ):
+        assert f"      - '{path}'" in push_paths
     assert "batch_size = 1" in workflow
     assert "--max-shards 60000" in workflow
     assert "--max-manifest-bytes 67108864" in workflow
