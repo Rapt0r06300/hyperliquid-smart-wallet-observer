@@ -13938,3 +13938,18 @@ publication certifiée simplement parce que le budget temporaire était
 supérieur à 60 000. Tout budget dépassant le plafond absolu de 100 000
 reste refusé explicitement (fail-closed). Des tests déterministes couvrent
 la publication normale, le lot réduit et le budget interdit.
+
+
+
+### 2026-10-17 — Conserver les vagues de réconciliation actives malgré les pushes
+
+Le groupe `dataset-v2-catalog-reconcile` demeure le seul écrivain du catalogue
+historique par workflow, et impose `cancel-in-progress: false` y compris pour
+les événements `push`. Un commit de code ne peut plus volontairement interrompre
+une vague longue déjà en cours et jeter ses calculs validés. Les candidats
+supplémentaires attendent un runner disponible et une place dans la file ; la
+validation et les publications restent liées aux SHAs effectivement vérifiés
+sur `main`. Les collecteurs restent dans leurs groupes indépendants, sans
+runner self-hosted ni PC utilisateur. Un test déterministe du workflow empêche
+le retour accidentel de l'annulation des vagues actives. Cette correction
+n'est pas une preuve de fermeture du backlog ni de certification replay-grade.
