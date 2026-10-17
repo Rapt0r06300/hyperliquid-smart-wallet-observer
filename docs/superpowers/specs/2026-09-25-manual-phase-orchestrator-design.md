@@ -13817,3 +13817,22 @@ construction des métriques SHA-bound et le commit Git restent strictement
 sérialisés. Un téléchargement manquant bloque la vague plutôt que de
 supprimer une Release du plan. Le débit réel est à mesurer sur les
 GitHub-hosted runs ; aucun gain n'est présumé.
+
+
+### 2026-10-17 — Réconciliation continue avec checkpoints sur un seul runner
+
+Le workflow GitHub-hosted exécute d'abord une vague avec la suite de tests,
+puis réutilise le même inventaire vérifié des Releases pour traiter jusqu'à
+60 vagues supplémentaires dans une fenêtre de 265 minutes (runner limité à
+345 minutes). Chaque vague conserve les limites de 96 Releases candidates,
+100 000 shards et 80 Mio de RUN_MANIFESTs ; chaque publication revalide
+l'index partitionné, les métriques SHA-bound et l'audit de quarantaine,
+réalise un vrai commit non vide avec push non forcé et vérifie l'ascendance
+du SHA publié sur main. Une erreur de pack réduit la vague de moitié ;
+un conflit reconstruit sur le dernier main sans réécrire les collecteurs.
+Le backlog découvert au début est consommé sans sauter de tags ; les nouveaux
+assets publiés entre-temps sont redécouverts par l'inventaire du runner
+suivant. Le relais n'est déclenché qu'après les checkpoints de ce runner,
+et les tests de la première vague ne sont pas supprimés. Un lot non viable
+reste non-SAFE selon la classification canonique. Aucun PC, aucun runner
+self-hosted, aucun ordre réel.

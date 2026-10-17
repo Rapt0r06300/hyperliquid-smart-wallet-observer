@@ -344,7 +344,7 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q             tests/test_partitioned_data_index.py             tests/test_restore_alina.py             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_reconciliation_fast_batch.py             tests/test_collection_metrics.py
+          python -m pytest -q             tests/test_partitioned_data_index.py             tests/test_restore_alina.py             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_reconciliation_fast_batch.py             tests/test_continuous_reconcile_backlog.py             tests/test_collection_metrics.py
           # Tests must never become publication inputs. Rebuild every derived
           # control-plane receipt after the suite, then prove that metrics are
           # bound to the exact partitioned index bytes and complete shard set.
@@ -449,6 +449,18 @@ jobs:
             echo "::error::Reconciliation not published after bounded retries and adaptive pack reductions"
             exit 1
           fi
+
+      - name: Continue certified historical waves on the same hosted runner
+        if: env.RUN_MANIFEST_COUNT != '0'
+        env:
+          ALINA_CATALOG_PARTITION_ACTIVATE: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/continuous_reconcile_backlog.py \
+            --inventory "$RUNNER_TEMP/v2-all-release-tags.txt" \
+            --work-root "$RUNNER_TEMP/alina-checkpointed-manifests" \
+            --max-minutes 265 --max-waves 60
 
       - name: Dispatch health receipts after durable catalog publication
         if: env.RUN_MANIFEST_COUNT != '0'
