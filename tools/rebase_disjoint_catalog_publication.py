@@ -67,7 +67,7 @@ def main() -> int:
         # (e.g. tests regenerate a health receipt). In that case never rebase:
         # its Git path overlaps, even if its semantic role is only reporting.
         ours_raw = git("diff", "--name-only", "-z", parent, "HEAD").stdout
-        ours = {part.decode("utf-8") for part in ours_raw.split(b"\\0") if part}
+        ours = {part.decode("utf-8") for part in ours_raw.split(b"\0") if part}
         overlapping = sorted(ours.intersection(paths))
         if overlapping:
             raise ValueError(f"remote overlaps publication: {overlapping[:10]}")
