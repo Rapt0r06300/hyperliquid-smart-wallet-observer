@@ -1,46 +1,46 @@
 {
-  "dataset_v2_head": "e0fe1ae1550e439123b333b16a732470a3bf62c8",
-  "generated_at_utc": "2026-10-17T19:46:27.071497Z",
+  "dataset_v2_head": "3c89dffecb451e3f458928817598d823587962f7",
+  "generated_at_utc": "2026-10-17T19:55:22.529869Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "a1038085c74f5878011636b680fc90444cce5b06607acee47457897715d272e9",
-      "output_tail": "................................F...............F.....                   [100%]\n=================================== FAILURES ===================================\n____ test_reconcile_covers_all_production_release_families_and_pins_actions ____\n\n    def test_reconcile_covers_all_production_release_families_and_pins_actions():\n        text = _workflow(\"reconcile-v2-catalog.yml\")\n        assert \"event-intelligence-v2-\" in text\n        assert \"data-v2-\" in text\n        assert \"--attempts 3\" in text\n        assert \"--poll-seconds 2\" in text\n        assert \"--list-tags-output\" in text\n>       assert \"--list-page-size 50\" in text\nE       assert '--list-page-size 50' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\n\ntests/test_workflow_bounds.py:204: AssertionError\n_____ test_reconcile_near_limit_uses_one_release_without_dropping_backlog ______\n\n    def test_reconcile_near_limit_uses_one_release_without_dropping_backlog():\n        text = _workflow(\"reconcile-v2-catalog.yml\")\n>       assert \"if indexed_bytes >= 75 * 1024 * 1024:\" in text\nE       assert 'if indexed_bytes >= 75 * 1024 * 1024:' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\n\ntests/test_workflow_bounds.py:397: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_reconcile_covers_all_production_release_families_and_pins_actions - assert '--list-page-size 50' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\nFAILED tests/test_workflow_bounds.py::test_reconcile_near_limit_uses_one_release_without_dropping_backlog - assert 'if indexed_bytes >= 75 * 1024 * 1024:' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\n2 failed, 52 passed in 1.49s\n",
+      "output_sha256": "cd50e803c6a115a9cbc0af0b4a393e8f66ddefd617b8517a49e4a3b57bf0b2eb",
+      "output_tail": "................................F...............F.....                   [100%]\n=================================== FAILURES ===================================\n____ test_reconcile_covers_all_production_release_families_and_pins_actions ____\n\n    def test_reconcile_covers_all_production_release_families_and_pins_actions():\n        text = _workflow(\"reconcile-v2-catalog.yml\")\n        assert \"event-intelligence-v2-\" in text\n        assert \"data-v2-\" in text\n        assert \"--attempts 3\" in text\n        assert \"--poll-seconds 2\" in text\n        assert \"--list-tags-output\" in text\n>       assert \"--list-page-size 50\" in text\nE       assert '--list-page-size 50' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\n\ntests/test_workflow_bounds.py:204: AssertionError\n_____ test_reconcile_near_limit_uses_one_release_without_dropping_backlog ______\n\n    def test_reconcile_near_limit_uses_one_release_without_dropping_backlog():\n        text = _workflow(\"reconcile-v2-catalog.yml\")\n>       assert \"if indexed_bytes >= 75 * 1024 * 1024:\" in text\nE       assert 'if indexed_bytes >= 75 * 1024 * 1024:' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\n\ntests/test_workflow_bounds.py:397: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_reconcile_covers_all_production_release_families_and_pins_actions - assert '--list-page-size 50' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\nFAILED tests/test_workflow_bounds.py::test_reconcile_near_limit_uses_one_release_without_dropping_backlog - assert 'if indexed_bytes >= 75 * 1024 * 1024:' in 'name: reconcile-v2-catalog\\nrun-name: \\'Dataset principal | reconciliation des Releases\\'\\n\\non:\\n  push:\\n    branch...l\\n          gh workflow run reconcile-v2-catalog.yml             --repo \"$GITHUB_REPOSITORY\"             --ref main\\n'\n2 failed, 52 passed in 2.17s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "69983d5f7d7fb2b67863dcdd8a49a4ad3ba585db4f7c321e65c991f65a48180f",
-      "output_tail": "........................................................                 [100%]\n56 passed in 1.99s\n",
+      "output_sha256": "6fbc846a1a732dd7f30a9815b8ffad5dcf7423b3a88b7b71db3073724c71f4cc",
+      "output_tail": "........................................................                 [100%]\n56 passed in 2.94s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_certification_and_replay_policy",
-      "output_sha256": "fd5a61af4c8c2ecfbb012f2b3af7e952671ec1764440d5afd7a6f074b4310f9c",
-      "output_tail": "........................................................................ [ 78%]\n....................                                                     [100%]\n92 passed in 2.79s\n",
+      "output_sha256": "9602fec14e1a2dac9be98f6898d606d864dacde463e1acad85588d43b5da74a8",
+      "output_tail": "........................................................................ [ 78%]\n....................                                                     [100%]\n92 passed in 3.98s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "fce36b5350e639ccfd8f1f596b5c5a2936bd36626108330626f0bd508d460c01",
-      "output_tail": ".........                                                                [100%]\n9 passed in 0.72s\n",
+      "output_sha256": "c0550b6229ae20f913d9972d30606eb4d69e38c3c596bec13370e8d9c05ed428",
+      "output_tail": ".........                                                                [100%]\n9 passed in 1.08s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "b9a067c1938d3d12b991e5839562ca00d4393664e1f4d172d4167da60f375d55",
-      "output_tail": "..................................................                       [100%]\n50 passed in 1.91s\n",
+      "output_sha256": "2814a000d2aac5b585c6bf9d679a9f94dd2fab2c1fc646d1db9b2cab65db92c0",
+      "output_tail": "..................................................                       [100%]\n50 passed in 2.62s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "763b3c572f10d3d04a6235afe06d451bc2cb064d947729fc9047a9ca347a25ab",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/applications.py:4745: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 3.24s\n",
+      "output_sha256": "56f4d245a2f376f894e106987680cd5cef97d88885ff32003dd2910bc0797db4",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/applications.py:4745: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 4.42s\n",
       "returncode": 0,
       "status": "PASS"
     },
@@ -52,17 +52,17 @@
       "status": "PASS"
     }
   ],
-  "main_alina_head": "e0fe1ae1550e439123b333b16a732470a3bf62c8",
+  "main_alina_head": "3c89dffecb451e3f458928817598d823587962f7",
   "paper_only": true,
   "python_version": "3.12.15",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "7ac0377f81bcb47b7e1916e7b92fc6321db47d5df61df3b5fe1ca887be24e09e",
+  "receipt_digest": "72a467b6c177316ff60b1f2f65afd7d8a06ea244178126c7e982c066bc3fa1b1",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "39063698081"
+  "workflow_run_id": "39064291189"
 }
