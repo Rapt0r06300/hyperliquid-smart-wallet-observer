@@ -13911,3 +13911,17 @@ système. Les rapports de progression indiquent le débit prouvé et le backlog
 correspondant à l'inventaire de départ ; toute estimation de délai reste
 conditionnelle à la couverture complète de cet inventaire et à l'intégrité
 des Releases.
+
+
+### 2026-10-17 — Interdiction des Releases mises en quarantaine pendant les vagues
+
+Le cache intra-runner indexé par SHA ne dispense jamais de vérifier les
+Releases nouvellement mises en quarantaine. Le pilote recharge la politique
+`control/legacy-release-migration.json` après chaque synchronisation de
+`main`, invalide son cache si la liste change, et recontrôle tous les tags du
+préfixe immédiatement avant l'import. Si une Release est désormais interdite,
+la vague échoue en mode fail-closed avant toute modification du catalogue.
+Les tags mal formés ou une politique mal formée provoquent aussi un refus.
+La séquence de publication non forcée vérifie toujours le SHA descendant
+sur `main`. Aucune suppression de données historiques ni interruption
+des collecteurs ne découle de ce garde-fou.
