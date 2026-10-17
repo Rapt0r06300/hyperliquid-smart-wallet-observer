@@ -94,3 +94,21 @@ def test_historical_workflow_never_cancels_active_reconciliation() -> None:
     assert "cancel-in-progress: ${{ github.event_name == 'push' }}" not in workflow
     assert "runs-on: ubuntu-latest" in workflow
     assert "self-hosted" not in workflow.split("runs-on: ubuntu-latest")[1].split("steps:")[0]
+
+
+def test_noop_compaction_skips_redundant_global_metrics() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github" / "workflows" / "reconcile-v2-catalog.yml"
+    ).read_text(encoding="utf-8")
+    diagnostic = workflow.split(
+        "- name: Measure canonical index field weights before reconciliation", 1
+    )[1].split("- name: Compact existing canonical index before growing it", 1)[0]
+    assert "if: github.event_name == 'workflow_dispatch'" in diagnostic
+    segment = workflow.split(
+        "- name: Compact existing canonical index before growing it", 1
+    )[1].split("- name: Download new Dataset principal run manifests", 1)[0]
+    assert segment.index("git add catalog") < segment.index("if git diff --cached --quiet")
+    assert segment.index("if git diff --cached --quiet") < segment.index("python tools/build_catalog_metrics.py")
+    assert segment.index("python tools/check_dataset_quality.py") < segment.index('git commit -m "data: losslessly compact canonical run locators"')
+    assert "git reset --hard origin/main" in segment

@@ -13979,3 +13979,17 @@ réparables restent protégés. L'objectif final de nettoyage des métadonnées
 historiques non référencées exige une migration prouvée distincte ; la
 suppression logique ne doit jamais être présentée comme une suppression
 historique totale de tous les objets Git.
+
+
+### 2026-10-17 — Recalcul pré-import proportionné aux changements vérifiés
+
+Le diagnostic de poids des champs du catalogue est réservé aux lancements
+manuels. Lors de la compaction pré-import, après fetch et reset sur main,
+le diff Git de l'index compacté est contrôlé AVANT le recalcul global des
+métriques et des audits. Si aucun fichier de catalogue n'a changé, le
+recalcul redondant est omis : la validation qualité SAFE de la source a
+déjà réussi lors du préflight, et la phase d'import reconstruira les preuves
+pour les données réellement ajoutées. En présence d'un vrai diff, métriques,
+audit de quarantaine et qualité sont recalculés puis validés AVANT tout
+commit. Aucun collecteur, contrat replay-grade, ni garde-fou fail-closed
+n'est modifié par cette optimisation.

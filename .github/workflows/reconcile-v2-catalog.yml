@@ -127,6 +127,8 @@ jobs:
           echo "ALINA_CATALOG_PARTITION_ACTIVATE=true" >> "$GITHUB_ENV"
 
       - name: Measure canonical index field weights before reconciliation
+        # Diagnostic only; 500k+ row field inventory is unnecessary on every automatic relay.
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -147,15 +149,18 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             python tools/index_run_manifest.py --compact-existing
-            python tools/build_catalog_metrics.py
-            python tools/build_quarantine_audit.py
-            python tools/check_dataset_quality.py
             git add catalog
+            # Preflight already checked the baseline SAFE catalog. Only a
+            # changed canonical index needs derived proof regeneration here.
             if git diff --cached --quiet; then
               echo "Existing catalog already compacted; no empty commit."
               published=true
               break
             fi
+            python tools/build_catalog_metrics.py
+            python tools/build_quarantine_audit.py
+            python tools/check_dataset_quality.py
+            git add catalog
             git commit -m "data: losslessly compact canonical run locators"
             if git push origin HEAD:main; then
               echo "Lossless index compaction durably published."
