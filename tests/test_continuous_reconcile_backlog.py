@@ -208,3 +208,35 @@ def test_index_blob_sha_requires_exact_git_object_identity(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="invalid canonical index"):
         module.index_blob_sha()
+
+
+def test_new_quarantine_blocks_old_selected_release(tmp_path, monkeypatch) -> None:
+    import json
+    import tools.continuous_reconcile_backlog as module
+    monkeypatch.chdir(tmp_path)
+    control = tmp_path / "control"
+    control.mkdir()
+    policy = control / "legacy-release-migration.json"
+    policy.write_text(json.dumps({"quarantined_tags": ["data-v2-bad"]}), encoding="utf-8")
+    assert module.load_current_quarantine() == {"data-v2-bad"}
+    with pytest.raises(ValueError, match="quarantined Releases"):
+        module.enforce_quarantine_before_import([
+            tmp_path / "data-v2-bad" / "RUN_MANIFEST.json",
+            tmp_path / "data-v2-good" / "RUN_MANIFEST.json",
+        ])
+    module.enforce_quarantine_before_import([
+        tmp_path / "data-v2-good" / "RUN_MANIFEST.json"
+    ])
+
+
+def test_malformed_quarantine_policy_is_fail_closed(tmp_path, monkeypatch) -> None:
+    import json
+    import tools.continuous_reconcile_backlog as module
+    monkeypatch.chdir(tmp_path)
+    control = tmp_path / "control"
+    control.mkdir()
+    policy = control / "legacy-release-migration.json"
+    for invalid in (["../escape"], "string-instead-of-list", [43]):
+        policy.write_text(json.dumps({"quarantined_tags": invalid}), encoding="utf-8")
+        with pytest.raises(ValueError, match="invalid quarantined"):
+            module.load_current_quarantine()
