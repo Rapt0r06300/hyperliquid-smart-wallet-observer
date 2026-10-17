@@ -674,3 +674,48 @@ def test_measurement_writers_keep_index_alias_factorization():
             "data-v2-shared": "run-repeated"
         }
         assert hydrate_default_release_repository(index) == original
+
+
+def test_reconciliation_does_not_rewrite_oversized_legacy_git_tree(tmp_path, monkeypatch) -> None:
+    import index_run_manifest as module
+
+    root = _bootstrap_root(tmp_path)
+    monkeypatch.setattr(module, "_LEGACY_FLAT_TREE_THRESHOLD", 3)
+    legacy = root / "datasets/safe"
+    immutable = {}
+    for i in range(3):
+        path = legacy / f"legacy-{i}.manifest.json"
+        path.write_text(f'{{"legacy":{i}}}', encoding="utf-8")
+        immutable[path.name] = path.read_bytes()
+
+    run = tmp_path / "RUN_MANIFEST.json"
+    _write_run(run, [_manifest(
+        family="l2Book", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+        dataset_id="fresh-sharded-receipt",
+    )])
+    module.index_run_manifests([run], root=root)
+    index = json.loads((root / "catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
+    [row] = index["shards"]
+    assert row["quality_status"] == "SAFE"
+    assert row["manifest_path"].startswith("datasets/sharded/safe/")
+    assert (root / row["manifest_path"]).is_file()
+    assert {p.name: p.read_bytes() for p in legacy.iterdir()} == immutable
+
+    # Idempotent re-import: no legacy-tree modification, stable indexed path.
+    module.index_run_manifests([run], root=root)
+    reread = json.loads((root / "catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
+    assert reread["shards"][0]["manifest_path"] == row["manifest_path"]
+    assert {p.name: p.read_bytes() for p in legacy.iterdir()} == immutable
+
+
+def test_sharded_receipt_is_deterministic_and_bounded(tmp_path) -> None:
+    import index_run_manifest as module
+
+    root = _bootstrap_root(tmp_path)
+    path = module._sharded_receipt_path(root, "safe", "example")
+    relative = path.relative_to(root).parts
+    assert relative[:3] == ("datasets", "sharded", "safe")
+    assert len(relative[3]) == len(relative[4]) == 2
+    assert relative[-1] == "example.manifest.json"
+    assert path == module._sharded_receipt_path(root, "safe", "example")
+    assert path != module._sharded_receipt_path(root, "safe", "different")

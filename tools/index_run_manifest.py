@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -77,6 +78,39 @@ _STAGE_BY_STATUS = {
     "REJECT": "rejected",
     "NO_DATA": "incoming",
 }
+
+# Legacy manifests are already stored in very large flat Git directories.
+# Adding one more file rewrites the entire tree object (> GitHub's accepted
+# push-object size). Keep these immutable trees untouched and publish NEW or
+# updated receipts in bounded hash buckets outside the legacy directories.
+_LEGACY_FLAT_TREE_THRESHOLD = 4096
+
+
+def _oversized_legacy_stage(base: Path, stage: str) -> bool:
+    directory = base / "datasets" / stage
+    if not directory.is_dir():
+        return False
+    with os.scandir(directory) as entries:
+        for number, _ in enumerate(entries, start=1):
+            if number >= _LEGACY_FLAT_TREE_THRESHOLD:
+                return True
+    return False
+
+
+def _sharded_receipt_path(base: Path, stage: str, dataset_id: str) -> Path:
+    digest = hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()
+    return (
+        base / "datasets" / "sharded" / stage / digest[:2] / digest[2:4]
+        / f"{dataset_id}.manifest.json"
+    )
+
+
+def _receipt_destination(
+    base: Path, stage: str, dataset_id: str, oversized: Mapping[str, bool],
+) -> Path:
+    if oversized.get(stage):
+        return _sharded_receipt_path(base, stage, dataset_id)
+    return base / "datasets" / stage / f"{dataset_id}.manifest.json"
 
 
 def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -573,6 +607,10 @@ def index_run_manifests(
         for key, old_row in rows_by_id.items()
     }
 
+    oversized_stages = {
+        stage: _oversized_legacy_stage(base, stage)
+        for stage in set(_STAGE_BY_STATUS.values())
+    }
     imported = 0
     statuses: dict[str, int] = {}
     pending_manifests: dict[str, tuple[Path, dict[str, Any]]] = {}
@@ -622,11 +660,8 @@ def index_run_manifests(
             # Stage changes in memory first: the canonical index size guard
             # must fire before we move or overwrite any immutable shard
             # classification receipts in this checkout.
-            destination = (
-                base
-                / "datasets"
-                / _STAGE_BY_STATUS[status]
-                / f"{dataset_id}.manifest.json"
+            destination = _receipt_destination(
+                base, _STAGE_BY_STATUS[status], dataset_id, oversized_stages
             )
             pending_manifests[dataset_id] = (destination, manifest)
             rows_by_id[dataset_id] = _compact_index_row(
@@ -665,9 +700,16 @@ def index_run_manifests(
     for dataset_id, (destination, manifest) in pending_manifests.items():
         _atomic_json(destination, manifest)
         for stage in set(_STAGE_BY_STATUS.values()):
-            stale = base / "datasets" / stage / f"{dataset_id}.manifest.json"
-            if stale != destination and stale.exists():
-                stale.unlink()
+            # Removing a legacy flat file would recreate the same oversize
+            # Git tree. Leave that immutable receipt unreferenced until a
+            # separately verified migration; selectors trust manifest_path.
+            if not oversized_stages[stage]:
+                legacy = base / "datasets" / stage / f"{dataset_id}.manifest.json"
+                if legacy != destination and legacy.exists():
+                    legacy.unlink()
+            sharded = _sharded_receipt_path(base, stage, dataset_id)
+            if sharded != destination and sharded.exists():
+                sharded.unlink()
 
     safe_count = sum(1 for row in shards if row.get("quality_status") == "SAFE")
     partial_count = sum(1 for row in shards if row.get("quality_status") == "PARTIAL")
