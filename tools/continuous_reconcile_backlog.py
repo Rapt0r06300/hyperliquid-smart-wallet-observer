@@ -19,6 +19,8 @@ except ModuleNotFoundError:
 
 REPO = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 PREFIX = ("data-v2-", "copy-vault-v2-", "archive-v2-", "event-intelligence-v2-")
+INITIAL_RELEASE_WINDOW = 24
+MAX_RELEASE_WINDOW = 96
 TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PACK = re.compile(r"remote unpack failed|index-pack failed|tree.{0,80}too large|pack exceeds|pack.{0,80}too large|unpacker error", re.I)
 
@@ -180,6 +182,22 @@ def next_shard_budget(current: int, requested: int, published: int) -> int:
     return steady
 
 
+def next_release_window(current: int, requested: int, published: int) -> int:
+    """Increase tag prefetch only after durable multi-Release batches.
+
+    Immutable manifest and shard budgets still decide the admitted prefix.
+    A GitHub pack rejection reduces future prefetch; no tag is skipped.
+    """
+    if (not INITIAL_RELEASE_WINDOW <= current <= MAX_RELEASE_WINDOW
+            or requested < 1 or not 1 <= published <= requested):
+        raise ValueError("invalid adaptive Release window progress")
+    if published < requested:
+        return max(INITIAL_RELEASE_WINDOW, current // 2)
+    if published >= 2:
+        return min(MAX_RELEASE_WINDOW, current * 2)
+    return current
+
+
 def load_current_quarantine() -> set[str]:
     """Reload the live, typed quarantine policy from the synced checkout."""
     path = Path("control/legacy-release-migration.json")
@@ -238,6 +256,7 @@ def main() -> int:
     a.work_root.mkdir(parents=True, exist_ok=True)
     waves = 0
     shard_budget = 20000
+    release_window = INITIAL_RELEASE_WINDOW
     cache_blob_sha: str | None = None
     cache_tags: list[str] | None = None
     cache_quarantine: frozenset[str] | None = None
@@ -255,7 +274,7 @@ def main() -> int:
             )
             if not tags:
                 break
-            next_tags = tags[:24]
+            next_tags = tags[:release_window]
             missing = [tag for tag in next_tags if not (a.work_root / tag / "RUN_MANIFEST.json").is_file()]
             if missing:
                 tags_file = a.work_root / "pending-tags.txt"
@@ -278,6 +297,9 @@ def main() -> int:
             shard_budget = next_shard_budget(
                 shard_budget, requested=len(selected), published=published,
             )
+            release_window = next_release_window(
+                release_window, requested=len(selected), published=published,
+            )
             # Publication is already SHA-verified by publish(). Drop only its
             # proven prefix, then pin this cache to the local published index
             # blob. Any concurrent index update invalidates it next iteration.
@@ -289,7 +311,7 @@ def main() -> int:
             elapsed_minutes = max((time.monotonic() - start) / 60, 1e-6)
             print(
                 f"HISTORICAL_ADAPTIVE_PROOF published_releases={published} "
-                f"next_shard_budget={shard_budget} "
+                f"next_shard_budget={shard_budget} release_window={release_window} "
                 f"total_published_this_runner={completed_releases} "
                 f"snapshot_remaining={len(cache_tags)} "
                 f"throughput_releases_per_hour={completed_releases * 60 / elapsed_minutes:.2f}",

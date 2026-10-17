@@ -223,3 +223,22 @@ def test_oversized_staging_budget_returns_to_safe_steady_state() -> None:
     # Over the absolute staging cap is forbidden, not silently clamped.
     with pytest.raises(ValueError, match="invalid adaptive wave"):
         next_shard_budget(100001, requested=1, published=1)
+
+
+def test_release_window_expands_only_after_durable_multi_release_proof() -> None:
+    from tools.continuous_reconcile_backlog import next_release_window
+    assert next_release_window(24, requested=12, published=12) == 48
+    assert next_release_window(48, requested=30, published=30) == 96
+    assert next_release_window(96, requested=30, published=30) == 96
+    assert next_release_window(24, requested=1, published=1) == 24
+
+
+def test_release_window_recovers_from_rejected_pack_without_skipping() -> None:
+    from tools.continuous_reconcile_backlog import next_release_window
+    assert next_release_window(96, requested=50, published=25) == 48
+    assert next_release_window(48, requested=10, published=5) == 24
+    assert next_release_window(24, requested=10, published=5) == 24
+    for args in ((23, 2, 2), (97, 2, 2), (24, 0, 0), (24, 4, 0),
+                 (24, 2, 3)):
+        with pytest.raises(ValueError, match="adaptive Release window"):
+            next_release_window(*args)
