@@ -77,3 +77,16 @@ def test_byte_budget_bounds_prefix_even_when_shard_budget_has_room(tmp_path: Pat
         max_manifest_bytes=bytes_first,
     ) == (["a"], 2)
     assert (tmp_path / "b" / "RUN_MANIFEST.json").is_file()
+
+
+
+def test_historical_workflow_never_cancels_active_reconciliation() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github" / "workflows" / "reconcile-v2-catalog.yml"
+    ).read_text(encoding="utf-8")
+    assert "group: dataset-v2-catalog-reconcile" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'push' }}" not in workflow
+    assert "runs-on: ubuntu-latest" in workflow
+    assert "self-hosted" not in workflow.split("runs-on: ubuntu-latest")[1].split("steps:")[0]
