@@ -78,7 +78,7 @@ jobs:
           print(verify_metrics_source())
           PY
             python tools/check_dataset_quality.py
-            git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
+            git add -A catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json catalog/quarantine-audit-parts
             if git diff --cached --quiet; then
               echo "Metrics already match the current catalog."
               published=true

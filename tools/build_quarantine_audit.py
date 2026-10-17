@@ -21,6 +21,9 @@ except ModuleNotFoundError:
     from partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
+PARTITION_SCHEMA = "alina.quarantine_audit_partitioned.v1"
+PARTITION_DIRECTORY = "quarantine-audit-parts"
+MAX_PARTITION_BYTES = 8 * 1024 * 1024
 QUARANTINE_STATUSES = {"PARTIAL", "QUARANTINE", "QUARANTINED"}
 REJECT_STATUSES = {"REJECT", "REJECTED"}
 NON_SAFE_STATUSES = QUARANTINE_STATUSES | REJECT_STATUSES | {"STALE"}
@@ -523,6 +526,143 @@ def compact_root_causes(audit: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _canonical_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ) + "\n"
+    ).encode("utf-8")
+
+
+def write_partitioned_audit(
+    output: Path,
+    body: Mapping[str, Any],
+    *,
+    max_partition_bytes: int = MAX_PARTITION_BYTES,
+) -> dict[str, Any]:
+    """Persist the exhaustive inventory without creating a >100 MiB Git blob."""
+    if not 1024 <= max_partition_bytes <= MAX_PARTITION_BYTES:
+        raise ValueError("QUARANTINE_PARTITION_INVALID_LIMIT")
+    rows = body.get("non_safe_shards")
+    if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        raise ValueError("QUARANTINE_PARTITION_INVALID_ROWS")
+    if len(rows) != body.get("non_safe_shard_count"):
+        raise ValueError("QUARANTINE_PARTITION_COUNT_MISMATCH")
+
+    parts_dir = output.parent / PARTITION_DIRECTORY
+    if parts_dir.is_symlink():
+        raise ValueError("QUARANTINE_PARTITION_UNSAFE_DIRECTORY")
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    for stale in parts_dir.glob("part-*.json"):
+        if stale.is_symlink() or not stale.is_file():
+            raise ValueError("QUARANTINE_PARTITION_UNSAFE_STALE_FILE")
+        stale.unlink()
+
+    descriptors: list[dict[str, Any]] = []
+    batch: list[Mapping[str, Any]] = []
+    batch_bytes = 3  # opening/closing brackets plus trailing newline
+
+    def flush() -> None:
+        nonlocal batch, batch_bytes
+        if not batch:
+            return
+        data = _canonical_bytes(batch)
+        if len(data) > max_partition_bytes:
+            raise ValueError("QUARANTINE_PARTITION_OVERSIZE")
+        name = f"part-{len(descriptors) + 1:06d}.json"
+        target = parts_dir / name
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_bytes(data)
+        temporary.replace(target)
+        descriptors.append({
+            "path": f"{PARTITION_DIRECTORY}/{name}",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+            "row_count": len(batch),
+        })
+        batch = []
+        batch_bytes = 3
+
+    for raw in rows:
+        row = dict(raw)
+        encoded_bytes = len(_canonical_bytes(row)) - 1
+        added_bytes = encoded_bytes + (1 if batch else 0)
+        if batch and batch_bytes + added_bytes > max_partition_bytes:
+            flush()
+            added_bytes = encoded_bytes
+        if batch_bytes + added_bytes > max_partition_bytes:
+            raise ValueError("QUARANTINE_PARTITION_SINGLE_ROW_OVERSIZE")
+        batch.append(row)
+        batch_bytes += added_bytes
+    flush()
+
+    root = {key: value for key, value in body.items() if key != "non_safe_shards"}
+    root.update({
+        "schema": PARTITION_SCHEMA,
+        "legacy_schema": body.get("schema"),
+        "non_safe_shards_materialized": False,
+        "partition_max_bytes": max_partition_bytes,
+        "partition_count": len(descriptors),
+        "partitions": descriptors,
+    })
+    data = json.dumps(root, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    temporary.write_text(data, encoding="utf-8")
+    temporary.replace(output)
+    return root
+
+
+def read_partitioned_audit(output: Path) -> dict[str, Any]:
+    """Reconstruct and verify an exhaustive persisted audit, fail closed."""
+    root = _load(output)
+    if not isinstance(root, Mapping) or root.get("schema") != PARTITION_SCHEMA:
+        raise ValueError("QUARANTINE_PARTITION_INVALID_ROOT")
+    descriptors = root.get("partitions")
+    if not isinstance(descriptors, list):
+        raise ValueError("QUARANTINE_PARTITION_INVALID_DESCRIPTORS")
+    rows: list[dict[str, Any]] = []
+    for number, descriptor in enumerate(descriptors, 1):
+        if not isinstance(descriptor, Mapping):
+            raise ValueError("QUARANTINE_PARTITION_INVALID_DESCRIPTOR")
+        expected = f"{PARTITION_DIRECTORY}/part-{number:06d}.json"
+        if descriptor.get("path") != expected:
+            raise ValueError("QUARANTINE_PARTITION_NONCANONICAL_SEQUENCE")
+        path = output.parent / expected
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("QUARANTINE_PARTITION_MISSING_FILE")
+        data = path.read_bytes()
+        if (
+            len(data) != descriptor.get("bytes")
+            or hashlib.sha256(data).hexdigest() != descriptor.get("sha256")
+        ):
+            raise ValueError("QUARANTINE_PARTITION_IDENTITY_MISMATCH")
+        values = json.loads(data)
+        if (
+            not isinstance(values, list)
+            or len(values) != descriptor.get("row_count")
+            or any(not isinstance(row, dict) for row in values)
+        ):
+            raise ValueError("QUARANTINE_PARTITION_ROW_MISMATCH")
+        rows.extend(values)
+    if len(rows) != root.get("non_safe_shard_count"):
+        raise ValueError("QUARANTINE_PARTITION_GLOBAL_COUNT_MISMATCH")
+    result = dict(root)
+    result["schema"] = result.pop("legacy_schema")
+    for key in (
+        "non_safe_shards_materialized", "partition_max_bytes",
+        "partition_count", "partitions",
+    ):
+        result.pop(key, None)
+    result["non_safe_shards"] = rows
+    canonical = json.dumps(
+        {key: value for key, value in result.items() if key != "receipt_digest"},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    if hashlib.sha256(canonical.encode()).hexdigest() != result.get("receipt_digest"):
+        raise ValueError("QUARANTINE_PARTITION_GLOBAL_DIGEST_MISMATCH")
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=str(ROOT))
@@ -531,10 +671,7 @@ def main() -> int:
     body = build(args.root)
     output = Path(args.root) / args.output
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(body, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    persisted = write_partitioned_audit(output, body)
     causes = compact_root_causes(body)
     causes_path = output.with_name("QUARANTINE_CAUSES.json")
     causes_path.write_text(
@@ -547,6 +684,7 @@ def main() -> int:
     }, sort_keys=True))
     print(json.dumps({
         "output": str(output),
+        "partition_count": persisted["partition_count"],
         "quarantined_record_count": body["quarantined_record_count"],
         "non_safe_shard_count": body["non_safe_shard_count"],
         "historical_live_only_false_reject_count": body["historical_live_only_false_reject_count"],

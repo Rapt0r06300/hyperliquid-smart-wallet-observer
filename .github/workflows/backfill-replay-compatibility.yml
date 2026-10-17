@@ -10,11 +10,13 @@ on:
       - 'tools/enforce_safe_replay_invariant.py'
       - 'tools/replay_compatibility.py'
       - 'tools/build_replay_compatibility_reasons.py'
+      - 'tools/build_quarantine_audit.py'
       - 'tools/index_run_manifest.py'
       - 'tests/test_manifest_policy.py'
       - 'tests/test_replay_compatibility.py'
       - 'tests/test_backfill_replay_compatibility_candidates.py'
       - 'tests/test_replay_receipt_publish.py'
+      - 'tests/test_quarantine_audit.py'
       - '.github/workflows/backfill-replay-compatibility.yml'
   schedule:
     - cron: '12,32,52 * * * *'

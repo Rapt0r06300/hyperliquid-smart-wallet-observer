@@ -131,6 +131,42 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
     assert row["repair_attempted"] is False
 
 
+def test_partitioned_audit_is_bounded_lossless_and_stale_safe(tmp_path: Path):
+    from tools.build_quarantine_audit import (
+        PARTITION_SCHEMA,
+        read_partitioned_audit,
+        write_partitioned_audit,
+    )
+
+    output = tmp_path / "catalog" / "QUARANTINE_AUDIT.json"
+    output.parent.mkdir()
+    rows = [
+        {"dataset_id": f"id-{number:04d}", "sha256": "a" * 64, "bytes": number + 1}
+        for number in range(180)
+    ]
+    body = {
+        "schema": "alina.quarantine_audit.v1",
+        "source_index_sha256": "b" * 64,
+        "non_safe_shard_count": len(rows),
+        "non_safe_shards": rows,
+        "paper_only": True,
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    body["receipt_digest"] = hashlib.sha256(canonical.encode()).hexdigest()
+    stale_dir = output.parent / "quarantine-audit-parts"
+    stale_dir.mkdir()
+    (stale_dir / "part-999999.json").write_text("[]\n", encoding="utf-8")
+
+    root = write_partitioned_audit(output, body, max_partition_bytes=4096)
+
+    assert root["schema"] == PARTITION_SCHEMA
+    assert "non_safe_shards" not in root
+    assert root["partition_count"] > 1
+    assert not (stale_dir / "part-999999.json").exists()
+    assert all(part["bytes"] <= 4096 for part in root["partitions"])
+    assert read_partitioned_audit(output) == body
+
+
 
 @pytest.mark.parametrize(
     ("stored_status", "current_status", "current_reasons", "expected"),
