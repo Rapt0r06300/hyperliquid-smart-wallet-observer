@@ -28,12 +28,13 @@ permissions:
 # A high-frequency metrics/identity writer must not replace a queued
 # historical reconciler. Reconciliation rebuilds every candidate publication
 # from the latest main and retries conflicting pushes, so keep its own lane.
-# Code fixes on main supersede an older reconciler; scheduled/manual
-# reconciliations never interrupt an active run. Collector jobs have their
-# own independent concurrency groups and are never cancelled by this key.
+# Keep the same single-writer lane but never cancel an active
+# historical reconciliation on a code push. Otherwise validated work is
+# repeatedly discarded before publication; newer code can run next.
+# Collector jobs have independent concurrency groups.
 concurrency:
   group: dataset-v2-catalog-reconcile
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: false
 
 jobs:
   reconcile:
