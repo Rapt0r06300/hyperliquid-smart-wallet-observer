@@ -92,8 +92,13 @@ jobs:
           # seven full million-shard catalogue reloads per replay wave.
           # Retain every former family quota/order, including catch-all; a
           # shard is processed at most once in the grouped wave.
-          python tools/backfill_replay_compatibility.py \
-            --group-quotas "${LIMIT}:trades,agg_trades,fills,userfills,user_fills;${LIMIT}:copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot;${LIMIT}:bbo;${LIMIT}:l2book,l2,book;18:capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx;18:cross_venue_capacity_tape;${LIMIT}:*"
+          RESULT="$(python tools/backfill_replay_compatibility.py \
+            --group-quotas "${LIMIT}:trades,agg_trades,fills,userfills,user_fills;${LIMIT}:copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot;${LIMIT}:bbo;${LIMIT}:l2book,l2,book;18:capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx;18:cross_venue_capacity_tape;${LIMIT}:*")"
+          printf '%s\n' "$RESULT"
+          if printf '%s\n' "$RESULT" | python -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("no_change") is True else 1)'; then
+            echo "REPLAY_WAVE_NOOP: no new verified candidates; global metrics unchanged."
+            exit 0
+          fi
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py

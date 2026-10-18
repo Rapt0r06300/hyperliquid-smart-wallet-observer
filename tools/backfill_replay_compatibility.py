@@ -822,6 +822,20 @@ def backfill(
         if group_quotas is not None else candidates[:max(1,int(limit))]
     )
 
+    # A fully exhausted grouped wave has no new verification evidence.
+    # Do not rewrite a million-row index, churn receipt metadata or trigger a
+    # competing Git push just to record a new workflow/run timestamp.
+    if group_quotas is not None and not candidates:
+        return {
+            "attempted": 0,
+            "updated": 0,
+            "replayable": 0,
+            "demoted": 0,
+            "failed": [],
+            "remaining_candidates_for_filter": 0,
+            "no_change": True,
+        }
+
     updated=0
     replayable=0
     demoted=0

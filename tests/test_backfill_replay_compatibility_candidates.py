@@ -580,3 +580,37 @@ def test_replay_workflow_consolidates_repeated_catalogue_rewrites():
     assert "--group-quotas" in wave
     assert "--limit 18" not in wave
     assert "python tools/check_dataset_quality.py" in wave
+
+def test_empty_grouped_replay_wave_does_not_rewrite_immutable_catalogue_or_patch(
+    monkeypatch, tmp_path,
+):
+    index = tmp_path / "DATA_INDEX.json"
+    patch = tmp_path / "REPLAY_COMPAT_PATCH.json"
+    original_index = '{"shards":[],"active_data_status":"SAFE"}\\n'
+    original_patch = '{"schema":"alina.replay_compat_patch.v1","results":{},"transient_failures":{},"progress_by_filter":{}}\\n'
+    index.write_text(original_index, encoding="utf-8")
+    patch.write_text(original_patch, encoding="utf-8")
+    monkeypatch.setattr(backfill, "INDEX_PATH", index)
+    monkeypatch.setattr(backfill, "PATCH_PATH", patch)
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    result = backfill.backfill(
+        36, set(), group_quotas=backfill.parse_group_quotas("36:trades;36:bbo;36:*")
+    )
+    assert result == {
+        "attempted": 0, "updated": 0, "replayable": 0, "demoted": 0,
+        "failed": [], "remaining_candidates_for_filter": 0, "no_change": True,
+    }
+    assert index.read_text(encoding="utf-8") == original_index
+    assert patch.read_text(encoding="utf-8") == original_patch
+
+
+def test_empty_grouped_workflow_skips_global_metrics_and_git_publication():
+    source = (
+        ROOT / ".github" / "workflows" / "backfill-replay-compatibility.yml"
+    ).read_text(encoding="utf-8")
+    wave = source.split("- name: Verify immutable assets for replay", 1)[1].split(
+        "- name: Publish replay-proof progress", 1
+    )[0]
+    assert "REPLAY_WAVE_NOOP" in wave
+    assert "json.load(sys.stdin).get(\\"no_change\\")" in wave
+    assert wave.index("REPLAY_WAVE_NOOP") < wave.index("python tools/build_replay_compatibility_reasons.py")
