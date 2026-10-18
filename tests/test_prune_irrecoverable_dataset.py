@@ -36,15 +36,17 @@ def _result(row: dict) -> dict:
 def test_prepare_protects_safe_member_and_selects_terminal_standalone(monkeypatch, tmp_path):
     reject = _row("reject", "REJECT", "shared.zip")
     safe = _row("safe", "SAFE", "shared.zip")
-    standalone = _row("terminal", "PARTIAL", "terminal.jsonl.gz")
+    standalone = _row("terminal", "REJECT", "terminal.jsonl.gz")
+    repairable = _row("repairable", "PARTIAL", "repairable.jsonl.gz")
     patch = tmp_path / "REPLAY_COMPAT_PATCH.json"
     plan = tmp_path / "DATA_DELETION_PLAN.json"
     patch.write_text(json.dumps({"results": {
         "reject": _result(reject), "terminal": _result(standalone),
+        "repairable": _result(repairable),
     }}), encoding="utf-8")
     monkeypatch.setattr(gc, "PATCH", patch)
     monkeypatch.setattr(gc, "PLAN", plan)
-    monkeypatch.setattr(gc, "_verified_snapshot", lambda: ({}, [reject, safe, standalone], "f" * 64))
+    monkeypatch.setattr(gc, "_verified_snapshot", lambda: ({}, [reject, safe, standalone, repairable], "f" * 64))
     monkeypatch.setattr(gc, "release", lambda _tag: {})
     monkeypatch.setattr(gc, "assets", lambda _release: {
         "shared.zip": {"id": 1, "size": 10, "digest": reject["release_remote_digest"]},
@@ -127,3 +129,31 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
         gc._verify_target_membership([reject, _row("new-safe", "SAFE", "mixed.zip")], [frozen])
     with pytest.raises(gc.Refuse, match="DELETION_PHYSICAL_MEMBER_CHANGED"):
         gc._verify_target_membership([{**reject, "bytes": 9}], [frozen])
+
+
+def test_partial_never_terminal_even_after_replay_verification_failure():
+    partial = _row("partial", "PARTIAL", "partial.jsonl.gz")
+    assert gc._terminal_rows([partial], {"partial": _result(partial)}) == {}
+
+
+def test_old_partial_deletion_plan_is_rejected():
+    import pytest
+    reject = _row("reject", "REJECT", "shared.zip")
+    partial = _row("partial", "PARTIAL", "shared.zip")
+    plan = {"assets": [{"release_tag": "data-test", "asset_name": "shared.zip",
+                        "datasets": [{"dataset_id": "reject", "quality_status": "REJECT"},
+                                     {"dataset_id": "partial", "quality_status": "PARTIAL"}]}]}
+    assert gc._reject_only_plan(plan) is False
+    with pytest.raises(gc.Refuse, match="DELETION_REJECT_ONLY"):
+        gc._verify_target_membership([reject, partial], plan["assets"])
+
+
+def test_only_reject_plan_and_current_membership_can_delete():
+    reject = _row("reject", "REJECT", "reject.jsonl.gz")
+    plan = {"assets": [{"release_tag": "data-test", "asset_name": "reject.jsonl.gz",
+                        "datasets": [{"dataset_id": "reject", "quality_status": "REJECT",
+                                      "sha256": reject["sha256"], "bytes": reject["bytes"],
+                                      "manifest_path": reject["manifest_path"]}]}]}
+    assert gc._reject_only_plan(plan) is True
+    gc._verify_target_membership([reject], plan["assets"])
+    assert gc._reject_only_plan({"assets": []}) is False
