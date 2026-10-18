@@ -163,6 +163,26 @@ def _terminal_rows(
     return terminal
 
 
+def _reject_only_plan(plan: Mapping[str, Any]) -> bool:
+    """Invalidate historical deletion plans containing any PARTIAL."""
+    assets_to_delete = plan.get("assets")
+    return (
+        isinstance(assets_to_delete, list)
+        and bool(assets_to_delete)
+        and all(
+            isinstance(item, Mapping)
+            and isinstance(item.get("datasets"), list)
+            and bool(item["datasets"])
+            and all(
+                isinstance(row, Mapping)
+                and row.get("quality_status") == "REJECT"
+                for row in item["datasets"]
+            )
+            for item in assets_to_delete
+        )
+    )
+
+
 def _verify_target_membership(
     rows: list[dict[str, Any]], plan_assets: list[dict[str, Any]]
 ) -> None:
@@ -179,6 +199,8 @@ def _verify_target_membership(
             current[key].append(row)
     for key, item in targets.items():
         frozen = item["datasets"]
+        if any(row.get("quality_status") != "REJECT" for row in frozen):
+            raise Refuse("DELETION_REJECT_ONLY")
         expected = {str(r["dataset_id"]): r for r in frozen}
         present = current.get(key, [])
         if len(expected) != len(frozen) or len(present) != len(frozen):
@@ -186,8 +208,11 @@ def _verify_target_membership(
         if {str(r.get("dataset_id") or "") for r in present} != set(expected):
             raise Refuse("DELETION_PHYSICAL_MEMBERSHIP_CHANGED")
         for row in present:
-            if str(row.get("quality_status") or "").upper() == "SAFE":
+            status = str(row.get("quality_status") or "").upper()
+            if status == "SAFE":
                 raise Refuse("DELETION_SAFE_PROTECTED")
+            if status != "REJECT":
+                raise Refuse("DELETION_REJECT_ONLY")
             frozen_row = expected[str(row["dataset_id"])]
             if any(row.get(field) != frozen_row.get(field) for field in (
                 "sha256", "bytes", "quality_status", "manifest_path"
@@ -198,7 +223,11 @@ def _verify_target_membership(
 def prepare(limit: int) -> dict[str, Any]:
     if PLAN.is_file():
         current = _load(PLAN)
-        if current.get("status") == "READY" and current.get("plan_digest") == _digest(current):
+        if (
+            current.get("status") == "READY"
+            and current.get("plan_digest") == _digest(current)
+            and _reject_only_plan(current)
+        ):
             return current
     _, rows, source_sha = _verified_snapshot()
     patch = _load(PATCH)
@@ -281,6 +310,7 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
         or plan.get("plan_digest") != expected_digest
         or _digest(plan) != expected_digest
         or plan.get("repository") != REPOSITORY
+        or not _reject_only_plan(plan)
     ):
         raise Refuse("DELETION_PLAN_LEASE_MISMATCH")
     _, rows, source_sha = _verified_snapshot()
@@ -368,6 +398,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
         receipt.get("status") != "ASSETS_DELETED"
         or receipt.get("plan_digest") != plan.get("plan_digest")
         or _digest(plan) != plan.get("plan_digest")
+        or not _reject_only_plan(plan)
     ):
         raise Refuse("DELETION_RECEIPT_PLAN_MISMATCH")
     index, rows, _ = _verified_snapshot()
