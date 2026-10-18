@@ -304,7 +304,7 @@ def main() -> int:
                 run("python", "tools/download_release_manifests.py",
                     "--repository", REPO, "--destination", str(a.work_root),
                     "--tags-file", str(tags_file), "--attempts", "3",
-                    "--poll-seconds", "2", "--workers", "4")
+                    "--poll-seconds", "2", "--workers", "8")
             selected, shard_count, used_budget = select_with_bounded_oversized_retry(
                 next_tags, a.work_root, shard_budget=shard_budget,
                 manifest_budget_bytes=manifest_budget_bytes,

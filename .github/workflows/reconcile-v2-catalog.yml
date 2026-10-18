@@ -209,6 +209,7 @@ jobs:
             --repository "$GITHUB_REPOSITORY" \
             --list-tags-output "$ALL_TAGS" \
             --list-page-size 100 \
+            --asset-workers 8 \
             --reconcile-index catalog/DATA_INDEX.json
           python - <<'PY' "$ALL_TAGS" "$TAGS"
           import json, os, re, sys
@@ -291,7 +292,7 @@ jobs:
             echo "No new canonical production releases to reconcile."
             exit 0
           fi
-          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 2             --workers 4
+          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 2             --workers 8
           python tools/select_reconciliation_batch.py \
             --root "$ROOT" \
             --tags-file "$TAGS" \

@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: true
 
       - name: Sync latest main before processing
@@ -55,7 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           LIMIT="${{ inputs.limit || '2000' }}"
-          python tools/backfill_exact_trade_counts.py --limit "$LIMIT"
+          RESULT="$(python tools/backfill_exact_trade_counts.py --limit "$LIMIT")"
+          printf '%s\n' "$RESULT"
+          if printf '%s\n' "$RESULT" | python -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("updated")==0 and d.get("restored_from_patch")==0 else 1)'; then
+            echo "TRADE_EXACT_NOOP: no new exact counts; skip global metrics rebuild."
+            exit 0
+          fi
           python tools/build_catalog_metrics.py
           python tools/check_dataset_quality.py
 

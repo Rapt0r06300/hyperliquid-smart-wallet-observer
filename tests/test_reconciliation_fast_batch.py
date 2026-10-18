@@ -173,3 +173,31 @@ def test_deferred_tag_traversal_is_rejected_before_temporary_cleanup(tmp_path: P
         apply_plan(root, tags, total, env, max_shards=4,
                    max_manifest_bytes=100000)
     assert marker.read_text(encoding="utf-8") == "must remain"
+
+def test_five_hosted_dataset_automations_share_safe_publish_lanes() -> None:
+    root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    names = (
+        "reconcile-v2-catalog.yml",
+        "backfill-exact-trade-counts.yml",
+        "backfill-global-unique-trade-counts.yml",
+        "backfill-replay-compatibility.yml",
+        "cleanup-incomplete-v2-releases.yml",
+    )
+    workflows = [(root / name).read_text(encoding="utf-8") for name in names]
+    for source in workflows:
+        assert "runs-on: ubuntu-latest" in source
+        assert "cancel-in-progress: false" in source
+        assert "schedule:" in source and "workflow_dispatch:" in source
+        assert "filter: blob:none" in source
+    assert "group: dataset-v2-control-plane-index" in workflows[1]
+    assert "group: dataset-v2-control-plane-index" in workflows[2]
+    assert "group: dataset-v2-catalog-reconcile" in workflows[0]
+    assert "group: dataset-v2-replay-verification-" in workflows[3]
+    assert "group: principal-dataset-terminal-cleanup" in workflows[4]
+    assert "NO_ELIGIBLE_ASSETS" in workflows[4]
+    assert "TRADE_EXACT_NOOP" in workflows[1]
+    assert "--asset-workers 8" in workflows[0]
+    assert "--workers 8" in workflows[0]
+    assert "self-hosted" not in "\n".join(
+        source.split("jobs:", 1)[1] for source in workflows
+    )
