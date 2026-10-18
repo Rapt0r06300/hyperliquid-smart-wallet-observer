@@ -242,3 +242,40 @@ def test_release_window_recovers_from_rejected_pack_without_skipping() -> None:
                  (24, 2, 3)):
         with pytest.raises(ValueError, match="adaptive Release window"):
             next_release_window(*args)
+
+def test_historical_manifest_budget_uses_verified_success_and_pack_refusal() -> None:
+    from tools.continuous_reconcile_backlog import next_manifest_budget
+    mib = 1024 * 1024
+    assert next_manifest_budget(64 * mib, 3, 3) == 96 * mib
+    assert next_manifest_budget(96 * mib, 4, 4) == 128 * mib
+    assert next_manifest_budget(128 * mib, 6, 6) == 128 * mib
+    assert next_manifest_budget(128 * mib, 6, 3) == 64 * mib
+    assert next_manifest_budget(64 * mib, 1, 1) == 64 * mib
+    for args in ((63 * mib, 2, 2), (129 * mib, 2, 2),
+                 (64 * mib, 2, 0), (64 * mib, 2, 3)):
+        with pytest.raises(ValueError, match="adaptive manifest"):
+            next_manifest_budget(*args)
+
+
+def test_historical_manifest_staging_budget_is_propagated_and_bounded(
+    monkeypatch, tmp_path,
+) -> None:
+    import tools.continuous_reconcile_backlog as module
+    seen = []
+
+    def fake_select(tags, root, *, max_shards, max_manifest_bytes):
+        seen.append(max_manifest_bytes)
+        return [tags[0]], 5000
+
+    monkeypatch.setattr(module, "select_prefix", fake_select)
+    result = module.select_with_bounded_oversized_retry(
+        ["first"], tmp_path, shard_budget=20000,
+        manifest_budget_bytes=96 * 1024 * 1024,
+    )
+    assert result == (["first"], 5000, 20000)
+    assert seen == [96 * 1024 * 1024]
+    with pytest.raises(ValueError, match="historical manifest"):
+        module.select_with_bounded_oversized_retry(
+            ["first"], tmp_path, shard_budget=20000,
+            manifest_budget_bytes=129 * 1024 * 1024,
+        )

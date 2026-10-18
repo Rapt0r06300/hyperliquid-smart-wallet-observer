@@ -139,17 +139,20 @@ def publish(paths: list[Path]) -> int:
 
 
 def select_with_bounded_oversized_retry(
-    tags: list[str], root: Path, *, shard_budget: int
+    tags: list[str], root: Path, *, shard_budget: int,
+    manifest_budget_bytes: int = 64 * 1024 * 1024,
 ) -> tuple[list[str], int, int]:
     """Boundedly retry a large first Release; never skip it."""
     budget = shard_budget
     if not 5000 <= budget <= 100000:
         raise ValueError("invalid bounded reconciliation budget")
+    if not 64 * 1024 * 1024 <= manifest_budget_bytes <= 128 * 1024 * 1024:
+        raise ValueError("invalid bounded historical manifest byte budget")
     while True:
         try:
             selected, count = select_prefix(
                 tags, root, max_shards=budget,
-                max_manifest_bytes=64 * 1024 * 1024,
+                max_manifest_bytes=manifest_budget_bytes,
             )
             return selected, count, budget
         except ValueError as exc:
@@ -180,6 +183,24 @@ def next_shard_budget(current: int, requested: int, published: int) -> int:
     if published >= 2:
         return min(60000, steady + max(5000, steady // 3))
     return steady
+
+
+def next_manifest_budget(current: int, requested: int, published: int) -> int:
+    """Grow staged immutable manifest bytes only after durable publication.
+
+    This is not the Git blob size limit: SHA-bound per-shard receipts and the
+    60k normal shard cap remain unchanged. Shrink promptly if the remote
+    rejects a candidate pack. Never skip the rejected Release.
+    """
+    floor = 64 * 1024 * 1024
+    ceiling = 128 * 1024 * 1024
+    if not floor <= current <= ceiling or requested < 1 or not 1 <= published <= requested:
+        raise ValueError("invalid adaptive manifest byte budget progress")
+    if published < requested:
+        return max(floor, current // 2)
+    if published >= 2:
+        return min(ceiling, current + 32 * 1024 * 1024)
+    return current
 
 
 def next_release_window(current: int, requested: int, published: int) -> int:
@@ -256,6 +277,7 @@ def main() -> int:
     a.work_root.mkdir(parents=True, exist_ok=True)
     waves = 0
     shard_budget = 20000
+    manifest_budget_bytes = 64 * 1024 * 1024
     release_window = INITIAL_RELEASE_WINDOW
     cache_blob_sha: str | None = None
     cache_tags: list[str] | None = None
@@ -285,6 +307,7 @@ def main() -> int:
                     "--poll-seconds", "2", "--workers", "4")
             selected, shard_count, used_budget = select_with_bounded_oversized_retry(
                 next_tags, a.work_root, shard_budget=shard_budget,
+                manifest_budget_bytes=manifest_budget_bytes,
             )
             shard_budget = used_budget
             print(
@@ -296,6 +319,9 @@ def main() -> int:
             ])
             shard_budget = next_shard_budget(
                 shard_budget, requested=len(selected), published=published,
+            )
+            manifest_budget_bytes = next_manifest_budget(
+                manifest_budget_bytes, requested=len(selected), published=published,
             )
             release_window = next_release_window(
                 release_window, requested=len(selected), published=published,
@@ -311,7 +337,9 @@ def main() -> int:
             elapsed_minutes = max((time.monotonic() - start) / 60, 1e-6)
             print(
                 f"HISTORICAL_ADAPTIVE_PROOF published_releases={published} "
-                f"next_shard_budget={shard_budget} release_window={release_window} "
+                f"next_shard_budget={shard_budget} "
+                f"next_manifest_budget_mib={manifest_budget_bytes // (1024 * 1024)} "
+                f"release_window={release_window} "
                 f"total_published_this_runner={completed_releases} "
                 f"snapshot_remaining={len(cache_tags)} "
                 f"throughput_releases_per_hour={completed_releases * 60 / elapsed_minutes:.2f}",

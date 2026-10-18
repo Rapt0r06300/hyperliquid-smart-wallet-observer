@@ -530,3 +530,53 @@ def test_parallel_asset_lookup_worker_limit_is_bounded():
 
     with pytest.raises(ValueError, match="asset_workers"):
         list_release_manifest_tags("owner/repo", asset_workers=9)
+
+def test_deep_http2_stream_resets_shrink_aligned_page_without_losing_releases():
+    import json
+    from download_release_manifests import list_release_manifest_tags
+    calls = []
+
+    def runner(command, **_kwargs):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        size = int(endpoint.split("per_page=")[1].split("&")[0])
+        page = int(endpoint.split("&page=")[1])
+        offset = (page - 1) * size
+        if size == 100 and offset == 100:
+            return subprocess.CompletedProcess(
+                command, 1, "", "stream error: stream ID 1; CANCEL; received from peer"
+            )
+        body = [
+            {"id": n + 1, "tag_name": f"data-v2-{n:04d}",
+             "assets": [{"name": "RUN_MANIFEST.json"}]}
+            for n in range(offset, min(125, offset + size))
+        ]
+        return subprocess.CompletedProcess(command, 0, json.dumps(body), "")
+
+    inventory = list_release_manifest_tags(
+        "owner/repo", runner=runner, sleeper=lambda _: None,
+        page_size=100, attempts=2,
+    )
+    assert len(inventory) == 125
+    assert len({tag for tag, _ in inventory}) == 125
+    assert inventory[0] == ("data-v2-0000", True)
+    assert inventory[-1] == ("data-v2-0124", True)
+    assert calls.count("repos/owner/repo/releases?per_page=100&page=1") == 1
+    assert calls.count("repos/owner/repo/releases?per_page=100&page=2") == 2
+    assert "repos/owner/repo/releases?per_page=50&page=3" in calls
+
+
+def test_first_page_stream_resets_fail_closed_not_silently_skipped():
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+
+    def runner(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command, 1, "", "stream error: stream ID 1; CANCEL"
+        )
+
+    with pytest.raises(RuntimeError, match="failed after 2 attempt"):
+        list_release_manifest_tags(
+            "owner/repo", runner=runner, sleeper=lambda _: None,
+            page_size=100, attempts=2,
+        )

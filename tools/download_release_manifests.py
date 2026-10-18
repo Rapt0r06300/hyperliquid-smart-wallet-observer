@@ -194,7 +194,7 @@ def _api_page(
     sleeper: Callable[[float], object],
     attempts: int = 5,
 ) -> list[dict[str, object]]:
-    """One bounded REST page at a time; restart only a failing page on HTTP 504."""
+    """One bounded REST page at a time; retry transient GitHub/API transport failures."""
     if attempts < 1:
         raise ValueError("attempts must be positive")
     for attempt in range(1, attempts + 1):
@@ -302,11 +302,16 @@ def list_release_manifest_tags(
                 endpoint, runner=runner, sleeper=sleeper, attempts=attempts
             )
         except RuntimeError as exc:
-            # Deep-offset HTTP 502/504 may persist even after GET retries.
-            # Keep the exact next *absolute* offset when shrinking pages;
-            # never restart, skip a page, or declare an incomplete inventory.
+            # Deep-offset 502/504 and HTTP/2 stream resets may persist after
+            # bounded GET retries. Shrink only a page-size-aligned offset:
+            # never skip a Release, restart blindly, or accept partial inventory.
+            # Rate limits and malformed responses remain hard failures.
             if offset and active_page_size > 10 and any(
-                status in str(exc).lower() for status in ("http 502", "http 504")
+                status in str(exc).lower()
+                for status in (
+                    "http 502", "http 503", "http 504",
+                    "stream error", "connection reset", "request timeout",
+                )
             ):
                 smaller = next((n for n in range(active_page_size // 2, 9, -1)
                                 if offset % n == 0), None)
