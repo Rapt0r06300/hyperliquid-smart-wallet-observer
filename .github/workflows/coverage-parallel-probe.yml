@@ -64,6 +64,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Installer dépendances exactes
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
@@ -159,6 +160,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Installer coverage et outils du dépôt
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt

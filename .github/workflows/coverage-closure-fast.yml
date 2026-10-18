@@ -43,6 +43,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Installer les dépendances de test
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt

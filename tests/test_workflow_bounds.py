@@ -455,7 +455,10 @@ def test_safe_restore_parity_uses_same_lossless_alias_compaction_as_writers():
     assert "Run deterministic restore tests" in text
 
 
-def test_hypersmart_ci_pip_cache_does_not_glob_principal_dataset_tree() -> None:
-    workflow = _workflow("ci.yml")
-    assert workflow.count("cache: pip") == 4
-    assert workflow.count("cache-dependency-path: pyproject.toml") == 4
+def test_pip_cache_discovery_is_bounded_in_every_workflow() -> None:
+    root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    for path in root.glob("*.yml"):
+        workflow = path.read_text(encoding="utf-8")
+        assert workflow.count("cache: pip") == workflow.count(
+            "cache-dependency-path:"
+        ), path.name
