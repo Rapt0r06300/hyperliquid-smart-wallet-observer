@@ -1,0 +1,127 @@
+{
+  "asset_verified": true,
+  "bytes": 64141,
+  "collection_run_id": "market-e8-1-2026101701-v7-0",
+  "collector_version": "bc17b19795d953a21d295a99632362be5a758ffa",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-trades-iren-usdt-1792199922134-1792203373413-9ea7501b75e4",
+  "end_ts_ms": 1792203373413,
+  "event_count": 582,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 582,
+    "live_only": null,
+    "local_continuity_fallback": true,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 0,
+    "reference_status": "UNAVAILABLE",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 582,
+  "release": {
+    "asset_id": 649307156,
+    "asset_name": "packed-shards-0044.zip",
+    "member_name": "gate-public-ws-trades-iren-usdt-1792199922134-1792203373413-9ea7501b75e4.jsonl.gz",
+    "release_id": 415538514,
+    "release_tag": "data-v2-campaign-market-e8-1-2026101701-v7-u0",
+    "remote_digest": "sha256:d64fd0750d6cf58b896c0c1479dfebdc418c8e352f5667b614478b3b6e93a0cc",
+    "remote_size": 46385556,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-public-ws-trades-iren-usdt-1792199922134-1792203373413-9ea7501b75e4.jsonl.gz",
+  "release_asset_id": 649307156,
+  "release_container_asset": "packed-shards-0044.zip",
+  "release_id": 415538514,
+  "release_member": "gate-public-ws-trades-iren-usdt-1792199922134-1792203373413-9ea7501b75e4.jsonl.gz",
+  "release_remote_digest": "sha256:d64fd0750d6cf58b896c0c1479dfebdc418c8e352f5667b614478b3b6e93a0cc",
+  "release_remote_size": 46385556,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-1-2026101701-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9ea7501b75e444127d0dd2495f71e1ab964efe4e61f508c74394496f3450feaf",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1792199922134,
+  "symbol": "IREN_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 582,
+      "max": 361.5,
+      "min": 189.5,
+      "p50": 223.0,
+      "p95": 313.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-22c43bdbf17f4b5d887367e40664bba0"
+    ],
+    "first_exchange_ts_ms": 1792199922083,
+    "last_exchange_ts_ms": 1792203373362,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 582,
+      "max": 232.0,
+      "min": 50.0,
+      "p50": 51.0,
+      "p95": 59.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 582,
+      "max": 131.804496,
+      "min": 0.0,
+      "p50": 100.126854,
+      "p95": 101.827601
+    }
+  },
+  "trade_count": 582,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 582,
+  "trade_identity_set_sha256": "b2ed54e9c08b41caaa49e339e31a02edad2fad049998ada1ead9abf172ed3bf9",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 822019,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 582,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "gate"
+}
