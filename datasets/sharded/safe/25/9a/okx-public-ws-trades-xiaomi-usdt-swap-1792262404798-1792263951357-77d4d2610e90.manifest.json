@@ -1,0 +1,130 @@
+{
+  "asset_verified": true,
+  "bytes": 996,
+  "collection_run_id": "market-e8-11-2026101717-v7-0",
+  "collector_version": "7719c04cadadacb42d4353a0bb2bf9eb92f09337",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-xiaomi-usdt-swap-1792262404798-1792263951357-77d4d2610e90",
+  "end_ts_ms": 1792263951357,
+  "event_count": 2,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 2,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 2,
+    "missing_from_live": 0,
+    "reference_count": 2,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 2,
+  "release": {
+    "asset_id": 651365482,
+    "asset_name": "packed-shards-0047.zip",
+    "member_name": "okx-public-ws-trades-xiaomi-usdt-swap-1792262404798-1792263951357-77d4d2610e90.jsonl.gz",
+    "release_id": 416010868,
+    "release_tag": "data-v2-campaign-market-e8-11-2026101717-v7-u0",
+    "remote_digest": "sha256:bd1d7938114ec21f802872fd1702cbba937698ab6b31a7a40c26eb6e9c8c1c53",
+    "remote_size": 9715655,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-xiaomi-usdt-swap-1792262404798-1792263951357-77d4d2610e90.jsonl.gz",
+  "release_asset_id": 651365482,
+  "release_container_asset": "packed-shards-0047.zip",
+  "release_id": 416010868,
+  "release_member": "okx-public-ws-trades-xiaomi-usdt-swap-1792262404798-1792263951357-77d4d2610e90.jsonl.gz",
+  "release_remote_digest": "sha256:bd1d7938114ec21f802872fd1702cbba937698ab6b31a7a40c26eb6e9c8c1c53",
+  "release_remote_size": 9715655,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-11-2026101717-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "77d4d2610e90f8269deebd1d442cc5077b12ec07904c93061e8bf18643cb71b9",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1792262404798,
+  "symbol": "XIAOMI-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2,
+      "max": 24.5,
+      "min": 22.5,
+      "p50": 22.5,
+      "p95": 24.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-b5606f2d027940e09fa2bc3db99f1354"
+    ],
+    "first_exchange_ts_ms": 1792262404734,
+    "last_exchange_ts_ms": 1792263951293,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2,
+      "max": 64.0,
+      "min": 64.0,
+      "p50": 64.0,
+      "p95": 64.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2,
+      "max": 118.456477,
+      "min": 118.089534,
+      "p50": 118.089534,
+      "p95": 118.456477
+    }
+  },
+  "trade_count": 2,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "022361b4baae164b9bef370574f2600c3b9a472deb4010b35b7b27c0dad1f906",
+    "bccc332fd7b9f7dbdbeb51f147159e73068fb3055ce675eb7038c0141167f2f0"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 2,
+  "trade_identity_set_sha256": "25d8e288ec9a201878e2a429a724b6b1de649dc2ca0e64898791def470ddcc38",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 3100,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 2,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}
