@@ -1,8 +1,8 @@
 {
   "by_category": {
     "PARTIAL_EVIDENCE": {
-      "records": 57380371,
-      "shards": 45534
+      "records": 57380372,
+      "shards": 45535
     },
     "REJECT_INTEGRITY_AND_PROOF_MISSING": {
       "records": 49325229,
@@ -29,6 +29,10 @@
     "clock_sync": {
       "records": 2306,
       "shards": 52
+    },
+    "copy_vault_fills": {
+      "records": 1,
+      "shards": 1
     },
     "copy_vault_l2": {
       "records": 183,
@@ -73,8 +77,8 @@
   },
   "by_status": {
     "PARTIAL": {
-      "records": 57380371,
-      "shards": 45534
+      "records": 57380372,
+      "shards": 45535
     },
     "REJECT": {
       "records": 49326318,
@@ -91,8 +95,8 @@
       "shards": 23429
     },
     "hyperliquid": {
-      "records": 4270577,
-      "shards": 4819
+      "records": 4270578,
+      "shards": 4820
     },
     "okx": {
       "records": 47571316,
@@ -163,6 +167,10 @@
     "hyperliquid|capacity_tape": {
       "records": 939763,
       "shards": 1553
+    },
+    "hyperliquid|copy_vault_fills": {
+      "records": 1,
+      "shards": 1
     },
     "hyperliquid|copy_vault_l2": {
       "records": 183,
@@ -464,7 +472,7 @@
     }
   },
   "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": true,
-  "non_safe_shards": 112944,
+  "non_safe_shards": 112945,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
@@ -956,7 +964,7 @@
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "4072aae1e3cda8df8b91790f2f1b34b7ec8125f7d1270bd3516632c1e9c01847",
+  "source_audit_digest": "3577c999952db5a53e31cafaad4a0969c01df836e0c9936099cba5873d627393",
   "source_gap_causes": {
     "bitget|bbo|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 102670,
@@ -1046,6 +1054,10 @@
       "records": 105421,
       "shards": 206
     },
+    "hyperliquid|copy_vault_fills|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
+      "records": 1,
+      "shards": 1
+    },
     "hyperliquid|copy_vault_l2|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
       "records": 183,
       "shards": 9
@@ -1123,8 +1135,8 @@
       "shards": 18
     }
   },
-  "source_index_sha256": "3f6ef61f08667601d3d5ce2c949eb221cb82b1fc42572e2032f5758adc676346",
-  "source_shards": 1297957,
+  "source_index_sha256": "894e5eba83887ad60be16a13b8d30145d2d35ff8c85d21929eba3eb8b259f653",
+  "source_shards": 1327490,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
     "FATAL_INTEGRITY:gap_count=1": {
@@ -1364,8 +1376,8 @@
       "shards": 831
     },
     "UNIQUE_TRADE_COUNT_NOT_EXACT": {
-      "records": 143260,
-      "shards": 2117
+      "records": 143261,
+      "shards": 2118
     }
   },
   "unreadable_manifest_count": 0,

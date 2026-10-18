@@ -1,0 +1,123 @@
+{
+  "asset_verified": true,
+  "bytes": 3079,
+  "collection_run_id": "copy-vault-e8-broad-2026101623-v8-0",
+  "collector_version": "edd61660778f3899496529efe15c5605a6c1777f",
+  "copy_vault_selection": {
+    "forward_only": true,
+    "observation_only": true,
+    "selected_at_ms": 1792193506403
+  },
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-info-copy-vault-positions-0x40687f12207d1b46b633f9921c18a229fbb77d23-1792194515602-1792197126826-91a462cb0b29",
+  "end_ts_ms": 1792197126826,
+  "event_count": 2,
+  "family": "copy_vault_positions",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "copy_vault_positions"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "receive_observation_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "method": "observed_public_http_state_v1",
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "record_count": 2,
+  "release": {
+    "asset_id": 649090289,
+    "asset_name": "packed-shards-0125.zip",
+    "member_name": "hyperliquid-public-info-copy-vault-positions-0x40687f12207d1b46b633f9921c18a229fbb77d23-1792194515602-1792197126826-91a462cb0b29.jsonl.gz",
+    "release_id": 415494101,
+    "release_tag": "data-v2-campaign-copy-vault-e8-broad-2026101623-v8-u0",
+    "remote_digest": "sha256:116331582c1686215503a05c305d960ec555588f7777356964bea2561b33b3f6",
+    "remote_size": 225116,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-info-copy-vault-positions-0x40687f12207d1b46b633f9921c18a229fbb77d23-1792194515602-1792197126826-91a462cb0b29.jsonl.gz",
+  "release_asset_id": 649090289,
+  "release_container_asset": "packed-shards-0125.zip",
+  "release_id": 415494101,
+  "release_member": "hyperliquid-public-info-copy-vault-positions-0x40687f12207d1b46b633f9921c18a229fbb77d23-1792194515602-1792197126826-91a462cb0b29.jsonl.gz",
+  "release_remote_digest": "sha256:116331582c1686215503a05c305d960ec555588f7777356964bea2561b33b3f6",
+  "release_remote_size": 225116,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-copy-vault-e8-broad-2026101623-v8-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "91a462cb0b29ab83ffe83f16f79f44cc49100bd2b126c82c14c9cb62e0efaf23",
+  "source": "hyperliquid_public_info",
+  "start_ts_ms": 1792194515602,
+  "symbol": "0x40687f12207d1b46b633f9921c18a229fbb77d23",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 16564,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "hyperliquid"
+}
