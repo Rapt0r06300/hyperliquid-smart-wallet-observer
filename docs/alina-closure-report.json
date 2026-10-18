@@ -2449,17 +2449,17 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "5bbdb87f2f99219223a5ee5d81f35ebdd5b56fba",
   "copy_vault_coverage_receipt": {
-    "digest": "2902fdf8e25ec7c7478495f842a4240b1be6068d6fa4bd0749dc2e35affacefa",
+    "digest": "8065ecbfbe47c2b7520493335c576dd4d6ddf7f693ac88fd569fcabb7c367466",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
-      "publication_complete": false,
+      "publication_complete": true,
       "selection_present": true,
       "selection_verified": true,
       "sharding_present": true,
       "ten_user_limit_respected": true
     },
-    "status": "MORE_DATA"
+    "status": "OBSERVED"
   },
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 0,
@@ -2486,25 +2486,25 @@
     "phase_epoch": 8,
     "profitability_claimed": false,
     "quarantined_record_count": 57380371,
-    "raw_record_count": 631584256,
-    "raw_trade_count": 34363289,
+    "raw_record_count": 657988557,
+    "raw_trade_count": 35179518,
     "rejected_shard_count": 67410,
-    "replay_compatible_shard_count": 651691,
+    "replay_compatible_shard_count": 689279,
     "replay_unclassified_candidate_count": 102,
-    "safe_shard_count": 651691,
+    "safe_shard_count": 689279,
     "status": "NOT_ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
     "unique_record_count": 227781935,
-    "unique_record_ratio": 0.3606517,
+    "unique_record_ratio": 0.34617917,
     "unique_trade_count_exact": false,
     "unique_trade_count_global": null,
     "valid_record_count": 227781935,
-    "valid_record_ratio": 0.3606517
+    "valid_record_ratio": 0.34617917
   },
-  "dataset_health_digest": "d5f770baa4009aa94bfa64cb52d343985e3c1d4df89b070e3a140baff539ebf5",
+  "dataset_health_digest": "0fce806cb125906bb59e63a90b47b79f483ad93681048e6d9b55c63be7116fb8",
   "dataset_selection_id": null,
-  "dataset_v2_head": "743078ea01f8b23cebe8d808d48ada66931749f4",
+  "dataset_v2_head": "3af4adfa3310b3adb2e6f5bf46afabd68e6792a7",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "92de75c2afee3362aa128ff48fda967949f7fa95b7f273be46d463b3d3d10fd5",
@@ -2537,7 +2537,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-18T00:13:25.433431Z",
+  "generated_at_utc": "2026-10-18T00:41:31.514350Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -2574,7 +2574,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "743078ea01f8b23cebe8d808d48ada66931749f4",
+  "main_alina_head": "3af4adfa3310b3adb2e6f5bf46afabd68e6792a7",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -2606,10 +2606,10 @@
   "phase": "COLLECT",
   "phase_epoch": 8,
   "quarantined_record_count": 57380371,
-  "raw_record_count": 631584256,
-  "raw_trade_count": 34363289,
+  "raw_record_count": 657988557,
+  "raw_trade_count": 35179518,
   "real_execution_reachable": false,
-  "receipt_digest": "324c54bfaa529f3fa39f287f7aa94d5d0566d59669c63d637e40300cc17769f9",
+  "receipt_digest": "a5b461e37150446316a0416f503d1f16188ec48c48203b5f1041e529f9b4f09a",
   "rejected_count": 67410,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
@@ -2618,9 +2618,9 @@
     "SAFE to replay-compatible migration has 102 unclassified candidates",
     "analysis campaigns are not all terminal COMPLETE"
   ],
-  "replay_compatible_count": 651691,
+  "replay_compatible_count": 689279,
   "replay_remaining_candidates": 102,
-  "safe_count": 651691,
+  "safe_count": 689279,
   "schema_version": "alina.final_closure_receipt.v1",
   "scoreboard_artifact": null,
   "scoreboard_provenance": {
@@ -2646,7 +2646,7 @@
   "two_segment_resume_status": "PROVEN",
   "uncompressed_size_coverage": true,
   "uncompressed_size_exact": true,
-  "uncompressed_size_exact_assets": 764635,
+  "uncompressed_size_exact_assets": 802223,
   "uncompressed_size_unavailable_assets": 0,
   "unique_record_count": 227781935,
   "unique_trade_count_exact": false,
@@ -2888,6 +2888,7 @@
     "39063362020",
     "39064242532",
     "39073150967",
-    "39074412700"
+    "39074412700",
+    "39077475883"
   ]
 }
