@@ -586,8 +586,8 @@ def test_empty_grouped_replay_wave_does_not_rewrite_immutable_catalogue_or_patch
 ):
     index = tmp_path / "DATA_INDEX.json"
     patch = tmp_path / "REPLAY_COMPAT_PATCH.json"
-    original_index = '{"shards":[],"active_data_status":"SAFE"}\\n'
-    original_patch = '{"schema":"alina.replay_compat_patch.v1","results":{},"transient_failures":{},"progress_by_filter":{}}\\n'
+    original_index = json.dumps({"shards": [], "active_data_status": "SAFE"}) + "\n"
+    original_patch = json.dumps({"schema": "alina.replay_compat_patch.v1", "results": {}, "transient_failures": {}, "progress_by_filter": {}}) + "\n"
     index.write_text(original_index, encoding="utf-8")
     patch.write_text(original_patch, encoding="utf-8")
     monkeypatch.setattr(backfill, "INDEX_PATH", index)
@@ -612,5 +612,5 @@ def test_empty_grouped_workflow_skips_global_metrics_and_git_publication():
         "- name: Publish replay-proof progress", 1
     )[0]
     assert "REPLAY_WAVE_NOOP" in wave
-    assert "json.load(sys.stdin).get(\\"no_change\\")" in wave
+    assert 'json.load(sys.stdin).get("no_change")' in wave
     assert wave.index("REPLAY_WAVE_NOOP") < wave.index("python tools/build_replay_compatibility_reasons.py")
