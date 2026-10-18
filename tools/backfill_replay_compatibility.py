@@ -731,7 +731,66 @@ def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
     )
 
 
-def backfill(limit: int, families: set[str]) -> dict[str,Any]:
+def parse_group_quotas(raw: str) -> list[tuple[int, set[str]]]:
+    """Bound one replay wave with independent family budgets and a catch-all.
+
+    The final '*' pool cannot reselect a shard already assigned elsewhere.
+    One complete catalogue read and one SHA-bound publication cover the wave.
+    """
+    specs: list[tuple[int, set[str]]] = []
+    total = 0
+    for entry in raw.split(";"):
+        if not entry or ":" not in entry:
+            raise ValueError("invalid replay group quota syntax")
+        amount, family_names = entry.split(":", 1)
+        if not amount.isascii() or not amount.isdecimal() or not family_names:
+            raise ValueError("invalid replay group quota")
+        quota = int(amount)
+        if not 1 <= quota <= 144:
+            raise ValueError("invalid replay group quota limit")
+        names = family_names.split(",")
+        if family_names == "*":
+            group = set()
+        elif not all(n and n.isascii() and n.replace("_", "").isalnum()
+                     and n == n.lower() for n in names):
+            raise ValueError("invalid replay group families")
+        else:
+            group = set(names)
+        total += quota
+        if total > 300 or len(specs) >= 12:
+            raise ValueError("replay grouped wave exceeds bounded work budget")
+        specs.append((quota, group))
+    if not specs:
+        raise ValueError("empty replay group quotas")
+    return specs
+
+
+def select_grouped_candidates(
+    eligible: list[dict[str, Any]],
+    groups: list[tuple[int, set[str]]],
+) -> list[dict[str, Any]]:
+    """Select per-family quotas without repeating assets or losing precedence."""
+    chosen: list[dict[str, Any]] = []
+    chosen_ids: set[str] = set()
+    for quota, families in groups:
+        taken = 0
+        for row in eligible:
+            dataset_id = str(row.get("dataset_id") or "")
+            family = str(row.get("family") or "").lower()
+            if not dataset_id or dataset_id in chosen_ids or (families and family not in families):
+                continue
+            chosen.append(row)
+            chosen_ids.add(dataset_id)
+            taken += 1
+            if taken >= quota:
+                break
+    return chosen
+
+
+def backfill(
+    limit: int, families: set[str],
+    *, group_quotas: list[tuple[int, set[str]]] | None = None,
+) -> dict[str,Any]:
     index=read_index(INDEX_PATH)
     try:
         rows=hydrate_default_release_repository(index)
@@ -751,13 +810,17 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
         raise BackfillError("invalid replay patch filter progress")
 
     unique_rows=_load_global_unique_rows(root=ROOT)
+    effective_families = set() if group_quotas is not None else families
     candidates=[
         row for row in rows
-        if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
+        if isinstance(row,dict) and _candidate(row,known,effective_families,unique_rows)
     ]
     candidates.sort(key=_candidate_sort_key)
     candidate_total=len(candidates)
-    candidates=candidates[:max(1,int(limit))]
+    candidates=(
+        select_grouped_candidates(candidates, group_quotas)
+        if group_quotas is not None else candidates[:max(1,int(limit))]
+    )
 
     updated=0
     replayable=0
@@ -810,10 +873,10 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     patch["processed_assets"]=len(known)
     remaining=sum(
         1 for row in rows
-        if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
+        if isinstance(row,dict) and _candidate(row,known,effective_families,unique_rows)
     )
     patch["remaining_candidates_for_filter"]=remaining
-    filter_key=",".join(sorted(families)) or "all"
+    filter_key="grouped" if group_quotas is not None else (",".join(sorted(families)) or "all")
     previous_filter=progress_by_filter.get(filter_key)
     previous_filter=previous_filter if isinstance(previous_filter,Mapping) else {}
     processed_cumulative=(
@@ -852,6 +915,10 @@ def main() -> int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--limit",type=int,default=20)
     parser.add_argument(
+        "--group-quotas", default=None,
+        help="Bounded semicolon-separated quotas, e.g. '36:trades;36:bbo;36:*'; one index read",
+    )
+    parser.add_argument(
         "--families",
         default="bbo,l2book,l2,book",
         help="Comma separated family priority filter; empty means all SAFE legacy families.",
@@ -859,7 +926,8 @@ def main() -> int:
     args=parser.parse_args()
     families={x.strip().lower() for x in str(args.families).split(",") if x.strip()}
     try:
-        result=backfill(args.limit,families)
+        groups = parse_group_quotas(args.group_quotas) if args.group_quotas is not None else None
+        result=backfill(args.limit,families,group_quotas=groups)
     except (BackfillError,OSError,ValueError,json.JSONDecodeError) as exc:
         print(f"REPLAY_COMPAT_BACKFILL_NO_GO:{type(exc).__name__}:{exc}")
         return 2

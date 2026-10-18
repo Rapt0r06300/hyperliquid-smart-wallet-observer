@@ -541,3 +541,42 @@ def test_replay_refresh_preserves_reversible_compaction(tmp_path):
     first = (catalog / "DATA_INDEX.json").read_bytes()
     backfill._refresh_catalog(saved, tmp_path)
     assert (catalog / "DATA_INDEX.json").read_bytes() == first
+
+def test_grouped_replay_quota_picks_families_once_in_original_precedence():
+    specs = backfill.parse_group_quotas("2:trades,agg_trades;1:bbo;2:*")
+    rows = [
+        {"dataset_id": "bbo-1", "family": "bbo"},
+        {"dataset_id": "bbo-2", "family": "bbo"},
+        {"dataset_id": "trade-1", "family": "trades"},
+        {"dataset_id": "trade-2", "family": "trades"},
+        {"dataset_id": "trade-3", "family": "trades"},
+        {"dataset_id": "other-1", "family": "funding"},
+    ]
+    selected = backfill.select_grouped_candidates(rows, specs)
+    ids = [row["dataset_id"] for row in selected]
+    assert ids == ["trade-1", "trade-2", "bbo-1", "bbo-2", "trade-3"]
+    assert len(ids) == len(set(ids))
+
+
+def test_grouped_replay_quota_rejects_unbounded_or_invalid_specs():
+    import pytest
+    for raw in ("", "0:trades", "145:trades", "-1:trades", "1:", "1:*;bad",
+                "1:trades;1:../escape", "144:trades;144:bbo;20:l2;1:*"):
+        with pytest.raises(ValueError, match="replay group|empty replay"):
+            backfill.parse_group_quotas(raw)
+    assert backfill.parse_group_quotas("36:trades;36:bbo;18:*") == [
+        (36, {"trades"}), (36, {"bbo"}), (18, set())
+    ]
+
+
+def test_replay_workflow_consolidates_repeated_catalogue_rewrites():
+    source = (
+        ROOT / ".github" / "workflows" / "backfill-replay-compatibility.yml"
+    ).read_text(encoding="utf-8")
+    wave = source.split("- name: Verify immutable assets for replay", 1)[1].split(
+        "- name: Publish replay-proof progress", 1
+    )[0]
+    assert wave.count("python tools/backfill_replay_compatibility.py") == 1
+    assert "--group-quotas" in wave
+    assert "--limit 18" not in wave
+    assert "python tools/check_dataset_quality.py" in wave

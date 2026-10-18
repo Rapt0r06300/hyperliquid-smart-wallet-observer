@@ -88,22 +88,12 @@ jobs:
         run: |
           set -euo pipefail
           LIMIT="${{ inputs.per_family_limit || '36' }}"
-          # Small resumable waves leave hosted compute free for live catalogue
-          # reconciliation while proving each shard from its immutable Release.
-          # Trades first: close the multi-million-row replay gap incrementally.
-          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "trades,agg_trades,fills,userfills,user_fills"
-          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot"
-          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "bbo"
-          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "l2book,l2,book"
-          # Secondary market context is strict replay-checked in a small, bounded batch.
-          # Derived capacity stays PARTIAL until independent parent-L2 proof exists.
-          python tools/backfill_replay_compatibility.py             --limit 18             --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
-          # Historical Cross-Venue observations: strict two-leg receipt, never parent L2/PnL proof.
-          python tools/backfill_replay_compatibility.py             --limit 18             --families "cross_venue_capacity_tape"
-          # Exhaustive bounded tail: every accessible PARTIAL/REJECT family
-          # receives a current verifier receipt, including newly introduced
-          # families not yet present in the priority waves above.
-          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families ""
+          # One SHA-bound scan and one compacted index rewrite instead of
+          # seven full million-shard catalogue reloads per replay wave.
+          # Retain every former family quota/order, including catch-all; a
+          # shard is processed at most once in the grouped wave.
+          python tools/backfill_replay_compatibility.py \
+            --group-quotas "${LIMIT}:trades,agg_trades,fills,userfills,user_fills;${LIMIT}:copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot;${LIMIT}:bbo;${LIMIT}:l2book,l2,book;18:capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx;18:cross_venue_capacity_tape;${LIMIT}:*"
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py
