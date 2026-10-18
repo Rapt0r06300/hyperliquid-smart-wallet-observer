@@ -60,6 +60,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
+          sparse-checkout: |
+            .github
+            catalog
+            control
+            src
+            tools
           persist-credentials: true
 
       - name: Sync latest main before campaign creation
@@ -78,6 +84,10 @@ jobs:
           repository: Rapt0r06300/hyperliquid-smart-wallet-observer
           ref: main
           path: alina
+          sparse-checkout: |
+            pyproject.toml
+            src
+            tools
           persist-credentials: false
 
       - name: Install current Alina runtime for deterministic discovery

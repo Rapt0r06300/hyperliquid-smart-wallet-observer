@@ -462,3 +462,15 @@ def test_pip_cache_discovery_is_bounded_in_every_workflow() -> None:
         assert workflow.count("cache: pip") == workflow.count(
             "cache-dependency-path:"
         ), path.name
+
+
+def test_campaign_workflows_sparse_checkout_excludes_principal_dataset_tree() -> None:
+    expected = {
+        "create-resumable-campaigns.yml": 2,
+        "resumable-campaign-controller.yml": 2,
+        "resumable-campaign-worker.yml": 3,
+    }
+    for name, checkout_count in expected.items():
+        workflow = _workflow(name)
+        assert workflow.count("actions/checkout@") == checkout_count
+        assert workflow.count("sparse-checkout:") == checkout_count

@@ -75,6 +75,11 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          sparse-checkout: |
+            catalog
+            control
+            src
+            tools
           persist-credentials: false
 
       - name: Refresh Alina main before pin
@@ -118,6 +123,10 @@ jobs:
           repository: Rapt0r06300/hyperliquid-smart-wallet-observer
           ref: ${{ steps.pin.outputs.sha }}
           path: alina
+          sparse-checkout: |
+            pyproject.toml
+            src
+            tools
           persist-credentials: false
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -350,6 +359,10 @@ jobs:
           repository: Rapt0r06300/hyperliquid-smart-wallet-observer
           ref: main
           path: current-publisher
+          sparse-checkout: |
+            pyproject.toml
+            src
+            tools
           persist-credentials: false
           fetch-depth: 1
 
