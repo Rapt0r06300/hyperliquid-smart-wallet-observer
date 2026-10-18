@@ -52,7 +52,7 @@ METRICS = ROOT / "catalog" / "DATA_METRICS.json"
 PATCH = ROOT / "catalog" / "REPLAY_COMPAT_PATCH.json"
 PLAN = ROOT / "catalog" / "DATA_DELETION_PLAN.json"
 HISTORY = ROOT / "catalog" / "DATA_DELETION_HISTORY.json"
-TERMINAL = {"PARTIAL", "REJECT"}
+TERMINAL = {"REJECT"}
 
 
 def _refresh_catalog(index: dict[str, Any], root: Path) -> None:
