@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 832455,
+  "collection_run_id": "market-e8-5-2026101800-v7-0",
+  "collector_version": "35d6fa665641494958e5db5aa6e42ff427192ba8",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-zeta-usdt-swap-1792285964622-1792289463639-3c524010c46f",
+  "end_ts_ms": 1792289463639,
+  "event_count": 9546,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 9546,
+  "release": {
+    "asset_id": 652241260,
+    "asset_name": "packed-shards-0041.zip",
+    "member_name": "okx-public-ws-ticker-zeta-usdt-swap-1792285964622-1792289463639-3c524010c46f.jsonl.gz",
+    "release_id": 416190998,
+    "release_tag": "data-v2-campaign-market-e8-5-2026101800-v7-u0",
+    "remote_digest": "sha256:b73e0f2a8a20af1e340e2935f75aca7f056eb11e318d4ab7e3c0d1f8f615f54d",
+    "remote_size": 10246777,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-ticker-zeta-usdt-swap-1792285964622-1792289463639-3c524010c46f.jsonl.gz",
+  "release_asset_id": 652241260,
+  "release_container_asset": "packed-shards-0041.zip",
+  "release_id": 416190998,
+  "release_member": "okx-public-ws-ticker-zeta-usdt-swap-1792285964622-1792289463639-3c524010c46f.jsonl.gz",
+  "release_remote_digest": "sha256:b73e0f2a8a20af1e340e2935f75aca7f056eb11e318d4ab7e3c0d1f8f615f54d",
+  "release_remote_size": 10246777,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026101800-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "3c524010c46f135031caca42bfb5d8145cc6ab99e39f7baeea6db389a090601a",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1792285964622,
+  "symbol": "ZETA-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 9546,
+      "max": 64.5,
+      "min": 9.0,
+      "p50": 20.0,
+      "p95": 53.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-d559d1f5dcf94ee2a6aac7a9db1f9232"
+    ],
+    "first_exchange_ts_ms": 1792285964069,
+    "last_exchange_ts_ms": 1792289463466,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 9546,
+      "max": 553.0,
+      "min": 92.0,
+      "p50": 122.0,
+      "p95": 194.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 9546,
+      "max": 167.469782,
+      "min": 0.0,
+      "p50": 163.394123,
+      "p95": 165.192376
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 15830060,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}
