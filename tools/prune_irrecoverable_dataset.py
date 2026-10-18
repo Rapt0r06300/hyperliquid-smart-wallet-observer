@@ -33,7 +33,6 @@ try:
         release,
         request,
     )
-    from tools.replay_compatibility import VERIFIER_VERSION
 except ModuleNotFoundError:
     from index_run_manifest import (
         _atomic_json,
@@ -44,15 +43,14 @@ except ModuleNotFoundError:
     )
     from partitioned_data_index import read_index
     from prune_verified_recovery_capsule import REPOSITORY, Refuse, assets, release, request
-    from replay_compatibility import VERIFIER_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 METRICS = ROOT / "catalog" / "DATA_METRICS.json"
-PATCH = ROOT / "catalog" / "REPLAY_COMPAT_PATCH.json"
 PLAN = ROOT / "catalog" / "DATA_DELETION_PLAN.json"
 HISTORY = ROOT / "catalog" / "DATA_DELETION_HISTORY.json"
 TERMINAL = {"REJECT"}
+REJECT_PURGE_POLICY = "alina.reject-only.remote-identity.v1"
 
 
 def _refresh_catalog(index: dict[str, Any], root: Path) -> None:
@@ -140,23 +138,29 @@ def _physical_key(row: Mapping[str, Any]) -> tuple[str, str] | None:
 
 
 def _terminal_rows(
-    rows: list[dict[str, Any]], results: Mapping[str, Any]
+    rows: list[dict[str, Any]], results: Mapping[str, Any] | None = None
 ) -> dict[str, dict[str, Any]]:
+    """Select only explicit catalogue REJECTs, not unverified PARTIALs.
+
+    Negative replay verification is not needed to discard an already rejected
+    payload; the *physical* deletion still requires a SHA/size-identical GitHub
+    asset and proof that every indexed member of its container is REJECT.
+    The old replay patch is intentionally not used as a deletion authority.
+    """
+    del results  # Kept for callers using the legacy two-argument interface.
     terminal: dict[str, dict[str, Any]] = {}
     for row in rows:
-        dataset_id = str(row.get("dataset_id") or "")
-        status = str(row.get("quality_status") or "").upper()
-        result = results.get(dataset_id)
+        dataset_id = row.get("dataset_id")
         if (
-            dataset_id
-            and status in TERMINAL
-            and isinstance(result, Mapping)
-            and result.get("verified_from_release") is True
-            and result.get("replay_compatible") is not True
-            and result.get("verifier_version") == VERIFIER_VERSION
-            and result.get("asset_sha256") == row.get("sha256")
-            and result.get("asset_size") == row.get("bytes")
-            and str(result.get("quality_status_after") or "").upper() == status
+            isinstance(dataset_id, str)
+            and bool(dataset_id)
+            and row.get("quality_status") == "REJECT"
+            and row.get("replay_compatible") is not True
+            and type(row.get("bytes")) is int
+            and row["bytes"] > 0
+            and isinstance(row.get("sha256"), str)
+            and len(row["sha256"]) == 64
+            and all(c in "0123456789abcdef" for c in row["sha256"].lower())
             and _physical_key(row) is not None
         ):
             terminal[dataset_id] = row
@@ -230,11 +234,7 @@ def prepare(limit: int) -> dict[str, Any]:
         ):
             return current
     _, rows, source_sha = _verified_snapshot()
-    patch = _load(PATCH)
-    results = patch.get("results")
-    if not isinstance(results, Mapping):
-        raise Refuse("DELETION_REPAIR_RESULTS_INVALID")
-    terminal = _terminal_rows(rows, results)
+    terminal = _terminal_rows(rows)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         key = _physical_key(row)
@@ -257,6 +257,8 @@ def prepare(limit: int) -> dict[str, Any]:
         }
         if len(proof_sizes) != 1 or len(proof_digests) != 1:
             continue
+        if next(iter(proof_sizes)) <= 0 or not str(next(iter(proof_digests))).startswith("sha256:"):
+            continue
         remote = assets(release(tag)).get(name)
         if remote is None:
             continue
@@ -277,7 +279,7 @@ def prepare(limit: int) -> dict[str, Any]:
                     "bytes": row["bytes"],
                     "quality_status": row["quality_status"],
                     "manifest_path": row.get("manifest_path"),
-                    "terminal_reason": results[row["dataset_id"]].get("replay_reason"),
+                    "terminal_reason": "CATALOG_REJECT_SHA_BOUND_REMOTE_ASSET",
                 }
                 for row in sorted(physical_rows, key=lambda item: item["dataset_id"])
             ],
@@ -290,7 +292,7 @@ def prepare(limit: int) -> dict[str, Any]:
         "status": "READY" if selected else "NO_ELIGIBLE_ASSETS",
         "repository": REPOSITORY,
         "source_index_sha256": source_sha,
-        "verifier_version": VERIFIER_VERSION,
+        "deletion_policy": REJECT_PURGE_POLICY,
         "github_run_id": os.getenv("GITHUB_RUN_ID"),
         "assets": selected,
         "asset_count": len(selected),
@@ -310,6 +312,7 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
         or plan.get("plan_digest") != expected_digest
         or _digest(plan) != expected_digest
         or plan.get("repository") != REPOSITORY
+        or plan.get("deletion_policy") != REJECT_PURGE_POLICY
         or not _reject_only_plan(plan)
     ):
         raise Refuse("DELETION_PLAN_LEASE_MISMATCH")
@@ -398,6 +401,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
         receipt.get("status") != "ASSETS_DELETED"
         or receipt.get("plan_digest") != plan.get("plan_digest")
         or _digest(plan) != plan.get("plan_digest")
+        or plan.get("deletion_policy") != REJECT_PURGE_POLICY
         or not _reject_only_plan(plan)
     ):
         raise Refuse("DELETION_RECEIPT_PLAN_MISMATCH")
