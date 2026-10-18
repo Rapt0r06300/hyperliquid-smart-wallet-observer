@@ -112,3 +112,18 @@ def test_terminal_receipt_rejects_path_traversal_or_symlink(tmp_path):
     with pytest.raises(gc.Refuse):
         gc._remove_terminal_receipt(tmp_path, "datasets/rejected/link.manifest.json")
     assert outside.read_text(encoding="utf-8") == "secret"
+
+
+def test_predelete_rechecks_every_current_member_of_physical_asset():
+    import pytest
+    reject = _row("reject", "REJECT", "mixed.zip")
+    frozen = {"release_tag": "data-test", "asset_name": "mixed.zip", "datasets": [{
+        "dataset_id": reject["dataset_id"], "sha256": reject["sha256"],
+        "bytes": reject["bytes"], "quality_status": reject["quality_status"],
+        "manifest_path": reject["manifest_path"],
+    }]}
+    gc._verify_target_membership([reject], [frozen])
+    with pytest.raises(gc.Refuse, match="DELETION_PHYSICAL_MEMBERSHIP_CHANGED"):
+        gc._verify_target_membership([reject, _row("new-safe", "SAFE", "mixed.zip")], [frozen])
+    with pytest.raises(gc.Refuse, match="DELETION_PHYSICAL_MEMBER_CHANGED"):
+        gc._verify_target_membership([{**reject, "bytes": 9}], [frozen])

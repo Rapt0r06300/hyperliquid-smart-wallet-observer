@@ -163,6 +163,38 @@ def _terminal_rows(
     return terminal
 
 
+def _verify_target_membership(
+    rows: list[dict[str, Any]], plan_assets: list[dict[str, Any]]
+) -> None:
+    """Recheck every member of a physical asset before any destructive action.
+
+    A newer SAFE/PARTIAL row that shares a planned terminal container must
+    prevent deletion, even if all the originally frozen rows still match.
+    """
+    targets = {(a["release_tag"], a["asset_name"]): a for a in plan_assets}
+    current: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        key = _physical_key(row)
+        if key in targets:
+            current[key].append(row)
+    for key, item in targets.items():
+        frozen = item["datasets"]
+        expected = {str(r["dataset_id"]): r for r in frozen}
+        present = current.get(key, [])
+        if len(expected) != len(frozen) or len(present) != len(frozen):
+            raise Refuse("DELETION_PHYSICAL_MEMBERSHIP_CHANGED")
+        if {str(r.get("dataset_id") or "") for r in present} != set(expected):
+            raise Refuse("DELETION_PHYSICAL_MEMBERSHIP_CHANGED")
+        for row in present:
+            if str(row.get("quality_status") or "").upper() == "SAFE":
+                raise Refuse("DELETION_SAFE_PROTECTED")
+            frozen_row = expected[str(row["dataset_id"])]
+            if any(row.get(field) != frozen_row.get(field) for field in (
+                "sha256", "bytes", "quality_status", "manifest_path"
+            )):
+                raise Refuse("DELETION_PHYSICAL_MEMBER_CHANGED")
+
+
 def prepare(limit: int) -> dict[str, Any]:
     if PLAN.is_file():
         current = _load(PLAN)
@@ -252,6 +284,7 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
     ):
         raise Refuse("DELETION_PLAN_LEASE_MISMATCH")
     _, rows, source_sha = _verified_snapshot()
+    _verify_target_membership(rows, plan["assets"])
     by_id = {str(row.get("dataset_id") or ""): row for row in rows}
     for item in plan["assets"]:
         for frozen in item["datasets"]:
@@ -338,6 +371,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
     ):
         raise Refuse("DELETION_RECEIPT_PLAN_MISMATCH")
     index, rows, _ = _verified_snapshot()
+    _verify_target_membership(rows, plan["assets"])
     frozen = {
         item["dataset_id"]: item
         for asset in receipt.get("assets") or []
