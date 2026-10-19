@@ -132,7 +132,7 @@ jobs:
             git reset --hard origin/main
             python tools/prune_irrecoverable_dataset.py finalize --receipt "$RECEIPT"
             python tools/build_replay_compatibility_reasons.py
-            python tools/build_dataset_metrics.py
+            python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
             python tools/check_dataset_quality.py
             git config user.name "github-actions[bot]"

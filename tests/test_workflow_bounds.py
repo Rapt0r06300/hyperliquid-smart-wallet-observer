@@ -494,3 +494,10 @@ def test_terminal_cleanup_reuses_identical_durable_plan_without_empty_commit() -
     assert plan.index("git diff --cached --quiet") < plan.index(
         'git commit -m "data: plan terminal payload deletion'
     )
+
+
+def test_terminal_cleanup_rebuilds_metrics_with_existing_catalog_tool() -> None:
+    cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
+    finalize = cleanup.split("- name: Delete exact terminal assets", 1)[1]
+    assert "python tools/build_catalog_metrics.py" in finalize
+    assert "python tools/build_dataset_metrics.py" not in finalize
