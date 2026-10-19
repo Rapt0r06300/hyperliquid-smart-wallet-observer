@@ -514,6 +514,7 @@ def test_terminal_cleanup_avoids_materializing_immutable_dataset_tree() -> None:
     assert "\n            /pyproject.toml\n" in sparse
     assert "\n            /README.md\n" in sparse
     assert "\n            /catalog/*.json\n" in sparse
+    assert "\n            /catalog/data-index-parts/\n" in sparse
     assert "\n            /catalog/campaign-history/\n" not in sparse
     assert "python tools/check_dataset_quality.py --catalog-only" in cleanup
 
@@ -527,6 +528,7 @@ def test_replay_backfill_checks_out_only_repairable_manifest_stages() -> None:
     assert "\n            /pyproject.toml\n" in sparse
     assert "\n            /README.md\n" in sparse
     assert "\n            /catalog/*.json\n" in sparse
+    assert "\n            /catalog/data-index-parts/\n" in sparse
     assert "\n            /catalog/campaign-history/\n" not in sparse
     assert "\n            /datasets/quarantine/\n" in sparse
     assert "\n            /datasets/rejected/\n" in sparse
