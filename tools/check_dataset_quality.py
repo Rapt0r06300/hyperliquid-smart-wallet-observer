@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -8,6 +9,14 @@ try:
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
     from partitioned_data_index import read_index
+
+parser = argparse.ArgumentParser(description="Validate the canonical dataset policy")
+parser.add_argument(
+    "--catalog-only",
+    action="store_true",
+    help="Validate the complete SHA-bound index and counters without materializing immutable manifest receipts",
+)
+args = parser.parse_args()
 
 root = Path(__file__).resolve().parents[1]
 reg = json.loads((root / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
@@ -44,19 +53,22 @@ for row in shards:
         assert row.get("replay_compatible") is True, "SAFE must be explicitly replay-compatible"
         repository = row["release_repository"] if "release_repository" in row else default_repo
         assert repository == "Rapt0r06300/hyperliquid-smart-wallet-observer"
-    manifest_path = root / row["manifest_path"]
-    assert manifest_path.is_file()
-    manifest = json.loads(manifest_path.read_text())
-    assert manifest["dataset_id"] == row["dataset_id"]
-    assert manifest["quality_status"] == row["quality_status"]
-    if row["quality_status"] == "SAFE":
-        assert manifest.get("sha256") == row["sha256"], "SAFE receipt sha mismatch"
-        assert manifest.get("replay_compatible") is True, "SAFE replay proof missing"
-        assert str(manifest.get("replay_schema_version") or ""), "SAFE replay schema missing"
-        if row.get("replay_schema_version") is not None:
-            assert row["replay_schema_version"] == manifest["replay_schema_version"], "SAFE replay schema mismatch"
-    expected_validation = row["quality_status"] == "SAFE" and row.get("replay_compatible") is True
-    assert manifest["validation_allowed"] is expected_validation
+    manifest_relative = row.get("manifest_path")
+    assert isinstance(manifest_relative, str) and manifest_relative.startswith("datasets/")
+    if not args.catalog_only:
+        manifest_path = root / manifest_relative
+        assert manifest_path.is_file()
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["dataset_id"] == row["dataset_id"]
+        assert manifest["quality_status"] == row["quality_status"]
+        if row["quality_status"] == "SAFE":
+            assert manifest.get("sha256") == row["sha256"], "SAFE receipt sha mismatch"
+            assert manifest.get("replay_compatible") is True, "SAFE replay proof missing"
+            assert str(manifest.get("replay_schema_version") or ""), "SAFE replay schema missing"
+            if row.get("replay_schema_version") is not None:
+                assert row["replay_schema_version"] == manifest["replay_schema_version"], "SAFE replay schema mismatch"
+        expected_validation = row["quality_status"] == "SAFE" and row.get("replay_compatible") is True
+        assert manifest["validation_allowed"] is expected_validation
 
 expected_active = (
     "SAFE"
@@ -86,4 +98,4 @@ for status, catalog_key, registry_key in (
     assert cat.get(catalog_key) == expected, f"catalog {status} count differs from index"
     assert reg["active_dataset"].get(registry_key) == expected, f"registry {status} count differs from index"
 assert reg["active_dataset"].get("indexed_shards") == len(shards)
-print("Alina dataset V2 policy: OK")
+print("Alina dataset V2 policy: OK (" + ("catalog-only" if args.catalog_only else "full-manifest") + ")")
