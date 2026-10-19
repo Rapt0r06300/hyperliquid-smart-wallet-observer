@@ -50,14 +50,16 @@ jobs:
         with:
           fetch-depth: 2
           filter: blob:none
+          sparse-checkout-cone-mode: false
           sparse-checkout: |
-            .github
-            catalog
-            datasets/quarantine
-            datasets/rejected
-            src
-            tests
-            tools
+            /.github/
+            /catalog/*.json
+            /catalog/quarantine-audit-parts/
+            /datasets/quarantine/
+            /datasets/rejected/
+            /src/
+            /tests/
+            /tools/
           persist-credentials: true
 
       - name: Sync latest main before processing
