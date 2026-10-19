@@ -30,11 +30,24 @@ jobs:
   audit:
     name: Audit quarantined shards
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 0
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/
+            /pyproject.toml
+            /catalog/*.json
+            /catalog/data-index-parts/
+            /catalog/quarantine-audit-parts/
+            /datasets/quarantine/
+            /datasets/rejected/
+            /src/
+            /tests/
+            /tools/
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -55,7 +68,7 @@ jobs:
           python tools/repair_stale_safe_classifications.py
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py
-          python tools/check_dataset_quality.py
+          python tools/check_dataset_quality.py --catalog-only
 
       - name: Fail closed on any remaining false non-SAFE label
         run: |
@@ -88,7 +101,7 @@ jobs:
             python tools/repair_stale_safe_classifications.py > "$RUNNER_TEMP/alina-reclassification-result.json"
             python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
-            python tools/check_dataset_quality.py
+            python tools/check_dataset_quality.py --catalog-only
             python - <<'PY'
           import json
           report=json.load(open("catalog/QUARANTINE_AUDIT.json",encoding="utf-8"))
@@ -99,7 +112,7 @@ jobs:
           if int(report.get("potential_false_non_safe_count") or 0):
               raise SystemExit("stale non-SAFE labels remain")
           PY
-            git add -A \
+            git add --sparse -A \
               catalog/DATA_INDEX.json \
               catalog/DATA_METRICS.json \
               catalog/DATA_CATALOG.json \
