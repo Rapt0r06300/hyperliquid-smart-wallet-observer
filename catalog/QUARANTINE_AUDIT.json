@@ -1,8 +1,8 @@
 {
   "by_category": {
     "EVIDENCE_UNAVAILABLE_NOT_IRRECOVERABLE": {
-      "records": 106705040,
-      "shards": 111845
+      "records": 103378479,
+      "shards": 62725
     }
   },
   "by_family": {
@@ -30,14 +30,6 @@
       "records": 183,
       "shards": 9
     },
-    "copy_vault_positions": {
-      "records": 20,
-      "shards": 10
-    },
-    "copy_vault_selection": {
-      "records": 10,
-      "shards": 10
-    },
     "cross_venue_capacity_tape": {
       "records": 16655442,
       "shards": 4196
@@ -63,8 +55,8 @@
       "shards": 1612
     },
     "trades": {
-      "records": 14701664,
-      "shards": 71972
+      "records": 11375133,
+      "shards": 22872
     }
   },
   "by_status": {
@@ -73,22 +65,22 @@
       "shards": 45535
     },
     "REJECT": {
-      "records": 49324668,
-      "shards": 66310
+      "records": 45998107,
+      "shards": 17190
     }
   },
   "by_venue": {
     "bitget": {
-      "records": 4874517,
-      "shards": 69185
+      "records": 1547986,
+      "shards": 20085
     },
     "gate": {
       "records": 33333373,
       "shards": 23429
     },
     "hyperliquid": {
-      "records": 4268928,
-      "shards": 3720
+      "records": 4268898,
+      "shards": 3700
     },
     "okx": {
       "records": 47571316,
@@ -101,8 +93,8 @@
   },
   "current_reason_counts": {
     "MANIFEST_UNREADABLE": {
-      "records": 106705040,
-      "shards": 111845
+      "records": 103378479,
+      "shards": 62725
     }
   },
   "historical_live_only_false_reject_count": 0,
@@ -110,7 +102,7 @@
   "historical_non_safe_shard_count": 0,
   "legacy_schema": "alina.quarantine_audit.v1",
   "metrics_quarantined_record_count": 57380372,
-  "non_safe_shard_count": 111845,
+  "non_safe_shard_count": 62725,
   "non_safe_shards_materialized": false,
   "paper_only": true,
   "partial_inventory_count": 45535,
@@ -128,7 +120,7 @@
       "shards": 120
     }
   },
-  "partition_count": 14,
+  "partition_count": 8,
   "partition_max_bytes": 8388608,
   "partitions": [
     {
@@ -162,58 +154,22 @@
       "sha256": "f0f0616be70169f0d1505fa3ddf896229e57ee76b1ee9437da6c53dc0c50adda"
     },
     {
-      "bytes": 8388324,
+      "bytes": 8388374,
       "path": "quarantine-audit-parts/part-000006.json",
       "row_count": 8356,
-      "sha256": "e4514571cc5f6ec3cb390390c4ddced46c55c08decdb03f5756ae97a67ddd92e"
+      "sha256": "1be3a926c8e67cf2e806e50ba104368c195c9cb64bf0c8281cf3589822a19357"
     },
     {
-      "bytes": 8388199,
+      "bytes": 8388007,
       "path": "quarantine-audit-parts/part-000007.json",
-      "row_count": 8682,
-      "sha256": "5cf67ef81c97f452c46a0eefe0e5f90ff22b39b4323989fc02567cb172b6000f"
+      "row_count": 8647,
+      "sha256": "1aa9f58187ff27ab2cd3bfc1ebe034843cc27b6cc169961a6d9a0dbd86263cc5"
     },
     {
-      "bytes": 8388190,
+      "bytes": 3612216,
       "path": "quarantine-audit-parts/part-000008.json",
-      "row_count": 8680,
-      "sha256": "95edd6c195a14fb08b7c1d69b8125877a4a3cd94bac62f942d0d864abc0ad7c8"
-    },
-    {
-      "bytes": 8387710,
-      "path": "quarantine-audit-parts/part-000009.json",
-      "row_count": 8666,
-      "sha256": "8900d0cd4073f91e290275745db5416db0403c17a74f2b3516cbfb37f70c5c6e"
-    },
-    {
-      "bytes": 8388293,
-      "path": "quarantine-audit-parts/part-000010.json",
-      "row_count": 8674,
-      "sha256": "1871a9662468f7538af15f0a3dc36f11447f5b0cb31abeb93dacf5493560f05a"
-    },
-    {
-      "bytes": 8387849,
-      "path": "quarantine-audit-parts/part-000011.json",
-      "row_count": 8671,
-      "sha256": "f9e6515f156079137730130727e71c252d717fd2bd046aefd22a361b8fe18de7"
-    },
-    {
-      "bytes": 8387832,
-      "path": "quarantine-audit-parts/part-000012.json",
-      "row_count": 8681,
-      "sha256": "654ce00fd050560f759df67fb477cc4b6b9b8df480bd5085b38ab569b7559cd4"
-    },
-    {
-      "bytes": 8387632,
-      "path": "quarantine-audit-parts/part-000013.json",
-      "row_count": 8535,
-      "sha256": "9f479f3a89e7f4da7db2edf2209142f14185677892aebb70faa80f3e8844bd7a"
-    },
-    {
-      "bytes": 784200,
-      "path": "quarantine-audit-parts/part-000014.json",
-      "row_count": 727,
-      "sha256": "633d950b5c73be00e3ed9584490b14eafe365dc8226fc84e58f3b56e056d1e3b"
+      "row_count": 3549,
+      "sha256": "9aa20f3f1067f0ffb01f88c788e51dde1ccf7a40dd3a58b85714492995c1fe8a"
     }
   ],
   "potential_false_non_safe_count": 0,
@@ -222,20 +178,20 @@
   "read_only": true,
   "real_execution": false,
   "reason_record_counts_overlap": true,
-  "receipt_digest": "2f7e8d7d6aaee692c7d6782bb4c01ad38c58cf03157e40af825674a4e200dd83",
-  "rejected_record_count": 49324668,
+  "receipt_digest": "2dd487fdc46e1ba6890af2f1774dc13c55a0873557e095cd94024bceeca11bdd",
+  "rejected_record_count": 45998107,
   "schema": "alina.quarantine_audit_partitioned.v1",
-  "source_index_sha256": "183b0997e8e9876c2b8c3c146b55ee3020eed5cee1f924753beb5e3022a96d42",
-  "source_metrics_sha256": "aba8cfbdecba70f441ec61db72bf624212f2844c81553437fb57e53db2262bd0",
+  "source_index_sha256": "86bc1fe8b490c8fb92bea5a5245dd71164d5bfef277640c1e38d44f89575b438",
+  "source_metrics_sha256": "b7467b753ec2fab91f8178d42c1b9b60ce525ce91c5a985beba706b62777581a",
   "source_record_count_patch_sha256": "49326f25d47de25362ae8fa1fd0adc97537a0877350be9caaa1fa71e53b55eb3",
-  "source_shard_count": 1363853,
-  "stale_classification_count": 111845,
+  "source_shard_count": 1314733,
+  "stale_classification_count": 62725,
   "stale_record_count": 0,
   "stored_reason_counts": {
     "NO_STORED_REASON": {
-      "records": 106705040,
-      "shards": 111845
+      "records": 103378479,
+      "shards": 62725
     }
   },
-  "unreadable_manifest_count": 111845
+  "unreadable_manifest_count": 62725
 }

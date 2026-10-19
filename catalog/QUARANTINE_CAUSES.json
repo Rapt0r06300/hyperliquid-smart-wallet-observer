@@ -1,8 +1,8 @@
 {
   "by_category": {
     "EVIDENCE_UNAVAILABLE_NOT_IRRECOVERABLE": {
-      "records": 106705040,
-      "shards": 111845
+      "records": 103378479,
+      "shards": 62725
     }
   },
   "by_family": {
@@ -30,14 +30,6 @@
       "records": 183,
       "shards": 9
     },
-    "copy_vault_positions": {
-      "records": 20,
-      "shards": 10
-    },
-    "copy_vault_selection": {
-      "records": 10,
-      "shards": 10
-    },
     "cross_venue_capacity_tape": {
       "records": 16655442,
       "shards": 4196
@@ -63,8 +55,8 @@
       "shards": 1612
     },
     "trades": {
-      "records": 14701664,
-      "shards": 71972
+      "records": 11375133,
+      "shards": 22872
     }
   },
   "by_status": {
@@ -73,22 +65,22 @@
       "shards": 45535
     },
     "REJECT": {
-      "records": 49324668,
-      "shards": 66310
+      "records": 45998107,
+      "shards": 17190
     }
   },
   "by_venue": {
     "bitget": {
-      "records": 4874517,
-      "shards": 69185
+      "records": 1547986,
+      "shards": 20085
     },
     "gate": {
       "records": 33333373,
       "shards": 23429
     },
     "hyperliquid": {
-      "records": 4268928,
-      "shards": 3720
+      "records": 4268898,
+      "shards": 3700
     },
     "okx": {
       "records": 47571316,
@@ -125,8 +117,8 @@
       "shards": 962
     },
     "bitget|trades": {
-      "records": 4307402,
-      "shards": 66219
+      "records": 980871,
+      "shards": 17119
     },
     "gate|bbo": {
       "records": 5876772,
@@ -167,14 +159,6 @@
     "hyperliquid|copy_vault_l2": {
       "records": 183,
       "shards": 9
-    },
-    "hyperliquid|copy_vault_positions": {
-      "records": 20,
-      "shards": 10
-    },
-    "hyperliquid|copy_vault_selection": {
-      "records": 10,
-      "shards": 10
     },
     "hyperliquid|instrument_metadata": {
       "records": 53,
@@ -223,12 +207,12 @@
   },
   "current_reasons": {
     "MANIFEST_UNREADABLE": {
-      "records": 106705040,
-      "shards": 111845
+      "records": 103378479,
+      "shards": 62725
     }
   },
   "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": true,
-  "non_safe_shards": 111845,
+  "non_safe_shards": 62725,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
@@ -261,8 +245,8 @@
       "shards": 962
     },
     "bitget|trades|MANIFEST_UNREADABLE": {
-      "records": 4307402,
-      "shards": 66219
+      "records": 980871,
+      "shards": 17119
     },
     "gate|bbo|MANIFEST_UNREADABLE": {
       "records": 5876772,
@@ -303,14 +287,6 @@
     "hyperliquid|copy_vault_l2|MANIFEST_UNREADABLE": {
       "records": 183,
       "shards": 9
-    },
-    "hyperliquid|copy_vault_positions|MANIFEST_UNREADABLE": {
-      "records": 20,
-      "shards": 10
-    },
-    "hyperliquid|copy_vault_selection|MANIFEST_UNREADABLE": {
-      "records": 10,
-      "shards": 10
     },
     "hyperliquid|instrument_metadata|MANIFEST_UNREADABLE": {
       "records": 53,
@@ -360,7 +336,7 @@
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "2f7e8d7d6aaee692c7d6782bb4c01ad38c58cf03157e40af825674a4e200dd83",
+  "source_audit_digest": "2dd487fdc46e1ba6890af2f1774dc13c55a0873557e095cd94024bceeca11bdd",
   "source_gap_causes": {
     "bitget|bbo|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
       "records": 102670,
@@ -387,8 +363,8 @@
       "shards": 962
     },
     "bitget|trades|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 4307402,
-      "shards": 66219
+      "records": 980871,
+      "shards": 17119
     },
     "gate|bbo|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
       "records": 5876772,
@@ -429,14 +405,6 @@
     "hyperliquid|copy_vault_l2|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
       "records": 183,
       "shards": 9
-    },
-    "hyperliquid|copy_vault_positions|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 20,
-      "shards": 10
-    },
-    "hyperliquid|copy_vault_selection|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 10,
-      "shards": 10
     },
     "hyperliquid|instrument_metadata|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
       "records": 53,
@@ -483,15 +451,15 @@
       "shards": 18
     }
   },
-  "source_index_sha256": "183b0997e8e9876c2b8c3c146b55ee3020eed5cee1f924753beb5e3022a96d42",
-  "source_shards": 1363853,
+  "source_index_sha256": "86bc1fe8b490c8fb92bea5a5245dd71164d5bfef277640c1e38d44f89575b438",
+  "source_shards": 1314733,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
     "NO_STORED_REASON": {
-      "records": 106705040,
-      "shards": 111845
+      "records": 103378479,
+      "shards": 62725
     }
   },
-  "unreadable_manifest_count": 111845,
+  "unreadable_manifest_count": 62725,
   "validation_allowed": false
 }
