@@ -503,10 +503,11 @@ def test_terminal_cleanup_rebuilds_metrics_with_existing_catalog_tool() -> None:
     assert "python tools/build_dataset_metrics.py" not in finalize
 
 
-def test_terminal_cleanup_materializes_dataset_manifests_for_full_validation() -> None:
+def test_terminal_cleanup_avoids_materializing_immutable_dataset_tree() -> None:
     cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
     sparse = cleanup.split("sparse-checkout: |", 1)[1].split(
         "persist-credentials:", 1
     )[0]
-    assert "\n            datasets\n" in sparse
-    assert "python tools/check_dataset_quality.py" in cleanup
+    assert "\n            datasets\n" not in sparse
+    assert "filter: blob:none" in cleanup
+    assert "python tools/check_dataset_quality.py --catalog-only" in cleanup
