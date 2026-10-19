@@ -24,9 +24,10 @@ permissions:
   contents: write
 
 concurrency:
-  # A newer SHA supersedes an older checkout-only cleanup wave.
+  # Release deletion and catalog finalization form one resumable transaction.
+  # Keep mutation waves serialized once the obsolete checkout has been cleared.
   group: principal-dataset-terminal-cleanup
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   delete-terminal:
