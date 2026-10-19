@@ -24,8 +24,9 @@ permissions:
   contents: write
 
 concurrency:
+  # A newer SHA supersedes an older checkout-only cleanup wave.
   group: principal-dataset-terminal-cleanup
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   delete-terminal:
