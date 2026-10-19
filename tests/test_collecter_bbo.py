@@ -286,3 +286,10 @@ def test_parser_active_asset_ctx_hl_preserves_market_context() -> None:
         "prev_day_px": 64000.0,
     }
     assert m.parser_active_asset_ctx_hl({"channel": "bbo", "data": {}}) is None
+
+
+def test_bbo_bundle_is_fail_closed_at_source_admission() -> None:
+    source = (RACINE / "tools" / "collecter_bbo.py").read_text(encoding="utf-8")
+    call = source[source.index("await asyncio.to_thread(\n            build_bundle,"):]
+    call = call[:call.index("\n        )")]
+    assert "replay_admission_only=True" in call

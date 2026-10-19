@@ -1709,6 +1709,7 @@ async def _boucle(
             root / "runtime" / "data" / "dataset_v2_bundle" / "bbo",
             collector_version=collector_version,
             compact_target_bytes=64 * 1024 * 1024,
+            replay_admission_only=True,
         )
 
 
