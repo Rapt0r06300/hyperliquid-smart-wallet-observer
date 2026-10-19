@@ -242,6 +242,9 @@ def prepare(limit: int) -> dict[str, Any]:
             grouped[key].append(row)
 
     selected: list[dict[str, Any]] = []
+    # A Release can contain thousands of terminal assets. Fetch its immutable
+    # inventory once per plan instead of spending one API request per asset.
+    release_assets: dict[str, dict[str, dict[str, Any]]] = {}
     for (tag, name), physical_rows in sorted(grouped.items()):
         # Deleting a physical asset is legal only when every logical member is
         # terminal. This protects SAFE and still-repairable members in ZIPs.
@@ -259,7 +262,9 @@ def prepare(limit: int) -> dict[str, Any]:
             continue
         if next(iter(proof_sizes)) <= 0 or not str(next(iter(proof_digests))).startswith("sha256:"):
             continue
-        remote = assets(release(tag)).get(name)
+        if tag not in release_assets:
+            release_assets[tag] = assets(release(tag))
+        remote = release_assets[tag].get(name)
         if remote is None:
             continue
         expected_size = next(iter(proof_sizes))
@@ -331,9 +336,12 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
     # Index may advance only through unrelated catalog receipts. Every target
     # identity is rechecked above; the frozen index digest remains evidence.
     deleted: list[dict[str, Any]] = []
+    release_assets: dict[str, dict[str, dict[str, Any]]] = {}
     for item in plan["assets"]:
-        current_assets = assets(release(item["release_tag"]))
-        remote = current_assets.get(item["asset_name"])
+        tag = item["release_tag"]
+        if tag not in release_assets:
+            release_assets[tag] = assets(release(tag))
+        remote = release_assets[tag].get(item["asset_name"])
         if remote is not None:
             if not (
                 remote.get("id") == item["asset_id"]

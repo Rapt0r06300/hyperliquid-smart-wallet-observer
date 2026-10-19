@@ -7,7 +7,7 @@ on:
       asset_limit:
         description: "Maximum terminal Release assets in this checkpoint"
         required: false
-        default: "20"
+        default: "500"
   workflow_run:
     workflows: [backfill-replay-compatibility]
     types: [completed]
@@ -33,7 +33,7 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
       PYTHONUTF8: "1"
@@ -83,7 +83,7 @@ jobs:
       - name: Commit immutable deletion plan
         id: plan
         env:
-          ASSET_LIMIT: ${{ github.event.inputs.asset_limit || '20' }}
+          ASSET_LIMIT: ${{ github.event.inputs.asset_limit || '500' }}
         run: |
           set -euo pipefail
           case "$ASSET_LIMIT" in ''|*[!0-9]*) echo "invalid asset_limit"; exit 2;; esac

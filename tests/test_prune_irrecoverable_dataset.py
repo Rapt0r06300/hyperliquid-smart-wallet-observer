@@ -136,3 +136,22 @@ def test_only_reject_plan_and_current_membership_can_delete():
     assert gc._reject_only_plan(plan) is True
     gc._verify_target_membership([reject], plan["assets"])
     assert gc._reject_only_plan({"assets": []}) is False
+
+
+def test_prepare_fetches_shared_release_inventory_once(monkeypatch, tmp_path):
+    first = _row("reject", "REJECT", "first.jsonl.gz")
+    second = {**_row("second", "REJECT", "second.jsonl.gz"), "sha256": "c" * 64,
+              "release_remote_digest": "sha256:" + "c" * 64}
+    monkeypatch.setattr(gc, "PLAN", tmp_path / "DATA_DELETION_PLAN.json")
+    monkeypatch.setattr(gc, "_verified_snapshot", lambda: ({}, [first, second], "f" * 64))
+    calls = []
+    monkeypatch.setattr(gc, "release", lambda tag: calls.append(tag) or {})
+    monkeypatch.setattr(gc, "assets", lambda _release: {
+        "first.jsonl.gz": {"id": 1, "size": 10, "digest": first["release_remote_digest"]},
+        "second.jsonl.gz": {"id": 2, "size": 10, "digest": second["release_remote_digest"]},
+    })
+
+    result = gc.prepare(500)
+
+    assert result["asset_count"] == 2
+    assert calls == ["data-test"]

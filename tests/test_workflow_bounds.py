@@ -511,3 +511,22 @@ def test_terminal_cleanup_avoids_materializing_immutable_dataset_tree() -> None:
     assert "\n            datasets\n" not in sparse
     assert "filter: blob:none" in cleanup
     assert "python tools/check_dataset_quality.py --catalog-only" in cleanup
+
+
+def test_replay_backfill_checks_out_only_repairable_manifest_stages() -> None:
+    replay = _workflow("backfill-replay-compatibility.yml")
+    sparse = replay.split("sparse-checkout: |", 1)[1].split(
+        "persist-credentials:", 1
+    )[0]
+    assert "\n            datasets/quarantine\n" in sparse
+    assert "\n            datasets/rejected\n" in sparse
+    assert "\n            datasets/safe\n" not in sparse
+    assert "python tools/check_dataset_quality.py --catalog-only" in replay
+    assert "git add --sparse catalog datasets" in replay
+
+
+def test_terminal_cleanup_amortizes_full_catalog_rewrite() -> None:
+    cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
+    assert 'default: "500"' in cleanup
+    assert "github.event.inputs.asset_limit || '500'" in cleanup
+    assert "timeout-minutes: 90" in cleanup

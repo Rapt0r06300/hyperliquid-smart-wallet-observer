@@ -49,8 +49,16 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 0
+          fetch-depth: 2
           filter: blob:none
+          sparse-checkout: |
+            .github
+            catalog
+            datasets/quarantine
+            datasets/rejected
+            src
+            tests
+            tools
           persist-credentials: true
 
       - name: Sync latest main before processing
@@ -103,7 +111,7 @@ jobs:
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py
-          python tools/check_dataset_quality.py
+          python tools/check_dataset_quality.py --catalog-only
 
       - name: Publish replay-proof progress
         shell: bash
@@ -111,7 +119,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add catalog datasets
+          git add --sparse catalog datasets
           git diff --cached --quiet && exit 0
           # Capture only NEW Release-verified SHA/size-bound results before the
           # first push. A competing writer must not force another large remote
@@ -141,8 +149,8 @@ jobs:
             python tools/build_replay_compatibility_reasons.py
             python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
-            python tools/check_dataset_quality.py
-            git add catalog datasets
+            python tools/check_dataset_quality.py --catalog-only
+            git add --sparse catalog datasets
             if git diff --cached --quiet; then
               echo "Replay receipts already published on canonical main."
               exit 0
