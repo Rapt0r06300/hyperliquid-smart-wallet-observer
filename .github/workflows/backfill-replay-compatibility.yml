@@ -33,11 +33,10 @@ permissions:
   contents: write
 
 concurrency:
-  # Keep replay proof running even when historical catalog reconciliation is
-  # continually relaunching. Writes remain SHA-verified and the push fails on
-  # semantic conflict rather than merging potentially inconsistent SAFE rows.
+  # A newer SHA supersedes an older checkout-only wave. Publication remains
+  # SHA-verified, so cancel stale work instead of holding the repair queue.
   group: dataset-v2-replay-verification-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   verify-replay:
