@@ -474,3 +474,11 @@ def test_campaign_workflows_sparse_checkout_excludes_principal_dataset_tree() ->
         workflow = _workflow(name)
         assert workflow.count("actions/checkout@") == checkout_count
         assert workflow.count("sparse-checkout:") == checkout_count
+
+
+def test_terminal_cleanup_sparse_checkout_includes_python_package() -> None:
+    cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
+    sparse = cleanup.split("sparse-checkout: |", 1)[1].split(
+        "persist-credentials:", 1
+    )[0]
+    assert "\n            src\n" in sparse
