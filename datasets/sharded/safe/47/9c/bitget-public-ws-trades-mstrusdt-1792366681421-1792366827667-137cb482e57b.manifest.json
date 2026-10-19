@@ -1,0 +1,127 @@
+{
+  "asset_verified": true,
+  "bytes": 25170,
+  "collection_run_id": "market-e8-9-2026101818-v7-0",
+  "collector_version": "5a5296244210cf46285a55821b8f48420bba6d0f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-mstrusdt-1792366681421-1792366827667-137cb482e57b",
+  "end_ts_ms": 1792366827667,
+  "event_count": 275,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 275,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 275,
+    "missing_from_live": 0,
+    "reference_count": 275,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 275,
+  "release": {
+    "asset_id": 654780955,
+    "asset_name": "packed-shards-0041.zip",
+    "member_name": "bitget-public-ws-trades-mstrusdt-1792366681421-1792366827667-137cb482e57b.jsonl.gz",
+    "release_id": 416782532,
+    "release_tag": "data-v2-campaign-market-e8-9-2026101818-v7-u0",
+    "remote_digest": "sha256:3e9ba00f493c15118af258df79fe047051fd2cb33feb76088b001a7a7a44bb46",
+    "remote_size": 688287,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-mstrusdt-1792366681421-1792366827667-137cb482e57b.jsonl.gz",
+  "release_asset_id": 654780955,
+  "release_container_asset": "packed-shards-0041.zip",
+  "release_id": 416782532,
+  "release_member": "bitget-public-ws-trades-mstrusdt-1792366681421-1792366827667-137cb482e57b.jsonl.gz",
+  "release_remote_digest": "sha256:3e9ba00f493c15118af258df79fe047051fd2cb33feb76088b001a7a7a44bb46",
+  "release_remote_size": 688287,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026101818-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "137cb482e57ba2642f338449d7241c3f995beea782b4ff49c8253a70cb2722e8",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1792366681421,
+  "symbol": "MSTRUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 275,
+      "max": 120.0,
+      "min": 74.0,
+      "p50": 102.5,
+      "p95": 120.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-e7d31d0f99a343faadc8962f984d5a2d"
+    ],
+    "first_exchange_ts_ms": 1792366607074,
+    "last_exchange_ts_ms": 1792366827599,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 275,
+      "max": 74347.0,
+      "min": 60.0,
+      "p50": 70.0,
+      "p95": 61810.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 275,
+      "max": 183.670031,
+      "min": 0.0,
+      "p50": 138.703212,
+      "p95": 183.670031
+    }
+  },
+  "trade_count": 275,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 275,
+  "trade_identity_set_sha256": "3bf65c22f794d67a4409cb0a4c1a0c90e4d6d672094bca16a30189aa6fb04850",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 446124,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 275,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
