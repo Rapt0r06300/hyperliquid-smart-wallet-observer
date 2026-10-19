@@ -501,3 +501,12 @@ def test_terminal_cleanup_rebuilds_metrics_with_existing_catalog_tool() -> None:
     finalize = cleanup.split("- name: Delete exact terminal assets", 1)[1]
     assert "python tools/build_catalog_metrics.py" in finalize
     assert "python tools/build_dataset_metrics.py" not in finalize
+
+
+def test_terminal_cleanup_materializes_dataset_manifests_for_full_validation() -> None:
+    cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
+    sparse = cleanup.split("sparse-checkout: |", 1)[1].split(
+        "persist-credentials:", 1
+    )[0]
+    assert "\n            datasets\n" in sparse
+    assert "python tools/check_dataset_quality.py" in cleanup
