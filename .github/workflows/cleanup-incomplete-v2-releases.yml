@@ -99,6 +99,12 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add catalog/DATA_DELETION_PLAN.json
+            if git diff --cached --quiet; then
+              echo "Deletion plan already durable at $(git rev-parse HEAD)."
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+              echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             git commit -m "data: plan terminal payload deletion ${GITHUB_RUN_ID}"
             if git push origin HEAD:main; then
               echo "ready=true" >> "$GITHUB_OUTPUT"

@@ -482,3 +482,15 @@ def test_terminal_cleanup_sparse_checkout_includes_python_package() -> None:
         "persist-credentials:", 1
     )[0]
     assert "\n            src\n" in sparse
+
+
+def test_terminal_cleanup_reuses_identical_durable_plan_without_empty_commit() -> None:
+    cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
+    plan = cleanup.split("- name: Commit immutable deletion plan", 1)[1].split(
+        "- name: Delete exact terminal assets", 1
+    )[0]
+    assert "git diff --cached --quiet" in plan
+    assert "Deletion plan already durable" in plan
+    assert plan.index("git diff --cached --quiet") < plan.index(
+        'git commit -m "data: plan terminal payload deletion'
+    )
