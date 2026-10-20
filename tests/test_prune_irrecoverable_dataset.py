@@ -45,7 +45,7 @@ def test_prepare_protects_safe_member_and_selects_terminal_standalone(monkeypatc
 def test_terminal_requires_explicit_reject_with_complete_asset_identity():
     row = _row("reject", "REJECT", "reject.jsonl.gz")
     assert gc._terminal_rows([{**row, "quality_status": "PARTIAL"}]) == {}
-    assert gc._terminal_rows([{**row, "replay_compatible": True}]) == {}
+    assert set(gc._terminal_rows([{**row, "replay_compatible": True}])) == {"reject"}
     assert gc._terminal_rows([{**row, "bytes": 0}]) == {}
     assert gc._terminal_rows([{**row, "sha256": "not-a-sha"}]) == {}
     assert gc._terminal_rows([{**row, "release_asset": ""}]) == {}
