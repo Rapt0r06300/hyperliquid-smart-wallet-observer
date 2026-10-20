@@ -48,7 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 2
+          # Historical manifest recovery needs commit history; blob:none keeps
+          # the checkout small and fetches only selected proof blobs on demand.
+          fetch-depth: 0
           filter: blob:none
           sparse-checkout-cone-mode: false
           sparse-checkout: |
