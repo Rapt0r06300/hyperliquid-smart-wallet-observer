@@ -553,3 +553,9 @@ def test_quarantine_audit_materializes_non_safe_manifests_and_fails_closed() -> 
     assert 'unreadable_manifest_count' in audit
     assert 'unreadable non-SAFE manifest(s)' in audit
 
+def test_quarantine_audit_retries_after_serialized_terminal_cleanup() -> None:
+    audit = _workflow("quarantine-audit.yml")
+    assert "workflow_run:" in audit
+    assert "workflows: [principal dataset terminal deletion]" in audit
+    assert "github.event.workflow_run.conclusion == 'success'" in audit
+
