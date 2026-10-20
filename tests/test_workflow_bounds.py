@@ -210,7 +210,7 @@ def test_reconcile_covers_all_production_release_families_and_pins_actions():
     assert "Download new Dataset principal run manifests (bounded batch)" in text
     assert "known={" in text
     assert "group: dataset-v2-catalog-reconcile" in text
-    assert "cancel-in-progress: ${{ github.event_name == 'push' }}" in text
+    assert "cancel-in-progress: false" in text
 
 
 def test_resumable_worker_preserves_frozen_cursor_and_retry_policy():

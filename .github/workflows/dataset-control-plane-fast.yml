@@ -28,6 +28,9 @@ jobs:
           sparse-checkout: |
             /.github/
             /tests/test_workflow_bounds.py
+            /tools/resumable_campaign.py
+            /tools/collecter_native_venues.py
+            /src/hl_observer/ops/autonomous_research_job.py
       - name: Validate dataset workflow invariants
         run: |
           python -m pip install --disable-pip-version-check pytest

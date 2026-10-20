@@ -1,6 +1,9 @@
 name: quarantine-audit
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [principal dataset terminal deletion]
+    types: [completed]
   schedule:
     - cron: "37 */2 * * *"
   push:
@@ -29,6 +32,7 @@ concurrency:
 jobs:
   audit:
     name: Audit quarantined shards
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
