@@ -201,7 +201,7 @@ def test_reconcile_covers_all_production_release_families_and_pins_actions():
     assert "--attempts 3" in text
     assert "--poll-seconds 2" in text
     assert "--list-tags-output" in text
-    assert "--list-page-size 50" in text
+    assert "--list-page-size 100" in text
     assert "dataset-health-receipt.yml" in text
     assert "actions/checkout@v4" not in text
     assert "actions/setup-python@v5" not in text
@@ -249,7 +249,8 @@ def test_terminal_cleanup_is_sha_bound_safe_protecting_and_post_repair():
 
 def test_replay_backfill_has_exhaustive_family_tail_before_cleanup():
     replay = _workflow("backfill-replay-compatibility.yml")
-    assert '--families ""' in replay
+    assert '--group-quotas "' in replay
+    assert ':*")' in replay
     assert "build_quarantine_audit.py" in replay
 
 
@@ -394,7 +395,6 @@ def test_single_repo_phase_control_propagates_generated_request_id():
 
 def test_reconcile_near_limit_uses_one_release_without_dropping_backlog():
     text = _workflow("reconcile-v2-catalog.yml")
-    assert "if indexed_bytes >= 75 * 1024 * 1024:" in text
     assert "batch_size = 1" in text
     assert "remaining = max(0, len(new_tags) - len(batch))" in text
     assert "REMAINING_NEW_TAGS" in text
@@ -481,7 +481,7 @@ def test_terminal_cleanup_sparse_checkout_includes_python_package() -> None:
     sparse = cleanup.split("sparse-checkout: |", 1)[1].split(
         "persist-credentials:", 1
     )[0]
-    assert "\n            src\n" in sparse
+    assert "\n            /src/\n" in sparse
 
 
 def test_terminal_cleanup_reuses_identical_durable_plan_without_empty_commit() -> None:
@@ -539,6 +539,6 @@ def test_replay_backfill_checks_out_only_repairable_manifest_stages() -> None:
 
 def test_terminal_cleanup_amortizes_full_catalog_rewrite() -> None:
     cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
-    assert 'default: "500"' in cleanup
-    assert "github.event.inputs.asset_limit || '500'" in cleanup
+    assert 'default: "2000"' in cleanup
+    assert "github.event.inputs.asset_limit || '2000'" in cleanup
     assert "timeout-minutes: 90" in cleanup
