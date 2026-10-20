@@ -36,7 +36,7 @@ concurrency:
   # A newer SHA supersedes an older checkout-only wave. Publication remains
   # SHA-verified, so cancel stale work instead of holding the repair queue.
   group: dataset-v2-replay-verification-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   verify-replay:
