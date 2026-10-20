@@ -614,3 +614,78 @@ def test_empty_grouped_workflow_skips_global_metrics_and_git_publication():
     assert "REPLAY_WAVE_NOOP" in wave
     assert 'json.load(sys.stdin).get("no_change")' in wave
     assert wave.index("REPLAY_WAVE_NOOP") < wave.index("python tools/build_replay_compatibility_reasons.py")
+
+
+def test_apply_result_recovers_sha_bound_manifest_from_git_history(tmp_path):
+    import subprocess
+
+    dataset_id = "history-recoverable-bbo"
+    relative = Path("datasets/quarantine") / f"{dataset_id}.manifest.json"
+    manifest_path = tmp_path / relative
+    manifest_path.parent.mkdir(parents=True)
+    manifest = {
+        "schema": "alina.shard_manifest.v2",
+        "dataset_id": dataset_id,
+        "family": "bbo", "venue": "hyperliquid", "symbol": "BTC",
+        "source": "hyperliquid_public_ws",
+        "start_ts_ms": 1000, "end_ts_ms": 1001,
+        "event_count": 2, "record_count": 2,
+        "sha256": "a" * 64, "bytes": 123,
+        "collector_version": "original-collector-sha",
+        "asset_verified": True,
+        "replay_compatible": True,
+        "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "quality_status": "PARTIAL",
+        "quality_reasons": ["STALE_CLASSIFICATION"],
+        "integrity": {
+            "gap_count": 0, "duplicate_count": 0, "duplicates_deduped": True,
+            "regression_count": 0, "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0, "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True, "authenticated": False,
+            "real_execution": False, "transports": ["websocket"],
+        },
+        "synchronization": {"connection_count": 1},
+        "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
+        "required_channels": [], "observed_channels": ["bbo"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", relative.as_posix()], cwd=tmp_path, check=True)
+    subprocess.run([
+        "git", "-c", "user.name=tests", "-c", "user.email=tests@example.invalid",
+        "commit", "-qm", "store manifest",
+    ], cwd=tmp_path, check=True)
+    manifest_path.unlink()
+    subprocess.run(["git", "add", "-u"], cwd=tmp_path, check=True)
+    subprocess.run([
+        "git", "-c", "user.name=tests", "-c", "user.email=tests@example.invalid",
+        "commit", "-qm", "retire manifest",
+    ], cwd=tmp_path, check=True)
+
+    row = {
+        "dataset_id": dataset_id, "family": "bbo", "venue": "hyperliquid",
+        "symbol": "BTC", "source": "hyperliquid_public_ws",
+        "quality_status": "PARTIAL", "replay_compatible": True,
+        "manifest_path": relative.as_posix(), "sha256": "a" * 64, "bytes": 123,
+    }
+    result = {
+        "record_count": 2, "replay_compatible": True,
+        "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "verified_from_release": True, "asset_sha256": "a" * 64,
+        "asset_size": 123, "verifier_version": backfill.VERIFIER_VERSION,
+    }
+
+    backfill._apply_result(row, result, root=tmp_path)
+
+    restored = tmp_path / "datasets/safe" / f"{dataset_id}.manifest.json"
+    assert restored.is_file()
+    saved = json.loads(restored.read_text(encoding="utf-8"))
+    assert saved["quality_status"] == "SAFE"
+    assert saved["manifest_recovery"]["source"] == "git_history"
+    assert len(saved["manifest_recovery"]["commit_sha"]) == 40
+    assert saved["manifest_recovery"]["original_manifest_sha256"]
