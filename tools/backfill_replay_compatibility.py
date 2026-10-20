@@ -402,9 +402,10 @@ def _candidate(
         if (
             prior.get("replay_compatible") is not True
             and str(prior.get("verifier_version") or "")==VERIFIER_VERSION
-            and not metadata_repair
+            and not (metadata_repair or manifest_recovery)
         ):
-            # A newly published exact global-v3 identity proof changes the
+            # A newly published exact global-v3 identity proof or an exact
+            # SHA/size-bound historical manifest changes the available evidence.
             # evidence, so a historical failure must not permanently suppress
             # the fully SHA-verified metadata repair path.
             return False
