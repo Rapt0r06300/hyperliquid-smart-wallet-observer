@@ -742,3 +742,11 @@ def test_missing_current_manifest_remains_a_repair_candidate(tmp_path, monkeypat
     unreadable.parent.mkdir(parents=True, exist_ok=True)
     unreadable.write_text("{not-json", encoding="utf-8")
     assert backfill._candidate(dict(row), {}, {"bbo"}) is True
+
+
+def test_scheduled_replay_wave_never_cancels_active_repair():
+    source = (
+        ROOT / ".github" / "workflows" / "backfill-replay-compatibility.yml"
+    ).read_text(encoding="utf-8")
+    concurrency = source.split("concurrency:", 1)[1].split("jobs:", 1)[0]
+    assert "cancel-in-progress: ${{ github.event_name == 'push' }}" in concurrency
