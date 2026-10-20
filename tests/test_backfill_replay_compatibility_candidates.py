@@ -689,3 +689,22 @@ def test_apply_result_recovers_sha_bound_manifest_from_git_history(tmp_path):
     assert saved["manifest_recovery"]["source"] == "git_history"
     assert len(saved["manifest_recovery"]["commit_sha"]) == 40
     assert saved["manifest_recovery"]["original_manifest_sha256"]
+
+
+
+def test_missing_current_manifest_remains_a_repair_candidate(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    row = {
+        "dataset_id": "history-recoverable-bbo",
+        "family": "bbo",
+        "quality_status": "PARTIAL",
+        "replay_compatible": True,
+        "manifest_path": "datasets/quarantine/history-recoverable-bbo.manifest.json",
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-example",
+        "release_asset": "history-recoverable-bbo.jsonl.gz",
+        "sha256": "a" * 64,
+        "bytes": 123,
+    }
+
+    assert backfill._candidate(dict(row), {}, {"bbo"}) is True
