@@ -191,6 +191,106 @@ def _manifest_for_row(row: Mapping[str,Any]) -> dict[str,Any] | None:
         return None
 
 
+def _manifest_relative_path(row: Mapping[str,Any]) -> Path:
+    relative=Path(str(row.get("manifest_path") or ""))
+    if (
+        not relative.parts
+        or relative.is_absolute()
+        or ".." in relative.parts
+        or len(relative.parts)<3
+        or relative.parts[:2] not in {
+            ("datasets","quarantine"),
+            ("datasets","rejected"),
+        }
+    ):
+        raise BackfillError("unsafe historical manifest path")
+    return relative
+
+
+def _recover_manifest_from_git_history(
+    row: Mapping[str,Any],
+    *,
+    root: Path,
+) -> tuple[dict[str,Any],dict[str,Any]]:
+    relative=_manifest_relative_path(row)
+    try:
+        history=subprocess.run(
+            ["git","log","--all","-n","64","--format=%H","--",relative.as_posix()],
+            cwd=root,capture_output=True,text=True,check=False,timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BackfillError("historical manifest lookup timed out") from exc
+    if history.returncode!=0:
+        raise BackfillError("historical manifest lookup failed")
+    expected_id=str(row.get("dataset_id") or "")
+    expected_sha=str(row.get("sha256") or "").lower()
+    try:
+        expected_bytes=int(row.get("bytes"))
+    except (TypeError,ValueError,OverflowError) as exc:
+        raise BackfillError("invalid index byte size for historical manifest") from exc
+    for commit_sha in history.stdout.splitlines():
+        if len(commit_sha)!=40:
+            continue
+        object_name=f"{commit_sha}:{relative.as_posix()}"
+        try:
+            size_check=subprocess.run(
+                ["git","cat-file","-s",object_name],cwd=root,capture_output=True,
+                text=True,check=False,timeout=30,
+            )
+            if size_check.returncode!=0:
+                continue
+            manifest_size=int(size_check.stdout.strip())
+            if manifest_size<=0 or manifest_size>2*1024*1024:
+                continue
+            blob=subprocess.run(
+                ["git","cat-file","-p",object_name],cwd=root,capture_output=True,
+                check=False,timeout=30,
+            )
+        except (subprocess.TimeoutExpired,ValueError):
+            continue
+        if blob.returncode!=0 or len(blob.stdout)!=manifest_size:
+            continue
+        try:
+            value=json.loads(blob.stdout.decode("utf-8"))
+        except (UnicodeDecodeError,ValueError,json.JSONDecodeError):
+            continue
+        if not isinstance(value,dict):
+            continue
+        try:
+            manifest_bytes=int(value.get("bytes"))
+        except (TypeError,ValueError,OverflowError):
+            continue
+        if (
+            str(value.get("dataset_id") or "")!=expected_id
+            or str(value.get("sha256") or "").lower()!=expected_sha
+            or manifest_bytes!=expected_bytes
+        ):
+            continue
+        for key in ("family","venue","symbol","source"):
+            expected=row.get(key)
+            observed=value.get(key)
+            if expected not in (None,"") and observed not in (None,"") and str(expected)!=str(observed):
+                break
+        else:
+            return value,{
+                "source":"git_history",
+                "commit_sha":commit_sha,
+                "original_manifest_sha256":hashlib.sha256(blob.stdout).hexdigest(),
+            }
+    raise BackfillError("no SHA/size-bound manifest found in git history")
+
+
+def _load_manifest_for_apply(
+    row: Mapping[str,Any],
+    *,
+    root: Path,
+) -> tuple[dict[str,Any],dict[str,Any] | None]:
+    manifest_path=root/str(row.get("manifest_path") or "")
+    if manifest_path.is_file():
+        return _load_json(manifest_path),None
+    return _recover_manifest_from_git_history(row,root=root)
+
+
 def _hydrate_release_fields(row: dict[str,Any], manifest: Mapping[str,Any] | None) -> None:
     """Recover immutable release coordinates from the manifest when an old index row lacks them."""
     if not isinstance(manifest,Mapping):
@@ -269,6 +369,19 @@ def _candidate(
     if families and family not in families:
         return False
 
+    manifest=_manifest_for_row(row)
+    if isinstance(row,dict):
+        _hydrate_release_fields(row,manifest)
+    try:
+        manifest_relative=_manifest_relative_path(row)
+    except BackfillError:
+        manifest_relative=None
+    manifest_recovery=bool(
+        str(row.get("quality_status") or "").upper()=="PARTIAL"
+        and manifest_relative is not None
+        and not (ROOT/manifest_relative).is_file()
+    )
+
     unique_evidence=(unique_rows or {}).get(dataset_id)
     metadata_repair=bool(
         row.get("replay_compatible") is True
@@ -277,12 +390,12 @@ def _candidate(
         and row.get("unique_trade_count_exact") is not True
         and _global_unique_evidence_valid(row,unique_evidence)
     )
-    if row.get("replay_compatible") is True and not metadata_repair:
+    if row.get("replay_compatible") is True and not (metadata_repair or manifest_recovery):
         return False
 
     prior=known.get(dataset_id)
     if isinstance(prior,Mapping):
-        if prior.get("replay_compatible") is True and not metadata_repair:
+        if prior.get("replay_compatible") is True and not (metadata_repair or manifest_recovery):
             return False
         # Failed receipts from older verifier semantics must be retried once.
         # A failure produced by the current verifier is stable and must not loop.
@@ -295,10 +408,6 @@ def _candidate(
             # evidence, so a historical failure must not permanently suppress
             # the fully SHA-verified metadata repair path.
             return False
-
-    manifest=_manifest_for_row(row)
-    if isinstance(row,dict):
-        _hydrate_release_fields(row,manifest)
 
     if not all(
         row.get(key) not in (None,"")
@@ -498,11 +607,20 @@ def _apply_result(
     root: Path,
 ) -> None:
     manifest_path=root/str(row["manifest_path"])
-    manifest=_load_json(manifest_path)
+    manifest,recovery=_load_manifest_for_apply(row,root=root)
     if str(manifest.get("dataset_id"))!=str(row.get("dataset_id")):
         raise BackfillError("manifest/index dataset_id mismatch")
     if str(manifest.get("sha256") or "").lower()!=str(row.get("sha256") or "").lower():
         raise BackfillError("manifest/index sha256 mismatch")
+    try:
+        manifest_bytes=int(manifest.get("bytes"))
+        index_bytes=int(row.get("bytes"))
+    except (TypeError,ValueError,OverflowError) as exc:
+        raise BackfillError("invalid manifest/index byte size") from exc
+    if manifest_bytes!=index_bytes:
+        raise BackfillError("manifest/index byte size mismatch")
+    if recovery is not None:
+        manifest["manifest_recovery"]=recovery
 
     authoritative_count=_restore_exact_trade_count_evidence(manifest,root=root)
 
