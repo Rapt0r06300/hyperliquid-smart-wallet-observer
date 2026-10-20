@@ -79,6 +79,9 @@ jobs:
               raise SystemExit("quarantine audit total does not match DATA_METRICS")
           historical=int(row.get("historical_live_only_false_reject_count") or 0)
           stale=int(row.get("potential_false_non_safe_count") or 0)
+          unreadable=int(row.get("unreadable_manifest_count") or 0)
+          if unreadable:
+              raise SystemExit(f"{unreadable} unreadable non-SAFE manifest(s); audit is incomplete")
           if historical:
               raise SystemExit(f"{historical} historical shard(s) are still blocked only by live-capture rules")
           if stale:
@@ -107,6 +110,9 @@ jobs:
           report=json.load(open("catalog/QUARANTINE_AUDIT.json",encoding="utf-8"))
           if report.get("quarantine_total_matches_metrics") is not True:
               raise SystemExit("quarantine audit and metrics disagree")
+          unreadable=int(report.get("unreadable_manifest_count") or 0)
+          if unreadable:
+              raise SystemExit(f"{unreadable} unreadable non-SAFE manifest(s); refusing incomplete audit")
           if int(report.get("historical_live_only_false_reject_count") or 0):
               raise SystemExit("historical live-only exclusions remain")
           if int(report.get("potential_false_non_safe_count") or 0):

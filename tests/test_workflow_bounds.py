@@ -542,3 +542,14 @@ def test_terminal_cleanup_amortizes_full_catalog_rewrite() -> None:
     assert 'default: "2000"' in cleanup
     assert "github.event.inputs.asset_limit || '2000'" in cleanup
     assert "timeout-minutes: 90" in cleanup
+
+def test_quarantine_audit_materializes_non_safe_manifests_and_fails_closed() -> None:
+    audit = _workflow("quarantine-audit.yml")
+    sparse = audit.split("sparse-checkout: |", 1)[1].split(
+        "- uses: actions/setup-python@", 1
+    )[0]
+    assert "\n            /datasets/quarantine/\n" in sparse
+    assert "\n            /datasets/rejected/\n" in sparse
+    assert 'unreadable_manifest_count' in audit
+    assert 'unreadable non-SAFE manifest(s)' in audit
+
