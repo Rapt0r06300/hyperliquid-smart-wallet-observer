@@ -708,3 +708,14 @@ def test_missing_current_manifest_remains_a_repair_candidate(tmp_path, monkeypat
     }
 
     assert backfill._candidate(dict(row), {}, {"bbo"}) is True
+
+    prior_current_failure = {
+        row["dataset_id"]: {
+            "replay_compatible": False,
+            "replay_reason": "MISSING_MANIFEST_AT_CURRENT_HEAD",
+            "verifier_version": backfill.VERIFIER_VERSION,
+        }
+    }
+    assert backfill._candidate(
+        dict(row), prior_current_failure, {"bbo"}
+    ) is True
