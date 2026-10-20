@@ -612,14 +612,14 @@ def _apply_result(
         raise BackfillError("manifest/index dataset_id mismatch")
     if str(manifest.get("sha256") or "").lower()!=str(row.get("sha256") or "").lower():
         raise BackfillError("manifest/index sha256 mismatch")
-    try:
-        manifest_bytes=int(manifest.get("bytes"))
-        index_bytes=int(row.get("bytes"))
-    except (TypeError,ValueError,OverflowError) as exc:
-        raise BackfillError("invalid manifest/index byte size") from exc
-    if manifest_bytes!=index_bytes:
-        raise BackfillError("manifest/index byte size mismatch")
     if recovery is not None:
+        try:
+            manifest_bytes=int(manifest.get("bytes"))
+            index_bytes=int(row.get("bytes"))
+        except (TypeError,ValueError,OverflowError) as exc:
+            raise BackfillError("invalid manifest/index byte size") from exc
+        if manifest_bytes!=index_bytes:
+            raise BackfillError("manifest/index byte size mismatch")
         manifest["manifest_recovery"]=recovery
 
     authoritative_count=_restore_exact_trade_count_evidence(manifest,root=root)
