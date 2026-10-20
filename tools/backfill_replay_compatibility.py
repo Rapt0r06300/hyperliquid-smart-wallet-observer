@@ -410,10 +410,12 @@ def _candidate(
             # the fully SHA-verified metadata repair path.
             return False
 
-    if not all(
-        row.get(key) not in (None,"")
-        for key in ("release_repository","release_tag","release_asset","sha256","bytes","manifest_path")
-    ):
+    required_identity = (
+        ("sha256","bytes","manifest_path")
+        if manifest_recovery
+        else ("release_repository","release_tag","release_asset","sha256","bytes","manifest_path")
+    )
+    if not all(row.get(key) not in (None,"") for key in required_identity):
         return False
 
     status=str(row.get("quality_status") or "").upper()
@@ -964,6 +966,18 @@ def backfill(
         for row in candidates:
             dataset_id=str(row["dataset_id"])
             try:
+                manifest_path=ROOT/str(row.get("manifest_path") or "")
+                if (
+                    str(row.get("quality_status") or "").upper()=="PARTIAL"
+                    and not manifest_path.is_file()
+                ):
+                    historical_manifest,_=_load_manifest_for_apply(row,root=ROOT)
+                    _hydrate_release_fields(row,historical_manifest)
+                if not all(
+                    row.get(key) not in (None,"")
+                    for key in ("release_repository","release_tag","release_asset","sha256","bytes")
+                ):
+                    raise BackfillError("release identity incomplete after manifest recovery")
                 asset=_download(row,tmp_root/dataset_id)
                 _verify_asset(asset,row)
                 result=inspect_asset(asset,row)

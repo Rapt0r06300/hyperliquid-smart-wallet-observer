@@ -420,7 +420,8 @@ def test_new_global_identity_evidence_retries_prior_failed_replay_receipt():
         "release_asset": "verified.jsonl.gz",
         "sha256": "a" * 64,
         "bytes": 123,
-        "manifest_path": "datasets/quarantine/verified.manifest.json",
+        # This test isolates global identity evidence, not missing-manifest recovery.
+        "manifest_path": "datasets/safe/verified.manifest.json",
     }
     prior = {dataset_id: {
         "replay_compatible": False,
@@ -700,9 +701,8 @@ def test_missing_current_manifest_remains_a_repair_candidate(tmp_path, monkeypat
         "quality_status": "PARTIAL",
         "replay_compatible": True,
         "manifest_path": "datasets/quarantine/history-recoverable-bbo.manifest.json",
-        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-        "release_tag": "data-v2-example",
-        "release_asset": "history-recoverable-bbo.jsonl.gz",
+        # Release coordinates are recovered from the exact historical manifest
+        # after bounded candidate selection, not invented in the index.
         "sha256": "a" * 64,
         "bytes": 123,
     }
