@@ -693,6 +693,24 @@ def test_apply_result_recovers_sha_bound_manifest_from_git_history(tmp_path):
 
 
 
+def test_unreadable_current_manifest_falls_back_to_exact_history(tmp_path, monkeypatch):
+    row = {
+        "dataset_id": "corrupt-current-manifest",
+        "manifest_path": "datasets/quarantine/corrupt-current-manifest.manifest.json",
+    }
+    path = tmp_path / row["manifest_path"]
+    path.parent.mkdir(parents=True)
+    path.write_text("{not-json", encoding="utf-8")
+    recovered = {"dataset_id": row["dataset_id"], "sha256": "a" * 64, "bytes": 123}
+    proof = {"source": "git_history", "commit_sha": "b" * 40}
+    monkeypatch.setattr(
+        backfill, "_recover_manifest_from_git_history",
+        lambda candidate, *, root: (recovered, proof),
+    )
+
+    assert backfill._load_manifest_for_apply(row, root=tmp_path) == (recovered, proof)
+
+
 def test_missing_current_manifest_remains_a_repair_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill, "ROOT", tmp_path)
     row = {
@@ -719,3 +737,8 @@ def test_missing_current_manifest_remains_a_repair_candidate(tmp_path, monkeypat
     assert backfill._candidate(
         dict(row), prior_current_failure, {"bbo"}
     ) is True
+
+    unreadable = tmp_path / row["manifest_path"]
+    unreadable.parent.mkdir(parents=True, exist_ok=True)
+    unreadable.write_text("{not-json", encoding="utf-8")
+    assert backfill._candidate(dict(row), {}, {"bbo"}) is True

@@ -287,7 +287,12 @@ def _load_manifest_for_apply(
 ) -> tuple[dict[str,Any],dict[str,Any] | None]:
     manifest_path=root/str(row.get("manifest_path") or "")
     if manifest_path.is_file():
-        return _load_json(manifest_path),None
+        try:
+            return _load_json(manifest_path),None
+        except (OSError,ValueError,BackfillError):
+            # A materialized but unreadable placeholder is not evidence.
+            # Recover only an exact SHA/size-bound historical manifest.
+            pass
     return _recover_manifest_from_git_history(row,root=root)
 
 
@@ -379,7 +384,7 @@ def _candidate(
     manifest_recovery=bool(
         str(row.get("quality_status") or "").upper()=="PARTIAL"
         and manifest_relative is not None
-        and not (ROOT/manifest_relative).is_file()
+        and manifest is None
     )
 
     unique_evidence=(unique_rows or {}).get(dataset_id)
@@ -966,10 +971,10 @@ def backfill(
         for row in candidates:
             dataset_id=str(row["dataset_id"])
             try:
-                manifest_path=ROOT/str(row.get("manifest_path") or "")
+                current_manifest=_manifest_for_row(row)
                 if (
                     str(row.get("quality_status") or "").upper()=="PARTIAL"
-                    and not manifest_path.is_file()
+                    and current_manifest is None
                 ):
                     historical_manifest,_=_load_manifest_for_apply(row,root=ROOT)
                     _hydrate_release_fields(row,historical_manifest)
