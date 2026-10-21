@@ -45,7 +45,8 @@ def test_prepare_protects_safe_member_and_selects_terminal_standalone(monkeypatc
 def test_terminal_requires_explicit_reject_with_complete_asset_identity():
     row = _row("reject", "REJECT", "reject.jsonl.gz")
     assert gc._terminal_rows([{**row, "quality_status": "PARTIAL"}]) == {}
-    assert set(gc._terminal_rows([{**row, "replay_compatible": True}])) == {"reject"}
+    assert gc._terminal_rows([{**row, "replay_compatible": True}]) == {}
+    assert gc._terminal_rows([{**row, "replay_compatible": None}]) == {}
     assert gc._terminal_rows([{**row, "bytes": 0}]) == {}
     assert gc._terminal_rows([{**row, "sha256": "not-a-sha"}]) == {}
     assert gc._terminal_rows([{**row, "release_asset": ""}]) == {}
@@ -101,13 +102,15 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
     frozen = {"release_tag": "data-test", "asset_name": "mixed.zip", "datasets": [{
         "dataset_id": reject["dataset_id"], "sha256": reject["sha256"],
         "bytes": reject["bytes"], "quality_status": reject["quality_status"],
-        "manifest_path": reject["manifest_path"],
+        "replay_compatible": False, "manifest_path": reject["manifest_path"],
     }]}
     gc._verify_target_membership([reject], [frozen])
     with pytest.raises(gc.Refuse, match="DELETION_PHYSICAL_MEMBERSHIP_CHANGED"):
         gc._verify_target_membership([reject, _row("new-safe", "SAFE", "mixed.zip")], [frozen])
     with pytest.raises(gc.Refuse, match="DELETION_PHYSICAL_MEMBER_CHANGED"):
         gc._verify_target_membership([{**reject, "bytes": 9}], [frozen])
+    with pytest.raises(gc.Refuse, match="DELETION_REPLAYABILITY_NOT_REFUTED"):
+        gc._verify_target_membership([{**reject, "replay_compatible": True}], [frozen])
 
 
 def test_partial_never_terminal_even_after_replay_verification_failure():
@@ -132,6 +135,7 @@ def test_only_reject_plan_and_current_membership_can_delete():
     plan = {"assets": [{"release_tag": "data-test", "asset_name": "reject.jsonl.gz",
                         "datasets": [{"dataset_id": "reject", "quality_status": "REJECT",
                                       "sha256": reject["sha256"], "bytes": reject["bytes"],
+                                      "replay_compatible": False,
                                       "manifest_path": reject["manifest_path"]}]}]}
     assert gc._reject_only_plan(plan) is True
     gc._verify_target_membership([reject], plan["assets"])
