@@ -394,6 +394,14 @@ def _candidate(
         return False
     if families and family not in families:
         return False
+    # The repair wave is not a full SAFE recertification job. Skip already
+    # replay-compatible SAFE shards before touching their immutable manifests
+    # (more than a million filesystem lookups per grouped wave otherwise).
+    if (
+        row.get("quality_status") == "SAFE"
+        and row.get("replay_compatible") is True
+    ):
+        return False
 
     manifest=_manifest_for_row(row)
     if isinstance(row,dict):
