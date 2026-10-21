@@ -86,7 +86,7 @@ jobs:
           unreadable=int(row.get("unreadable_manifest_count") or 0)
           if unreadable:
               from tools.build_quarantine_audit import read_partitioned_audit
-              full=read_partitioned_audit("catalog/QUARANTINE_AUDIT.json")
+              full=read_partitioned_audit(__import__("pathlib").Path("catalog/QUARANTINE_AUDIT.json"))
               blocked=[
                   {
                       "dataset_id": item.get("dataset_id"),

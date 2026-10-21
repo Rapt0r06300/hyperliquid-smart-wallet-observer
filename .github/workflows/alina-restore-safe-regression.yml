@@ -7,6 +7,10 @@ on:
       - Alina-restore.cmd
       - RESTORE_ALINA.cmd
       - tools/restore_alina.py
+      - tools/sync_complete_clone.py
+      - ALINA_SYNC_COMPLETE.cmd
+      - ALINA_SYNC_COMPLETE.sh
+      - README.md
       - tests/test_restore_alina.py
       - tests/test_restore_alina_launcher.py
       - tests/test_push_github_safe_contract.py
@@ -59,14 +63,29 @@ jobs:
           # Keep the SHA-bound catalog and test code, but exclude massive
           # unrelated runtime/archive/data trees from this read-only job.
           sparse-checkout: |
+            .github/workflows
             catalog
             src
             tools
             tests
+            ALINA_SYNC_COMPLETE.cmd
+            ALINA_SYNC_COMPLETE.sh
+            README.md
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
+      - name: Prove clone SAFE budget and remote preflight
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/sync_complete_clone.py tools/restore_alina.py
+          python tools/sync_complete_clone.py --catalog-budget | tee "$RUNNER_TEMP/alina-safe-catalog-budget.json"
+          python tools/restore_alina.py \
+            --replay-ready \
+            --preflight-only \
+            --max-download-gib 0 \
+            --destination "$RUNNER_TEMP/alina-safe-clone-preflight" | \
+            tee "$RUNNER_TEMP/alina-safe-clone-preflight.json"
       - name: Measure canonical index headroom
         run: |
           python - <<'PY'
