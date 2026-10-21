@@ -193,17 +193,36 @@ def _manifest_for_row(row: Mapping[str,Any]) -> dict[str,Any] | None:
 
 def _manifest_relative_path(row: Mapping[str,Any]) -> Path:
     relative=Path(str(row.get("manifest_path") or ""))
-    if (
-        not relative.parts
-        or relative.is_absolute()
-        or ".." in relative.parts
-        or len(relative.parts)<3
-        or relative.parts[:2] not in {
-            ("datasets","quarantine"),
-            ("datasets","rejected"),
+    parts=relative.parts
+    flat=(
+        len(parts)==3
+        and parts[:2] in {("datasets","quarantine"),("datasets","rejected")}
+    )
+    sharded=(
+        len(parts)==6
+        and parts[:3] in {
+            ("datasets","sharded","quarantine"),
+            ("datasets","sharded","rejected"),
         }
+        and all(len(part)==2 and all(ch in "0123456789abcdef" for ch in part)
+                for part in parts[3:5])
+    )
+    dataset_id=str(row.get("dataset_id") or "")
+    # The historical receipt must be tied to the exact logical identity;
+    # neither a caller-supplied path nor a symlink may redirect recovery.
+    if (
+        relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in parts)
+        or not dataset_id
+        or "/" in dataset_id or "\\" in dataset_id
+        or parts[-1] != f"{dataset_id}.manifest.json"
+        or not (flat or sharded)
     ):
         raise BackfillError("unsafe historical manifest path")
+    if sharded:
+        digest=hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()
+        if (parts[3],parts[4]) != (digest[:2],digest[2:4]):
+            raise BackfillError("sharded historical manifest identity mismatch")
     return relative
 
 
@@ -382,7 +401,7 @@ def _candidate(
     except BackfillError:
         manifest_relative=None
     manifest_recovery=bool(
-        str(row.get("quality_status") or "").upper()=="PARTIAL"
+        str(row.get("quality_status") or "").upper() in {"PARTIAL","REJECT"}
         and manifest_relative is not None
         and manifest is None
     )
