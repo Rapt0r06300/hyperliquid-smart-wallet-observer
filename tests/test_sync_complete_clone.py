@@ -237,7 +237,11 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
         "source_inventory_sha256": "c" * 64,
         "catalog_verification": {"source_index_sha256": catalog_sha},
     }), encoding="utf-8")
-    monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
+    def fresh_restore(*_a, **_k):
+        report = report_dir / "RESTORE_REPORT.json"
+        report.write_text(report.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        return 0
+    monkeypatch.setattr(module, "restore_published", fresh_restore)
     assert module.main(["--download-safe"]) == 0
     path = tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json"
     result = json.loads(path.read_text(encoding="utf-8"))
@@ -446,3 +450,25 @@ def test_sync_refuses_conflicting_preview_download_and_nonpositive_cap(capsys):
     assert "choose exactly one of --download-safe, --preflight-only or --prune-cache-only" in capsys.readouterr().err
     assert module.main(["--max-download-gib", "0"]) == 2
     assert "--max-download-gib must be positive" in capsys.readouterr().err
+
+
+def test_stale_success_report_cannot_certify_new_restore(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "e" * 40)
+    catalog = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"shards":[]}', encoding="utf-8")
+    digest = hashlib.sha256(catalog.read_bytes()).hexdigest()
+    report_dir = tmp_path / "runtime" / "recovery" / "full"
+    report_dir.mkdir(parents=True)
+    (report_dir / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE", "repository": module.REPOSITORY,
+        "source_inventory_sha256": "c" * 64,
+        "catalog_verification": {"source_index_sha256": digest},
+    }), encoding="utf-8")
+    monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
+    assert module.main([]) == 2
+    checkpoint = json.loads((report_dir / "SYNC_REPORT.json").read_text(encoding="utf-8"))
+    assert checkpoint["status"] == "RESTORE_INCOMPLETE"
+    assert checkpoint["report_validation_error"] == "restore did not refresh its report"
