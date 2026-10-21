@@ -1371,9 +1371,19 @@ def _materialize_catalog_safe_shards(
             report["missing_or_corrupt_rows"] += 1
             report["failures"].append({"dataset_id": dataset_id, "error": str(exc)})
     usable_root = destination / "usable" / "shards"
+    if prune_stale and usable_root.is_symlink():
+        report["failures"].append({
+            "path": str(usable_root), "error": "SYMLINKED_USABLE_SHARD_ROOT",
+        })
+        return report
     if prune_stale and usable_root.is_dir():
         for previous in sorted(usable_root.glob("*/*.jsonl.gz")):
             if previous in expected:
+                continue
+            if previous.is_symlink() or previous.parent.is_symlink():
+                report["failures"].append({
+                    "path": str(previous), "error": "SYMLINKED_STALE_SHARD_NOT_PRUNED",
+                })
                 continue
             try:
                 old_size = previous.stat().st_size
