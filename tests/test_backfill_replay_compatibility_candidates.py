@@ -59,6 +59,41 @@ def test_rejected_official_archive_candidate_is_hydrated_from_manifest(monkeypat
     assert row["bytes"] == 1234
 
 
+def test_sharded_historical_receipt_is_sha_bound_and_selectable(monkeypatch, tmp_path):
+    import hashlib
+    import pytest
+
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    dataset_id = "recovery-example"
+    digest = hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()
+    relative = (
+        f"datasets/sharded/quarantine/{digest[:2]}/{digest[2:4]}/"
+        f"{dataset_id}.manifest.json"
+    )
+    row = {
+        "dataset_id": dataset_id, "family": "trades",
+        "quality_status": "PARTIAL", "replay_compatible": True,
+        "manifest_path": relative,
+        "sha256": "a" * 64, "bytes": 123,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-test", "release_asset": "x.jsonl.gz",
+    }
+    assert backfill._manifest_relative_path(row).as_posix() == relative
+    assert backfill._candidate(dict(row), {}, {"trades"}) is True
+    reject = {**row, "quality_status": "REJECT"}
+    assert backfill._candidate(reject, {}, {"trades"}) is True
+
+    for invalid in (
+        "",
+        "../escape.manifest.json",
+        f"datasets/sharded/quarantine/00/00/{dataset_id}.manifest.json",
+        f"datasets/sharded/safe/{digest[:2]}/{digest[2:4]}/{dataset_id}.manifest.json",
+        f"datasets/sharded/quarantine/{digest[:2]}/{digest[2:4]}/other.manifest.json",
+    ):
+        with pytest.raises(backfill.BackfillError):
+            backfill._manifest_relative_path({**row, "manifest_path": invalid})
+
+
 def test_non_official_rejected_dump_stays_excluded(monkeypatch, tmp_path):
     monkeypatch.setattr(backfill, "ROOT", tmp_path)
     dataset_id = "legacy-trades-btc-test"
