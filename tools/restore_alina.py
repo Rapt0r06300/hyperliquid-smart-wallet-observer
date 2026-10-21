@@ -145,6 +145,8 @@ def _download_to_path(
                         or int(match.group(2)) < existing_size
                         or (match.group(3) != "*"
                             and int(match.group(2)) >= int(match.group(3)))
+                        or (max_bytes is not None and match.group(3) != "*"
+                            and int(match.group(3)) != max_bytes)
                     ):
                         raise RestoreError(f"invalid HTTP Content-Range for {url}")
                 elif status not in (200, None):
