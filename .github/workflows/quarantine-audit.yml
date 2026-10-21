@@ -49,6 +49,10 @@ jobs:
             /catalog/quarantine-audit-parts/
             /datasets/quarantine/
             /datasets/rejected/
+            # Sharded PARTIAL/REJECT receipts must be visible to the audit.
+            # Do not materialize the million-file sharded SAFE tree.
+            /datasets/sharded/quarantine/
+            /datasets/sharded/rejected/
             /src/
             /tests/
             /tools/
@@ -144,7 +148,9 @@ jobs:
               catalog/quarantine-audit-parts \
               datasets/safe \
               datasets/quarantine \
-              datasets/rejected
+              datasets/rejected \
+              datasets/sharded/quarantine \
+              datasets/sharded/rejected
             # Never publish a partition root without its matching Git blobs.
             if [ -d catalog/data-index-parts ]; then git add -A -- catalog/data-index-parts; fi
             # A retired PARTIAL/REJECT manifest must have its exact original
