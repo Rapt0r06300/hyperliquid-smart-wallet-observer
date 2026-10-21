@@ -98,10 +98,8 @@ def restore_published(root: Path, *, preflight: bool = False,
     elif preflight:
         cmd.append("--preflight-only")
     else:
-        # The canonical hydrated corpus contains SAFE_REPLAY only. Remove old
-        # unselected cache copies solely after proving they are byte-identical
-        # to recoverable GitHub Release assets; never touch unknown local data.
-        cmd.append("--prune-unselected-cache")
+        # Keep all historical/unselected local cache copies unless the operator
+        # explicitly requested --prune-cache-only in a separate operation.
         if max_download_gib is not None:
             if type(max_download_gib) is not int or max_download_gib <= 0:
                 raise SyncError("download cap must be a positive whole number of GiB")
@@ -283,8 +281,8 @@ def _read_restore_status(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Update canonical main safely and hydrate every current "
-                    "SAFE/replayable shard with SHA-256 verification."
+        description="Update canonical main and preflight SAFE/replayable "
+                    "shards; downloads require --download-safe."
     )
     parser.add_argument(
         "--skip-update", action="store_true",
@@ -305,12 +303,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--download-safe", action="store_true",
-        help="explicit SAFE download mode (kept for compatibility); "
-             "without a mode flag, full SAFE hydration is the default",
+        help="explicitly hydrate SAFE/replayable assets after an explicit operator opt-in",
     )
     parser.add_argument(
-        "--max-download-gib", type=int, default=256,
-        help="limit NEW SAFE payload transfers to this many GiB (default 256)",
+        "--max-download-gib", type=int, default=8,
+        help="limit NEW SAFE payload transfers to this many GiB (default 8)",
     )
     parser.add_argument(
         "--catalog-budget", action="store_true",
@@ -337,10 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         print("ALINA_SYNC_FAIL: choose exactly one of --download-safe, "
               "--preflight-only or --prune-cache-only", file=sys.stderr)
         return 2
-    effective_download = args.download_safe or not (
-        args.preflight_only or args.prune_cache_only
-    )
-    effective_preflight = args.preflight_only
+    effective_download = args.download_safe
+    effective_preflight = not (args.download_safe or args.prune_cache_only)
     if sys.version_info < (3, 10):
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
