@@ -689,15 +689,15 @@ def download_asset(
         _verify_zip_archive(tmp, name)
         tmp.replace(target)
         return verified_result("RESUMED_VERIFIED", str(_expected_digest(asset)))
-    # A stale or corrupt cached prefix can be resumed into a wrong-sized or
-    # wrong-hash result. Retry at most once from byte zero; never certify the
-    # first invalid response, and never retry a fresh invalid download.
+    # If an existing partial resumes to a full-size, SHA-invalid asset,
+    # retry once from byte zero. Keep a short but valid-length prefix for
+    # future resumable recovery instead of throwing its bytes away.
     had_partial = tmp.is_file() and tmp.stat().st_size > 0
     actual_size, actual_sha = _download_to_path(
         url, tmp, token=token, max_bytes=asset["size"]
     )
     if had_partial and (
-        actual_size != asset["size"] or actual_sha != _expected_digest(asset)
+        actual_size == asset["size"] and actual_sha != _expected_digest(asset)
     ):
         tmp.unlink(missing_ok=True)
         actual_size, actual_sha = _download_to_path(
