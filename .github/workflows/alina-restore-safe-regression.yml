@@ -116,6 +116,35 @@ jobs:
               raise SystemExit("preflight has no measurable SAFE materialization budget")
           print("ALINA_SAFE_CLONE_PREFLIGHT_VERIFIED")
           PY
+      - name: Verify real historical SAFE asset download and SHA-256
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import tempfile
+          from pathlib import Path
+          from tools.restore_alina import _json, _list_release_assets, _download_to_path, _expected_digest
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          tag = "archive-v2-35707914210-binance-ETH"
+          name = "binance-usdm-official-archive-trades-ethusdt-1789776000003-1789796291633-6c8e3c4b4a17.jsonl.gz"
+          release = _json(f"https://api.github.com/repos/{repo}/releases/tags/{tag}", token=token)
+          assert release["tag_name"] == tag
+          assets = _list_release_assets(repo, release["id"], token=token)
+          matches = [a for a in assets if a["name"] == name]
+          assert len(matches) == 1
+          asset = matches[0]
+          assert asset["state"] == "uploaded" and asset["size"] == 14769267
+          assert _expected_digest(asset) == "6c8e3c4b4a170ac7723a83cddcaabd5d270b8b060a7147e5d2c4a4519712bc54"
+          with tempfile.TemporaryDirectory() as directory:
+              path = Path(directory) / name
+              size, digest = _download_to_path(asset["browser_download_url"], path, token=token, max_bytes=asset["size"])
+              assert size == asset["size"] and digest == _expected_digest(asset)
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+          print("HISTORICAL_SAFE_ASSET_RESTORED_VERIFIED", size, digest)
+          PY
       - name: Measure canonical index headroom
         run: |
           python - <<'PY'
