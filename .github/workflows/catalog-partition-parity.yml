@@ -234,6 +234,12 @@ jobs:
           # This job owns a disposable checkout. The canonical GitHub main is
           # never altered; a failure blocks any production partition migration.
           cp catalog/DATA_METRICS.json "$RUNNER_TEMP/legacy-data-metrics.json"
+          # Recompute the baseline from all immutable receipts on THIS hosted
+          # checkout. Checked-in metrics can carry partial historic receipts;
+          # comparing those to a fresh full-receipt calculation falsely
+          # attributes improved evidence coverage to partitioning.
+          python tools/build_catalog_metrics.py
+          cp catalog/DATA_METRICS.json "$RUNNER_TEMP/baseline-full-receipt-metrics.json"
           test ! -L catalog/data-index-parts
           # The source may already be partitioned: preserve originals in the
           # disposable hosted checkout, and layer the proven parts over them.
@@ -248,9 +254,21 @@ jobs:
           import json,os
           from pathlib import Path
           from tools.restore_alina import _load_current_safe_catalog
-          previous=json.loads(Path(os.environ["RUNNER_TEMP"]).joinpath("legacy-data-metrics.json").read_text())
+          root=Path(os.environ["RUNNER_TEMP"])
+          previous=json.loads(root.joinpath("legacy-data-metrics.json").read_text())
+          baseline=json.loads(root.joinpath("baseline-full-receipt-metrics.json").read_text())
           current=json.loads(Path("catalog/DATA_METRICS.json").read_text())
-          assert previous["totals"] == current["totals"], "PARTITION_METRICS_TOTALS_CHANGED"
+          # Invariant 1: the exact full-receipt metrics do not change when
+          # only the DATA_INDEX storage layout changes.
+          assert baseline["totals"] == current["totals"], "PARTITION_METRICS_TOTALS_CHANGED"
+          # Invariant 2: partitioning cannot mutate immutable shard labels
+          # even when previously published coverage metrics were incomplete.
+          for key in ("TOTAL_SHARDS", "SAFE_SHARDS", "PARTIAL_SHARDS", "REJECTED_SHARDS"):
+              assert previous["totals"][key] == current["totals"][key], f"PARTITION_STATUS_PARITY_FAILED:{key}"
+          if previous["totals"] != baseline["totals"]:
+              print("STORED_METRIC_EVIDENCE_COVERAGE_DRIFT_NOT_PARTITION_LOSS",
+                    sorted(k for k in baseline["totals"]
+                           if baseline["totals"].get(k) != previous["totals"].get(k)))
           safe,verification=_load_current_safe_catalog(
               Path("catalog/DATA_INDEX.json"), Path("catalog/DATA_METRICS.json"))
           assert len(safe) == current["totals"]["SAFE_SHARDS"]
