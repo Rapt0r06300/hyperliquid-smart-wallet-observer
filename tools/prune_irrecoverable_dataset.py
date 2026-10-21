@@ -211,6 +211,11 @@ def _reject_only_plan(plan: Mapping[str, Any]) -> bool:
                 isinstance(row, Mapping)
                 and row.get("quality_status") == "REJECT"
                 and row.get("replay_compatible") is False
+                and row.get("release_repository") == REPOSITORY
+                and row.get("release_tag") == item.get("release_tag")
+                and _physical_key(row) == (
+                    item.get("release_tag"), item.get("asset_name")
+                )
                 and _irrecoverable_repair_proof(row)
                 for row in item["datasets"]
             )
@@ -260,7 +265,8 @@ def _verify_target_membership(
             frozen_row = expected[str(row["dataset_id"])]
             if any(row.get(field) != frozen_row.get(field) for field in (
                 "sha256", "bytes", "quality_status", "replay_compatible",
-                "terminal_repair_evidence", "manifest_path"
+                "release_repository", "release_tag", "release_asset",
+                "release_container_asset", "terminal_repair_evidence", "manifest_path"
             )):
                 raise Refuse("DELETION_PHYSICAL_MEMBER_CHANGED")
 
@@ -323,6 +329,10 @@ def prepare(limit: int) -> dict[str, Any]:
                     "dataset_id": row["dataset_id"],
                     "sha256": row["sha256"],
                     "bytes": row["bytes"],
+                    "release_repository": row.get("release_repository") or REPOSITORY,
+                    "release_tag": row["release_tag"],
+                    "release_asset": row["release_asset"],
+                    "release_container_asset": row.get("release_container_asset"),
                     "quality_status": row["quality_status"],
                     "replay_compatible": False,
                     "terminal_repair_evidence": row["terminal_repair_evidence"],
@@ -372,7 +382,8 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
             current = by_id.get(frozen["dataset_id"])
             if current is None or any(current.get(key) != frozen.get(key) for key in (
                 "sha256", "bytes", "quality_status", "replay_compatible",
-                "terminal_repair_evidence", "manifest_path"
+                "release_repository", "release_tag", "release_asset",
+                "release_container_asset", "terminal_repair_evidence", "manifest_path"
             )):
                 raise Refuse("DELETION_DATASET_CHANGED")
             if current.get("quality_status") == "SAFE":
