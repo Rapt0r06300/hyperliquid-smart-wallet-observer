@@ -1019,6 +1019,8 @@ def test_canonical_catalog_requires_sha_bound_metrics_and_unique_id(tmp_path):
         "dataset_id": "asset-1",
         "quality_status": "SAFE",
         "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
         "sha256": "a" * 64,
         "release_tag": "data-v2-e8",
     }
@@ -1054,6 +1056,46 @@ def test_canonical_catalog_requires_sha_bound_metrics_and_unique_id(tmp_path):
     metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
     with pytest.raises(module.RestoreError, match="duplicated dataset_id"):
         module._load_current_safe_catalog(index_path, metrics_path)
+
+
+def test_catalog_refuses_safe_label_without_remote_and_backtest_evidence(tmp_path):
+    import pytest
+    module = _module()
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    row = {
+        "dataset_id": "uncertified-safe",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "asset_verified": True,
+        "validation_allowed": True,
+        "sha256": "b" * 64,
+        "release_tag": "data-v2-test",
+        "release_asset": "uncertified-safe.jsonl.gz",
+    }
+
+    for missing in ("asset_verified", "validation_allowed", "replay_compatible",
+                    "sha256", "release_tag"):
+        candidate = dict(row)
+        candidate.pop(missing)
+        index_path.write_text(json.dumps({"shards": [candidate]}), encoding="utf-8")
+        metrics_path.write_text(json.dumps({
+            "schema_version": "alina.data_metrics.v4",
+            "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+            "totals": {"TOTAL_SHARDS": 1},
+        }), encoding="utf-8")
+        with pytest.raises(module.RestoreError, match="SAFE_CATALOG_NOT_FULLY_CERTIFIED"):
+            module._load_replay_ready_plan(index_path, metrics_path)
+
+    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+    safe, _proof, rows, _required = module._load_replay_ready_plan(index_path, metrics_path)
+    assert set(safe) == {"uncertified-safe"}
+    assert [item["dataset_id"] for item in rows] == ["uncertified-safe"]
 
 
 def test_restore_rejects_stale_catalog_before_release_transfer(tmp_path, monkeypatch):
@@ -1336,6 +1378,7 @@ def test_restore_verified_overflow_via_canonical_manifest(tmp_path, monkeypatch)
     index.write_text(json.dumps({"shards": [{
         "dataset_id": row["dataset_id"], "sha256": digest,
         "quality_status": "SAFE", "replay_compatible": True,
+        "validation_allowed": True, "asset_verified": True,
         "release_tag": data_tag,
     }]}))
     metrics = tmp_path / "DATA_METRICS.json"
@@ -2222,7 +2265,8 @@ def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkey
     index_path.write_text(json.dumps({"shards": [
         {
             "dataset_id": "safe-one", "quality_status": "SAFE",
-            "replay_compatible": True, "release_tag": "data-v2-profile-test",
+            "replay_compatible": True, "validation_allowed": True,
+            "asset_verified": True, "release_tag": "data-v2-profile-test",
             "release_asset": "safe.jsonl.gz", "bytes": len(safe_bytes),
             "sha256": safe_sha,
         },
@@ -2306,6 +2350,8 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
             "quality_status": status,
             # Even a positive replay flag cannot override a non-SAFE label.
             "replay_compatible": True,
+            "validation_allowed": status == "SAFE",
+            "asset_verified": True,
             "release_tag": tag,
             "release_asset": f"{name}.jsonl.gz",
             "release_container_asset": "mixed.zip",
@@ -2368,7 +2414,8 @@ def test_replay_ready_preflight_counts_zip_extraction_space(tmp_path, monkeypatc
     index_path = tmp_path / "DATA_INDEX.json"
     index_path.write_text(json.dumps({"shards": [{
         "dataset_id": "safe-packed", "quality_status": "SAFE",
-        "replay_compatible": True, "release_tag": "data-v2-packed",
+        "replay_compatible": True, "validation_allowed": True,
+        "asset_verified": True, "release_tag": "data-v2-packed",
         "release_asset": "safe.jsonl.gz",
         "release_container_asset": "packed.zip",
         "release_remote_size": len(outer),
@@ -2471,7 +2518,8 @@ def test_prune_only_removes_verified_local_non_safe_cache_without_payload_downlo
     index_path = tmp_path / "DATA_INDEX.json"
     index_path.write_text(json.dumps({"shards": [
         {"dataset_id": "safe-cache", "quality_status": "SAFE",
-         "replay_compatible": True, "release_tag": tag,
+         "replay_compatible": True, "validation_allowed": True,
+         "asset_verified": True, "release_tag": tag,
          "release_asset": "safe.jsonl.gz", "bytes": len(safe_bytes),
          "sha256": hashlib.sha256(safe_bytes).hexdigest()},
         {"dataset_id": "bad-cache", "quality_status": "REJECT",
