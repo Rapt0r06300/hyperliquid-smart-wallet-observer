@@ -164,6 +164,30 @@ def test_corrupt_cached_partial_retries_once_from_byte_zero(tmp_path, monkeypatc
     assert not partial.exists()
 
 
+def test_short_resumed_partial_retries_once_from_zero(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"complete-valid-release-payload"
+    asset = _asset("asset.bin", "https://example.invalid/asset", payload)
+    partial = tmp_path / "asset.bin.partial"
+    partial.write_bytes(b"STALE")
+    seen = []
+
+    def short_then_clean(_url, path, **_kwargs):
+        seen.append(path.read_bytes() if path.exists() else None)
+        if len(seen) == 1:
+            path.write_bytes(payload[:7])
+            return 7, hashlib.sha256(payload[:7]).hexdigest()
+        assert not path.exists(), "second attempt must discard stale prefix"
+        path.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", short_then_clean)
+    receipt = module.download_asset(asset, tmp_path)
+    assert seen == [b"STALE", None]
+    assert receipt["verification_status"] == "VERIFIED"
+    assert (tmp_path / "asset.bin").read_bytes() == payload
+
+
 def test_corrupt_cached_partial_stays_fail_closed_after_retry(tmp_path, monkeypatch):
     module = _module()
     payload = b"valid-release-bytes-after-retry"
