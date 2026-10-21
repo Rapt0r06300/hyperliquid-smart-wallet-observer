@@ -50,6 +50,8 @@ class PartitionedTickDatasetWriter:
         # allowing later clean frames to be recovered as a separate shard.
         self._last_l2_sequence: dict[tuple[str, str, str], int] = {}
         self._l2_gap_pending: set[tuple[str, str, str]] = set()
+        # Only a genuine exchange snapshot anchors a recoverable L2 prefix.
+        self._l2_snapshot_seen: set[tuple[str, str, str]] = set()
 
     def _key(self, envelope: TickEnvelope) -> tuple[str, str, str]:
         return (
@@ -128,11 +130,13 @@ class PartitionedTickDatasetWriter:
                     writer.rotate()
                     self._last_l2_sequence.pop(key, None)
                     self._l2_gap_pending.discard(key)
+                    self._l2_snapshot_seen.discard(key)
                 self._last_connection[key] = connection
 
-                # Segment at the FIRST authentic exchange re-anchor after a
-                # provable gap. This does not repair missing deltas: they stay
-                # in the preceding damaged shard, never in the new SAFE epoch.
+                # Seal a snapshot-anchored clean prefix BEFORE the first
+                # provably broken delta, then isolate damaged frames until
+                # an authentic snapshot starts a new causal epoch. Never
+                # synthesize lost exchange deltas.
                 buffered: list[tuple[int, TickEnvelope]] = []
                 def flush_segment() -> None:
                     if not buffered:
@@ -164,6 +168,7 @@ class PartitionedTickDatasetWriter:
                                 writer.rotate()
                             self._l2_gap_pending.discard(key)
                             self._last_l2_sequence.pop(key, None)
+                            self._l2_snapshot_seen.add(key)
                         else:
                             before = self._last_l2_sequence.get(key)
                             seq = envelope.sequence
@@ -174,7 +179,24 @@ class PartitionedTickDatasetWriter:
                                 or (type(first) is int and first > before + 1)
                                 or (type(seq) is int and seq < before)
                             ):
+                                if (
+                                    key not in self._l2_gap_pending
+                                    and key in self._l2_snapshot_seen
+                                ):
+                                    flush_segment()
+                                    writer.rotate()
+                                # The breaking delta starts a non-replayable
+                                # segment: its missing predecessor is not
+                                # visible to a fresh shard-local scan, so
+                                # persist the independently observed DESYNC.
+                                envelope.parsed_summary = {
+                                    **summary,
+                                    "quality": "DESYNC",
+                                    "sequence_gap_detected": True,
+                                    "expected_prev_sequence": before,
+                                }
                                 self._l2_gap_pending.add(key)
+                                self._l2_snapshot_seen.discard(key)
                         seq = envelope.sequence
                         if type(seq) is int:
                             before = self._last_l2_sequence.get(key)

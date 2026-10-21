@@ -153,7 +153,7 @@ def test_post_gap_native_l2_snapshot_seals_damaged_prefix_and_recovers_clean_suf
         tick.parsed_summary = {"prev_sequence": previous}
         return tick
     ticks = [
-        book(1000, 10, -1),
+        book(1000, 10, -1, "SNAPSHOT"),
         book(1001, 11, 10),
         book(1002, 15, 13),  # authenticated predecessor gap: 11 != 13.
         book(1003, 20, -1, "SNAPSHOT"),  # genuine source re-anchor.
@@ -161,15 +161,17 @@ def test_post_gap_native_l2_snapshot_seals_damaged_prefix_and_recovers_clean_suf
     ]
     assert len(writer.append_batch_records(ticks)) == 5
     shards = writer.rotate_all()
-    assert len(shards) == 2
+    assert len(shards) == 3
     manifests = [build_manifest_from_tick_shard(
         p, collector_version="recovery-test",
     ) for p in shards]
-    assert [v["event_count"] for v in manifests] == [3, 2]
-    assert manifests[0]["integrity"]["gap_count"] > 0
-    assert manifests[0]["replay_compatible"] is False
-    assert manifests[1]["integrity"]["gap_count"] == 0
-    assert manifests[1]["replay_compatible"] is True
+    assert [v["event_count"] for v in manifests] == [2, 1, 2]
+    assert manifests[0]["integrity"]["gap_count"] == 0
+    assert manifests[0]["replay_compatible"] is True
+    assert manifests[1]["integrity"]["desync_count"] > 0
+    assert manifests[1]["replay_compatible"] is False
+    assert manifests[2]["integrity"]["gap_count"] == 0
+    assert manifests[2]["replay_compatible"] is True
     all_rows = []
     for p in shards:
         with gzip.open(p, "rt", encoding="utf-8") as fh:
@@ -194,4 +196,45 @@ def test_post_gap_no_snapshot_remains_one_bad_shard(tmp_path):
     assert len(shards) == 1
     manifest = build_manifest_from_tick_shard(shards[0], collector_version="recovery-test")
     assert manifest["integrity"]["gap_count"] > 0
+    assert manifest["integrity"]["desync_count"] > 0
     assert manifest["replay_compatible"] is False
+
+
+
+def test_l2_gap_on_later_batch_preserves_safe_prefix_without_inventing_deltas(tmp_path):
+    import gzip
+
+    writer = PartitionedTickDatasetWriter(tmp_path, rotate_bytes=10_000_000)
+
+    def book(ts, seq, previous, kind="UPDATE"):
+        tick = envelope("gate_public_ws", "l2Book", "BTC_USDT", ts)
+        tick.event_kind = kind
+        tick.sequence = seq
+        tick.parsed_summary = {"prev_sequence": previous}
+        return tick
+
+    writer.append_batch_records([
+        book(1000, 10, -1, "SNAPSHOT"),
+        book(1001, 11, 10),
+    ])
+    broken = book(1002, 15, 13)
+    later = book(1003, 16, 15)
+    writer.append_batch_records([broken, later])
+    files = writer.rotate_all()
+    assert len(files) == 2
+    manifests = [
+        build_manifest_from_tick_shard(path, collector_version="recovery-test")
+        for path in files
+    ]
+    assert [m["event_count"] for m in manifests] == [2, 2]
+    assert manifests[0]["replay_compatible"] is True
+    assert manifests[1]["replay_compatible"] is False
+    assert manifests[1]["integrity"]["desync_count"] == 1
+    with gzip.open(files[1], "rt", encoding="utf-8") as fh:
+        bad, retained = [json.loads(line) for line in fh]
+    assert bad["parsed_summary"]["sequence_gap_detected"] is True
+    assert bad["parsed_summary"]["expected_prev_sequence"] == 11
+    assert bad["parsed_summary"]["quality"] == "DESYNC"
+    assert retained["parsed_summary"]["prev_sequence"] == 15
+    assert bad["raw_sha256"] == broken.as_record(written_ts_ms=0)["raw_sha256"]
+    assert broken.raw_payload == {"ts": 1002, "instrument": "BTC_USDT"}
