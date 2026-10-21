@@ -1008,7 +1008,7 @@ def backfill(
             try:
                 current_manifest=_manifest_for_row(row)
                 if (
-                    str(row.get("quality_status") or "").upper()=="PARTIAL"
+                    str(row.get("quality_status") or "").upper() in {"PARTIAL","REJECT"}
                     and current_manifest is None
                 ):
                     historical_manifest,_=_load_manifest_for_apply(row,root=ROOT)
