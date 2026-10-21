@@ -550,3 +550,20 @@ def test_quarantine_cloud_audit_reads_sharded_non_safe_without_safe_tree():
     assert "/datasets/sharded/safe/" not in roots
     # Selective SAFE receipt commits are allowed; mass SAFE tree staging is not.
     assert 'git add --sparse -A -- datasets/safe' not in workflow
+
+
+def test_quarantine_audit_publishes_proven_progress_before_final_fail_closed_gate():
+    """Incomplete evidence cannot certify, but must not roll back true SAFE repairs."""
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "quarantine-audit.yml").read_text(
+        encoding="utf-8",
+    )
+    parity = workflow.index("name: Verify audit parity before publishing")
+    publish = workflow.index("name: Publish repaired catalog and audit")
+    final_gate = workflow.index("name: Gate final quarantine certification")
+    status = workflow.index("name: Publish auditable quarantine result")
+    assert parity < publish < final_gate < status
+    assert "git push origin HEAD:main" in workflow[publish:final_gate]
+    assert "raise SystemExit(f\"{unreadable} unreadable non-SAFE" in workflow[final_gate:status]
+    # An incomplete audit is not an unconditional green check.
+    assert "if: always()" in workflow[status:]
