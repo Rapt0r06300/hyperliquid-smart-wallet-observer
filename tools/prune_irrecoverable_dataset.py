@@ -155,7 +155,6 @@ def _terminal_rows(
             isinstance(dataset_id, str)
             and bool(dataset_id)
             and row.get("quality_status") == "REJECT"
-            and row.get("replay_compatible") is not True
             and type(row.get("bytes")) is int
             and row["bytes"] > 0
             and isinstance(row.get("sha256"), str)
