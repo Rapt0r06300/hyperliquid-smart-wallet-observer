@@ -2245,6 +2245,55 @@ def test_snapshot_cli_options_are_mutually_exclusive(tmp_path):
     assert ex.value.code == 2
 
 
+def test_replay_ready_recovers_historical_safe_asset_missing_from_inventory(tmp_path, monkeypatch):
+    module = _module()
+    payload = b'{"trade_id":"historical"}\n'
+    digest = hashlib.sha256(payload).hexdigest()
+    tag = "archive-v2-historical-safe"
+    name = "historical.jsonl.gz"
+    asset = {
+        **_asset(name, "https://example.invalid/historical", payload),
+        "id": 991, "state": "uploaded",
+    }
+    # The main Release inventory is incomplete, but the authoritative tag
+    # lookup and paginated assets endpoint still expose the published bytes.
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([]))
+    calls = []
+    def lookup(url, **_kw):
+        calls.append(url)
+        assert url.endswith("/releases/tags/" + tag)
+        return {"id": 123, "tag_name": tag, "assets": []}
+    monkeypatch.setattr(module, "_json", lookup)
+    monkeypatch.setattr(module, "_list_release_assets",
+                        lambda *_a, **_kw: [asset])
+    def download(url, target, **_kw):
+        assert url == asset["browser_download_url"]
+        target.write_bytes(payload)
+        return len(payload), digest
+    monkeypatch.setattr(module, "_download_to_path", download)
+    index = tmp_path / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shards": [{
+        "dataset_id": "historical-safe", "quality_status": "SAFE",
+        "replay_compatible": True, "validation_allowed": True,
+        "asset_verified": True, "release_tag": tag,
+        "release_asset": name, "bytes": len(payload), "sha256": digest,
+    }]}), encoding="utf-8")
+    metrics = tmp_path / "DATA_METRICS.json"
+    metrics.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+    report = module.restore_everything(
+        "owner/repo", tmp_path / "restored", catalog_path=index,
+        metrics_path=metrics, profile="replay-ready",
+    )
+    assert calls
+    assert report["status"] == "REPLAY_READY_COMPLETE"
+    assert (tmp_path / "restored" / "usable" / "shards" /
+            tag / "historical-safe.jsonl.gz").read_bytes() == payload
+
+
 def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkeypatch):
     module = _module()
     safe_bytes = b'{"trade_id":"safe"}\n'
