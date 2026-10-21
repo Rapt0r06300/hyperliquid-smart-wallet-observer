@@ -115,6 +115,9 @@ def main() -> int:
             "last_date": days[-1].isoformat(),
             "last_exchange_ts_ms": archives[-1]["last_exchange_ts_ms"],
         },
+        # Repair/requalify from observed bytes during this hosted collection.
+        # Non-admissible shards never enter the Release publication bundle.
+        replay_admission_only=True,
     )
     summary = {
         "schema": "alina.official_archive_backfill.v1",
