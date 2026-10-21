@@ -194,7 +194,7 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
 
-def test_explicit_safe_download_dispatches_with_operator_budget(
+def test_no_argument_sync_downloads_complete_safe_corpus_by_default(
     monkeypatch, tmp_path,
 ):
     module = _module()
@@ -213,7 +213,7 @@ def test_explicit_safe_download_dispatches_with_operator_budget(
 
     monkeypatch.setattr(module, "restore_published", capture_restore)
     with pytest.raises(StopAfterDispatch):
-        module.main(["--download-safe", "--max-download-gib", "256"])
+        module.main([])
 
     assert captured["preflight"] is False
     assert captured["prune_only"] is False
@@ -397,7 +397,7 @@ def test_catalog_budget_cli_does_not_touch_git_or_network(monkeypatch, tmp_path,
     assert module.main(["--catalog-budget"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "CATALOG_ONLY_NOT_RESTORED"
 
-def test_default_sync_is_preflight_only_without_market_payload_download(monkeypatch, tmp_path):
+def test_explicit_preflight_never_downloads_market_payload(monkeypatch, tmp_path):
     module = _module()
     monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
     monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "f" * 40)
@@ -416,7 +416,7 @@ def test_default_sync_is_preflight_only_without_market_payload_download(monkeypa
         calls.append(kwargs)
         return 0
     monkeypatch.setattr(module, "restore_published", preview_only)
-    assert module.main([]) == 0
+    assert module.main(["--preflight-only"]) == 0
     assert len(calls) == 1
     assert calls[0]["preflight"] is True
     assert calls[0]["max_download_gib"] is None
