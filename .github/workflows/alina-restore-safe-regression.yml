@@ -278,7 +278,10 @@ jobs:
                   if row.get("release_container_asset"):
                       with zipfile.ZipFile(destination) as archive:
                           member = str(row["release_asset"])
-                          info = archive.getinfo(member)
+                          matches = [entry for entry in archive.infolist() if entry.filename == member]
+                          if len(matches) != 1:
+                              raise SystemExit(f"SAFE_SAMPLE_MEMBER_NOT_UNIQUE: {venue}")
+                          info = matches[0]
                           if info.file_size != row["bytes"]:
                               raise SystemExit(f"SAFE_SAMPLE_MEMBER_SIZE_MISMATCH: {venue}")
                           with archive.open(info) as stream:
@@ -311,6 +314,7 @@ jobs:
               "verified_venues": len(verified),
               "unverified_venues": [venue for venue in venues if venue not in candidates],
               "verified_venue_names": [item["venue"] for item in verified],
+              "full_dataset_certified": False,
               "verified": verified,
           }
           result = Path(os.environ["RUNNER_TEMP"]) / "SAFE_MULTI_VENUE_RECEIPT.json"
