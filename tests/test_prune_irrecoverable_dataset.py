@@ -123,6 +123,10 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
     frozen = {"release_tag": "data-test", "asset_name": "mixed.zip", "datasets": [{
         "dataset_id": reject["dataset_id"], "sha256": reject["sha256"],
         "bytes": reject["bytes"], "quality_status": reject["quality_status"],
+        "release_repository": gc.REPOSITORY,
+        "release_tag": reject["release_tag"],
+        "release_asset": reject["release_asset"],
+        "release_container_asset": None,
         "replay_compatible": False,
         "terminal_repair_evidence": reject["terminal_repair_evidence"],
         "manifest_path": reject["manifest_path"],
@@ -161,6 +165,10 @@ def test_only_reject_plan_and_current_membership_can_delete():
                         "datasets": [{"dataset_id": "reject", "quality_status": "REJECT",
                                       "sha256": reject["sha256"], "bytes": reject["bytes"],
                                       "replay_compatible": False,
+                                      "release_repository": gc.REPOSITORY,
+                                      "release_tag": reject["release_tag"],
+                                      "release_asset": reject["release_asset"],
+                                      "release_container_asset": None,
                                       "terminal_repair_evidence": reject["terminal_repair_evidence"],
                                       "manifest_path": reject["manifest_path"]}]}]}
     assert gc._reject_only_plan(plan) is True
@@ -171,6 +179,25 @@ def test_only_reject_plan_and_current_membership_can_delete():
     }]}) is False
     gc._verify_target_membership([reject], plan["assets"])
     assert gc._reject_only_plan({"assets": []}) is False
+    assert gc._reject_only_plan({"assets": [{
+        **plan["assets"][0],
+        "asset_name": "different-physical-asset.zip",
+    }]}) is False
+    assert gc._reject_only_plan({"assets": [{
+        **plan["assets"][0],
+        "datasets": [{
+            **plan["assets"][0]["datasets"][0],
+            "release_asset": "forged-member.jsonl.gz",
+        }],
+    }]}) is False
+    assert gc._reject_only_plan({"assets": [{
+        **plan["assets"][0],
+        "datasets": [{
+            **plan["assets"][0]["datasets"][0],
+            "sha256": "d" * 64,
+        }],
+    }]}) is False
+
 
 
 def test_prepare_fetches_shared_release_inventory_once(monkeypatch, tmp_path):
