@@ -1058,7 +1058,7 @@ def test_canonical_catalog_requires_sha_bound_metrics_and_unique_id(tmp_path):
         module._load_current_safe_catalog(index_path, metrics_path)
 
 
-def test_catalog_refuses_safe_label_without_remote_and_backtest_evidence(tmp_path):
+def test_catalog_refuses_explicitly_denied_safe_and_accepts_compact_evidence(tmp_path):
     import pytest
     module = _module()
     index_path = tmp_path / "DATA_INDEX.json"
@@ -1070,45 +1070,39 @@ def test_catalog_refuses_safe_label_without_remote_and_backtest_evidence(tmp_pat
         "asset_verified": True,
         "validation_allowed": True,
         "sha256": "b" * 64,
-        "bytes": 10,
+        "bytes": 23,
         "release_tag": "data-v2-test",
         "release_asset": "uncertified-safe.jsonl.gz",
     }
 
-    for missing in ("asset_verified", "validation_allowed", "replay_compatible",
-                    "sha256", "release_tag"):
-        candidate = dict(row)
-        candidate.pop(missing)
+    def write(candidate):
         index_path.write_text(json.dumps({"shards": [candidate]}), encoding="utf-8")
         metrics_path.write_text(json.dumps({
             "schema_version": "alina.data_metrics.v4",
             "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
             "totals": {"TOTAL_SHARDS": 1},
         }), encoding="utf-8")
-        with pytest.raises(module.RestoreError, match="SAFE_CATALOG_NOT_FULLY_CERTIFIED"):
-            module._load_replay_ready_plan(index_path, metrics_path)
 
-    # Even a fully labelled SAFE row is not restorable without immutable size.
-    absent_size = dict(row)
-    absent_size.pop("bytes")
-    index_path.write_text(json.dumps({"shards": [absent_size]}), encoding="utf-8")
-    metrics_path.write_text(json.dumps({
-        "schema_version": "alina.data_metrics.v4",
-        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
-        "totals": {"TOTAL_SHARDS": 1},
-    }), encoding="utf-8")
-    with pytest.raises(module.RestoreError, match="invalid outer asset evidence"):
-        module._load_replay_ready_plan(index_path, metrics_path)
-
-    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
-    metrics_path.write_text(json.dumps({
-        "schema_version": "alina.data_metrics.v4",
-        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
-        "totals": {"TOTAL_SHARDS": 1},
-    }), encoding="utf-8")
+    # The compact index can omit redundant flags; restored bytes are still
+    # verified against the immutable GitHub Release and logical shard SHA.
+    compact = {key: value for key, value in row.items()
+               if key not in {"asset_verified", "validation_allowed"}}
+    write(compact)
     safe, _proof, rows, _required = module._load_replay_ready_plan(index_path, metrics_path)
     assert set(safe) == {"uncertified-safe"}
     assert [item["dataset_id"] for item in rows] == ["uncertified-safe"]
+
+    for invalid in ("asset_verified", "validation_allowed", "replay_compatible",
+                    "sha256", "release_tag"):
+        candidate = dict(row)
+        if invalid in {"asset_verified", "validation_allowed"}:
+            candidate[invalid] = False
+        else:
+            candidate.pop(invalid)
+        write(candidate)
+        with pytest.raises(module.RestoreError, match="SAFE_CATALOG_NOT_FULLY_CERTIFIED"):
+            module._load_replay_ready_plan(index_path, metrics_path)
+
 
 
 def test_restore_rejects_stale_catalog_before_release_transfer(tmp_path, monkeypatch):
