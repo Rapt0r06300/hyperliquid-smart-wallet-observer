@@ -89,15 +89,26 @@ jobs:
             tee "$RUNNER_TEMP/alina-safe-clone-preflight.json"
           PREFLIGHT_EXIT=${PIPESTATUS[0]}
           set -e
-          python - "$RUNNER_TEMP/alina-safe-clone-preflight/RESTORE_PREFLIGHT.json" "$PREFLIGHT_EXIT" <<'PY'
+          python - "$RUNNER_TEMP/alina-safe-clone-preflight/RESTORE_PREFLIGHT.json" "$RUNNER_TEMP/alina-safe-catalog-budget.json" "$PREFLIGHT_EXIT" <<'PY'
           import json
           import sys
-          report=json.load(open(sys.argv[1], encoding="utf-8"))
-          code=int(sys.argv[2])
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              report = json.load(stream)
+          with open(sys.argv[2], encoding="utf-8") as stream:
+              budget = json.load(stream)
+          code = int(sys.argv[3])
           if code != 3 or report.get("status") != "PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED":
               raise SystemExit(f"unexpected preflight result: exit={code} status={report.get('status')}")
-          if int(report.get("replay_ready_catalog_shards") or 0) <= 0:
-              raise SystemExit("preflight selected no SAFE/replayable shards")
+          # The preflight describes Release bytes/disk; shard counts belong
+          # exclusively to the SHA-bound catalog budget, not this report.
+          if int(budget.get("replay_selected_shards") or 0) <= 0:
+              raise SystemExit("catalog selected no SAFE/replayable shards")
+          if int(budget.get("replay_selected_release_assets") or 0) <= 0:
+              raise SystemExit("catalog selected no SAFE Release assets")
+          if int(report.get("unverified_source_asset_count") or 0) != 0:
+              raise SystemExit("preflight selected unverifiable Release assets")
+          if int(report.get("source_asset_bytes") or 0) < int(budget.get("replay_selected_release_download_bytes") or 0):
+              raise SystemExit("preflight source inventory does not cover catalog SAFE assets")
           if int(report.get("pending_download_bytes") or 0) <= 0:
               raise SystemExit("preflight has no measurable SAFE download budget")
           if int(report.get("pending_materialization_bytes") or 0) <= 0:
