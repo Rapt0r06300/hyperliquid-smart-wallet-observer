@@ -138,18 +138,23 @@ jobs:
           if int(report.get("potential_false_non_safe_count") or 0):
               raise SystemExit("stale non-SAFE labels remain")
           PY
-            git add --sparse -A \
+            git add --sparse -A -- \
               catalog/DATA_INDEX.json \
               catalog/DATA_METRICS.json \
               catalog/DATA_CATALOG.json \
               catalog/DATA_QUALITY_REGISTRY.json \
               catalog/QUARANTINE_AUDIT.json \
               catalog/QUARANTINE_CAUSES.json \
-              catalog/quarantine-audit-parts \
-              datasets/quarantine \
-              datasets/rejected \
-              datasets/sharded/quarantine \
-              datasets/sharded/rejected
+              catalog/quarantine-audit-parts
+            # An empty sparse checkout may have neither a directory nor tracked
+            # entries for a historical stage. Stage tracked deletions as well
+            # as present files, but never fail on a nonexistent pathspec.
+            for stage in datasets/quarantine datasets/rejected \
+                datasets/sharded/quarantine datasets/sharded/rejected; do
+              if [ -d "$stage" ] || git ls-files --error-unmatch -- "$stage" >/dev/null 2>&1; then
+                git add --sparse -A -- "$stage"
+              fi
+            done
             # Stage repaired SAFE receipts individually; never scan the huge
             # flat or sharded SAFE trees.
             python - <<'PY'
