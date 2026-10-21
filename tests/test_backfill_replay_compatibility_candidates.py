@@ -683,7 +683,7 @@ def test_apply_result_recovers_sha_bound_manifest_from_git_history(tmp_path):
 
     backfill._apply_result(row, result, root=tmp_path)
 
-    restored = tmp_path / "datasets/safe" / f"{dataset_id}.manifest.json"
+    restored = backfill._sharded_receipt_path(tmp_path, "safe", dataset_id)
     assert restored.is_file()
     saved = json.loads(restored.read_text(encoding="utf-8"))
     assert saved["quality_status"] == "SAFE"
@@ -773,3 +773,61 @@ def test_replay_backfill_checkout_covers_non_safe_sharded_history_only():
     } <= roots
     assert "/datasets/sharded/safe/" not in roots
     assert "/datasets/safe/" not in roots
+
+
+
+def test_historical_replay_writes_sharded_safe_and_retains_old_quarantine(tmp_path):
+    import json
+    dataset_id = "historical-replay-clean-bbo"
+    source = tmp_path / "datasets/quarantine" / f"{dataset_id}.manifest.json"
+    source.parent.mkdir(parents=True)
+    previous = {
+        "schema": "alina.shard_manifest.v2",
+        "dataset_id": dataset_id, "family": "bbo", "venue": "hyperliquid",
+        "symbol": "BTC", "source": "hyperliquid_public_ws",
+        "start_ts_ms": 1000, "end_ts_ms": 1001,
+        "event_count": 2, "record_count": 2,
+        "sha256": "a" * 64, "bytes": 123,
+        "collector_version": "original-pinned-collector",
+        "asset_verified": True, "replay_compatible": True,
+        "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "quality_status": "PARTIAL",
+        "integrity": {
+            "gap_count": 0, "duplicate_count": 0, "duplicates_deduped": True,
+            "regression_count": 0, "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0, "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True, "authenticated": False,
+            "real_execution": False, "transports": ["websocket"],
+        },
+        "synchronization": {"connection_count": 1},
+        "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
+        "required_channels": [], "observed_channels": ["bbo"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    source.write_text(json.dumps(previous), encoding="utf-8")
+    old = source.read_bytes()
+    row = {
+        "dataset_id": dataset_id, "family": "bbo", "venue": "hyperliquid",
+        "symbol": "BTC", "source": "hyperliquid_public_ws",
+        "quality_status": "PARTIAL", "replay_compatible": True,
+        "manifest_path": source.relative_to(tmp_path).as_posix(),
+        "sha256": "a" * 64, "bytes": 123,
+    }
+    backfill._apply_result(row, {
+        "record_count": 2, "replay_compatible": True,
+        "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "verified_from_release": True,
+        "asset_sha256": "a" * 64, "asset_size": 123,
+        "verifier_version": backfill.VERIFIER_VERSION,
+    }, root=tmp_path)
+    target = backfill._sharded_receipt_path(tmp_path, "safe", dataset_id)
+    assert row["quality_status"] == "SAFE"
+    assert row["manifest_path"] == target.relative_to(tmp_path).as_posix()
+    assert target.is_file()
+    assert json.loads(target.read_text(encoding="utf-8"))["quality_status"] == "SAFE"
+    # Negative history is no longer indexed, but remains inspectable.
+    assert source.read_bytes() == old

@@ -23,6 +23,7 @@ from index_run_manifest import (
     _publish_canonical_index,
     compact_index_rows,
     hydrate_default_release_repository,
+    _sharded_receipt_path,
 )
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
@@ -792,10 +793,19 @@ def _apply_result(
     manifest["validation_allowed"]=status=="SAFE" and manifest.get("replay_compatible") is True
     manifest["proof_of_pnl_allowed"]=False
 
-    target=root/"datasets"/_STAGE_BY_STATUS[status]/f"{manifest['dataset_id']}.manifest.json"
-    _write_json(target,manifest)
-    if target.resolve()!=manifest_path.resolve() and manifest_path.exists():
-        manifest_path.unlink()
+    dataset_id = str(manifest.get("dataset_id") or "")
+    if (
+        not dataset_id or len(dataset_id) > 240 or dataset_id in {".", ".."}
+        or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" for c in dataset_id)
+    ):
+        raise BackfillError("unsafe replay receipt dataset_id")
+    target = _sharded_receipt_path(root, _STAGE_BY_STATUS[status], dataset_id)
+    if target.is_symlink():
+        raise BackfillError("unsafe replay receipt destination")
+    _write_json(target, manifest)
+    # Preserve the previous PARTIAL/REJECT manifest in Git as historical
+    # evidence; rewriting a legacy giant flat Git tree is unnecessary.
+    # The updated canonical index is the only SAFE-admission authority.
 
     row.pop("replay_validation_pending",None)
     row.pop("pre_replay_quality_status",None)
