@@ -62,6 +62,10 @@ jobs:
             /catalog/quarantine-audit-parts/
             /datasets/quarantine/
             /datasets/rejected/
+            # Historical SHA-bound non-SAFE manifests can live in sharded
+            # quarantine receipts. Read them, but never hydrate the giant SAFE tree.
+            /datasets/sharded/quarantine/
+            /datasets/sharded/rejected/
             /src/
             /tests/
             /tools/
