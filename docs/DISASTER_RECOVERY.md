@@ -84,6 +84,18 @@ elle n'est exécutée que lorsque l'opérateur la lance. Aucun collecteur
 cloud n'est arrêté, aucune donnée privée Dataset V2 n'est réimportée et
 aucun ordre n'est exécuté.
 
+Le workflow GitHub-hosted `SAFE corpus distributed byte verification` complète
+les régressions bornées chaque nuit. Il fige le catalogue par SHA-256, répartit
+les conteneurs Release SAFE sur 24 runners bornés, vérifie la taille et le
+SHA-256 de chaque conteneur puis de chaque membre logique SAFE sélectionné, et
+n'émet son certificat agrégé qu'après couverture exacte, sans doublon, de toutes
+les partitions. Les téléchargements sont supprimés après chaque conteneur pour
+respecter le disque éphémère. Ce certificat constitue une preuve exhaustive
+distribuée d'accessibilité et d'identité des octets ; il ne prétend pas qu'une
+seule machine a matérialisé simultanément le corpus. Seul un rapport local
+`REPLAY_READY_COMPLETE` produit par `ALINA_SYNC_COMPLETE --download-safe`
+prouve cette restauration physique monolithique.
+
 ## Inventaire exact et preuve d'identité des données
 
 Le restaurateur énumère la fenêtre live via les pages `list releases` et leurs

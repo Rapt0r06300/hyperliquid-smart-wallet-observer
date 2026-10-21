@@ -18,6 +18,7 @@ def test_overnight_clone_readiness_runs_all_required_gates_on_hosted_runners():
         "native-venues-github-validation.yml": "cron: '37 19 * * *'",
         "alina-restore-safe-regression.yml": "cron: '47 19 * * *'",
         "durable-restore-drill.yml": "cron: '7 20 * * *'",
+        "safe-corpus-distributed-verification.yml": "cron: '37 20 * * *'",
     }
     for name, cron in schedules.items():
         source = _workflow(name)
@@ -51,3 +52,14 @@ def test_existing_dataset_control_gates_continue_overnight():
         source = _workflow(name)
         assert cron in source, name
         assert "self-hosted" not in source, name
+
+
+def test_distributed_safe_gate_is_exhaustive_but_scope_honest():
+    source = _workflow("safe-corpus-distributed-verification.yml")
+    assert "permissions:\n  contents: read" in source
+    assert "cancel-in-progress: false" in source
+    assert "fail-fast: false" in source
+    assert "max-parallel: 6" in source
+    assert "verify_safe_corpus_partition.py verify" in source
+    assert "verify_safe_corpus_partition.py aggregate" in source
+    assert "safe-distributed-certificate" in source
