@@ -194,6 +194,32 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
 
+def test_no_argument_sync_downloads_complete_safe_corpus_by_default(
+    monkeypatch, tmp_path,
+):
+    module = _module()
+    monkeypatch.setattr(
+        module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py")
+    )
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "a" * 40)
+    captured = {}
+
+    class StopAfterDispatch(RuntimeError):
+        pass
+
+    def capture_restore(*_args, **kwargs):
+        captured.update(kwargs)
+        raise StopAfterDispatch
+
+    monkeypatch.setattr(module, "restore_published", capture_restore)
+    with pytest.raises(StopAfterDispatch):
+        module.main([])
+
+    assert captured["preflight"] is False
+    assert captured["prune_only"] is False
+    assert captured["max_download_gib"] == 256
+
+
 def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path):
     module = _module()
     mock_script = tmp_path / "tools" / "sync_complete_clone.py"
