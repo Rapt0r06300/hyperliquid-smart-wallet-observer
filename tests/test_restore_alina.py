@@ -2503,6 +2503,46 @@ def test_replay_ready_materialization_refuses_symlinked_usable_tree(tmp_path):
     assert not list(outside.rglob("*.jsonl.gz"))
 
 
+def test_replay_ready_stale_cleanup_refuses_symlinked_shards(tmp_path):
+    module = _module()
+    destination = tmp_path / "restore"
+    stale_dir = destination / "usable" / "shards" / "obsolete"
+    stale_dir.mkdir(parents=True)
+    outside = tmp_path / "unrelated-data.bin"
+    outside.write_bytes(b"must not follow, hash, move or delete")
+    linked = stale_dir / "old.jsonl.gz"
+    linked.symlink_to(outside)
+
+    report = module._materialize_catalog_safe_shards(
+        [], tmp_path / "releases", destination,
+    )
+    assert report["usable_shards"] == 0
+    assert any(item.get("error") == "SYMLINKED_STALE_SHARD_NOT_PRUNED"
+               for item in report["failures"])
+    assert linked.is_symlink()
+    assert outside.read_bytes() == b"must not follow, hash, move or delete"
+    assert not (destination / "quarantine" / "stale_usable").exists()
+
+
+def test_replay_ready_stale_cleanup_refuses_symlinked_root(tmp_path):
+    module = _module()
+    destination = tmp_path / "restore"
+    (destination / "usable").mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "old-release").mkdir()
+    (outside / "old-release" / "old.jsonl.gz").write_bytes(b"non-catalog")
+    (destination / "usable" / "shards").symlink_to(outside, target_is_directory=True)
+
+    report = module._materialize_catalog_safe_shards(
+        [], tmp_path / "releases", destination,
+    )
+    assert report["usable_shards"] == 0
+    assert any(item.get("error") == "SYMLINKED_USABLE_SHARD_ROOT"
+               for item in report["failures"])
+    assert (outside / "old-release" / "old.jsonl.gz").read_bytes() == b"non-catalog"
+
+
 def test_replay_ready_prune_preserves_unknown_corrupt_and_symlinked_files(tmp_path):
     module = _module()
     expected = b"published"
