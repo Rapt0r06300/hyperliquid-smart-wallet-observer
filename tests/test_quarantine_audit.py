@@ -525,3 +525,28 @@ def test_stale_repair_index_write_failure_never_partially_moves_manifest(tmp_pat
     assert json.loads((catalog / "DATA_QUALITY_REGISTRY.json").read_text()) == {}
     assert json.loads((catalog / "DATA_CATALOG.json").read_text()) == {}
 
+
+
+def test_quarantine_cloud_audit_reads_sharded_non_safe_without_safe_tree():
+    """The hosted auditor must see historical receipts yet stay blobless."""
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "quarantine-audit.yml").read_text(
+        encoding="utf-8",
+    )
+    sparse = workflow.split("sparse-checkout: |", 1)[1].split(
+        "persist-credentials:", 1,
+    )[0]
+    roots = {
+        line.strip() for line in sparse.splitlines()
+        if line.strip().startswith("/")
+    }
+    assert {
+        "/datasets/quarantine/",
+        "/datasets/rejected/",
+        "/datasets/sharded/quarantine/",
+        "/datasets/sharded/rejected/",
+    } <= roots
+    assert "/datasets/safe/" not in roots
+    assert "/datasets/sharded/safe/" not in roots
+    # Selective SAFE receipt commits are allowed; mass SAFE tree staging is not.
+    assert 'git add --sparse -A -- datasets/safe' not in workflow
