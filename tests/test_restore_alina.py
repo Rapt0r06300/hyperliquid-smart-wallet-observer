@@ -838,6 +838,33 @@ def test_streaming_download_resumes_existing_partial_with_http_range(tmp_path, m
     assert digest == hashlib.sha256(b"prefix-suffix").hexdigest()
 
 
+def test_http_range_rejects_wrong_total_before_appending(tmp_path, monkeypatch):
+    module = _module()
+    target = tmp_path / "asset.partial"
+    target.write_bytes(b"prefix-")
+
+    class Response:
+        status = 206
+        headers = {"Content-Range": "bytes 7-12/14"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            raise AssertionError("invalid range must not stream")
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *_a, **_k: Response())
+    import pytest
+    with pytest.raises(module.RestoreError, match="Content-Range"):
+        module._download_to_path(
+            "https://example.invalid/asset", target, max_bytes=13,
+        )
+    assert target.read_bytes() == b"prefix-"
+
+
 def test_short_download_is_retained_as_resumable_partial(tmp_path, monkeypatch):
     module = _module()
     payload = b"complete-payload"
