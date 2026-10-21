@@ -1,6 +1,8 @@
 name: Alina SAFE restore regression
 
 on:
+  schedule:
+    - cron: '47 19 * * *'
   push:
     branches: [main]
     paths:

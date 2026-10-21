@@ -1,6 +1,8 @@
 name: native-venues-github-validation
 
 on:
+  schedule:
+    - cron: '37 19 * * *'
   push:
     branches:
       - main

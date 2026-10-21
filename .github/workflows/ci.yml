@@ -2,6 +2,8 @@ name: hypersmart-ci
 
 # CI HyperSmart — paper/read-only. Aucun secret, aucune execution externe.
 on:
+  schedule:
+    - cron: '7 19 * * *'
   push:
     branches: [main]
     paths-ignore:

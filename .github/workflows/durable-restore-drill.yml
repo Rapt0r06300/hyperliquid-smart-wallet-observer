@@ -1,5 +1,7 @@
 name: durable-restore-drill
 on:
+  schedule:
+    - cron: '7 20 * * *'
   workflow_dispatch:
 permissions:
   contents: read

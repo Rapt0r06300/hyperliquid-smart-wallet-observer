@@ -1,6 +1,8 @@
 name: collector-replay-integrity-ci
 
 on:
+  schedule:
+    - cron: '27 19 * * *'
   push:
     branches: [main]
     paths:
