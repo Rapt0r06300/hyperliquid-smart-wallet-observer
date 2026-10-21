@@ -142,9 +142,9 @@ def _terminal_rows(
 ) -> dict[str, dict[str, Any]]:
     """Select only explicit catalogue REJECTs, not unverified PARTIALs.
 
-    Negative replay verification is not needed to discard an already rejected
-    payload; the *physical* deletion still requires a SHA/size-identical GitHub
-    asset and proof that every indexed member of its container is REJECT.
+    A stale REJECT label must not override a replay-compatible shard.
+    Physical deletion requires a negative replay state, a SHA/size-identical
+    GitHub asset and proof that every indexed member is REJECT.
     The old replay patch is intentionally not used as a deletion authority.
     """
     del results  # Kept for callers using the legacy two-argument interface.
@@ -155,6 +155,7 @@ def _terminal_rows(
             isinstance(dataset_id, str)
             and bool(dataset_id)
             and row.get("quality_status") == "REJECT"
+            and row.get("replay_compatible") is False
             and type(row.get("bytes")) is int
             and row["bytes"] > 0
             and isinstance(row.get("sha256"), str)
@@ -179,6 +180,7 @@ def _reject_only_plan(plan: Mapping[str, Any]) -> bool:
             and all(
                 isinstance(row, Mapping)
                 and row.get("quality_status") == "REJECT"
+                and row.get("replay_compatible") is False
                 for row in item["datasets"]
             )
             for item in assets_to_delete
@@ -204,6 +206,8 @@ def _verify_target_membership(
         frozen = item["datasets"]
         if any(row.get("quality_status") != "REJECT" for row in frozen):
             raise Refuse("DELETION_REJECT_ONLY")
+        if any(row.get("replay_compatible") is not False for row in frozen):
+            raise Refuse("DELETION_REPLAYABILITY_NOT_REFUTED")
         expected = {str(r["dataset_id"]): r for r in frozen}
         present = current.get(key, [])
         if len(expected) != len(frozen) or len(present) != len(frozen):
@@ -216,9 +220,11 @@ def _verify_target_membership(
                 raise Refuse("DELETION_SAFE_PROTECTED")
             if status != "REJECT":
                 raise Refuse("DELETION_REJECT_ONLY")
+            if row.get("replay_compatible") is not False:
+                raise Refuse("DELETION_REPLAYABILITY_NOT_REFUTED")
             frozen_row = expected[str(row["dataset_id"])]
             if any(row.get(field) != frozen_row.get(field) for field in (
-                "sha256", "bytes", "quality_status", "manifest_path"
+                "sha256", "bytes", "quality_status", "replay_compatible", "manifest_path"
             )):
                 raise Refuse("DELETION_PHYSICAL_MEMBER_CHANGED")
 
@@ -282,6 +288,7 @@ def prepare(limit: int) -> dict[str, Any]:
                     "sha256": row["sha256"],
                     "bytes": row["bytes"],
                     "quality_status": row["quality_status"],
+                    "replay_compatible": False,
                     "manifest_path": row.get("manifest_path"),
                     "terminal_reason": "CATALOG_REJECT_SHA_BOUND_REMOTE_ASSET",
                 }
@@ -327,11 +334,13 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
         for frozen in item["datasets"]:
             current = by_id.get(frozen["dataset_id"])
             if current is None or any(current.get(key) != frozen.get(key) for key in (
-                "sha256", "bytes", "quality_status", "manifest_path"
+                "sha256", "bytes", "quality_status", "replay_compatible", "manifest_path"
             )):
                 raise Refuse("DELETION_DATASET_CHANGED")
             if current.get("quality_status") == "SAFE":
                 raise Refuse("DELETION_SAFE_PROTECTED")
+            if current.get("replay_compatible") is not False:
+                raise Refuse("DELETION_REPLAYABILITY_NOT_REFUTED")
     # Index may advance only through unrelated catalog receipts. Every target
     # identity is rechecked above; the frozen index digest remains evidence.
     deleted: list[dict[str, Any]] = []
@@ -428,7 +437,7 @@ def finalize(receipt_path: Path) -> dict[str, Any]:
             continue
         if row.get("quality_status") == "SAFE" or any(
             row.get(key) != expected.get(key)
-            for key in ("sha256", "bytes", "quality_status", "manifest_path")
+            for key in ("sha256", "bytes", "quality_status", "replay_compatible", "manifest_path")
         ):
             raise Refuse("DELETION_FINALIZE_TARGET_CHANGED")
         _remove_terminal_receipt(ROOT, str(row.get("manifest_path") or ""))
