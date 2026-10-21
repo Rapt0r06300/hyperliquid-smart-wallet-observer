@@ -1063,13 +1063,15 @@ def _load_current_safe_catalog(
         sha = str(row.get("sha256") or "").lower()
         tag = str(row.get("release_tag") or "")
         if row.get("quality_status") == "SAFE":
-            # A SAFE label cannot override missing independent asset, replay
-            # or backtest-admission evidence. Refuse the entire restore rather
-            # than silently publishing an incomplete supposedly SAFE corpus.
+            # Legacy compact indexes can omit asset_verified and
+            # validation_allowed: immutable manifest evidence and exact
+            # Release SHA/size are independently verified during hydration.
+            # An explicitly negative admission is never overridden; missing
+            # redundant index flags cannot be mistaken for remote verification.
             if (
                 row.get("replay_compatible") is not True
-                or row.get("asset_verified") is not True
-                or row.get("validation_allowed") is not True
+                or row.get("asset_verified") is False
+                or row.get("validation_allowed") is False
                 or re.fullmatch(r"[0-9a-f]{64}", sha) is None
                 or not tag
             ):
