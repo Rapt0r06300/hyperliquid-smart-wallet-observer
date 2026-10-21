@@ -2394,7 +2394,11 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
     ]
     assert (usable / "safe-one.jsonl.gz").read_bytes() == payloads["safe-one"]
     assert result["classification"]["usable_shards"] == 1
-    assert result["classification"]["verified_zip_members"] == 1
+    # First-stage extraction already checked the ZIP member against its
+    # SHA-bound manifest; the final pass correctly reuses the verified shard.
+    assert result["releases"][0]["assets"][0]["status"] == "STAGED_MATERIALIZED_VERIFIED"
+    assert result["classification"]["skipped_verified_shards"] == 1
+    assert result["classification"]["verified_zip_members"] == 0
     assert result["classification"]["quarantined_shards"] == 0
     assert not list((restored_root / "usable").rglob("*partial-one*"))
     assert not list((restored_root / "usable").rglob("*reject-one*"))
