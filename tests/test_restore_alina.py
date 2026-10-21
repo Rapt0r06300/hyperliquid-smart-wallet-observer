@@ -164,28 +164,26 @@ def test_corrupt_cached_partial_retries_once_from_byte_zero(tmp_path, monkeypatc
     assert not partial.exists()
 
 
-def test_short_resumed_partial_retries_once_from_zero(tmp_path, monkeypatch):
+def test_short_resumed_partial_is_preserved_for_next_resume(tmp_path, monkeypatch):
     module = _module()
     payload = b"complete-valid-release-payload"
     asset = _asset("asset.bin", "https://example.invalid/asset", payload)
     partial = tmp_path / "asset.bin.partial"
     partial.write_bytes(b"STALE")
-    seen = []
+    calls = []
 
-    def short_then_clean(_url, path, **_kwargs):
-        seen.append(path.read_bytes() if path.exists() else None)
-        if len(seen) == 1:
-            path.write_bytes(payload[:7])
-            return 7, hashlib.sha256(payload[:7]).hexdigest()
-        assert not path.exists(), "second attempt must discard stale prefix"
-        path.write_bytes(payload)
-        return len(payload), hashlib.sha256(payload).hexdigest()
+    def interrupted_resume(_url, path, **_kwargs):
+        calls.append(path.read_bytes() if path.exists() else None)
+        path.write_bytes(payload[:7])
+        return 7, hashlib.sha256(payload[:7]).hexdigest()
 
-    monkeypatch.setattr(module, "_download_to_path", short_then_clean)
-    receipt = module.download_asset(asset, tmp_path)
-    assert seen == [b"STALE", None]
-    assert receipt["verification_status"] == "VERIFIED"
-    assert (tmp_path / "asset.bin").read_bytes() == payload
+    monkeypatch.setattr(module, "_download_to_path", interrupted_resume)
+    import pytest
+    with pytest.raises(module.RestoreError, match="size mismatch"):
+        module.download_asset(asset, tmp_path)
+    assert calls == [b"STALE"]
+    assert partial.read_bytes() == payload[:7]
+    assert not (tmp_path / "asset.bin").exists()
 
 
 def test_corrupt_cached_partial_stays_fail_closed_after_retry(tmp_path, monkeypatch):
