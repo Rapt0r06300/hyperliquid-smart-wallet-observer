@@ -1,26 +1,26 @@
 {
   "authoritative_plan": {
-    "active_lane_count": 1,
+    "active_lane_count": 0,
     "broad_rest_universe_count": 3073,
     "campaigns": [
       {
         "campaign_id": "copy-vault-e8-broad-2026102117-v8",
-        "collected": false,
-        "completed_units": 0,
-        "published": false,
+        "collected": true,
+        "completed_units": 1,
+        "published": true,
         "shard_index": 0,
-        "status": "RUNNING",
-        "status_reason": "worker_started"
+        "status": "COMPLETE",
+        "status_reason": "unit_complete"
       }
     ],
-    "collected_lane_count": 0,
+    "collected_lane_count": 1,
     "collection_mode": "two_speed_broad_rest_priority_ws",
-    "completed_unit_count": 0,
+    "completed_unit_count": 1,
     "created_at_max": "2026-10-21T17:37:12.853324+00:00",
     "declared_universe_count": 3073,
     "duplicate_lane_indices": [],
     "explicit_unavailable_lane_count": 0,
-    "fully_published": false,
+    "fully_published": true,
     "lane_indices": [
       0
     ],
@@ -30,15 +30,15 @@
     "no_silent_loss": true,
     "out_of_range_lane_indices": [],
     "plan_valid": true,
-    "published_lane_count": 0,
-    "qualified_shard_count": 0,
+    "published_lane_count": 1,
+    "qualified_shard_count": 413,
     "scheduled_lane_count": 1,
     "selected_count": 3073,
     "selection_file": "catalog/copy_vault_selections/e8/2026102117.json",
     "selection_sha256": "a5b5504b0e743d5969ea8637ff1a2a46c1c606511b9017be14cbc5ef5718df35",
     "selection_verified": true,
-    "status": "MORE_DATA",
-    "terminal_lane_count": 0,
+    "status": "OBSERVED",
+    "terminal_lane_count": 1,
     "unexpected_failures": [],
     "users_per_largest_lane": 3073,
     "ws_subscription_limit_verified": true,
@@ -3292,27 +3292,27 @@
       "ws_users_per_largest_lane": 10
     },
     {
-      "active_lane_count": 1,
+      "active_lane_count": 0,
       "broad_rest_universe_count": 3073,
       "campaigns": [
         {
           "campaign_id": "copy-vault-e8-broad-2026102117-v8",
-          "collected": false,
-          "completed_units": 0,
-          "published": false,
+          "collected": true,
+          "completed_units": 1,
+          "published": true,
           "shard_index": 0,
-          "status": "RUNNING",
-          "status_reason": "worker_started"
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
         }
       ],
-      "collected_lane_count": 0,
+      "collected_lane_count": 1,
       "collection_mode": "two_speed_broad_rest_priority_ws",
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "created_at_max": "2026-10-21T17:37:12.853324+00:00",
       "declared_universe_count": 3073,
       "duplicate_lane_indices": [],
       "explicit_unavailable_lane_count": 0,
-      "fully_published": false,
+      "fully_published": true,
       "lane_indices": [
         0
       ],
@@ -3322,15 +3322,15 @@
       "no_silent_loss": true,
       "out_of_range_lane_indices": [],
       "plan_valid": true,
-      "published_lane_count": 0,
-      "qualified_shard_count": 0,
+      "published_lane_count": 1,
+      "qualified_shard_count": 413,
       "scheduled_lane_count": 1,
       "selected_count": 3073,
       "selection_file": "catalog/copy_vault_selections/e8/2026102117.json",
       "selection_sha256": "a5b5504b0e743d5969ea8637ff1a2a46c1c606511b9017be14cbc5ef5718df35",
       "selection_verified": true,
-      "status": "MORE_DATA",
-      "terminal_lane_count": 0,
+      "status": "OBSERVED",
+      "terminal_lane_count": 1,
       "unexpected_failures": [],
       "users_per_largest_lane": 3073,
       "ws_subscription_limit_verified": true,
@@ -3339,11 +3339,11 @@
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "76f2a6e4140492f3bce502075f8975325332a1f378620b30bb5ccefb867b7d31",
+  "receipt_digest": "27560b287af3166affecf7dfb28439a5da3c07ee1c4c8861637a8ba56e2cdc07",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
-    "publication_complete": false,
+    "publication_complete": true,
     "selection_present": true,
     "selection_verified": true,
     "sharding_present": true,
@@ -3351,5 +3351,5 @@
   },
   "schema": "alina.copy_vault_coverage_receipt.v2",
   "source_collection_epoch": 8,
-  "status": "MORE_DATA"
+  "status": "OBSERVED"
 }
