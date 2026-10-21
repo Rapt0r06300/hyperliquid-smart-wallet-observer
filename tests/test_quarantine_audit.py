@@ -8,6 +8,7 @@ import pytest
 
 from tools.build_quarantine_audit import build
 from tools.repair_stale_safe_classifications import repair
+from tools.index_run_manifest import _sharded_receipt_path
 
 
 def _manifest(dataset_id: str, *, safe_now: bool) -> dict:
@@ -287,7 +288,7 @@ def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
 
     assert result["repaired_count"] == 1
     assert result["repaired_record_count"] == 10
-    safe_path = tmp_path / "datasets" / "safe" / "stale-safe.manifest.json"
+    safe_path = _sharded_receipt_path(tmp_path, "safe", "stale-safe")
     assert safe_path.is_file()
     assert not manifest_path.exists()
     repaired_manifest = json.loads(safe_path.read_text(encoding="utf-8"))
@@ -298,7 +299,7 @@ def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
     index = json.loads((catalog / "DATA_INDEX.json").read_text(encoding="utf-8"))
     repaired_row = index["shards"][0]
     assert repaired_row["quality_status"] == "SAFE"
-    assert repaired_row["manifest_path"] == "datasets/safe/stale-safe.manifest.json"
+    assert repaired_row["manifest_path"] == safe_path.relative_to(tmp_path).as_posix()
     assert repaired_row["replay_compatible"] is True
     assert repaired_row["trade_count_exact"] is True
     assert repaired_row["unique_trade_count_exact"] is True
