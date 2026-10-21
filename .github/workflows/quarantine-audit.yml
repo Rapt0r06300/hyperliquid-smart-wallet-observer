@@ -146,11 +146,27 @@ jobs:
               catalog/QUARANTINE_AUDIT.json \
               catalog/QUARANTINE_CAUSES.json \
               catalog/quarantine-audit-parts \
-              datasets/safe \
               datasets/quarantine \
               datasets/rejected \
               datasets/sharded/quarantine \
               datasets/sharded/rejected
+            # Stage repaired SAFE receipts individually; never scan the huge
+            # flat or sharded SAFE trees.
+            python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          receipt=json.loads((Path(os.environ["RUNNER_TEMP"]) / "alina-reclassification-result.json").read_text())
+          for item in receipt.get("repaired", []):
+              rel=item.get("new_manifest_path")
+              if not isinstance(rel, str) or re.fullmatch(
+                  r"datasets/sharded/safe/[0-9a-f]{2}/[0-9a-f]{2}/[A-Za-z0-9._-]+\\.manifest\\.json", rel
+              ) is None or not Path(rel).is_file():
+                  raise SystemExit("RECLASSIFICATION_SHARDED_SAFE_RECEIPT_INVALID")
+              subprocess.run(["git", "add", "--sparse", "--", rel], check=True)
+          PY
             # Never publish a partition root without its matching Git blobs.
             if [ -d catalog/data-index-parts ]; then git add -A -- catalog/data-index-parts; fi
             # A retired PARTIAL/REJECT manifest must have its exact original
@@ -185,6 +201,19 @@ jobs:
               if (hashlib.sha256(disk).hexdigest() != sha
                       or hashlib.sha256(staged).hexdigest() != sha):
                   raise SystemExit("RECLASSIFICATION_ARCHIVE_NOT_STAGED")
+              new_rel = item.get("new_manifest_path")
+              if not isinstance(new_rel, str):
+                  raise SystemExit("RECLASSIFICATION_NEW_SAFE_RECEIPT_MISSING")
+              new_disk = Path(new_rel).read_bytes()
+              new_staged = subprocess.run(
+                  ["git", "show", ":" + new_rel], capture_output=True, check=True
+              ).stdout
+              current = json.loads(new_disk)
+              if (new_disk != new_staged
+                      or current.get("dataset_id") != item.get("dataset_id")
+                      or current.get("quality_status") != "SAFE"
+                      or current.get("replay_compatible") is not True):
+                  raise SystemExit("RECLASSIFICATION_NEW_SAFE_RECEIPT_NOT_STAGED")
           PY
             if git diff --cached --quiet; then
               echo "Quarantine audit and repaired catalog already current."
