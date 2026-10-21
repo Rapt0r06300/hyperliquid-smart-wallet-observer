@@ -192,7 +192,9 @@ def test_five_hosted_dataset_automations_share_safe_publish_lanes() -> None:
         assert "filter: blob:none" in source
     assert "sparse-checkout:" in workflows[4]
     assert "fetch-depth: 2" in workflows[4]
-    assert "filter: blob:none" not in workflows[4]
+    # The bounded deletion-control checkout must not hydrate historical raw
+    # data blobs. SHA-bound remote assets are independently verified later.
+    assert "filter: blob:none" in workflows[4]
     assert "group: dataset-v2-control-plane-index" in workflows[1]
     assert "group: dataset-v2-control-plane-index" in workflows[2]
     assert "group: dataset-v2-catalog-reconcile" in workflows[0]
