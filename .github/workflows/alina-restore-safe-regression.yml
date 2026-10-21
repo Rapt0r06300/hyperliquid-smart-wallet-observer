@@ -160,11 +160,11 @@ jobs:
           Path(os.environ["RUNNER_TEMP"], "SAFE_SAMPLE_RESTORE_RECEIPT.json").write_text(
               json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
-          # Exercise a bounded restart against the same verified Release asset.
+          # A corrupt partial must never be mistaken for certified SAFE data.
+          # Verify a clean retry when the server responds with full HTTP 200.
           with tempfile.TemporaryDirectory() as directory:
               path = Path(directory) / name
-              with path.open("wb") as stream:
-                  stream.write(b"partial-transfer-to-be-replaced")
+              path.write_bytes(b"partial-transfer-to-be-replaced")
               resumed_size, resumed_digest = _download_to_path(
                   asset["browser_download_url"], path, token=token, max_bytes=asset["size"]
               )
