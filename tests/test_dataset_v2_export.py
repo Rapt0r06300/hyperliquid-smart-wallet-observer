@@ -55,6 +55,20 @@ def test_manifest_is_derived_from_real_partitioned_shard(tmp_path) -> None:
     assert manifest["integrity"]["missing_monotonic_count"] == 0
 
 
+def test_explicit_unchanged_cumulative_gap_baseline_is_not_a_local_gap(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for ts in (1000, 1010):
+        event = _event(ts)
+        event.gap_count = 5
+        event.provenance["gap_count_semantics"] = "cumulative"
+        writer.append(event)
+    [shard] = writer.rotate_all()
+
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["integrity"]["gap_count"] == 0
+    assert manifest["replay_compatible"] is True
+
+
 def test_malformed_jsonl_frames_make_shard_non_replayable(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
     writer.append(_event(1000))
@@ -507,10 +521,21 @@ def test_incremental_gap_after_real_snapshot_is_still_reported(tmp_path):
             provenance={"access": "read_only", "transport": "websocket", "authenticated": False},
             parsed_summary={"prev_sequence": previous},
         ))
-    [shard] = writer.rotate_all()
-    report = build_manifest_from_tick_shard(shard, collector_version="test")
-    assert report["integrity"]["gap_count"] >= 1
-    assert report["replay_compatible"] is False
+    shards = writer.rotate_all()
+    assert len(shards) == 2
+    reports = [
+        build_manifest_from_tick_shard(shard, collector_version="test")
+        for shard in shards
+    ]
+    # The snapshot-anchored prefix is preserved while the breaking delta is
+    # isolated and cannot enter replay publication.
+    assert sum(report["replay_compatible"] is True for report in reports) == 1
+    rejected = [report for report in reports if report["replay_compatible"] is False]
+    assert len(rejected) == 1
+    assert (
+        rejected[0]["integrity"]["gap_count"]
+        + rejected[0]["integrity"]["desync_count"]
+    ) >= 1
 
 
 

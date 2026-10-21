@@ -303,10 +303,16 @@ def build_manifest_from_tick_shard(
                     timestamp_semantics.add(semantic_value)
                 gap_semantics = str(provenance.get("gap_count_semantics") or "").lower()
                 if record_gap_counter is not None:
-                    if gap_semantics == "event_delta":
-                        event_gap_deltas.append(max(0, record_gap_counter))
-                    else:
+                    if gap_semantics == "cumulative":
                         gap_counter_values.append(record_gap_counter)
+                    else:
+                        # An undeclared counter cannot be assumed cumulative:
+                        # on a one-record shard, max-min would erase a real
+                        # non-zero gap and admit corrupt payload. Only sources
+                        # explicitly declaring cumulative semantics receive
+                        # baseline subtraction; event_delta and unknown modes
+                        # fail closed as per-event evidence.
+                        event_gap_deltas.append(max(0, record_gap_counter))
                 if "authenticated" not in provenance:
                     authenticated_explicit = False
                 authenticated = provenance.get("authenticated")
