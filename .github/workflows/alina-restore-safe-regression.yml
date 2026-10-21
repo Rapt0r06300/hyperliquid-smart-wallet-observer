@@ -196,11 +196,129 @@ jobs:
           assert receipt["asset_name"].endswith(".jsonl.gz")
           print("SAFE_SAMPLE_RECEIPT_SCHEMA_VERIFIED", hashlib.sha256(receipt_path.read_bytes()).hexdigest())
           PY
+      - name: Verify bounded multi-venue SAFE shards against Release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tempfile
+          import zipfile
+          from pathlib import Path
+          from urllib.parse import quote
+          from tools.restore_alina import (
+              _download_to_path, _expected_digest, _json,
+              _list_release_assets, _load_replay_ready_plan,
+          )
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          _, proof, rows, required = _load_replay_ready_plan(
+              Path("catalog/DATA_INDEX.json"), Path("catalog/DATA_METRICS.json")
+          )
+          venues = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
+          limit = 128 * 1024 * 1024
+          candidates = {}
+          for row in rows:
+              venue = str(row.get("venue") or "").lower()
+              if venue not in venues:
+                  continue
+              tag = str(row["release_tag"])
+              name = str(row.get("release_container_asset") or row["release_asset"])
+              size, digest = required[(tag, name)]
+              # Bound both the network transfer and decompressed ZIP member.
+              member_size = row["bytes"]
+              if size <= 0 or size > limit or member_size <= 0 or member_size > limit:
+                  continue
+              ordering = (size, tag, name, str(row["dataset_id"]))
+              previous = candidates.get(venue)
+              if previous is None or ordering < previous[0]:
+                  candidates[venue] = (ordering, row, digest)
+          if len(candidates) < 3:
+              raise SystemExit("SAFE_MULTI_VENUE_SAMPLE_INSUFFICIENT_BOUNDED_CANDIDATES")
+          verified = []
+          for venue in venues:
+              if venue not in candidates:
+                  continue
+              ordering, row, expected_sha = candidates[venue]
+              size, tag, name, _dataset_id = ordering
+              release = _json(
+                  f"https://api.github.com/repos/{repository}/releases/tags/{quote(tag, safe='')}",
+                  token=token,
+              )
+              if release.get("tag_name") != tag:
+                  raise SystemExit("SAFE_SAMPLE_RELEASE_TAG_MISMATCH")
+              assets = _list_release_assets(repository, release["id"], token=token)
+              matching = [asset for asset in assets if asset.get("name") == name]
+              if len(matching) != 1:
+                  raise SystemExit(f"SAFE_SAMPLE_ASSET_NOT_UNIQUE: {venue}")
+              asset = matching[0]
+              if (
+                  asset.get("state") != "uploaded"
+                  or asset.get("size") != size
+                  or _expected_digest(asset) != expected_sha
+              ):
+                  raise SystemExit(f"SAFE_SAMPLE_RELEASE_EVIDENCE_MISMATCH: {venue}")
+              with tempfile.TemporaryDirectory() as folder:
+                  destination = Path(folder) / "selected_asset"
+                  got_size, got_sha = _download_to_path(
+                      asset["browser_download_url"], destination,
+                      token=token, max_bytes=size,
+                  )
+                  if got_size != size or got_sha != expected_sha:
+                      raise SystemExit(f"SAFE_SAMPLE_ASSET_SHA_MISMATCH: {venue}")
+                  digest = hashlib.sha256()
+                  count = 0
+                  if row.get("release_container_asset"):
+                      with zipfile.ZipFile(destination) as archive:
+                          member = str(row["release_asset"])
+                          info = archive.getinfo(member)
+                          if info.file_size != row["bytes"]:
+                              raise SystemExit(f"SAFE_SAMPLE_MEMBER_SIZE_MISMATCH: {venue}")
+                          with archive.open(info) as stream:
+                              while chunk := stream.read(1024 * 1024):
+                                  count += len(chunk)
+                                  if count > row["bytes"]:
+                                      raise SystemExit("SAFE_SAMPLE_MEMBER_OVERFLOW")
+                                  digest.update(chunk)
+                  else:
+                      with destination.open("rb") as stream:
+                          while chunk := stream.read(1024 * 1024):
+                              count += len(chunk)
+                              digest.update(chunk)
+                  if count != row["bytes"] or digest.hexdigest() != row["sha256"]:
+                      raise SystemExit(f"SAFE_SAMPLE_MEMBER_SHA_MISMATCH: {venue}")
+              verified.append({
+                  "venue": venue, "family": row.get("family"),
+                  "dataset_id": row["dataset_id"], "release_tag": tag,
+                  "asset_name": name, "asset_id": asset["id"],
+                  "asset_bytes": size, "asset_sha256": expected_sha,
+                  "member_bytes": count, "member_sha256": digest.hexdigest(),
+              })
+              print("SAFE_VENUE_MEMBER_SHA_VERIFIED", venue, row.get("family"), count)
+          receipt = {
+              "schema": "alina.multi_venue_sample_restore.v1",
+              "status": "BOUNDED_SAMPLES_ONLY_NOT_FULL_DATASET",
+              "repository": repository,
+              "git_sha": os.environ["GITHUB_SHA"],
+              "catalog_sha256": proof["source_index_sha256"],
+              "verified_venues": len(verified),
+              "unverified_venues": [venue for venue in venues if venue not in candidates],
+              "verified": verified,
+          }
+          result = Path(os.environ["RUNNER_TEMP"]) / "SAFE_MULTI_VENUE_RECEIPT.json"
+          result.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+          print("SAFE_MULTI_VENUE_RECEIPT_VERIFIED", len(verified))
+          PY
       - name: Publish SHA-bound SAFE sample receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: safe-sample-restore-receipt-${{ github.run_id }}
-          path: ${{ runner.temp }}/SAFE_SAMPLE_RESTORE_RECEIPT.json
+          path: |
+            ${{ runner.temp }}/SAFE_SAMPLE_RESTORE_RECEIPT.json
+            ${{ runner.temp }}/SAFE_MULTI_VENUE_RECEIPT.json
           if-no-files-found: error
           retention-days: 30
       - name: Measure canonical index headroom
