@@ -374,8 +374,9 @@ def test_verified_observation_repair_keeps_original_missing_timestamp_evidence(t
         "asset_sha256": "a" * 64, "verifier_version": VERIFIER_VERSION,
     }
     backfill._apply_result(row, result, root=tmp_path)
-    safe = tmp_path / "datasets" / "safe" / "vault-example.manifest.json"
+    safe = backfill._sharded_receipt_path(tmp_path, "safe", "vault-example")
     assert safe.is_file()
+    assert row["manifest_path"] == safe.relative_to(tmp_path).as_posix()
     saved = json.loads(safe.read_text(encoding="utf-8"))
     assert saved["historical_receive_only_repair"]["previous_missing_timestamp_count"] == 2
     assert saved["historical_receive_only_repair"]["exchange_timestamp_invented"] is False
