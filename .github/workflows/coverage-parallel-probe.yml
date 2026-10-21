@@ -3,9 +3,20 @@ name: coverage-parallel-probe
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'catalog/**'
-      - 'control/**'
+    # A 32-runner coverage matrix is not necessary for a documentation,
+    # catalog, orchestration-checkpoint or unrelated test-only commit.
+    # Runtime and coverage-tool changes still trigger the full gate.
+    paths:
+      - 'src/**'
+      - 'hyper_smart_observer/**'
+      - 'tools/**'
+      - 'tests/test_coverage*.py'
+      - 'tests/test_workflow_bounds.py'
+      - 'tests/test_ci_shard.py'
+      - '.github/workflows/coverage-parallel-probe.yml'
+      - 'pyproject.toml'
+      - 'requirements-ci-*.txt'
+      - 'requirements-recherche.txt'
   workflow_dispatch: {}
 
 permissions:
