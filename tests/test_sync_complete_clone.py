@@ -121,7 +121,7 @@ def test_restore_delegates_to_existing_engine_and_propagates_failure(monkeypatch
     assert "--everything" not in command
     assert "--clone-root" not in command  # Legacy LFS reuse is disabled.
     assert "--recover-verifiable" in command
-    assert "--prune-unselected-cache" in command
+    assert "--prune-unselected-cache" not in command
     assert "--materialize-available-local-snapshot" not in command
     assert "--preflight-only" not in command
     assert kwargs["cwd"] == tmp_path.resolve()
@@ -194,7 +194,7 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
 
-def test_no_argument_sync_downloads_complete_safe_corpus_by_default(
+def test_no_argument_sync_is_preflight_only_and_does_not_download(
     monkeypatch, tmp_path,
 ):
     module = _module()
@@ -215,9 +215,9 @@ def test_no_argument_sync_downloads_complete_safe_corpus_by_default(
     with pytest.raises(StopAfterDispatch):
         module.main([])
 
-    assert captured["preflight"] is False
+    assert captured["preflight"] is True
     assert captured["prune_only"] is False
-    assert captured["max_download_gib"] == 256
+    assert captured["max_download_gib"] is None
 
 
 def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path):
@@ -468,7 +468,7 @@ def test_stale_success_report_cannot_certify_new_restore(monkeypatch, tmp_path):
         "catalog_verification": {"source_index_sha256": digest},
     }), encoding="utf-8")
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
-    assert module.main([]) == 2
+    assert module.main(["--download-safe"]) == 2
     checkpoint = json.loads((report_dir / "SYNC_REPORT.json").read_text(encoding="utf-8"))
     assert checkpoint["status"] == "RESTORE_INCOMPLETE"
     assert checkpoint["report_validation_error"] == "restore did not refresh its report"
@@ -487,7 +487,7 @@ def test_symlinked_prior_restore_report_is_rejected(monkeypatch, tmp_path):
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlink creation is unavailable on this runner: {exc}")
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: pytest.fail("must not restore"))
-    assert module.main([]) == 2
+    assert module.main(["--download-safe"]) == 2
     assert target.read_text(encoding="utf-8") == '{"status":"REPLAY_READY_COMPLETE"}'
 
 
@@ -498,4 +498,4 @@ def test_directory_at_prior_report_path_fails_before_restore(monkeypatch, tmp_pa
     report_dir = tmp_path / "runtime" / "recovery" / "full"
     (report_dir / "RESTORE_REPORT.json").mkdir(parents=True)
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: pytest.fail("must not restore"))
-    assert module.main([]) == 2
+    assert module.main(["--download-safe"]) == 2
