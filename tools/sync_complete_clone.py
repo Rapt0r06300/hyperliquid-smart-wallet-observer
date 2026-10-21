@@ -360,8 +360,17 @@ def main(argv: list[str] | None = None) -> int:
         report_name = "RESTORE_PREFLIGHT.json" if effective_preflight else "RESTORE_REPORT.json"
         prior_report = report_dir / report_name
         prior_identity = None
-        if prior_report.exists():
+        if prior_report.is_symlink():
+            raise SyncError("refusing symlinked restore report")
+        try:
             stat = prior_report.stat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise SyncError(f"cannot inspect prior restore report: {exc}") from exc
+        else:
+            if not prior_report.is_file():
+                raise SyncError("restore report path is not a regular file")
             prior_identity = (stat.st_mtime_ns, stat.st_ctime_ns)
         code = restore_published(
             root, preflight=effective_preflight,
@@ -389,9 +398,12 @@ def main(argv: list[str] | None = None) -> int:
             report_dir / report_name,
             expected_catalog_sha256=catalog_sha256 if not effective_preflight else None,
         )
-        if prior_identity is not None:
-            current = (report_dir / report_name).stat() if (report_dir / report_name).exists() else None
-            if current is None or (current.st_mtime_ns, current.st_ctime_ns) == prior_identity:
+        current_report = report_dir / report_name
+        if current_report.is_symlink() or not current_report.is_file():
+            restore_status, report_error = "RESTORE_INCOMPLETE", "missing or unsafe restore report"
+        elif prior_identity is not None:
+            current = current_report.stat()
+            if (current.st_mtime_ns, current.st_ctime_ns) == prior_identity:
                 restore_status, report_error = "RESTORE_INCOMPLETE", "restore did not refresh its report"
         certified = (
             not effective_preflight
