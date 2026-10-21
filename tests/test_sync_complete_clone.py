@@ -318,12 +318,14 @@ def test_catalog_budget_deduplicates_shared_release_zip_and_preserves_quarantine
     rows = [
         {
             "dataset_id": "safe1", "quality_status": "SAFE", "replay_compatible": True,
+            "validation_allowed": True, "asset_verified": True,
             "sha256": "a" * 64, "bytes": 20, "release_asset": "safe1.jsonl.gz",
             "venue": "okx", "family": "trades", "event_count": 5,
             "start_ts_ms": 1000, "end_ts_ms": 2000, **asset,
         },
         {
             "dataset_id": "safe2", "quality_status": "SAFE", "replay_compatible": True,
+            "validation_allowed": True, "asset_verified": True,
             "sha256": "b" * 64, "bytes": 30, "release_asset": "safe2.jsonl.gz",
             "venue": "okx", "family": "l2book", "event_count": 9,
             "start_ts_ms": 1500, "end_ts_ms": 2500, **asset,
