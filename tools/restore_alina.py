@@ -1062,12 +1062,20 @@ def _load_current_safe_catalog(
         seen.add(identity)
         sha = str(row.get("sha256") or "").lower()
         tag = str(row.get("release_tag") or "")
-        if (
-            row.get("quality_status") == "SAFE"
-            and row.get("replay_compatible") is True
-            and re.fullmatch(r"[0-9a-f]{64}", sha)
-            and tag
-        ):
+        if row.get("quality_status") == "SAFE":
+            # A SAFE label cannot override missing independent asset, replay
+            # or backtest-admission evidence. Refuse the entire restore rather
+            # than silently publishing an incomplete supposedly SAFE corpus.
+            if (
+                row.get("replay_compatible") is not True
+                or row.get("asset_verified") is not True
+                or row.get("validation_allowed") is not True
+                or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+                or not tag
+            ):
+                raise RestoreError(
+                    f"SAFE_CATALOG_NOT_FULLY_CERTIFIED: {identity}"
+                )
             safe[identity] = (sha, tag)
     return safe, {
         "source_index_sha256": digest,
