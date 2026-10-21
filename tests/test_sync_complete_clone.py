@@ -194,7 +194,7 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
 
-def test_no_argument_sync_downloads_complete_safe_corpus_by_default(
+def test_explicit_safe_download_dispatches_with_operator_budget(
     monkeypatch, tmp_path,
 ):
     module = _module()
@@ -213,7 +213,7 @@ def test_no_argument_sync_downloads_complete_safe_corpus_by_default(
 
     monkeypatch.setattr(module, "restore_published", capture_restore)
     with pytest.raises(StopAfterDispatch):
-        module.main([])
+        module.main(["--download-safe", "--max-download-gib", "256"])
 
     assert captured["preflight"] is False
     assert captured["prune_only"] is False
