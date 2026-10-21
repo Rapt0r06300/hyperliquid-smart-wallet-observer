@@ -50,7 +50,8 @@ METRICS = ROOT / "catalog" / "DATA_METRICS.json"
 PLAN = ROOT / "catalog" / "DATA_DELETION_PLAN.json"
 HISTORY = ROOT / "catalog" / "DATA_DELETION_HISTORY.json"
 TERMINAL = {"REJECT"}
-REJECT_PURGE_POLICY = "alina.reject-only.remote-identity.v1"
+REJECT_PURGE_POLICY = "alina.reject-only-verified-repair-exhausted.v2"
+TERMINAL_PROOF_SCHEMA = "alina.terminal_repair_exhaustion.v1"
 
 
 def _refresh_catalog(index: dict[str, Any], root: Path) -> None:
@@ -137,15 +138,43 @@ def _physical_key(row: Mapping[str, Any]) -> tuple[str, str] | None:
     return (tag, asset) if tag and asset else None
 
 
+def _irrecoverable_repair_proof(row: Mapping[str, Any]) -> bool:
+    """Require immutable negative replay and exhausted source repair.
+
+    A REJECT label or a negative replay flag alone is never permission to
+    destroy published bytes that may still be recovered.
+    """
+    proof = row.get("terminal_repair_evidence")
+    return (
+        isinstance(proof, Mapping)
+        and proof.get("schema") == TERMINAL_PROOF_SCHEMA
+        and proof.get("dataset_id") == row.get("dataset_id")
+        and proof.get("sha256") == row.get("sha256")
+        and proof.get("release_tag") == row.get("release_tag")
+        and proof.get("release_asset") == row.get("release_asset")
+        and proof.get("verified_from_release") is True
+        and proof.get("replay_compatible") is False
+        and proof.get("independent_replay_scan_completed") is True
+        and proof.get("repair_attempted") is True
+        and proof.get("recovery_sources_exhausted") is True
+        and proof.get("terminal") is True
+        and isinstance(proof.get("verifier_version"), str)
+        and bool(proof["verifier_version"])
+        and isinstance(proof.get("evidence_sha256"), str)
+        and len(proof["evidence_sha256"]) == 64
+        and all(ch in "0123456789abcdef" for ch in proof["evidence_sha256"])
+    )
+
+
 def _terminal_rows(
     rows: list[dict[str, Any]], results: Mapping[str, Any] | None = None
 ) -> dict[str, dict[str, Any]]:
     """Select only explicit catalogue REJECTs, not unverified PARTIALs.
 
     A stale REJECT label must not override a replay-compatible shard.
-    Physical deletion requires a negative replay state, a SHA/size-identical
-    GitHub asset and proof that every indexed member is REJECT.
-    The old replay patch is intentionally not used as a deletion authority.
+    Physical deletion requires a SHA-bound negative replay verification,
+    explicit source-repair exhaustion, and a fully REJECT-only Release asset.
+    The replay patch alone is never a terminal-deletion authority.
     """
     del results  # Kept for callers using the legacy two-argument interface.
     terminal: dict[str, dict[str, Any]] = {}
@@ -156,6 +185,7 @@ def _terminal_rows(
             and bool(dataset_id)
             and row.get("quality_status") == "REJECT"
             and row.get("replay_compatible") is False
+            and _irrecoverable_repair_proof(row)
             and type(row.get("bytes")) is int
             and row["bytes"] > 0
             and isinstance(row.get("sha256"), str)
@@ -181,6 +211,7 @@ def _reject_only_plan(plan: Mapping[str, Any]) -> bool:
                 isinstance(row, Mapping)
                 and row.get("quality_status") == "REJECT"
                 and row.get("replay_compatible") is False
+                and _irrecoverable_repair_proof(row)
                 for row in item["datasets"]
             )
             for item in assets_to_delete
@@ -208,6 +239,8 @@ def _verify_target_membership(
             raise Refuse("DELETION_REJECT_ONLY")
         if any(row.get("replay_compatible") is not False for row in frozen):
             raise Refuse("DELETION_REPLAYABILITY_NOT_REFUTED")
+        if any(not _irrecoverable_repair_proof(row) for row in frozen):
+            raise Refuse("DELETION_REPAIR_EXHAUSTION_NOT_PROVEN")
         expected = {str(r["dataset_id"]): r for r in frozen}
         present = current.get(key, [])
         if len(expected) != len(frozen) or len(present) != len(frozen):
@@ -222,9 +255,12 @@ def _verify_target_membership(
                 raise Refuse("DELETION_REJECT_ONLY")
             if row.get("replay_compatible") is not False:
                 raise Refuse("DELETION_REPLAYABILITY_NOT_REFUTED")
+            if not _irrecoverable_repair_proof(row):
+                raise Refuse("DELETION_REPAIR_EXHAUSTION_NOT_PROVEN")
             frozen_row = expected[str(row["dataset_id"])]
             if any(row.get(field) != frozen_row.get(field) for field in (
-                "sha256", "bytes", "quality_status", "replay_compatible", "manifest_path"
+                "sha256", "bytes", "quality_status", "replay_compatible",
+                "terminal_repair_evidence", "manifest_path"
             )):
                 raise Refuse("DELETION_PHYSICAL_MEMBER_CHANGED")
 
@@ -289,6 +325,7 @@ def prepare(limit: int) -> dict[str, Any]:
                     "bytes": row["bytes"],
                     "quality_status": row["quality_status"],
                     "replay_compatible": False,
+                    "terminal_repair_evidence": row["terminal_repair_evidence"],
                     "manifest_path": row.get("manifest_path"),
                     "terminal_reason": "CATALOG_REJECT_SHA_BOUND_REMOTE_ASSET",
                 }
@@ -334,13 +371,16 @@ def execute(expected_digest: str, receipt_path: Path) -> dict[str, Any]:
         for frozen in item["datasets"]:
             current = by_id.get(frozen["dataset_id"])
             if current is None or any(current.get(key) != frozen.get(key) for key in (
-                "sha256", "bytes", "quality_status", "replay_compatible", "manifest_path"
+                "sha256", "bytes", "quality_status", "replay_compatible",
+                "terminal_repair_evidence", "manifest_path"
             )):
                 raise Refuse("DELETION_DATASET_CHANGED")
             if current.get("quality_status") == "SAFE":
                 raise Refuse("DELETION_SAFE_PROTECTED")
             if current.get("replay_compatible") is not False:
                 raise Refuse("DELETION_REPLAYABILITY_NOT_REFUTED")
+            if not _irrecoverable_repair_proof(current):
+                raise Refuse("DELETION_REPAIR_EXHAUSTION_NOT_PROVEN")
     # Index may advance only through unrelated catalog receipts. Every target
     # identity is rechecked above; the frozen index digest remains evidence.
     deleted: list[dict[str, Any]] = []
