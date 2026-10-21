@@ -180,9 +180,14 @@ def test_source_folder_relocation_status_distinguishes_unbuilt_bundle():
 
     assert status.relative_launcher_ok is True
     assert status.first_launch_regeneration_ok is True
-    assert status.longest_path_ok is True
-    assert status.longest_path <= module.MAX_WINDOWS_PATH
+    # Source checkouts can contain very long historical sharded receipts.
+    # Test the actual Windows path gate rather than asserting every checkout
+    # location is short enough; an overlong path must remain NO_GO.
+    assert status.longest_path_ok == (status.longest_path <= module.MAX_WINDOWS_PATH)
     assert status.longest_path_member
+    if not status.longest_path_ok:
+        assert status.ok is False
+        assert any("C:\\HyperSmart" in item for item in status.recommendations)
     assert status.hardcoded_user_paths == ()
 
     if embedded.is_file() and pth.is_file():
