@@ -666,3 +666,40 @@ def test_corrupt_integrity_proof_cannot_become_safe(tmp_path) -> None:
         assert verdict["quality_status"] == "REJECT"
         assert verdict["validation_allowed"] is False
         assert "INCOMPLETE_OR_INVALID_INTEGRITY_COUNTERS" in verdict["quality_reasons"]
+
+
+def test_collector_replay_only_admission_never_stages_reject_payload(tmp_path) -> None:
+    """Source admission happens BEFORE GitHub Release publication or packing."""
+    import json
+
+    writer = PartitionedTickDatasetWriter(tmp_path / "raw")
+    writer.append(_event(1_000, connection="good"))
+    writer.append(_event(1_010, connection="bad", gap_count=1))
+    writer.rotate_all()
+
+    bundle_dir = tmp_path / "bundle"
+    index = build_bundle(
+        tmp_path / "raw", bundle_dir,
+        collector_version="a" * 40,
+        replay_admission_only=True,
+    )
+
+    assert index["source_shard_count"] == 2
+    assert index["shard_count"] == 1
+    assert index["partial_count"] == 1  # Remote SHA verification is pending.
+    assert index["reject_count"] == 0
+    assert index["source_admission"]["mode"] == "replay_only"
+    assert index["source_admission"]["excluded_shards"] == 1
+    assert index["source_admission"]["no_rejected_payload_published"] is True
+    assert len(list((bundle_dir / "assets").glob("*.jsonl.gz"))) == 1
+    assert len(list((bundle_dir / "manifests").glob("*.json"))) == 1
+    row = json.loads((bundle_dir / index["manifests"][0]).read_text())
+    assert row["replay_compatible"] is True
+    assert row["quality_status"] == "PARTIAL"
+    assert row["quality_reasons"] == ["REMOTE_ASSET_NOT_VERIFIED"]
+    # The publisher can promote only after checking the real remote digest;
+    # the final download/sync must never see this provisional PARTIAL label.
+    assert row["validation_allowed"] is False
+    assert not any(
+        "bad" in path.name for path in (bundle_dir / "assets").iterdir()
+    )
