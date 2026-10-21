@@ -398,7 +398,9 @@ def test_reconcile_near_limit_uses_one_release_without_dropping_backlog():
     assert "batch_size = 1" in text
     assert "remaining = max(0, len(new_tags) - len(batch))" in text
     assert "REMAINING_NEW_TAGS" in text
-    assert "if: env.RUN_MANIFEST_COUNT != '0' && env.REMAINING_NEW_TAGS != '0'" in text
+    assert "Continue historical backlog on a fresh hosted runner" in text
+    assert "--reconcile-index catalog/DATA_INDEX.json" in text
+    assert "--max-minutes 95 --max-waves 60" in text
 
 
 def test_reconcile_regenerates_from_release_manifests_after_concurrent_commit():

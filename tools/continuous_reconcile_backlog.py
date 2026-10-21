@@ -103,10 +103,15 @@ def publish(paths: list[Path]) -> int:
         synced()
         enforce_quarantine_before_import(candidates)
         run("python", "tools/index_run_manifest.py", *map(str, candidates))
-        for tool in ("build_catalog_metrics.py", "build_quarantine_audit.py", "check_dataset_quality.py"):
+        for tool in ("build_catalog_metrics.py", "build_quarantine_audit.py"):
             run("python", f"tools/{tool}")
+        # Historical workers deliberately use a sparse checkout: the complete
+        # immutable manifest set was already certified when it entered main.
+        # Revalidate the entire SHA-bound catalog plus the newly generated
+        # receipts without materializing millions of unchanged receipt files.
+        run("python", "tools/check_dataset_quality.py", "--catalog-only")
         run("python", "-c", "from tools.build_catalog_metrics import verify_metrics_source; verify_metrics_source()")
-        run("git", "add", "catalog", "datasets")
+        run("git", "add", "--sparse", "catalog", "datasets")
         if run("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
             raise RuntimeError("empty catalog publication, no checkpoint possible")
         run("git", "commit", "-q", "-m", "data: historical V2 checkpoint")

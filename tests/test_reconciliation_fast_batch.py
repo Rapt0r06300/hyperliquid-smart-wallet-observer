@@ -98,10 +98,15 @@ def test_historical_workflow_never_cancels_active_reconciliation() -> None:
     assert "batch_size = 1" in workflow
     assert "--max-shards 60000" in workflow
     assert "--max-manifest-bytes 67108864" in workflow
-    assert "Continue certified historical waves on the same hosted runner" in workflow
+    assert "Continue historical backlog on a fresh hosted runner" in workflow
+    assert "--max-minutes 95 --max-waves 60" in workflow
+    assert workflow.count("timeout-minutes: 115") == 2
+    assert "fetch-depth: 20" in workflow
+    assert "sparse-checkout:" in workflow
+    assert "git add --sparse catalog datasets" in workflow
+    assert "check_dataset_quality.py --catalog-only" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'push' }}" not in workflow
     assert "runs-on: ubuntu-latest" in workflow
-    assert "fetch-depth: 0" in workflow
     assert "filter: blob:none" in workflow
     assert "self-hosted" not in workflow.split("runs-on: ubuntu-latest")[1].split("steps:")[0]
 

@@ -3,6 +3,14 @@ import pytest
 from tools.continuous_reconcile_backlog import pending, PACK
 
 
+def test_sparse_historical_publication_keeps_fail_closed_catalog_validation() -> None:
+    source = __import__("inspect").getsource(
+        __import__("tools.continuous_reconcile_backlog", fromlist=["publish"]).publish
+    )
+    assert '"tools/check_dataset_quality.py", "--catalog-only"' in source
+    assert '"git", "add", "--sparse", "catalog", "datasets"' in source
+
+
 def test_pending_respects_release_aliases_status_and_quarantine() -> None:
     index = {
         "release_repository_default": "Rapt0r06300/hyperliquid-smart-wallet-observer",
