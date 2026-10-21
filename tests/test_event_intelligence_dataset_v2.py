@@ -97,38 +97,33 @@ def test_public_event_bundle_is_causal_read_only_and_not_artificially_safe(
         monotonic_ns=5_000,
     )
 
-    assert bundle["shard_count"] == 4
+    # Four public event streams were observed, but without an independent
+    # exact reconciliation none is safe for executable market replays.
+    assert bundle["source_shard_count"] == 4
+    assert bundle["shard_count"] == 0
     assert bundle["safe_count"] == 0
-    assert bundle["partial_count"] == 4
+    assert bundle["partial_count"] == 0
+    assert bundle["reject_count"] == 0
+    assert bundle["manifests"] == []
+    assert bundle["assets"] == []
+    assert bundle["dataset_ids"] == []
+    assert bundle["source_admission"]["mode"] == "replay_only"
+    assert bundle["source_admission"]["excluded_shards"] == 4
+    assert bundle["source_admission"]["no_rejected_payload_published"] is True
+    assert not list((tmp_path / "bundle" / "assets").glob("*.jsonl.gz"))
+    assert not list((tmp_path / "bundle" / "manifests").glob("*.json"))
+
+    # Research remains observable without exposing quarantined data as
+    # backtest-ready payload or fabricating an economic proof.
     assert bundle["read_only"] is True
     assert bundle["real_execution"] is False
     assert bundle["event_intelligence"]["idea_count"] == 120
-
-    manifests = []
-    for relative in bundle["manifests"]:
-        manifest = json.loads((tmp_path / "bundle" / relative).read_text(encoding="utf-8"))
-        manifests.append(manifest)
-        assert manifest["family"] == "external_events"
-        assert manifest["quality_status"] == "PARTIAL"
-        assert manifest["validation_allowed"] is False
-        assert manifest["proof_of_pnl_allowed"] is False
-        assert manifest["reconciliation"]["status"] == "UNAVAILABLE"
-        assert manifest["reconciliation"]["reason"] == "NO_INDEPENDENT_EXACT_REFERENCE"
-        assert manifest["event_intelligence"]["idea_count"] == 120
-        assert manifest["event_intelligence"]["proof_state"] == "STRUCTURAL_ONLY"
-        assert manifest["provenance"]["public_data_only"] is True
-        assert manifest["provenance"]["authenticated"] is False
-        assert manifest["provenance"]["real_execution"] is False
-        assert manifest["integrity"]["missing_monotonic_count"] == 0
-        assert manifest["integrity"]["missing_timestamp_count"] == 0
-        assert manifest["synchronization"]["first_exchange_ts_ms"] is None
-
-    assert {row["source"] for row in manifests} == {
-        "gdacs",
-        "gdelt.doc",
-        "nasa.eonet",
-        "usgs.earthquakes",
+    assert bundle["event_intelligence"]["proof_state"] == "STRUCTURAL_ONLY"
+    assert bundle["event_intelligence_runtime"]["proof_state"] == "STRUCTURAL_ONLY"
+    assert set(bundle["source_status"]) == {
+        "usgs_earthquakes", "nasa_eonet", "gdacs", "gdelt_doc",
     }
+    assert all(row["status"] == "COLLECTED" for row in bundle["source_status"].values())
 
 
 def test_public_event_bundle_refuses_false_success_when_every_source_fails(tmp_path: Path) -> None:
