@@ -472,3 +472,17 @@ def test_stale_success_report_cannot_certify_new_restore(monkeypatch, tmp_path):
     checkpoint = json.loads((report_dir / "SYNC_REPORT.json").read_text(encoding="utf-8"))
     assert checkpoint["status"] == "RESTORE_INCOMPLETE"
     assert checkpoint["report_validation_error"] == "restore did not refresh its report"
+
+
+def test_symlinked_prior_restore_report_is_rejected(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "f" * 40)
+    report_dir = tmp_path / "runtime" / "recovery" / "full"
+    report_dir.mkdir(parents=True)
+    target = tmp_path / "untrusted.json"
+    target.write_text('{"status":"REPLAY_READY_COMPLETE"}', encoding="utf-8")
+    (report_dir / "RESTORE_REPORT.json").symlink_to(target)
+    monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: pytest.fail("must not restore"))
+    assert module.main([]) == 2
+    assert target.read_text(encoding="utf-8") == '{"status":"REPLAY_READY_COMPLETE"}'
