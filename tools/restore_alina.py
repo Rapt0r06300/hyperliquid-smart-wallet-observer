@@ -2143,6 +2143,46 @@ def restore_everything(
         repository, token=token, allow_incomplete=recover_verifiable,
         inventory_cache_root=releases_root,
     ))
+    # Historical inventories may omit an older Release still referenced by
+    # canonical SAFE evidence. Resolve only missing catalog tags from GitHub's
+    # authoritative tag endpoint; never invent an asset or relax SHA checks.
+    if profile == "replay-ready" and replay_required:
+        listed = {str(release.get("tag_name") or ""): release for release in releases}
+        missing = sorted({tag for tag, name in replay_required
+                          if not any(asset.get("name") == name
+                                     for asset in listed.get(tag, {}).get("assets", []))})
+        for tag in missing:
+            from urllib.parse import quote
+            remote = _json(
+                f"https://api.github.com/repos/{repository}/releases/tags/{quote(tag, safe='')}",
+                token=token,
+            )
+            if not isinstance(remote, Mapping) or remote.get("tag_name") != tag:
+                raise RestoreError(f"invalid historical SAFE Release lookup: {tag}")
+            release_id = remote.get("id")
+            if type(release_id) is not int or release_id <= 0:
+                raise RestoreError(f"invalid historical SAFE Release id: {tag}")
+            assets = _list_release_assets(
+                repository, release_id, token=token,
+                allow_incomplete=recover_verifiable,
+            )
+            resolved = dict(remote)
+            resolved["assets"] = assets
+            if tag in listed:
+                if listed[tag].get("id") != release_id:
+                    raise RestoreError(f"historical SAFE Release identity conflict: {tag}")
+                existing = {a.get("name"): a for a in listed[tag]["assets"]}
+                for asset in assets:
+                    prior = existing.get(asset["name"])
+                    if prior is not None and (prior.get("id") != asset["id"]
+                            or prior.get("size") != asset["size"]
+                            or _expected_digest(prior) != _expected_digest(asset)):
+                        raise RestoreError(f"historical SAFE asset identity conflict: {tag}")
+                listed[tag] = resolved
+                releases = [resolved if row.get("tag_name") == tag else row for row in releases]
+            else:
+                listed[tag] = resolved
+                releases.append(resolved)
     # Never start transferring data with a partial/malformed source inventory.
     seen_tags: set[str] = set()
     seen_windows_release_dirs: set[str] = set()
