@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.datasets.v2_export import write_manifest
-from hl_observer.datasets.v2_pipeline import build_bundle, finalize_manifest
+from hl_observer.datasets.v2_pipeline import (
+    admission_rejection, build_bundle, finalize_manifest,
+    locally_replay_admissible, summarize_admission_rejections,
+)
 from hl_observer.event_intelligence.archive import EventIntelligenceArchive
 from hl_observer.event_intelligence.direct_sources import (
     DirectSourceReadOnlyClient,
@@ -151,9 +154,9 @@ def build_public_event_bundle(
 ) -> dict[str, Any]:
     """Collect four keyless public sources and build an honest V2 bundle.
 
-    Exact independent reconciliation does not exist for these heterogeneous
-    external events, so every shard remains PARTIAL.  It may feed research but
-    cannot authorize validation or PnL promotion.
+    Exact independent reconciliation is not available for all public
+    event sources. Keep causal research summaries but never publish a PARTIAL
+    or REJECT payload into the executable replay/backtest dataset.
     """
 
     output = Path(output_root)
@@ -208,6 +211,7 @@ def build_public_event_bundle(
         output,
         collector_version=str(collector_version),
         collection_run_id=str(collection_run_id),
+        replay_admission_only=True,
     )
     contract = integration_contract()
     runtime_evidence = build_runtime_evidence(
@@ -236,6 +240,7 @@ def build_public_event_bundle(
         json.dumps(runtime_evidence, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     manifests: list[dict[str, Any]] = []
+    post_enrichment_exclusions: list[dict[str, Any]] = []
     for relative in bundle["manifests"]:
         path = output / str(relative)
         manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -258,8 +263,35 @@ def build_public_event_bundle(
             "proof_of_pnl_allowed": False,
         }
         manifest = finalize_manifest(manifest)
+        if not locally_replay_admissible(manifest):
+            # Enrichment can revoke an initially admissible shard (e.g. no
+            # independently verified source). Never leave its payload in the
+            # bundle passed to the Release publisher.
+            post_enrichment_exclusions.append(admission_rejection(manifest))
+            path.unlink()
+            (output / "assets" / str(manifest["release_asset"])).unlink()
+            continue
         write_manifest(manifest, path)
         manifests.append(manifest)
+
+    prior_admission = dict(bundle.get("source_admission") or {})
+    additional = summarize_admission_rejections(post_enrichment_exclusions)
+    reasons = dict(prior_admission.get("blocking_reasons") or {})
+    for reason, count in additional["blocking_reasons"].items():
+        reasons[reason] = int(reasons.get(reason, 0)) + count
+    bundle["source_admission"] = {
+        **prior_admission,
+        "mode": "replay_only",
+        "excluded_shards": int(prior_admission.get("excluded_shards") or 0)
+        + additional["excluded_shards"],
+        "excluded_compressed_bytes": int(prior_admission.get("excluded_compressed_bytes") or 0)
+        + additional["excluded_compressed_bytes"],
+        "blocking_reasons": dict(sorted(reasons.items())),
+        "no_rejected_payload_published": True,
+    }
+    bundle["manifests"] = [f"manifests/{row['dataset_id']}.json" for row in manifests]
+    bundle["assets"] = [f"assets/{row['release_asset']}" for row in manifests]
+    bundle["dataset_ids"] = [row["dataset_id"] for row in manifests]
 
     bundle.update(
         {
