@@ -16,6 +16,11 @@ class EntrypointRole(StrEnum):
 
 
 ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
+    # Explicit local restore/backup tools; never cloud-run or live trading.
+    "ALINA_SYNC_COMPLETE.cmd": EntrypointRole.MAINTENANCE,
+    "Alina-restore.cmd": EntrypointRole.COMPAT,
+    "BACKUP_LOCAL_ALINA.cmd": EntrypointRole.MAINTENANCE,
+    "RESTORE_ALINA.cmd": EntrypointRole.MAINTENANCE,
     "ANALYSER_BACKTESTS_REPLAYS.cmd": EntrypointRole.OFFICIAL_ANALYSIS,
     "ANALYSER_DONNEES_HYPERSMART.cmd": EntrypointRole.MAINTENANCE,
     "ANALYSE_HISTORIQUE_COMPLETE.cmd": EntrypointRole.COMPAT,
