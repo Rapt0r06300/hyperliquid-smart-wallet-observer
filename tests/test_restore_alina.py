@@ -2304,7 +2304,8 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
         rows.append({
             "dataset_id": name,
             "quality_status": status,
-            "replay_compatible": status == "SAFE",
+            # Even a positive replay flag cannot override a non-SAFE label.
+            "replay_compatible": True,
             "release_tag": tag,
             "release_asset": f"{name}.jsonl.gz",
             "release_container_asset": "mixed.zip",
