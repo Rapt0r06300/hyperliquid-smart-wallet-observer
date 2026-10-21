@@ -447,6 +447,11 @@ def _candidate(
     status=str(row.get("quality_status") or "").upper()
     if metadata_repair:
         return True
+    if manifest_recovery:
+        # Historical REJECT/PARTIAL receipts may exist only in Git history.
+        # Selection is NOT certification: recover SHA/size-bound evidence,
+        # then verify the immutable Release bytes and rerun strict replay.
+        return True
     # Immutable legacy SAFE/PARTIAL shards may predate replay receipts. Running
     # the strict parser can prove deterministic replay without pretending that
     # PARTIAL source reconciliation suddenly became SAFE.
