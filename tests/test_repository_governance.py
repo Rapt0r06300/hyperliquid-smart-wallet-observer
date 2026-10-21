@@ -134,6 +134,8 @@ def test_coverage_probe_has_git_parent_for_anti_deletion_proof() -> None:
     assert "fetch-depth: 2" in text
     assert "COVERAGE_ARTIFACT_COUNT_INVALID" in text
     assert "test \"${#COVERAGE_FILES[@]}\" -eq 32" in text
+    assert "cancel-in-progress: false" in text
+    assert "cancel-in-progress: true" not in text
 
 
 def test_current_state_supersedes_stale_master_document() -> None:

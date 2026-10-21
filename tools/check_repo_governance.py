@@ -107,7 +107,8 @@ def local_failures() -> list[str]:
             "COVERAGE_ARTIFACT_COUNT_INVALID",
             "test \"${#COVERAGE_FILES[@]}\" -eq 32",
             "hypersmart/coverage-parallel-probe",
-            "cancel-in-progress: true",
+            # Active coverage proofs must finish despite frequent collector commits.
+            "cancel-in-progress: false",
         ):
             if marker not in text:
                 failures.append(f"coverage probe incomplet: marqueur absent {marker}")
