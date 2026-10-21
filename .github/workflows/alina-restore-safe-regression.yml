@@ -143,6 +143,7 @@ jobs:
               size, digest = _download_to_path(asset["browser_download_url"], path, token=token, max_bytes=asset["size"])
               assert size == asset["size"] and digest == _expected_digest(asset)
               assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+              verified_prefix = path.read_bytes()[:min(1024 * 1024, size // 2)]
           import json
           from datetime import datetime, timezone
           receipt = {
@@ -160,15 +161,18 @@ jobs:
           Path(os.environ["RUNNER_TEMP"], "SAFE_SAMPLE_RESTORE_RECEIPT.json").write_text(
               json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
-          # A corrupt partial must never be mistaken for certified SAFE data.
-          # Verify a clean retry when the server responds with full HTTP 200.
+          # Use a byte-identical prefix so either HTTP 206 resume or HTTP 200
+          # restart is valid, with full SHA-256 verification in both cases.
           with tempfile.TemporaryDirectory() as directory:
               path = Path(directory) / name
-              path.write_bytes(b"partial-transfer-to-be-replaced")
+              prefix_length = min(1024 * 1024, size // 2)
+              path.write_bytes(verified_prefix)
+              assert path.stat().st_size == prefix_length
               resumed_size, resumed_digest = _download_to_path(
                   asset["browser_download_url"], path, token=token, max_bytes=asset["size"]
               )
               assert resumed_size == asset["size"] and resumed_digest == digest
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
           print("HISTORICAL_SAFE_ASSET_RESTART_VERIFIED", resumed_size, resumed_digest)
           print("HISTORICAL_SAFE_ASSET_RESTORED_VERIFIED", size, digest)
           PY
