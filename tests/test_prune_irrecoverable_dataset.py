@@ -4,7 +4,7 @@ from tools import prune_irrecoverable_dataset as gc
 
 
 def _row(dataset_id: str, status: str, asset: str) -> dict:
-    return {
+    row = {
         "dataset_id": dataset_id,
         "quality_status": status,
         "replay_compatible": False,
@@ -17,6 +17,23 @@ def _row(dataset_id: str, status: str, asset: str) -> dict:
         "release_remote_digest": "sha256:" + (("a" if dataset_id == "reject" else "b") * 64),
         "manifest_path": f"datasets/rejected/{dataset_id}.manifest.json",
     }
+    if status == "REJECT":
+        row["terminal_repair_evidence"] = {
+            "schema": gc.TERMINAL_PROOF_SCHEMA,
+            "dataset_id": dataset_id,
+            "sha256": row["sha256"],
+            "release_tag": row["release_tag"],
+            "release_asset": asset,
+            "verified_from_release": True,
+            "replay_compatible": False,
+            "independent_replay_scan_completed": True,
+            "repair_attempted": True,
+            "recovery_sources_exhausted": True,
+            "terminal": True,
+            "verifier_version": "test-verifier",
+            "evidence_sha256": "f" * 64,
+        }
+    return row
 
 
 def test_prepare_protects_safe_member_and_selects_terminal_standalone(monkeypatch, tmp_path):
@@ -47,6 +64,10 @@ def test_terminal_requires_explicit_reject_with_complete_asset_identity():
     assert gc._terminal_rows([{**row, "quality_status": "PARTIAL"}]) == {}
     assert gc._terminal_rows([{**row, "replay_compatible": True}]) == {}
     assert gc._terminal_rows([{**row, "replay_compatible": None}]) == {}
+    assert gc._terminal_rows([{**row, "terminal_repair_evidence": None}]) == {}
+    assert gc._terminal_rows([{**row, "terminal_repair_evidence": {
+        **row["terminal_repair_evidence"], "recovery_sources_exhausted": False,
+    }}]) == {}
     assert gc._terminal_rows([{**row, "bytes": 0}]) == {}
     assert gc._terminal_rows([{**row, "sha256": "not-a-sha"}]) == {}
     assert gc._terminal_rows([{**row, "release_asset": ""}]) == {}
@@ -102,7 +123,9 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
     frozen = {"release_tag": "data-test", "asset_name": "mixed.zip", "datasets": [{
         "dataset_id": reject["dataset_id"], "sha256": reject["sha256"],
         "bytes": reject["bytes"], "quality_status": reject["quality_status"],
-        "replay_compatible": False, "manifest_path": reject["manifest_path"],
+        "replay_compatible": False,
+        "terminal_repair_evidence": reject["terminal_repair_evidence"],
+        "manifest_path": reject["manifest_path"],
     }]}
     gc._verify_target_membership([reject], [frozen])
     with pytest.raises(gc.Refuse, match="DELETION_PHYSICAL_MEMBERSHIP_CHANGED"):
@@ -111,6 +134,8 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
         gc._verify_target_membership([{**reject, "bytes": 9}], [frozen])
     with pytest.raises(gc.Refuse, match="DELETION_REPLAYABILITY_NOT_REFUTED"):
         gc._verify_target_membership([{**reject, "replay_compatible": True}], [frozen])
+    with pytest.raises(gc.Refuse, match="DELETION_REPAIR_EXHAUSTION_NOT_PROVEN"):
+        gc._verify_target_membership([{**reject, "terminal_repair_evidence": None}], [frozen])
 
 
 def test_partial_never_terminal_even_after_replay_verification_failure():
@@ -136,8 +161,14 @@ def test_only_reject_plan_and_current_membership_can_delete():
                         "datasets": [{"dataset_id": "reject", "quality_status": "REJECT",
                                       "sha256": reject["sha256"], "bytes": reject["bytes"],
                                       "replay_compatible": False,
+                                      "terminal_repair_evidence": reject["terminal_repair_evidence"],
                                       "manifest_path": reject["manifest_path"]}]}]}
     assert gc._reject_only_plan(plan) is True
+    assert gc._reject_only_plan({"assets": [{
+        **plan["assets"][0],
+        "datasets": [{**plan["assets"][0]["datasets"][0],
+                      "terminal_repair_evidence": None}],
+    }]}) is False
     gc._verify_target_membership([reject], plan["assets"])
     assert gc._reject_only_plan({"assets": []}) is False
 
