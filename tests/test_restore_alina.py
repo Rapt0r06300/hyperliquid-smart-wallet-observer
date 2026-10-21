@@ -134,6 +134,59 @@ def test_download_asset_rejects_digest_mismatch(tmp_path, monkeypatch):
         raise AssertionError("corrupted restore asset must fail closed")
 
 
+def test_corrupt_cached_partial_retries_once_from_byte_zero(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"valid-release-bytes-after-retry"
+    asset = _asset("asset.bin", "https://example.invalid/asset", payload)
+    partial = tmp_path / "asset.bin.partial"
+    partial.write_bytes(b"BAD!!")
+    calls = []
+
+    def simulate_range_then_clean_download(_url, path, **_kwargs):
+        calls.append(path.read_bytes() if path.exists() else None)
+        if len(calls) == 1:
+            # Resumed HTTP 206 retained the corrupt prefix.
+            bad = b"BAD!!" + payload[5:]
+            path.write_bytes(bad)
+            return len(bad), hashlib.sha256(bad).hexdigest()
+        assert len(calls) == 2
+        assert not path.exists(), "retry must start from byte zero"
+        path.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", simulate_range_then_clean_download)
+    receipt = module.download_asset(asset, tmp_path)
+
+    assert calls == [b"BAD!!", None]
+    assert receipt["status"] == "DOWNLOADED_VERIFIED"
+    assert receipt["calculated_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert (tmp_path / "asset.bin").read_bytes() == payload
+    assert not partial.exists()
+
+
+def test_corrupt_cached_partial_stays_fail_closed_after_retry(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"valid-release-bytes-after-retry"
+    asset = _asset("asset.bin", "https://example.invalid/asset", payload)
+    partial = tmp_path / "asset.bin.partial"
+    partial.write_bytes(b"BAD!!")
+    calls = []
+
+    def always_corrupt(_url, path, **_kwargs):
+        calls.append(path.read_bytes() if path.exists() else None)
+        bad = b"BAD!!" + payload[5:]
+        path.write_bytes(bad)
+        return len(bad), hashlib.sha256(bad).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", always_corrupt)
+    import pytest
+    with pytest.raises(module.RestoreError, match="sha256 mismatch"):
+        module.download_asset(asset, tmp_path)
+    assert calls == [b"BAD!!", None]
+    assert not partial.exists()
+    assert not (tmp_path / "asset.bin").exists()
+
+
 def test_materialize_latest_local_snapshot_rebuilds_large_runtime_file(tmp_path):
     module = _module()
     releases_root = tmp_path / "downloads" / "releases"
