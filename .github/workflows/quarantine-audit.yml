@@ -85,6 +85,18 @@ jobs:
           stale=int(row.get("potential_false_non_safe_count") or 0)
           unreadable=int(row.get("unreadable_manifest_count") or 0)
           if unreadable:
+              from tools.build_quarantine_audit import read_partitioned_audit
+              full=read_partitioned_audit("catalog/QUARANTINE_AUDIT.json")
+              blocked=[
+                  {
+                      "dataset_id": item.get("dataset_id"),
+                      "manifest_path": item.get("manifest_path"),
+                      "initial_status": item.get("initial_status"),
+                  }
+                  for item in full.get("non_safe_shards", [])
+                  if item.get("current_classification") == "UNAVAILABLE"
+              ]
+              print("UNREADABLE_NON_SAFE_MANIFESTS=" + json.dumps(blocked[:20], sort_keys=True))
               raise SystemExit(f"{unreadable} unreadable non-SAFE manifest(s); audit is incomplete")
           if historical:
               raise SystemExit(f"{historical} historical shard(s) are still blocked only by live-capture rules")
