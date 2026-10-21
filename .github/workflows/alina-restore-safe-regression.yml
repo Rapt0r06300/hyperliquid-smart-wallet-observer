@@ -238,6 +238,8 @@ jobs:
                   candidates[venue] = (ordering, row, digest)
           if len(candidates) < 3:
               raise SystemExit("SAFE_MULTI_VENUE_SAMPLE_INSUFFICIENT_BOUNDED_CANDIDATES")
+          # Only sample the actual catalog. A missing venue is reported, never
+          # presented as SHA-verified. Keep each transfer bounded independently.
           verified = []
           for venue in venues:
               if venue not in candidates:
@@ -259,6 +261,8 @@ jobs:
                   asset.get("state") != "uploaded"
                   or asset.get("size") != size
                   or _expected_digest(asset) != expected_sha
+                  or not isinstance(asset.get("browser_download_url"), str)
+                  or not asset["browser_download_url"].startswith("https://")
               ):
                   raise SystemExit(f"SAFE_SAMPLE_RELEASE_EVIDENCE_MISMATCH: {venue}")
               with tempfile.TemporaryDirectory() as folder:
@@ -306,6 +310,7 @@ jobs:
               "catalog_sha256": proof["source_index_sha256"],
               "verified_venues": len(verified),
               "unverified_venues": [venue for venue in venues if venue not in candidates],
+              "verified_venue_names": [item["venue"] for item in verified],
               "verified": verified,
           }
           result = Path(os.environ["RUNNER_TEMP"]) / "SAFE_MULTI_VENUE_RECEIPT.json"
