@@ -1394,6 +1394,56 @@ def _materialize_catalog_safe_shards(
     return report
 
 
+def _retire_verified_selected_cache(
+    releases: list[Mapping[str, Any]],
+    releases_root: Path,
+    destination: Path,
+    repository: str,
+    rows_by_asset: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Remove selected raw cache only AFTER all SAFE members are SHA-verified.
+
+    Old mixed ZIP caches may physically contain REJECT or PARTIAL members.
+    They must not remain in the clean replay-ready restoration once their
+    selected SAFE members have been materialized with immutable receipts.
+    """
+    result: dict[str, Any] = {"assets": 0, "bytes": 0, "failures": []}
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        for asset in release.get("assets") or []:
+            name = str(asset.get("name") or "")
+            rows = rows_by_asset.get((tag, name), [])
+            if not rows:
+                continue
+            cache = releases_root / _safe_component(tag) / _safe_component(name)
+            if cache.is_symlink():
+                result["failures"].append({
+                    "release_tag": tag, "asset_name": name,
+                    "reason": "SELECTED_CACHE_SYMLINK_NOT_RETIRED",
+                })
+                continue
+            if not cache.exists():
+                continue
+            try:
+                if not _asset_ok(cache, asset):
+                    raise RestoreError("selected cache does not match immutable Release")
+                # A receipt can only be sealed after EACH selected logical
+                # member is present and its exact bytes/size match the index.
+                _write_staged_asset_receipt(
+                    destination, repository, tag, asset, rows
+                )
+                amount = cache.stat().st_size
+                cache.unlink()
+                result["assets"] += 1
+                result["bytes"] += amount
+            except (OSError, RestoreError) as exc:
+                result["failures"].append({
+                    "release_tag": tag, "asset_name": name,
+                    "reason": str(exc),
+                })
+    return result
+
+
 def _safe_replay_row(
     row: Mapping[str, Any],
     *,
@@ -2626,6 +2676,17 @@ def restore_everything(
             allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
         )
     )
+    report["retired_selected_cache"] = {
+        "assets": 0, "bytes": 0, "failures": [],
+    }
+    if profile == "replay-ready" and not report["classification"]["failures"]:
+        report["retired_selected_cache"] = _retire_verified_selected_cache(
+            releases, releases_root, destination, repository, raw_rows_by_asset
+        )
+        report["failures"].extend(
+            {"stage": "selected_cache_retirement", **failure}
+            for failure in report["retired_selected_cache"]["failures"]
+        )
     report["analysis_evidence"] = {
         "required": 0,
         "materialized": 0,
