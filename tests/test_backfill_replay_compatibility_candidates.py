@@ -910,3 +910,71 @@ def test_historical_replay_writes_sharded_safe_and_retains_old_quarantine(tmp_pa
     assert json.loads(target.read_text(encoding="utf-8"))["quality_status"] == "SAFE"
     # Negative history is no longer indexed, but remains inspectable.
     assert source.read_bytes() == old
+
+
+def test_reject_with_missing_manifest_hydrates_historical_release_before_download(
+    tmp_path, monkeypatch,
+):
+    """No REJECT is promoted: missing history is recovered before SHA-verified scan."""
+    import hashlib
+
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    dataset_id = "historical-missing-reject"
+    digest = hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()
+    row = {
+        "dataset_id": dataset_id, "family": "trades",
+        "quality_status": "REJECT", "replay_compatible": False,
+        "manifest_path": (
+            f"datasets/sharded/rejected/{digest[:2]}/{digest[2:4]}/"
+            f"{dataset_id}.manifest.json"
+        ),
+        "sha256": "a" * 64, "bytes": 4,
+    }
+    historical = {
+        "dataset_id": dataset_id, "sha256": row["sha256"], "bytes": 4,
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "tag": "test-immutable-release",
+            "asset_name": "reject-source.jsonl.gz",
+        },
+    }
+    verified = []
+    monkeypatch.setattr(backfill, "read_index", lambda _: {"shards": [row]})
+    monkeypatch.setattr(backfill, "hydrate_default_release_repository", lambda _: [row])
+    monkeypatch.setattr(backfill, "_load_patch", lambda: {
+        "results": {}, "transient_failures": {}, "progress_by_filter": {},
+    })
+    monkeypatch.setattr(backfill, "_load_global_unique_rows", lambda **_: {})
+    def load_historical(candidate, *, root):
+        assert candidate["dataset_id"] == dataset_id
+        assert root == tmp_path
+        verified.append("recovered")
+        return historical, {"source": "git_history", "commit_sha": "b" * 40}
+    monkeypatch.setattr(backfill, "_load_manifest_for_apply", load_historical)
+    def download(candidate, destination):
+        assert candidate["release_tag"] == "test-immutable-release"
+        assert candidate["release_asset"] == "reject-source.jsonl.gz"
+        assert verified == ["recovered"]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"safe")
+        verified.append("downloaded")
+        return destination
+    monkeypatch.setattr(backfill, "_download", download)
+    monkeypatch.setattr(backfill, "_verify_asset", lambda _p, _r: verified.append("sha-checked"))
+    monkeypatch.setattr(backfill, "inspect_asset", lambda _p, _r: {
+        "replay_compatible": True, "record_count": 1,
+    })
+    def apply(candidate, receipt, *, root):
+        assert receipt["verified_from_release"] is True
+        assert verified[-1] == "sha-checked"
+        candidate["quality_status"] = "SAFE"
+        candidate["replay_compatible"] = True
+        verified.append("applied")
+    monkeypatch.setattr(backfill, "_apply_result", apply)
+    monkeypatch.setattr(backfill, "_write_json", lambda *_: None)
+    monkeypatch.setattr(backfill, "_refresh_catalog", lambda *_: None)
+    result = backfill.backfill(1, {"trades"})
+    assert result["attempted"] == 1
+    assert result["updated"] == 1
+    assert result["replayable"] == 1
+    assert verified == ["recovered", "downloaded", "sha-checked", "applied"]
