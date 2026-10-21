@@ -33,8 +33,9 @@ téléverse PAS implicitement des centaines de Go de runtime vers l'historique
 Git. Cela ne sauvegarde pas rétroactivement les artifacts Actions expirés.
 
 Après publication, **`ALINA_SYNC_COMPLETE.cmd`** (ou
-**`ALINA_SYNC_COMPLETE.sh`**) met à jour la branche `main` locale par
-avance rapide et restaure le corpus `replay-ready` avec contrôle SHA-256.
+**`ALINA_SYNC_COMPLETE.sh`**) met à jour `main` par avance rapide et lance par défaut
+un **préflight sans téléchargement**. Pour restaurer les données SAFE, utiliser
+explicitement `--download-safe` avec une limite de téléchargement suffisante.
 C'est aussi l'unique commande à relancer dans un dossier déjà cloné.
 Un checkpoint `runtime/recovery/full/SYNC_REPORT.json` lie le HEAD Git
 au résultat exact de `RESTORE_REPORT.json`.
@@ -55,17 +56,17 @@ quota Git LFS n'est nécessaire pour cette restauration.
 Windows CMD (Git, Python 3.10+ et place disque suffisante) :
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd --download-safe --max-download-gib 256
 ```
 
 Linux/macOS :
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh --download-safe --max-download-gib 256
 ```
 
-La commande récupère le code, les catalogues et workflows de `main`, puis
-**uniquement les assets nécessaires à toutes les lignes `SAFE` et
+La commande explicite ci-dessus récupère le code, les catalogues et workflows
+de `main`, puis **uniquement les assets nécessaires à toutes les lignes `SAFE` et
 `replay_compatible` du catalogue courant**. Elle vérifie d'abord le SHA-256 et
 la taille du conteneur Release, puis ceux de chaque shard extrait. Les lignes
 `PARTIAL`/`REJECT`, les anciennes capsules `alina-recovery-*` et l'ancien
@@ -73,11 +74,11 @@ bundle complet ne polluent plus le corpus de backtest. Elles restent publiées
 et récupérables volontairement avec `python tools/restore_alina.py
 --everything ...`; rien n'est supprimé à l'aveugle.
 
-Dans un ancien dossier déjà hydraté, la commande canonique libère aussi les
-copies locales devenues hors profil, mais seulement si elles correspondent
-encore exactement (taille + SHA-256) à un asset publié. Les fichiers inconnus,
-partiels, corrompus, liés symboliquement ou appartenant à l'utilisateur ne
-sont jamais supprimés. Le rapport compte les assets et octets ainsi libérés.
+La synchronisation normale conserve toutes les copies locales historiques.
+Le nettoyage du cache nécessite l'option distincte `--prune-cache-only` et
+reste limité aux copies dont la taille et le SHA-256 correspondent à un asset
+toujours publié. Les fichiers inconnus, partiels, corrompus ou personnels
+ne doivent jamais être supprimés automatiquement.
 
 Le certificat normal est `REPLAY_READY_COMPLETE` : il signifie 100 % du
 catalogue SAFE/replayable courant, pas 100 % de l'archive historique. Le mode
