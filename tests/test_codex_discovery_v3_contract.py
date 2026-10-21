@@ -78,7 +78,8 @@ def test_agents_routes_through_canonical_manual_phase_spec() -> None:
     assert "github-hosted" in text
     assert "self-hosted" in text
     assert "paper" in text and "read-only" in text
-    assert "+4 usd net/jour" in text
+    assert "+5 usd net/jour" in text
+    assert "200 usd de capital paper" in text
 
 
 def test_v32_runbook_and_skill_make_context_first_and_model_turns_sparse() -> None:
