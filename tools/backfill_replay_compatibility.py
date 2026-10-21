@@ -211,7 +211,8 @@ def _manifest_relative_path(row: Mapping[str,Any]) -> Path:
     # The historical receipt must be tied to the exact logical identity;
     # neither a caller-supplied path nor a symlink may redirect recovery.
     if (
-        relative.is_absolute()
+        not parts
+        or relative.is_absolute()
         or any(part in {"", ".", ".."} for part in parts)
         or not dataset_id
         or "/" in dataset_id or "\\" in dataset_id
