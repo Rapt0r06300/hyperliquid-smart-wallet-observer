@@ -94,6 +94,49 @@ def test_sharded_historical_receipt_is_sha_bound_and_selectable(monkeypatch, tmp
             backfill._manifest_relative_path({**row, "manifest_path": invalid})
 
 
+def test_sha_bound_historical_sharded_manifest_recovers_from_git(tmp_path):
+    import hashlib
+    import subprocess
+
+    dataset_id = "historical-repair-unit"
+    digest = hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()
+    relative = Path(
+        f"datasets/sharded/quarantine/{digest[:2]}/{digest[2:4]}/"
+        f"{dataset_id}.manifest.json"
+    )
+    file = tmp_path / relative
+    file.parent.mkdir(parents=True)
+    manifest = {
+        "dataset_id": dataset_id,
+        "sha256": "c" * 64,
+        "bytes": 23,
+        "family": "trades",
+        "venue": "okx",
+    }
+    file.write_text(json.dumps(manifest), encoding="utf-8")
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True,
+        )
+    git("init", "-q")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.invalid")
+    git("add", "--", relative.as_posix())
+    git("commit", "-qm", "historical receipt")
+    file.unlink()
+
+    row = {
+        "dataset_id": dataset_id, "sha256": "c" * 64, "bytes": 23,
+        "family": "trades", "venue": "okx",
+        "manifest_path": relative.as_posix(),
+    }
+    recovered, provenance = backfill._load_manifest_for_apply(row, root=tmp_path)
+    assert recovered == manifest
+    assert provenance["source"] == "git_history"
+    assert len(provenance["commit_sha"]) == 40
+    assert len(provenance["original_manifest_sha256"]) == 64
+
+
 def test_non_official_rejected_dump_stays_excluded(monkeypatch, tmp_path):
     monkeypatch.setattr(backfill, "ROOT", tmp_path)
     dataset_id = "legacy-trades-btc-test"
