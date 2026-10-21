@@ -194,6 +194,15 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
 
+def test_disaster_recovery_commands_explicitly_opt_in_to_complete_safe_download():
+    guide = (ROOT / "docs" / "DISASTER_RECOVERY.md").read_text(encoding="utf-8")
+    required = "--download-safe --max-download-gib 256"
+    assert required in guide
+    assert "ALINA_SYNC_COMPLETE.cmd --download-safe --max-download-gib 256" in guide
+    assert "bash ALINA_SYNC_COMPLETE.sh --download-safe --max-download-gib 256" in guide
+    assert "sans option effectue uniquement un préflight" in guide
+
+
 def test_no_argument_sync_is_preflight_only_and_does_not_download(
     monkeypatch, tmp_path,
 ):

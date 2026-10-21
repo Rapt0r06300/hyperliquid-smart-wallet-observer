@@ -11,6 +11,7 @@ on:
       - ALINA_SYNC_COMPLETE.cmd
       - ALINA_SYNC_COMPLETE.sh
       - README.md
+      - docs/DISASTER_RECOVERY.md
       - tests/test_restore_alina.py
       - tests/test_restore_alina_launcher.py
       - tests/test_sync_complete_clone.py
@@ -72,6 +73,7 @@ jobs:
             ALINA_SYNC_COMPLETE.cmd
             ALINA_SYNC_COMPLETE.sh
             README.md
+            docs/DISASTER_RECOVERY.md
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:

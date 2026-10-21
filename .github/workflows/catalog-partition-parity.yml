@@ -1,6 +1,8 @@
 name: catalog-partition-parity
 
 on:
+  schedule:
+    - cron: '7 2 * * *'
   push:
     branches: [main]
     paths:
@@ -121,10 +123,10 @@ jobs:
           print("FULL_CATALOG_PARTITION_PARITY_PROVED", receipt["original_shards"])
           PY
 
-      # Optional, explicitly requested read-only export. Do not produce a large
-      # artifact on every push; collection and publication remain untouched.
+      # Read-only export. Do not produce a large mutation: every bounded parity
+      # run and the daily schedule publish a
+      # current SHA-bound triage. Collection and publication remain untouched.
       - name: Build and verify exact recovery triage for Work
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
         shell: bash
         run: |
           set -euo pipefail
@@ -158,7 +160,6 @@ jobs:
           PY
 
       - name: Verify published Release source snapshot against unresolved shards
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,7 +195,6 @@ jobs:
           PY
 
       - name: Export bounded read-only source asset hydration plan
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
         shell: bash
         run: |
           set -euo pipefail
@@ -210,7 +210,6 @@ jobs:
           test -z "$(ls -A "$OUT/empty-download-cache")"
 
       - name: Seal and verify Work recovery transfer receipt
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
         shell: bash
         run: |
           set -euo pipefail
@@ -219,7 +218,6 @@ jobs:
           python tools/verify_recovery_bundle.py --root "$OUT" --verify
 
       - name: Publish verified recovery triage as short-lived Actions artifact
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: alina-recovery-triage-${{ github.run_id }}

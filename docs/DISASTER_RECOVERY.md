@@ -22,23 +22,30 @@ est limitée, sans consigner ce secret dans les rapports.
 **Dossier neuf, Windows CMD (une seule ligne) :**
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd --download-safe --max-download-gib 256
 ```
 
 **Dossier neuf, Linux/macOS (une seule ligne) :**
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh --download-safe --max-download-gib 256
 ```
 
 **Dossier existant déjà cloné du dépôt canonique :** lancer
-`ALINA_SYNC_COMPLETE.cmd` (Windows CMD) ou `bash ALINA_SYNC_COMPLETE.sh`
+`ALINA_SYNC_COMPLETE.cmd --download-safe --max-download-gib 256` (Windows CMD)
+ou `bash ALINA_SYNC_COMPLETE.sh --download-safe --max-download-gib 256`
 (Linux/macOS) depuis la racine. Cela synchronise **les deux** couches dans
 la même opération : les fichiers Git depuis `main`, puis le corpus
 `replay-ready` du même dépôt. Celui-ci contient exactement les assets requis
 par toutes les lignes `SAFE` + `replay_compatible` du catalogue courant.
 Les données déjà vérifiées sont réutilisées et les téléchargements partiels
 sont repris.
+
+`ALINA_SYNC_COMPLETE` sans option effectue uniquement un préflight et ne
+télécharge aucun payload de marché. L'opt-in `--download-safe` est donc
+obligatoire pour une restauration physique. La limite de 256 GiB ci-dessus
+couvre l'instantané courant ; si le rapport de préflight annonce davantage,
+relancer avec une limite supérieure et assez d'espace disque.
 
 Sur un dossier ancien, le profil normal supprime du cache uniquement les
 assets hors profil encore publiés dont la copie locale passe de nouveau les

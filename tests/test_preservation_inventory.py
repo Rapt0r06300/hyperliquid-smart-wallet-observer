@@ -192,15 +192,21 @@ def test_recovery_triage_verification_fails_on_stale_catalog(tmp_path):
         verify_recovery_triage(index, newer, output)
 
 
-def test_partition_workflow_manual_verified_triage_export():
+def test_partition_workflow_autonomously_exports_verified_triage():
     from pathlib import Path
     workflow = (Path(__file__).resolve().parents[1]
                 / ".github" / "workflows" / "catalog-partition-parity.yml").read_text()
     assert "emit_recovery_triage:" in workflow
     assert "workflow_dispatch" in workflow
+    assert "schedule:" in workflow
+    assert "cron: '7 2 * * *'" in workflow
     assert "--triage-jsonl" in workflow
     assert "--verify-triage-jsonl" in workflow
     assert "TRIAGE_VERIFIED_NOT_RESTORED" in workflow
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "retention-days: 30" in workflow
     assert workflow.index("--verify-triage-jsonl") < workflow.index("Publish verified recovery triage")
+    triage_step = workflow.split(
+        "- name: Build and verify exact recovery triage for Work", 1
+    )[1].split("- name: Dry-run all critical SAFE consumers", 1)[0]
+    assert "if: ${{ github.event_name == 'workflow_dispatch'" not in triage_step
