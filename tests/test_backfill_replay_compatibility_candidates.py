@@ -59,6 +59,21 @@ def test_rejected_official_archive_candidate_is_hydrated_from_manifest(monkeypat
     assert row["bytes"] == 1234
 
 
+def test_replay_backfill_skips_certified_safe_without_manifest_io(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("SAFE backfill must not hydrate manifest")
+
+    monkeypatch.setattr(backfill, "_manifest_for_row", forbidden)
+    row = {
+        "dataset_id": "existing-safe",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "family": "trades",
+        "manifest_path": "datasets/safe/existing-safe.manifest.json",
+    }
+    assert backfill._candidate(row, {}, {"trades"}) is False
+
+
 def test_sharded_historical_receipt_is_sha_bound_and_selectable(monkeypatch, tmp_path):
     import hashlib
     import pytest
