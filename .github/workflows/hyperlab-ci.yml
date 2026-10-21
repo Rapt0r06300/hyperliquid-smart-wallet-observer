@@ -9,7 +9,8 @@ on:
 
 concurrency:
   group: hyperlab-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Retain an active SHA-bound proof; only the pending run can be superseded.
+  cancel-in-progress: false
 
 permissions:
   contents: read

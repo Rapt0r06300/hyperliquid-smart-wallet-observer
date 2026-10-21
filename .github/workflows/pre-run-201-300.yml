@@ -13,7 +13,8 @@ permissions:
 
 concurrency:
   group: pre-run-201-300-${{ github.ref }}
-  cancel-in-progress: true
+  # Retain an active SHA-bound proof; only the pending run can be superseded.
+  cancel-in-progress: false
 
 env:
   PYTHONPATH: src:tools
