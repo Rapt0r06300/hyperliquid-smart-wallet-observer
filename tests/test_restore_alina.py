@@ -2399,6 +2399,24 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
     assert not list((restored_root / "usable").rglob("*partial-one*"))
     assert not list((restored_root / "usable").rglob("*reject-one*"))
 
+    # A previously cached mixed ZIP can still contain PARTIAL/REJECT bytes.
+    # Reusing it must not leave those bytes in the clean local restore cache.
+    cached_outer = restored_root / "releases" / tag / "mixed.zip"
+    cached_outer.parent.mkdir(parents=True, exist_ok=True)
+    cached_outer.write_bytes(packed)
+    second = module.restore_everything(
+        "owner/repo", restored_root, catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready", prune_unselected=True,
+    )
+    assert second["status"] == "REPLAY_READY_COMPLETE"
+    assert not cached_outer.exists()
+    assert second["retired_selected_cache"]["assets"] == 1
+    assert second["retired_selected_cache"]["bytes"] == len(packed)
+    assert fetched == [url]
+    assert sorted(p.name for p in usable.glob("*.jsonl.gz")) == [
+        "safe-one.jsonl.gz",
+    ]
+
 
 def test_replay_ready_preflight_counts_zip_extraction_space(tmp_path, monkeypatch):
     module = _module()
