@@ -149,6 +149,7 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
     by_quality: dict[str, dict[str, int]] = {}
     by_venue: dict[str, dict[str, int]] = {}
     by_family: dict[str, dict[str, int]] = {}
+    safe_by_venue_family: dict[str, dict[str, dict]] = {}
     total_logical_bytes = 0
 
     def accumulate(buckets: dict[str, dict[str, int]], key: str, size: int) -> None:
@@ -172,6 +173,35 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
         accumulate(by_quality, quality, size)
         accumulate(by_venue, str(row.get("venue") or "unknown").lower(), size)
         accumulate(by_family, str(row.get("family") or "unknown").lower(), size)
+        if quality == "SAFE_REPLAY":
+            # Only catalogue metadata. Time bounds are NOT a continuity,
+            # synchronized-venues, replay or out-of-sample certificate.
+            venue = str(row.get("venue") or "unknown").lower()
+            family = str(row.get("family") or "unknown").lower()
+            bucket = safe_by_venue_family.setdefault(venue, {}).setdefault(
+                family, {
+                    "shards": 0, "logical_bytes": 0,
+                    "reported_events": 0, "event_count_missing_shards": 0,
+                    "first_ts_ms": None, "last_ts_ms": None,
+                    "time_bounds_missing_shards": 0,
+                },
+            )
+            bucket["shards"] += 1
+            bucket["logical_bytes"] += size
+            events = row.get("event_count")
+            if type(events) is int and events > 0:
+                bucket["reported_events"] += events
+            else:
+                bucket["event_count_missing_shards"] += 1
+            start, end = row.get("start_ts_ms"), row.get("end_ts_ms")
+            if (type(start) is int and type(end) is int
+                    and 0 <= start <= end):
+                if bucket["first_ts_ms"] is None or start < bucket["first_ts_ms"]:
+                    bucket["first_ts_ms"] = start
+                if bucket["last_ts_ms"] is None or end > bucket["last_ts_ms"]:
+                    bucket["last_ts_ms"] = end
+            else:
+                bucket["time_bounds_missing_shards"] += 1
         total_logical_bytes += size
 
     replay_logical_bytes = sum(int(row["bytes"]) for row in replay_rows)
@@ -192,6 +222,14 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
         "by_quality": dict(sorted(by_quality.items())),
         "by_venue": dict(sorted(by_venue.items())),
         "by_family": dict(sorted(by_family.items())),
+        "safe_by_venue_family": {
+            venue: dict(sorted(families.items()))
+            for venue, families in sorted(safe_by_venue_family.items())
+        },
+        "safe_time_bounds_meaning": (
+            "Earliest and latest declared shard timestamps only; NOT continuous "
+            "coverage or an executable replay/backtest certificate."
+        ),
         "replay_selected_shards": len(replay_rows),
         "replay_selected_logical_bytes": replay_logical_bytes,
         "replay_selected_release_assets": len(required),

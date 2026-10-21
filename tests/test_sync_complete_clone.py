@@ -319,12 +319,14 @@ def test_catalog_budget_deduplicates_shared_release_zip_and_preserves_quarantine
         {
             "dataset_id": "safe1", "quality_status": "SAFE", "replay_compatible": True,
             "sha256": "a" * 64, "bytes": 20, "release_asset": "safe1.jsonl.gz",
-            "venue": "okx", "family": "trades", **asset,
+            "venue": "okx", "family": "trades", "event_count": 5,
+            "start_ts_ms": 1000, "end_ts_ms": 2000, **asset,
         },
         {
             "dataset_id": "safe2", "quality_status": "SAFE", "replay_compatible": True,
             "sha256": "b" * 64, "bytes": 30, "release_asset": "safe2.jsonl.gz",
-            "venue": "okx", "family": "l2book", **asset,
+            "venue": "okx", "family": "l2book", "event_count": 9,
+            "start_ts_ms": 1500, "end_ts_ms": 2500, **asset,
         },
         {
             "dataset_id": "repair", "quality_status": "PARTIAL",
@@ -345,6 +347,20 @@ def test_catalog_budget_deduplicates_shared_release_zip_and_preserves_quarantine
     assert report["replay_selected_logical_bytes"] == 50
     assert report["replay_selected_release_assets"] == 1
     assert report["replay_selected_release_download_bytes"] == 300
+    assert report["safe_by_venue_family"]["okx"] == {
+        "trades": {
+            "shards": 1, "logical_bytes": 20, "reported_events": 5,
+            "event_count_missing_shards": 0, "first_ts_ms": 1000,
+            "last_ts_ms": 2000, "time_bounds_missing_shards": 0,
+        },
+        "l2book": {
+            "shards": 1, "logical_bytes": 30, "reported_events": 9,
+            "event_count_missing_shards": 0, "first_ts_ms": 1500,
+            "last_ts_ms": 2500, "time_bounds_missing_shards": 0,
+        },
+    }
+    assert "NOT continuous" in report["safe_time_bounds_meaning"]
+    assert "gate" not in report["safe_by_venue_family"]
     assert report["logical_shard_bytes_all_qualities"] == 180
     assert report["by_quality"]["PARTIAL"] == {"shards": 1, "logical_bytes": 40}
     assert report["by_quality"]["REJECT"] == {"shards": 1, "logical_bytes": 90}
@@ -357,7 +373,9 @@ def test_catalog_budget_rejects_stale_metrics_and_unknown_bytes(tmp_path):
     module = _module()
     rows = [{"dataset_id": "quarantine", "quality_status": "PARTIAL", "bytes": 12}]
     index, metrics = _write_catalog_budget_fixture(tmp_path, rows)
-    assert module.calculate_catalog_budget(index, metrics)["replay_selected_shards"] == 0
+    report = module.calculate_catalog_budget(index, metrics)
+    assert report["replay_selected_shards"] == 0
+    assert report["safe_by_venue_family"] == {}
     index.write_text(json.dumps({"schema": "alina.index.v1", "shards": []}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="canonical DATA_METRICS does not match"):
         module.calculate_catalog_budget(index, metrics)
