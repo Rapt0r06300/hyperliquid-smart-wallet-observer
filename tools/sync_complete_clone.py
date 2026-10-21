@@ -353,6 +353,16 @@ def main(argv: list[str] | None = None) -> int:
                   "Use --download-safe for bounded SAFE-only restoration.", flush=True)
         if args.prune_cache_only:
             print("ALINA_LOCAL_CACHE_PRUNE_ONLY: no market downloads and no GitHub asset deletions.", flush=True)
+        # A previous successful report must never certify a new restore run.
+        # Preserve the historical report for diagnosis, but require this run
+        # to replace it with fresh evidence before reporting success.
+        report_dir = root / "runtime" / "recovery" / "full"
+        report_name = "RESTORE_PREFLIGHT.json" if effective_preflight else "RESTORE_REPORT.json"
+        prior_report = report_dir / report_name
+        prior_identity = None
+        if prior_report.exists():
+            stat = prior_report.stat()
+            prior_identity = (stat.st_mtime_ns, stat.st_ctime_ns)
         code = restore_published(
             root, preflight=effective_preflight,
             snapshot=not args.no_snapshot_materialization,
@@ -379,6 +389,10 @@ def main(argv: list[str] | None = None) -> int:
             report_dir / report_name,
             expected_catalog_sha256=catalog_sha256 if not effective_preflight else None,
         )
+        if prior_identity is not None:
+            current = (report_dir / report_name).stat() if (report_dir / report_name).exists() else None
+            if current is None or (current.st_mtime_ns, current.st_ctime_ns) == prior_identity:
+                restore_status, report_error = "RESTORE_INCOMPLETE", "restore did not refresh its report"
         certified = (
             not effective_preflight
             and code == 0
