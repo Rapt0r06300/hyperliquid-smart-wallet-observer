@@ -175,8 +175,14 @@ def test_only_reject_plan_and_current_membership_can_delete():
 
 def test_prepare_fetches_shared_release_inventory_once(monkeypatch, tmp_path):
     first = _row("reject", "REJECT", "first.jsonl.gz")
-    second = {**_row("second", "REJECT", "second.jsonl.gz"), "sha256": "c" * 64,
-              "release_remote_digest": "sha256:" + "c" * 64}
+    second = _row("second", "REJECT", "second.jsonl.gz")
+    second["sha256"] = "c" * 64
+    second["release_remote_digest"] = "sha256:" + "c" * 64
+    # Updating the immutable asset identity must also update its independent
+    # repair-exhaustion evidence. A stale proof must fail closed.
+    second["terminal_repair_evidence"] = {
+        **second["terminal_repair_evidence"], "sha256": second["sha256"],
+    }
     monkeypatch.setattr(gc, "PLAN", tmp_path / "DATA_DELETION_PLAN.json")
     monkeypatch.setattr(gc, "_verified_snapshot", lambda: ({}, [first, second], "f" * 64))
     calls = []
