@@ -18,7 +18,8 @@ permissions:
 
 concurrency:
   group: security-quality-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve a completed security verdict during rapid main updates.
+  cancel-in-progress: false
 
 env:
   PYTHONPATH: src:tools

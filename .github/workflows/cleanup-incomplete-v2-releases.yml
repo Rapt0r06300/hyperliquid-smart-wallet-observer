@@ -24,10 +24,10 @@ permissions:
   contents: write
 
 concurrency:
-  # A corrective push may replace a checkout-only obsolete wave. Automatic
-  # workflow/schedule events never interrupt an active deletion transaction.
+  # Never interrupt terminal-deletion evidence/publication in progress.
+  # A new push replaces only a pending run, not a running transaction.
   group: principal-dataset-terminal-cleanup
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: false
 
 jobs:
   delete-terminal:

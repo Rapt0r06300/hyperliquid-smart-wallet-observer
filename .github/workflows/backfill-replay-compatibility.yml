@@ -33,10 +33,10 @@ permissions:
   contents: write
 
 concurrency:
-  # A newer SHA supersedes an older checkout-only wave. Publication remains
-  # SHA-verified, so cancel stale work instead of holding the repair queue.
+  # Replay qualification may publish verified catalog evidence. Never cancel
+  # an active transaction on a code push; a newer pending run can follow.
   group: dataset-v2-replay-verification-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: false
 
 jobs:
   verify-replay:
