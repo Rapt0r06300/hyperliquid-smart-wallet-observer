@@ -158,7 +158,7 @@ jobs:
               "verified_at_utc": datetime.now(timezone.utc).isoformat(),
           }
           Path(os.environ["RUNNER_TEMP"], "SAFE_SAMPLE_RESTORE_RECEIPT.json").write_text(
-              json.dumps(receipt, indent=2, sort_keys=True) + "\\n", encoding="utf-8"
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
           print("HISTORICAL_SAFE_ASSET_RESTORED_VERIFIED", size, digest)
           PY
