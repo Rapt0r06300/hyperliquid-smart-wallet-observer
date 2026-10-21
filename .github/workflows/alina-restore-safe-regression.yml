@@ -143,8 +143,32 @@ jobs:
               size, digest = _download_to_path(asset["browser_download_url"], path, token=token, max_bytes=asset["size"])
               assert size == asset["size"] and digest == _expected_digest(asset)
               assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+          import json
+          from datetime import datetime, timezone
+          receipt = {
+              "schema": "alina.safe_sample_restore.v1",
+              "status": "SAMPLE_VERIFIED_NOT_FULL_DATASET",
+              "git_sha": os.environ["GITHUB_SHA"],
+              "repository": repo,
+              "release_tag": tag,
+              "asset_name": name,
+              "asset_id": asset["id"],
+              "bytes": size,
+              "sha256": digest,
+              "verified_at_utc": datetime.now(timezone.utc).isoformat(),
+          }
+          Path(os.environ["RUNNER_TEMP"], "SAFE_SAMPLE_RESTORE_RECEIPT.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\\n", encoding="utf-8"
+          )
           print("HISTORICAL_SAFE_ASSET_RESTORED_VERIFIED", size, digest)
           PY
+      - name: Publish SHA-bound SAFE sample receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: safe-sample-restore-receipt-${{ github.run_id }}
+          path: ${{ runner.temp }}/SAFE_SAMPLE_RESTORE_RECEIPT.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Measure canonical index headroom
         run: |
           python - <<'PY'
