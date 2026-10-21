@@ -160,6 +160,16 @@ jobs:
           Path(os.environ["RUNNER_TEMP"], "SAFE_SAMPLE_RESTORE_RECEIPT.json").write_text(
               json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
+          # Exercise a bounded restart against the same verified Release asset.
+          with tempfile.TemporaryDirectory() as directory:
+              path = Path(directory) / name
+              with path.open("wb") as stream:
+                  stream.write(b"partial-transfer-to-be-replaced")
+              resumed_size, resumed_digest = _download_to_path(
+                  asset["browser_download_url"], path, token=token, max_bytes=asset["size"]
+              )
+              assert resumed_size == asset["size"] and resumed_digest == digest
+          print("HISTORICAL_SAFE_ASSET_RESTART_VERIFIED", resumed_size, resumed_digest)
           print("HISTORICAL_SAFE_ASSET_RESTORED_VERIFIED", size, digest)
           PY
       - name: Publish SHA-bound SAFE sample receipt
