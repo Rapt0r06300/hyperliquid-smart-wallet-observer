@@ -75,12 +75,11 @@ economically certified data. A preflight may exit zero **only** with status
 missing analysis evidence, conflicting provenance or any other incomplete
 working-set status must exit nonzero, even when the available disk appears
 sufficient. Never delete unselected **GitHub Release** evidence automatically and never
-claim a restored or profitable corpus from metadata-only checks. The ordinary
-replay-ready synchronization compacts **local** Release caches by deleting only
-unselected copies whose size and SHA-256 exactly match still-published GitHub
-assets; unknown, modified, corrupt, symlinked, repairable-only cloud data and
-the published inventory remain untouched. A local operator can explicitly
-retain all cache copies. The default CLI also sets a 64 GiB ceiling on **new**
+claim a restored or profitable corpus from metadata-only checks. Ordinary replay-ready synchronization never prunes local Release caches.
+Only an explicit `--prune-cache-only` operation may delete unselected local
+copies after proving they match still-published GitHub assets by size and
+SHA-256; unknown, modified, corrupt, symlinked, repairable-only cloud data
+and the published inventory remain untouched. The default CLI also sets a 64 GiB ceiling on **new**
 Release payload bytes (configurable with `--max-download-gib`): budget checks
 run before transfers and before local pruning; preflight reports
 `PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED` and does not transfer payloads. Never
@@ -12932,8 +12931,9 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com
 
 This is ONE operator command containing **two** distinct operations:
 clone the exact committed code/catalog/control plane from `main`, then
-stream the exact assets required by the current SAFE/replay-compatible
-catalog from the **same** repository. `GIT_LFS_SKIP_SMUDGE` guarantees no
+preflight the SAFE/replay-compatible catalog without downloading market
+payloads. Explicit `--download-safe` subsequently opts into bounded,
+SHA-verified hydration from the **same** repository. `GIT_LFS_SKIP_SMUDGE` guarantees no
 accidental LFS download.
 Both wrappers call `tools/sync_complete_clone.py`, which delegates to the
 single `tools/restore_alina.py` data plane; no duplicate restorer is permitted.
