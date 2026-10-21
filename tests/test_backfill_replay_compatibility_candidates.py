@@ -751,3 +751,25 @@ def test_scheduled_replay_wave_never_cancels_active_repair():
     concurrency = source.split("concurrency:", 1)[1].split("jobs:", 1)[0]
     assert "cancel-in-progress: false" in concurrency
     assert "cancel-in-progress: ${{" not in concurrency
+
+
+def test_replay_backfill_checkout_covers_non_safe_sharded_history_only():
+    """Historical repair needs PARTIAL/REJECT receipts but not the SAFE tree."""
+    workflow = (
+        ROOT / ".github" / "workflows" / "backfill-replay-compatibility.yml"
+    ).read_text(encoding="utf-8")
+    sparse = workflow.split("sparse-checkout: |", 1)[1].split(
+        "persist-credentials:", 1,
+    )[0]
+    roots = {
+        line.strip() for line in sparse.splitlines()
+        if line.strip().startswith("/")
+    }
+    assert {
+        "/datasets/quarantine/",
+        "/datasets/rejected/",
+        "/datasets/sharded/quarantine/",
+        "/datasets/sharded/rejected/",
+    } <= roots
+    assert "/datasets/sharded/safe/" not in roots
+    assert "/datasets/safe/" not in roots
