@@ -176,6 +176,26 @@ jobs:
           print("HISTORICAL_SAFE_ASSET_RESTART_VERIFIED", resumed_size, resumed_digest)
           print("HISTORICAL_SAFE_ASSET_RESTORED_VERIFIED", size, digest)
           PY
+      - name: Verify SAFE sample receipt schema and SHA binding
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          receipt_path = Path(os.environ["RUNNER_TEMP"]) / "SAFE_SAMPLE_RESTORE_RECEIPT.json"
+          receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+          assert receipt["schema"] == "alina.safe_sample_restore.v1"
+          assert receipt["status"] == "SAMPLE_VERIFIED_NOT_FULL_DATASET"
+          assert receipt["git_sha"] == os.environ["GITHUB_SHA"]
+          assert receipt["repository"] == os.environ["GITHUB_REPOSITORY"]
+          assert receipt["bytes"] == 14769267
+          assert receipt["sha256"] == "6c8e3c4b4a170ac7723a83cddcaabd5d270b8b060a7147e5d2c4a4519712bc54"
+          assert isinstance(receipt["asset_id"], int) and receipt["asset_id"] > 0
+          assert receipt["release_tag"] == "archive-v2-35707914210-binance-ETH"
+          assert receipt["asset_name"].endswith(".jsonl.gz")
+          print("SAFE_SAMPLE_RECEIPT_SCHEMA_VERIFIED", hashlib.sha256(receipt_path.read_bytes()).hexdigest())
+          PY
       - name: Publish SHA-bound SAFE sample receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
