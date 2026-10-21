@@ -13711,11 +13711,23 @@ Any inability to execute the current certification policy fails closed.
 
 Historical PARTIAL rows receive a real repair/verifier attempt against their
 canonical principal-repository source. A successful repair follows
-`PARTIAL -> REPAIRED -> VERIFIED -> SAFE`. A current, exact release verification
-that cannot establish the certified replay/backtest contract is terminal. Both
-terminal REJECT and irreparable PARTIAL payloads are deleted; there is no
-published third class. Temporary API/rate-limit failures remain blocked and are
-retried, never promoted and never deleted as though they were terminal.
+`PARTIAL -> REPAIRED -> VERIFIED -> SAFE`. An unsuccessful replay scan alone
+does **not** prove irrecoverability: check official source backfills, existing
+SHA-verified recovery capsules, source gaps and reclassification possibilities
+before assigning a terminal disposition. A REJECT label or
+`replay_compatible=false` never, by itself, authorizes remote deletion.
+The destructive gate requires an explicit per-shard, SHA-bound
+`terminal_repair_evidence` receipt (schema
+`alina.terminal_repair_exhaustion.v1`) attesting independent immutable replay
+verification, a negative result, completed repair attempt, exhausted available
+recovery sources and terminality. An old deletion plan lacking that receipt is
+invalid under `alina.reject-only-verified-repair-exhausted.v2`; until complete
+receipts are produced, leave unproven non-SAFE source assets isolated rather
+than irreversibly deleting potentially repairable bytes. Such assets are never
+eligible for SAFE replay/backtest selection. Confirmed terminal REJECT and
+proven irreparable PARTIAL payloads are eventually purged under the same
+container-level membership and remote identity checks. Temporary API/rate-limit
+failures remain blocked and retried, never promoted or deleted as terminal.
 
 Destructive cleanup is a resumable three-phase transaction. It first commits a
 plan bound to the canonical index SHA, dataset SHA/size, current verifier
