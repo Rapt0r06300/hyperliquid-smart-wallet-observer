@@ -8,14 +8,15 @@ import json
 import os
 import tempfile
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 try:
     from tools.manifest_policy import classify_manifest
-    from tools.index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator
+    from tools.index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator, _sharded_receipt_path
 except ModuleNotFoundError:
     from manifest_policy import classify_manifest
-    from index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator
+    from index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator, _sharded_receipt_path
 
 try:
     from tools.partitioned_data_index import read_index, save_index, partition_index
@@ -211,15 +212,16 @@ def repair(root: str | Path = ROOT, *, dry_run: bool = False) -> dict[str, Any]:
             continue
 
         dataset_id = str(manifest.get("dataset_id") or row.get("dataset_id") or "").strip()
-        if not dataset_id:
-            raise ValueError("dataset_id required for stale classification repair")
+        if not dataset_id or re.fullmatch(r"[A-Za-z0-9._-]{1,240}", dataset_id) is None or dataset_id in {".", ".."}:
+            raise ValueError("unsafe dataset_id for stale classification repair")
 
         manifest["quality_status"] = "SAFE"
         manifest["quality_reasons"] = list(current_reasons)
         manifest["validation_allowed"] = True
         manifest["proof_of_pnl_allowed"] = False
 
-        destination = base / "datasets" / "safe" / f"{dataset_id}.manifest.json"
+        # Avoid rewriting oversized legacy flat SAFE Git trees.
+        destination = _sharded_receipt_path(base, "safe", dataset_id)
         pending_manifests.append((destination, dict(manifest), manifest_path))
 
         merged = dict(row)
