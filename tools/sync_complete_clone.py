@@ -305,13 +305,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--download-safe", action="store_true",
-        help="explicit opt-in to download SAFE/replay-compatible assets; "
-             "by default only inventory and preflight run",
+        help="explicit SAFE download mode (kept for compatibility); "
+             "without a mode flag, full SAFE hydration is the default",
     )
     parser.add_argument(
-        "--max-download-gib", type=int, default=8,
-        help="limit NEW SAFE payload transfers to this many GiB (default 8); "
-             "requires --download-safe to transfer data",
+        "--max-download-gib", type=int, default=256,
+        help="limit NEW SAFE payload transfers to this many GiB (default 256)",
     )
     parser.add_argument(
         "--catalog-budget", action="store_true",
@@ -338,7 +337,10 @@ def main(argv: list[str] | None = None) -> int:
         print("ALINA_SYNC_FAIL: choose exactly one of --download-safe, "
               "--preflight-only or --prune-cache-only", file=sys.stderr)
         return 2
-    effective_preflight = not (args.download_safe or args.prune_cache_only)
+    effective_download = args.download_safe or not (
+        args.preflight_only or args.prune_cache_only
+    )
+    effective_preflight = args.preflight_only
     if sys.version_info < (3, 10):
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
@@ -354,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         code = restore_published(
             root, preflight=effective_preflight,
             snapshot=not args.no_snapshot_materialization,
-            max_download_gib=args.max_download_gib if args.download_safe else None,
+            max_download_gib=args.max_download_gib if effective_download else None,
             prune_only=args.prune_cache_only,
         )
         if args.prune_cache_only:
@@ -375,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog_sha256 = hashlib.sha256(index_file.read_bytes()).hexdigest()
         restore_status, inventory_sha, report_error = _read_restore_status(
             report_dir / report_name,
-            expected_catalog_sha256=catalog_sha256 if not args.preflight_only else None,
+            expected_catalog_sha256=catalog_sha256 if not effective_preflight else None,
         )
         certified = (
             not effective_preflight
@@ -393,8 +395,8 @@ def main(argv: list[str] | None = None) -> int:
             "git_head": head,
             "catalog_index_sha256": catalog_sha256,
             "restore_exit_code": code,
-            "market_payload_download_opt_in": bool(args.download_safe),
-            "download_cap_gib": args.max_download_gib if args.download_safe else None,
+            "market_payload_download_opt_in": bool(effective_download),
+            "download_cap_gib": args.max_download_gib if effective_download else None,
             "status": "REPLAY_READY_COMPLETE" if certified else "RESTORE_INCOMPLETE",
             "restore_report": report_name,
             "restore_report_status": restore_status,
