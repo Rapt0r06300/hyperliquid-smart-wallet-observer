@@ -121,7 +121,11 @@ def test_predelete_rechecks_every_current_member_of_physical_asset():
     import pytest
     reject = _row("reject", "REJECT", "mixed.zip")
     frozen = {"release_tag": "data-test", "asset_name": "mixed.zip", "datasets": [{
-        "dataset_id": reject["dataset_id"], "sha256": reject["sha256"],
+        "dataset_id": reject["dataset_id"],
+        "release_repository": reject["release_repository"],
+        "release_tag": reject["release_tag"],
+        "release_asset": reject["release_asset"],
+        "sha256": reject["sha256"],
         "bytes": reject["bytes"], "quality_status": reject["quality_status"],
         "release_repository": gc.REPOSITORY,
         "release_tag": reject["release_tag"],
@@ -163,6 +167,9 @@ def test_only_reject_plan_and_current_membership_can_delete():
     reject = _row("reject", "REJECT", "reject.jsonl.gz")
     plan = {"assets": [{"release_tag": "data-test", "asset_name": "reject.jsonl.gz",
                         "datasets": [{"dataset_id": "reject", "quality_status": "REJECT",
+                                      "release_repository": reject["release_repository"],
+                                      "release_tag": reject["release_tag"],
+                                      "release_asset": reject["release_asset"],
                                       "sha256": reject["sha256"], "bytes": reject["bytes"],
                                       "replay_compatible": False,
                                       "release_repository": gc.REPOSITORY,
@@ -172,6 +179,12 @@ def test_only_reject_plan_and_current_membership_can_delete():
                                       "terminal_repair_evidence": reject["terminal_repair_evidence"],
                                       "manifest_path": reject["manifest_path"]}]}]}
     assert gc._reject_only_plan(plan) is True
+    # A plan lacking the exact per-member Release locator must not delete.
+    missing_locator = {**plan, "assets": [{**plan["assets"][0], "datasets": [
+        {key: value for key, value in plan["assets"][0]["datasets"][0].items()
+         if key != "release_asset"}
+    ]}]}
+    assert gc._reject_only_plan(missing_locator) is False
     assert gc._reject_only_plan({"assets": [{
         **plan["assets"][0],
         "datasets": [{**plan["assets"][0]["datasets"][0],
