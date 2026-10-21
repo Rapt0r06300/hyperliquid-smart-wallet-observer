@@ -2277,6 +2277,82 @@ def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkey
     assert repeated["releases"][0]["assets"][0]["status"] == "MATERIALIZED_VERIFIED"
 
 
+
+def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
+    tmp_path, monkeypatch,
+):
+    """A physical ZIP shared with PARTIAL/REJECT cannot contaminate usable data."""
+    module = _module()
+    tag = "data-v2-mixed-physical"
+    payloads = {
+        "safe-one": gzip.compress(b'{"trade_id":"safe"}\n', mtime=0),
+        "partial-one": gzip.compress(b'{"trade_id":"partial"}\n', mtime=0),
+        "reject-one": gzip.compress(b'{"trade_id":"reject"}\n', mtime=0),
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name, payload in payloads.items():
+            archive.writestr(f"{name}.jsonl.gz", payload)
+    packed = buffer.getvalue()
+    outer_sha = hashlib.sha256(packed).hexdigest()
+
+    rows = []
+    for name, status in (
+        ("safe-one", "SAFE"), ("partial-one", "PARTIAL"), ("reject-one", "REJECT"),
+    ):
+        payload = payloads[name]
+        rows.append({
+            "dataset_id": name,
+            "quality_status": status,
+            "replay_compatible": status == "SAFE",
+            "release_tag": tag,
+            "release_asset": f"{name}.jsonl.gz",
+            "release_container_asset": "mixed.zip",
+            "release_remote_size": len(packed),
+            "release_remote_digest": "sha256:" + outer_sha,
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": rows}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": len(rows)},
+    }), encoding="utf-8")
+
+    url = "https://example.invalid/mixed"
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([{
+        "tag_name": tag, "assets": [_asset("mixed.zip", url, packed)],
+    }]))
+    fetched = []
+
+    def fake_download(source_url, target, **_kw):
+        fetched.append(source_url)
+        target.write_bytes(packed)
+        return len(packed), outer_sha
+
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    restored_root = tmp_path / "restored"
+    result = module.restore_everything(
+        "owner/repo", restored_root, catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready", prune_unselected=True,
+    )
+    assert result["status"] == "REPLAY_READY_COMPLETE"
+    assert fetched == [url]  # The shared physical archive is needed for SAFE.
+    usable = restored_root / "usable" / "shards" / tag
+    assert sorted(p.name for p in usable.glob("*.jsonl.gz")) == [
+        "safe-one.jsonl.gz",
+    ]
+    assert (usable / "safe-one.jsonl.gz").read_bytes() == payloads["safe-one"]
+    assert result["classification"]["usable_shards"] == 1
+    assert result["classification"]["verified_zip_members"] == 1
+    assert result["classification"]["quarantined_shards"] == 0
+    assert not list((restored_root / "usable").rglob("*partial-one*"))
+    assert not list((restored_root / "usable").rglob("*reject-one*"))
+
+
 def test_replay_ready_preflight_counts_zip_extraction_space(tmp_path, monkeypatch):
     module = _module()
     member = b"compressed-safe-shard"
