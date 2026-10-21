@@ -162,7 +162,7 @@ jobs:
           for item in receipt.get("repaired", []):
               rel=item.get("new_manifest_path")
               if not isinstance(rel, str) or re.fullmatch(
-                  r"datasets/sharded/safe/[0-9a-f]{2}/[0-9a-f]{2}/[A-Za-z0-9._-]+\\.manifest\\.json", rel
+                  r"datasets/sharded/safe/[0-9a-f]{2}/[0-9a-f]{2}/[A-Za-z0-9._-]+\.manifest\.json", rel
               ) is None or not Path(rel).is_file():
                   raise SystemExit("RECLASSIFICATION_SHARDED_SAFE_RECEIPT_INVALID")
               subprocess.run(["git", "add", "--sparse", "--", rel], check=True)
