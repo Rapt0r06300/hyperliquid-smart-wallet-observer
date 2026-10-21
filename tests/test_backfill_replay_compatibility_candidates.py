@@ -749,4 +749,5 @@ def test_scheduled_replay_wave_never_cancels_active_repair():
         ROOT / ".github" / "workflows" / "backfill-replay-compatibility.yml"
     ).read_text(encoding="utf-8")
     concurrency = source.split("concurrency:", 1)[1].split("jobs:", 1)[0]
-    assert "cancel-in-progress: ${{ github.event_name == 'push' }}" in concurrency
+    assert "cancel-in-progress: false" in concurrency
+    assert "cancel-in-progress: ${{" not in concurrency
