@@ -482,7 +482,20 @@ def test_symlinked_prior_restore_report_is_rejected(monkeypatch, tmp_path):
     report_dir.mkdir(parents=True)
     target = tmp_path / "untrusted.json"
     target.write_text('{"status":"REPLAY_READY_COMPLETE"}', encoding="utf-8")
-    (report_dir / "RESTORE_REPORT.json").symlink_to(target)
+    try:
+        (report_dir / "RESTORE_REPORT.json").symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation is unavailable on this runner: {exc}")
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: pytest.fail("must not restore"))
     assert module.main([]) == 2
     assert target.read_text(encoding="utf-8") == '{"status":"REPLAY_READY_COMPLETE"}'
+
+
+def test_directory_at_prior_report_path_fails_before_restore(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "f" * 40)
+    report_dir = tmp_path / "runtime" / "recovery" / "full"
+    (report_dir / "RESTORE_REPORT.json").mkdir(parents=True)
+    monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: pytest.fail("must not restore"))
+    assert module.main([]) == 2
