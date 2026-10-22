@@ -352,6 +352,7 @@ def iter_releases(
     while True:
         page = offset // page_size + 1
         url = f"https://api.github.com/repos/{repository}/releases?per_page={page_size}&page={page}"
+        print(f"ALINA_RESTORE_PHASE=FETCH_RELEASE_INVENTORY page={page} page_size={page_size}", file=sys.stderr, flush=True)
         try:
             payload = _json(url, token=token)
         except RestoreError as exc:
@@ -1032,6 +1033,8 @@ def materialize_analysis_evidence(
 def _load_current_safe_catalog(
     index_path: Path,
     metrics_path: Path,
+    *,
+    validated_index: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, Any]]:
     """Bind SAFE restoration to the latest index with SHA-matched metrics.
 
@@ -1042,7 +1045,7 @@ def _load_current_safe_catalog(
     try:
         index_bytes = index_path.read_bytes()
         try:
-            index = read_index(index_path)
+            index = validated_index if validated_index is not None else read_index(index_path)
         except ValueError as exc:
             # Preserve the canonical restore contract after the shared
             # partition reader detects an invalid identity earlier.
@@ -1104,11 +1107,19 @@ def _load_replay_ready_plan(
     metrics_path: Path,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, Any], list[Mapping[str, Any]], dict[tuple[str, str], tuple[int, str]]]:
     """Return the exact SAFE/replayable rows and their immutable outer assets."""
-    safe, proof = _load_current_safe_catalog(index_path, metrics_path)
+    print("ALINA_RESTORE_PHASE=VERIFY_CANONICAL_PARTITIONS", file=sys.stderr, flush=True)
     try:
         index = read_index(index_path)
     except (OSError, ValueError) as exc:
         raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
+    print("ALINA_RESTORE_PHASE=VERIFY_SAFE_ADMISSION", file=sys.stderr, flush=True)
+    safe, proof = _load_current_safe_catalog(
+        index_path, metrics_path, validated_index=index,
+    )
+    print(
+        f"ALINA_RESTORE_PHASE=SELECT_SAFE_ROWS total={len(index['shards'])} safe={len(safe)}",
+        file=sys.stderr, flush=True,
+    )
     rows: list[Mapping[str, Any]] = []
     required: dict[tuple[str, str], tuple[int, str]] = {}
     logical_bytes = 0
@@ -1138,6 +1149,10 @@ def _load_replay_ready_plan(
         required[key] = evidence
         rows.append(row)
         logical_bytes += int(row["bytes"])
+    print(
+        f"ALINA_RESTORE_PHASE=SAFE_PLAN_READY shards={len(rows)} release_assets={len(required)}",
+        file=sys.stderr, flush=True,
+    )
     proof = dict(proof)
     proof.update({
         "profile": "replay-ready",
@@ -2207,6 +2222,7 @@ def restore_everything(
             else:
                 listed[tag] = resolved
                 releases.append(resolved)
+    print(f"ALINA_RESTORE_PHASE=VERIFY_RELEASE_INVENTORY releases={len(releases)}", file=sys.stderr, flush=True)
     # Never start transferring data with a partial/malformed source inventory.
     seen_tags: set[str] = set()
     seen_windows_release_dirs: set[str] = set()
@@ -2594,10 +2610,19 @@ def restore_everything(
         "unverified_source_assets_sample": unverified_source_assets[:50],
     }
 
-    for release in releases:
+    print(
+        f"ALINA_RESTORE_PHASE=TRANSFER_AND_VERIFY releases={len(releases)} assets={sum(len(r.get('assets', [])) for r in releases)}",
+        file=sys.stderr, flush=True,
+    )
+    for release_idx, release in enumerate(releases, 1):
         tag = str(release.get("tag_name") or "")
         if not tag:
             continue
+        if release_idx == 1 or release_idx % 10 == 0 or release_idx == len(releases):
+            print(
+                f"ALINA_RESTORE_PROGRESS=RELEASE {release_idx}/{len(releases)} tag={tag}",
+                file=sys.stderr, flush=True,
+            )
         safe_tag = _safe_component(tag)
         release_dir = releases_root / safe_tag
         if release_dir.is_symlink():
