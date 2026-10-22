@@ -530,6 +530,28 @@ def test_download_safe_forwards_hard_limit_and_rejects_invalid_limit(monkeypatch
     with pytest.raises(module.SyncError, match="download cap"):
         module.restore_published(tmp_path, max_download_gib=0)
 
+def test_all_safe_delegates_unlimited_download_to_restore_engine(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("GH_TOKEN", "test-token")
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=3)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.restore_published(tmp_path, unlimited_download=True) == 3
+    assert "--unlimited-download" in commands[0]
+    assert "--max-download-gib" not in commands[0]
+    assert "--replay-ready" in commands[0]
+
+
+def test_all_safe_requires_explicit_download_opt_in(capsys):
+    module = _module()
+    assert module.main(["--all-safe"]) == 2
+    assert "--all-safe requires --download-safe" in capsys.readouterr().err
+
+
 def test_sync_refuses_conflicting_preview_download_and_nonpositive_cap(capsys):
     module = _module()
     assert module.main(["--download-safe", "--preflight-only"]) == 2
