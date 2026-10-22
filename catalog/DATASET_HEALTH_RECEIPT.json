@@ -1,6 +1,7 @@
 {
   "backlog_by_kind": {
     "copy_vault_collection": 295,
+    "event_intelligence_collection": 1,
     "market_collection": 21
   },
   "by_family": {
@@ -43145,18 +43146,20 @@
   },
   "campaign_counts": {
     "backtest:COMPLETE": 1,
-    "copy_vault_collection:COMPLETE": 152,
+    "copy_vault_collection:COMPLETE": 153,
     "copy_vault_collection:FAILED": 255,
     "copy_vault_collection:PENDING": 290,
     "copy_vault_collection:STUCK": 5,
     "event_intelligence_collection:COMPLETE": 47,
     "event_intelligence_collection:FAILED": 26,
     "event_intelligence_collection:PARTIAL": 32,
+    "event_intelligence_collection:PENDING": 1,
     "event_intelligence_collection:UNAVAILABLE": 24,
     "forward_paper:COMPLETE": 1,
-    "market_collection:COMPLETE": 1655,
+    "market_collection:COMPLETE": 1669,
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 21,
+    "market_collection:RUNNING": 2,
     "market_collection:UNAVAILABLE": 376,
     "module_pnl_proof:COMPLETE": 1,
     "official_archive_collection:COMPLETE": 10,
@@ -59450,6 +59453,28 @@
     {
       "analysis_stage": null,
       "attempts": 0,
+      "campaign_id": "copy-vault-e8-broad-2026102219-v8",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "copy_vault_collection",
+      "last_checkpoint_id": "c33afc4302ce1e21c37e694c97f6d1f1422b57d34fab94a4506f190470ff7633",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:07:37.908474Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
       "campaign_id": "event-2026100104-v5",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -62284,6 +62309,28 @@
       "status": "FAILED",
       "status_reason": "adapter_failed",
       "updated_at": "2026-10-22T16:54:08.969370Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "event-e8-2026102219-v5",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 0,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "event_intelligence_collection",
+      "last_checkpoint_id": null,
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "PENDING",
+      "status_reason": "created",
+      "updated_at": "2026-10-22T20:02:27.657163Z"
     },
     {
       "analysis_stage": null,
@@ -73551,7 +73598,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 19,
+      "attempts": 20,
       "campaign_id": "market-e8-0-2026101820-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -73569,7 +73616,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:04:46.460579Z"
+      "updated_at": "2026-10-22T19:59:39.404012Z"
     },
     {
       "analysis_stage": null,
@@ -74032,6 +74079,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:35:14.038020Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-0-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "4cbc50923be3302a2575210b9fc4a4d3f33143e40df8031e46250f811762193b",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:39:10.629857Z"
     },
     {
       "analysis_stage": null,
@@ -75795,7 +75864,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 19,
+      "attempts": 20,
       "campaign_id": "market-e8-1-2026101820-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -75813,7 +75882,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:04:53.389894Z"
+      "updated_at": "2026-10-22T19:59:49.822362Z"
     },
     {
       "analysis_stage": null,
@@ -76276,6 +76345,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:40:01.539892Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-1-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "ad3c2613571ee697f01b54f10f982b744dec117970e5365f33360289218c35a1",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:28:05.992545Z"
     },
     {
       "analysis_stage": null,
@@ -77951,7 +78042,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 23,
+      "attempts": 24,
       "campaign_id": "market-e8-10-2026101805-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -77969,7 +78060,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:04:59.628703Z"
+      "updated_at": "2026-10-22T19:59:59.812394Z"
     },
     {
       "analysis_stage": null,
@@ -78017,7 +78108,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-10-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -78035,7 +78126,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:04:59.833374Z"
+      "updated_at": "2026-10-22T20:00:00.125139Z"
     },
     {
       "analysis_stage": null,
@@ -78520,6 +78611,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:39:40.960984Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-10-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "0385de384c8dddb2d8b30b87550a6eed30986648a08136e9d6ae34baa0608a1e",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:26:26.699604Z"
     },
     {
       "analysis_stage": null,
@@ -80261,7 +80374,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-11-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -80279,7 +80392,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:06.388566Z"
+      "updated_at": "2026-10-22T20:00:10.715961Z"
     },
     {
       "analysis_stage": null,
@@ -80764,6 +80877,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:33:57.205015Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-11-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "06cfa02701c90e38cea8fc4232c9023224b19389b95844a8380f3048921959e8",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:37:58.837643Z"
     },
     {
       "analysis_stage": null,
@@ -82505,7 +82640,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-12-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -82523,7 +82658,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:12.894878Z"
+      "updated_at": "2026-10-22T20:00:21.073117Z"
     },
     {
       "analysis_stage": null,
@@ -83008,6 +83143,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:40:20.103178Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-12-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "ae88895d3216ca7707040e2d06ec907f32232ada3ecde13b197c39195fe76e22",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:18:58.466533Z"
     },
     {
       "analysis_stage": null,
@@ -84683,7 +84840,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 23,
+      "attempts": 24,
       "campaign_id": "market-e8-13-2026101805-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -84701,7 +84858,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:19.339156Z"
+      "updated_at": "2026-10-22T20:00:30.939506Z"
     },
     {
       "analysis_stage": null,
@@ -84749,7 +84906,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-13-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -84767,7 +84924,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:19.529350Z"
+      "updated_at": "2026-10-22T20:00:31.244070Z"
     },
     {
       "analysis_stage": null,
@@ -85252,6 +85409,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:34:52.285462Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-13-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "23246d7278773311b1c5e4603f8ba4d218c33b7df10c7ca53c28eeb78179522f",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:21:49.683979Z"
     },
     {
       "analysis_stage": null,
@@ -86289,7 +86468,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 53,
+      "attempts": 54,
       "campaign_id": "market-e8-14-2026101318-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -86307,7 +86486,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:24.022343Z"
+      "updated_at": "2026-10-22T20:00:38.198154Z"
     },
     {
       "analysis_stage": null,
@@ -86927,7 +87106,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 23,
+      "attempts": 24,
       "campaign_id": "market-e8-14-2026101805-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -86945,7 +87124,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:25.891494Z"
+      "updated_at": "2026-10-22T20:00:41.182526Z"
     },
     {
       "analysis_stage": null,
@@ -86993,7 +87172,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-14-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -87011,7 +87190,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:26.083734Z"
+      "updated_at": "2026-10-22T20:00:41.482800Z"
     },
     {
       "analysis_stage": null,
@@ -87496,6 +87675,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:39:46.274937Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-14-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "df52120a271fb97e5bf9a5affb36442a92f1889f948fcf2e2ff98d21e66ac079",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:30:34.667611Z"
     },
     {
       "analysis_stage": null,
@@ -89237,7 +89438,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-15-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -89255,7 +89456,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:32.692743Z"
+      "updated_at": "2026-10-22T20:00:51.682952Z"
     },
     {
       "analysis_stage": null,
@@ -89740,6 +89941,33 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:36:26.138780Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-15-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 0,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": null,
+      "lease": {
+        "acquired_at": "2026-10-22T20:32:23.281354Z",
+        "expires_at": "2026-10-23T02:17:23.281354Z",
+        "lease_token_sha256": "2c0cb9628f72458912c4d82eaaad3fe4036dcc565e2d49c7ca0be7c0d634e569",
+        "owner_run_id": "39845343800"
+      },
+      "lease_expires_at": "2026-10-23T02:17:23.281354Z",
+      "lease_owner": "39845343800",
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "RUNNING",
+      "status_reason": "worker_started",
+      "updated_at": "2026-10-22T20:32:23.281406Z"
     },
     {
       "analysis_stage": null,
@@ -91503,7 +91731,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 19,
+      "attempts": 20,
       "campaign_id": "market-e8-2-2026101820-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -91521,7 +91749,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:39.280631Z"
+      "updated_at": "2026-10-22T20:01:01.955733Z"
     },
     {
       "analysis_stage": null,
@@ -91984,6 +92212,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:35:19.006628Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-2-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "f8afb8e4eb87b7625938e520e91518030cc49b009af996cb8c789fc5b02f5cf3",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:22:17.549920Z"
     },
     {
       "analysis_stage": null,
@@ -93725,7 +93975,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-3-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -93743,7 +93993,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:45.836568Z"
+      "updated_at": "2026-10-22T20:01:11.994572Z"
     },
     {
       "analysis_stage": null,
@@ -94228,6 +94478,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:29:17.526850Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-3-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "f8cb2c5a78cb382df7bca74e713a714b7d962fc2c8252e1572c4c5343f1618f9",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:24:28.276226Z"
     },
     {
       "analysis_stage": null,
@@ -95969,7 +96241,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-4-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -95987,7 +96259,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:52.406676Z"
+      "updated_at": "2026-10-22T20:01:22.188832Z"
     },
     {
       "analysis_stage": null,
@@ -96472,6 +96744,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:35:19.261136Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-4-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "fb5c8fc14b4c806243c9111e0fc86a587bb7741228b9eeac3d7ca7cf9792d118",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:21:23.793357Z"
     },
     {
       "analysis_stage": null,
@@ -98213,7 +98507,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-5-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -98231,7 +98525,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:05:58.847821Z"
+      "updated_at": "2026-10-22T20:01:32.462590Z"
     },
     {
       "analysis_stage": null,
@@ -98716,6 +99010,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:31:36.260340Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-5-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "7a293be3f8491c0d5999d2a54f272bd82967ef0c3ac39be9c51b598209bc41e6",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:23:15.822984Z"
     },
     {
       "analysis_stage": null,
@@ -100457,7 +100773,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-6-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -100475,7 +100791,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:06:05.369479Z"
+      "updated_at": "2026-10-22T20:01:42.784157Z"
     },
     {
       "analysis_stage": null,
@@ -100960,6 +101276,33 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:35:08.032798Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-6-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 0,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": null,
+      "lease": {
+        "acquired_at": "2026-10-22T20:42:17.754840Z",
+        "expires_at": "2026-10-23T02:27:17.754840Z",
+        "lease_token_sha256": "d74152d08d31d15dc4a77210b9979489308b6a2ea2312497029138f06173782d",
+        "owner_run_id": "39845343800"
+      },
+      "lease_expires_at": "2026-10-23T02:27:17.754840Z",
+      "lease_owner": "39845343800",
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "RUNNING",
+      "status_reason": "worker_started",
+      "updated_at": "2026-10-22T20:42:17.754889Z"
     },
     {
       "analysis_stage": null,
@@ -102635,7 +102978,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 23,
+      "attempts": 24,
       "campaign_id": "market-e8-7-2026101805-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -102653,7 +102996,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:06:11.654023Z"
+      "updated_at": "2026-10-22T20:01:52.721014Z"
     },
     {
       "analysis_stage": null,
@@ -102701,7 +103044,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-7-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -102719,7 +103062,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:06:11.844155Z"
+      "updated_at": "2026-10-22T20:01:53.024456Z"
     },
     {
       "analysis_stage": null,
@@ -103204,6 +103547,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:32:07.885852Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-7-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "7362823cc1e24e526675abd0ad9059349f08d656a88a564769d614d1c2e67e7f",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:22:04.890273Z"
     },
     {
       "analysis_stage": null,
@@ -104945,7 +105310,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-8-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -104963,7 +105328,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:06:18.206352Z"
+      "updated_at": "2026-10-22T20:02:03.355257Z"
     },
     {
       "analysis_stage": null,
@@ -105448,6 +105813,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:38:51.540541Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-8-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "4184f80f7e37ade9af1de6364ac86c188c55882f29113f85bb9c6cba335f6eaf",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:32:08.545879Z"
     },
     {
       "analysis_stage": null,
@@ -107189,7 +107576,7 @@
     },
     {
       "analysis_stage": null,
-      "attempts": 20,
+      "attempts": 21,
       "campaign_id": "market-e8-9-2026101818-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
@@ -107207,7 +107594,7 @@
       "source_collection_epoch": null,
       "status": "PENDING",
       "status_reason": "refresh_collect_after_code_fix",
-      "updated_at": "2026-10-22T15:06:24.641891Z"
+      "updated_at": "2026-10-22T20:02:13.624660Z"
     },
     {
       "analysis_stage": null,
@@ -107692,6 +108079,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-22T16:31:52.219754Z"
+    },
+    {
+      "analysis_stage": null,
+      "attempts": 0,
+      "campaign_id": "market-e8-9-2026102219-v7",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": null,
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "COLLECT",
+      "kind": "market_collection",
+      "last_checkpoint_id": "e5ff9ef387c31318fea22e2d15c42ebcdf60b418b25002d5484b226a4c05db57",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 8,
+      "source_collection_epoch": null,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T21:27:00.914404Z"
     }
   ],
   "coverage": {
@@ -107709,13 +108118,13 @@
     "unique_trade_count_exact": false,
     "valid_record_count_exact": false
   },
-  "dataset_commit": "dbbadb18c9148dd1355ff69a9b0dca18ecfa6d04",
-  "metrics_digest": "ec8d186c28070e871dc8eb2c55200ac434b04997185a1d24a96634ca856c3e5b",
+  "dataset_commit": "444233c93d2e30a0ebb4e79aa5227cbc184d984c",
+  "metrics_digest": "2dcec5da4bb069dff1b094c7075ed741caebc0d1969032b8839db61fe9bfd327",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
   "oldest_next_due_at": "2026-10-02T18:10:03.324968Z",
   "oldest_pending_updated_at": "2026-10-01T04:38:09.193828Z",
-  "pending_campaign_count": 311,
+  "pending_campaign_count": 312,
   "phase": {
     "analysis_stage": null,
     "collection_cutoff_at_utc": null,
@@ -107732,7 +108141,7 @@
     "mismatches": [],
     "status": "CONSISTENT"
   },
-  "receipt_digest": "69ac9c97c0c0678d13119fe2be1f058dcddcc67eded3a48e55e3bb9712fca959",
+  "receipt_digest": "5fc0cb1837a099c6f3f5cda33a25f5406e923fe99740105a417103179b0c3660",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "REPLAYABLE_BUT_PARTIAL": 45319,
@@ -107778,8 +108187,8 @@
     }
   ],
   "totals": {
-    "GAP_COUNT_COVERAGE_COMPLETE": false,
-    "GAP_COUNT_MISSING_SHARDS": 55392,
+    "GAP_COUNT_COVERAGE_COMPLETE": true,
+    "GAP_COUNT_MISSING_SHARDS": 0,
     "GLOBAL_UNIQUE_FAILURE_REASON_COUNT": 0,
     "GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE": false,
     "GLOBAL_UNIQUE_TRADE_IDENTITY_DIGEST": null,
@@ -107794,7 +108203,7 @@
     "TOTAL_COMPRESSED_BYTES": 129140936735,
     "TOTAL_CROSS_SHARD_OVERLAP_TRADES": 0,
     "TOTAL_DUPLICATE_RECORDS": 0,
-    "TOTAL_GAP_RECORDS": 0,
+    "TOTAL_GAP_RECORDS": 23217875,
     "TOTAL_INVALID_RECORDS": 0,
     "TOTAL_L2_RECORDS": 266170560,
     "TOTAL_QUARANTINED_RECORDS": 57380372,
