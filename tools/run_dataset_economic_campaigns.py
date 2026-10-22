@@ -13,13 +13,15 @@ import argparse
 import importlib.util
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from types import FunctionType
-from typing import Any, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from hl_observer.backtesting.copy_vault_v21_frozen import SCHEMA_VERSION as COPY_V21_EVALUATION_SCHEMA  # noqa: E402
 from hl_observer.backtesting.copy_vault_v21_frozen import evaluate_frozen_v21  # noqa: E402
 from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack  # noqa: E402
 from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
@@ -287,7 +289,7 @@ def run_dataset_campaigns(
     vnext_research = run_economic_vnext_pack(data_root, lead_sources=lead_sources)
 
     copy_v21: dict[str, Any] = {
-        "schema_version": "hypersmart.copy_vault_v21_frozen_evaluation.v1",
+        "schema_version": COPY_V21_EVALUATION_SCHEMA,
         "family": "copy_vault",
         "objective_status": "NON_PROUVE",
         "status": "COPY_V21_RUNTIME_TOOL_MISSING",
@@ -331,20 +333,27 @@ def run_dataset_campaigns(
         continuous_books = {
             coin: rows for coin, rows in continuous_books.items() if rows
         }
-        copy_v21 = evaluate_frozen_v21(
-            causal_metaorders,
-            continuous_books,
-            freeze_payload,
-            input_audit={
-                "entries": entries_audit,
-                "metaorders": metaorder_audit,
-                "books": books_audit,
-                "protocol": protocol_audit,
-                "continuous_causal_rows": sum(
-                    len(rows) for rows in continuous_books.values()
-                ),
-            },
-        )
+        try:
+            copy_v21 = evaluate_frozen_v21(
+                causal_metaorders,
+                continuous_books,
+                freeze_payload,
+                input_audit={
+                    "entries": entries_audit,
+                    "metaorders": metaorder_audit,
+                    "books": books_audit,
+                    "protocol": protocol_audit,
+                    "continuous_causal_rows": sum(
+                        len(rows) for rows in continuous_books.values()
+                    ),
+                },
+            )
+        except ValueError as exc:
+            copy_v21.update({
+                "status": "COPY_V21_FREEZE_REJECTED",
+                "reason": str(exc),
+                "economically_proven": False,
+            })
         copy_v21_path = (
             data_root
             / "runtime"
