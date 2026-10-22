@@ -25,6 +25,9 @@ def test_button_retains_main_and_propagates_push_failure():
     button = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
     assert "tools\\push_github_safe.ps1" in button
     assert 'for %%G in (git.exe)' in button
+    assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' in button
+    assert "if errorlevel 1 goto :git_install_failed" in button
+    assert ':git_ready' in button
     assert "if not \"%RC%\"==\"0\" goto :echec_code" in button
     assert "endlocal & exit /b %RC%" in button
     assert "git push --force" not in button.lower()

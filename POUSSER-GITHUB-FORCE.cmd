@@ -4,16 +4,27 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
-if not exist "%HYPERSMART_GIT%" (
-  rem Codex local may use a normal system Git; embedded Git is not required.
-  for %%G in (git.exe) do if not "%%~$PATH:G"=="" set "HYPERSMART_GIT=%%~$PATH:G"
-  if not exist "%HYPERSMART_GIT%" (
-    echo   [ERREUR] Git est introuvable, embarque ou installe.
-    echo   Installe Git ou lance PREPARER_GIT_PORTABLE.cmd.
-    set "RC=2"
-    goto :echec_code
-  )
-)
+if exist "%HYPERSMART_GIT%" goto :git_ready
+
+rem Un Git systeme reste acceptable si le PC en possede deja un.
+for %%G in (git.exe) do if not "%%~$PATH:G"=="" set "HYPERSMART_GIT=%%~$PATH:G"
+if exist "%HYPERSMART_GIT%" goto :git_ready
+
+echo   [INFO] Git est absent. Installation automatique du Git portable officiel...
+set "HYPERSMART_NO_PAUSE=1"
+call "%~dp0PREPARER_GIT_PORTABLE.cmd"
+if errorlevel 1 goto :git_install_failed
+set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
+if not exist "%HYPERSMART_GIT%" goto :git_install_failed
+echo   [OK] Git portable est pret.
+goto :git_ready
+
+:git_install_failed
+echo   [ERREUR] Git portable n'a pas pu etre installe.
+set "RC=2"
+goto :echec_code
+
+:git_ready
 
 if /I "%~1"=="--portable-self-check" goto :portable_self_check
 
@@ -23,6 +34,7 @@ if /I "%~1"=="dry-run" set "PUSH_OPTION=-DryRun"
 
 echo ============================================================
 echo   POUSSER vers GitHub - synchronisation sure de main
+echo   Detecte et commit automatiquement toutes les modifications publiables.
 echo   Integre GitHub et les anciens bundles sans ecraser de commit.
 echo   Aucun --force, aucun reset, aucun FETCH_HEAD pousse.
 echo ============================================================
