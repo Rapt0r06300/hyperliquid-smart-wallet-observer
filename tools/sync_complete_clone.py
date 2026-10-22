@@ -336,6 +336,10 @@ def main(argv: list[str] | None = None) -> int:
         help="limit NEW SAFE payload transfers to this many GiB (default 8)",
     )
     parser.add_argument(
+        "--all-safe", action="store_true",
+        help="restore all catalog-selected SAFE/replayable assets without a download cap",
+    )
+    parser.add_argument(
         "--catalog-budget", action="store_true",
         help="offline SAFE/PARTIAL/REJECT and replay-ready byte accounting; "
              "no git fetch, GitHub API, payload download or local mutations",
@@ -353,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
+    if args.all_safe and not args.download_safe:
+        print("ALINA_SYNC_FAIL: --all-safe requires --download-safe", file=sys.stderr)
+        return 2
     if args.max_download_gib <= 0:
         print("ALINA_SYNC_FAIL: --max-download-gib must be positive", file=sys.stderr)
         return 2
@@ -396,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         code = restore_published(
             root, preflight=effective_preflight,
             snapshot=not args.no_snapshot_materialization,
-            max_download_gib=args.max_download_gib if effective_download else None,
+            max_download_gib=(None if args.all_safe else args.max_download_gib) if effective_download else None,
             prune_only=args.prune_cache_only,
         )
         if args.prune_cache_only:
@@ -443,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
             "catalog_index_sha256": catalog_sha256,
             "restore_exit_code": code,
             "market_payload_download_opt_in": bool(effective_download),
-            "download_cap_gib": args.max_download_gib if effective_download else None,
+            "download_cap_gib": (None if args.all_safe else args.max_download_gib) if effective_download else None,
             "status": "REPLAY_READY_COMPLETE" if certified else "RESTORE_INCOMPLETE",
             "restore_report": report_name,
             "restore_report_status": restore_status,
