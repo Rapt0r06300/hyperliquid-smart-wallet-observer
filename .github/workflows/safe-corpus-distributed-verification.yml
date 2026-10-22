@@ -23,6 +23,7 @@ permissions:
 
 concurrency:
   group: safe-corpus-distributed-verification
+  # Keep the active full-corpus proof; a new push must not cancel verified work.
   cancel-in-progress: false
 
 jobs:
