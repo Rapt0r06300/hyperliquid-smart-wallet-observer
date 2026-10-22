@@ -96,6 +96,18 @@ def test_generation_is_deterministic_structured_deduplicated_and_filters_invalid
     assert all("data_feasibility" in p for p in first)
 
 
+def test_shortlist_prioritizes_distinct_mechanisms_before_timing_variants():
+    catalog = load_catalog(
+        ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
+    )
+    plans = generate_semantic_plans(catalog, "copy_vault", 2000, 0)
+    assert len({plan["mechanism_signature"] for plan in plans}) >= 12
+    selected = rank_semantic_plans(plans, [], [], 12)
+    assert len(selected) == 12
+    assert len({plan["mechanism_signature"] for plan in selected}) == 12
+    assert len({plan["archetype_key"] for plan in selected}) >= 5
+
+
 def test_catalog_rejects_invalid_rule_values_outside_declared_axes(tmp_path):
     catalog = _catalog()
     catalog["families"]["lead_lag"]["invalid_combinations"] = [

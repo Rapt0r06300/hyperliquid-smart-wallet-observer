@@ -355,6 +355,28 @@ def rank_semantic_plans(
     candidates.sort(key=lambda item: (-item["priority_score"], item["semantic_key"]))
     selected: list[dict[str, Any]] = []
     used_archetypes: set[str] = set()
+    used_mechanisms: set[str] = set()
+    # Spend scarce shortlist slots on distinct causal mechanisms first.
+    # Timing/context variants can otherwise crowd out every challenger.
+    for candidate in candidates:
+        if (
+            candidate["mechanism_signature"] in used_mechanisms
+            or candidate["archetype_key"] in used_archetypes
+        ):
+            continue
+        selected.append(candidate)
+        used_archetypes.add(candidate["archetype_key"])
+        used_mechanisms.add(candidate["mechanism_signature"])
+        if len(selected) >= shortlist:
+            return selected
+    for candidate in candidates:
+        if candidate["mechanism_signature"] in used_mechanisms:
+            continue
+        selected.append(candidate)
+        used_archetypes.add(candidate["archetype_key"])
+        used_mechanisms.add(candidate["mechanism_signature"])
+        if len(selected) >= shortlist:
+            return selected
     for candidate in candidates:
         if candidate["archetype_key"] in used_archetypes:
             continue

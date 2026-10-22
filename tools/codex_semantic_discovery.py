@@ -115,6 +115,8 @@ def main() -> int:
         "family": args.family,
         "generated": len(plans),
         "shortlisted": len(ranked),
+        "distinct_mechanisms": len({row["mechanism_signature"] for row in ranked}),
+        "distinct_archetypes": len({row["archetype_key"] for row in ranked}),
         "filtered_before_llm": filtered,
         "historical_memory_records": len(historical),
         "runtime_memory_records": len(runtime),
