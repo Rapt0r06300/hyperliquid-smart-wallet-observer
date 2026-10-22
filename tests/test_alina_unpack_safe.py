@@ -72,3 +72,13 @@ def test_unselected_prior_jsonl_is_quarantined_not_mixed_or_deleted(tmp_path):
     assert not old.exists()
     assert list((tmp_path / "quarantine" / "stale_unpacked").rglob("*.stale"))
     assert (tmp_path / "usable" / "unpacked" / "release-one" / "new.jsonl").is_file()
+
+
+def test_valid_gzip_with_invalid_jsonl_is_rejected(tmp_path):
+    fixture(tmp_path)
+    path = tmp_path / "usable" / "shards" / "release-one" / "safe.jsonl.gz"
+    path.write_bytes(gzip.compress(b"this-is-not-json\n", mtime=0))
+    with pytest.raises(SafeUnpackError, match="invalid JSONL"):
+        expand_safe_corpus(tmp_path, catalog_sha256="a" * 64)
+    assert json.loads((tmp_path / "UNPACK_REPORT.json").read_text())["status"] != "SAFE_UNPACK_COMPLETE"
+    assert not (tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl").exists()

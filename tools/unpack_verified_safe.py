@@ -11,6 +11,7 @@ import hashlib
 import json
 import shutil
 import sys
+import zlib
 from pathlib import Path
 
 CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -153,13 +154,21 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
         last = b""
         try:
             with gzip.open(source, "rb") as inp, tmp.open("xb") as out:
-                while block := inp.read(8 * 1024 * 1024):
-                    size += len(block)
+                for line in inp:
+                    size += len(line)
                     if size > announced_bytes or size > MAX_SINGLE_FILE_BYTES:
                         raise SafeUnpackError(f"gzip size exceeds declared ISIZE: {source}")
-                    out.write(block)
-                    sha.update(block)
-                    last = block[-1:]
+                    if len(line) > 64 * 1024 * 1024:
+                        raise SafeUnpackError(f"oversized JSONL record: {source}")
+                    try:
+                        event = json.loads(line)
+                    except (ValueError, UnicodeError) as exc:
+                        raise SafeUnpackError(f"invalid JSONL record: {source}") from exc
+                    if not isinstance(event, dict):
+                        raise SafeUnpackError(f"non-object JSONL record: {source}")
+                    out.write(line)
+                    sha.update(line)
+                    last = line[-1:]
             if size != announced_bytes or last != b"\n":
                 raise SafeUnpackError(f"JSONL truncation or invalid gzip size: {source}")
             tmp.replace(target)
@@ -169,9 +178,11 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
                 "jsonl_sha256": sha.hexdigest(),
                 "jsonl_bytes": size,
             })
-        except (OSError, EOFError, gzip.BadGzipFile, SafeUnpackError):
+        except (OSError, EOFError, zlib.error, SafeUnpackError) as exc:
             tmp.unlink(missing_ok=True)
-            raise
+            if isinstance(exc, SafeUnpackError):
+                raise
+            raise SafeUnpackError(f"SAFE gzip extraction failed: {source}: {exc}") from exc
         created += 1
         written_bytes += size
         if created == 1 or created % 100 == 0 or created == len(planned):
