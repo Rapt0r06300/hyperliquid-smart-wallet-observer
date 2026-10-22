@@ -149,7 +149,21 @@ def summarize_complete_utc_days(
         }
 
     ordered_days = sorted(covered_days)
+    if any(
+        current - previous != UTC_DAY_MS
+        for previous, current in zip(ordered_days, ordered_days[1:], strict=False)
+    ):
+        return {
+            "status": "UNMEASURABLE",
+            "reason": "NONCONTIGUOUS_COMPLETE_UTC_DAY_COVERAGE",
+            "calendar_day_count": len(ordered_days),
+            "calendar_day_net_pnl_usd": [],
+            "calendar_day_mean_net_pnl_usd": None,
+            "active_day_mean_net_pnl_usd": None,
+            "zero_trade_days": 0,
+        }
     day_net = dict.fromkeys(ordered_days, 0.0)
+    day_trade_count = dict.fromkeys(ordered_days, 0)
     for row in rows:
         value = number(row.get(value_key))
         timestamp = number(row.get(timestamp_key))
@@ -175,15 +189,18 @@ def summarize_complete_utc_days(
                 "zero_trade_days": 0,
             }
         day_net[day_start] += value
+        day_trade_count[day_start] += 1
 
     values = [day_net[day] for day in ordered_days]
-    active = [value for value in values if value != 0.0]
+    active = [
+        day_net[day] for day in ordered_days if day_trade_count[day] > 0
+    ]
     return {
         "status": "MEASURABLE",
         "reason": None,
         "calendar_day_count": len(ordered_days),
-        "active_day_count": sum(day != 0.0 for day in values),
-        "zero_trade_days": sum(day == 0.0 for day in values),
+        "active_day_count": len(active),
+        "zero_trade_days": sum(count == 0 for count in day_trade_count.values()),
         "calendar_day_starts_ms": ordered_days,
         "calendar_day_net_pnl_usd": [round(value, 10) for value in values],
         "calendar_day_mean_net_pnl_usd": fmean(values),

@@ -114,3 +114,34 @@ def test_calendar_mean_rejects_non_utc_day_boundaries_and_duplicates() -> None:
         )
         assert result["status"] == "UNMEASURABLE"
         assert result["reason"] == "INVALID_COMPLETE_UTC_DAY_COVERAGE"
+
+
+def test_calendar_mean_rejects_gaps_in_covered_day_sequence() -> None:
+    day = 86_400_000
+    result = summarize_complete_utc_days(
+        [],
+        value_key="net",
+        timestamp_key="ts",
+        complete_day_starts_ms=[day, 3 * day],
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "NONCONTIGUOUS_COMPLETE_UTC_DAY_COVERAGE"
+
+
+def test_calendar_active_day_count_uses_trades_not_nonzero_pnl() -> None:
+    day = 86_400_000
+    result = summarize_complete_utc_days(
+        [
+            {"ts": day + 1, "net": 1.0},
+            {"ts": day + 2, "net": -1.0},
+        ],
+        value_key="net",
+        timestamp_key="ts",
+        complete_day_starts_ms=[day, 2 * day],
+    )
+
+    assert result["status"] == "MEASURABLE"
+    assert result["active_day_count"] == 1
+    assert result["zero_trade_days"] == 1
+    assert result["active_day_mean_net_pnl_usd"] == 0.0

@@ -572,16 +572,23 @@ def _evaluate_segment(
     fully_covered_days = None
     if complete_utc_day_starts_ms is not None:
         first_full_day = ((int(start_ms) + UTC_DAY_MS - 1) // UTC_DAY_MS) * UTC_DAY_MS
-        fully_covered_days = [
-            day
-            for day in complete_utc_day_starts_ms
-            if isinstance(day, (int, float))
-            and not isinstance(day, bool)
-            and math.isfinite(day)
-            and int(day) == day
-            and int(day) >= first_full_day
-            and (end_ms is None or int(day) + UTC_DAY_MS - 1 <= int(end_ms))
-        ]
+        fully_covered_days = []
+        for day in complete_utc_day_starts_ms:
+            if (
+                isinstance(day, (int, float))
+                and not isinstance(day, bool)
+                and math.isfinite(day)
+                and int(day) == day
+                and (
+                    int(day) < first_full_day
+                    or (
+                    end_ms is not None
+                    and int(day) + UTC_DAY_MS - 1 > int(end_ms)
+                    )
+                )
+            ):
+                continue
+            fully_covered_days.append(day)
     calendar_stats = summarize_complete_utc_days(
         trades,
         value_key="net_pnl_usd",

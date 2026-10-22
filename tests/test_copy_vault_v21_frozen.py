@@ -171,6 +171,25 @@ def test_frozen_v21_opens_heldouts_sequentially(monkeypatch: pytest.MonkeyPatch)
     assert report["carry_pnl_usd"] == 0.0
 
 
+def test_segment_calendar_coverage_does_not_discard_malformed_day_entries() -> None:
+    params = _freeze()["freeze"]["parameters"]
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=2 * 86_400_000,
+        params=params,
+        complete_utc_day_starts_ms=[0, 86_400_000, "malformed"],
+    )
+
+    assert result["calendar_day_statistics"]["status"] == "UNMEASURABLE"
+    assert (
+        result["calendar_day_statistics"]["reason"]
+        == "INVALID_COMPLETE_UTC_DAY_COVERAGE"
+    )
+
+
 def test_frozen_v21_never_opens_oos_after_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

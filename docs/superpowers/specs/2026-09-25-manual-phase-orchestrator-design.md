@@ -14035,6 +14035,7 @@ expose séparément la moyenne des jours actifs et la moyenne calendaire UTC.
 Cette dernière n'est mesurable que si l'audit d'entrée fournit explicitement
 les débuts (millisecondes UTC) des journées complètes couvertes; les jours
 sans trade valent alors zéro, tandis qu'une couverture absente, invalide ou
-incomplète rend l'objectif `UNMEASURABLE`. La couverture n'est jamais déduite
-des seuls trades ou snapshots, et la référence de 5 USD/jour reste
-informative, sans seuil de promotion.
+discontinue rend l'objectif `UNMEASURABLE`. Le nombre de jours actifs est
+déterminé par la présence de trades, pas par un PnL non nul. La couverture
+n'est jamais déduite des seuls trades ou snapshots, et la référence de
+5 USD/jour reste informative, sans seuil de promotion.
