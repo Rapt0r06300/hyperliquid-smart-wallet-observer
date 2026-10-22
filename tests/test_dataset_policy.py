@@ -76,3 +76,12 @@ def test_every_indexed_manifest_exists_and_matches_status():
         assert manifest["dataset_id"] == row["dataset_id"]
         assert manifest["quality_status"] == row["quality_status"]
         assert manifest["validation_allowed"] is (row["quality_status"] == "SAFE")
+
+
+def test_dataset_quality_ci_budget_covers_full_catalog_validation():
+    """The large read-only catalog scan must not hit a 10-minute runner cap."""
+    workflow = (ROOT / ".github/workflows/dataset-quality-ci.yml").read_text(encoding="utf-8")
+    job = workflow.split("  quality:\n", 1)[1].split("    steps:\n", 1)[0]
+    timeout = next(int(line.split(":", 1)[1].strip()) for line in job.splitlines()
+                   if line.strip().startswith("timeout-minutes:"))
+    assert timeout >= 30
