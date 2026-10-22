@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from hl_observer.backtesting.train_statistics import profit_factor, summarize_train_rows
+from hl_observer.backtesting.train_statistics import (
+    profit_factor,
+    summarize_complete_utc_days,
+    summarize_train_rows,
+)
 
 
 def test_bonferroni_lcb_reste_strictement_train_et_positif_sur_jours_stables() -> None:
@@ -53,3 +57,60 @@ def test_train_statistics_reject_invalid_rows_and_hash_payload_stably() -> None:
     assert result["bonferroni_trial_count"] == 1
     assert result["daily_mean_lcb_usd"] is None
     assert result["total_lcb_usd"] is None
+
+
+def test_calendar_mean_includes_only_explicitly_covered_no_trade_days() -> None:
+    day = 86_400_000
+    result = summarize_complete_utc_days(
+        [
+            {"ts": day + 1, "net": 1.0},
+            {"ts": day + 2, "net": 2.0},
+        ],
+        value_key="net",
+        timestamp_key="ts",
+        complete_day_starts_ms=[day, 2 * day, 3 * day],
+    )
+
+    assert result["status"] == "MEASURABLE"
+    assert result["calendar_day_net_pnl_usd"] == [3.0, 0.0, 0.0]
+    assert result["calendar_day_mean_net_pnl_usd"] == 1.0
+    assert result["active_day_mean_net_pnl_usd"] == 3.0
+    assert result["zero_trade_days"] == 2
+
+
+def test_calendar_mean_is_unmeasurable_without_complete_day_coverage() -> None:
+    result = summarize_complete_utc_days(
+        [{"ts": 86_400_001, "net": 3.0}],
+        value_key="net",
+        timestamp_key="ts",
+        complete_day_starts_ms=None,
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "COMPLETE_UTC_DAY_COVERAGE_MISSING"
+    assert result["calendar_day_mean_net_pnl_usd"] is None
+
+
+def test_calendar_mean_refuses_trade_outside_declared_coverage() -> None:
+    day = 86_400_000
+    result = summarize_complete_utc_days(
+        [{"ts": 2 * day + 1, "net": 1.0}],
+        value_key="net",
+        timestamp_key="ts",
+        complete_day_starts_ms=[day],
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "TRADE_OUTSIDE_COMPLETE_UTC_DAY_COVERAGE"
+
+
+def test_calendar_mean_rejects_non_utc_day_boundaries_and_duplicates() -> None:
+    for coverage in ([1], [86_400_000, 86_400_000]):
+        result = summarize_complete_utc_days(
+            [],
+            value_key="net",
+            timestamp_key="ts",
+            complete_day_starts_ms=coverage,
+        )
+        assert result["status"] == "UNMEASURABLE"
+        assert result["reason"] == "INVALID_COMPLETE_UTC_DAY_COVERAGE"

@@ -14026,3 +14026,15 @@ Chaque chemin de Release, y compris différé, est validé avant tout nettoyage
 du cache éphémère, afin d'exclure les traversées de répertoires et les noms
 dupliqués. Toute publication durable reste subordonnée aux mêmes preuves
 SHA, vérifications de qualité et contrôles de push sans force.
+
+### 2026-10-22 — Moyenne économique par journée UTC complète
+
+Une moyenne « par jour » destinée à l'objectif journalier ne peut pas être
+calculée uniquement sur les journées où des trades existent. Le replay V21
+expose séparément la moyenne des jours actifs et la moyenne calendaire UTC.
+Cette dernière n'est mesurable que si l'audit d'entrée fournit explicitement
+les débuts (millisecondes UTC) des journées complètes couvertes; les jours
+sans trade valent alors zéro, tandis qu'une couverture absente, invalide ou
+incomplète rend l'objectif `UNMEASURABLE`. La couverture n'est jamais déduite
+des seuls trades ou snapshots, et la référence de 5 USD/jour reste
+informative, sans seuil de promotion.

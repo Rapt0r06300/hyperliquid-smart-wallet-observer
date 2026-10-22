@@ -23,6 +23,7 @@ CORE_TESTS = (
 )
 INTEGRATION_TESTS = (
     "tests/test_alina_quant_lab_console.py",
+    "tests/test_train_statistics.py",
     "tests/test_economic_campaigns.py",
     "tests/test_economic_proof_audit.py",
     "tests/test_replay_compatibility.py",

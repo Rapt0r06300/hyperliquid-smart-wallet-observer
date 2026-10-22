@@ -16,6 +16,7 @@ from statistics import NormalDist, fmean, stdev
 from typing import Any
 
 SCHEMA_VERSION = "hypersmart.train_selection_statistics.v1"
+UTC_DAY_MS = 86_400_000
 
 
 def number(value: object) -> float | None:
@@ -97,11 +98,107 @@ def summarize_train_rows(
     }
 
 
+def summarize_complete_utc_days(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    value_key: str,
+    timestamp_key: str,
+    complete_day_starts_ms: Iterable[object] | None,
+) -> dict[str, Any]:
+    """Compute calendar-day PnL only over explicitly proven complete UTC days."""
+    if complete_day_starts_ms is None:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": "COMPLETE_UTC_DAY_COVERAGE_MISSING",
+            "calendar_day_count": 0,
+            "calendar_day_net_pnl_usd": [],
+            "calendar_day_mean_net_pnl_usd": None,
+            "active_day_mean_net_pnl_usd": None,
+            "zero_trade_days": 0,
+        }
+
+    covered_days: list[int] = []
+    for raw_day in complete_day_starts_ms:
+        day = number(raw_day)
+        if (
+            day is None
+            or isinstance(raw_day, bool)
+            or not day.is_integer()
+            or int(day) < 0
+            or int(day) % UTC_DAY_MS != 0
+        ):
+            return {
+                "status": "UNMEASURABLE",
+                "reason": "INVALID_COMPLETE_UTC_DAY_COVERAGE",
+                "calendar_day_count": 0,
+                "calendar_day_net_pnl_usd": [],
+                "calendar_day_mean_net_pnl_usd": None,
+                "active_day_mean_net_pnl_usd": None,
+                "zero_trade_days": 0,
+            }
+        covered_days.append(int(day))
+    if not covered_days or len(set(covered_days)) != len(covered_days):
+        return {
+            "status": "UNMEASURABLE",
+            "reason": "INVALID_COMPLETE_UTC_DAY_COVERAGE",
+            "calendar_day_count": 0,
+            "calendar_day_net_pnl_usd": [],
+            "calendar_day_mean_net_pnl_usd": None,
+            "active_day_mean_net_pnl_usd": None,
+            "zero_trade_days": 0,
+        }
+
+    ordered_days = sorted(covered_days)
+    day_net = dict.fromkeys(ordered_days, 0.0)
+    for row in rows:
+        value = number(row.get(value_key))
+        timestamp = number(row.get(timestamp_key))
+        if value is None or timestamp is None or timestamp < 0:
+            return {
+                "status": "UNMEASURABLE",
+                "reason": "INVALID_TRADE_ROW_FOR_CALENDAR_PNL",
+                "calendar_day_count": len(ordered_days),
+                "calendar_day_net_pnl_usd": [],
+                "calendar_day_mean_net_pnl_usd": None,
+                "active_day_mean_net_pnl_usd": None,
+                "zero_trade_days": 0,
+            }
+        day_start = int(timestamp) // UTC_DAY_MS * UTC_DAY_MS
+        if day_start not in day_net:
+            return {
+                "status": "UNMEASURABLE",
+                "reason": "TRADE_OUTSIDE_COMPLETE_UTC_DAY_COVERAGE",
+                "calendar_day_count": len(ordered_days),
+                "calendar_day_net_pnl_usd": [],
+                "calendar_day_mean_net_pnl_usd": None,
+                "active_day_mean_net_pnl_usd": None,
+                "zero_trade_days": 0,
+            }
+        day_net[day_start] += value
+
+    values = [day_net[day] for day in ordered_days]
+    active = [value for value in values if value != 0.0]
+    return {
+        "status": "MEASURABLE",
+        "reason": None,
+        "calendar_day_count": len(ordered_days),
+        "active_day_count": sum(day != 0.0 for day in values),
+        "zero_trade_days": sum(day == 0.0 for day in values),
+        "calendar_day_starts_ms": ordered_days,
+        "calendar_day_net_pnl_usd": [round(value, 10) for value in values],
+        "calendar_day_mean_net_pnl_usd": fmean(values),
+        "active_day_mean_net_pnl_usd": fmean(active) if active else None,
+        "calendar_total_net_pnl_usd": round(sum(values), 10),
+    }
+
+
 __all__ = [
     "SCHEMA_VERSION",
     "number",
     "profit_factor",
     "stable_hash",
     "summarize_train_rows",
+    "summarize_complete_utc_days",
     "top_positive_share",
+    "UTC_DAY_MS",
 ]

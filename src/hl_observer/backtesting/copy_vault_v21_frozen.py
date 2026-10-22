@@ -26,6 +26,10 @@ from hl_observer.backtesting.copy_vault_protocol import (
     PAPER_EQUITY_USD,
 )
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
+from hl_observer.backtesting.train_statistics import (
+    UTC_DAY_MS,
+    summarize_complete_utc_days,
+)
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 
@@ -540,6 +544,7 @@ def _evaluate_segment(
     capital_scenario_usd: float | None = None,
     execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
     fee_bps: float | None = None,
+    complete_utc_day_starts_ms: Sequence[object] | None = None,
 ) -> dict[str, Any]:
     candidates, candidate_audit = _segment_candidates(
         metaorders,
@@ -564,6 +569,25 @@ def _evaluate_segment(
         trial_count=int(params["bonferroni_trial_count"]),
     )
     daily_mean = _mean_daily(assessment["statistics"])
+    fully_covered_days = None
+    if complete_utc_day_starts_ms is not None:
+        first_full_day = ((int(start_ms) + UTC_DAY_MS - 1) // UTC_DAY_MS) * UTC_DAY_MS
+        fully_covered_days = [
+            day
+            for day in complete_utc_day_starts_ms
+            if isinstance(day, (int, float))
+            and not isinstance(day, bool)
+            and math.isfinite(day)
+            and int(day) == day
+            and int(day) >= first_full_day
+            and (end_ms is None or int(day) + UTC_DAY_MS - 1 <= int(end_ms))
+        ]
+    calendar_stats = summarize_complete_utc_days(
+        trades,
+        value_key="net_pnl_usd",
+        timestamp_key="entry_ts_ms",
+        complete_day_starts_ms=fully_covered_days,
+    )
     reasons = list(assessment["reasons"])
     return {
         **assessment,
@@ -576,7 +600,10 @@ def _evaluate_segment(
         "candidate_count": len(candidates),
         "candidate_audit": candidate_audit,
         "replay_audit": replay_audit,
-        "daily_mean_net_pnl_usd": daily_mean,
+        "daily_mean_net_pnl_usd": calendar_stats["calendar_day_mean_net_pnl_usd"],
+        "active_day_mean_net_pnl_usd": daily_mean,
+        "daily_mean_net_pnl_scope": "COMPLETE_UTC_CALENDAR_DAYS",
+        "calendar_day_statistics": calendar_stats,
         "trades": trades,
         "placebos": placebos,
         "heldout_evaluated": True,
@@ -596,6 +623,7 @@ def evaluate_frozen_v21_segment(
     *,
     segment: str,
     capital_scenario_usd: float | None = None,
+    complete_utc_day_starts_ms: Sequence[object] | None = None,
 ) -> dict[str, Any]:
     """Reproduce one named segment with the immutable V21 policy."""
     freeze = _verified_freeze(freeze_payload)
@@ -624,6 +652,7 @@ def evaluate_frozen_v21_segment(
         end_ms=end_ms,
         params=params,
         capital_scenario_usd=capital_scenario_usd,
+        complete_utc_day_starts_ms=complete_utc_day_starts_ms,
     )
 
 
@@ -860,6 +889,7 @@ def evaluate_frozen_v21(
         start_ms=int(bounds["validation_start_ms"]),
         end_ms=int(bounds["validation_end_ms"]),
         params=params,
+        complete_utc_day_starts_ms=(input_audit or {}).get("complete_utc_day_starts_ms"),
     )
     if validation["eligible"]:
         oos = _evaluate_segment(
@@ -869,6 +899,7 @@ def evaluate_frozen_v21(
             start_ms=int(bounds["oos_start_ms"]),
             end_ms=int(bounds["oos_end_ms"]),
             params=params,
+            complete_utc_day_starts_ms=(input_audit or {}).get("complete_utc_day_starts_ms"),
         )
     else:
         oos = {
@@ -890,6 +921,7 @@ def evaluate_frozen_v21(
             start_ms=int(freeze["frozen_at_ms"]) + 1,
             end_ms=None,
             params=params,
+            complete_utc_day_starts_ms=(input_audit or {}).get("complete_utc_day_starts_ms"),
         )
     else:
         forward = {
