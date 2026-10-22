@@ -161,7 +161,17 @@ jobs:
               raise SystemExit("preflight has no measurable SAFE materialization budget")
           print("ALINA_SAFE_CLONE_PREFLIGHT_VERIFIED")
           PY
-      - name: Preserve SHA-bound SAFE catalog and remote preflight evidence\n        if: always()\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        with:\n          name: alina-safe-download-preflight-${{ github.run_id }}\n          path: |\n            ${{ runner.temp }}/alina-safe-catalog-budget.json\n            ${{ runner.temp }}/alina-safe-clone-preflight/RESTORE_PREFLIGHT.json\n          if-no-files-found: warn\n          retention-days: 30\n      - name: Verify real historical SAFE asset download and SHA-256
+      - name: Preserve SHA-bound SAFE catalog and remote preflight evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alina-safe-download-preflight-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/alina-safe-catalog-budget.json
+            ${{ runner.temp }}/alina-safe-clone-preflight/RESTORE_PREFLIGHT.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Verify real historical SAFE asset download and SHA-256
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
