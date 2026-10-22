@@ -3132,3 +3132,30 @@ def test_replay_download_budget_is_checked_before_pruning_or_any_payload(
         )
     assert downloads == []
     assert old.read_bytes() == rejected_bytes
+
+
+def test_unlimited_download_requires_replay_profile_and_disallows_preview(capsys):
+    module = _module()
+    assert module.main(["--everything", "--unlimited-download"]) == 2
+    assert "requires --replay-ready" in capsys.readouterr().err
+    assert module.main(["--replay-ready", "--unlimited-download", "--preflight-only"]) == 2
+    assert "incompatible with prune/preflight" in capsys.readouterr().err
+
+
+def test_unlimited_download_passes_none_budget_to_existing_engine(
+    monkeypatch, tmp_path,
+):
+    module = _module()
+    seen = {}
+
+    def fake_restore(*args, **kwargs):
+        seen.update(kwargs)
+        raise module.RestoreError("STOP_BEFORE_NETWORK")
+
+    monkeypatch.setattr(module, "restore_everything", fake_restore)
+    assert module.main([
+        "--replay-ready", "--unlimited-download",
+        "--destination", str(tmp_path),
+    ]) == 2
+    assert seen["profile"] == "replay-ready"
+    assert seen["max_download_bytes"] is None
