@@ -79,7 +79,8 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
 def restore_published(root: Path, *, preflight: bool = False,
                       snapshot: bool = True,
                       max_download_gib: int | None = None,
-                      prune_only: bool = False) -> int:
+                      prune_only: bool = False,
+                      unlimited_download: bool = False) -> int:
     """Delegate all byte-verification and SAFE gates to the ONE restore engine."""
     root = root.resolve()
     cmd = [
@@ -97,6 +98,8 @@ def restore_published(root: Path, *, preflight: bool = False,
         cmd.extend(("--prune-cache-only", "--max-download-gib", "0"))
     elif preflight:
         cmd.append("--preflight-only")
+    elif unlimited_download:
+        cmd.append("--unlimited-download")
     else:
         # Keep all historical/unselected local cache copies unless the operator
         # explicitly requested --prune-cache-only in a separate operation.
@@ -405,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
             snapshot=not args.no_snapshot_materialization,
             max_download_gib=(None if args.all_safe else args.max_download_gib) if effective_download else None,
             prune_only=args.prune_cache_only,
+            unlimited_download=args.all_safe,
         )
         if args.prune_cache_only:
             # The restore engine writes CACHE_PRUNE_REPORT.json; never turn a
