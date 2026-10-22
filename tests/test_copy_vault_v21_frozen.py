@@ -189,6 +189,34 @@ def test_frozen_v21_never_opens_oos_after_validation_failure(
     assert report["forward"]["heldout_evaluated"] is False
 
 
+def test_forward_eligible_evaluation_wires_capacity_and_stress_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        V21,
+        "_evaluate_segment",
+        lambda *_args, segment, **_kwargs: _segment(segment, True),
+    )
+
+    report = V21.evaluate_frozen_v21([], {}, _freeze())
+
+    assert report["economically_proven"] is True
+    assert report["capacity_diagnostic"]["capital_scenarios_usd"] == [
+        10.0,
+        50.0,
+        100.0,
+        200.0,
+        400.0,
+        1_000.0,
+        2_000.0,
+        5_000.0,
+        10_000.0,
+    ]
+    assert report["capacity_diagnostic"]["promotion_eligible"] is False
+    assert report["stress_diagnostic"]["scenario_count"] == 13
+    assert report["stress_diagnostic"]["promotion_eligible"] is False
+
+
 def test_frozen_v21_rejects_parameter_tampering() -> None:
     payload = _freeze()
     tampered = copy.deepcopy(payload)
@@ -280,6 +308,184 @@ def test_settle_rejects_overlapping_positions_above_paper_gross_limit(
     assert len(trades) == 1
     assert calls == [150.0, 150.0]
     assert audit["PAPER_GROSS_EXPOSURE_REJECTED"] == 1
+
+
+def test_capacity_scenario_scales_frozen_sizing_but_remains_diagnostic_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[float] = []
+
+    def execute(_metaorder, _books, *, notional_usd: float, **_kwargs):
+        calls.append(notional_usd)
+        signal_ms = int(_metaorder["signal_ts_ms"])
+        return (
+            {
+                "entry_ts_ms": signal_ms + 1,
+                "exit_ts_ms": signal_ms + 300_000,
+                "direction": 1,
+                "quantity": 1.0,
+                "entry_price": 100.0,
+                "notional_usd": notional_usd,
+                "net_pnl_usd": -1.0,
+            },
+            "LIQUIDATABLE_NET",
+        )
+
+    monkeypatch.setattr(V21.cv, "execute_metaorder", execute)
+    params = {
+        "horizon_ms": 300_000,
+        "vault_daily_limit": 10,
+        "coin_daily_limit": 10,
+        "max_open_positions": 10,
+        "daily_profit_lock_usd": 4.0,
+        "core_notional_usd": 150.0,
+        "probe_notional_usd": 75.0,
+        "stop_loss_bps": 50.0,
+        "take_profit_bps": 100.0,
+    }
+    candidate = {
+        "signal_ts_ms": 1_000,
+        "metaorder_id": "meta-0",
+        "vault": "vault-0",
+        "coin": "BTC",
+        "direction": 1,
+        "signed_reference_depth_imbalance": 0.2,
+        "reference_two_sided_capacity_usd": 1_000.0,
+    }
+
+    trades, _placebos, audit = V21._settle(
+        [candidate],
+        {"BTC": []},
+        segment="capacity_400",
+        params=params,
+        capital_scenario_usd=400.0,
+    )
+
+    assert calls == [300.0, 300.0]
+    assert trades[0]["notional_usd"] == 300.0
+    assert trades[0]["economic_scope"] == "DIAGNOSTIC_ONLY"
+    assert trades[0]["economically_proven"] is False
+    assert audit.get("PAPER_GROSS_EXPOSURE_REJECTED", 0) == 0
+
+
+def test_capacity_scenarios_use_the_predeclared_ladder_and_never_certify() -> None:
+    result = V21.evaluate_capacity_scenarios([], {}, _freeze())
+
+    assert result["capital_scenarios_usd"] == [
+        10.0,
+        50.0,
+        100.0,
+        200.0,
+        400.0,
+        1_000.0,
+        2_000.0,
+        5_000.0,
+        10_000.0,
+    ]
+    assert result["scope"] == "DIAGNOSTIC_ONLY"
+    assert result["economic_proof"] is False
+    assert result["promotion_eligible"] is False
+    assert all(row["economically_proven"] is False for row in result["scenarios"])
+
+
+@pytest.mark.parametrize("scenarios", [[], [0.0], [float("nan")], [10.0, 10.0]])
+def test_capacity_scenarios_reject_invalid_capital_ladders(scenarios) -> None:
+    with pytest.raises(ValueError, match="COPY_V21_CAPITAL_SCENARIOS_INVALID"):
+        V21.evaluate_capacity_scenarios(
+            [], {}, _freeze(), capital_scenarios_usd=scenarios
+        )
+
+
+def test_stress_books_widen_spread_and_reduce_depth_without_mutating_input() -> None:
+    source = {
+        "BTC": [
+            {
+                "ts_ms": 1_000,
+                "bid": 100.0,
+                "ask": 102.0,
+                "bids5": [[100.0, 2.0]],
+                "asks5": [[102.0, 3.0]],
+                "causal_observation": True,
+            }
+        ]
+    }
+
+    stressed = V21._stress_books(
+        source, spread_multiplier=2.0, depth_multiplier=0.5
+    )
+
+    assert stressed["BTC"][0]["bids5"] == [[99.0, 1.0]]
+    assert stressed["BTC"][0]["asks5"] == [[103.0, 1.5]]
+    assert source["BTC"][0]["bids5"] == [[100.0, 2.0]]
+    assert source["BTC"][0]["asks5"] == [[102.0, 3.0]]
+
+
+def test_stress_matrix_is_predeclared_diagnostic_and_lists_unmeasured_axes() -> None:
+    result = V21.evaluate_stress_matrix([], {}, _freeze())
+
+    assert result["scenario_count"] == 13
+    assert result["scope"] == "DIAGNOSTIC_ONLY"
+    assert result["economic_proof"] is False
+    assert result["promotion_eligible"] is False
+    assert result["scenarios"][0]["scenario"] == "BASELINE_REFERENCE"
+    assert result["scenarios"][1]["scenario"] == "FEE_X2"
+    assert result["scenarios"][2]["scenario"] == "SPREAD_X2"
+    assert result["scenarios"][-1]["scenario"] == "EXTRA_DELAY_300000MS"
+    assert result["not_evaluated"]["funding_adverse"] == (
+        "UNMEASURABLE_FUNDING_ROWS_NOT_WIRED"
+    )
+
+
+def test_stress_matrix_runs_the_real_causal_l2_executor_and_records_delay_refusals() -> None:
+    payload = _freeze()
+    params = payload["freeze"]["parameters"]
+    params["horizon_ms"] = 300_000
+    params["stop_loss_bps"] = 5_000.0
+    params["take_profit_bps"] = 5_000.0
+    payload["freeze"]["parameters_sha256"] = parameter_hash(params)
+    signal_ms = 6_000
+    books = [
+        {
+            "ts_ms": ts_ms,
+            "bid": 100.0,
+            "ask": 101.0,
+            "capacity_usd": 2_500.0,
+            "bids5": [[100.0, 21.0]],
+            "asks5": [[101.0, 20.0]],
+            "causal_observation": True,
+            "source_line": index + 1,
+        }
+        for index, ts_ms in enumerate(
+            (signal_ms, signal_ms + 60_000, signal_ms + 360_000)
+        )
+    ]
+    metaorders = [
+        {
+            "metaorder_id": "stress-metaorder",
+            "vault": "vault-stress",
+            "coin": "BTC",
+            "direction": 1,
+            "signal_ts_ms": signal_ms,
+            "member_events": [{"action": "ADD", "taille_usd": 150.0}],
+        }
+    ]
+
+    result = V21.evaluate_stress_matrix(
+        metaorders, {"BTC": books}, payload, segment="forward"
+    )
+
+    baseline = result["scenarios"][0]["result"]
+    fee_stress = result["scenarios"][1]["result"]
+    assert fee_stress["candidate_count"] == 1
+    assert fee_stress["replay_audit"]["ADMITTED_CLOSED_POSITION"] == 1
+    assert (
+        fee_stress["economic_summary"]["net_pnl_usd"]
+        < baseline["economic_summary"]["net_pnl_usd"]
+    )
+    delay_300s = result["scenarios"][-1]["result"]
+    assert delay_300s["candidate_count"] == 1
+    assert delay_300s["replay_audit"]["INCOMPLETE_EPISODE_REJECTED"] == 1
+    assert delay_300s["replay_audit"]["ACTUAL_PROVENANCE_REFUSAL_STALE_OR_MISSING_EXIT_BOOK"] == 1
 
 
 def test_frozen_v21_does_not_use_the_five_dollar_reference_as_a_gate(

@@ -23,6 +23,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     MAX_GROSS_EXPOSURE_USD,
     MAX_REFERENCE_LAG_MS,
     MAX_TARGET_LAG_MS,
+    PAPER_EQUITY_USD,
 )
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.config.frais_venues import frais_taker_bps
@@ -34,6 +35,7 @@ REFERENCE_DAILY_OBJECTIVE_USD = 5.0
 FROZEN_COPY_DELAY_MS = 60_000
 FROZEN_MAX_REFERENCE_LAG_MS = 30_000
 FROZEN_MAX_TARGET_LAG_MS = 30_000
+CAPACITY_SCENARIOS_USD = (10.0, 50.0, 100.0, 200.0, 400.0, 1_000.0, 2_000.0, 5_000.0, 10_000.0)
 
 
 def _first_action(metaorder: Mapping[str, Any]) -> str:
@@ -119,6 +121,7 @@ def _apply_risk_exit(
     stop_loss_bps: float,
     take_profit_bps: float,
     horizon_ms: int,
+    copy_delay_ms: int = FROZEN_COPY_DELAY_MS,
 ) -> tuple[dict[str, Any], str]:
     entry_ms = int(trade["entry_ts_ms"])
     fallback_exit_ms = int(trade["exit_ts_ms"])
@@ -157,7 +160,7 @@ def _apply_risk_exit(
         books,
         horizon_ms=dynamic_horizon,
         direction_multiplier=direction_multiplier,
-        copy_delay_ms=FROZEN_COPY_DELAY_MS,
+        copy_delay_ms=copy_delay_ms,
         max_reference_lag_ms=FROZEN_MAX_REFERENCE_LAG_MS,
         max_target_lag_ms=FROZEN_MAX_TARGET_LAG_MS,
         notional_usd=float(trade["notional_usd"]),
@@ -363,7 +366,29 @@ def _settle(
     *,
     segment: str,
     params: Mapping[str, Any],
+    capital_scenario_usd: float | None = None,
+    execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
+    fee_bps: float | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    if capital_scenario_usd is not None:
+        try:
+            capital_scenario_usd = float(capital_scenario_usd)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("COPY_V21_CAPITAL_SCENARIO_INVALID") from exc
+        if not math.isfinite(capital_scenario_usd) or capital_scenario_usd <= 0.0:
+            raise ValueError("COPY_V21_CAPITAL_SCENARIO_INVALID")
+        sizing_scale = capital_scenario_usd / float(PAPER_EQUITY_USD)
+    else:
+        sizing_scale = 1.0
+    gross_exposure_limit = (
+        float(capital_scenario_usd)
+        if capital_scenario_usd is not None
+        else float(MAX_GROSS_EXPOSURE_USD)
+    )
+    scenario_params = dict(params)
+    scenario_params["core_notional_usd"] = float(params["core_notional_usd"]) * sizing_scale
+    scenario_params["probe_notional_usd"] = float(params["probe_notional_usd"]) * sizing_scale
+    scenario_params["daily_profit_lock_usd"] = float(params["daily_profit_lock_usd"]) * sizing_scale
     audit: dict[str, int] = defaultdict(int)
     trades: list[dict[str, Any]] = []
     placebos: list[dict[str, Any]] = []
@@ -379,10 +404,10 @@ def _settle(
         day = signal_ms // 86_400_000
         vault_key = (str(metaorder["vault"]), day)
         coin_key = (str(metaorder["coin"]), day)
-        if vault_day[vault_key] >= int(params["vault_daily_limit"]):
+        if vault_day[vault_key] >= int(scenario_params["vault_daily_limit"]):
             audit["VAULT_DAILY_BUDGET_REJECTED"] += 1
             continue
-        if coin_day[coin_key] >= int(params["coin_daily_limit"]):
+        if coin_day[coin_key] >= int(scenario_params["coin_daily_limit"]):
             audit["COIN_DAILY_BUDGET_REJECTED"] += 1
             continue
         active_positions = [
@@ -390,7 +415,7 @@ def _settle(
             for exit_ms, notional in active_positions
             if exit_ms > signal_ms
         ]
-        if len(active_positions) >= int(params["max_open_positions"]):
+        if len(active_positions) >= int(scenario_params["max_open_positions"]):
             audit["PORTFOLIO_CAPACITY_REJECTED"] += 1
             continue
 
@@ -400,17 +425,17 @@ def _settle(
             if int(trade["exit_ts_ms"]) <= signal_ms
             and int(trade["exit_ts_ms"]) // 86_400_000 == day
         )
-        locked = realized_today >= float(params["daily_profit_lock_usd"])
+        locked = realized_today >= float(scenario_params["daily_profit_lock_usd"])
         notional_usd = (
-            float(params["probe_notional_usd"])
+            float(scenario_params["probe_notional_usd"])
             if locked
-            else float(params["core_notional_usd"])
+            else float(scenario_params["core_notional_usd"])
         )
         active_gross_usd = sum(notional for _, notional in active_positions)
         if (
             not math.isfinite(notional_usd)
             or notional_usd <= 0.0
-            or active_gross_usd + notional_usd > MAX_GROSS_EXPOSURE_USD + 1e-9
+            or active_gross_usd + notional_usd > gross_exposure_limit + 1e-9
         ):
             audit["PAPER_GROSS_EXPOSURE_REJECTED"] += 1
             continue
@@ -423,23 +448,25 @@ def _settle(
         actual, actual_reason = cv.execute_metaorder(
             metaorder,
             books,
-            horizon_ms=int(params["horizon_ms"]),
+            horizon_ms=int(scenario_params["horizon_ms"]),
             direction_multiplier=1,
-            copy_delay_ms=FROZEN_COPY_DELAY_MS,
+            copy_delay_ms=execution_delay_ms,
             max_reference_lag_ms=FROZEN_MAX_REFERENCE_LAG_MS,
             max_target_lag_ms=FROZEN_MAX_TARGET_LAG_MS,
             notional_usd=notional_usd,
+            fee_bps=fee_bps,
             require_causal_books=True,
         )
         placebo, placebo_reason = cv.execute_metaorder(
             metaorder,
             books,
-            horizon_ms=int(params["horizon_ms"]),
+            horizon_ms=int(scenario_params["horizon_ms"]),
             direction_multiplier=-1,
-            copy_delay_ms=FROZEN_COPY_DELAY_MS,
+            copy_delay_ms=execution_delay_ms,
             max_reference_lag_ms=FROZEN_MAX_REFERENCE_LAG_MS,
             max_target_lag_ms=FROZEN_MAX_TARGET_LAG_MS,
             notional_usd=notional_usd,
+            fee_bps=fee_bps,
             require_causal_books=True,
         )
         if actual is None or placebo is None:
@@ -454,17 +481,19 @@ def _settle(
             actual,
             metaorder,
             books,
-            stop_loss_bps=float(params["stop_loss_bps"]),
-            take_profit_bps=float(params["take_profit_bps"]),
-            horizon_ms=int(params["horizon_ms"]),
+            stop_loss_bps=float(scenario_params["stop_loss_bps"]),
+            take_profit_bps=float(scenario_params["take_profit_bps"]),
+            horizon_ms=int(scenario_params["horizon_ms"]),
+            copy_delay_ms=execution_delay_ms,
         )
         placebo, placebo_trigger = _apply_risk_exit(
             placebo,
             metaorder,
             books,
-            stop_loss_bps=float(params["stop_loss_bps"]),
-            take_profit_bps=float(params["take_profit_bps"]),
-            horizon_ms=int(params["horizon_ms"]),
+            stop_loss_bps=float(scenario_params["stop_loss_bps"]),
+            take_profit_bps=float(scenario_params["take_profit_bps"]),
+            horizon_ms=int(scenario_params["horizon_ms"]),
+            copy_delay_ms=execution_delay_ms,
         )
         common = {
             "mechanism": "copy_v21_entry_capacity_daily_lock",
@@ -475,7 +504,7 @@ def _settle(
             "reference_two_sided_capacity_usd": float(metaorder["reference_two_sided_capacity_usd"]),
             "sizing_state": sizing_state,
             "realized_daily_pnl_before_entry_usd": realized_today,
-            "daily_profit_lock_usd": float(params["daily_profit_lock_usd"]),
+            "daily_profit_lock_usd": float(scenario_params["daily_profit_lock_usd"]),
             "risk_exit_trigger": actual_trigger,
             "placebo_risk_exit_trigger": placebo_trigger,
             "frozen_policy": True,
@@ -483,6 +512,13 @@ def _settle(
             "paper_read_only": True,
             "real_execution": False,
         }
+        if capital_scenario_usd is not None:
+            common.update({
+                "economic_scope": "DIAGNOSTIC_ONLY",
+                "economically_proven": False,
+                "capital_scenario_usd": capital_scenario_usd,
+                "capital_scenario_sizing_scale": sizing_scale,
+            })
         trades.append({**actual, **common})
         placebos.append({**placebo, **common})
         vault_day[vault_key] += 1
@@ -501,6 +537,9 @@ def _evaluate_segment(
     start_ms: int,
     end_ms: int | None,
     params: Mapping[str, Any],
+    capital_scenario_usd: float | None = None,
+    execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
+    fee_bps: float | None = None,
 ) -> dict[str, Any]:
     candidates, candidate_audit = _segment_candidates(
         metaorders,
@@ -515,6 +554,9 @@ def _evaluate_segment(
         books_by_coin,
         segment=segment,
         params=params,
+        capital_scenario_usd=capital_scenario_usd,
+        execution_delay_ms=execution_delay_ms,
+        fee_bps=fee_bps,
     )
     assessment = assess_train_variant(
         trades,
@@ -542,6 +584,8 @@ def _evaluate_segment(
         "paper_read_only": True,
         "real_execution": False,
         "carry_pnl_usd": 0.0,
+        "economic_scope": "DIAGNOSTIC_ONLY" if capital_scenario_usd is not None else "FROZEN_POLICY_EVALUATION",
+        "economically_proven": False if capital_scenario_usd is not None else None,
     }
 
 
@@ -551,6 +595,7 @@ def evaluate_frozen_v21_segment(
     freeze_payload: Mapping[str, Any],
     *,
     segment: str,
+    capital_scenario_usd: float | None = None,
 ) -> dict[str, Any]:
     """Reproduce one named segment with the immutable V21 policy."""
     freeze = _verified_freeze(freeze_payload)
@@ -578,7 +623,223 @@ def evaluate_frozen_v21_segment(
         start_ms=start_ms,
         end_ms=end_ms,
         params=params,
+        capital_scenario_usd=capital_scenario_usd,
     )
+
+
+def evaluate_capacity_scenarios(
+    metaorders: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    freeze_payload: Mapping[str, Any],
+    *,
+    segment: str = "oos",
+    capital_scenarios_usd: Sequence[float] = CAPACITY_SCENARIOS_USD,
+) -> dict[str, Any]:
+    """Replay the same frozen sizing rule across predeclared hypothetical capital caps."""
+    scenarios = [float(value) for value in capital_scenarios_usd]
+    if (
+        not scenarios
+        or any(not math.isfinite(value) or value <= 0.0 for value in scenarios)
+        or len(set(scenarios)) != len(scenarios)
+    ):
+        raise ValueError("COPY_V21_CAPITAL_SCENARIOS_INVALID")
+    rows = [
+        evaluate_frozen_v21_segment(
+            metaorders,
+            books_by_coin,
+            freeze_payload,
+            segment=segment,
+            capital_scenario_usd=capital,
+        )
+        for capital in scenarios
+    ]
+    return {
+        "schema_version": "hypersmart.copy_vault_capacity_diagnostic.v1",
+        "segment": str(segment).strip().lower(),
+        "scope": "DIAGNOSTIC_ONLY",
+        "economic_proof": False,
+        "promotion_eligible": False,
+        "capital_scenarios_usd": scenarios,
+        "sizing_policy": "FROZEN_NOTIONAL_AND_DAILY_LOCK_SCALED_PROPORTIONALLY_TO_CAPITAL",
+        "exposure_limit_policy": "GROSS_EXPOSURE_CAPPED_AT_SCENARIO_CAPITAL_NO_LEVERAGE_ASSUMED",
+        "instrument_minimum_and_lot_rules": "NOT_EVALUATED_BY_THIS_DIAGNOSTIC",
+        "promotion_blocker": "CAPACITY_SCENARIO_IS_NOT_ECONOMIC_PROOF",
+        "scenarios": rows,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def _stress_books(
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    *,
+    spread_multiplier: float = 1.0,
+    depth_multiplier: float = 1.0,
+) -> dict[str, list[dict[str, Any]]]:
+    if (
+        not math.isfinite(float(spread_multiplier))
+        or float(spread_multiplier) < 1.0
+        or not math.isfinite(float(depth_multiplier))
+        or not 0.0 < float(depth_multiplier) <= 1.0
+    ):
+        raise ValueError("COPY_V21_STRESS_MULTIPLIER_INVALID")
+    stressed: dict[str, list[dict[str, Any]]] = {}
+    for coin, books in books_by_coin.items():
+        stressed_rows: list[dict[str, Any]] = []
+        for raw in books:
+            row = dict(raw)
+            bids = list(row.get("bids5") or ())
+            asks = list(row.get("asks5") or ())
+            if not bids or not asks:
+                stressed_rows.append(row)
+                continue
+            try:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                mid = (best_bid + best_ask) / 2.0
+                if (
+                    not math.isfinite(mid)
+                    or mid <= 0.0
+                    or best_ask <= best_bid
+                ):
+                    raise ValueError
+
+                def transform(levels, *, is_bid: bool, midpoint: float):
+                    output = []
+                    for level in levels:
+                        price, quantity = float(level[0]), float(level[1])
+                        if (
+                            not math.isfinite(price)
+                            or price <= 0.0
+                            or not math.isfinite(quantity)
+                            or quantity <= 0.0
+                        ):
+                            raise ValueError
+                        stressed_price = (
+                            midpoint - (midpoint - price) * float(spread_multiplier)
+                            if is_bid
+                            else midpoint + (price - midpoint) * float(spread_multiplier)
+                        )
+                        output.append(
+                            [stressed_price, quantity * float(depth_multiplier), *list(level[2:])]
+                        )
+                    return output
+
+                row["bids5"] = transform(bids, is_bid=True, midpoint=mid)
+                row["asks5"] = transform(asks, is_bid=False, midpoint=mid)
+                row["bid"] = row["bids5"][0][0]
+                row["ask"] = row["asks5"][0][0]
+            except (IndexError, TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("COPY_V21_STRESS_BOOK_INVALID") from exc
+            stressed_rows.append(row)
+        stressed[str(coin)] = stressed_rows
+    return stressed
+
+
+def evaluate_stress_matrix(
+    metaorders: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    freeze_payload: Mapping[str, Any],
+    *,
+    segment: str = "forward",
+) -> dict[str, Any]:
+    """Run fixed, labelled stresses through the same V21 execution path."""
+    freeze = _verified_freeze(freeze_payload)
+    canonical_fee_bps = float(frais_taker_bps("HYPERLIQUID"))
+    scenarios: list[dict[str, Any]] = []
+    definitions = [
+        ("BASELINE_REFERENCE", {}, FROZEN_COPY_DELAY_MS, None),
+        ("FEE_X2", {}, FROZEN_COPY_DELAY_MS, canonical_fee_bps * 2.0),
+        ("SPREAD_X2", {"spread_multiplier": 2.0}, FROZEN_COPY_DELAY_MS, None),
+        ("SPREAD_X3", {"spread_multiplier": 3.0}, FROZEN_COPY_DELAY_MS, None),
+        ("DEPTH_50_PERCENT", {"depth_multiplier": 0.5}, FROZEN_COPY_DELAY_MS, None),
+        ("DEPTH_25_PERCENT", {"depth_multiplier": 0.25}, FROZEN_COPY_DELAY_MS, None),
+    ]
+    definitions.extend(
+        (
+            f"EXTRA_DELAY_{int(extra_ms)}MS",
+            {},
+            FROZEN_COPY_DELAY_MS + int(extra_ms),
+            None,
+        )
+        for extra_ms in (100, 500, 1_000, 5_000, 30_000, 60_000, 300_000)
+    )
+    for name, book_stress, delay_ms, stressed_fee_bps in definitions:
+        stressed_books = (
+            _stress_books(books_by_coin, **book_stress)
+            if book_stress
+            else books_by_coin
+        )
+        result = _evaluate_segment(
+            metaorders,
+            stressed_books,
+            segment=f"{segment}_{name.lower()}",
+            start_ms=_segment_start_ms(freeze, segment),
+            end_ms=_segment_end_ms(freeze, segment),
+            params=freeze["parameters"],
+            capital_scenario_usd=float(PAPER_EQUITY_USD),
+            execution_delay_ms=delay_ms,
+            fee_bps=stressed_fee_bps,
+        )
+        scenarios.append(
+            {
+                "scenario": name,
+                "scope": "DIAGNOSTIC_ONLY",
+                "execution_delay_ms": delay_ms,
+                "fee_bps": stressed_fee_bps,
+                "spread_multiplier": book_stress.get("spread_multiplier", 1.0),
+                "depth_multiplier": book_stress.get("depth_multiplier", 1.0),
+                "result": result,
+            }
+        )
+    return {
+        "schema_version": "hypersmart.copy_vault_stress_diagnostic.v1",
+        "segment": str(segment).strip().lower(),
+        "scope": "DIAGNOSTIC_ONLY",
+        "economic_proof": False,
+        "promotion_eligible": False,
+        "scenario_count": len(scenarios),
+        "scenarios": scenarios,
+        "not_evaluated": {
+            "funding_adverse": "UNMEASURABLE_FUNDING_ROWS_NOT_WIRED",
+            "bull_bear_sideways_regimes": "UNMEASURABLE_REGIME_LABELS_NOT_PROVEN",
+            "missing_leader_data": "NOT_SIMULATED_WITHOUT_MEASURED_OBSERVATION_GAPS",
+            "partial_fills": "NOT_MODELED_BY_CURRENT_ALL_OR_NONE_EXECUTOR",
+            "missing_venue": "NOT_APPLICABLE_SINGLE_VENUE_COPY_VAULT",
+            "instrument_minimums_and_lot_rules": "NOT_EVALUATED",
+        },
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def _segment_start_ms(freeze: Mapping[str, Any], segment: str) -> int:
+    params = dict(freeze["parameters"])
+    bounds = dict(params["bounds"])
+    name = str(segment).strip().lower()
+    if name == "train":
+        return int(bounds["train_start_ms"])
+    if name == "validation":
+        return int(bounds["validation_start_ms"])
+    if name == "oos":
+        return int(bounds["oos_start_ms"])
+    if name == "forward":
+        return int(freeze["frozen_at_ms"]) + 1
+    raise ValueError(f"unsupported COPY_V21 segment: {segment!r}")
+
+
+def _segment_end_ms(freeze: Mapping[str, Any], segment: str) -> int | None:
+    bounds = dict(freeze["parameters"]["bounds"])
+    name = str(segment).strip().lower()
+    if name == "train":
+        return int(bounds["train_end_ms"])
+    if name == "validation":
+        return int(bounds["validation_end_ms"])
+    if name == "oos":
+        return int(bounds["oos_end_ms"])
+    if name == "forward":
+        return None
+    raise ValueError(f"unsupported COPY_V21 segment: {segment!r}")
 
 
 def evaluate_frozen_v21(
@@ -647,6 +908,42 @@ def evaluate_frozen_v21(
         and oos.get("eligible") is True
         and forward.get("eligible") is True
     )
+    capacity_diagnostic = (
+        evaluate_capacity_scenarios(
+            metaorders,
+            books_by_coin,
+            freeze_payload,
+            segment="forward",
+        )
+        if forward.get("heldout_evaluated") is True
+        else {
+            "schema_version": "hypersmart.copy_vault_capacity_diagnostic.v1",
+            "scope": "DIAGNOSTIC_ONLY",
+            "economic_proof": False,
+            "promotion_eligible": False,
+            "status": "NOT_RUN_FORWARD_NOT_EVALUATED",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    )
+    stress_diagnostic = (
+        evaluate_stress_matrix(
+            metaorders,
+            books_by_coin,
+            freeze_payload,
+            segment="forward",
+        )
+        if forward.get("eligible") is True
+        else {
+            "schema_version": "hypersmart.copy_vault_stress_diagnostic.v1",
+            "scope": "DIAGNOSTIC_ONLY",
+            "economic_proof": False,
+            "promotion_eligible": False,
+            "status": "NOT_RUN_FORWARD_NOT_ELIGIBLE",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "family": "copy_vault",
@@ -665,6 +962,8 @@ def evaluate_frozen_v21(
         "validation": validation,
         "oos": oos,
         "forward": forward,
+        "capacity_diagnostic": capacity_diagnostic,
+        "stress_diagnostic": stress_diagnostic,
         "carry_pnl_usd": 0.0,
         "paper_read_only": True,
         "real_execution": False,
@@ -672,8 +971,11 @@ def evaluate_frozen_v21(
 
 
 __all__ = [
+    "CAPACITY_SCENARIOS_USD",
     "PROTOCOL",
     "SCHEMA_VERSION",
+    "evaluate_capacity_scenarios",
     "evaluate_frozen_v21",
     "evaluate_frozen_v21_segment",
+    "evaluate_stress_matrix",
 ]
