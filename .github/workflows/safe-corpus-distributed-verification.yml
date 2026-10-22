@@ -1,12 +1,9 @@
 name: SAFE corpus distributed byte verification
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/safe-corpus-distributed-verification.yml'
-      - 'tools/verify_safe_corpus_partition.py'
-      - 'tests/test_verify_safe_corpus_partition.py'
+  # Full byte certification is expensive and must not be queued on each main
+  # push: GitHub concurrency replaces an older pending run even with
+  # cancel-in-progress: false. Use dispatch or the nightly schedule instead.
   schedule:
     # After nightly clone/readiness and durable-state gates. Paris: 22:37 CEST.
     - cron: '37 20 * * *'
