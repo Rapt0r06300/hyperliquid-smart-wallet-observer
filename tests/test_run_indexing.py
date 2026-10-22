@@ -719,3 +719,41 @@ def test_sharded_receipt_is_deterministic_and_bounded(tmp_path) -> None:
     assert relative[-1] == "example.manifest.json"
     assert path == module._sharded_receipt_path(root, "safe", "example")
     assert path != module._sharded_receipt_path(root, "safe", "different")
+
+
+def test_sparse_reconciliation_uses_indexed_legacy_tree_size(tmp_path, monkeypatch) -> None:
+    """An omitted sparse-checkout directory must never recreate a huge Git tree."""
+    import index_run_manifest as module
+
+    root = _bootstrap_root(tmp_path)
+    monkeypatch.setattr(module, "_LEGACY_FLAT_TREE_THRESHOLD", 3)
+    index_path = root / "catalog/DATA_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["shards"] = [
+        {
+            "dataset_id": f"existing-{i}",
+            "manifest_path": f"datasets/safe/existing-{i}.manifest.json",
+            "quality_status": "SAFE",
+            "sha256": "b" * 64,
+        }
+        for i in range(3)
+    ]
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    # Reproduce the hosted reconciler's sparse checkout: Git knows these
+    # immutable receipts, but datasets/safe is absent from the worktree.
+    (root / "datasets/safe").rmdir()
+    run = tmp_path / "RUN_MANIFEST.json"
+    _write_run(run, [_manifest(
+        family="l2Book", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+        dataset_id="sparse-new-receipt",
+    )])
+    module.index_run_manifests([run], root=root)
+    updated = json.loads(index_path.read_text(encoding="utf-8"))
+    new_row = next(row for row in updated["shards"]
+                   if row["dataset_id"] == "sparse-new-receipt")
+    assert new_row["quality_status"] == "SAFE"
+    assert new_row["manifest_path"].startswith("datasets/sharded/safe/")
+    assert (root / new_row["manifest_path"]).is_file()
+    assert not (root / "datasets/safe").exists()
+    assert sum(row["dataset_id"].startswith("existing-")
+               for row in updated["shards"]) == 3

@@ -607,9 +607,22 @@ def index_run_manifests(
         for key, old_row in rows_by_id.items()
     }
 
+    # Sparse Actions checkouts intentionally omit datasets/. Infer oversized
+    # immutable flat trees from the SHA-bound index as well as the filesystem.
+    # Otherwise a new receipt recreates a >GitHub-limit legacy tree on push.
+    legacy_flat_counts = {stage: 0 for stage in set(_STAGE_BY_STATUS.values())}
+    for row in rows_by_id.values():
+        parent, sep, _ = str(row.get("manifest_path") or "").rpartition("/")
+        if sep and parent.startswith("datasets/"):
+            stage = parent.removeprefix("datasets/")
+            if stage in legacy_flat_counts:
+                legacy_flat_counts[stage] += 1
     oversized_stages = {
-        stage: _oversized_legacy_stage(base, stage)
-        for stage in set(_STAGE_BY_STATUS.values())
+        stage: (
+            _oversized_legacy_stage(base, stage)
+            or legacy_flat_counts[stage] >= _LEGACY_FLAT_TREE_THRESHOLD
+        )
+        for stage in legacy_flat_counts
     }
     imported = 0
     statuses: dict[str, int] = {}
