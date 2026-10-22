@@ -27,6 +27,11 @@ on:
       - "clone_payload/README.md"
       - ".gitattributes"
   workflow_dispatch:
+  # Run the latest main restore suite when cloud dataset health completes:
+  # bot-created main commits do not always initiate push-triggered Actions.
+  workflow_run:
+    workflows: [dataset-health-receipt]
+    types: [completed]
   schedule:
     - cron: "23 3 * * *"
 

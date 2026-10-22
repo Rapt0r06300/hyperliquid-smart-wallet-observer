@@ -16,7 +16,11 @@ on:
       - 'tests/test_verify_safe_corpus_partition.py'
   schedule:
     - cron: '47 19 * * *'
-  # Explicit dispatch and nightly run avoid queued-run replacement on rapid main pushes.
+  # Verify new sync fixes from the current main once cloud dataset health
+  # completes, even if app-created commits do not fire push-triggered Actions.
+  workflow_run:
+    workflows: [dataset-health-receipt]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
