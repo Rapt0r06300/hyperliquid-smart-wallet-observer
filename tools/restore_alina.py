@@ -1109,7 +1109,12 @@ def _load_replay_ready_plan(
     """Return the exact SAFE/replayable rows and their immutable outer assets."""
     print("ALINA_RESTORE_PHASE=VERIFY_CANONICAL_PARTITIONS", file=sys.stderr, flush=True)
     try:
-        index = read_index(index_path)
+        index = read_index(
+            index_path, progress_callback=lambda done, total: print(
+                f"ALINA_CATALOG_PARTITIONS={done}/{total}",
+                file=sys.stderr, flush=True,
+            ),
+        )
     except (OSError, ValueError) as exc:
         raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
     print("ALINA_RESTORE_PHASE=VERIFY_SAFE_ADMISSION", file=sys.stderr, flush=True)
