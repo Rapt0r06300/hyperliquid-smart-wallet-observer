@@ -111,6 +111,17 @@ def test_historical_workflow_never_cancels_active_reconciliation() -> None:
     assert "self-hosted" not in workflow.split("runs-on: ubuntu-latest")[1].split("steps:")[0]
 
 
+def test_sparse_reconcile_validation_does_not_require_unchecked_out_receipts() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github" / "workflows" / "reconcile-v2-catalog.yml"
+    ).read_text(encoding="utf-8")
+    validation = workflow.split("name: Validate rebuilt control plane", 1)[1]
+    validation = validation.split("name: Commit reconciled catalog", 1)[0]
+    assert "check_dataset_quality.py --catalog-only" in validation
+    assert "tests/test_dataset_policy.py" not in validation
+
+
 def test_noop_compaction_skips_redundant_global_metrics() -> None:
     workflow = (
         Path(__file__).resolve().parents[1]
