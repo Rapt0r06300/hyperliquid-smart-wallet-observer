@@ -1,6 +1,10 @@
 name: Alina SAFE restore regression
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/alina-restore-safe-regression.yml'
   schedule:
     - cron: '47 19 * * *'
   # Explicit dispatch and nightly run avoid queued-run replacement on rapid main pushes.
@@ -137,7 +141,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
+          import gzip
           import hashlib
+          import json
           import os
           import tempfile
           from pathlib import Path
@@ -159,6 +165,16 @@ jobs:
               size, digest = _download_to_path(asset["browser_download_url"], path, token=token, max_bytes=asset["size"])
               assert size == asset["size"] and digest == _expected_digest(asset)
               assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+              # A real selected SAFE shard must be readable as executable JSONL,
+              # not merely an opaque gzip with a matching compressed SHA.
+              events = 0
+              with gzip.open(path, "rt", encoding="utf-8") as records:
+                  for line in records:
+                      event = json.loads(line)
+                      assert isinstance(event, dict)
+                      events += 1
+              assert events == 200000, events
+              print("HISTORICAL_SAFE_JSONL_REPLAY_STREAM_VERIFIED", events)
               verified_prefix = path.read_bytes()[:min(1024 * 1024, size // 2)]
           import json
           from datetime import datetime, timezone
