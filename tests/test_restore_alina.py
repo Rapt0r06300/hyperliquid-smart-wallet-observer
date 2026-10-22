@@ -1160,6 +1160,44 @@ def test_canonical_catalog_requires_sha_bound_metrics_and_unique_id(tmp_path):
         module._load_current_safe_catalog(index_path, metrics_path)
 
 
+
+def test_replay_ready_catalog_partition_reader_invoked_only_once(tmp_path, monkeypatch, capsys):
+    module = _module()
+    raw = b"safe-data"
+    row = {
+        "dataset_id": "safe-once",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "release_tag": "data-v2-test",
+        "release_asset": "safe.jsonl.gz",
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+
+    original_read = module.read_index
+    calls = []
+    def counted_read(path):
+        calls.append(path)
+        return original_read(path)
+    monkeypatch.setattr(module, "read_index", counted_read)
+
+    safe, proof, rows, required = module._load_replay_ready_plan(index_path, metrics_path)
+    assert len(calls) == 1
+    assert proof["safe_catalog_shards"] == 1
+    assert list(safe) == ["safe-once"]
+    assert [item["dataset_id"] for item in rows] == ["safe-once"]
+    assert len(required) == 1
+    assert "ALINA_RESTORE_PHASE=SAFE_PLAN_READY" in capsys.readouterr().err
+
+
 def test_catalog_refuses_explicitly_denied_safe_and_accepts_compact_evidence(tmp_path):
     import pytest
     module = _module()
