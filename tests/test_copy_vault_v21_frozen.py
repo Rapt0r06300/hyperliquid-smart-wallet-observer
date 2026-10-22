@@ -77,11 +77,26 @@ def test_reference_depth_uses_only_the_latest_book_received_by_signal_time() -> 
         },
     ]
 
-    features = V21._reference_depth_features(
-        {"signal_ts_ms": 1_000, "direction": 1}, books
+    candidates, audit = V21._segment_candidates(
+        [
+            {
+                "signal_ts_ms": 1_000,
+                "direction": 1,
+                "coin": "BTC",
+                "member_events": [{"action": "ADD", "taille_usd": 150.0}],
+            }
+        ],
+        {"BTC": books},
+        start_ms=900,
+        end_ms=1_200,
+        minimum_leader_fill_notional_usd=100.0,
+        signed_depth_imbalance_minimum=-1.0,
     )
 
-    assert features == pytest.approx((99.0 / 301.0, 101.0))
+    assert len(candidates) == 1
+    assert candidates[0]["signed_reference_depth_imbalance"] == pytest.approx(99.0 / 301.0)
+    assert candidates[0]["reference_two_sided_capacity_usd"] == pytest.approx(101.0)
+    assert audit["FIXED_POLICY_CANDIDATE"] == 1
 
 
 def test_reference_depth_is_unmeasurable_without_a_pre_signal_book() -> None:
@@ -94,9 +109,24 @@ def test_reference_depth_is_unmeasurable_without_a_pre_signal_book() -> None:
         }
     ]
 
-    assert V21._reference_depth_features(
-        {"signal_ts_ms": 1_000, "direction": 1}, future_only
-    ) is None
+    candidates, audit = V21._segment_candidates(
+        [
+            {
+                "signal_ts_ms": 1_000,
+                "direction": 1,
+                "coin": "BTC",
+                "member_events": [{"action": "ADD", "taille_usd": 150.0}],
+            }
+        ],
+        {"BTC": future_only},
+        start_ms=900,
+        end_ms=1_200,
+        minimum_leader_fill_notional_usd=100.0,
+        signed_depth_imbalance_minimum=-1.0,
+    )
+
+    assert candidates == []
+    assert audit["REFERENCE_DEPTH_FEATURE_UNMEASURABLE"] == 1
 
 
 def test_reference_depth_rejects_stale_or_noncausal_books() -> None:
