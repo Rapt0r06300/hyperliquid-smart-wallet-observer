@@ -346,12 +346,153 @@ def _read_restore_inventory_asset(
     return releases
 
 
+
+def _iter_published_inventory_fast(
+    repository: str, *, token: str | None,
+    allow_incomplete: bool,
+    inventory_cache_root: Path | None,
+) -> Iterable[Mapping[str, Any]]:
+    """Resolve the whole Release set in bounded calls using its SHA-verified snapshot.
+
+    The historical slow path walks thousands of live Release pages, risking API
+    timeouts and rate limits before the first SAFE byte is transferred. Use the
+    latest GitHub-hosted RESTORE_INVENTORY, then reconcile recent live Releases.
+    Missing catalog-required tags are still checked against GitHub by tag in
+    restore_everything; an unverified or missing snapshot always fails closed.
+    """
+    candidates: list[tuple[tuple[int, int], str, Mapping[str, Any]]] = []
+    live: list[Mapping[str, Any]] = []
+    seen_live_ids: dict[int, str] = {}
+    for page in range(1, 6):
+        print(
+            f"ALINA_RESTORE_PHASE=LOCATE_PUBLISHED_SAFE_INVENTORY page={page}",
+            file=sys.stderr, flush=True,
+        )
+        url = f"https://api.github.com/repos/{repository}/releases?per_page=100&page={page}"
+        payload = _json(url, token=token)
+        if not isinstance(payload, list):
+            raise RestoreError("published SAFE inventory lookup returned non-list")
+        for release in payload:
+            if not isinstance(release, Mapping):
+                raise RestoreError("invalid live Release while locating SAFE inventory")
+            tag = release.get("tag_name")
+            rid = release.get("id")
+            if (type(rid) is not int or rid <= 0
+                    or not isinstance(tag, str) or not tag):
+                raise RestoreError("invalid live Release identity")
+            prev = seen_live_ids.get(rid)
+            if prev is not None:
+                if prev != tag:
+                    raise RestoreError("live Release changed tag during pagination")
+                continue
+            seen_live_ids[rid] = tag
+            assets = release.get("assets")
+            if not isinstance(assets, list):
+                raise RestoreError("invalid live Release embedded assets")
+            asset_ids: set[int] = set()
+            asset_names: set[str] = set()
+            for asset in assets:
+                _validate_release_asset(
+                    asset, rid, asset_ids, asset_names,
+                    allow_incomplete=allow_incomplete,
+                )
+            live.append(release)
+            matched = re.fullmatch(r"alina-restore-inventory-(\d+)-(\d+)", tag)
+            if matched:
+                matches = [
+                    asset for asset in assets
+                    if asset.get("name") == "RESTORE_INVENTORY.json.gz"
+                ]
+                if len(matches) != 1:
+                    raise RestoreError(f"published SAFE inventory asset unavailable: {tag}")
+                candidates.append((
+                    (int(matched.group(1)), int(matched.group(2))),
+                    tag, matches[0],
+                ))
+        if candidates:
+            break
+        if len(payload) < 100:
+            break
+    if not candidates:
+        raise RestoreError(
+            "ALINA_SAFE_INVENTORY_UNAVAILABLE: no published RESTORE_INVENTORY.json.gz "
+            "within five recent GitHub Release pages; refusing slow multi-thousand-page scan"
+        )
+    _run_id, inventory_tag, asset = max(candidates, key=lambda row: row[0])
+    cache_path = (
+        inventory_cache_root / _safe_component(inventory_tag)
+        / _safe_component(str(asset["name"]))
+        if inventory_cache_root is not None else None
+    )
+    print(
+        f"ALINA_RESTORE_PHASE=LOAD_PUBLISHED_SAFE_INVENTORY tag={inventory_tag}",
+        file=sys.stderr, flush=True,
+    )
+    historical = _read_restore_inventory_asset(
+        asset, repository, token=token, cache_path=cache_path,
+        allow_incomplete=allow_incomplete,
+    )
+    merged: dict[str, dict[str, Any]] = {}
+    ids: dict[int, str] = {}
+    for row in historical:
+        rid = row["id"]
+        tag = row["tag_name"]
+        if rid in ids or tag in merged:
+            raise RestoreError("duplicated identity in published SAFE Release inventory")
+        ids[rid] = tag
+        merged[tag] = dict(row)
+    added = 0
+    updated = 0
+    for row in live:
+        tag = str(row["tag_name"])
+        if tag.startswith("alina-restore-inventory-"):
+            continue
+        rid = row["id"]
+        if tag not in merged:
+            if rid in ids:
+                raise RestoreError(f"live Release id conflicts with published inventory: {tag}")
+            merged[tag] = dict(row)
+            ids[rid] = tag
+            added += 1
+            continue
+        stored = merged[tag]
+        if stored["id"] != rid:
+            raise RestoreError(f"live Release tag conflicts with published inventory: {tag}")
+        prior = {asset["name"]: asset for asset in stored["assets"]}
+        for asset in row["assets"]:
+            name = asset["name"]
+            before = prior.get(name)
+            if before is not None and (
+                before["id"] != asset["id"]
+                or before["size"] != asset["size"]
+                or _expected_digest(before) != _expected_digest(asset)
+                or before.get("state") != asset.get("state")
+            ):
+                raise RestoreError(f"live Release asset identity conflicts with snapshot: {tag}/{name}")
+            prior[name] = asset
+        stored["assets"] = list(prior.values())
+        updated += 1
+    print(
+        f"ALINA_RESTORE_PHASE=SAFE_INVENTORY_READY snapshot_releases={len(historical)} "
+        f"live_added={added} live_refreshed={updated} total={len(merged)}",
+        file=sys.stderr, flush=True,
+    )
+    yield from merged.values()
+
+
 def iter_releases(
     repository: str, *, token: str | None = None,
     allow_incomplete: bool = False,
     inventory_cache_root: Path | None = None,
+    prefer_published_inventory: bool = False,
 ) -> Iterable[Mapping[str, Any]]:
     """Read every Release and its documented embedded asset inventory."""
+    if prefer_published_inventory:
+        yield from _iter_published_inventory_fast(
+            repository, token=token, allow_incomplete=allow_incomplete,
+            inventory_cache_root=inventory_cache_root,
+        )
+        return
     # The list-Releases response contains each Release's asset array.  Reading
     # 100 Releases per page keeps large public repositories inside GitHub's
     # anonymous API allowance instead of issuing one extra request per Release.
@@ -2203,6 +2344,7 @@ def restore_everything(
     releases = list(iter_releases(
         repository, token=token, allow_incomplete=recover_verifiable,
         inventory_cache_root=releases_root,
+        prefer_published_inventory=(profile == "replay-ready"),
     ))
     # Historical inventories may omit an older Release still referenced by
     # canonical SAFE evidence. Resolve only missing catalog tags from GitHub's

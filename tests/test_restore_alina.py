@@ -3207,3 +3207,83 @@ def test_unlimited_download_rejects_explicit_cap_before_network(capsys):
     ):
         assert module.main(["--replay-ready", "--unlimited-download", *parameters]) == 2
         assert "--unlimited-download conflicts with --max-download-gib" in capsys.readouterr().err
+
+
+def test_fast_safe_inventory_downloads_snapshot_after_one_page(monkeypatch):
+    module = _module()
+    expected = {
+        "id": 101, "tag_name": "historical-safe",
+        "assets": [{**_asset("old.jsonl.gz", "https://example.invalid/old", b"payload"),
+                    "id": 201, "state": "uploaded"}],
+    }
+    inventory = {
+        "id": 999, "tag_name": "alina-restore-inventory-102-1",
+        "assets": [{
+            **_asset("RESTORE_INVENTORY.json.gz", "https://example.invalid/inv", b"inv"),
+            "id": 1001, "state": "uploaded",
+        }],
+    }
+    new = {
+        "id": 1000, "tag_name": "current-safe",
+        "assets": [{**_asset("new.jsonl.gz", "https://example.invalid/new", b"new"),
+                    "id": 2002, "state": "uploaded"}],
+    }
+    calls = []
+    def request(url, **_kwargs):
+        calls.append(url)
+        if "page=1" in url:
+            return [new, inventory]
+        raise AssertionError(f"unexpected deep scan: {url}")
+    monkeypatch.setattr(module, "_json", request)
+    monkeypatch.setattr(
+        module, "_read_restore_inventory_asset",
+        lambda *_a, **_k: [expected],
+    )
+    rows = list(module.iter_releases("owner/repo", prefer_published_inventory=True))
+    assert {row["tag_name"] for row in rows} == {"historical-safe", "current-safe"}
+    assert calls == ["https://api.github.com/repos/owner/repo/releases?per_page=100&page=1"]
+
+
+def test_fast_safe_inventory_missing_snapshot_fails_not_silent_deep_scan(monkeypatch):
+    import pytest
+    module = _module()
+    requests = []
+    def request(url, **_kwargs):
+        requests.append(url)
+        return [{"id": 1, "tag_name": "data-v2-new", "assets": []}]
+    monkeypatch.setattr(module, "_json", request)
+    with pytest.raises(module.RestoreError, match="SAFE_INVENTORY_UNAVAILABLE"):
+        list(module.iter_releases("owner/repo", prefer_published_inventory=True))
+    assert len(requests) == 1
+
+
+def test_fast_safe_inventory_changed_asset_sha_fails_closed(monkeypatch):
+    import pytest
+    module = _module()
+    live_asset = {**_asset("safe.gz", "https://example.invalid/live", b"new"),
+                  "id": 5, "state": "uploaded"}
+    historical_asset = {**_asset("safe.gz", "https://example.invalid/historical", b"old"),
+                        "id": 5, "state": "uploaded"}
+    inventory = {
+        "id": 999, "tag_name": "alina-restore-inventory-888-1",
+        "assets": [{
+            **_asset("RESTORE_INVENTORY.json.gz", "https://example.invalid/inventory", b"inventory"),
+            "id": 900, "state": "uploaded",
+        }],
+    }
+    monkeypatch.setattr(
+        module, "_json",
+        lambda *_a, **_k: [
+            {"id": 11, "tag_name": "current-safe", "assets": [live_asset]},
+            inventory,
+        ],
+    )
+    monkeypatch.setattr(
+        module, "_read_restore_inventory_asset",
+        lambda *_a, **_k: [{
+            "id": 11, "tag_name": "current-safe", "assets": [historical_asset],
+        }],
+    )
+    with pytest.raises(module.RestoreError, match="asset identity conflicts"):
+        list(module.iter_releases("owner/repo", prefer_published_inventory=True))
+
