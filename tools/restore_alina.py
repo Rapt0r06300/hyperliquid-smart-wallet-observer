@@ -128,6 +128,10 @@ def _download_to_path(
         if existing_size:
             request_headers["Range"] = f"bytes={existing_size}-"
         request = urllib.request.Request(url, headers=request_headers)
+        print(
+            f"ALINA_DOWNLOAD_CONNECT asset={target.name} offset={existing_size} attempt={attempt}/{retries}",
+            file=sys.stderr, flush=True,
+        )
         try:
             digest = hashlib.sha256()
             with urllib.request.urlopen(request, timeout=120) as response:
@@ -160,6 +164,7 @@ def _download_to_path(
                 else:
                     size = 0
                 with target.open("ab" if append else "wb") as output:
+                    last_heartbeat = time.monotonic()
                     while True:
                         chunk = response.read(8 * 1024 * 1024)
                         if not chunk:
@@ -169,6 +174,12 @@ def _download_to_path(
                         output.write(chunk)
                         digest.update(chunk)
                         size += len(chunk)
+                        if time.monotonic() - last_heartbeat >= 10:
+                            print(
+                                f"ALINA_DOWNLOAD_BYTES asset={target.name} received={size}",
+                                file=sys.stderr, flush=True,
+                            )
+                            last_heartbeat = time.monotonic()
             return size, digest.hexdigest()
         except urllib.error.HTTPError as exc:
             if (
