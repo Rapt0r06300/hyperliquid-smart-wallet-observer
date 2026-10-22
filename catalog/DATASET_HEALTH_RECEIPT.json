@@ -43140,10 +43140,9 @@
     "event_intelligence_collection:PARTIAL": 32,
     "event_intelligence_collection:UNAVAILABLE": 24,
     "forward_paper:COMPLETE": 1,
-    "market_collection:COMPLETE": 1638,
+    "market_collection:COMPLETE": 1639,
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 21,
-    "market_collection:RUNNING": 1,
     "market_collection:UNAVAILABLE": 376,
     "module_pnl_proof:COMPLETE": 1,
     "official_archive_collection:COMPLETE": 10,
@@ -89492,26 +89491,21 @@
       "campaign_id": "market-e8-15-2026102210-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "market_collection",
-      "last_checkpoint_id": null,
-      "lease": {
-        "acquired_at": "2026-10-22T11:41:12.240407Z",
-        "expires_at": "2026-10-22T17:26:12.240407Z",
-        "lease_token_sha256": "7df97ffb240cfe75804c06097eff7791b26154e431183cc5ed841ff958c2c9b6",
-        "owner_run_id": "39771516943"
-      },
-      "lease_expires_at": "2026-10-22T17:26:12.240407Z",
-      "lease_owner": "39771516943",
+      "last_checkpoint_id": "03b44a39f5f30a1007496c2168f71c26beb445efd48acf377e7582f4c3eba024",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
       "next_due_at": null,
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "RUNNING",
-      "status_reason": "worker_started",
-      "updated_at": "2026-10-22T11:41:12.240455Z"
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-22T12:56:28.672459Z"
     },
     {
       "analysis_stage": null,
@@ -107305,8 +107299,8 @@
     "unique_trade_count_exact": false,
     "valid_record_count_exact": false
   },
-  "dataset_commit": "92c04e724ad97237a9b8702a6b8847ff648267c5",
-  "metrics_digest": "c12f5795fc1fff1a828ea5306e7ec64a87b620d18c5b590bde46313a665240b5",
+  "dataset_commit": "cb40850b265508309e14a1cc5a4a46b0dc42f949",
+  "metrics_digest": "52d34b592c25451f1e630ec57ab700783f65fb094d0f9e0a01e28c843f0da474",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
   "oldest_next_due_at": "2026-10-02T18:10:03.324968Z",
@@ -107328,7 +107322,7 @@
     "mismatches": [],
     "status": "CONSISTENT"
   },
-  "receipt_digest": "b1b34cf71758cfb0e62be84bddbf02401696774d865cc5497bdf9cc1ddea3510",
+  "receipt_digest": "4ce0b2d92420e28b9f4ebc52f77fa8949933461309eab13b3444c0a12a38cfd8",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "REPLAYABLE_BUT_PARTIAL": 45319,
@@ -107374,8 +107368,8 @@
     }
   ],
   "totals": {
-    "GAP_COUNT_COVERAGE_COMPLETE": true,
-    "GAP_COUNT_MISSING_SHARDS": 0,
+    "GAP_COUNT_COVERAGE_COMPLETE": false,
+    "GAP_COUNT_MISSING_SHARDS": 33559,
     "GLOBAL_UNIQUE_FAILURE_REASON_COUNT": 0,
     "GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE": false,
     "GLOBAL_UNIQUE_TRADE_IDENTITY_DIGEST": null,
