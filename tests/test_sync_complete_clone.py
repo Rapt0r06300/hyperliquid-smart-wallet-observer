@@ -384,6 +384,22 @@ def test_lfs_filters_disabled_in_attributes():
     )
 
 
+
+def test_windows_checkout_preserves_byte_exact_replay_catalog():
+    # Git core.autocrlf=true adds a CR byte per JSON partition on Windows
+    # unless checkout attributes explicitly preserve its canonical LF bytes.
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    active = {
+        line.strip() for line in attributes.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert {
+        "catalog/DATA_INDEX.json text eol=lf",
+        "catalog/DATA_METRICS.json text eol=lf",
+        "catalog/data-index-parts/*.json text eol=lf",
+    }.issubset(active)
+
+
 def _write_catalog_budget_fixture(tmp_path, rows):
     index = tmp_path / "catalog" / "DATA_INDEX.json"
     index.parent.mkdir(parents=True, exist_ok=True)
