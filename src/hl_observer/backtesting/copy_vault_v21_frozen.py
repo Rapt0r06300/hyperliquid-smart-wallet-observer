@@ -28,8 +28,9 @@ from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 
-SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v2"
+SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v3"
 PROTOCOL = "copy_v21_entry_capacity_daily_lock_v1"
+REFERENCE_DAILY_OBJECTIVE_USD = 5.0
 FROZEN_COPY_DELAY_MS = 60_000
 FROZEN_MAX_REFERENCE_LAG_MS = 30_000
 FROZEN_MAX_TARGET_LAG_MS = 30_000
@@ -183,6 +184,17 @@ def _apply_risk_exit(
 def _mean_daily(statistics: Mapping[str, Any]) -> float | None:
     values = [float(value) for value in (statistics.get("daily_net_pnl_usd") or ())]
     return sum(values) / len(values) if values else None
+
+
+def _reference_objective_status(*segments: Mapping[str, Any]) -> str:
+    daily_means = [segment.get("daily_mean_net_pnl_usd") for segment in segments]
+    if not daily_means or any(value is None for value in daily_means):
+        return "UNMEASURABLE"
+    return (
+        "ATTEINT"
+        if all(float(value) >= REFERENCE_DAILY_OBJECTIVE_USD for value in daily_means)
+        else "NON_ATTEINT"
+    )
 
 
 def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -563,8 +575,9 @@ def evaluate_frozen_v21(
         "family": "copy_vault",
         "protocol": PROTOCOL,
         "reference_feature_policy": "LATEST_CAUSAL_RECEIVED_BOOK_AT_OR_BEFORE_SIGNAL_V1",
-        "objective_net_usd_per_day": 5.0,
-        "objective_status": "ATTEINT" if proven else "NON_PROUVE",
+        "objective_net_usd_per_day": REFERENCE_DAILY_OBJECTIVE_USD,
+        "objective_is_informational_reference_only": True,
+        "objective_status": _reference_objective_status(validation, oos, forward),
         "economically_proven": proven,
         "selection_scope": "IMMUTABLE_FROZEN_POLICY_SEQUENTIAL_HELDOUT",
         "heldout_used_for_retuning": False,

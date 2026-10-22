@@ -165,7 +165,7 @@ def test_frozen_v21_opens_heldouts_sequentially(monkeypatch: pytest.MonkeyPatch)
     assert report["oos"]["eligible"] is False
     assert report["forward"]["status"] == "BLOCKED_BY_OOS"
     assert report["forward"]["heldout_evaluated"] is False
-    assert report["objective_status"] == "NON_PROUVE"
+    assert report["objective_status"] == "UNMEASURABLE"
     assert report["carry_pnl_usd"] == 0.0
 
 
@@ -299,3 +299,23 @@ def test_frozen_v21_does_not_use_the_five_dollar_reference_as_a_gate(
     assert result["eligible"] is True
     assert "DAILY_MEAN_NET_BELOW_5_USD" not in result["reasons"]
     assert result["status"] == "PASS"
+
+
+def test_reference_objective_status_is_independent_from_economic_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        V21,
+        "_evaluate_segment",
+        lambda *_args, segment, **_kwargs: {
+            "segment": segment,
+            "eligible": True,
+            "daily_mean_net_pnl_usd": 4.5,
+        },
+    )
+
+    report = V21.evaluate_frozen_v21([], {}, _freeze())
+
+    assert report["economically_proven"] is True
+    assert report["objective_status"] == "NON_ATTEINT"
+    assert report["objective_is_informational_reference_only"] is True
