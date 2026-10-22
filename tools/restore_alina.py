@@ -2980,7 +2980,7 @@ def main(argv: list[str] | None = None) -> int:
         help="restore the latest published snapshot when available; refuse corrupt snapshots",
     )
     args = parser.parse_args(argv)
-    if args.unlimited_download and not args.replay_ready:
+    if args.unlimited_download and any(\n        token == "--max-download-gib" or token.startswith("--max-download-gib=")\n        for token in (argv if argv is not None else sys.argv[1:])\n    ):\n        print("ALINA_RESTORE_FAIL: --unlimited-download conflicts with --max-download-gib", file=sys.stderr)\n        return 2\n    if args.unlimited_download and not args.replay_ready:
         print("ALINA_RESTORE_FAIL: --unlimited-download requires --replay-ready", file=sys.stderr)
         return 2
     if args.unlimited_download and (args.prune_cache_only or args.preflight_only):

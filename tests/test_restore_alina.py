@@ -3159,3 +3159,4 @@ def test_unlimited_download_passes_none_budget_to_existing_engine(
     ]) == 2
     assert seen["profile"] == "replay-ready"
     assert seen["max_download_bytes"] is None
+\n\ndef test_unlimited_download_rejects_explicit_cap_before_network(capsys):\n    module = _module()\n    for parameters in (\n        ["--max-download-gib", "32"],\n        ["--max-download-gib=32"],\n    ):\n        assert module.main(["--replay-ready", "--unlimited-download", *parameters]) == 2\n        assert "--unlimited-download conflicts with --max-download-gib" in capsys.readouterr().err\n
