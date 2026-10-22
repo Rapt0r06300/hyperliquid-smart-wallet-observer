@@ -276,6 +276,32 @@ def _read_restore_status(
                 "RESTORE_INCOMPLETE", inventory_sha,
                 "restore report is not bound to the current canonical DATA_INDEX SHA-256",
             )
+    if status == "REPLAY_READY_COMPLETE":
+        classification = payload.get("classification")
+        verification = payload.get("catalog_verification")
+        if not isinstance(classification, dict) or not isinstance(verification, dict):
+            return (
+                "RESTORE_INCOMPLETE", inventory_sha,
+                "restore report has no exact SAFE materialization parity",
+            )
+        expected_shards = classification.get("expected_usable_shards")
+        usable_shards = classification.get("usable_shards")
+        expected_bytes = classification.get("expected_usable_bytes")
+        usable_bytes = classification.get("usable_bytes")
+        catalog_safe = verification.get("safe_catalog_shards", expected_shards)
+        if (
+            type(expected_shards) is not int or expected_shards < 0
+            or type(usable_shards) is not int or usable_shards != expected_shards
+            or type(expected_bytes) is not int or expected_bytes < 0
+            or type(usable_bytes) is not int or usable_bytes != expected_bytes
+            or type(catalog_safe) is not int or catalog_safe != expected_shards
+            or classification.get("materialization_complete") is not True
+            or classification.get("failures") not in ([], None)
+        ):
+            return (
+                "RESTORE_INCOMPLETE", inventory_sha,
+                "restore report has no exact SAFE materialization parity",
+            )
     return status, inventory_sha, None
 
 

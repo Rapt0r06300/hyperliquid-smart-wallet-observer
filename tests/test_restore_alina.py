@@ -2552,6 +2552,14 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
     ]
     assert (usable / "safe-one.jsonl.gz").read_bytes() == payloads["safe-one"]
     assert result["classification"]["usable_shards"] == 1
+    assert result["classification"]["expected_usable_shards"] == 1
+    assert result["classification"]["expected_usable_bytes"] == len(payloads["safe-one"])
+    assert result["classification"]["materialization_complete"] is True
+    # Replay/backtest readers consume the canonical gzip shard directly.  A
+    # successful restore must therefore leave an actually decompressible
+    # stream, not merely a correctly named ZIP member.
+    with gzip.open(usable / "safe-one.jsonl.gz", "rb") as stream:
+        assert stream.read() == b'{"trade_id":"safe"}\n'
     # First-stage extraction already checked the ZIP member against its
     # SHA-bound manifest; the final pass correctly reuses the verified shard.
     assert result["releases"][0]["assets"][0]["status"] == "STAGED_MATERIALIZED_VERIFIED"

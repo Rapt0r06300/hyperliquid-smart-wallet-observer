@@ -68,7 +68,13 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com
 La commande explicite ci-dessus récupère le code, les catalogues et workflows
 de `main`, puis **uniquement les assets nécessaires à toutes les lignes `SAFE` et
 `replay_compatible` du catalogue courant**. Elle vérifie d'abord le SHA-256 et
-la taille du conteneur Release, puis ceux de chaque shard extrait. Les lignes
+la taille du conteneur Release, puis décompresse les conteneurs ZIP et vérifie
+la taille et le SHA-256 de chaque shard extrait. Les fichiers matérialisés dans
+`runtime/recovery/full/usable/shards/` restent au format canonique `.jsonl.gz` :
+les lecteurs de replay/backtest les ouvrent en gzip en streaming. Les gonfler
+une seconde fois en `.jsonl` pourrait approcher **2,38 To** pour le catalogue
+actuel, sans ajouter un seul octet d'information ni renforcer la preuve SHA.
+Les lignes
 `PARTIAL`/`REJECT`, les anciennes capsules `alina-recovery-*` et l'ancien
 bundle complet ne polluent plus le corpus de backtest. Elles restent publiées
 et récupérables volontairement avec `python tools/restore_alina.py

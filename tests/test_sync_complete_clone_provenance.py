@@ -17,7 +17,18 @@ def report(tmp_path, *, bound=SOURCE):
         "profile": "replay-ready",
         "status": "REPLAY_READY_COMPLETE",
         "source_inventory_sha256": "c" * 64,
-        "catalog_verification": {"source_index_sha256": bound},
+        "catalog_verification": {
+            "source_index_sha256": bound,
+            "safe_catalog_shards": 0,
+        },
+        "classification": {
+            "expected_usable_shards": 0,
+            "usable_shards": 0,
+            "expected_usable_bytes": 0,
+            "usable_bytes": 0,
+            "materialization_complete": True,
+            "failures": [],
+        },
     }))
     return path
 

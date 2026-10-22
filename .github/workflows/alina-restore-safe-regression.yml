@@ -55,6 +55,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  fresh-clone-contract:
+    name: Clone complete bot worktree and exercise ALINA_SYNC_COMPLETE
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Perform a real normal clone and verify complete Git objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone --branch main --single-branch \
+            "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "$RUNNER_TEMP/alina-fresh-clone"
+          cd "$RUNNER_TEMP/alina-fresh-clone"
+          test "$(git branch --show-current)" = main
+          git cat-file -e "${GITHUB_SHA}^{commit}"
+          git merge-base --is-ancestor "$GITHUB_SHA" HEAD
+          git fsck --full
+          test -z "$(git status --porcelain)"
+      - name: Exercise the one-file SAFE restore launcher from the fresh clone
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/alina-fresh-clone"
+          bash ALINA_SYNC_COMPLETE.sh --skip-update --catalog-budget \
+            > "$RUNNER_TEMP/ALINA_CATALOG_BUDGET.json"
+          python - "$RUNNER_TEMP/ALINA_CATALOG_BUDGET.json" <<'PY'
+          import json, sys
+          report=json.load(open(sys.argv[1], encoding="utf-8"))
+          assert report["status"] == "CATALOG_ONLY_NOT_RESTORED"
+          assert report["replay_selected_shards"] > 0
+          assert report["replay_selected_release_assets"] > 0
+          assert report["selected_release_asset_sizes_sha_bound"] is True
+          print("ALINA_FRESH_NORMAL_CLONE_CONTRACT_OK")
+          PY
+
   restore-safety:
     name: Verify SAFE-only restore
     runs-on: ubuntu-latest

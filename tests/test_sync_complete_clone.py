@@ -203,6 +203,16 @@ def test_disaster_recovery_commands_explicitly_opt_in_to_complete_safe_download(
     assert "sans option effectue uniquement un préflight" in guide
 
 
+def test_restore_docs_define_replay_ready_decompression_without_terabyte_duplication():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs" / "DISASTER_RECOVERY.md").read_text(encoding="utf-8")
+    for text in (readme, guide):
+        assert "décompresse les conteneurs ZIP" in text
+        assert "`.jsonl.gz`" in text
+        assert "gzip en streaming" in text
+    assert "2,38 To" in readme
+
+
 def test_no_argument_sync_is_preflight_only_and_does_not_download(
     monkeypatch, tmp_path,
 ):
@@ -266,6 +276,14 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
         "repository": module.REPOSITORY,
         "source_inventory_sha256": "c" * 64,
         "catalog_verification": {"source_index_sha256": catalog_sha},
+        "classification": {
+            "expected_usable_shards": 0,
+            "usable_shards": 0,
+            "expected_usable_bytes": 0,
+            "usable_bytes": 0,
+            "materialization_complete": True,
+            "failures": [],
+        },
     }), encoding="utf-8")
     def fresh_restore(*_a, **_k):
         report = report_dir / "RESTORE_REPORT.json"
@@ -281,6 +299,44 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     assert result["restore_report"] == "RESTORE_REPORT.json"
     assert result["source_inventory_sha256"] == "c" * 64
     assert result["catalog_index_sha256"] == catalog_sha
+
+
+def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path):
+    module = _module()
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": module.REPOSITORY,
+        "source_inventory_sha256": "d" * 64,
+        "catalog_verification": {
+            "source_index_sha256": "e" * 64,
+            "safe_catalog_shards": 2,
+        },
+        "classification": {
+            "expected_usable_shards": 2,
+            "usable_shards": 1,
+            "expected_usable_bytes": 20,
+            "usable_bytes": 10,
+            "materialization_complete": False,
+            "failures": [],
+        },
+    }), encoding="utf-8")
+
+    status, _inventory, error = module._read_restore_status(
+        report, expected_catalog_sha256="e" * 64,
+    )
+
+    assert status == "RESTORE_INCOMPLETE"
+    assert error == "restore report has no exact SAFE materialization parity"
+
+
+def test_github_restore_workflow_runs_real_full_worktree_clone_contract():
+    workflow = (ROOT / ".github" / "workflows" /
+                "alina-restore-safe-regression.yml").read_text(encoding="utf-8")
+    assert "fresh-clone-contract:" in workflow
+    assert "git clone --branch main --single-branch" in workflow
+    assert "git fsck --full" in workflow
+    assert "ALINA_SYNC_COMPLETE.sh --skip-update --catalog-budget" in workflow
 
 
 def test_zero_restore_exit_without_complete_report_fails_closed(monkeypatch, tmp_path):
@@ -495,7 +551,14 @@ def test_stale_success_report_cannot_certify_new_restore(monkeypatch, tmp_path):
     (report_dir / "RESTORE_REPORT.json").write_text(json.dumps({
         "status": "REPLAY_READY_COMPLETE", "repository": module.REPOSITORY,
         "source_inventory_sha256": "c" * 64,
-        "catalog_verification": {"source_index_sha256": digest},
+        "catalog_verification": {
+            "source_index_sha256": digest, "safe_catalog_shards": 0,
+        },
+        "classification": {
+            "expected_usable_shards": 0, "usable_shards": 0,
+            "expected_usable_bytes": 0, "usable_bytes": 0,
+            "materialization_complete": True, "failures": [],
+        },
     }), encoding="utf-8")
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
     assert module.main(["--download-safe"]) == 2

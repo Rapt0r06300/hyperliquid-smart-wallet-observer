@@ -131,6 +131,13 @@ membre extrait. L'inventaire incomplet,
 les erreurs de téléchargement, un ZIP ambigu, les pertes de données, une
 qualification révoquée ou des SHA contradictoires échouent de façon fermée.
 
+Le restaurateur décompresse les conteneurs ZIP et matérialise individuellement
+les membres SAFE sous `usable/shards/`. Il conserve chaque shard dans son format
+canonique `.jsonl.gz` ; les moteurs replay/backtest effectuent la lecture gzip en streaming.
+Cette matérialisation est complète uniquement si le nombre de shards et les
+octets compressés sont exactement égaux au plan SAFE lié au catalogue. Elle
+n'écrit jamais un membre PARTIAL ou REJECT dans `usable/`.
+
 `--recover-verifiable` permet de sauver toutes les pièces de source
 vérifiables même lorsqu'une ancienne archive est `starter`, sans empreinte
 ou définitivement inaccessible ; ces défauts restent dans

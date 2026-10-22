@@ -1316,8 +1316,13 @@ def _materialize_catalog_safe_shards(
     rows: list[Mapping[str, Any]], releases_root: Path, destination: Path,
     *, prune_stale: bool = True,
 ) -> dict[str, Any]:
+    expected_usable_shards = len(rows)
+    expected_usable_bytes = sum(int(row["bytes"]) for row in rows)
     report: dict[str, Any] = {
         "usable_shards": 0, "usable_bytes": 0, "quarantined_shards": 0,
+        "expected_usable_shards": expected_usable_shards,
+        "expected_usable_bytes": expected_usable_bytes,
+        "materialization_complete": False,
         "quarantined_bytes": 0, "excluded_rows": 0,
         "missing_or_corrupt_rows": 0, "verified_zip_members": 0,
         "skipped_verified_shards": 0, "stale_usable_quarantined": 0,
@@ -1416,6 +1421,12 @@ def _materialize_catalog_safe_shards(
                 report["stale_usable_quarantined_bytes"] += old_size
             except (OSError, RestoreError) as exc:
                 report["failures"].append({"path": str(previous), "error": str(exc)})
+    report["materialization_complete"] = (
+        report["usable_shards"] == expected_usable_shards
+        and report["usable_bytes"] == expected_usable_bytes
+        and report["missing_or_corrupt_rows"] == 0
+        and not report["failures"]
+    )
     return report
 
 
@@ -2844,6 +2855,10 @@ def restore_everything(
         and not report["failures"]
         and not report["verification_failures"]
         and not report["classification"]["failures"]
+        and (
+            profile != "replay-ready"
+            or report["classification"].get("materialization_complete") is True
+        )
         and not report["unclaimed_dataset_release_count"]
         and (working_set is None or not working_set["failures"])
         and report["analysis_evidence"]["materialized"]
