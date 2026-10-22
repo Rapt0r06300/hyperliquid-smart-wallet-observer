@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
-    if args.all_safe and "--max-download-gib" in (argv if argv is not None else sys.argv[1:]):
+    if args.all_safe and any(token == "--max-download-gib" or token.startswith("--max-download-gib=") for token in (argv if argv is not None else sys.argv[1:])):
         print("ALINA_SYNC_FAIL: --all-safe conflicts with --max-download-gib", file=sys.stderr)
         return 2
     if args.all_safe and not args.download_safe:
