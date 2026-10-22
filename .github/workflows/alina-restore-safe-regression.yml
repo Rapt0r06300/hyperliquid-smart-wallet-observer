@@ -555,7 +555,7 @@ jobs:
             & ".\ALINA_SYNC_COMPLETE.cmd"
             if ($LASTEXITCODE -ne 0) { throw "CMD no-argument launch failed" }
             $argsSeen = @(Get-Content "observed.json" -Raw | ConvertFrom-Json)
-            if (($argsSeen -join " ") -ne "--download-safe --all-safe --unpack-safe") {
+            if (($argsSeen -join " ") -ne "--download-safe --all-safe") {
               throw "No-argument CMD did not request full SAFE restoration: $argsSeen"
             }
             & ".\ALINA_SYNC_COMPLETE.cmd" --help
