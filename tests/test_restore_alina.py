@@ -7,7 +7,10 @@ import json
 import gzip
 import tarfile
 import zipfile
+import os
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -836,6 +839,43 @@ def test_streaming_download_resumes_existing_partial_with_http_range(tmp_path, m
     assert target.read_bytes() == b"prefix-suffix"
     assert size == len(b"prefix-suffix")
     assert digest == hashlib.sha256(b"prefix-suffix").hexdigest()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="regression specifique a MAX_PATH Windows")
+def test_streaming_download_supports_windows_path_over_260_chars(tmp_path, monkeypatch):
+    module = _module()
+    parent = tmp_path / ("release-" + "r" * 110)
+    parent.mkdir()
+    name = "shard-" + "s" * 120 + ".jsonl.gz"
+    target = parent / name
+    assert len(str(target.with_suffix(target.suffix + ".partial"))) > 260
+
+    class Response:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            if hasattr(self, "done"):
+                return b""
+            self.done = True
+            return b"safe"
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *_a, **_k: Response())
+    monkeypatch.setattr(module.time, "sleep", lambda *_a: None)
+
+    result = module.download_asset(
+        _asset(name, "https://example.invalid/asset", b"safe"), parent,
+    )
+
+    assert result["status"] == "DOWNLOADED_VERIFIED"
+    assert result["calculated_sha256"] == hashlib.sha256(b"safe").hexdigest()
+    assert Path("\\\\?\\" + str(target)).read_bytes() == b"safe"
 
 
 def test_http_range_rejects_wrong_total_before_appending(tmp_path, monkeypatch):

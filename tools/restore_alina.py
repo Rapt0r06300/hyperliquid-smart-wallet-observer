@@ -54,7 +54,21 @@ def _safe_component(value: str) -> str:
     return cleaned[:220]
 
 
+def _windows_io_path(path: Path) -> Path:
+    """Return an extended Windows path so immutable Release names exceed MAX_PATH safely."""
+    path = Path(path)
+    if os.name != "nt":
+        return path
+    raw = os.path.abspath(os.fspath(path))
+    if raw.startswith("\\\\?\\"):
+        return Path(raw)
+    if raw.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + raw[2:])
+    return Path("\\\\?\\" + raw)
+
+
 def _sha256(path: Path) -> str:
+    path = _windows_io_path(path)
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -113,6 +127,7 @@ def _download_to_path(
     max_bytes: int | None = None,
 ) -> tuple[int, str]:
     """Stream one Release asset; optional hard cap protects bounded recovery."""
+    target = _windows_io_path(target)
     if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
         raise RestoreError("invalid bounded download byte limit")
     if max_bytes is not None and target.is_file() and target.stat().st_size > max_bytes:
@@ -619,6 +634,7 @@ def _source_asset_eligible(asset: Mapping[str, Any], *, salvage: bool) -> bool:
 
 
 def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
+    path = _windows_io_path(path)
     if path.is_symlink() or not path.is_file():
         return False
     size = asset.get("size")
@@ -799,14 +815,15 @@ def download_asset(
         raise RestoreError(f"missing/invalid SHA-256 for {name}")
     if type(asset.get("size")) is not int or asset["size"] < 0:
         raise RestoreError(f"invalid size for {name}")
-    target = destination / _safe_component(name)
+    display_target = destination / _safe_component(name)
+    target = _windows_io_path(display_target)
     target.parent.mkdir(parents=True, exist_ok=True)
 
     def verified_result(status: str, calculated_sha256: str) -> dict[str, Any]:
         return {
             "name": name,
-            "path": str(target),
-            "destination": str(target),
+            "path": str(display_target),
+            "destination": str(display_target),
             "status": status,
             "verification_status": "VERIFIED",
             "downloaded_size_bytes": target.stat().st_size,
@@ -874,6 +891,7 @@ def download_asset(
 
 
 def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
+    path = _windows_io_path(path)
     expected_sha = str(row.get("sha256") or "").lower()
     expected_size = row.get("bytes")
     return (
@@ -1513,7 +1531,9 @@ def _materialize_catalog_safe_shards(
         tag = str(row["release_tag"])
         member = str(row["release_asset"])
         outer = str(row.get("release_container_asset") or member)
-        source = releases_root / _safe_component(tag) / _safe_component(outer)
+        source = _windows_io_path(
+            releases_root / _safe_component(tag) / _safe_component(outer)
+        )
         target_root = destination / "usable" / "shards" / _safe_component(tag)
         if any(path.is_symlink() for path in (
             destination / "usable",
@@ -2863,7 +2883,9 @@ def restore_everything(
                         receipt_path = _write_staged_asset_receipt(
                             destination, repository, tag, asset, raw_rows
                         )
-                        staged_target = asset_dir / _safe_component(asset_name)
+                        staged_target = _windows_io_path(
+                            asset_dir / _safe_component(asset_name)
+                        )
                         staged_target.unlink()
                         result = {
                             **result,
