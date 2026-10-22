@@ -287,3 +287,17 @@ def test_historical_manifest_staging_budget_is_propagated_and_bounded(
             ["first"], tmp_path, shard_budget=20000,
             manifest_budget_bytes=129 * 1024 * 1024,
         )
+
+
+def test_historical_git_commit_has_deterministic_hosted_author() -> None:
+    from pathlib import Path
+    import tools.continuous_reconcile_backlog as module
+    import inspect
+    implementation = inspect.getsource(module.publish)
+    assert '"-c", "user.name=github-actions[bot]"' in implementation
+    assert '"-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"' in implementation
+    workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" /
+                "reconcile-v2-catalog.yml").read_text(encoding="utf-8")
+    historical = workflow.split("  historical:", 1)[1]
+    assert 'git config --local user.name "github-actions[bot]"' in historical
+    assert 'git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"' in historical

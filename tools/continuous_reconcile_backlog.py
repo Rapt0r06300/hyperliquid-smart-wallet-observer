@@ -114,7 +114,14 @@ def publish(paths: list[Path]) -> int:
         run("git", "add", "--sparse", "catalog", "datasets")
         if run("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
             raise RuntimeError("empty catalog publication, no checkpoint possible")
-        run("git", "commit", "-q", "-m", "data: historical V2 checkpoint")
+        # Explicit per-invocation author protects fresh hosted checkouts even
+        # when the workflow configuration step was skipped or changed.
+        run(
+            "git",
+            "-c", "user.name=github-actions[bot]",
+            "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+            "commit", "-q", "-m", "data: historical V2 checkpoint",
+        )
         sha = run("git", "rev-parse", "HEAD").stdout.strip()
         result = run("git", "push", "--no-thin", "origin", "HEAD:main", check=False)
         if remote_contains_head():

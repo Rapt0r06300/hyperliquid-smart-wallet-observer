@@ -524,6 +524,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # This is a separate hosted job, not the reconcile job above.
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python tools/continuous_reconcile_backlog.py \
             --inventory "$RUNNER_TEMP/v2-historical-tags.txt" \
             --work-root "$RUNNER_TEMP/alina-checkpointed-manifests" \
