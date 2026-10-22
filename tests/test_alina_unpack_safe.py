@@ -93,5 +93,5 @@ def test_interrupted_unsealed_jsonl_quarantined_and_reconstructed(tmp_path):
     result = expand_safe_corpus(tmp_path, catalog_sha256="a" * 64)
     assert result["status"] == "SAFE_UNPACK_COMPLETE"
     assert result["quarantined_unsealed_outputs"] == 1
-    assert target.read_bytes() == b'{"px":100}\\n'
+    assert target.read_bytes() == b'{"px":100}\n'
     assert list((tmp_path / "quarantine" / "unsealed_unpacked").rglob("*.unsealed"))
