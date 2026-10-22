@@ -556,6 +556,8 @@ def test_all_safe_rejects_conflicting_explicit_cap(capsys):
     module = _module()
     assert module.main(["--download-safe", "--all-safe", "--max-download-gib", "32"]) == 2
     assert "--all-safe conflicts with --max-download-gib" in capsys.readouterr().err
+    assert module.main(["--download-safe", "--all-safe", "--max-download-gib=32"]) == 2
+    assert "--all-safe conflicts with --max-download-gib" in capsys.readouterr().err
 
 
 def test_sync_refuses_conflicting_preview_download_and_nonpositive_cap(capsys):
