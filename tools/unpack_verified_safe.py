@@ -71,6 +71,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
     if len(sources) != expected:
         raise SafeUnpackError(f"SAFE gzip count mismatch: {len(sources)} != {expected}")
     planned = []
+    selected_targets: set[Path] = set()
     reused = 0
     required_bytes = 0
     for source in sources:
@@ -81,6 +82,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
             raise SafeUnpackError(f"symlinked unpack directory: {directory}")
         target = directory / source.name[:-3]
         seal = target.with_suffix(".jsonl.alina.json")
+        selected_targets.add(target)
         if target.is_symlink() or seal.is_symlink():
             raise SafeUnpackError(f"symlinked unpack target: {target}")
         if target.exists() or seal.exists():
@@ -103,6 +105,31 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
             raise SafeUnpackError(f"invalid or ambiguous gzip ISIZE: {source}")
         required_bytes += announced_bytes
         planned.append((source, target, seal, announced_bytes))
+    # Old previously-expanded SAFE files must never pollute a changed working
+    # set. Quarantine only sealed byte-identical outputs; never destroy them.
+    stale_outputs = 0
+    for stale in sorted(outroot.glob("*/*.jsonl")):
+        if stale in selected_targets:
+            continue
+        seal = stale.with_suffix(".jsonl.alina.json")
+        if (stale.is_symlink() or stale.parent.is_symlink() or seal.is_symlink()
+                or not stale.is_file() or not seal.is_file()):
+            raise SafeUnpackError(f"unverifiable stale JSONL: {stale}")
+        proof = json.loads(seal.read_text(encoding="utf-8"))
+        if (proof.get("jsonl_sha256") != _hash(stale)
+                or proof.get("jsonl_bytes") != stale.stat().st_size):
+            raise SafeUnpackError(f"modified stale JSONL: {stale}")
+        quarantine_dir = destination / "quarantine" / "stale_unpacked" / stale.parent.name
+        if quarantine_dir.is_symlink():
+            raise SafeUnpackError(f"symlinked stale quarantine: {quarantine_dir}")
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        archived = quarantine_dir / (stale.name + "." + _hash(stale)[:16] + ".stale")
+        archived_seal = archived.with_suffix(archived.suffix + ".alina.json")
+        if archived.exists() or archived_seal.exists():
+            raise SafeUnpackError(f"stale quarantine destination already exists: {archived}")
+        stale.replace(archived)
+        seal.replace(archived_seal)
+        stale_outputs += 1
     free = shutil.disk_usage(destination).free
     if required_bytes + RESERVE_BYTES > free:
         raise SafeUnpackError(
@@ -159,6 +186,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
         "certified_shards": expected,
         "created": created,
         "reused_verified": reused,
+        "quarantined_stale_outputs": stale_outputs,
         "new_uncompressed_bytes": written_bytes,
         "compressed_safe_retained": True,
         "unpacked_directory": str(outroot),

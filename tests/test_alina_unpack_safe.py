@@ -57,3 +57,18 @@ def test_bad_gzip_does_not_produce_complete_report(tmp_path):
 def test_unpack_flag_requires_explicit_safe_download():
     from tools.sync_complete_clone import main
     assert main(["--unpack-safe"]) == 2
+
+
+def test_unselected_prior_jsonl_is_quarantined_not_mixed_or_deleted(tmp_path):
+    fixture(tmp_path)
+    expand_safe_corpus(tmp_path, catalog_sha256="a" * 64)
+    old = tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl"
+    source = tmp_path / "usable" / "shards" / "release-one" / "safe.jsonl.gz"
+    source.unlink()
+    new = source.parent / "new.jsonl.gz"
+    new.write_bytes(gzip.compress(b'{"px":200}\n', mtime=0))
+    outcome = expand_safe_corpus(tmp_path, catalog_sha256="a" * 64)
+    assert outcome["quarantined_stale_outputs"] == 1
+    assert not old.exists()
+    assert list((tmp_path / "quarantine" / "stale_unpacked").rglob("*.stale"))
+    assert (tmp_path / "usable" / "unpacked" / "release-one" / "new.jsonl").is_file()

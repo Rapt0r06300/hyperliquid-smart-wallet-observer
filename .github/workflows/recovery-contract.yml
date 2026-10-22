@@ -6,6 +6,12 @@ on:
       - main
     paths:
       - "tools/restore_alina.py"
+      - "tools/sync_complete_clone.py"
+      - "tools/unpack_verified_safe.py"
+      - "tools/verify_safe_corpus_partition.py"
+      - "tests/test_alina_unpack_safe.py"
+      - "tests/test_sync_complete_clone.py"
+      - "tests/test_verify_safe_corpus_partition.py"
       - "tools/publish_dataset_v2_release.py"
       - "tools/recover_dataset_v2_capsules.py"
       - "tools/publish_local_recovery_snapshot.py"
@@ -60,12 +66,12 @@ jobs:
 
       - name: Compile published Release recovery tools
         run: |
-          python -m py_compile tools/restore_alina.py tools/publish_dataset_v2_release.py tools/recover_dataset_v2_capsules.py tools/publish_local_recovery_snapshot.py
+          python -m py_compile tools/sync_complete_clone.py tools/unpack_verified_safe.py tools/verify_safe_corpus_partition.py tools/restore_alina.py tools/publish_dataset_v2_release.py tools/recover_dataset_v2_capsules.py tools/publish_local_recovery_snapshot.py
 
       - name: Run release recovery tests
         run: |
           python -m pip install --disable-pip-version-check -e . pytest
-          python -m pytest -q tests/test_restore_alina.py tests/test_restore_alina_launcher.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py --tb=line
+          python -m pytest -q tests/test_restore_alina.py tests/test_restore_alina_launcher.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py tests/test_alina_unpack_safe.py tests/test_sync_complete_clone.py tests/test_verify_safe_corpus_partition.py --tb=line
 
   release-smoke:
     name: Verify a pinned published Release asset (no API inventory quota)
