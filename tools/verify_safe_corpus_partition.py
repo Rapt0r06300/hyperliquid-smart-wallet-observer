@@ -363,6 +363,13 @@ def aggregate(
     *, index: Path, metrics: Path, partitions: int,
     receipts: Path, output: Path, git_sha: str,
 ) -> dict[str, Any]:
+    # A failed rerun must never leave a previous full-corpus certificate in place.
+    if output.is_symlink():
+        raise RestoreError("unsafe certificate output symlink")
+    if output.exists():
+        if not output.is_file():
+            raise RestoreError("certificate output is not a regular file")
+        output.unlink()
     proof, specs = _load_specs(index, metrics)
     buckets = assign_partitions(specs, partitions)
     expected = {
@@ -386,6 +393,7 @@ def aggregate(
             or payload.get("catalog_sha256") != proof["source_index_sha256"]
             or payload.get("partition_count") != partitions
             or type(part) is not int
+            or not 0 <= part < partitions
             or part in seen_partitions
         ):
             raise RestoreError(f"invalid partition receipt: {path.name}")
@@ -395,8 +403,9 @@ def aggregate(
         actual_keys: set[tuple[str, str]] = set()
         for item in payload.get("verified", []):
             key = (str(item.get("release_tag") or ""), str(item.get("asset_name") or ""))
-            if key in actual_keys or key in seen_assets or expected.get(key) != {
-                field: item.get(field) for field in expected[key]
+            expected_item = expected.get(key)
+            if key in actual_keys or key in seen_assets or expected_item is None or expected_item != {
+                field: item.get(field) for field in expected_item
             }:
                 raise RestoreError(f"duplicate or mismatched SAFE receipt evidence: {key}")
             actual_keys.add(key)
