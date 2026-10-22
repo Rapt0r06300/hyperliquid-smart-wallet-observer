@@ -14032,6 +14032,7 @@ SHA, vérifications de qualité et contrôles de push sans force.
 Une moyenne « par jour » destinée à l'objectif journalier ne peut pas être
 calculée uniquement sur les journées où des trades existent. Le replay V21
 expose séparément la moyenne des jours actifs et la moyenne calendaire UTC.
+Le PnL net d'une position clôturée est attribué à sa journée UTC de clôture.
 Cette dernière n'est mesurable que si l'audit d'entrée fournit explicitement
 les débuts (millisecondes UTC) des journées complètes couvertes; les jours
 sans trade valent alors zéro, tandis qu'une couverture absente, invalide ou

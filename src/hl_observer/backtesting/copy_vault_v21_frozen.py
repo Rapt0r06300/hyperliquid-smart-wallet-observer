@@ -592,7 +592,7 @@ def _evaluate_segment(
     calendar_stats = summarize_complete_utc_days(
         trades,
         value_key="net_pnl_usd",
-        timestamp_key="entry_ts_ms",
+        timestamp_key="exit_ts_ms",
         complete_day_starts_ms=fully_covered_days,
     )
     reasons = list(assessment["reasons"])

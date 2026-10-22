@@ -190,6 +190,45 @@ def test_segment_calendar_coverage_does_not_discard_malformed_day_entries() -> N
     )
 
 
+def test_calendar_pnl_is_attributed_to_trade_close_utc_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day = 86_400_000
+    monkeypatch.setattr(V21, "_segment_candidates", lambda *_args, **_kwargs: ([], {}))
+    monkeypatch.setattr(
+        V21,
+        "_settle",
+        lambda *_args, **_kwargs: (
+            [{"net_pnl_usd": 7.0, "entry_ts_ms": day - 1, "exit_ts_ms": day}],
+            [],
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        V21,
+        "assess_train_variant",
+        lambda *_args, **_kwargs: {
+            "statistics": {"daily_net_pnl_usd": [7.0]},
+            "reasons": [],
+        },
+    )
+
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=2 * day - 1,
+        params=_freeze()["freeze"]["parameters"],
+        complete_utc_day_starts_ms=[0, day],
+    )
+
+    assert result["calendar_day_statistics"]["calendar_day_net_pnl_usd"] == [
+        0.0,
+        7.0,
+    ]
+
+
 def test_frozen_v21_never_opens_oos_after_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
