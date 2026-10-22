@@ -54,6 +54,33 @@ def _git(root: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
+def _tracked_files_changed(root: Path) -> bool:
+    """Return whether tracked content differs, ignoring Windows stat-cache noise."""
+    checks = (
+        ("diff", "--quiet", "--no-ext-diff", "--ignore-submodules", "--"),
+        ("diff", "--cached", "--quiet", "--no-ext-diff", "--ignore-submodules", "--"),
+    )
+    for args in checks:
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(root), *args],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as exc:
+            raise SyncError("Git is required to verify local tracked files") from exc
+        if done.returncode == 1:
+            return True
+        if done.returncode != 0:
+            detail = (done.stderr or "").strip()[:600]
+            raise SyncError(
+                f"git tracked-file safety check failed (exit {done.returncode}): {detail}"
+            )
+    return False
+
+
 def synchronize_main(root: Path, *, update: bool = True) -> str:
     """Fast-forward ONLY canonical main; never reset/rebase/stash local changes."""
     root = root.resolve()
@@ -71,7 +98,7 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
 
     # This intentionally ignores untracked/ignored research files; Git itself
     # must refuse a merge that would overwrite any of those paths.
-    if _git(root, "status", "--porcelain", "--untracked-files=no"):
+    if _tracked_files_changed(root):
         raise SyncError(
             "local tracked files were modified: commit or preserve them before "
             "sync; no reset, stash, forced checkout or overwritten files"

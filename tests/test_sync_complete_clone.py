@@ -33,7 +33,6 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None):
         ("rev-parse", "--show-toplevel"): str(root),
         ("symbolic-ref", "--quiet", "--short", "HEAD"): "main",
         ("remote", "get-url", "origin"): current_origin,
-        ("status", "--porcelain", "--untracked-files=no"): " M README.md" if dirty else "",
         ("fetch", "--no-tags", "origin", "main"): "",
         ("rev-parse", "refs/remotes/origin/main"): "b" * 40,
         ("merge", "--ff-only", "refs/remotes/origin/main"): "",
@@ -47,6 +46,7 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None):
         return responses[args]
 
     monkeypatch.setattr(module, "_git", command)
+    monkeypatch.setattr(module, "_tracked_files_changed", lambda _root: dirty)
     return calls
 
 
@@ -67,6 +67,17 @@ def test_dirty_tracked_files_abort_before_fetch(monkeypatch, tmp_path):
     with pytest.raises(module.SyncError, match="local tracked files"):
         module.synchronize_main(tmp_path)
     assert not any(command[0] == "fetch" for command in calls)
+
+
+def test_stat_only_false_dirty_does_not_abort_before_fetch(monkeypatch, tmp_path):
+    """Large Windows checkouts can report `.M` although both diffs are clean."""
+    module = _module()
+    root = tmp_path.resolve()
+    calls = _stub_main(monkeypatch, module, root, dirty=True)
+    monkeypatch.setattr(module, "_tracked_files_changed", lambda _root: False)
+
+    assert module.synchronize_main(root) == "b" * 40
+    assert ("fetch", "--no-tags", "origin", "main") in calls
 
 
 def test_foreign_origin_refused_even_when_branch_is_main(monkeypatch, tmp_path):
@@ -187,7 +198,7 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     windows = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
     unix = (ROOT / "ALINA_SYNC_COMPLETE.sh").read_text(encoding="utf-8")
     assert 'cd /d "%~dp0"' in windows
-    assert windows.count("tools\\sync_complete_clone.py %*") == 3
+    assert windows.count("tools\\sync_complete_clone.py %ALINA_SYNC_ARGS%") == 3
     assert windows.count("exit /b %ERRORLEVEL%") == 3
     assert "GIT_LFS_SKIP_SMUDGE=1" in windows
     assert 'exec python3 tools/sync_complete_clone.py "$@"' in unix

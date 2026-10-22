@@ -7,6 +7,8 @@ cd /d "%~dp0" || (
 set "GIT_LFS_SKIP_SMUDGE=1"
 rem Double-click / no arguments is an explicit SAFE hydration entrypoint.
 rem Passing any arguments preserves the Python CLI choices (including --help).
+rem The Python guard verifies real tracked byte differences and safely ignores
+rem Git's false `.M` stat-cache entries on this large Windows checkout.
 if "%~1"=="" (
   echo ALINA_SYNC_MODE=DOWNLOAD_ALL_SAFE_AND_UNPACK
   set "ALINA_SYNC_ARGS=--download-safe --all-safe --unpack-safe"
