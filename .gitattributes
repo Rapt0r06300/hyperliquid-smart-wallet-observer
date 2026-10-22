@@ -11,3 +11,10 @@ docs/archive/legacy_cmd/2026-07-25/TOUT-TESTER.cmd.txt text eol=crlf
 # Large immutable data is stored in same-repository GitHub Releases and
 # reconstructed by tools/restore_alina.py with strict byte/SHA-256 checks.
 # Do not reintroduce filter=lfs, LFS migration or mirror workflows.
+
+# Replay-grade catalog metadata is SHA/byte-bound. On Windows, core.autocrlf
+# must never add CR bytes to these one-line JSON files during checkout.
+# Otherwise load_partitioned_index fails with PARTITION_PARITY_SIZE_MISMATCH.
+catalog/DATA_INDEX.json text eol=lf
+catalog/DATA_METRICS.json text eol=lf
+catalog/data-index-parts/*.json text eol=lf
