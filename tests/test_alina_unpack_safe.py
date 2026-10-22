@@ -82,3 +82,16 @@ def test_valid_gzip_with_invalid_jsonl_is_rejected(tmp_path):
         expand_safe_corpus(tmp_path, catalog_sha256="a" * 64)
     assert json.loads((tmp_path / "UNPACK_REPORT.json").read_text())["status"] != "SAFE_UNPACK_COMPLETE"
     assert not (tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl").exists()
+
+
+
+def test_interrupted_unsealed_jsonl_quarantined_and_reconstructed(tmp_path):
+    fixture(tmp_path)
+    target = tmp_path / "usable" / "unpacked" / "release-one" / "safe.jsonl"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"partial crash output")
+    result = expand_safe_corpus(tmp_path, catalog_sha256="a" * 64)
+    assert result["status"] == "SAFE_UNPACK_COMPLETE"
+    assert result["quarantined_unsealed_outputs"] == 1
+    assert target.read_bytes() == b'{"px":100}\\n'
+    assert list((tmp_path / "quarantine" / "unsealed_unpacked").rglob("*.unsealed"))

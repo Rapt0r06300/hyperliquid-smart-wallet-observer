@@ -74,6 +74,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
     planned = []
     selected_targets: set[Path] = set()
     reused = 0
+    quarantined_unsealed = 0
     required_bytes = 0
     for source in sources:
         if source.is_symlink() or source.parent.is_symlink() or not source.is_file():
@@ -86,6 +87,27 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
         selected_targets.add(target)
         if target.is_symlink() or seal.is_symlink():
             raise SafeUnpackError(f"symlinked unpack target: {target}")
+        if target.exists() != seal.exists():
+            # Interrupted crashes can occur between renaming a JSONL and
+            # publishing its independent hash receipt. Never trust or delete
+            # this unsealed output: preserve it and rebuild from the SHA-bound
+            # compressed source on the next attempt.
+            found = target if target.exists() else seal
+            if not found.is_file() or found.is_symlink():
+                raise SafeUnpackError(f"unverifiable unsealed extraction: {found}")
+            quarantine_dir = (
+                destination / "quarantine" / "unsealed_unpacked" / source.parent.name
+            )
+            if quarantine_dir.is_symlink():
+                raise SafeUnpackError(f"unsafe extraction quarantine: {quarantine_dir}")
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            quarantine_path = quarantine_dir / (
+                found.name + "." + _hash(found)[:16] + ".unsealed"
+            )
+            if quarantine_path.exists() or quarantine_path.is_symlink():
+                raise SafeUnpackError(f"unsealed quarantine collision: {quarantine_path}")
+            found.replace(quarantine_path)
+            quarantined_unsealed += 1
         if target.exists() or seal.exists():
             if not target.is_file() or not seal.is_file():
                 raise SafeUnpackError(f"unsealed previously extracted file: {target}")
@@ -198,6 +220,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
         "created": created,
         "reused_verified": reused,
         "quarantined_stale_outputs": stale_outputs,
+        "quarantined_unsealed_outputs": quarantined_unsealed,
         "new_uncompressed_bytes": written_bytes,
         "compressed_safe_retained": True,
         "unpacked_directory": str(outroot),
