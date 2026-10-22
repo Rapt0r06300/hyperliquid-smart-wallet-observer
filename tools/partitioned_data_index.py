@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 SCHEMA = "alina.data_index_partitioned.v1"
 MAX_PARTITION_BYTES = 8 * 1024 * 1024
@@ -101,7 +101,9 @@ def partition_index(
     return result, files
 
 
-def load_partitioned_index(index_path: Path) -> dict[str, Any]:
+def load_partitioned_index(
+    index_path: Path, *, progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
     """Reconstruct the exact original logical index; refuse any missing evidence.
 
     Callers must not fall back to an incomplete or partial index on failure.
@@ -154,6 +156,8 @@ def load_partitioned_index(index_path: Path) -> dict[str, Any]:
         rows.extend(part_rows)
         if len(rows) > count:
             raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
+        if progress_callback is not None and (i == 1 or i % 10 == 0 or i == len(parts)):
+            progress_callback(i, len(parts))
     rows = _validate_rows(rows)
     if len(rows) != count or hashlib.sha256(_json_bytes(rows)).hexdigest() != root["shards_sha256"]:
         raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
@@ -167,7 +171,9 @@ def load_partitioned_index(index_path: Path) -> dict[str, Any]:
 
 
 
-def read_index(index_path: Path) -> dict[str, Any]:
+def read_index(
+    index_path: Path, *, progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
     """Return the complete logical index, legacy or fully verified partitions.
 
     No partial shard list or silent fallback is permitted.
@@ -177,7 +183,7 @@ def read_index(index_path: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("DATA_INDEX_INVALID_ROOT")
     if raw.get("schema") == SCHEMA:
-        return load_partitioned_index(index_path)
+        return load_partitioned_index(index_path, progress_callback=progress_callback)
     if "partitions" in raw or not isinstance(raw.get("shards"), list):
         raise ValueError("DATA_INDEX_UNKNOWN_OR_PARTIAL_LAYOUT")
     _validate_rows(raw["shards"])
