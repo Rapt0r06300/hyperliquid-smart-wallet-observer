@@ -1,0 +1,132 @@
+{
+  "asset_verified": true,
+  "bytes": 1347,
+  "collection_run_id": "market-e8-9-2026102205-v7-0",
+  "collector_version": "189283afc08a276d21771cabeb4e24b61487e907",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-public-ws-trades-regnusdt-1792648483373-1792649824418-4e076f14dae2",
+  "end_ts_ms": 1792649824418,
+  "event_count": 4,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "local_continuity_fallback": true,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "reference_status": "UNAVAILABLE",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 4,
+  "release": {
+    "asset_id": 664962519,
+    "asset_name": "packed-shards-0062.zip",
+    "member_name": "bybit-public-ws-trades-regnusdt-1792648483373-1792649824418-4e076f14dae2.jsonl.gz",
+    "release_id": 420391169,
+    "release_tag": "data-v2-campaign-market-e8-9-2026102205-v7-u0",
+    "remote_digest": "sha256:aa1f2844f336aeba6968891f998fe7bbe79dc1ed27a0764daac79f0e7ea75e1a",
+    "remote_size": 7859088,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bybit-public-ws-trades-regnusdt-1792648483373-1792649824418-4e076f14dae2.jsonl.gz",
+  "release_asset_id": 664962519,
+  "release_container_asset": "packed-shards-0062.zip",
+  "release_id": 420391169,
+  "release_member": "bybit-public-ws-trades-regnusdt-1792648483373-1792649824418-4e076f14dae2.jsonl.gz",
+  "release_remote_digest": "sha256:aa1f2844f336aeba6968891f998fe7bbe79dc1ed27a0764daac79f0e7ea75e1a",
+  "release_remote_size": 7859088,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026102205-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4e076f14dae21cf747ea72b7074afb8bd1a866da53ed43635c24b2f5fd4b0ae4",
+  "source": "bybit_public_ws",
+  "start_ts_ms": 1792648483373,
+  "symbol": "REGNUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 4,
+      "max": -112.0,
+      "min": -123.5,
+      "p50": -112.0,
+      "p95": -112.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bybit-57038ec061f6431d80a01af9211b799e"
+    ],
+    "first_exchange_ts_ms": 1792648482946,
+    "last_exchange_ts_ms": 1792649824301,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4,
+      "max": 427.0,
+      "min": 117.0,
+      "p50": 427.0,
+      "p95": 427.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 4,
+      "max": 2029.209998,
+      "min": 1135.342022,
+      "p50": 2029.209998,
+      "p95": 2029.209998
+    }
+  },
+  "trade_count": 4,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "29f1becf4d014f868e940a24d18b4137755daf44e896a00e8b68daee9b1dcb8d",
+    "9c6bc800e910e92a5f9ac2d94b0ef50c21453aace6ac586fd0bc9f30e03406a7",
+    "c799b723e6ad264308cfe6509baf821c3519432666be128ad6fa9c0ca5c8884c",
+    "eaae4a5b7bb79f9e713d68d3fb576cc916c98d7df455d7ac17a9e2f0eafac57d"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 4,
+  "trade_identity_set_sha256": "3f1972702af7da0674a5fa21df0f17045ffed63de4c6e5e95e27477e738190b9",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 6220,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 4,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bybit"
+}

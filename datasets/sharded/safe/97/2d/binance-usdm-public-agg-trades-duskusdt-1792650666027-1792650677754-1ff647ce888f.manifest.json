@@ -1,0 +1,143 @@
+{
+  "asset_verified": true,
+  "bytes": 2507,
+  "collection_run_id": "market-e8-9-2026102205-v7-0",
+  "collector_version": "189283afc08a276d21771cabeb4e24b61487e907",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-agg-trades-duskusdt-1792650666027-1792650677754-1ff647ce888f",
+  "end_ts_ms": 1792650677754,
+  "event_count": 15,
+  "family": "agg_trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "agg_trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "local_continuity_fallback": true,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "reference_status": "UNAVAILABLE",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 15,
+  "release": {
+    "asset_id": 664958347,
+    "asset_name": "packed-shards-0000.zip",
+    "member_name": "binance-usdm-public-agg-trades-duskusdt-1792650666027-1792650677754-1ff647ce888f.jsonl.gz",
+    "release_id": 420391169,
+    "release_tag": "data-v2-campaign-market-e8-9-2026102205-v7-u0",
+    "remote_digest": "sha256:dc24094161c13f8efb6153cd6ca1abd409d4fb2e92b431ff1c32b77d2d8534f1",
+    "remote_size": 42064734,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "binance-usdm-public-agg-trades-duskusdt-1792650666027-1792650677754-1ff647ce888f.jsonl.gz",
+  "release_asset_id": 664958347,
+  "release_container_asset": "packed-shards-0000.zip",
+  "release_id": 420391169,
+  "release_member": "binance-usdm-public-agg-trades-duskusdt-1792650666027-1792650677754-1ff647ce888f.jsonl.gz",
+  "release_remote_digest": "sha256:dc24094161c13f8efb6153cd6ca1abd409d4fb2e92b431ff1c32b77d2d8534f1",
+  "release_remote_size": 42064734,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026102205-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1ff647ce888f91c1a142f0204ed861a496cfb64b69328c617d409d8fd9263581",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1792650666027,
+  "symbol": "DUSKUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-agg_trades-2390fd86f72f495396e4de62cc8c4233"
+    ],
+    "first_exchange_ts_ms": 1792650665814,
+    "last_exchange_ts_ms": 1792650677536,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 15,
+      "max": 549.0,
+      "min": 68.0,
+      "p50": 217.0,
+      "p95": 531.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 15,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "01490218fd84dde6301199679b78301f832f15d8445e69d8fb996b58d78e6af3",
+    "30424b728d32a4c88c2d5b1d48984fb21e119748097e7263877a406d095b358f",
+    "37d28bff47f556c9a31c05f78eae0fbca735617242975239f1f3125d9cee3fab",
+    "3cc6b1be0e049cec85f29bceae16a5a9570128e06b613fc9cd0ae76e9e32daf4",
+    "4f6ee83431e2144ab7c203bc0a54015a8a3e7e3cdf88c533bca5348f0ddc0a02",
+    "696384669bd00eb38e9901e74bc4758f3f7a1a23c1914d4d4f6ff60355b20121",
+    "77a06ce926e8cb78ea7926f351accae1e6b25292250fcd540baa064489dca18a",
+    "9c730d171c5cc6dc7b4b90344190b8bf3ecbe3f743408a39305bbf1a6319819f",
+    "9ce42f3d1dd3763f0d7cea0ec6182a05f6f231fdcc675dca888b0a1b3edc014a",
+    "a72d8668f3b0f1a6f7038e5cc17b6507bec2189ac4b55b104b276268e9a8a53f",
+    "ad6eb2bf2f7a1d9293450655bbace40d1c2431d4042ae6426258d930399139e3",
+    "b67d703b0dead9d38be8317cd6484d99eb9287b70670f6139acb503ead2affdc",
+    "b7ef70d051f225ccd176cfb21db2cb432624aa34f420edffc6d4dda03a13916a",
+    "d54c305679bbb11d6771ded621ea226ed3905b848a546b568f5fa1c6279fbc0d",
+    "da4c37aeaab144d09e3df21d701645a2f1b292aeba4e35587645a019f91cb96c"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 15,
+  "trade_identity_set_sha256": "17ed96a58a3561d07480b2796d133ba88051e5be3709bd9f7e6b618b456a527f",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 19563,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 15,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "binance"
+}

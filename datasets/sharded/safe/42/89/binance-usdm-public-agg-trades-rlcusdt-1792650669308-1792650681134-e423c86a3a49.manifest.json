@@ -1,0 +1,150 @@
+{
+  "asset_verified": true,
+  "bytes": 3389,
+  "collection_run_id": "market-e8-9-2026102205-v7-0",
+  "collector_version": "189283afc08a276d21771cabeb4e24b61487e907",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-agg-trades-rlcusdt-1792650669308-1792650681134-e423c86a3a49",
+  "end_ts_ms": 1792650681134,
+  "event_count": 22,
+  "family": "agg_trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "agg_trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "local_continuity_fallback": true,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "reference_status": "UNAVAILABLE",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 22,
+  "release": {
+    "asset_id": 664958347,
+    "asset_name": "packed-shards-0000.zip",
+    "member_name": "binance-usdm-public-agg-trades-rlcusdt-1792650669308-1792650681134-e423c86a3a49.jsonl.gz",
+    "release_id": 420391169,
+    "release_tag": "data-v2-campaign-market-e8-9-2026102205-v7-u0",
+    "remote_digest": "sha256:dc24094161c13f8efb6153cd6ca1abd409d4fb2e92b431ff1c32b77d2d8534f1",
+    "remote_size": 42064734,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "binance-usdm-public-agg-trades-rlcusdt-1792650669308-1792650681134-e423c86a3a49.jsonl.gz",
+  "release_asset_id": 664958347,
+  "release_container_asset": "packed-shards-0000.zip",
+  "release_id": 420391169,
+  "release_member": "binance-usdm-public-agg-trades-rlcusdt-1792650669308-1792650681134-e423c86a3a49.jsonl.gz",
+  "release_remote_digest": "sha256:dc24094161c13f8efb6153cd6ca1abd409d4fb2e92b431ff1c32b77d2d8534f1",
+  "release_remote_size": 42064734,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026102205-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e423c86a3a494df633ce2da5128f6aa07fe9fbc7b736286c84381f447f725e94",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1792650669308,
+  "symbol": "RLCUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-agg_trades-2390fd86f72f495396e4de62cc8c4233"
+    ],
+    "first_exchange_ts_ms": 1792650668094,
+    "last_exchange_ts_ms": 1792650680914,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 22,
+      "max": 2045.0,
+      "min": 66.0,
+      "p50": 213.0,
+      "p95": 1214.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 22,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "0c75ff5090f62ab08e9452ca02ed5c802b32895133a24a1ab4b1f32b32d9c9aa",
+    "0fa5c30a82de46ac5cd055fcb253efef192c341cbee4d63877ae7aa2483cb935",
+    "1355c8aa101c33a3e4e6be8ad0684018e7f57b6a95848bc2d1cc1354f87a8633",
+    "19b058c185ae5ae2c719803a990f06bde3441c5d62a700b80b724aa7f6999228",
+    "2e47e2f1393f0a546b79dd03b766d6b8c54f06131bde75e41142af35e0ff85c2",
+    "4c49a6cd4b54efd7dce35e3d82cccd9b2c5658363fad852d997f671aa32d2f54",
+    "6155384ebc3eca367c3072b434d31f58d41511d301fe1340e839f18318fa118e",
+    "6da7e3728660d213a7305b88b90bb498462754485cf88dac1785fe84d9e8a0a2",
+    "6f40ef4c8ef76ba53c9cb4cc1677b8bc41e9580c69ac4adecdce7bdf0ac44d1b",
+    "7287fcfdd712abd4a6f77d41e2f6fe686e209b752925327eeb689e5508b87ff3",
+    "9daa1124f99dbd2bdb2565ae77147b190dc2df15f45685d8493bc49cc64202b9",
+    "aa7f39824b2dbcf21d0081ee3a5c8274013ea5086b0fc3579e655501447b863f",
+    "aaf316559523549e918d1b23be4606d9b748934546f52168434fff89a30628d9",
+    "b86716ae866b007d1efd9ac7c8a704d62e7b97cdd46eff59ce5abb9250a71ac5",
+    "bacf77ab8ae1ef07cee11b3d68358d501fbedc196ad13ab47af4512f531eb99f",
+    "bc4afb0b71881b3e139ad62f140911a2d8706648b7a683e67737dca16eff09a2",
+    "d523a3c055859521b15530fe72c2bbd34e8e29c63aa25c5509928698e2761705",
+    "ef3b2468faf9224474967d91f8af08795ca00957c5210da11e98c873ce7eae04",
+    "f09abdef7748f34092008f71402f75b1d429b31822608f5ac89f0103e10d715b",
+    "f0b95b36260b49151d3003774959184ad98c2de3e56eb72ff374f5bb2641fe09",
+    "f84176c155008c92d95db8bb5f138e6cfadddff63e14203f1c4ad3dedd2dd60d",
+    "f983c252430877b08ffe4ff14d9a30a3e4d444b92238a2b19359bc1f4117fda6"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 22,
+  "trade_identity_set_sha256": "b29b48bf000dfb267040aaa42c24bdd50decaa39747db1ae443d9a99502fac78",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 28643,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 22,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "binance"
+}
