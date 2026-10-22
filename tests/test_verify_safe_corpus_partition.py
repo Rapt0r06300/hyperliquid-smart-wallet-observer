@@ -155,3 +155,46 @@ def test_aggregate_rejects_forged_partition_and_removes_stale_certificate(
             receipts=receipts, output=output, git_sha="d" * 40,
         )
     assert not output.exists()
+
+
+def test_missing_historical_safe_asset_resolved_by_exact_release_tag(monkeypatch):
+    asset = {"id": 101, "name": "old.jsonl.gz", "state": "uploaded",
+             "size": 4, "digest": "sha256:" + "a" * 64,
+             "browser_download_url": "https://example.invalid/old.jsonl.gz"}
+    seen = []
+    def by_tag(url, *, token=None):
+        seen.append(("tag", url, token))
+        return {"id": 42, "tag_name": "historical-tag"}
+    def by_assets(repository, release_id, *, token=None):
+        seen.append(("assets", repository, release_id, token))
+        return [asset]
+    monkeypatch.setattr(verifier, "_json", by_tag)
+    monkeypatch.setattr(verifier, "_list_release_assets", by_assets)
+    required = {("historical-tag", "old.jsonl.gz"): (4, "a" * 64)}
+    resolved = verifier._resolve_missing_historical_assets([], required, token="test-only")
+    selected = verifier._select_replay_ready_releases(resolved, required)
+    assert selected[0]["assets"] == [asset]
+    assert seen[0][1].endswith("/releases/tags/historical-tag")
+    assert seen[1][2] == 42
+
+def test_historical_safe_asset_mismatch_fails_closed(monkeypatch):
+    monkeypatch.setattr(verifier, "_json", lambda *_a, **_k: {"id": 9, "tag_name": "old"})
+    monkeypatch.setattr(verifier, "_list_release_assets", lambda *_a, **_k: [
+        {"id": 20, "name": "safe.gz", "state": "uploaded",
+         "size": 4, "digest": "sha256:" + "f" * 64},
+    ])
+    with pytest.raises(RestoreError, match="identity mismatch"):
+        verifier._resolve_missing_historical_assets(
+            [], {("old", "safe.gz"): (4, "a" * 64)}, token=None,
+        )
+
+def test_complete_inventory_makes_no_historical_request(monkeypatch):
+    monkeypatch.setattr(verifier, "_json", lambda *_a, **_k:
+                        pytest.fail("unexpected historical lookup"))
+    rows = [{"id": 1, "tag_name": "old", "assets": [
+        {"name": "safe.gz", "size": 4,
+         "digest": "sha256:" + "a" * 64, "state": "uploaded"},
+    ]}]
+    assert verifier._resolve_missing_historical_assets(
+        rows, {("old", "safe.gz"): (4, "a" * 64)}, token=None,
+    ) == rows

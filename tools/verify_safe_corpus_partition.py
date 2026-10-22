@@ -20,6 +20,7 @@ import re
 import shutil
 import sys
 import zipfile
+from urllib.parse import quote
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,8 @@ try:
         _expected_digest,
         _load_replay_ready_plan,
         _select_replay_ready_releases,
+        _json,
+        _list_release_assets,
         iter_releases,
     )
 except ModuleNotFoundError:  # pragma: no cover - direct tools/ execution
@@ -42,6 +45,8 @@ except ModuleNotFoundError:  # pragma: no cover - direct tools/ execution
         _expected_digest,
         _load_replay_ready_plan,
         _select_replay_ready_releases,
+        _json,
+        _list_release_assets,
         iter_releases,
     )
 
@@ -256,6 +261,70 @@ def write_plan(
     return payload
 
 
+
+def _resolve_missing_historical_assets(
+    releases: list[Mapping[str, Any]],
+    required: Mapping[tuple[str, str], tuple[int, str]],
+    *,
+    token: str | None,
+) -> list[dict[str, Any]]:
+    """Resolve missing historical SAFE assets by the official Release tag.
+
+    Only missing keys are added. Never overwrite conflicting catalog evidence.
+    """
+    updated = [dict(release) for release in releases]
+    by_tag = {str(release.get("tag_name") or ""): i for i, release in enumerate(updated)}
+    present = {
+        (str(release.get("tag_name") or ""), str(asset.get("name") or ""))
+        for release in updated
+        for asset in release.get("assets", [])
+        if isinstance(asset, Mapping)
+    }
+    missing: dict[str, set[str]] = {}
+    for tag, name in required:
+        if (tag, name) not in present:
+            missing.setdefault(tag, set()).add(name)
+    for tag, names in sorted(missing.items()):
+        remote = _json(
+            f"https://api.github.com/repos/{REPOSITORY}/releases/tags/{quote(tag, safe='')}",
+            token=token,
+        )
+        if not isinstance(remote, Mapping) or remote.get("tag_name") != tag:
+            raise RestoreError(f"historical SAFE Release tag mismatch: {tag}")
+        release_id = remote.get("id")
+        if type(release_id) is not int or release_id <= 0:
+            raise RestoreError(f"historical SAFE Release id invalid: {tag}")
+        index = by_tag.get(tag)
+        if index is not None and updated[index].get("id") != release_id:
+            raise RestoreError(f"historical SAFE Release id conflict: {tag}")
+        assets = _list_release_assets(REPOSITORY, release_id, token=token)
+        chosen = []
+        for name in sorted(names):
+            matches = [
+                asset for asset in assets
+                if isinstance(asset, Mapping) and asset.get("name") == name
+            ]
+            if len(matches) != 1:
+                raise RestoreError(f"historical SAFE asset missing: {tag}/{name}")
+            asset = matches[0]
+            size, digest = required[(tag, name)]
+            if (asset.get("state") != "uploaded"
+                    or asset.get("size") != size
+                    or _expected_digest(asset) != digest):
+                raise RestoreError(f"historical SAFE asset identity mismatch: {tag}/{name}")
+            chosen.append(asset)
+        if index is None:
+            by_tag[tag] = len(updated)
+            updated.append({"id": release_id, "tag_name": tag, "assets": chosen})
+        else:
+            updated[index]["assets"] = list(updated[index].get("assets", [])) + chosen
+        print(
+            f"SAFE_HISTORICAL_ASSETS_RESOLVED tag={tag} assets={len(chosen)}",
+            file=sys.stderr, flush=True,
+        )
+    return updated
+
+
 def verify_partition(
     *, index: Path, metrics: Path, partitions: int, partition: int,
     output: Path, token: str | None, work_root: Path, git_sha: str,
@@ -293,7 +362,14 @@ def verify_partition(
         (int(spec["asset_bytes"]), str(spec["asset_sha256"]))
         for spec in selected_specs
     }
-    selected = _select_replay_ready_releases(releases, required)
+    try:
+        resolved = _resolve_missing_historical_assets(releases, required, token=token)
+        selected = _select_replay_ready_releases(resolved, required)
+    except (RestoreError, OSError, ValueError) as exc:
+        receipt["status"] = "FAILED_NOT_CERTIFIED"
+        receipt["error"] = f"{type(exc).__name__}: {exc}"[:1000]
+        output.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        raise
     live: dict[tuple[str, str], Mapping[str, Any]] = {}
     for release in selected:
         tag = str(release["tag_name"])
