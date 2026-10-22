@@ -2938,6 +2938,10 @@ def main(argv: list[str] | None = None) -> int:
              "0 means no new payload transfer",
     )
     parser.add_argument(
+        "--unlimited-download", action="store_true",
+        help="explicitly allow all selected SAFE Release transfers without a GiB cap",
+    )
+    parser.add_argument(
         "--prune-cache-only", action="store_true",
         help="remove only locally SHA-verified, unselected Release cache copies; "
              "never download market payloads or claim a completed restoration",
@@ -2976,6 +2980,12 @@ def main(argv: list[str] | None = None) -> int:
         help="restore the latest published snapshot when available; refuse corrupt snapshots",
     )
     args = parser.parse_args(argv)
+    if args.unlimited_download and not args.replay_ready:
+        print("ALINA_RESTORE_FAIL: --unlimited-download requires --replay-ready", file=sys.stderr)
+        return 2
+    if args.unlimited_download and (args.prune_cache_only or args.preflight_only):
+        print("ALINA_RESTORE_FAIL: unlimited download is incompatible with prune/preflight", file=sys.stderr)
+        return 2
     if args.max_download_gib < 0:
         parser.error("--max-download-gib must be non-negative")
     if args.prune_cache_only and (
@@ -3014,7 +3024,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.prune_cache_only or args.prune_unselected_cache
             ),
             prune_only=args.prune_cache_only,
-            max_download_bytes=0 if args.prune_cache_only else args.max_download_gib * (1024 ** 3),
+            max_download_bytes=(0 if args.prune_cache_only else None if args.unlimited_download else args.max_download_gib * (1024 ** 3)),
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot
