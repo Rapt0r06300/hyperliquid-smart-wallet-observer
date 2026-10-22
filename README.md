@@ -56,16 +56,16 @@ quota Git LFS n'est nécessaire pour cette restauration.
 Windows CMD (Git, Python 3.10+ et place disque suffisante) :
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd --download-safe --max-download-gib 256
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd --download-safe --all-safe
 ```
 
 Linux/macOS :
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh --download-safe --max-download-gib 256
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh --download-safe --all-safe
 ```
 
-La commande explicite ci-dessus récupère le code, les catalogues et workflows
+L'option `--all-safe` désactive uniquement le plafond de transfert ; elle ne contourne aucun contrôle de SHA-256, de taille, de qualité ou de disponibilité. Elle peut demander un volume disque et un temps réseau considérables. Un échec laisse le statut incomplet et les données déjà vérifiées sont réutilisables au prochain lancement.\n\nLa commande explicite ci-dessus récupère le code, les catalogues et workflows
 de `main`, puis **uniquement les assets nécessaires à toutes les lignes `SAFE` et
 `replay_compatible` du catalogue courant**. Elle vérifie d'abord le SHA-256 et
 la taille du conteneur Release, puis décompresse les conteneurs ZIP et vérifie
