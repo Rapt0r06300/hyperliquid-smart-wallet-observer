@@ -1,7 +1,6 @@
 {
   "backlog_by_kind": {
     "copy_vault_collection": 295,
-    "event_intelligence_collection": 1,
     "market_collection": 21
   },
   "by_family": {
@@ -43151,9 +43150,8 @@
     "copy_vault_collection:PENDING": 290,
     "copy_vault_collection:STUCK": 5,
     "event_intelligence_collection:COMPLETE": 47,
-    "event_intelligence_collection:FAILED": 25,
+    "event_intelligence_collection:FAILED": 26,
     "event_intelligence_collection:PARTIAL": 32,
-    "event_intelligence_collection:PENDING": 1,
     "event_intelligence_collection:UNAVAILABLE": 24,
     "forward_paper:COMPLETE": 1,
     "market_collection:COMPLETE": 1655,
@@ -62271,11 +62269,11 @@
       "campaign_id": "event-e8-2026102215-v5",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "event_intelligence_collection",
-      "last_checkpoint_id": null,
+      "last_checkpoint_id": "7114a83a1550be7afc4d01606c5a58a2e5d1d6d6fa9b559553a22336fdcafe1c",
       "lease": null,
       "lease_expires_at": null,
       "lease_owner": null,
@@ -62283,9 +62281,9 @@
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "PENDING",
-      "status_reason": "created",
-      "updated_at": "2026-10-22T15:06:34.666169Z"
+      "status": "FAILED",
+      "status_reason": "adapter_failed",
+      "updated_at": "2026-10-22T16:54:08.969370Z"
     },
     {
       "analysis_stage": null,
@@ -107711,13 +107709,13 @@
     "unique_trade_count_exact": false,
     "valid_record_count_exact": false
   },
-  "dataset_commit": "8a748f30270222623ad911576e529f88aaeb8bd0",
+  "dataset_commit": "8edd0c62f7489917cd6de6f758ea23beac0ddd33",
   "metrics_digest": "3cb3ef5e1c5724a2520d5f5ae1a35257e1d0905d7173cf4dd73fd4bd598266d8",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
   "oldest_next_due_at": "2026-10-02T18:10:03.324968Z",
   "oldest_pending_updated_at": "2026-10-01T04:38:09.193828Z",
-  "pending_campaign_count": 312,
+  "pending_campaign_count": 311,
   "phase": {
     "analysis_stage": null,
     "collection_cutoff_at_utc": null,
@@ -107734,7 +107732,7 @@
     "mismatches": [],
     "status": "CONSISTENT"
   },
-  "receipt_digest": "43ca0ca1294e9c08ba3065ea5d19effb37d3ab87eb2c9eac97c6591d4d754ee2",
+  "receipt_digest": "a3d54b62d91385c1934043fbc4591a69c8f3ae4346a7df7da14d0247d3382f95",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "REPLAYABLE_BUT_PARTIAL": 45319,
