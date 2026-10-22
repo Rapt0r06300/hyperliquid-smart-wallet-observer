@@ -638,3 +638,13 @@ def test_directory_at_prior_report_path_fails_before_restore(monkeypatch, tmp_pa
     (report_dir / "RESTORE_REPORT.json").mkdir(parents=True)
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: pytest.fail("must not restore"))
     assert module.main(["--download-safe"]) == 2
+
+
+
+def test_double_click_cmd_downloads_safe_instead_of_preview_only():
+    launcher = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
+    assert 'if "%~1"=="" (' in launcher
+    assert 'set "ALINA_SYNC_ARGS=--download-safe --all-safe --unpack-safe"' in launcher
+    assert 'set "ALINA_SYNC_ARGS=%*"' in launcher
+    assert launcher.count("sync_complete_clone.py %ALINA_SYNC_ARGS%") == 3
+    assert "sync_complete_clone.py %*" not in launcher

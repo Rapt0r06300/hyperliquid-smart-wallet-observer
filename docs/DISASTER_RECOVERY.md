@@ -212,3 +212,17 @@ Les JSONL se trouvent dans `runtime/recovery/full/usable/unpacked/`.
 Les fichiers compressés sont conservés. L'espace brut peut être de plusieurs
 **téraoctets** ; si le disque est insuffisant, le processus refuse sans
 commencer la décompression. Les résultats économiques restent non prouvés.
+
+
+### Lancement direct Windows (sans argument)
+
+Double-cliquer sur `ALINA_SYNC_COMPLETE.cmd` dans un clone propre lance
+maintenant **explicitement** `--download-safe --all-safe --unpack-safe`
+plutôt que le mode prévisualisation silencieux. Il affiche
+`ALINA_SYNC_MODE=DOWNLOAD_ALL_SAFE_AND_UNPACK`, puis les phases du moteur.
+Le programme vérifie les Releases et l'espace disque avant de récupérer les
+shards, avec reprise des fichiers déjà SHA-256 vérifiés. Pour seulement inspecter
+l'inventaire sans téléchargement, passer `--preflight-only` : cette option
+conserve son sens strict. Sur un volume insuffisant, la commande échoue sans
+prétendre avoir restauré les données. Les shards compressés restent disponibles
+sans extraction avec `--download-safe --all-safe`.
