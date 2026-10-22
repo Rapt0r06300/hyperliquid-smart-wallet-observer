@@ -44,6 +44,27 @@ def test_partition_plan_exact_roundtrip_stable_and_no_live_mutation(tmp_path):
     assert load_partitioned_index(_stage(tmp_path, root, files)) == original
 
 
+
+def test_partition_read_progress_only_after_verified_parts(tmp_path):
+    from tools.partitioned_data_index import read_index
+    root, files = partition_index(_index(), max_partition_bytes=240)
+    path = _stage(tmp_path, root, files)
+    updates = []
+    result = read_index(path, progress_callback=lambda done, total: updates.append((done, total)))
+    assert result == _index()
+    assert updates
+    assert updates[0] == (1, len(files))
+    assert updates[-1] == (len(files), len(files))
+    assert all(1 <= done <= total == len(files) for done, total in updates)
+
+    first = next(iter(files))
+    (path.parent / first).write_bytes(files[first] + b" ")
+    updates.clear()
+    with pytest.raises(ValueError, match="PARTITION_PARITY_SIZE_MISMATCH"):
+        read_index(path, progress_callback=lambda done, total: updates.append((done, total)))
+    assert not updates
+
+
 def test_partition_refuses_tampered_evidence(tmp_path):
     root, files = partition_index(_index(), max_partition_bytes=240)
     path = _stage(tmp_path, root, files)
