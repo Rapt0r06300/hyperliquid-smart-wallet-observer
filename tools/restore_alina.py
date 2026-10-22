@@ -1116,6 +1116,8 @@ def _load_current_safe_catalog(
 def _load_replay_ready_plan(
     index_path: Path,
     metrics_path: Path,
+    *,
+    index_holder: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, Any], list[Mapping[str, Any]], dict[tuple[str, str], tuple[int, str]]]:
     """Return the exact SAFE/replayable rows and their immutable outer assets."""
     print("ALINA_RESTORE_PHASE=VERIFY_CANONICAL_PARTITIONS", file=sys.stderr, flush=True)
@@ -1128,6 +1130,10 @@ def _load_replay_ready_plan(
         )
     except (OSError, ValueError) as exc:
         raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
+    # Optional internal hand-off avoids reconstructing the same partitions
+    # a second time for offline catalog budget calculations.
+    if index_holder is not None:
+        index_holder.append(index)
     print("ALINA_RESTORE_PHASE=VERIFY_SAFE_ADMISSION", file=sys.stderr, flush=True)
     safe, proof = _load_current_safe_catalog(
         index_path, metrics_path, validated_index=index,

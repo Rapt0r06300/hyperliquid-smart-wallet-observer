@@ -32,10 +32,20 @@ class SyncError(RuntimeError):
 
 def _git(root: Path, *args: str) -> str:
     try:
+        # An existing multi-GB checkout can spend a long time fetching. Keep
+        # Git's real stderr progress visible instead of silently buffering it.
+        fetching = bool(args) and args[0] == "fetch"
+        command = ["git", "-C", str(root), *args]
+        if fetching and "--progress" not in args:
+            command.insert(4, "--progress")
+            print("ALINA_SYNC_PHASE=FETCH_MAIN", file=sys.stderr, flush=True)
         done = subprocess.run(
-            ["git", "-C", str(root), *args],
-            check=False, capture_output=True, text=True,
+            command, check=False, text=True,
+            stdout=subprocess.PIPE,
+            stderr=None if fetching else subprocess.PIPE,
         )
+        if fetching and done.returncode == 0:
+            print("ALINA_SYNC_PHASE=FETCH_MAIN_COMPLETE", file=sys.stderr, flush=True)
     except OSError as exc:
         raise SyncError("Git is required to synchronize Alina") from exc
     if done.returncode:
@@ -135,18 +145,21 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
     These are manifest bytes, NOT downloaded/verified bytes or economic proof.
     """
     try:
-        from tools.partitioned_data_index import read_index
         from tools.restore_alina import _load_replay_ready_plan
     except ModuleNotFoundError:
-        from partitioned_data_index import read_index
         from restore_alina import _load_replay_ready_plan
 
     # This existing canonical verifier rejects stale metrics, malformed SAFE
     # asset identities, and incompletely reconstructed index partitions.
+    # Reuse the already SHA-verified logical index: a second full pass
+    # over a large partitioned catalog is expensive and can look frozen.
+    verified_index: list[dict] = []
     _safe, proof, replay_rows, required = _load_replay_ready_plan(
-        index_path, metrics_path
+        index_path, metrics_path, index_holder=verified_index
     )
-    index = read_index(index_path)
+    if len(verified_index) != 1:
+        raise ValueError("BUDGET_VERIFIED_CATALOG_UNAVAILABLE")
+    index = verified_index[0]
     by_quality: dict[str, dict[str, int]] = {}
     by_venue: dict[str, dict[str, int]] = {}
     by_family: dict[str, dict[str, int]] = {}
