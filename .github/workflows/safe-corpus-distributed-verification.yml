@@ -74,7 +74,8 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      max-parallel: 6
+      # Prioritize the SAFE GO lane while keeping bounded GitHub-hosted concurrency.
+      max-parallel: 12
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
