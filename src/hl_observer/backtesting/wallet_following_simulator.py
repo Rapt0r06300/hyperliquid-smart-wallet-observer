@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from .fee_model import calculate_fee_usdt
 from .slippage_model import apply_slippage
@@ -26,6 +26,8 @@ class WalletFollowingResult:
     trades: tuple[BacktestTrade, ...]
     net_pnl_usdt: float
     equity_curve: tuple[float, ...]
+    model_scope: str = "FIXTURE_DIAGNOSTIC_ONLY"
+    economic_proof_status: str = "UNMEASURABLE"
 
 
 def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = 200.0, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:

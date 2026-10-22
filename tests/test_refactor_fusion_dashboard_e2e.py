@@ -27,6 +27,8 @@ def test_refactor_fusion_dashboard_e2e_contains_real_sections_and_safety_flags(t
     assert "pnl_snapshot" in dashboard
     assert "loss_attribution" in dashboard
     assert run_json["replay_backtest"]["trade_count"] >= 1
+    assert run_json["replay_backtest"]["proof_status"] == "UNMEASURABLE"
+    assert run_json["replay_backtest"]["model_scope"] == "FIXTURE_DIAGNOSTIC_ONLY"
     assert run_json["paper_only"] is True
     assert run_json["real_execution"] is False
     assert "fixture:" in " ".join(dashboard["source_labels"])

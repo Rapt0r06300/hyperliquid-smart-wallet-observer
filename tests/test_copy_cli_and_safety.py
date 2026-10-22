@@ -1,9 +1,15 @@
+import json
 from pathlib import Path
 
 from click import unstyle
 from typer.testing import CliRunner
 
-from hl_observer.cli import _resolve_public_trade_scan_coins, _selected_top_wallet_rows, _unique_top_wallet_rows, app
+from hl_observer.cli import (
+    _resolve_public_trade_scan_coins,
+    _selected_top_wallet_rows,
+    _unique_top_wallet_rows,
+    app,
+)
 from hl_observer.config.loader import load_settings
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import MarketUniverseModel, TopWallet
@@ -330,6 +336,17 @@ def test_v23_fusion_cli_aliases_exist():
     ):
         result = runner.invoke(app, [command, "--help"])
         assert result.exit_code == 0, result.output
+
+
+def test_wallet_copy_fixture_cli_marks_result_unmeasurable():
+    runner = CliRunner()
+    result = runner.invoke(app, ["backtest-wallet-copy"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["model_scope"] == "FIXTURE_DIAGNOSTIC_ONLY"
+    assert payload["proof_status"] == "UNMEASURABLE"
+    assert payload["real_execution"] is False
 
 
 def test_copy_batch_keeps_testnet_and_mainnet_disabled_by_default():

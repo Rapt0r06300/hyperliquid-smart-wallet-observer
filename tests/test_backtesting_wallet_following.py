@@ -17,3 +17,5 @@ def test_wallet_following_applies_fees_and_slippage():
     )
     assert len(result.trades) == 1
     assert result.equity_curve[-1] != 1000.0
+    assert result.model_scope == "FIXTURE_DIAGNOSTIC_ONLY"
+    assert result.economic_proof_status == "UNMEASURABLE"

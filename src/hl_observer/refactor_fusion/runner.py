@@ -216,6 +216,9 @@ def run_refactor_fusion(
             "net_pnl_usdt": replay.net_pnl_usdt,
             "equity_curve": list(replay.equity_curve),
             "trade_count": len(replay.trades),
+            "proof_status": replay.economic_proof_status,
+            "model_scope": replay.model_scope,
+            "reason": "SIMPLIFIED_PRICE_ONLY_MODEL_NO_SHA_BOUND_REPLAY_EVIDENCE",
         },
         "dual_venue_hedge": {
             "accepted": hedge.accepted,
@@ -286,7 +289,7 @@ def run_refactor_fusion(
         + f"- Conflict resolver: {conflict.decision} side={conflict.winning_side or 'NONE'} reasons={','.join(conflict.reasons) or 'OK'}\n"
         + f"- Liquidity cliff: blocked={liquidity_cliff.blocked} reason={liquidity_cliff.reason}\n"
         + f"- Concentration: blocked={concentration.blocked} share={concentration.top_wallet_share}\n"
-        + f"- Replay paper PnL: {replay.net_pnl_usdt:.6f} USDT on {len(replay.trades)} fixture trade(s)\n"
+        + f"- Fixture-only diagnostic (not economic proof): {replay.net_pnl_usdt:.6f} USDT on {len(replay.trades)} fixture trade(s); status={replay.economic_proof_status}\n"
         + f"- Dual venue hedge: accepted={hedge.accepted} reason={hedge.reason} real_execution={hedge.real_execution}\n"
         + "\n## Secondary ports\n\n"
         + f"- Copy session: {copy_session.status}, watchlist={len(copy_session.watchlist)}, paper_only={copy_session.paper_only}\n"
