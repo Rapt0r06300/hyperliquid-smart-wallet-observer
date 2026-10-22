@@ -1184,9 +1184,9 @@ def test_replay_ready_catalog_partition_reader_invoked_only_once(tmp_path, monke
 
     original_read = module.read_index
     calls = []
-    def counted_read(path):
+    def counted_read(path, **kwargs):
         calls.append(path)
-        return original_read(path)
+        return original_read(path, **kwargs)
     monkeypatch.setattr(module, "read_index", counted_read)
 
     safe, proof, rows, required = module._load_replay_ready_plan(index_path, metrics_path)
