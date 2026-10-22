@@ -66,6 +66,17 @@ def _first_at_or_after(
     return (rows[index], lag) if 0 <= lag <= int(max_lag_ms) else (None, lag)
 
 
+def _last_at_or_before(
+    rows: list[dict[str, Any]], target_ms: int, max_age_ms: int
+) -> tuple[dict[str, Any] | None, int | None]:
+    timestamps = [int(row["ts_ms"]) for row in rows]
+    index = bisect.bisect_right(timestamps, int(target_ms)) - 1
+    if index < 0:
+        return None, None
+    age = int(target_ms) - int(rows[index]["ts_ms"])
+    return (rows[index], age) if 0 <= age <= int(max_age_ms) else (None, age)
+
+
 def _exact_checkpoint_triplet(
     metaorder: Mapping[str, Any],
     books: list[dict[str, Any]],
@@ -118,8 +129,12 @@ def _exact_checkpoint_triplet(
         target = int(row.get("checkpoint_target_ms") or 0)
         if target != expected_target:
             return None, "CHECKPOINT_TARGET_BINDING_MISMATCH"
-        lag = int(row["ts_ms"]) - target
-        allowed = max_reference_lag_ms if index == 0 else max_target_lag_ms
+        if index == 0:
+            lag = target - int(row["ts_ms"])
+            allowed = max_reference_lag_ms
+        else:
+            lag = int(row["ts_ms"]) - target
+            allowed = max_target_lag_ms
         if lag < 0 or lag > int(allowed):
             return None, "STALE_EXACT_METAORDER_CHECKPOINT"
         lags.append(lag)
@@ -204,7 +219,10 @@ def execute_metaorder(
         continuous_books = [row for row in books if not row.get("checkpoint_id")]
         if not continuous_books:
             return None, "MISSING_EXACT_METAORDER_CHECKPOINT"
-        reference, reference_lag = _first_at_or_after(
+        timestamps = [int(row["ts_ms"]) for row in continuous_books]
+        if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
+            return None, "UNSORTED_BOOK_TIMESTAMPS"
+        reference, reference_lag = _last_at_or_before(
             continuous_books, signal_ms, max_reference_lag_ms
         )
         if reference is None:

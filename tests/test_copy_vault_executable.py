@@ -192,6 +192,22 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
     assert trade["member_event_ids_at_signal"] == ["first", "second"]
 
 
+def test_execution_reference_book_ne_peut_pas_etre_postérieur_au_signal() -> None:
+    metaorder = cluster_metaorders([_entry("asof", 1_000)])[0][0]
+    books = [
+        _book(990, 99.0, 101.0, line=1),
+        _book(1_001, 90.0, 92.0, line=2),
+        _book(61_000, 100.0, 102.0, line=3),
+        _book(361_000, 109.0, 111.0, line=4),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["reference_ts_ms"] == 990
+
+
 def test_continuation_refuse_un_prefix_historique_ou_non_monotone() -> None:
     rows = [
         {
@@ -527,6 +543,20 @@ def test_stale_reference_is_refused_instead_of_using_future_price() -> None:
     assert reason == "STALE_OR_MISSING_REFERENCE_BOOK"
 
 
+def test_unsorted_continuous_books_are_rejected_before_replay() -> None:
+    metaorder = cluster_metaorders([_entry("unsorted", 1_000)])[0][0]
+    books = [
+        _book(61_000, 100.0, 102.0, line=1),
+        _book(990, 99.0, 101.0, line=2),
+        _book(361_000, 109.0, 111.0, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "UNSORTED_BOOK_TIMESTAMPS"
+
+
 def _checkpoint_book(
     metaorder_id: str, stage: str, ts_ms: int, target_ms: int, *, line: int
 ) -> dict:
@@ -564,6 +594,21 @@ def test_executeur_lie_les_trois_books_au_metaordre_exact() -> None:
     assert trade["checkpoint_writer_run_id"] == "copy-writer-clean"
     assert trade["checkpoint_clean_epoch_ms"] == 500
     assert trade["all_checkpoints_post_clean_epoch"] is True
+
+
+def test_executeur_refuse_un_checkpoint_reference_recu_apres_le_signal() -> None:
+    metaorder = cluster_metaorders([_entry("late-reference", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    books = [
+        _checkpoint_book(identifier, "REFERENCE", 1_001, 1_000, line=1),
+        _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "STALE_EXACT_METAORDER_CHECKPOINT"
 
 
 def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
