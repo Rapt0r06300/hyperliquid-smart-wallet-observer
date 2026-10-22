@@ -557,6 +557,21 @@ def test_unsorted_continuous_books_are_rejected_before_replay() -> None:
     assert reason == "UNSORTED_BOOK_TIMESTAMPS"
 
 
+def test_execution_refuse_une_position_traversant_un_funding_non_mesure() -> None:
+    signal_ms = 3_500_000
+    metaorder = cluster_metaorders([_entry("funding-gap", signal_ms)])[0][0]
+    books = [
+        _book(signal_ms - 10, 99.0, 101.0, line=1),
+        _book(signal_ms + COPY_DELAY_MS, 100.0, 102.0, line=2),
+        _book(signal_ms + COPY_DELAY_MS + 300_000, 109.0, 111.0, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "FUNDING_BOUNDARY_UNPRICED"
+
+
 def _checkpoint_book(
     metaorder_id: str, stage: str, ts_ms: int, target_ms: int, *, line: int
 ) -> dict:

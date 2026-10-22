@@ -51,6 +51,7 @@ from hl_observer.economics.assumptions import (
 )
 from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
+from hl_observer.funding.funding_times import next_funding_time_ms
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 
@@ -240,6 +241,10 @@ def execute_metaorder(
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
         book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
+    if next_funding_time_ms(int(entry["ts_ms"]), interval_hours=1) <= int(
+        exit_book["ts_ms"]
+    ):
+        return None, "FUNDING_BOUNDARY_UNPRICED"
     checkpoint_writer_ids = {
         str(row.get("writer_run_id") or "").strip()
         for row in (reference, entry, exit_book)
