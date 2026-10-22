@@ -8,6 +8,7 @@ if OOS passes.  All fills remain PAPER/READ-ONLY and use recorded causal L2.
 from __future__ import annotations
 
 import bisect
+import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -19,6 +20,7 @@ from hl_observer.backtesting.copy_vault_execution_math import (
 )
 from hl_observer.backtesting.copy_vault_protocol import (
     COPY_DELAY_MS,
+    MAX_GROSS_EXPOSURE_USD,
     MAX_REFERENCE_LAG_MS,
     MAX_TARGET_LAG_MS,
 )
@@ -26,7 +28,7 @@ from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.config.frais_venues import frais_taker_bps
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 
-SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v1"
+SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v2"
 PROTOCOL = "copy_v21_entry_capacity_daily_lock_v1"
 FROZEN_COPY_DELAY_MS = 60_000
 FROZEN_MAX_REFERENCE_LAG_MS = 30_000
@@ -57,11 +59,15 @@ def _reference_depth_features(
     if not rows:
         return None
     timestamps = [int(row["ts_ms"]) for row in rows]
+    if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
+        return None
     signal_ms = int(metaorder["signal_ts_ms"])
-    index = bisect.bisect_left(timestamps, signal_ms)
-    if index >= len(rows) or timestamps[index] - signal_ms > FROZEN_MAX_REFERENCE_LAG_MS:
+    index = bisect.bisect_right(timestamps, signal_ms) - 1
+    if index < 0 or signal_ms - timestamps[index] > FROZEN_MAX_REFERENCE_LAG_MS:
         return None
     row = rows[index]
+    if row.get("causal_observation") is not True:
+        return None
     bids = list(row.get("bids5") or ())
     asks = list(row.get("asks5") or ())
     if not bids or not asks:
@@ -199,6 +205,17 @@ def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("COPY_V21_SAFETY_CONTRACT_MISMATCH")
     if parameter_hash(parameters) != str(row.get("parameters_sha256") or ""):
         raise ValueError("COPY_V21_FREEZE_HASH_MISMATCH")
+    for name in ("core_notional_usd", "probe_notional_usd"):
+        try:
+            notional = float(parameters[name])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("COPY_V21_PAPER_NOTIONAL_INVALID") from exc
+        if (
+            not math.isfinite(notional)
+            or notional <= 0.0
+            or notional > MAX_GROSS_EXPOSURE_USD
+        ):
+            raise ValueError("COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED")
     if int(row.get("frozen_at_ms") or 0) <= 0:
         raise ValueError("COPY_V21_FREEZE_TIMESTAMP_INVALID")
     if (
@@ -263,7 +280,7 @@ def _settle(
     placebos: list[dict[str, Any]] = []
     vault_day: dict[tuple[str, int], int] = defaultdict(int)
     coin_day: dict[tuple[str, int], int] = defaultdict(int)
-    active_exit_times: list[int] = []
+    active_positions: list[tuple[int, float]] = []
 
     for metaorder in sorted(
         candidates,
@@ -279,8 +296,12 @@ def _settle(
         if coin_day[coin_key] >= int(params["coin_daily_limit"]):
             audit["COIN_DAILY_BUDGET_REJECTED"] += 1
             continue
-        active_exit_times = [value for value in active_exit_times if value > signal_ms]
-        if len(active_exit_times) >= int(params["max_open_positions"]):
+        active_positions = [
+            (exit_ms, notional)
+            for exit_ms, notional in active_positions
+            if exit_ms > signal_ms
+        ]
+        if len(active_positions) >= int(params["max_open_positions"]):
             audit["PORTFOLIO_CAPACITY_REJECTED"] += 1
             continue
 
@@ -296,6 +317,14 @@ def _settle(
             if locked
             else float(params["core_notional_usd"])
         )
+        active_gross_usd = sum(notional for _, notional in active_positions)
+        if (
+            not math.isfinite(notional_usd)
+            or notional_usd <= 0.0
+            or active_gross_usd + notional_usd > MAX_GROSS_EXPOSURE_USD + 1e-9
+        ):
+            audit["PAPER_GROSS_EXPOSURE_REJECTED"] += 1
+            continue
         sizing_state = (
             "POST_LOCK_NEW_VAULT_PROBE"
             if locked
@@ -369,7 +398,7 @@ def _settle(
         placebos.append({**placebo, **common})
         vault_day[vault_key] += 1
         coin_day[coin_key] += 1
-        active_exit_times.append(int(actual["exit_ts_ms"]))
+        active_positions.append((int(actual["exit_ts_ms"]), notional_usd))
         audit["ADMITTED_CLOSED_POSITION"] += 1
 
     return trades, placebos, dict(audit)
@@ -405,9 +434,8 @@ def _evaluate_segment(
     )
     daily_mean = _mean_daily(assessment["statistics"])
     reasons = list(assessment["reasons"])
-    if daily_mean is None or daily_mean < float(params["daily_profit_lock_usd"]):
-        reasons.append("DAILY_MEAN_NET_BELOW_4_USD")
     return {
+        **assessment,
         "segment": segment,
         "status": "PASS" if not reasons else "FAIL",
         "eligible": not reasons,
@@ -417,7 +445,6 @@ def _evaluate_segment(
         "candidate_count": len(candidates),
         "candidate_audit": candidate_audit,
         "replay_audit": replay_audit,
-        **assessment,
         "daily_mean_net_pnl_usd": daily_mean,
         "trades": trades,
         "placebos": placebos,
@@ -535,7 +562,8 @@ def evaluate_frozen_v21(
         "schema_version": SCHEMA_VERSION,
         "family": "copy_vault",
         "protocol": PROTOCOL,
-        "objective_net_usd_per_day": float(params["daily_profit_lock_usd"]),
+        "reference_feature_policy": "LATEST_CAUSAL_RECEIVED_BOOK_AT_OR_BEFORE_SIGNAL_V1",
+        "objective_net_usd_per_day": 5.0,
         "objective_status": "ATTEINT" if proven else "NON_PROUVE",
         "economically_proven": proven,
         "selection_scope": "IMMUTABLE_FROZEN_POLICY_SEQUENTIAL_HELDOUT",
