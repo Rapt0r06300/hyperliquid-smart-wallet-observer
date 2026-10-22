@@ -111,3 +111,47 @@ def test_aggregate_requires_exact_duplicate_free_partition_coverage(
             index=Path("index"), metrics=Path("metrics"), partitions=1,
             receipts=receipts, output=output, git_sha="d" * 40,
         )
+
+def test_aggregate_rejects_forged_partition_and_removes_stale_certificate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    specs = _specs()
+    monkeypatch.setattr(
+        verifier, "_load_specs",
+        lambda _index, _metrics: ({"source_index_sha256": "c" * 64}, specs),
+    )
+    receipts = tmp_path / "receipts"
+    receipts.mkdir()
+    output = tmp_path / "certificate.json"
+    output.write_text('{"status":"DISTRIBUTED_SAFE_CORPUS_BYTES_FULLY_VERIFIED"}')
+    payload = {
+        "schema": verifier.SCHEMA,
+        "status": "PARTITION_FULLY_BYTE_VERIFIED",
+        "repository": verifier.REPOSITORY,
+        "git_sha": "d" * 40,
+        "catalog_sha256": "c" * 64,
+        "partition": 2,
+        "partition_count": 1,
+        "verified": [],
+    }
+    receipt = receipts / "safe-corpus-partition-0.json"
+    receipt.write_text(json.dumps(payload))
+    with pytest.raises(RestoreError, match="invalid partition receipt"):
+        verifier.aggregate(
+            index=Path("index"), metrics=Path("metrics"), partitions=1,
+            receipts=receipts, output=output, git_sha="d" * 40,
+        )
+    assert not output.exists()
+
+    payload["partition"] = 0
+    payload["verified"] = [{
+        **verifier._asset_summary(specs[0]),
+        "asset_name": "unknown-forged-asset.zip",
+    }]
+    receipt.write_text(json.dumps(payload))
+    with pytest.raises(RestoreError, match="duplicate or mismatched"):
+        verifier.aggregate(
+            index=Path("index"), metrics=Path("metrics"), partitions=1,
+            receipts=receipts, output=output, git_sha="d" * 40,
+        )
+    assert not output.exists()
