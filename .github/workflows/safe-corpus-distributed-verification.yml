@@ -1,6 +1,11 @@
 name: SAFE corpus distributed byte verification
 
 on:
+  # One-shot bootstrap when this workflow changes; ordinary collector pushes do not trigger it.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/safe-corpus-distributed-verification.yml'
   # Full byte certification is expensive and must not be queued on each main
   # push: GitHub concurrency replaces an older pending run even with
   # cancel-in-progress: false. Use dispatch or the nightly schedule instead.
@@ -19,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: safe-corpus-distributed-verification
+  group: safe-corpus-distributed-verification-${{ github.run_id }}
   # Keep the active full-corpus proof; a new push must not cancel verified work.
   cancel-in-progress: false
 
