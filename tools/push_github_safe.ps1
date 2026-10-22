@@ -40,6 +40,21 @@ function Test-Git {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Stage-PublishableChanges {
+    # Un simple pathspec d'exclusion fait echouer `git add` lorsque les
+    # repertoires exclus sont aussi ignores. On prepare donc tout ce que Git
+    # accepte, puis on retire uniquement les zones runtime de l'index.
+    Invoke-Git @("add", "-A", "--", ".")
+    $stagedPaths = Get-GitText @("-c", "core.quotepath=false", "diff", "--cached", "--name-only")
+    foreach ($path in ($stagedPaths -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $normal = $path.Replace("\", "/")
+        if ($normal -match "^(runtime|logs|data|datasets|archive)/" -or $normal -match "(?i)\.bundle$") {
+            Invoke-Git @("restore", "--staged", "--", $path)
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # ROBUSTESSE 1 : purge des verrous .lock PERIMES.
 #
@@ -279,12 +294,7 @@ try {
                 # Git n'embarque pas les donnees massives : elles vont dans
                 # les Releases par BACKUP_LOCAL_ALINA.cmd. Ne jamais pousser
                 # ces donnees brutes ou des bundles dans le Git principal.
-                Invoke-Git @(
-                    "add", "-A", "--", ".",
-                    ":(exclude)runtime", ":(exclude)logs", ":(exclude)data",
-                    ":(exclude)datasets", ":(exclude)archive",
-                    ":(exclude)*.bundle"
-                )
+                Stage-PublishableChanges
             }
         }
         if ($runtimeDirty.Count -gt 0) {
