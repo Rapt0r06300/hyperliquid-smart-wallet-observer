@@ -478,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
                     from unpack_verified_safe import expand_safe_corpus
                 unpack_report = expand_safe_corpus(
                     report_dir, catalog_sha256=catalog_sha256,
+                    catalog_path=index_file,
                 )
             except (OSError, ValueError, RuntimeError) as exc:
                 report_error = f"SAFE_UNPACK_INCOMPLETE: {exc}"[:700]

@@ -12,6 +12,7 @@ import json
 import shutil
 import sys
 import zlib
+import re
 from pathlib import Path
 
 CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -40,7 +41,50 @@ def _json_atomic(path: Path, value: dict) -> None:
     tmp.replace(path)
 
 
-def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
+def _catalog_safe_bytes(index_path: Path, destination: Path, digest: str) -> dict[Path, tuple[int, str]]:
+    """Re-derive every admissible gzip identity from SHA-bound canonical index."""
+    if index_path.is_symlink() or not index_path.is_file():
+        raise SafeUnpackError("canonical catalog missing or symlinked")
+    if _hash(index_path) != digest:
+        raise SafeUnpackError("canonical DATA_INDEX changed after SAFE restoration")
+    try:
+        from tools.partitioned_data_index import read_index
+        from tools.restore_alina import _safe_component
+    except ModuleNotFoundError:
+        from partitioned_data_index import read_index
+        from restore_alina import _safe_component
+    try:
+        canonical = read_index(index_path)
+    except (ValueError, OSError, TypeError) as exc:
+        raise SafeUnpackError(f"canonical catalog partition verification failed: {exc}") from exc
+    expected: dict[Path, tuple[int, str]] = {}
+    for row in canonical["shards"]:
+        if row.get("quality_status") != "SAFE":
+            continue
+        if (row.get("replay_compatible") is not True
+                or row.get("validation_allowed") is False
+                or row.get("asset_verified") is False):
+            raise SafeUnpackError("SAFE catalog row is not replay-admissible")
+        sha = str(row.get("sha256") or "").lower()
+        size = row.get("bytes")
+        tag = str(row.get("release_tag") or "")
+        ident = str(row.get("dataset_id") or "")
+        if (not tag or not ident or type(size) is not int or size <= 0
+                or re.fullmatch(r"[0-9a-f]{64}", sha) is None):
+            raise SafeUnpackError("SAFE catalog row has no valid compressed byte identity")
+        path = (
+            destination / "usable" / "shards" / _safe_component(tag)
+            / (_safe_component(ident) + ".jsonl.gz")
+        )
+        if path in expected:
+            raise SafeUnpackError(f"duplicated SAFE shard output path: {path}")
+        expected[path] = (size, sha)
+    return expected
+
+
+def expand_safe_corpus(
+    destination: Path, *, catalog_sha256: str, catalog_path: Path,
+) -> dict:
     destination = Path(destination).resolve()
     certificate = destination / "RESTORE_REPORT.json"
     if certificate.is_symlink() or not certificate.is_file():
@@ -68,6 +112,11 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
     outroot = destination / "usable" / "unpacked"
     if any(x.is_symlink() for x in (destination / "usable", srcroot, outroot)):
         raise SafeUnpackError("symlinked SAFE data root")
+    expected_gz = _catalog_safe_bytes(Path(catalog_path), destination, catalog_sha256)
+    if len(expected_gz) != expected:
+        raise SafeUnpackError(
+            f"certified SAFE catalog count mismatch: {len(expected_gz)} != {expected}"
+        )
     sources = sorted(srcroot.glob("*/*.jsonl.gz"))
     if len(sources) != expected:
         raise SafeUnpackError(f"SAFE gzip count mismatch: {len(sources)} != {expected}")
@@ -79,6 +128,15 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
     for source in sources:
         if source.is_symlink() or source.parent.is_symlink() or not source.is_file():
             raise SafeUnpackError(f"unsafe source: {source}")
+        catalog_identity = expected_gz.get(source)
+        if catalog_identity is None:
+            raise SafeUnpackError(f"non-SAFE gzip in usable corpus: {source}")
+        expected_size, expected_sha = catalog_identity
+        if source.stat().st_size != expected_size:
+            raise SafeUnpackError(f"SAFE gzip size changed: {source}")
+        compressed_sha = _hash(source)
+        if compressed_sha != expected_sha:
+            raise SafeUnpackError(f"SAFE gzip SHA-256 changed after restore: {source}")
         directory = outroot / source.parent.name
         if directory.is_symlink():
             raise SafeUnpackError(f"symlinked unpack directory: {directory}")
@@ -115,7 +173,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
                 proof = json.loads(seal.read_text(encoding="utf-8"))
             except (OSError, UnicodeError, ValueError) as exc:
                 raise SafeUnpackError(f"unreadable extracted proof: {target}") from exc
-            if (proof.get("compressed_sha256") != _hash(source)
+            if (proof.get("compressed_sha256") != compressed_sha
                     or proof.get("jsonl_sha256") != _hash(target)
                     or proof.get("jsonl_bytes") != target.stat().st_size):
                 raise SafeUnpackError(f"previous extracted file changed: {target}")
@@ -127,7 +185,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
         if announced_bytes == 0:
             raise SafeUnpackError(f"invalid or ambiguous gzip ISIZE: {source}")
         required_bytes += announced_bytes
-        planned.append((source, target, seal, announced_bytes))
+        planned.append((source, target, seal, announced_bytes, compressed_sha))
     # Old previously-expanded SAFE files must never pollute a changed working
     # set. Quarantine only sealed byte-identical outputs; never destroy them.
     stale_outputs = 0
@@ -165,7 +223,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
     )
     created = 0
     written_bytes = 0
-    for source, target, seal, announced_bytes in planned:
+    for source, target, seal, announced_bytes, compressed_sha in planned:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(".jsonl.partial")
         if tmp.is_symlink():
@@ -196,7 +254,7 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
             tmp.replace(target)
             _json_atomic(seal, {
                 "schema": "alina.safe_jsonl_proof.v1",
-                "compressed_sha256": _hash(source),
+                "compressed_sha256": compressed_sha,
                 "jsonl_sha256": sha.hexdigest(),
                 "jsonl_bytes": size,
             })
