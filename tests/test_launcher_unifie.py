@@ -187,5 +187,10 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "PREPARER_PC_ALINA.cmd",
         "LANCER_COCKPIT_ALINA.cmd",
         "VERIFIER_LAB_AUTONOME_ALINA.cmd",
+        # Dedicated recovery/backup utilities are not competing runtime launchers.
+        "ALINA_SYNC_COMPLETE.cmd",
+        "RESTORE_ALINA.cmd",
+        "Alina-restore.cmd",
+        "BACKUP_LOCAL_ALINA.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves
