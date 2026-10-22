@@ -55,7 +55,8 @@ ici (explosion combinatoire = overfit) : leur effet se teste séparément via
 Champs clés de `scenario_report.json` :
 - `robust_count` / `best_robust` : les scénarios fiables (net>0 sur train **et** test, gate OK,
   plateau OK). **Ne considérer que ceux-là.**
-- `finalists` : classés par net **out-of-sample** (test), avec PF, winrate, drawdown des deux côtés.
+- `finalists` : classés par net **TRAIN uniquement** ; le test hors échantillon sert à évaluer,
+  jamais à reclasser les candidats. PF, winrate et drawdown restent visibles des deux côtés.
 
 ⚠️ Métriques **descriptives** sur le passé enregistré. Un bon score au replay **n'est pas une
 promesse** de PnL futur — c'est le meilleur pari possible sur données réelles, pas une garantie.

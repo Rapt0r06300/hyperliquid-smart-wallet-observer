@@ -5,7 +5,10 @@ from __future__ import annotations
 from hl_observer.backtesting.ab_flag_replay import marks_by_coin
 from hl_observer.backtesting.scenario_grid import _mk, archetype_scenarios
 from hl_observer.backtesting.scenario_search import (
-    eval_trades, report_from_trades, search, temporal_split,
+    eval_trades,
+    report_from_trades,
+    search,
+    temporal_split,
 )
 
 
@@ -67,11 +70,31 @@ def test_winner_survives_out_of_sample_on_uptrend():
     assert "aucune promesse" in rep["honesty"]
 
 
-def test_finalists_ranked_by_oos_net():
+def test_finalists_ranked_by_train_net():
     rep = search(_long_candidates(30), _uptrend_marks(150), archetype_scenarios(),
                  train_frac=0.6, top_k=8, min_trades=3, jobs=1)
-    nets = [f["test"]["net_total_usd"] or 0.0 for f in rep["finalists"]]
+    nets = [f["train"]["net_total_usd"] or 0.0 for f in rep["finalists"]]
     assert nets == sorted(nets, reverse=True)
+    assert rep["selection_basis"] == "train_net_only"
+
+
+def test_holdout_cannot_reorder_train_selected_finalists(monkeypatch):
+    # The holdout is deliberately most favorable to the weakest TRAIN scenario.
+    # Only the selection order is under test; the real train scorer and search path run.
+    def opposed_holdout(scenario, _candidates, _marks, _notional):
+        pnl = {"court_a": 3.0, "court_b": 2.0, "court_c": 1.0}[scenario.name]
+        return [("AAA", 2_000.0 + i, pnl) for i in range(40)]
+
+    monkeypatch.setattr(
+        "hl_observer.backtesting.scenario_search.eval_trades_triplets", opposed_holdout
+    )
+    rep = search(_long_candidates(30), _uptrend_marks(150), _scenarios_horizon_court(),
+                 train_frac=0.6, top_k=3, min_trades=3, jobs=1)
+
+    assert [f["scenario"]["name"] for f in rep["finalists"]] == [
+        "court_c", "court_b", "court_a"
+    ]
+    assert rep["finalists"][0]["test"]["net_total_usd"] < rep["finalists"][-1]["test"]["net_total_usd"]
 
 
 def test_higher_cost_reduces_net():

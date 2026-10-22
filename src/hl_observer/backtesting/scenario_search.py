@@ -20,8 +20,8 @@ from hl_observer.backtesting.ab_flag_replay import load_jsonl, marks_by_coin, si
 from hl_observer.backtesting.anti_overfit_gate import evaluer as _anti_overfit
 from hl_observer.backtesting.purged_split import purged_temporal_split
 from hl_observer.backtesting.scenario_grid import generate
-from hl_observer.paper_trading.sl_tp import SLTPConfig
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.paper_trading.sl_tp import SLTPConfig
 
 CONTEXT = "REPLAY"
 DEFAULT_NOTIONAL_USD = 500.0  # notre position reelle = marge $50 x levier 10
@@ -289,9 +289,8 @@ def _plateau_flag(sc, scored_map, k=12):
 
 def search(candidates, mark_rows, scenarios, *, train_frac=0.7, top_k=40, min_trades=25,
            jobs=1, notional_usd=DEFAULT_NOTIONAL_USD):
-    from hl_observer.backtesting.validation_gates import run_validation_gates
-
     from hl_observer.backtesting import regime_wiring as _rw
+    from hl_observer.backtesting.validation_gates import run_validation_gates
 
     marks = marks_by_coin(mark_rows)
 
@@ -372,7 +371,8 @@ def search(candidates, mark_rows, scenarios, *, train_frac=0.7, top_k=40, min_tr
             "regimes": _rw.repartition(test_trades_labellises),
         })
 
-    finalists.sort(key=lambda f: (f["test"]["net_total_usd"] or 0.0), reverse=True)
+    # The shortlist is already ordered by TRAIN net. Re-sorting it by the holdout
+    # turns that supposedly untouched holdout into a selection set.
     robust = [f for f in finalists if f["robust"]]
     return {
         "context": CONTEXT,
@@ -385,6 +385,7 @@ def search(candidates, mark_rows, scenarios, *, train_frac=0.7, top_k=40, min_tr
         "coupe_purgee": _coupe.as_dict(),
         "scenarios_evaluated": len(scenarios),
         "scenarios_with_min_trades": len(scored),
+        "selection_basis": "train_net_only",
         "robust_count": len(robust),
         "best_robust": robust[0] if robust else None,
         "finalists": finalists,
@@ -406,10 +407,9 @@ def search_over_db(candidates, mark_rows, db_path, *, sample=None, batch=50000,
     """
     import heapq
 
+    from hl_observer.backtesting import regime_wiring as _rw
     from hl_observer.backtesting.scenario_db import iter_db_scenarios
     from hl_observer.backtesting.validation_gates import run_validation_gates
-
-    from hl_observer.backtesting import regime_wiring as _rw
 
     marks = marks_by_coin(mark_rows)
     candidates = prefilter_candidates(candidates, marks)  # ecarte les non-mesurables (1 seule fois)
@@ -463,8 +463,11 @@ def search_over_db(candidates, mark_rows, db_path, *, sample=None, batch=50000,
                 if progress_every and st["evaluated"] >= nxt[0]:
                     nxt[0] += int(progress_every)
                     bn = max((h[0] for h in heap), default=0.0)
-                    print("[replay] evaluated=%d kept=%d elapsed_s=%d best_train_net=%.2f"
-                          % (st["evaluated"], st["kept"], _t.time() - t0, bn), flush=True)
+                    print(
+                        f"[replay] evaluated={st['evaluated']} kept={st['kept']} "
+                        f"elapsed_s={int(_t.time() - t0)} best_train_net={bn:.2f}",
+                        flush=True,
+                    )
 
         def _should_stop():
             # (1) limite de temps optionnelle ; (2) fichier-signal STOP (arret sur commande).
@@ -544,7 +547,7 @@ def search_over_db(candidates, mark_rows, db_path, *, sample=None, batch=50000,
             "regimes": _rw.repartition(test_trades_labellises),
         })
 
-    finalists.sort(key=lambda f: (f["test"]["net_total_usd"] or 0.0), reverse=True)
+    # Preserve the train-only heap order; the holdout is for evaluation, not ranking.
     robust = [f for f in finalists if f["robust"]]
     return {
         "context": CONTEXT,
@@ -556,6 +559,7 @@ def search_over_db(candidates, mark_rows, db_path, *, sample=None, batch=50000,
         "train_size": len(train), "test_size": len(test), "train_frac": train_frac,
         "scenarios_evaluated": evaluated,
         "scenarios_with_min_trades": kept,
+        "selection_basis": "train_net_only",
         "pool_kept": len(heap),
         "robust_count": len(robust),
         "best_robust": robust[0] if robust else None,
