@@ -28,6 +28,8 @@ def _freeze() -> dict:
         "max_open_positions": 10,
         "bonferroni_trial_count": 432,
         "bounds": {
+            "train_start_ms": 100,
+            "train_end_ms": 900,
             "validation_start_ms": 1_000,
             "validation_end_ms": 2_000,
             "oos_start_ms": 3_000,
@@ -202,6 +204,26 @@ def test_frozen_v21_rejects_single_trade_notional_above_paper_gross_limit() -> N
     payload["freeze"]["parameters_sha256"] = parameter_hash(params)
 
     with pytest.raises(ValueError, match="PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED"):
+        V21.evaluate_frozen_v21([], {}, payload)
+
+
+def test_frozen_v21_rejects_incomplete_hashed_parameters_before_evaluation() -> None:
+    payload = _freeze()
+    params = payload["freeze"]["parameters"]
+    del params["horizon_ms"]
+    payload["freeze"]["parameters_sha256"] = parameter_hash(params)
+
+    with pytest.raises(ValueError, match="COPY_V21_FREEZE_PARAMETERS_INVALID"):
+        V21.evaluate_frozen_v21([], {}, payload)
+
+
+def test_frozen_v21_rejects_non_chronological_hashed_bounds() -> None:
+    payload = _freeze()
+    params = payload["freeze"]["parameters"]
+    params["bounds"]["oos_start_ms"] = params["bounds"]["validation_end_ms"]
+    payload["freeze"]["parameters_sha256"] = parameter_hash(params)
+
+    with pytest.raises(ValueError, match="COPY_V21_FREEZE_BOUNDS_INVALID"):
         V21.evaluate_frozen_v21([], {}, payload)
 
 

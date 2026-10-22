@@ -217,6 +217,50 @@ def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("COPY_V21_SAFETY_CONTRACT_MISMATCH")
     if parameter_hash(parameters) != str(row.get("parameters_sha256") or ""):
         raise ValueError("COPY_V21_FREEZE_HASH_MISMATCH")
+    required_parameters = {
+        "training_selection_eligible",
+        "minimum_leader_fill_notional_usd",
+        "signed_depth_imbalance_minimum",
+        "core_notional_usd",
+        "probe_notional_usd",
+        "daily_profit_lock_usd",
+        "stop_loss_bps",
+        "take_profit_bps",
+        "horizon_ms",
+        "vault_daily_limit",
+        "coin_daily_limit",
+        "max_open_positions",
+        "bonferroni_trial_count",
+        "bounds",
+    }
+    if (
+        not required_parameters.issubset(parameters)
+        or parameters.get("training_selection_eligible") is not True
+    ):
+        raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID")
+    positive_parameters = (
+        "minimum_leader_fill_notional_usd",
+        "daily_profit_lock_usd",
+        "stop_loss_bps",
+        "take_profit_bps",
+        "horizon_ms",
+        "vault_daily_limit",
+        "coin_daily_limit",
+        "max_open_positions",
+        "bonferroni_trial_count",
+    )
+    try:
+        positive_values = [float(parameters[name]) for name in positive_parameters]
+        signed_imbalance_minimum = float(parameters["signed_depth_imbalance_minimum"])
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID") from exc
+    if (
+        any(not math.isfinite(value) or value <= 0.0 for value in positive_values)
+        or not math.isfinite(signed_imbalance_minimum)
+        or not -1.0 <= signed_imbalance_minimum <= 1.0
+        or any(not value.is_integer() for value in positive_values[-5:])
+    ):
+        raise ValueError("COPY_V21_FREEZE_PARAMETERS_INVALID")
     for name in ("core_notional_usd", "probe_notional_usd"):
         try:
             notional = float(parameters[name])
@@ -228,8 +272,41 @@ def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
             or notional > MAX_GROSS_EXPOSURE_USD
         ):
             raise ValueError("COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED")
-    if int(row.get("frozen_at_ms") or 0) <= 0:
+    try:
+        frozen_at_ms = int(row.get("frozen_at_ms") or 0)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("COPY_V21_FREEZE_TIMESTAMP_INVALID") from exc
+    if frozen_at_ms <= 0:
         raise ValueError("COPY_V21_FREEZE_TIMESTAMP_INVALID")
+    try:
+        bounds = parameters["bounds"]
+        if not isinstance(bounds, Mapping):
+            raise TypeError
+        train_start_ms = int(bounds["train_start_ms"])
+        train_end_ms = int(bounds["train_end_ms"])
+        validation_start_ms = int(bounds["validation_start_ms"])
+        validation_end_ms = int(bounds["validation_end_ms"])
+        oos_start_ms = int(bounds["oos_start_ms"])
+        oos_end_ms = int(bounds["oos_end_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID") from exc
+    if (
+        min(
+            train_start_ms,
+            train_end_ms,
+            validation_start_ms,
+            validation_end_ms,
+            oos_start_ms,
+            oos_end_ms,
+        ) <= 0
+        or train_end_ms < train_start_ms
+        or validation_start_ms <= train_end_ms
+        or validation_end_ms < validation_start_ms
+        or oos_start_ms <= validation_end_ms
+        or oos_end_ms < oos_start_ms
+        or frozen_at_ms <= oos_end_ms
+    ):
+        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID")
     if (
         int(COPY_DELAY_MS) != FROZEN_COPY_DELAY_MS
         or int(MAX_REFERENCE_LAG_MS) != FROZEN_MAX_REFERENCE_LAG_MS
