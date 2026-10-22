@@ -352,6 +352,10 @@ def main(argv: list[str] | None = None) -> int:
         help="limit NEW SAFE payload transfers to this many GiB (default 8)",
     )
     parser.add_argument(
+        "--unpack-safe", action="store_true",
+        help="unpack certified SAFE gzip shards to JSONL with disk guard and SHA receipts",
+    )
+    parser.add_argument(
         "--all-safe", action="store_true",
         help="restore all catalog-selected SAFE/replayable assets without a download cap",
     )
@@ -378,6 +382,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.all_safe and not args.download_safe:
         print("ALINA_SYNC_FAIL: --all-safe requires --download-safe", file=sys.stderr)
+        return 2
+    if args.unpack_safe and not args.download_safe:
+        print("ALINA_SYNC_FAIL: --unpack-safe requires --download-safe", file=sys.stderr)
         return 2
     if args.max_download_gib <= 0:
         print("ALINA_SYNC_FAIL: --max-download-gib must be positive", file=sys.stderr)
@@ -462,6 +469,21 @@ def main(argv: list[str] | None = None) -> int:
         effective_code = code
         if not effective_preflight and code == 0 and not certified:
             effective_code = 2
+        unpack_report = None
+        if certified and args.unpack_safe:
+            try:
+                try:
+                    from tools.unpack_verified_safe import expand_safe_corpus
+                except ModuleNotFoundError:
+                    from unpack_verified_safe import expand_safe_corpus
+                unpack_report = expand_safe_corpus(
+                    report_dir, catalog_sha256=catalog_sha256,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                report_error = f"SAFE_UNPACK_INCOMPLETE: {exc}"[:700]
+                print(f"ALINA_UNPACK_FAIL: {report_error}", file=sys.stderr, flush=True)
+                effective_code = 3
+                certified = False
         checkpoint = {
             "schema": "alina.main_sync.v1",
             "repository": REPOSITORY,
@@ -476,6 +498,11 @@ def main(argv: list[str] | None = None) -> int:
             "restore_report_status": restore_status,
             "source_inventory_sha256": inventory_sha,
             "report_validation_error": report_error,
+            "unpack_requested": bool(args.unpack_safe),
+            "unpack_complete": bool(
+                unpack_report and unpack_report.get("status") == "SAFE_UNPACK_COMPLETE"
+            ),
+            "unpack_report": "UNPACK_REPORT.json" if unpack_report else None,
         }
         path = report_dir / "SYNC_REPORT.json"
         temporary = path.with_suffix(".json.partial")

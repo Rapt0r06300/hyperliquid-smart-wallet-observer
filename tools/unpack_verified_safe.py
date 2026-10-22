@@ -57,6 +57,12 @@ def expand_safe_corpus(destination: Path, *, catalog_sha256: str) -> dict:
     expected = classification.get("usable_shards")
     if type(expected) is not int or expected <= 0:
         raise SafeUnpackError("no certified SAFE shards to unpack")
+    # Invalidate any prior successful expansion proof before new work.
+    _json_atomic(destination / "UNPACK_REPORT.json", {
+        "schema": "alina.safe_unpack_report.v1",
+        "status": "UNPACK_IN_PROGRESS_NOT_CERTIFIED",
+        "catalog_index_sha256": catalog_sha256,
+    })
     srcroot = destination / "usable" / "shards"
     outroot = destination / "usable" / "unpacked"
     if any(x.is_symlink() for x in (destination / "usable", srcroot, outroot)):

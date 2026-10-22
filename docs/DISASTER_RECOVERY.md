@@ -196,3 +196,19 @@ ses pointeurs. Les anciens manifests/scripts sont conservés uniquement si
 nécessaires à la compatibilité et ne sont pas un chemin de récupération actif.
 Un simple `git clone` sans étape d'hydratation des Releases n'est **pas**
 une copie intégrale.
+
+
+### SAFE uniquement : téléchargement et décompression JSONL
+
+Après le clone, `ALINA_SYNC_COMPLETE.cmd --download-safe --all-safe` récupère
+uniquement les assets SAFE/replay_compatible SHA-256 vérifiés dans
+`runtime/recovery/full/usable/shards/` au format `.jsonl.gz`.
+
+Pour décompresser également tous les JSONL, lancer
+`ALINA_SYNC_COMPLETE.cmd --download-safe --all-safe --unpack-safe`.
+Cette opération exige d'abord RESTORE_REPORT.json certifié, contrôle l'espace
+disque avant l'extraction, vérifie gzip/CRC et écrit des preuves SHA-256.
+Les JSONL se trouvent dans `runtime/recovery/full/usable/unpacked/`.
+Les fichiers compressés sont conservés. L'espace brut peut être de plusieurs
+**téraoctets** ; si le disque est insuffisant, le processus refuse sans
+commencer la décompression. Les résultats économiques restent non prouvés.
