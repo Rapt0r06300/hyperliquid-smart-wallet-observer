@@ -136,3 +136,14 @@ def test_modified_but_valid_gzip_must_not_be_accepted_as_certified_safe(tmp_path
     with pytest.raises(SafeUnpackError, match="SHA-256 changed"):
         _expand(tmp_path)
     assert json.loads((tmp_path / "UNPACK_REPORT.json").read_text())["status"] != "SAFE_UNPACK_COMPLETE"
+
+
+def test_old_success_report_is_invalidated_on_missing_restore_certificate(tmp_path):
+    fixture(tmp_path)
+    _expand(tmp_path)
+    certificate = tmp_path / "RESTORE_REPORT.json"
+    certificate.unlink()
+    with pytest.raises(SafeUnpackError, match="missing verified"):
+        _expand(tmp_path)
+    report = json.loads((tmp_path / "UNPACK_REPORT.json").read_text())
+    assert report["status"] == "UNPACK_IN_PROGRESS_NOT_CERTIFIED"

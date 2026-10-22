@@ -86,6 +86,13 @@ def expand_safe_corpus(
     destination: Path, *, catalog_sha256: str, catalog_path: Path,
 ) -> dict:
     destination = Path(destination).resolve()
+    # Invalidate any prior success before every validation, including missing
+    # or mismatched RESTORE_REPORT/catalog. No stale green report may survive.
+    _json_atomic(destination / "UNPACK_REPORT.json", {
+        "schema": "alina.safe_unpack_report.v1",
+        "status": "UNPACK_IN_PROGRESS_NOT_CERTIFIED",
+        "catalog_index_sha256": catalog_sha256,
+    })
     certificate = destination / "RESTORE_REPORT.json"
     if certificate.is_symlink() or not certificate.is_file():
         raise SafeUnpackError("missing verified RESTORE_REPORT.json")
@@ -102,12 +109,6 @@ def expand_safe_corpus(
     expected = classification.get("usable_shards")
     if type(expected) is not int or expected <= 0:
         raise SafeUnpackError("no certified SAFE shards to unpack")
-    # Invalidate any prior successful expansion proof before new work.
-    _json_atomic(destination / "UNPACK_REPORT.json", {
-        "schema": "alina.safe_unpack_report.v1",
-        "status": "UNPACK_IN_PROGRESS_NOT_CERTIFIED",
-        "catalog_index_sha256": catalog_sha256,
-    })
     srcroot = destination / "usable" / "shards"
     outroot = destination / "usable" / "unpacked"
     if any(x.is_symlink() for x in (destination / "usable", srcroot, outroot)):
@@ -251,6 +252,10 @@ def expand_safe_corpus(
                     last = line[-1:]
             if size != announced_bytes or last != b"\n":
                 raise SafeUnpackError(f"JSONL truncation or invalid gzip size: {source}")
+            # Protect against replacement/modification between the initial
+            # catalog-bound SHA check and the end of a long extraction.
+            if _hash(source) != compressed_sha:
+                raise SafeUnpackError(f"SAFE gzip modified during extraction: {source}")
             tmp.replace(target)
             _json_atomic(seal, {
                 "schema": "alina.safe_jsonl_proof.v1",
