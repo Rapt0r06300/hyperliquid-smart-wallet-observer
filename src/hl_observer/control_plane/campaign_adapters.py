@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 ROOT = Path(__file__).resolve().parents[3]
 ECONOMIC_KINDS = frozenset({"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"})
 ANALYSIS_STAGE_BY_KIND = {
@@ -451,14 +453,14 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         loaded = json.loads(summary_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             summary = loaded
-    except (OSError, ValueError, TypeError):
-        pass
+    except (OSError, ValueError, TypeError) as exc:
+        _noter_echec("control_plane/campaign_adapters.py:collection_summary", exc)
     try:
         loaded = json.loads(index_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             index = loaded
-    except (OSError, ValueError, TypeError):
-        pass
+    except (OSError, ValueError, TypeError) as exc:
+        _noter_echec("control_plane/campaign_adapters.py:bundle_index", exc)
 
     trade_count = 0
     record_count = 0
