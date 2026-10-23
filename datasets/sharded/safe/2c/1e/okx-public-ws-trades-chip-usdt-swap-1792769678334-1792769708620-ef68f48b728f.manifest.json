@@ -1,0 +1,144 @@
+{
+  "asset_verified": true,
+  "bytes": 2244,
+  "collection_run_id": "market-e8-1-2026102314-v7-0",
+  "collector_version": "095dad1bfcffb3e2978a8232b82e8538268ca096",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-chip-usdt-swap-1792769678334-1792769708620-ef68f48b728f",
+  "end_ts_ms": 1792769708620,
+  "event_count": 16,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 16,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 16,
+    "missing_from_live": 0,
+    "reference_count": 16,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 16,
+  "release": {
+    "asset_id": 669724215,
+    "asset_name": "packed-shards-0098.zip",
+    "member_name": "okx-public-ws-trades-chip-usdt-swap-1792769678334-1792769708620-ef68f48b728f.jsonl.gz",
+    "release_id": 422075678,
+    "release_tag": "data-v2-campaign-market-e8-1-2026102314-v7-u0",
+    "remote_digest": "sha256:b62391e78ff6ddc833484856e1ff53ab92b47b248a712c6549b241f64000070d",
+    "remote_size": 1135786,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-chip-usdt-swap-1792769678334-1792769708620-ef68f48b728f.jsonl.gz",
+  "release_asset_id": 669724215,
+  "release_container_asset": "packed-shards-0098.zip",
+  "release_id": 422075678,
+  "release_member": "okx-public-ws-trades-chip-usdt-swap-1792769678334-1792769708620-ef68f48b728f.jsonl.gz",
+  "release_remote_digest": "sha256:b62391e78ff6ddc833484856e1ff53ab92b47b248a712c6549b241f64000070d",
+  "release_remote_size": 1135786,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-1-2026102314-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ef68f48b728fde75ce47ad722660896801bf2592cd4334bc3d35a0fa7d05343a",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1792769678334,
+  "symbol": "CHIP-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 18.5,
+      "min": 17.0,
+      "p50": 17.0,
+      "p95": 18.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-ea6ffa8b6de24e2c8a334b31977c1272"
+    ],
+    "first_exchange_ts_ms": 1792769677877,
+    "last_exchange_ts_ms": 1792769695491,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 13129.0,
+      "min": 54.0,
+      "p50": 2796.0,
+      "p95": 12472.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    }
+  },
+  "trade_count": 16,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "165ff2629095ae6129e262f6f353889d964f0d2dccf14a32429027c9b720ae90",
+    "3cdfe2433d065a5625a0a76549f793cbd8b0ea5d42b3daf5d52f48bba9fcb228",
+    "415d6ae2432fbb27a09fb0fdbc36c80e3e9e005a2078e142c4d34b03ab8cb3ed",
+    "48c80ffe66880a8ea08672f0cbf9494fa7c1f089dce3e77d15c55a35bcd50d75",
+    "50459bfa3e2d470e86f6ab6e04eab82cf31ade001f42f8caf1a71ddc4872cbd6",
+    "59629149727c170ad9a13d3a768b688105e0825ff6541f3b4a4b0e1ee3a1be2f",
+    "6350eca4e87a9bbbef629370cd2895702c71c6f06c215e19a13864a91ca0352d",
+    "646ab25cab61f61f416ef494ea8563c980f17dc8f2d8776c2979e9cf456643be",
+    "70087adb208bf808472983ee725526f997fb5f53f0d1901aaa2060669a78d7ff",
+    "b107036814e789acc007af048864e5b4c5ba0622fd68bed4e0be02c8ed4d746a",
+    "ba72e061982144e2e18961359208d893fab923c58df6bc53233067063059d0f0",
+    "c1b089f996f497ff28866e2d979738abbfdc218f1ec553863b387ea80f5f01c6",
+    "c657ac5efc367eb2c66f9a3343c3346e342bc2c68e42ab772912d6a877043a05",
+    "dbfb3ba173460d3ee497e219c552764d82df77eb148a26d22e0820e3252527c5",
+    "ddac5168c643a06cb529af0e545d54e9e2aa8cd3634ea5a7fe485742af5c8876",
+    "f3e7dfbec131e92bedcbe1e60408db0fc1b06bdc218c7f58ea2bb6bed9c085a0"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 16,
+  "trade_identity_set_sha256": "85750a827e5026462b301d61206fe1a96c5fdf5a8edf54d59e26683ca3615412",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 24526,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 16,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

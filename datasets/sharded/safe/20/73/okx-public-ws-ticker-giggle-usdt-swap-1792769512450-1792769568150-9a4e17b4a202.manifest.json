@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 9879,
+  "collection_run_id": "market-e8-1-2026102314-v7-0",
+  "collector_version": "095dad1bfcffb3e2978a8232b82e8538268ca096",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-giggle-usdt-swap-1792769512450-1792769568150-9a4e17b4a202",
+  "end_ts_ms": 1792769568150,
+  "event_count": 105,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 105,
+  "release": {
+    "asset_id": 669723323,
+    "asset_name": "packed-shards-0087.zip",
+    "member_name": "okx-public-ws-ticker-giggle-usdt-swap-1792769512450-1792769568150-9a4e17b4a202.jsonl.gz",
+    "release_id": 422075678,
+    "release_tag": "data-v2-campaign-market-e8-1-2026102314-v7-u0",
+    "remote_digest": "sha256:155ff1288a4dfda99b340f48c47ac622b3121acedf3fc985194747c9102bdfd8",
+    "remote_size": 1321670,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-ticker-giggle-usdt-swap-1792769512450-1792769568150-9a4e17b4a202.jsonl.gz",
+  "release_asset_id": 669723323,
+  "release_container_asset": "packed-shards-0087.zip",
+  "release_id": 422075678,
+  "release_member": "okx-public-ws-ticker-giggle-usdt-swap-1792769512450-1792769568150-9a4e17b4a202.jsonl.gz",
+  "release_remote_digest": "sha256:155ff1288a4dfda99b340f48c47ac622b3121acedf3fc985194747c9102bdfd8",
+  "release_remote_size": 1321670,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-1-2026102314-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9a4e17b4a202a059c0ac2b8f2bd1a608b9758d4ba9912e73d14fc6026bb37ba4",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1792769512450,
+  "symbol": "GIGGLE-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 105,
+      "max": 24.0,
+      "min": 6.0,
+      "p50": 24.0,
+      "p95": 24.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-064ea4e635bd416f910054c20ee0ebf3"
+    ],
+    "first_exchange_ts_ms": 1792769512046,
+    "last_exchange_ts_ms": 1792769550065,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 105,
+      "max": 18416.0,
+      "min": 90.0,
+      "p50": 8576.0,
+      "p95": 18100.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 105,
+      "max": 8526.167138,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 8526.167138
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 172346,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}
