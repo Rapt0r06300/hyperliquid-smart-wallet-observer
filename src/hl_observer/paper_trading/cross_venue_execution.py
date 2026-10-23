@@ -383,7 +383,9 @@ def _run_scenario(
     ledger.open_position(
         coin=request.leg1.ledger_coin,
         side=request.leg1.position_side,
-        notional_usdc=leg1_filled,
+        # PaperLedger requires quantity * all-in fill price, not pre-cost L2 notional.
+        # Fee/slippage are already embedded in the canonical execution fill price.
+        notional_usdc=leg1_result.execution.filled_quantity * float(leg1_result.execution.fill_price),
         quantity=leg1_result.execution.filled_quantity,
         fill_price=float(leg1_result.execution.fill_price),
         timestamp_ms=scenario.leg1_entry.decision_ts_ms,
@@ -433,7 +435,7 @@ def _run_scenario(
         ledger.open_position(
             coin=request.leg2.ledger_coin,
             side=request.leg2.position_side,
-            notional_usdc=leg2_filled,
+            notional_usdc=leg2_result.execution.filled_quantity * float(leg2_result.execution.fill_price),
             quantity=leg2_result.execution.filled_quantity,
             fill_price=float(leg2_result.execution.fill_price),
             timestamp_ms=scenario.leg2_delayed.decision_ts_ms,
