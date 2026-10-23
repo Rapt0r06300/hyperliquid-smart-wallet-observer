@@ -21,4 +21,5 @@ set "RESULT=%ERRORLEVEL%"
 echo.
 echo Report: runtime\recovery\full\LOCAL_L2_CERTIFICATION.json
 echo Exit code: %RESULT%  (1 = some L2 shards blocked, 2 = infrastructure failure)
+if "%~1"=="" pause
 exit /b %RESULT%

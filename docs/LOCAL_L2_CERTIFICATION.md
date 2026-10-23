@@ -42,3 +42,9 @@ Code de sortie : 0 = aucun BLOCKED, 1 = au moins un BLOCKED (rapport écrit),
 2 = erreur d'infrastructure (catalogue, accès disque ou arguments).
 
 Tests déterministes: \`python -m pytest -q tests/test_certify_local_l2.py\`.
+
+## Performance et reprise
+
+Chaque scan strict parcourt les octets gzip et vérifie SHA-256, CRC, JSONL, séquences et structure de carnet **sans tout décompresser sur disque**. Les shards sont traités en parallèle (1 à 16 threads), dans une mémoire bornée par flux de carnet. Les reçus sous `LOCAL_L2_RECEIPTS/` sont sauvegardés individuellement, pour reprendre après interruption avec `--resume` (ex. `VERIFIER_REPARER_L2_LOCAL.cmd --resume --workers 8`). **Attention :** `--resume` fait confiance à la taille et au mtime d'un fichier précédemment haché ; ce mode n'est pas une nouvelle vérification cryptographique. Pour un audit de preuve final, relancer sans `--resume`.
+
+Les checksums natifs optionnels de carnet et les frontières **inter-shards** ne sont pas encore vérifiés de bout en bout. `CONTINUOUS_L2` désigne uniquement la chaîne structurelle validée **dans le shard**. Les fichiers produits par la réparation ne sont pas automatiquement branchés aux backtests.

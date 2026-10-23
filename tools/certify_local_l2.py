@@ -174,7 +174,7 @@ def inspect_shard(path, entry):
         return result
 
     books = {}
-    prior_sequence, prior_time, last_connection = None, None, None
+    prior_sequence, prior_time, prior_received, prior_mono, last_connection = None, None, None, None, None
     active_start = None
     segments = []
     line_number = 0
@@ -205,9 +205,20 @@ def inspect_shard(path, entry):
                         reject("ROW_VENUE_INVALID"); close(); books = {}; continue
                     stamp = integer(row.get("exchange_ts_ms"))
                     received = integer(row.get("received_ts_ms"))
-                    if stamp is None or received is None or (prior_time is not None and stamp < prior_time):
+                    mono = integer(row.get("local_monotonic_ns"))
+                    if (stamp is None or received is None
+                            or (prior_time is not None and stamp < prior_time)
+                            or (prior_received is not None and received < prior_received)
+                            or (mono is not None and prior_mono is not None and mono < prior_mono)):
                         reject("TIMESTAMP_INVALID_OR_REGRESSION"); close(); books = {}; continue
-                    prior_time = stamp
+                    prior_time, prior_received = stamp, received
+                    if mono is not None:
+                        prior_mono = mono
+                    channel = str(row.get("channel") or "l2Book").lower()
+                    if channel not in FAMILIES or (
+                            entry.get("symbol") and row.get("instrument")
+                            and str(row["instrument"]).upper() != str(entry["symbol"]).upper()):
+                        reject("L2_CHANNEL_OR_SYMBOL_MISMATCH"); close(); books = {}; continue
                     if integer(row.get("gap_count")) not in (0, None):
                         reject("RECORDED_SOURCE_GAP"); close(); books = {}; continue
                     summary = row.get("parsed_summary") or {}
@@ -286,6 +297,8 @@ def inspect_shard(path, entry):
 
 
 def atomic_json(path, value):
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("UNSAFE_REPORT_PATH")
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
                                      prefix=".l2-report-", suffix=".tmp",
@@ -459,6 +472,8 @@ def main(argv=None):
     parser.add_argument("--repair", action="store_true", help="create separate proven spans")
     parser.add_argument("--resume", action="store_true", help="trust previous SHA-verified receipts only if source size+mtime unchanged; not a fresh byte validation")
     args = parser.parse_args(argv)
+    if args.limit < 0 or args.workers <= 0 or args.workers > 16:
+        parser.error("--limit must be >=0 and --workers must be 1..16")
     root = args.root.resolve()
     destination = args.destination or root / "runtime" / "recovery" / "full"
     try:

@@ -14,7 +14,11 @@ permissions:
 
 jobs:
   offline-l2-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 8
     env:
       PYTHONPATH: '.:tools:src'

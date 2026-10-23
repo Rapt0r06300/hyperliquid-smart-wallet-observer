@@ -100,3 +100,31 @@ def test_bitget_pseq_requires_exact_previous(tmp_path):
                            [frame("snapshot", 1, 10), frame("update", 2, 12, 9)],
                            venue="bitget")
     assert inspect_shard(source, info)["status"] != "CONTINUOUS_L2"
+
+
+def test_full_offline_report_and_fast_receipt_resume(tmp_path):
+    from tools.certify_local_l2 import run
+    from pathlib import Path
+
+    root = tmp_path / "repository"
+    destination = root / "runtime" / "recovery" / "full"
+    stored = destination / "usable" / "shards" / "sample-release"
+    stored.mkdir(parents=True)
+    path, row = prepare(tmp_path, [snap(1, 100), delta(2, 101, 102, 100)])
+    shard_path = stored / "data.jsonl.gz"
+    shard_path.write_bytes(path.read_bytes())
+    row.update({"quality_status": "SAFE", "replay_compatible": True,
+                "asset_verified": True, "validation_allowed": True,
+                "release_tag": "sample-release", "symbol": "BTCUSDT"})
+    (root / "catalog").mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": [row]}),
+        encoding="utf-8",
+    )
+    first = run(root, destination, workers=2)
+    assert first["totals"] == {"CONTINUOUS_L2": 1}
+    assert first["cache_reused_without_new_hash"] == 0
+    second = run(root, destination, workers=2, resume=True)
+    assert second["cache_reused_without_new_hash"] == 1
+    assert second["totals"] == first["totals"]
+    assert shard_path.read_bytes() == path.read_bytes()
