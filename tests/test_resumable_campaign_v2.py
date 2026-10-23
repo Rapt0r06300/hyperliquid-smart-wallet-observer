@@ -42,7 +42,7 @@ def test_v2_manifest_validation():
         "kind": "market_collection",
         "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "code_sha": "a" * 40,
-        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "dataset_generation": "gen-1",
         "config_sha256": "b" * 64,
         "work_plan_sha256": "c" * 64,
@@ -63,6 +63,12 @@ def test_v2_manifest_validation():
     assert m.creation_phase == "COLLECT"
     assert m.phase_epoch == 2
 
+    # The retired dataset repository remains invalid for V2; only the fixture
+    # now uses the same canonical repository as the real production gate.
+    retired = {**raw_v2_valid, "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2"}
+    with pytest.raises(ValueError, match="canonical Alina repository"):
+        CampaignManifest.from_dict(retired)
+
 
 def test_v2_analyze_manifest_requires_cutoff_and_selection():
     raw_analyze = {
@@ -70,7 +76,7 @@ def test_v2_analyze_manifest_requires_cutoff_and_selection():
         "kind": "replay",
         "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "code_sha": "a" * 40,
-        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "dataset_generation": "gen-1",
         "config_sha256": "b" * 64,
         "work_plan_sha256": "c" * 64,
@@ -100,7 +106,7 @@ def test_v2_lease_and_selection_epoch_enforcement():
         "kind": "market_collection",
         "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "code_sha": "a" * 40,
-        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "dataset_generation": "gen-1",
         "config_sha256": "b" * 64,
         "work_plan_sha256": "c" * 64,
@@ -168,7 +174,7 @@ def test_save_expected_digest_uses_exact_on_disk_json(tmp_path):
         "kind": "market_collection",
         "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "code_sha": "a" * 40,
-        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "dataset_generation": "V2_FRESH",
         "config_sha256": "b" * 64,
         "work_plan_sha256": "c" * 64,
