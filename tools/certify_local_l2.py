@@ -251,8 +251,6 @@ def inspect_shard(path, entry, *, carry=None):
                         prior_sequence = sequence
                         active_start = line_number
                     else:
-                        if inherited and line_number == 1:
-                            used_carry = True
                         if not books or prior_sequence is None or sequence is None:
                             reject("DELTA_WITHOUT_PROVEN_ANCHOR")
                             close(); books = {}; continue
@@ -284,6 +282,8 @@ def inspect_shard(path, entry, *, carry=None):
                     if not books["bid"] or not books["ask"] or max(books["bid"]) >= min(books["ask"]):
                         reject("BOOK_EMPTY_OR_CROSSED")
                         close(); books = {}; continue
+                    if inherited and line_number == 1 and not snapshot:
+                        used_carry = True
                     result["valid_records"] += 1
             if hashed.size != expected_size or hashed.digest.hexdigest() != expected_sha:
                 reject("COMPRESSED_SHA256_MISMATCH")
@@ -299,6 +299,7 @@ def inspect_shard(path, entry, *, carry=None):
         return result
     close(include_current=True)
     result["segments"] = segments
+    result["first_segment_depends_on_prior_shard"] = used_carry
     if not segments:
         result["status"] = "BLOCKED"
     elif venue == "hyperliquid" or not has_deltas:
@@ -344,6 +345,13 @@ def salvage(source, folder, record):
         raise ValueError("UNSAFE_REPAIR_ID")
     identity = hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()[:24]
     segments = record["segments"]
+    # A locally repaired gzip must never begin with a delta that depends on
+    # an absent earlier-shard snapshot. Keep that interval only in the linked
+    # certification report, not in the standalone repaired asset.
+    if record.get("first_segment_depends_on_prior_shard"):
+        segments = segments[1:]
+    if not segments:
+        raise ValueError("NO_SELF_ANCHORED_INTERVAL_TO_REPAIR")
     fragment = hashlib.sha256(json.dumps(segments, sort_keys=True).encode()).hexdigest()[:12]
     target = folder / (identity + "." + record["source_sha256"][:16] +
                        "." + fragment + ".reanchored.jsonl.gz")
