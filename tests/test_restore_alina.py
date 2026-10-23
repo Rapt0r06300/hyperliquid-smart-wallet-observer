@@ -1398,6 +1398,176 @@ def test_restore_rejects_zip_unsafe_members_and_symlinks(tmp_path):
         module._verify_zip_archive(archive_path, archive_path.name)
 
 
+def test_materialize_safe_shard_uses_windows_io_path_for_long_target(
+    tmp_path, monkeypatch,
+):
+    module = _module()
+    payload = b'{"trade_id":"long-windows-path"}\n'
+    tag = "data-v2-long-target"
+    dataset_id = "safe-" + ("x" * 210)
+    releases_root = tmp_path / "releases"
+    source = releases_root / tag / "source.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    destination = tmp_path / "restore"
+    redirected_root = tmp_path / "extended-path-io"
+    original_windows_io_path = module._windows_io_path
+
+    def redirect_materialized_target(path):
+        path = Path(path)
+        usable_root = destination / "usable" / "shards"
+        try:
+            relative = path.relative_to(usable_root)
+        except ValueError:
+            return original_windows_io_path(path)
+        if len(relative.parts) == 1:
+            return redirected_root
+        suffix = ".partial" if path.name.endswith(".partial") else ""
+        return redirected_root / f"target.jsonl.gz{suffix}"
+
+    monkeypatch.setattr(module, "_windows_io_path", redirect_materialized_target)
+    row = {
+        "dataset_id": dataset_id,
+        "release_tag": tag,
+        "release_asset": source.name,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+    result = module._materialize_catalog_safe_shards(
+        [row], releases_root, destination, prune_stale=False,
+    )
+
+    target = redirected_root / "target.jsonl.gz"
+    assert result["failures"] == []
+    assert result["materialization_complete"] is True
+    assert result["usable_shards"] == 1
+    assert target.read_bytes() == payload
+    assert not (destination / "usable" / "shards" / tag / target.name).exists()
+
+
+def test_long_target_root_symlink_check_uses_windows_io_path(
+    tmp_path, monkeypatch,
+):
+    module = _module()
+    payload = b'{"trade_id":"long-symlink-root"}\n'
+    tag = "data-v2-long-symlink-root"
+    releases_root = tmp_path / "releases"
+    source = releases_root / tag / "source.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    destination = tmp_path / "restore"
+    display_root = destination / "usable" / "shards" / tag
+    io_root = tmp_path / "extended-io-root"
+    original_windows_io_path = module._windows_io_path
+    original_is_symlink = Path.is_symlink
+
+    def redirect_target_root(path):
+        path = Path(path)
+        if path == display_root:
+            return io_root
+        return original_windows_io_path(path)
+
+    def mark_io_root_as_symlink(path):
+        if path == io_root:
+            return True
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(module, "_windows_io_path", redirect_target_root)
+    monkeypatch.setattr(Path, "is_symlink", mark_io_root_as_symlink)
+    row = {
+        "dataset_id": "safe-long-root",
+        "release_tag": tag,
+        "release_asset": source.name,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+    result = module._materialize_catalog_safe_shards(
+        [row], releases_root, destination, prune_stale=False,
+    )
+
+    assert result["failures"] == [{
+        "dataset_id": "safe-long-root",
+        "error": "SYMLINKED_SHARD_DIRECTORY",
+    }]
+    assert not io_root.exists()
+
+
+def test_stale_symlink_check_uses_windows_io_path(tmp_path, monkeypatch):
+    module = _module()
+    destination = tmp_path / "restore"
+    previous = destination / "usable" / "shards" / "old" / "old.jsonl.gz"
+    previous.parent.mkdir(parents=True)
+    previous.write_bytes(b"stale")
+    io_previous = module._windows_io_path(previous)
+    original_is_symlink = Path.is_symlink
+
+    def mark_io_previous_as_symlink(path):
+        if path == io_previous:
+            return True
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", mark_io_previous_as_symlink)
+
+    result = module._materialize_catalog_safe_shards(
+        [], tmp_path / "releases", destination, prune_stale=True,
+    )
+
+    assert result["failures"] == [{
+        "path": str(previous),
+        "error": "SYMLINKED_STALE_SHARD_NOT_PRUNED",
+    }]
+    assert previous.read_bytes() == b"stale"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows long-path regression")
+def test_stale_long_materialized_shard_uses_windows_io_paths(tmp_path):
+    module = _module()
+    payload = b'{"trade_id":"stale-long-windows-path"}\n'
+    tag = "data-v2-long-stale"
+    dataset_id = "safe-" + ("x" * 210)
+    releases_root = tmp_path / "releases"
+    source = releases_root / tag / "source.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    destination = tmp_path / "restore"
+    row = {
+        "dataset_id": dataset_id,
+        "release_tag": tag,
+        "release_asset": source.name,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+    created = module._materialize_catalog_safe_shards(
+        [row], releases_root, destination, prune_stale=False,
+    )
+    target = (
+        destination / "usable" / "shards" / tag
+        / f"{module._safe_component(dataset_id)}.jsonl.gz"
+    )
+    assert len(str(target)) > 260
+    assert created["materialization_complete"] is True
+    assert module._windows_io_path(target).read_bytes() == payload
+
+    pruned = module._materialize_catalog_safe_shards(
+        [], releases_root, destination, prune_stale=True,
+    )
+
+    assert pruned["failures"] == []
+    assert pruned["materialization_complete"] is True
+    assert pruned["stale_usable_quarantined"] == 1
+    assert not module._windows_io_path(target).exists()
+    quarantined = list(
+        module._windows_io_path(
+            destination / "quarantine" / "stale_usable" / tag
+        ).glob("*.stale")
+    )
+    assert len(quarantined) == 1
+    assert quarantined[0].read_bytes() == payload
+
+
 def test_restore_zip_rejects_casefold_collisions_but_accepts_safe_nested_files(tmp_path):
     import pytest
 

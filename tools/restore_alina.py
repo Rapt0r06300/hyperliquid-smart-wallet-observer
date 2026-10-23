@@ -1535,7 +1535,7 @@ def _materialize_catalog_safe_shards(
             releases_root / _safe_component(tag) / _safe_component(outer)
         )
         target_root = destination / "usable" / "shards" / _safe_component(tag)
-        if any(path.is_symlink() for path in (
+        if any(_windows_io_path(path).is_symlink() for path in (
             destination / "usable",
             destination / "usable" / "shards",
             target_root,
@@ -1545,15 +1545,17 @@ def _materialize_catalog_safe_shards(
                 "error": "SYMLINKED_SHARD_DIRECTORY",
             })
             continue
-        target_root.mkdir(parents=True, exist_ok=True)
-        target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
+        io_target_root = _windows_io_path(target_root)
+        io_target_root.mkdir(parents=True, exist_ok=True)
+        display_target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
+        target = _windows_io_path(display_target)
         if target.is_symlink():
             report["failures"].append({
                 "dataset_id": dataset_id,
                 "error": "SYMLINKED_MATERIALIZED_SHARD",
             })
             continue
-        expected.add(target)
+        expected.add(display_target)
         if _verified_row_bytes(target, row):
             report["usable_shards"] += 1
             report["usable_bytes"] += int(row["bytes"])
@@ -1589,36 +1591,52 @@ def _materialize_catalog_safe_shards(
             report["missing_or_corrupt_rows"] += 1
             report["failures"].append({"dataset_id": dataset_id, "error": str(exc)})
     usable_root = destination / "usable" / "shards"
-    if prune_stale and usable_root.is_symlink():
+    io_usable_root = _windows_io_path(usable_root)
+    if prune_stale and io_usable_root.is_symlink():
         report["failures"].append({
             "path": str(usable_root), "error": "SYMLINKED_USABLE_SHARD_ROOT",
         })
         return report
-    if prune_stale and usable_root.is_dir():
-        for previous in sorted(usable_root.glob("*/*.jsonl.gz")):
-            if previous in expected:
+    if prune_stale and io_usable_root.is_dir():
+        for previous in sorted(io_usable_root.glob("*/*.jsonl.gz")):
+            display_previous = usable_root / previous.relative_to(io_usable_root)
+            if display_previous in expected:
                 continue
-            if previous.is_symlink() or previous.parent.is_symlink():
+            io_previous = _windows_io_path(previous)
+            if io_previous.is_symlink() or _windows_io_path(
+                previous.parent
+            ).is_symlink():
                 report["failures"].append({
-                    "path": str(previous), "error": "SYMLINKED_STALE_SHARD_NOT_PRUNED",
+                    "path": str(display_previous),
+                    "error": "SYMLINKED_STALE_SHARD_NOT_PRUNED",
                 })
                 continue
             try:
-                old_size = previous.stat().st_size
-                old_digest = _sha256(previous)
-                stale_root = destination / "quarantine" / "stale_usable" / previous.parent.name
+                old_size = io_previous.stat().st_size
+                old_digest = _sha256(io_previous)
+                display_stale_root = (
+                    destination / "quarantine" / "stale_usable"
+                    / display_previous.parent.name
+                )
+                stale_root = _windows_io_path(display_stale_root)
                 stale_root.mkdir(parents=True, exist_ok=True)
-                stale = stale_root / f"{previous.name}.{old_digest[:20]}.stale"
+                display_stale = (
+                    display_stale_root
+                    / f"{display_previous.name}.{old_digest[:20]}.stale"
+                )
+                stale = _windows_io_path(display_stale)
                 if stale.exists():
                     if _sha256(stale) != old_digest:
                         raise RestoreError("stale quarantine destination collision")
-                    previous.unlink()
+                    io_previous.unlink()
                 else:
-                    previous.replace(stale)
+                    io_previous.replace(stale)
                 report["stale_usable_quarantined"] += 1
                 report["stale_usable_quarantined_bytes"] += old_size
             except (OSError, RestoreError) as exc:
-                report["failures"].append({"path": str(previous), "error": str(exc)})
+                report["failures"].append({
+                    "path": str(display_previous), "error": str(exc),
+                })
     report["materialization_complete"] = (
         report["usable_shards"] == expected_usable_shards
         and report["usable_bytes"] == expected_usable_bytes
