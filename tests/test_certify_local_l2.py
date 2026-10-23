@@ -128,3 +128,28 @@ def test_full_offline_report_and_fast_receipt_resume(tmp_path):
     assert second["cache_reused_without_new_hash"] == 1
     assert second["totals"] == first["totals"]
     assert shard_path.read_bytes() == path.read_bytes()
+
+
+def test_cross_shard_snapshot_then_incremental_proof(tmp_path):
+    # A delta-only shard is not lost when a prior immutable, SHA-checked
+    # shard supplies the authentic native snapshot and matching sequence.
+    anchor, first = prepare(tmp_path, [snap(1, 100)])
+    carried = {}
+    initial = inspect_shard(anchor, first, carry=carried)
+    assert initial["status"] == "SNAPSHOT_OBSERVATIONS_ONLY"
+    assert carried["seq"] == 100
+    continuation, second = prepare(tmp_path, [delta(2, 101, 102, 100)])
+    second["dataset_id"] = "continuation"
+    linked = inspect_shard(continuation, second, carry=carried)
+    assert linked["status"] == "CONTINUOUS_L2_CROSS_SHARD"
+    assert linked["previous_sha_verified_shard"] == "data"
+    assert inspect_shard(continuation, second)["status"] == "BLOCKED"
+
+
+def test_bad_digest_poisoned_link_is_not_carried_forward(tmp_path):
+    anchor, first = prepare(tmp_path, [snap(1, 100)])
+    first["sha256"] = "0" * 64
+    carried = {}
+    result = inspect_shard(anchor, first, carry=carried)
+    assert result["status"] == "BLOCKED"
+    assert not carried

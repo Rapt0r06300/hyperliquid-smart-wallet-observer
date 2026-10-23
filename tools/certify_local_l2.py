@@ -148,7 +148,7 @@ def native_frame(row, venue):
     return snap, seq, prev, low, bids, asks
 
 
-def inspect_shard(path, entry):
+def inspect_shard(path, entry, *, carry=None):
     """Immutable SHA, full gzip/JSONL, native L2 sequences and actual anchors."""
     path = Path(path)
     venue = str(entry.get("venue") or "").lower()
@@ -174,9 +174,16 @@ def inspect_shard(path, entry):
         reject("NO_NATIVE_VERIFIER")
         return result
 
-    books = {}
-    prior_sequence, prior_time, prior_received, prior_mono, last_connection = None, None, None, None, None
-    active_start = None
+    inherited = bool(carry and carry.get("book") and carry.get("seq") is not None)
+    inherited_source = carry.get("dataset_id") if inherited else None
+    books = {side: dict(carry["book"][side]) for side in ("bid", "ask")} if inherited else {}
+    prior_sequence = carry["seq"] if inherited else None
+    prior_time = carry["last_ts"] if inherited else None
+    prior_received = carry["last_received"] if inherited else None
+    prior_mono = carry.get("last_mono") if inherited else None
+    last_connection = carry.get("last_connection") if inherited else None
+    used_carry, has_deltas = False, False
+    active_start = 1 if inherited else None
     segments = []
     line_number = 0
 
@@ -244,6 +251,8 @@ def inspect_shard(path, entry):
                         prior_sequence = sequence
                         active_start = line_number
                     else:
+                        if inherited and line_number == 1:
+                            used_carry = True
                         if not books or prior_sequence is None or sequence is None:
                             reject("DELTA_WITHOUT_PROVEN_ANCHOR")
                             close(); books = {}; continue
@@ -271,6 +280,7 @@ def inspect_shard(path, entry):
                                 else:
                                     books[side][price] = quantity
                         prior_sequence = sequence
+                        has_deltas = True
                     if not books["bid"] or not books["ask"] or max(books["bid"]) >= min(books["ask"]):
                         reject("BOOK_EMPTY_OR_CROSSED")
                         close(); books = {}; continue
@@ -278,22 +288,37 @@ def inspect_shard(path, entry):
             if hashed.size != expected_size or hashed.digest.hexdigest() != expected_sha:
                 reject("COMPRESSED_SHA256_MISMATCH")
                 result["valid_records"] = 0
+                if carry is not None:
+                    carry.clear()
                 return result
     except (OSError, EOFError, ValueError, gzip.BadGzipFile):
         reject("GZIP_TRUNCATED_OR_UNREADABLE")
         result["valid_records"] = 0
+        if carry is not None:
+            carry.clear()
         return result
     close(include_current=True)
     result["segments"] = segments
     if not segments:
         result["status"] = "BLOCKED"
-    elif venue == "hyperliquid" or len(segments) == result["valid_records"]:
+    elif venue == "hyperliquid" or not has_deltas:
         result["status"] = "SNAPSHOT_OBSERVATIONS_ONLY"
     elif (not reasons and len(segments) == 1
           and segments[0]["records"] == result["records"]):
-        result["status"] = "CONTINUOUS_L2"
+        result["status"] = "CONTINUOUS_L2_CROSS_SHARD" if used_carry else "CONTINUOUS_L2"
+        if used_carry:
+            result["previous_sha_verified_shard"] = inherited_source
     else:
         result["status"] = "RECOVERABLE_ANCHORED_SPANS"
+    # Only SHA-verified bytes can propagate a book into the next shard.
+    if carry is not None:
+        carry.clear()
+        if books and prior_sequence is not None and segments:
+            carry.update({
+                "book": books, "seq": prior_sequence, "last_ts": prior_time,
+                "last_received": prior_received, "last_mono": prior_mono,
+                "last_connection": last_connection, "dataset_id": entry.get("dataset_id"),
+            })
     return result
 
 
@@ -364,7 +389,7 @@ def salvage(source, folder, record):
         temp.unlink(missing_ok=True)
 
 
-def run(root, destination, *, workers=4, limit=0, repair=False, resume=False):
+def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cross_shard=False):
     """Verify canonical partitioned index before examining local SAFE objects."""
     root, destination = Path(root).resolve(), Path(destination).resolve()
     try:
@@ -385,6 +410,8 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False):
             path = (destination / "usable" / "shards" / _safe_component(row["release_tag"])
                     / (_safe_component(row["dataset_id"]) + ".jsonl.gz"))
             selected.append((path, row))
+    if cross_shard and resume:
+        raise ValueError("CROSS_SHARD_REQUIRES_FRESH_FULL_HASH_SCAN_NOT_RESUME")
     if limit:
         selected = selected[:limit]
     if not selected:
@@ -442,20 +469,49 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False):
 
     print(f"ALINA_L2_SCAN shards={len(selected)} workers={workers} resume={resume}", flush=True)
     outputs = []
+    if cross_shard:
+        groups = {}
+        for path, row in selected:
+            key = (str(row.get("venue") or "").lower(),
+                   str(row.get("symbol") or "").upper())
+            groups.setdefault(key, []).append((path, row))
+        def scan_group(group):
+            state = {}
+            rows = []
+            sorted_group = sorted(group, key=lambda item: (
+                item[1].get("start_ts_ms") if type(item[1].get("start_ts_ms")) is int else -1,
+                str(item[1].get("dataset_id")),
+            ))
+            for path, row in sorted_group:
+                if type(row.get("start_ts_ms")) is not int:
+                    state.clear()  # no proven ordering between shards
+                item = inspect_shard(path, row, carry=state)
+                rows.append((path, item))
+            return rows
+        tasks = list(groups.values())
+    else:
+        tasks = selected
     with ThreadPoolExecutor(max_workers=max(1, min(workers, 16))) as pool:
-        futures = {pool.submit(inspect_with_receipt, path, row): path for path, row in selected}
-        for index, future in enumerate(as_completed(futures), 1):
-            item = future.result()
-            if repair and item["status"] == "RECOVERABLE_ANCHORED_SPANS":
-                try:
-                    item["repair"] = salvage(
-                        futures[future], destination / "usable" / "local_l2_repaired", item
-                    )
-                except (OSError, ValueError) as exc:
-                    item["repair_error"] = str(exc)
-            outputs.append(item)
-            if index % 200 == 0 or index == len(futures):
-                print(f"ALINA_L2_PROGRESS {index}/{len(futures)}", flush=True)
+        if cross_shard:
+            futures = {pool.submit(scan_group, group): None for group in tasks}
+        else:
+            futures = {pool.submit(inspect_with_receipt, path, row): path
+                       for path, row in tasks}
+        processed = 0
+        for future in as_completed(futures):
+            batch = future.result() if cross_shard else [(futures[future], future.result())]
+            for path, item in batch:
+                if repair and item["status"] == "RECOVERABLE_ANCHORED_SPANS":
+                    try:
+                        item["repair"] = salvage(
+                            path, destination / "usable" / "local_l2_repaired", item
+                        )
+                    except (OSError, ValueError) as exc:
+                        item["repair_error"] = str(exc)
+                outputs.append(item)
+                processed += 1
+                if processed % 200 == 0 or processed == len(selected):
+                    print(f"ALINA_L2_PROGRESS {processed}/{len(selected)}", flush=True)
     outputs.sort(key=lambda x: str(x["dataset_id"]))
     totals = dict(Counter(x["status"] for x in outputs))
     repair_failures = sum("repair_error" in x for x in outputs)
@@ -464,6 +520,7 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False):
         "catalog_sha256": digest_file(catalog),
         "status": "LOCAL_L2_AUDIT_COMPLETE_NOT_GLOBAL_REPLAY_CERTIFICATION",
         "totals": totals, "repair_failures": repair_failures,
+        "cross_shard_mode": cross_shard,
         "cache_reused_without_new_hash": sum(x.get("stat_cache_reused_without_new_hash", False) for x in outputs),
         "l2_rows": outputs, "paper_only": True,
         "read_only_sources": True,
@@ -482,7 +539,9 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4))
     parser.add_argument("--limit", type=int, default=0, help="optional smoke-test cap")
     parser.add_argument("--repair", action="store_true", help="create separate proven spans")
-    parser.add_argument("--resume", action="store_true", help="trust previous SHA-verified receipts only if source size+mtime unchanged; not a fresh byte validation")
+    parser.add_argument("--resume", action="store_true", help="trust prior SHA receipts by unchanged size+mtime; not a fresh byte verification")
+    parser.add_argument("--cross-shard", action="store_true",
+                        help="verify native continuity across sorted same-venue/symbol shards; incompatible with --resume")
     args = parser.parse_args(argv)
     if args.limit < 0 or args.workers <= 0 or args.workers > 16:
         parser.error("--limit must be >=0 and --workers must be 1..16")
@@ -490,7 +549,7 @@ def main(argv=None):
     destination = args.destination or root / "runtime" / "recovery" / "full"
     try:
         report = run(root, destination, workers=args.workers, limit=args.limit,
-                     repair=args.repair, resume=args.resume)
+                     repair=args.repair, resume=args.resume, cross_shard=args.cross_shard)
     except (OSError, ValueError, KeyError) as exc:
         print(f"ALINA_L2_FAIL: {exc}", file=sys.stderr)
         return 2
