@@ -8,6 +8,7 @@ import gzip
 import tarfile
 import zipfile
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -3452,6 +3453,67 @@ def test_certified_working_set_excludes_unbound_analysis_receipt(tmp_path):
     assert result["status"] == "CERTIFIED_WORKING_SET_INCOMPLETE"
     assert result["excluded_receipts"] == 1
     assert result["failures"][0]["reason"] == "INVALID_ANALYSIS_PROVENANCE"
+
+
+def test_certified_working_set_accepts_only_git_proven_crlf_checkout(tmp_path):
+    module = _module()
+    receipt, receipts, campaigns = _analysis_receipt(tmp_path)
+    campaign = campaigns / f"{receipt['campaign_id']}.json"
+    canonical = (
+        b'{\n'
+        b'  "campaign_id": "analysis-e7-backtest-v2",\n'
+        b'  "paper_only": true\n'
+        b'}\n'
+    )
+    campaign.write_bytes(canonical)
+    receipt["manifest_sha256"] = hashlib.sha256(canonical).hexdigest()
+    next(receipts.glob("*.json")).write_text(json.dumps(receipt), encoding="utf-8")
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "restore-test@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Restore Test"], cwd=tmp_path, check=True
+    )
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "false"], cwd=tmp_path, check=True
+    )
+    subprocess.run(
+        ["git", "add", campaign.relative_to(tmp_path).as_posix()],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "canonical campaign"], cwd=tmp_path, check=True
+    )
+
+    campaign.write_bytes(canonical.replace(b"\n", b"\r\n"))
+    evidence = b"paper evidence"
+    release = {
+        "tag_name": receipt["evidence_tag"],
+        "assets": [_asset("evidence.tgz", "https://example.invalid/evidence", evidence)],
+    }
+    result = module.build_certified_working_set(
+        [release],
+        raw_required={},
+        receipts_root=receipts,
+        campaigns_root=campaigns,
+        repository="owner/repo",
+    )
+    assert result["failures"] == []
+
+    campaign.write_bytes(campaign.read_bytes().replace(b"true", b"false"))
+    tampered = module.build_certified_working_set(
+        [release],
+        raw_required={},
+        receipts_root=receipts,
+        campaigns_root=campaigns,
+        repository="owner/repo",
+    )
+    assert tampered["failures"][0]["reason"] == "INVALID_ANALYSIS_PROVENANCE"
 
 
 def test_materialize_analysis_evidence_keeps_valid_negative_results(tmp_path):

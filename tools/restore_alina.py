@@ -106,6 +106,59 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _git_head_blob(path: Path) -> bytes | None:
+    """Return the tracked HEAD bytes for path, or None outside a Git checkout."""
+    try:
+        resolved = Path(path).resolve(strict=True)
+        root_result = subprocess.run(
+            ["git", "-C", str(resolved.parent), "rev-parse", "--show-toplevel"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if root_result.returncode != 0:
+            return None
+        root = Path(root_result.stdout.decode("utf-8").strip()).resolve(strict=True)
+        relative = resolved.relative_to(root).as_posix()
+        blob_result = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "blob", f"HEAD:{relative}"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        return blob_result.stdout if blob_result.returncode == 0 else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _matches_provenance_sha256(path: Path, expected_sha: str) -> bool:
+    """Match exact bytes, or a Git-proven LF blob checked out as CRLF.
+
+    Git for Windows may convert a tracked text blob from LF to CRLF.  The
+    publication receipt binds the immutable Git blob, not that platform-only
+    worktree representation.  The fallback remains fail-closed: HEAD must
+    contain the expected blob and the worktree may differ only by CRLF
+    expansion.
+    """
+    try:
+        raw = _windows_io_path(path).read_bytes()
+    except OSError:
+        return False
+    expected = str(expected_sha or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        return False
+    if hashlib.sha256(raw).hexdigest() == expected:
+        return True
+    if b"\r\n" not in raw:
+        return False
+    blob = _git_head_blob(path)
+    return (
+        blob is not None
+        and hashlib.sha256(blob).hexdigest() == expected
+        and raw.replace(b"\r\n", b"\n") == blob
+    )
+
+
 def _request(url: str, *, token: str | None = None, retries: int = 8) -> bytes:
     headers = {"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT}
     if token:
@@ -1012,7 +1065,9 @@ def build_certified_working_set(
             )
             and evidence_tag == f"campaign-evidence-{campaign_id}-u{unit_id}"
             and campaign_path.is_file()
-            and _sha256(campaign_path) == receipt.get("manifest_sha256")
+            and _matches_provenance_sha256(
+                campaign_path, str(receipt.get("manifest_sha256") or "")
+            )
         )
         if not valid:
             excluded += 1
