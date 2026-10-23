@@ -2975,6 +2975,43 @@ def test_replay_ready_staging_cleanup_is_idempotent_after_sha_receipt(
             "safe-one.jsonl.gz").read_bytes() == payload
 
 
+def test_staged_receipt_verification_uses_bounded_parallel_workers(
+    tmp_path, monkeypatch,
+):
+    import threading
+    import time
+
+    module = _module()
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def slow_receipt_check(*_args):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return True
+
+    monkeypatch.setattr(module, "_staged_materialized_asset_ok", slow_receipt_check)
+    releases = []
+    rows_by_asset = {}
+    for index in range(12):
+        tag = f"data-v2-parallel-{index}"
+        name = f"asset-{index}.jsonl.gz"
+        releases.append({"tag_name": tag, "assets": [{"name": name}]})
+        rows_by_asset[(tag, name)] = [{"dataset_id": f"safe-{index}"}]
+
+    result = module._verify_staged_materialized_assets(
+        tmp_path, "owner/repo", releases, rows_by_asset,
+    )
+    assert result == {key: True for key in rows_by_asset}
+    assert 1 < maximum_active <= module.VERIFY_WORKERS
+
+
 
 def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
     tmp_path, monkeypatch,

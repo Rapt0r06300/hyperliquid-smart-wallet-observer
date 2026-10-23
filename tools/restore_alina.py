@@ -1554,6 +1554,62 @@ def _staged_materialized_asset_ok(
     )
 
 
+def _verify_staged_materialized_assets(
+    destination: Path,
+    repository: str,
+    releases: list[Mapping[str, Any]],
+    rows_by_asset: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+) -> dict[tuple[str, str], bool]:
+    """Verify resumable staged receipts concurrently and exactly once."""
+    candidates: list[
+        tuple[tuple[str, str], Mapping[str, Any], list[Mapping[str, Any]]]
+    ] = []
+    seen: set[tuple[str, str]] = set()
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        for asset in release.get("assets") or []:
+            if not isinstance(asset, Mapping):
+                continue
+            name = str(asset.get("name") or "")
+            key = (tag, name)
+            rows = rows_by_asset.get(key, [])
+            if not rows:
+                continue
+            if key in seen:
+                raise RestoreError("duplicate staged materialization identity")
+            seen.add(key)
+            candidates.append((key, asset, rows))
+
+    print(
+        f"ALINA_RESTORE_PHASE=VERIFY_STAGED_MATERIALIZED_ASSETS "
+        f"assets={len(candidates)} workers={VERIFY_WORKERS}",
+        file=sys.stderr, flush=True,
+    )
+
+    def verify(
+        candidate: tuple[
+            tuple[str, str], Mapping[str, Any], list[Mapping[str, Any]]
+        ],
+    ) -> tuple[tuple[str, str], bool]:
+        key, asset, rows = candidate
+        return key, _staged_materialized_asset_ok(
+            destination, repository, key[0], asset, rows,
+        )
+
+    verified: dict[tuple[str, str], bool] = {}
+    for checked, (key, valid) in enumerate(_bounded_parallel_map(
+        verify, candidates, max_workers=VERIFY_WORKERS,
+    ), 1):
+        verified[key] = valid
+        if checked == 1 or checked % 500 == 0 or checked == len(candidates):
+            print(
+                f"ALINA_RESTORE_PROGRESS=STAGED_MATERIALIZED_ASSETS "
+                f"{checked}/{len(candidates)}",
+                file=sys.stderr, flush=True,
+            )
+    return verified
+
+
 def _write_staged_asset_receipt(
     destination: Path,
     repository: str,
@@ -2921,6 +2977,14 @@ def restore_everything(
             f"free={free_destination}"
         )
 
+    staged_materialized_assets = (
+        _verify_staged_materialized_assets(
+            destination, repository, releases, raw_rows_by_asset,
+        )
+        if profile == "replay-ready"
+        else {}
+    )
+
     report: dict[str, Any] = {
         "schema": "alina.full_restore_report.v1",
         "repository": repository,
@@ -3036,8 +3100,8 @@ def restore_everything(
                 asset_name = str(asset.get("name") or "")
                 raw_rows = raw_rows_by_asset.get((tag, asset_name), [])
                 canonical_target = release_dir / _safe_component(asset_name)
-                if raw_rows and _staged_materialized_asset_ok(
-                    destination, repository, tag, asset, raw_rows
+                if raw_rows and staged_materialized_assets.get(
+                    (tag, asset_name), False,
                 ):
                     result = {
                         "name": asset_name,
@@ -3048,7 +3112,9 @@ def restore_everything(
                         "destination": str(_staged_asset_receipt_path(destination, tag, asset_name)),
                     }
                 else:
-                    use_staging = bool(raw_rows) and not _asset_ok(canonical_target, asset)
+                    use_staging = bool(raw_rows) and not _windows_io_path(
+                        canonical_target
+                    ).is_file()
                     asset_root = staging_releases_root if use_staging else releases_root
                     asset_dir = asset_root / safe_tag
                     result = download_asset(
