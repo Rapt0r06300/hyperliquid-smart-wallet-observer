@@ -39,7 +39,8 @@ except ModuleNotFoundError:
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 USER_AGENT = "alina-smartflow-disaster-restore/1"
 SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
-VERIFY_WORKERS = min(16, max(4, os.cpu_count() or 4))
+_LOGICAL_PROCESSORS = max(1, os.cpu_count() or 1)
+VERIFY_WORKERS = min(8, max(1, _LOGICAL_PROCESSORS // 2))
 _T = TypeVar("_T")
 _R = TypeVar("_R")
 
@@ -3070,7 +3071,11 @@ def restore_everything(
                         staged_target = _windows_io_path(
                             asset_dir / _safe_component(asset_name)
                         )
-                        staged_target.unlink()
+                        # The receipt is sealed only after every materialized
+                        # shard passes exact size/SHA-256 checks.  Cleanup is
+                        # deliberately idempotent: an already-absent ephemeral
+                        # staging asset must not invalidate proven output.
+                        staged_target.unlink(missing_ok=True)
                         result = {
                             **result,
                             "status": "STAGED_MATERIALIZED_VERIFIED",

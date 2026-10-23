@@ -1,4 +1,5 @@
 """Cloud CI regression for lossless, fail-closed catalogue partition planning."""
+import hashlib
 import json
 
 import pytest
@@ -65,6 +66,36 @@ def test_partition_read_progress_only_after_verified_parts(tmp_path):
     assert not updates
 
 
+def test_partition_reader_does_not_reserialize_full_catalog_for_global_digest(
+    tmp_path, monkeypatch,
+):
+    """The global SHA proof must stay streaming as the catalogue grows."""
+    from tools import partitioned_data_index as module
+
+    logical = _index()
+    logical["shards"] = [
+        {
+            "dataset_id": f"stream-{i:04d}",
+            "quality_status": "SAFE",
+            "release_tag": "part-1",
+            "sha256": f"{i:064x}",
+            "payload": "x" * 80,
+        }
+        for i in range(80)
+    ]
+    root, files = partition_index(logical, max_partition_bytes=1024)
+    largest_partition_rows = max(part["row_count"] for part in root["partitions"])
+    original_json_bytes = module._json_bytes
+
+    def reject_monolithic_reserialization(value):
+        if isinstance(value, list) and len(value) > largest_partition_rows:
+            raise AssertionError("full catalogue was reserialized into one giant buffer")
+        return original_json_bytes(value)
+
+    monkeypatch.setattr(module, "_json_bytes", reject_monolithic_reserialization)
+    assert load_partitioned_index(_stage(tmp_path, root, files)) == logical
+
+
 def test_partition_refuses_tampered_evidence(tmp_path):
     root, files = partition_index(_index(), max_partition_bytes=240)
     path = _stage(tmp_path, root, files)
@@ -111,6 +142,25 @@ def test_partition_refuses_global_count_mismatch(tmp_path):
     root, files = partition_index(_index(), max_partition_bytes=240)
     root["shard_count"] += 1
     with pytest.raises(ValueError, match="PARTITION_PARITY_GLOBAL_MISMATCH"):
+        load_partitioned_index(_stage(tmp_path, root, files))
+
+
+def test_partition_reader_refuses_duplicate_identity_across_verified_parts(tmp_path):
+    logical = _index()
+    root, files = partition_index(logical, max_partition_bytes=240)
+    names = list(files)
+    assert len(names) > 1
+    first_rows = json.loads(files[names[0]])
+    second_rows = json.loads(files[names[1]])
+    second_rows[0]["dataset_id"] = first_rows[0]["dataset_id"]
+    modified = (json.dumps(
+        second_rows, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"), allow_nan=False,
+    ) + "\n").encode("utf-8")
+    files[names[1]] = modified
+    root["partitions"][1]["bytes"] = len(modified)
+    root["partitions"][1]["sha256"] = hashlib.sha256(modified).hexdigest()
+    with pytest.raises(ValueError, match="DUPLICATE_OR_MISSING_DATASET_ID"):
         load_partitioned_index(_stage(tmp_path, root, files))
 
 def test_snapshot_cli_helper_preserves_source_and_reconstructs_all(tmp_path):

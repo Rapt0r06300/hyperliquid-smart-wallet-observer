@@ -124,6 +124,10 @@ def load_partitioned_index(
             or not isinstance(root.get("shards_sha256"), str)):
         raise ValueError("PARTITION_PARITY_INVALID_METADATA")
     rows: list[dict[str, Any]] = []
+    seen_dataset_ids: set[str] = set()
+    global_digest = hashlib.sha256()
+    global_digest.update(b"[")
+    has_global_rows = False
     for i, descriptor in enumerate(parts, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -153,13 +157,28 @@ def load_partitioned_index(
         if (isinstance(descriptor.get("row_count"), bool)
                 or len(part_rows) != descriptor.get("row_count") or not part_rows):
             raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
+        for row in part_rows:
+            identity = row["dataset_id"]
+            if identity in seen_dataset_ids:
+                raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+            seen_dataset_ids.add(identity)
+        # partition_index writes canonical JSON arrays.  Their SHA-bound raw
+        # interiors can therefore be joined into the canonical global array
+        # without allocating and serializing the entire multi-GB catalogue a
+        # second time.  A non-canonical part fails the global digest closed.
+        if not data.startswith(b"[") or not data.endswith(b"]\n"):
+            raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
+        if has_global_rows:
+            global_digest.update(b",")
+        global_digest.update(memoryview(data)[1:-2])
+        has_global_rows = True
         rows.extend(part_rows)
         if len(rows) > count:
             raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
         if progress_callback is not None and (i == 1 or i % 10 == 0 or i == len(parts)):
             progress_callback(i, len(parts))
-    rows = _validate_rows(rows)
-    if len(rows) != count or hashlib.sha256(_json_bytes(rows)).hexdigest() != root["shards_sha256"]:
+    global_digest.update(b"]\n")
+    if len(rows) != count or global_digest.hexdigest() != root["shards_sha256"]:
         raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
     reconstructed = {k: v for k, v in root.items() if k not in (
         "partitions", "legacy_schema", "shard_count", "shards_sha256",
