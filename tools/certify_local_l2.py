@@ -300,9 +300,10 @@ def salvage(source, folder, record):
     """Immutable selected lines -> separate gzip and independently hashed proof."""
     if record["status"] != "RECOVERABLE_ANCHORED_SPANS":
         return None
-    identity = str(record["dataset_id"])
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", identity):
+    dataset_id = str(record["dataset_id"] or "")
+    if not dataset_id:
         raise ValueError("UNSAFE_REPAIR_ID")
+    identity = hashlib.sha256(dataset_id.encode("utf-8")).hexdigest()[:24]
     segments = record["segments"]
     fragment = hashlib.sha256(json.dumps(segments, sort_keys=True).encode()).hexdigest()[:12]
     target = folder / (identity + "." + record["source_sha256"][:16] +
@@ -347,7 +348,7 @@ def salvage(source, folder, record):
         temp.unlink(missing_ok=True)
 
 
-def run(root, destination, *, workers=4, limit=0, repair=False):
+def run(root, destination, *, workers=4, limit=0, repair=False, resume=False):
     """Verify canonical partitioned index before examining local SAFE objects."""
     root, destination = Path(root).resolve(), Path(destination).resolve()
     try:
@@ -372,10 +373,52 @@ def run(root, destination, *, workers=4, limit=0, repair=False):
         selected = selected[:limit]
     if not selected:
         raise ValueError("NO_SAFE_L2_IN_CANONICAL_INDEX")
-    print(f"ALINA_L2_SCAN shards={len(selected)} workers={workers}", flush=True)
+    # Before any work, retire a previous green run so interrupted runs fail closed.
+    report_path = destination / "LOCAL_L2_CERTIFICATION.json"
+    atomic_json(report_path, {
+        "schema": "alina.local_l2_certification.v1",
+        "status": "IN_PROGRESS_NOT_CERTIFIED", "selected_count": len(selected),
+        "paper_only": True,
+    })
+    receipt_dir = destination / "LOCAL_L2_RECEIPTS"
+    if receipt_dir.is_symlink():
+        raise ValueError("UNSAFE_L2_RECEIPT_DIRECTORY")
+
+    def inspect_with_receipt(path, row):
+        ident = hashlib.sha256(
+            (str(row["dataset_id"]) + "|" + str(row["sha256"])).encode("utf-8")
+        ).hexdigest()
+        receipt = receipt_dir / (ident + ".json")
+        if path.is_file() and not path.is_symlink():
+            stat = path.stat()
+            if resume and receipt.is_file() and not receipt.is_symlink():
+                try:
+                    cached = json.loads(receipt.read_text(encoding="utf-8"))
+                    if (cached.get("size") == stat.st_size
+                            and cached.get("mtime_ns") == stat.st_mtime_ns
+                            and cached.get("source_path") == str(path)
+                            and cached.get("source_sha256") == row["sha256"]):
+                        value = cached["result"]
+                        if isinstance(value, dict):
+                            return {**value, "stat_cache_reused_without_new_hash": True}
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
+        value = inspect_shard(path, row)
+        if path.is_file() and not path.is_symlink():
+            # Receipt is an optimization hint, not an independent byte proof.
+            # Only the optional --resume trusts unchanged file size+mtime.
+            stat = path.stat()
+            atomic_json(receipt, {
+                "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+                "source_path": str(path), "source_sha256": row["sha256"],
+                "result": value,
+            })
+        return value
+
+    print(f"ALINA_L2_SCAN shards={len(selected)} workers={workers} resume={resume}", flush=True)
     outputs = []
     with ThreadPoolExecutor(max_workers=max(1, min(workers, 16))) as pool:
-        futures = {pool.submit(inspect_shard, path, row): path for path, row in selected}
+        futures = {pool.submit(inspect_with_receipt, path, row): path for path, row in selected}
         for index, future in enumerate(as_completed(futures), 1):
             item = future.result()
             if repair and item["status"] == "RECOVERABLE_ANCHORED_SPANS":
@@ -390,11 +433,14 @@ def run(root, destination, *, workers=4, limit=0, repair=False):
                 print(f"ALINA_L2_PROGRESS {index}/{len(futures)}", flush=True)
     outputs.sort(key=lambda x: str(x["dataset_id"]))
     totals = dict(Counter(x["status"] for x in outputs))
+    repair_failures = sum("repair_error" in x for x in outputs)
     report = {
         "schema": "alina.local_l2_certification.v1",
         "catalog_sha256": digest_file(catalog),
         "status": "LOCAL_L2_AUDIT_COMPLETE_NOT_GLOBAL_REPLAY_CERTIFICATION",
-        "totals": totals, "l2_rows": outputs, "paper_only": True,
+        "totals": totals, "repair_failures": repair_failures,
+        "cache_reused_without_new_hash": sum(x.get("stat_cache_reused_without_new_hash", False) for x in outputs),
+        "l2_rows": outputs, "paper_only": True,
         "read_only_sources": True,
         "warning": "SAFE and SHA-256 are not proof of L2 continuity. "
                    "Recovered segments require native re-anchors; separate "
@@ -411,18 +457,19 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4))
     parser.add_argument("--limit", type=int, default=0, help="optional smoke-test cap")
     parser.add_argument("--repair", action="store_true", help="create separate proven spans")
+    parser.add_argument("--resume", action="store_true", help="trust previous SHA-verified receipts only if source size+mtime unchanged; not a fresh byte validation")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     destination = args.destination or root / "runtime" / "recovery" / "full"
     try:
         report = run(root, destination, workers=args.workers, limit=args.limit,
-                     repair=args.repair)
+                     repair=args.repair, resume=args.resume)
     except (OSError, ValueError, KeyError) as exc:
         print(f"ALINA_L2_FAIL: {exc}", file=sys.stderr)
         return 2
     print("ALINA_L2_RESULT " + json.dumps(report["totals"], sort_keys=True))
     print("ALINA_L2_REPORT " + str(destination / "LOCAL_L2_CERTIFICATION.json"))
-    return 0 if not report["totals"].get("BLOCKED") else 1
+    return 0 if not report["totals"].get("BLOCKED") and not report["repair_failures"] else 1
 
 
 if __name__ == "__main__":
