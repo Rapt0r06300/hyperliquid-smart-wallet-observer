@@ -58,3 +58,10 @@ def test_health_receipt_requires_real_digest(tmp_path):
 def test_never_hide_deletion_of_critical_catalog(tmp_path):
     with pytest.raises(ValueError, match="CRITICAL_CATALOG_FILE_MISSING"):
         verify_catalog_changes(tmp_path, ["catalog/DATA_INDEX.json"])
+
+def test_catalog_only_rejects_corrupt_jsonl(tmp_path):
+    target = tmp_path / "catalog/receipts/rows.jsonl"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"valid": 1}\n{broken}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="INVALID_CATALOG_JSONL"):
+        verify_catalog_changes(tmp_path, ["catalog/receipts/rows.jsonl"])

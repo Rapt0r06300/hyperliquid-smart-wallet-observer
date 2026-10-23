@@ -61,6 +61,15 @@ def verify_catalog_changes(root: Path, paths: list[str]) -> None:
             continue  # A purged non-critical catalog receipt is not fabricated anew.
         if path.stat().st_size >= 99_000_000:
             raise ValueError(f"CATALOG_GITHUB_BLOB_LIMIT:{rel}")
+        if path.suffix.lower() == ".jsonl":
+            try:
+                with path.open("r", encoding="utf-8") as stream:
+                    for line in stream:
+                        if line.strip():
+                            json.loads(line)
+            except (OSError, UnicodeError, ValueError) as exc:
+                raise ValueError(f"INVALID_CATALOG_JSONL:{rel}") from exc
+            continue
         if path.suffix.lower() != ".json":
             continue
         try:
@@ -88,6 +97,14 @@ def verify_catalog_changes(root: Path, paths: list[str]) -> None:
             ).encode()).hexdigest()
             if not isinstance(expected, str) or digest != expected:
                 raise ValueError("DATASET_HEALTH_DIGEST_MISMATCH")
+
+    if any(name in paths for name in ("catalog/DATA_INDEX.json", "catalog/DATA_METRICS.json")):
+        from tools.build_catalog_metrics import verify_metrics_source
+
+        verify_metrics_source(
+            root / "catalog/DATA_INDEX.json",
+            root / "catalog/DATA_METRICS.json",
+        )
 
 
 def main() -> int:
