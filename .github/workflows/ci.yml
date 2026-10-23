@@ -27,8 +27,33 @@ env:
   HL_ENABLE_TESTNET_EXECUTION: "0"
 
 jobs:
+  scope:
+    name: Classer et verifier les changements du SHA exact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Compare all changed files, fail closed if history is missing
+        id: classify
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch --no-tags --depth 1 origin "$BEFORE" || true
+          fi
+          python tools/ci_change_scope.py --before "$BEFORE" --head "$GITHUB_SHA"
+
   securite:
     name: Securite et imports runtime
+    needs: scope
+    if: needs.scope.outputs.mode == 'source'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
