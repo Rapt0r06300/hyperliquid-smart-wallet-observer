@@ -1489,6 +1489,31 @@ def _pending_catalog_materialization_bytes(
     return total
 
 
+def _conservative_replay_preflight(
+    rows: list[Mapping[str, Any]], *, source_asset_bytes: int,
+    free_destination: int, max_download_bytes: int | None,
+) -> dict[str, int] | None:
+    """Skip duplicate SHA scans only when a worst-case disk plan is safe."""
+    if max_download_bytes is not None:
+        return None
+    pending_materialization = sum(
+        int(row["bytes"])
+        for row in rows
+        if row.get("release_container_asset")
+    )
+    safety_margin = 1024 * 1024 * 1024
+    required = source_asset_bytes + pending_materialization + safety_margin
+    if required > free_destination:
+        return None
+    return {
+        "pending_download_bytes": source_asset_bytes,
+        "pending_retained_download_bytes": source_asset_bytes,
+        "peak_staged_asset_bytes": 0,
+        "pending_materialization_bytes": pending_materialization,
+        "required_free_destination_bytes": required,
+    }
+
+
 def _staged_materialized_asset_ok(
     destination: Path,
     repository: str,
@@ -1585,6 +1610,8 @@ def _materialize_catalog_safe_shards(
         "ignored_stale_release_manifests": 0, "failures": [],
     }
     expected: set[Path] = set()
+    prepared_target_roots: set[Path] = set()
+
     def candidates() -> Iterator[
         tuple[Mapping[str, Any], str, str, Path, Path]
     ]:
@@ -1599,18 +1626,20 @@ def _materialize_catalog_safe_shards(
             target_root = (
                 destination / "usable" / "shards" / _safe_component(tag)
             )
-            if any(_windows_io_path(path).is_symlink() for path in (
-                destination / "usable",
-                destination / "usable" / "shards",
-                target_root,
-            )):
-                report["failures"].append({
-                    "dataset_id": dataset_id,
-                    "error": "SYMLINKED_SHARD_DIRECTORY",
-                })
-                continue
-            io_target_root = _windows_io_path(target_root)
-            io_target_root.mkdir(parents=True, exist_ok=True)
+            if target_root not in prepared_target_roots:
+                if any(_windows_io_path(path).is_symlink() for path in (
+                    destination / "usable",
+                    destination / "usable" / "shards",
+                    target_root,
+                )):
+                    report["failures"].append({
+                        "dataset_id": dataset_id,
+                        "error": "SYMLINKED_SHARD_DIRECTORY",
+                    })
+                    continue
+                io_target_root = _windows_io_path(target_root)
+                io_target_root.mkdir(parents=True, exist_ok=True)
+                prepared_target_roots.add(target_root)
             display_target = (
                 target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
             )
@@ -1655,6 +1684,18 @@ def _materialize_catalog_safe_shards(
             report["skipped_verified_shards"] += 1
             continue
         tmp = target.with_suffix(target.suffix + ".partial")
+        if any(path.is_symlink() for path in (
+            target.parent.parent.parent,
+            target.parent.parent,
+            target.parent,
+            target,
+            tmp,
+        )):
+            report["failures"].append({
+                "dataset_id": dataset_id,
+                "error": "SYMLINKED_SHARD_DIRECTORY",
+            })
+            continue
         tmp.unlink(missing_ok=True)
         try:
             if row.get("release_container_asset"):
@@ -2686,63 +2727,108 @@ def restore_everything(
     if len(allowed_release_dirs) != len(seen_tags):
         raise RestoreError("Release tags collide after path normalization")
 
-    pending_download_bytes = 0
-    pending_retained_download_bytes = 0
-    peak_staged_asset_bytes = 0
+    free_destination = shutil.disk_usage(destination).free
+    conservative_plan = (
+        _conservative_replay_preflight(
+            replay_rows,
+            source_asset_bytes=source_asset_bytes,
+            free_destination=free_destination,
+            max_download_bytes=max_download_bytes,
+        )
+        if profile == "replay-ready" and not preflight_only
+        else None
+    )
     staging_releases_root = destination / ".staging" / "releases"
-    for release in releases:
-        tag = str(release.get("tag_name") or "")
-        if not tag:
-            continue
-        release_dir = releases_root / _safe_component(tag)
-        if release_dir.is_symlink():
-            raise RestoreError(f"symlinked Release directory: {tag}")
-        assets = release.get("assets")
-        for asset in assets if isinstance(assets, list) else []:
-            if not isinstance(asset, Mapping):
+    if conservative_plan is not None:
+        pending_download_bytes = conservative_plan["pending_download_bytes"]
+        pending_retained_download_bytes = conservative_plan[
+            "pending_retained_download_bytes"
+        ]
+        peak_staged_asset_bytes = conservative_plan["peak_staged_asset_bytes"]
+        pending_materialization_bytes = conservative_plan[
+            "pending_materialization_bytes"
+        ]
+        required_free_destination_bytes = conservative_plan[
+            "required_free_destination_bytes"
+        ]
+        preflight_verification_mode = "CONSERVATIVE_NO_DUPLICATE_SHA_SCAN"
+        print(
+            f"ALINA_RESTORE_PHASE=CONSERVATIVE_PREFLIGHT_COMPLETE "
+            f"worst_case_bytes={required_free_destination_bytes}",
+            file=sys.stderr, flush=True,
+        )
+    else:
+        pending_download_bytes = 0
+        pending_retained_download_bytes = 0
+        peak_staged_asset_bytes = 0
+        for release in releases:
+            tag = str(release.get("tag_name") or "")
+            if not tag:
                 continue
-            name = str(asset.get("name") or "")
-            if not name:
-                continue
-            target = release_dir / _safe_component(name)
-            partial = target.with_suffix(target.suffix + ".partial")
-            if target.is_symlink() or partial.is_symlink():
-                raise RestoreError(f"symlinked Release asset during preflight: {tag}/{name}")
-            if recover_verifiable and (
-                not _source_asset_eligible(asset, salvage=recover_verifiable)
-            ):
-                continue
-            if not _asset_ok(target, asset):
-                raw_rows = raw_rows_by_asset.get((tag, name), [])
-                if raw_rows and _staged_materialized_asset_ok(
-                    destination, repository, tag, asset, raw_rows
+            release_dir = releases_root / _safe_component(tag)
+            if release_dir.is_symlink():
+                raise RestoreError(f"symlinked Release directory: {tag}")
+            assets = release.get("assets")
+            for asset in assets if isinstance(assets, list) else []:
+                if not isinstance(asset, Mapping):
+                    continue
+                name = str(asset.get("name") or "")
+                if not name:
+                    continue
+                target = release_dir / _safe_component(name)
+                partial = target.with_suffix(target.suffix + ".partial")
+                if target.is_symlink() or partial.is_symlink():
+                    raise RestoreError(
+                        f"symlinked Release asset during preflight: {tag}/{name}"
+                    )
+                if recover_verifiable and (
+                    not _source_asset_eligible(asset, salvage=recover_verifiable)
                 ):
                     continue
-                source = clone_sources.get((tag, name))
-                # A verified LFS hardlink occupies no new payload space on
-                # the same volume. A cross-volume copy still needs capacity.
-                if source is not None and source.stat().st_dev == releases_root.stat().st_dev:
-                    continue
-                expected_size = max(0, int(asset.get("size") or 0))
-                if raw_rows:
-                    staged_target = (
-                        staging_releases_root / _safe_component(tag)
-                        / _safe_component(name)
-                    )
-                    partial = staged_target.with_suffix(staged_target.suffix + ".partial")
-                partial_size = partial.stat().st_size if partial.is_file() else 0
-                remaining = max(0, expected_size - partial_size)
-                pending_download_bytes += remaining
-                if raw_rows:
-                    peak_staged_asset_bytes = max(peak_staged_asset_bytes, remaining)
-                else:
-                    pending_retained_download_bytes += remaining
+                if not _asset_ok(target, asset):
+                    raw_rows = raw_rows_by_asset.get((tag, name), [])
+                    if raw_rows and _staged_materialized_asset_ok(
+                        destination, repository, tag, asset, raw_rows
+                    ):
+                        continue
+                    source = clone_sources.get((tag, name))
+                    if (
+                        source is not None
+                        and source.stat().st_dev == releases_root.stat().st_dev
+                    ):
+                        continue
+                    expected_size = max(0, int(asset.get("size") or 0))
+                    if raw_rows:
+                        staged_target = (
+                            staging_releases_root / _safe_component(tag)
+                            / _safe_component(name)
+                        )
+                        partial = staged_target.with_suffix(
+                            staged_target.suffix + ".partial"
+                        )
+                    partial_size = partial.stat().st_size if partial.is_file() else 0
+                    remaining = max(0, expected_size - partial_size)
+                    pending_download_bytes += remaining
+                    if raw_rows:
+                        peak_staged_asset_bytes = max(
+                            peak_staged_asset_bytes, remaining,
+                        )
+                    else:
+                        pending_retained_download_bytes += remaining
 
-    pending_materialization_bytes = 0
-    if profile == "replay-ready":
-        pending_materialization_bytes = _pending_catalog_materialization_bytes(
-            replay_rows, destination,
+        pending_materialization_bytes = 0
+        if profile == "replay-ready":
+            pending_materialization_bytes = _pending_catalog_materialization_bytes(
+                replay_rows, destination,
+            )
+        safety_margin = 1024 * 1024 * 1024
+        required_free_destination_bytes = (
+            pending_retained_download_bytes
+            + peak_staged_asset_bytes
+            + pending_materialization_bytes
+            + safety_margin
         )
+        preflight_verification_mode = "EXACT_SHA_SCAN"
 
     download_budget_ok = (
         max_download_bytes is None or pending_download_bytes <= max_download_bytes
@@ -2754,14 +2840,6 @@ def restore_everything(
         prune_result = _prune_verified_unselected_assets(
             full_releases, selected_keys, releases_root,
         )
-    free_destination = shutil.disk_usage(destination).free
-    safety_margin = 1024 * 1024 * 1024
-    required_free_destination_bytes = (
-        pending_retained_download_bytes
-        + peak_staged_asset_bytes
-        + pending_materialization_bytes
-        + safety_margin
-    )
     enough_disk = required_free_destination_bytes <= free_destination
     if preflight_only:
         # Planning never downloads assets and is not a recovery certificate.
@@ -2777,6 +2855,7 @@ def restore_everything(
             ),
             "repository": repository,
             "profile": profile,
+            "preflight_verification_mode": preflight_verification_mode,
             "source_inventory_sha256": source_inventory_sha256,
             "release_count": len(releases),
             "asset_count": sum(len(release["assets"]) for release in releases),
@@ -2845,6 +2924,7 @@ def restore_everything(
         "schema": "alina.full_restore_report.v1",
         "repository": repository,
         "profile": profile,
+        "preflight_verification_mode": preflight_verification_mode,
         "source_inventory_sha256": source_inventory_sha256,
         "destination": str(destination),
         "release_count": 0,

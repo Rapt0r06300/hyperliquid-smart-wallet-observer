@@ -1489,6 +1489,79 @@ def test_materialize_safe_shards_verifies_existing_targets_concurrently(
     assert maximum_active >= 2
 
 
+def test_materialize_safe_shards_prepares_each_release_root_once(
+    tmp_path, monkeypatch,
+):
+    module = _module()
+    destination = tmp_path / "restore"
+    tag = "data-v2-shared-root"
+    target_root = destination / "usable" / "shards" / tag
+    calls = 0
+    original_windows_io_path = module._windows_io_path
+
+    def counted_windows_io_path(path):
+        nonlocal calls
+        if Path(path) == target_root:
+            calls += 1
+        return original_windows_io_path(path)
+
+    monkeypatch.setattr(module, "_windows_io_path", counted_windows_io_path)
+    monkeypatch.setattr(module, "_verified_row_bytes", lambda *_args: True)
+    rows = [
+        {
+            "dataset_id": f"safe-{index}",
+            "release_tag": tag,
+            "release_asset": "source.jsonl.gz",
+            "bytes": 1,
+            "sha256": hashlib.sha256(b"x").hexdigest(),
+        }
+        for index in range(12)
+    ]
+
+    result = module._materialize_catalog_safe_shards(
+        rows, tmp_path / "releases", destination, prune_stale=False,
+    )
+
+    assert result["materialization_complete"] is True
+    assert calls <= 3
+
+
+def test_materialize_rechecks_usable_ancestor_immediately_before_write(
+    tmp_path, monkeypatch,
+):
+    module = _module()
+    destination = tmp_path / "restore"
+    usable = destination / "usable"
+    verification_finished = False
+    original_is_symlink = Path.is_symlink
+
+    def missing_target(_path, _row):
+        nonlocal verification_finished
+        verification_finished = True
+        return False
+
+    def late_usable_symlink(path):
+        if verification_finished and Path(path) == module._windows_io_path(usable):
+            return True
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(module, "_verified_row_bytes", missing_target)
+    monkeypatch.setattr(Path, "is_symlink", late_usable_symlink)
+    row = {
+        "dataset_id": "safe-late-link", "release_tag": "data-v2-late-link",
+        "release_asset": "source.jsonl.gz", "bytes": 1,
+        "sha256": hashlib.sha256(b"x").hexdigest(),
+    }
+
+    result = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination, prune_stale=False,
+    )
+
+    assert result["failures"] == [{
+        "dataset_id": "safe-late-link", "error": "SYMLINKED_SHARD_DIRECTORY",
+    }]
+
+
 def test_pending_materialization_bytes_are_computed_concurrently(
     tmp_path, monkeypatch,
 ):
@@ -1529,6 +1602,44 @@ def test_pending_materialization_bytes_are_computed_concurrently(
 
     assert pending == sum(range(1, 13, 2))
     assert maximum_active >= 2
+
+
+def test_unlimited_replay_uses_conservative_preflight_without_sha_rescan():
+    module = _module()
+    rows = [
+        {"release_container_asset": "bundle.zip", "bytes": 30},
+        {"release_container_asset": "bundle.zip", "bytes": 20},
+        {"bytes": 999},
+    ]
+
+    plan = module._conservative_replay_preflight(
+        rows,
+        source_asset_bytes=100,
+        free_destination=2 * 1024 * 1024 * 1024,
+        max_download_bytes=None,
+    )
+
+    assert plan == {
+        "pending_download_bytes": 100,
+        "pending_retained_download_bytes": 100,
+        "peak_staged_asset_bytes": 0,
+        "pending_materialization_bytes": 50,
+        "required_free_destination_bytes": 100 + 50 + 1024 * 1024 * 1024,
+    }
+
+
+def test_conservative_preflight_falls_back_for_cap_or_insufficient_disk():
+    module = _module()
+    rows = [{"release_container_asset": "bundle.zip", "bytes": 30}]
+
+    assert module._conservative_replay_preflight(
+        rows, source_asset_bytes=100, free_destination=2**40,
+        max_download_bytes=99,
+    ) is None
+    assert module._conservative_replay_preflight(
+        rows, source_asset_bytes=100, free_destination=10,
+        max_download_bytes=None,
+    ) is None
 
 
 def test_long_target_root_symlink_check_uses_windows_io_path(
