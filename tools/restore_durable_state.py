@@ -77,7 +77,12 @@ def main() -> int:
         })
 
     health = json.loads(Path(args.health).read_text(encoding="utf-8"))
-    if health.get("schema_version") != "alina.dataset_health_receipt.v1":
+    # The publisher has emitted v2 since the extended campaign/coverage receipt.
+    # Keep v1 readable for historical restores; reject unknown future schemas.
+    if health.get("schema_version") not in {
+        "alina.dataset_health_receipt.v1",
+        "alina.dataset_health_receipt.v2",
+    }:
         raise SystemExit("unsupported health receipt schema")
     receipt_digest = health.get("receipt_digest")
     body = dict(health)
