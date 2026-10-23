@@ -1,0 +1,127 @@
+{
+  "asset_verified": true,
+  "bytes": 50682,
+  "collection_run_id": "market-e8-12-2026102223-v7-0",
+  "collector_version": "2b063958fb6f9256972c6ff292038f4b1cda12d8",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-kioxiausdt-1792713571815-1792713686922-4b7c698a4def",
+  "end_ts_ms": 1792713686922,
+  "event_count": 563,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 563,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 563,
+    "missing_from_live": 0,
+    "reference_count": 563,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 563,
+  "release": {
+    "asset_id": 667513071,
+    "asset_name": "packed-shards-0032.zip",
+    "member_name": "bitget-public-ws-trades-kioxiausdt-1792713571815-1792713686922-4b7c698a4def.jsonl.gz",
+    "release_id": 421333204,
+    "release_tag": "data-v2-campaign-market-e8-12-2026102223-v7-u0",
+    "remote_digest": "sha256:33a9754cfb267257f1d7b7bfb4e080176e13b2a066d674a1ff9d3219c890b765",
+    "remote_size": 770121,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-kioxiausdt-1792713571815-1792713686922-4b7c698a4def.jsonl.gz",
+  "release_asset_id": 667513071,
+  "release_container_asset": "packed-shards-0032.zip",
+  "release_id": 421333204,
+  "release_member": "bitget-public-ws-trades-kioxiausdt-1792713571815-1792713686922-4b7c698a4def.jsonl.gz",
+  "release_remote_digest": "sha256:33a9754cfb267257f1d7b7bfb4e080176e13b2a066d674a1ff9d3219c890b765",
+  "release_remote_size": 770121,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-12-2026102223-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4b7c698a4deff58a407010db5433952e3a990d8edeed728fbd18686ea0d5a2f6",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1792713571815,
+  "symbol": "KIOXIAUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 563,
+      "max": 65.0,
+      "min": 38.5,
+      "p50": 38.5,
+      "p95": 65.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-aaa6b7ca416045ae85814c070a993882"
+    ],
+    "first_exchange_ts_ms": 1792713340201,
+    "last_exchange_ts_ms": 1792713686853,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 563,
+      "max": 231614.0,
+      "min": 68.0,
+      "p50": 74.0,
+      "p95": 211093.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 563,
+      "max": 143.507666,
+      "min": 0.0,
+      "p50": 132.401523,
+      "p95": 132.723024
+    }
+  },
+  "trade_count": 563,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 563,
+  "trade_identity_set_sha256": "f8084ed7978d92dfceb35030295e0eac9e8921ab81975f44ed46d432adc74252",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 903804,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 563,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
