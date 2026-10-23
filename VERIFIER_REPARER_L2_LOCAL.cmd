@@ -8,11 +8,11 @@ if exist "%~dp0tools\python\python.exe" (
   goto :done
 )
 where py >nul 2>nul && (
-  py -3 tools\certify_local_l2.py --repair %*
+  py -3 tools\certify_local_l2.py %ALINA_L2_ARGS%
   goto :done
 )
 where python >nul 2>nul && (
-  python tools\certify_local_l2.py --repair %*
+  python tools\certify_local_l2.py %ALINA_L2_ARGS%
   goto :done
 )
 echo Python 3.10+ is required.
