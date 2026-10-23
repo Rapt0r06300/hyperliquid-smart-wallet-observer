@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 14518,
+  "collection_run_id": "market-e8-5-2026102309-v7-0",
+  "collector_version": "62119ef86a1505c11bf4c1e3644ece37d77d442f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-bbo-coinusdt-1792750315583-1792750462120-ca28303b794a",
+  "end_ts_ms": 1792750462120,
+  "event_count": 133,
+  "family": "bbo",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "bbo"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 133,
+  "release": {
+    "asset_id": 668895074,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "bitget-public-ws-bbo-coinusdt-1792750315583-1792750462120-ca28303b794a.jsonl.gz",
+    "release_id": 421755181,
+    "release_tag": "data-v2-campaign-market-e8-5-2026102309-v7-u0",
+    "remote_digest": "sha256:6983ac7ea118b88968bfb86c5f3c304b404e32bced26cb825dc4d302587412e2",
+    "remote_size": 2058974,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-bbo-coinusdt-1792750315583-1792750462120-ca28303b794a.jsonl.gz",
+  "release_asset_id": 668895074,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 421755181,
+  "release_member": "bitget-public-ws-bbo-coinusdt-1792750315583-1792750462120-ca28303b794a.jsonl.gz",
+  "release_remote_digest": "sha256:6983ac7ea118b88968bfb86c5f3c304b404e32bced26cb825dc4d302587412e2",
+  "release_remote_size": 2058974,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026102309-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ca28303b794ad8f599f13c5f48b6fb233891ae475a8c72c26ed06f3d6f911d15",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1792750315583,
+  "symbol": "COINUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 133,
+      "max": 103.5,
+      "min": 75.5,
+      "p50": 88.0,
+      "p95": 88.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-7247834e2ccb49f4a6d04e4fbcd14854"
+    ],
+    "first_exchange_ts_ms": 1792750315518,
+    "last_exchange_ts_ms": 1792750462066,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 133,
+      "max": 126.0,
+      "min": 52.0,
+      "p50": 61.0,
+      "p95": 99.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 133,
+      "max": 122.81058,
+      "min": 0.0,
+      "p50": 104.709787,
+      "p95": 122.81058
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 211670,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
