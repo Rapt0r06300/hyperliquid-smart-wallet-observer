@@ -125,6 +125,21 @@ def test_AUCUN_except_pass_ne_revient():
             len(muets), "\n    ".join(muets[:15])))
 
 
+
+def test_checkpoint_manquant_journalise_les_deux_erreurs_sans_faux_comptage(tmp_path):
+    from hl_observer.control_plane.campaign_adapters import _collection_checkpoint_metrics
+
+    result = _collection_checkpoint_metrics(tmp_path)
+
+    assert result["record_count_observed"] == 0
+    assert result["safe_count"] == 0
+    assert result["trade_count_observed"] == 0
+    sites = {row["site"]: row for row in resume()["sites"]}
+    assert sites["control_plane/campaign_adapters.py:collection_summary"]["dernier"] == "FileNotFoundError"
+    assert sites["control_plane/campaign_adapters.py:bundle_index"]["dernier"] == "FileNotFoundError"
+
+
+
 def test_le_fallback_fatal_visible_est_le_seul_cas_tolere():
     lines = ["x"] * 20
     lines[8] = 'print("ALINA_AUTONOMOUS_RESEARCH_NO_GO")'
