@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 10995,
+  "collection_run_id": "market-e8-2-2026102304-v7-0",
+  "collector_version": "1f3154b268f2c0c3b27555e68c747ea02d73bc44",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-l2book-cetususdt-1792731924088-1792732046687-50c42f15de7c",
+  "end_ts_ms": 1792732046687,
+  "event_count": 88,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 88,
+  "release": {
+    "asset_id": 668121026,
+    "asset_name": "packed-shards-0014.zip",
+    "member_name": "bitget-public-ws-l2book-cetususdt-1792731924088-1792732046687-50c42f15de7c.jsonl.gz",
+    "release_id": 421492515,
+    "release_tag": "data-v2-campaign-market-e8-2-2026102304-v7-u0",
+    "remote_digest": "sha256:c1fa915b3c664e842dea036796104d6102886507ab5bc2fbb538ba1b697a3468",
+    "remote_size": 2590156,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-l2book-cetususdt-1792731924088-1792732046687-50c42f15de7c.jsonl.gz",
+  "release_asset_id": 668121026,
+  "release_container_asset": "packed-shards-0014.zip",
+  "release_id": 421492515,
+  "release_member": "bitget-public-ws-l2book-cetususdt-1792731924088-1792732046687-50c42f15de7c.jsonl.gz",
+  "release_remote_digest": "sha256:c1fa915b3c664e842dea036796104d6102886507ab5bc2fbb538ba1b697a3468",
+  "release_remote_size": 2590156,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-2-2026102304-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "50c42f15de7c75aebc1c1f09ef9ae0dc22bc4b8c82057ae5614d493043e66e8e",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1792731924088,
+  "symbol": "CETUSUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 88,
+      "max": 69.5,
+      "min": 25.0,
+      "p50": 69.5,
+      "p95": 69.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-5c7f620dc5ef4f56871dd7891d65ce7d"
+    ],
+    "first_exchange_ts_ms": 1792731923835,
+    "last_exchange_ts_ms": 1792732046574,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 88,
+      "max": 316.0,
+      "min": 71.0,
+      "p50": 81.0,
+      "p95": 144.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 88,
+      "max": 189.158069,
+      "min": 0.0,
+      "p50": 142.356678,
+      "p95": 189.158069
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 200429,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
