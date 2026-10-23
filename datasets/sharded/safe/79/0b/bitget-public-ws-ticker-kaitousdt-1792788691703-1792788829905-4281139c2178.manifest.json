@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 123470,
+  "collection_run_id": "market-e8-9-2026102319-v7-0",
+  "collector_version": "5106ed6cebd41af4df9d76212dc275d59e2bbeec",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-kaitousdt-1792788691703-1792788829905-4281139c2178",
+  "end_ts_ms": 1792788829905,
+  "event_count": 1290,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1290,
+  "release": {
+    "asset_id": 670494884,
+    "asset_name": "packed-shards-0033.zip",
+    "member_name": "bitget-public-ws-ticker-kaitousdt-1792788691703-1792788829905-4281139c2178.jsonl.gz",
+    "release_id": 422334720,
+    "release_tag": "data-v2-campaign-market-e8-9-2026102319-v7-u0",
+    "remote_digest": "sha256:c56d7bb162e815b826a8e86b0428e5c1a78e2c93c7a5becae96d6221e1628e99",
+    "remote_size": 12200491,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-ticker-kaitousdt-1792788691703-1792788829905-4281139c2178.jsonl.gz",
+  "release_asset_id": 670494884,
+  "release_container_asset": "packed-shards-0033.zip",
+  "release_id": 422334720,
+  "release_member": "bitget-public-ws-ticker-kaitousdt-1792788691703-1792788829905-4281139c2178.jsonl.gz",
+  "release_remote_digest": "sha256:c56d7bb162e815b826a8e86b0428e5c1a78e2c93c7a5becae96d6221e1628e99",
+  "release_remote_size": 12200491,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026102319-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4281139c2178f5aa977af85ddb7c44000dfadaffcd8a1687c3c79064cb9ade98",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1792788691703,
+  "symbol": "KAITOUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1290,
+      "max": 118.0,
+      "min": 66.5,
+      "p50": 82.5,
+      "p95": 118.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-f3d578ad882c44f5b4f7e915a12ebee6"
+    ],
+    "first_exchange_ts_ms": 1792788691226,
+    "last_exchange_ts_ms": 1792788829845,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1290,
+      "max": 477.0,
+      "min": 56.0,
+      "p50": 65.0,
+      "p95": 80.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1290,
+      "max": 160.385296,
+      "min": 0.0,
+      "p50": 119.026889,
+      "p95": 160.385296
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 2737913,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
