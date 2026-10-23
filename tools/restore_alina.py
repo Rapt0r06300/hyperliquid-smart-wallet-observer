@@ -10,6 +10,7 @@ The tool is read-only against GitHub. It uses only Python's standard library.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import gzip
 import hashlib
 import http.client
@@ -26,8 +27,9 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections import deque
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping, TypeVar
 
 try:
     from tools.partitioned_data_index import read_index
@@ -37,10 +39,37 @@ except ModuleNotFoundError:
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 USER_AGENT = "alina-smartflow-disaster-restore/1"
 SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
+VERIFY_WORKERS = min(16, max(4, os.cpu_count() or 4))
+_T = TypeVar("_T")
+_R = TypeVar("_R")
 
 
 class RestoreError(RuntimeError):
     pass
+
+
+def _bounded_parallel_map(
+    function: Callable[[_T], _R], values: Iterable[_T],
+    *, max_workers: int = VERIFY_WORKERS,
+) -> Iterator[_R]:
+    """Map read-only verification with bounded memory and stable ordering."""
+    if max_workers < 1:
+        raise ValueError("max_workers must be positive")
+    iterator = iter(values)
+    pending: deque[concurrent.futures.Future[_R]] = deque()
+    max_pending = max_workers * 4
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for _ in range(max_pending):
+            try:
+                pending.append(executor.submit(function, next(iterator)))
+            except StopIteration:
+                break
+        while pending:
+            yield pending.popleft().result()
+            try:
+                pending.append(executor.submit(function, next(iterator)))
+            except StopIteration:
+                pass
 
 
 def _safe_component(value: str) -> str:
@@ -1430,6 +1459,36 @@ def _materialized_row_target(destination: Path, row: Mapping[str, Any]) -> Path:
     )
 
 
+def _pending_catalog_materialization_bytes(
+    rows: list[Mapping[str, Any]], destination: Path,
+) -> int:
+    """SHA-verify existing materializations concurrently without parallel writes."""
+    selected = [row for row in rows if row.get("release_container_asset")]
+
+    def pending_bytes(row: Mapping[str, Any]) -> int:
+        target = _materialized_row_target(destination, row)
+        return 0 if _verified_row_bytes(target, row) else int(row["bytes"])
+
+    print(
+        f"ALINA_RESTORE_PHASE=PREFLIGHT_MATERIALIZED_SAFE_SHARDS "
+        f"shards={len(selected)} workers={VERIFY_WORKERS}",
+        file=sys.stderr, flush=True,
+    )
+    total = 0
+    results = _bounded_parallel_map(
+        pending_bytes, selected, max_workers=VERIFY_WORKERS,
+    )
+    for checked, pending in enumerate(results, 1):
+        total += pending
+        if checked == 1 or checked % 10_000 == 0 or checked == len(selected):
+            print(
+                f"ALINA_RESTORE_PROGRESS=PREFLIGHT_MATERIALIZED_SAFE_SHARDS "
+                f"{checked}/{len(selected)} pending_bytes={total}",
+                file=sys.stderr, flush=True,
+            )
+    return total
+
+
 def _staged_materialized_asset_ok(
     destination: Path,
     repository: str,
@@ -1526,37 +1585,71 @@ def _materialize_catalog_safe_shards(
         "ignored_stale_release_manifests": 0, "failures": [],
     }
     expected: set[Path] = set()
-    for row in rows:
-        dataset_id = str(row["dataset_id"])
-        tag = str(row["release_tag"])
-        member = str(row["release_asset"])
-        outer = str(row.get("release_container_asset") or member)
-        source = _windows_io_path(
-            releases_root / _safe_component(tag) / _safe_component(outer)
+    def candidates() -> Iterator[
+        tuple[Mapping[str, Any], str, str, Path, Path]
+    ]:
+        for row in rows:
+            dataset_id = str(row["dataset_id"])
+            tag = str(row["release_tag"])
+            member = str(row["release_asset"])
+            outer = str(row.get("release_container_asset") or member)
+            source = _windows_io_path(
+                releases_root / _safe_component(tag) / _safe_component(outer)
+            )
+            target_root = (
+                destination / "usable" / "shards" / _safe_component(tag)
+            )
+            if any(_windows_io_path(path).is_symlink() for path in (
+                destination / "usable",
+                destination / "usable" / "shards",
+                target_root,
+            )):
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "SYMLINKED_SHARD_DIRECTORY",
+                })
+                continue
+            io_target_root = _windows_io_path(target_root)
+            io_target_root.mkdir(parents=True, exist_ok=True)
+            display_target = (
+                target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
+            )
+            target = _windows_io_path(display_target)
+            if target.is_symlink():
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "SYMLINKED_MATERIALIZED_SHARD",
+                })
+                continue
+            expected.add(display_target)
+            yield row, dataset_id, member, source, target
+
+    def verify_candidate(
+        candidate: tuple[Mapping[str, Any], str, str, Path, Path],
+    ) -> tuple[Mapping[str, Any], str, str, Path, Path, bool]:
+        row, dataset_id, member, source, target = candidate
+        return (
+            row, dataset_id, member, source, target,
+            _verified_row_bytes(target, row),
         )
-        target_root = destination / "usable" / "shards" / _safe_component(tag)
-        if any(_windows_io_path(path).is_symlink() for path in (
-            destination / "usable",
-            destination / "usable" / "shards",
-            target_root,
-        )):
-            report["failures"].append({
-                "dataset_id": dataset_id,
-                "error": "SYMLINKED_SHARD_DIRECTORY",
-            })
-            continue
-        io_target_root = _windows_io_path(target_root)
-        io_target_root.mkdir(parents=True, exist_ok=True)
-        display_target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
-        target = _windows_io_path(display_target)
-        if target.is_symlink():
-            report["failures"].append({
-                "dataset_id": dataset_id,
-                "error": "SYMLINKED_MATERIALIZED_SHARD",
-            })
-            continue
-        expected.add(display_target)
-        if _verified_row_bytes(target, row):
+
+    print(
+        f"ALINA_RESTORE_PHASE=VERIFY_MATERIALIZED_SAFE_SHARDS "
+        f"shards={len(rows)} workers={VERIFY_WORKERS}",
+        file=sys.stderr, flush=True,
+    )
+    verified_candidates = _bounded_parallel_map(
+        verify_candidate, candidates(), max_workers=VERIFY_WORKERS,
+    )
+    for checked, candidate in enumerate(verified_candidates, 1):
+        row, dataset_id, member, source, target, already_verified = candidate
+        if checked == 1 or checked % 10_000 == 0 or checked == len(rows):
+            print(
+                f"ALINA_RESTORE_PROGRESS=MATERIALIZED_SAFE_SHARDS "
+                f"{checked}/{len(rows)}",
+                file=sys.stderr, flush=True,
+            )
+        if already_verified:
             report["usable_shards"] += 1
             report["usable_bytes"] += int(row["bytes"])
             report["skipped_verified_shards"] += 1
@@ -2647,16 +2740,9 @@ def restore_everything(
 
     pending_materialization_bytes = 0
     if profile == "replay-ready":
-        for row in replay_rows:
-            if not row.get("release_container_asset"):
-                continue
-            target = (
-                destination / "usable" / "shards"
-                / _safe_component(str(row["release_tag"]))
-                / f"{_safe_component(str(row['dataset_id']))}.jsonl.gz"
-            )
-            if not _verified_row_bytes(target, row):
-                pending_materialization_bytes += int(row["bytes"])
+        pending_materialization_bytes = _pending_catalog_materialization_bytes(
+            replay_rows, destination,
+        )
 
     download_budget_ok = (
         max_download_bytes is None or pending_download_bytes <= max_download_bytes

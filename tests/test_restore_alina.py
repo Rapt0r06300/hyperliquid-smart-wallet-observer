@@ -1446,6 +1446,91 @@ def test_materialize_safe_shard_uses_windows_io_path_for_long_target(
     assert not (destination / "usable" / "shards" / tag / target.name).exists()
 
 
+def test_materialize_safe_shards_verifies_existing_targets_concurrently(
+    tmp_path, monkeypatch,
+):
+    import threading
+    import time
+
+    module = _module()
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def slow_verified(_path, _row):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return True
+
+    monkeypatch.setattr(module, "_verified_row_bytes", slow_verified)
+    rows = [
+        {
+            "dataset_id": f"safe-{index}",
+            "release_tag": "data-v2-parallel",
+            "release_asset": "source.jsonl.gz",
+            "bytes": 1,
+            "sha256": hashlib.sha256(b"x").hexdigest(),
+        }
+        for index in range(12)
+    ]
+
+    result = module._materialize_catalog_safe_shards(
+        rows, tmp_path / "releases", tmp_path / "restore",
+        prune_stale=False,
+    )
+
+    assert result["materialization_complete"] is True
+    assert result["skipped_verified_shards"] == len(rows)
+    assert maximum_active >= 2
+
+
+def test_pending_materialization_bytes_are_computed_concurrently(
+    tmp_path, monkeypatch,
+):
+    import threading
+    import time
+
+    module = _module()
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def slow_verified(_path, row):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return int(row["bytes"]) % 2 == 0
+
+    monkeypatch.setattr(module, "_verified_row_bytes", slow_verified)
+    rows = [
+        {
+            "dataset_id": f"safe-{index}",
+            "release_tag": "data-v2-parallel-plan",
+            "release_asset": "bundle.zip",
+            "release_container_asset": "bundle.zip",
+            "bytes": index,
+            "sha256": hashlib.sha256(str(index).encode()).hexdigest(),
+        }
+        for index in range(1, 13)
+    ]
+
+    pending = module._pending_catalog_materialization_bytes(
+        rows, tmp_path / "restore",
+    )
+
+    assert pending == sum(range(1, 13, 2))
+    assert maximum_active >= 2
+
+
 def test_long_target_root_symlink_check_uses_windows_io_path(
     tmp_path, monkeypatch,
 ):
