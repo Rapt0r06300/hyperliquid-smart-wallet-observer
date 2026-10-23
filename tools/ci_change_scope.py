@@ -99,7 +99,10 @@ def verify_catalog_changes(root: Path, paths: list[str]) -> None:
                 raise ValueError("DATASET_HEALTH_DIGEST_MISMATCH")
 
     if any(name in paths for name in ("catalog/DATA_INDEX.json", "catalog/DATA_METRICS.json")):
-        from tools.build_catalog_metrics import verify_metrics_source
+        try:
+            from tools.build_catalog_metrics import verify_metrics_source
+        except ModuleNotFoundError:  # direct tools/ invocation before editable install
+            from build_catalog_metrics import verify_metrics_source
 
         verify_metrics_source(
             root / "catalog/DATA_INDEX.json",
