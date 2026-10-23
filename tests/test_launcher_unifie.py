@@ -192,5 +192,7 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "RESTORE_ALINA.cmd",
         "Alina-restore.cmd",
         "BACKUP_LOCAL_ALINA.cmd",
+        "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+        "VERIFIER_REPARER_L2_LOCAL.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves

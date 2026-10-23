@@ -6,9 +6,6 @@ on:
     - cron: '7 19 * * *'
   push:
     branches: [main]
-    paths-ignore:
-      - 'catalog/**'
-      - 'control/**'
   pull_request:
     branches: [main]
   workflow_dispatch: {}

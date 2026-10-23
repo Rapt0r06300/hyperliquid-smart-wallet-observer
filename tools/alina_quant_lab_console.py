@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from tools.sous_processus_isole import creationflags
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -214,6 +216,7 @@ def _run_group(name: str, tests: list[str], log_path: Path) -> dict[str, Any]:
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        creationflags=creationflags(),
         env={
             **os.environ,
             "PYTHONPATH": os.pathsep.join(

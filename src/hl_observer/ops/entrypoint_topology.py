@@ -37,6 +37,7 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "LANCER_COCKPIT_ALINA.cmd": EntrypointRole.COMPAT,
     "LANCER_HYPERLAB.cmd": EntrypointRole.COMPAT,
     "LANCER_HYPERSMART.cmd": EntrypointRole.OFFICIAL_RUNTIME,
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd": EntrypointRole.MAINTENANCE,
     "LANCER_LABO.cmd": EntrypointRole.COMPAT,
     "LANCER_LABO_180GO.cmd": EntrypointRole.COMPAT,
     "LANCER_MICRO.cmd": EntrypointRole.COMPAT,
@@ -52,6 +53,7 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "RECETTE-WINDOWS.cmd": EntrypointRole.MAINTENANCE,
     "REPARER_ET_POUSSER.cmd": EntrypointRole.LEGACY,
     "VERIFIER_LAB_AUTONOME_ALINA.cmd": EntrypointRole.MAINTENANCE,
+    "VERIFIER_REPARER_L2_LOCAL.cmd": EntrypointRole.MAINTENANCE,
 }
 
 OFFICIAL_ENTRYPOINTS = {

@@ -106,6 +106,15 @@ def auditer(racine: str | Path) -> list[dict]:
                     continue
                 if cat == "chemin_absolu_disque" and _litteral_diagnostic_portable(sans_vars):
                     continue
+                # A legacy SHA-bound quarantine manifest can carry immutable GitHub
+                # runner provenance. Checking that string is not a runtime path dependency.
+                if (
+                    cat == "chemin_sandbox_profil"
+                    and rel == "src/hl_observer/ops/archive_portable.py"
+                    and fonction == "chemins_absolus_portables"
+                    and 'path.startswith("/home/runner/work/_temp/")' in sans_vars
+                ):
+                    continue
                 if cat == "registre_windows":
                     readers = _MACHINE_ID_READERS.get(rel, set())
                     if fonction in readers and not _REGISTRE_ECRITURE.search(sans_vars):
