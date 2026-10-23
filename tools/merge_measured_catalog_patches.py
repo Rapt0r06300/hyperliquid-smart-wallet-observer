@@ -146,7 +146,12 @@ def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
             _load(target), measured, index_rows=rows, kind=kind, schema=schema
         )
         tmp = target.with_suffix(target.suffix + ".merge.tmp")
-        tmp.write_text(json.dumps(updated, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        # Legacy indented JSON exceeded GitHub's 100 MB blob limit.
+        # Compact serialization preserves all exact SHA-bound measurements.
+        payload = json.dumps(updated, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+        if len(payload.encode("utf-8")) >= 95_000_000:
+            raise ValueError(f"CATALOG_PATCH_NEEDS_PARTITION: {file_name} exceeds 95 MB")
+        tmp.write_text(payload, encoding="utf-8")
         os.replace(tmp, target)
         out[kind] = {
             "exact": updated["exact_assets"],

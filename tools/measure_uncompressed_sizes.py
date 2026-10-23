@@ -217,9 +217,9 @@ def main() -> None:
         "unavailable_assets": unavailable_records,
         **common,
     }
-    SIZE_PATCH.write_text(json.dumps(size_body, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    SIZE_PATCH.write_text(json.dumps(size_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
     RECORD_PATCH.write_text(
-        json.dumps(record_body, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        json.dumps(record_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8"
     )
     print(
         json.dumps(
