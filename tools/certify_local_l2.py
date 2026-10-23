@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 import tempfile
 
@@ -336,6 +337,8 @@ def salvage(source, folder, record):
         return proof
     if digest_file(source) != record["source_sha256"]:
         raise ValueError("SOURCE_CHANGED_DURING_REPAIR")
+    if shutil.disk_usage(folder).free < source.stat().st_size * 2 + 512 * 1024 * 1024:
+        raise ValueError("INSUFFICIENT_DISK_FOR_SAFE_REPAIR")
     fd, tempname = tempfile.mkstemp(dir=folder, prefix=".l2-copy-", suffix=".tmp")
     os.close(fd)
     temp = Path(tempname)
@@ -416,7 +419,16 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False):
                             return {**value, "stat_cache_reused_without_new_hash": True}
                 except (OSError, ValueError, KeyError, TypeError):
                     pass
+        before = path.stat() if path.is_file() and not path.is_symlink() else None
         value = inspect_shard(path, row)
+        after = path.stat() if path.is_file() and not path.is_symlink() else None
+        if before is not None and (after is None or
+                (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)):
+            value["status"] = "BLOCKED"
+            value["segments"] = []
+            value["valid_records"] = 0
+            value["reasons"]["SOURCE_CHANGED_DURING_SCAN"] = 1
+            return value
         if path.is_file() and not path.is_symlink():
             # Receipt is an optimization hint, not an independent byte proof.
             # Only the optional --resume trusts unchanged file size+mtime.

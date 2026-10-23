@@ -21,7 +21,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 8
     env:
-      PYTHONPATH: '.:tools:src'
+      PYTHONPATH: '.'
       REAL_MAINNET_TRADING: 'false'
       ENABLE_REAL_ORDERS: '0'
       HL_ENABLE_MAINNET_EXECUTION: '0'
