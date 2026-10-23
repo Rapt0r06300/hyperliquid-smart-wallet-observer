@@ -65,6 +65,7 @@ def test_cross_asset_refuse_des_shards_disjoints_sans_reduire_trial_count(tmp_pa
     assert report["fixed_grid"]["trial_count"] == (
         module.research_family_trial_count(1, 1)
         + module.book_confirmation_trial_count(2)
+        + module.microstructure_confirmation_trial_count(2)
     )
     assert report["fixed_grid"]["cross_asset_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     assert report["selection_eligible"] is False
@@ -105,4 +106,5 @@ def test_cross_asset_accepte_uniquement_une_source_alignee_commune(tmp_path: Pat
     assert report["fixed_grid"]["trial_count"] == (
         module.research_family_trial_count(1, 1)
         + module.book_confirmation_trial_count(2)
+        + module.microstructure_confirmation_trial_count(2)
     )

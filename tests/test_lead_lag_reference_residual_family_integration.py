@@ -57,7 +57,12 @@ def test_residual_family_is_counted_before_any_replay(tmp_path: Path, monkeypatc
         candidate_coins=("BTC", "SOL"),
     )
 
-    assert report["fixed_grid"]["trial_count"] == 109
+    # Predeclared family includes microstructure trials even when no replay occurs.
+    assert report["fixed_grid"]["trial_count"] == (
+        module.research_family_trial_count(1, 1)
+        + module.book_confirmation_trial_count(2)
+        + module.microstructure_confirmation_trial_count(2)
+    )
     assert report["fixed_grid"]["reference_residual_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     assert report["heldout_evaluated"] is False
     assert report["paper_read_only"] is True

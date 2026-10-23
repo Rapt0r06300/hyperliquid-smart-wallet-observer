@@ -34,13 +34,14 @@ def test_loader_conserve_provenance_trade_par_observation(tmp_path: Path, monkey
 
     tape, meta = module.load_multiasset_train_tape(tmp_path, [source], coins=("BTC",))
 
-    assert tape["BTC"]["TRADE_OBS"] == [
-        {
-            "observable_at_ms": start + 1_000,
-            "price": 100.0,
-            "source_id": "aligned.jsonl",
-        }
-    ]
+    # Provenance is invariant; compatible additional observation metadata is allowed.
+    observations = tape["BTC"]["TRADE_OBS"]
+    assert len(observations) == 1
+    assert {key: observations[0][key] for key in ("observable_at_ms", "price", "source_id")} == {
+        "observable_at_ms": start + 1_000,
+        "price": 100.0,
+        "source_id": "aligned.jsonl",
+    }
     assert meta["heldout_loaded"] is False
     assert meta["real_execution"] is False
 
@@ -128,7 +129,9 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
     replay_calls: list[dict] = []
 
     def fake_replay(_tape, _books, **kwargs):
-        replay_calls.append(dict(kwargs))
+        # Microstructure confirmations also replay; count only the residual source-aligned lane.
+        if all("TRADE_OBS" not in stream for stream in _tape.values()):
+            replay_calls.append(dict(kwargs))
         return {
             "costs_measured": True,
             "segments": {label: {"net": 0.0} for label in ("IS", "OOS", "FORWARD")},
