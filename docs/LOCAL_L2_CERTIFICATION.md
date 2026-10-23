@@ -52,3 +52,7 @@ Avec `--resume`, le lanceur désactive implicitement le mode inter-shards car ce
 ## Option de certification inter-shards
 
 Le double-clic sans arguments utilise le mode inter-shards. La commande `VERIFIER_REPARER_L2_LOCAL.cmd --cross-shard` vérifie **en plus** les liens de séquence entre shards SAFE de la même plateforme et du même instrument, dans l'ordre des timestamps du catalogue. Le carnet n'est transmis au shard suivant **qu'après** validation du SHA-256 source, du gzip et des séquences natives. Le rapport utilise `CONTINUOUS_L2_CROSS_SHARD` si un shard de deltas a pu être rattaché à un snapshot d'un shard précédent. Ce mode est moins parallèle à l'intérieur d'un même instrument, mais conserve le parallélisme entre instruments ; il ne réutilise pas les reçus stat et ne peut donc pas être combiné à `--resume`. Les intervalles incomplets ou irréparables restent exclus.
+
+### Shards déjà téléchargés uniquement
+
+Par défaut, l'outil n'analyse **que les shards SAFE L2 actuellement présents sur ce PC**. Les autres shards du catalogue sont comptabilisés sous `not_downloaded_locally`, sans être faussement déclarés corrompus. Pour une vérification stricte de la récupération *complète*, utilise `--include-missing` : les fichiers absents seront alors signalés comme `BLOCKED`. Aucun fichier absent n'est téléchargé par cet auditeur.

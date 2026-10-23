@@ -397,7 +397,7 @@ def salvage(source, folder, record):
         temp.unlink(missing_ok=True)
 
 
-def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cross_shard=False):
+def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cross_shard=False, include_missing=False):
     """Verify canonical partitioned index before examining local SAFE objects."""
     root, destination = Path(root).resolve(), Path(destination).resolve()
     try:
@@ -420,10 +420,17 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
             selected.append((path, row))
     if cross_shard and resume:
         raise ValueError("CROSS_SHARD_REQUIRES_FRESH_FULL_HASH_SCAN_NOT_RESUME")
+    indexed_count = len(selected)
+    if not include_missing:
+        # User is auditing shards ALREADY on the PC, not attempting another
+        # download. An absent file is NOT a corrupt downloaded shard.
+        selected = [(path, row) for path, row in selected
+                    if path.is_file() or path.is_symlink()]
+    missing_count = indexed_count - len(selected)
     if limit:
         selected = selected[:limit]
     if not selected:
-        raise ValueError("NO_SAFE_L2_IN_CANONICAL_INDEX")
+        raise ValueError("NO_LOCALLY_DOWNLOADED_SAFE_L2_SHARDS_FOUND")
     # Before any work, retire a previous green run so interrupted runs fail closed.
     report_path = destination / "LOCAL_L2_CERTIFICATION.json"
     atomic_json(report_path, {
@@ -529,6 +536,8 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
         "status": "LOCAL_L2_AUDIT_COMPLETE_NOT_GLOBAL_REPLAY_CERTIFICATION",
         "totals": totals, "repair_failures": repair_failures,
         "cross_shard_mode": cross_shard,
+        "indexed_safe_l2_shards": indexed_count,
+        "not_downloaded_locally": missing_count,
         "cache_reused_without_new_hash": sum(x.get("stat_cache_reused_without_new_hash", False) for x in outputs),
         "l2_rows": outputs, "paper_only": True,
         "read_only_sources": True,
@@ -548,6 +557,8 @@ def main(argv=None):
     parser.add_argument("--limit", type=int, default=0, help="optional smoke-test cap")
     parser.add_argument("--repair", action="store_true", help="create separate proven spans")
     parser.add_argument("--resume", action="store_true", help="trust prior SHA receipts by unchanged size+mtime; not a fresh byte verification")
+    parser.add_argument("--include-missing", action="store_true",
+                        help="also report indexed SAFE L2 files that are not yet downloaded as BLOCKED")
     parser.add_argument("--cross-shard", action="store_true",
                         help="verify native continuity across sorted same-venue/symbol shards; incompatible with --resume")
     args = parser.parse_args(argv)
@@ -557,7 +568,8 @@ def main(argv=None):
     destination = args.destination or root / "runtime" / "recovery" / "full"
     try:
         report = run(root, destination, workers=args.workers, limit=args.limit,
-                     repair=args.repair, resume=args.resume, cross_shard=args.cross_shard)
+                     repair=args.repair, resume=args.resume, cross_shard=args.cross_shard,
+                     include_missing=args.include_missing)
     except (OSError, ValueError, KeyError) as exc:
         print(f"ALINA_L2_FAIL: {exc}", file=sys.stderr)
         return 2

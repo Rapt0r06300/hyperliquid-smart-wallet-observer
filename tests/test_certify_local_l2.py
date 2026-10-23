@@ -153,3 +153,26 @@ def test_bad_digest_poisoned_link_is_not_carried_forward(tmp_path):
     result = inspect_shard(anchor, first, carry=carried)
     assert result["status"] == "BLOCKED"
     assert not carried
+
+
+def test_missing_catalog_shards_are_counted_not_mislabeled_corrupt(tmp_path):
+    from tools.certify_local_l2 import run
+
+    root = tmp_path / "repo"
+    dest = root / "runtime" / "recovery" / "full"
+    have = dest / "usable" / "shards" / "release"
+    have.mkdir(parents=True)
+    src, row = prepare(tmp_path, [snap(1, 100)])
+    (have / "data.jsonl.gz").write_bytes(src.read_bytes())
+    row.update({"quality_status": "SAFE", "replay_compatible": True,
+                "release_tag": "release", "symbol": "BTCUSDT"})
+    missing = {**row, "dataset_id": "not_yet_downloaded"}
+    (root / "catalog").mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": [row, missing]}),
+        encoding="utf-8",
+    )
+    report = run(root, dest)
+    assert report["indexed_safe_l2_shards"] == 2
+    assert report["not_downloaded_locally"] == 1
+    assert report["totals"] == {"SNAPSHOT_OBSERVATIONS_ONLY": 1}
