@@ -123,5 +123,5 @@ def test_exposure_cap_blocks_after_max():
 
 def test_empty_session_is_no_data():
     r = run_v9_paper_session([], now_ms=NOW)
-    assert r.entries_opened == 0 and r.equity_usdt == 100.0
+    assert r.entries_opened == 0 and r.equity_usdt == r.starting_equity_usdt == 200.0
     assert r.supply_report.bottleneck == "NO_DATA"

@@ -36,7 +36,7 @@ def test_realtime_magic_score_accepts_fresh_measurable_edge_for_local_simulation
     assert score.accepted
     assert score.edge_remaining_bps is not None
     assert score.edge_remaining_bps >= 25.0
-    assert score.simulated_notional_usdt == 50.0
+    assert score.simulated_notional_usdt == 100.0  # 200 USDT paper base, 10x stress
     assert score.decision == "ACCEPT_LOCAL_SIMULATION"
 
 
