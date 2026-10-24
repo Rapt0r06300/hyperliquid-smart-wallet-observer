@@ -77,6 +77,23 @@ def load_observed_books(
     except (AttributeError, TypeError, ValueError, OverflowError):
         clean_epoch_ms = 0
         output_start_offset = -1
+    checkpoint_counters = (
+        checkpoint_state.get("counters")
+        if isinstance(checkpoint_state, dict) else None
+    )
+    if not isinstance(checkpoint_counters, dict):
+        checkpoint_counters = {}
+    try:
+        collector_gap_count = sum(
+            int(checkpoint_counters.get(name) or 0)
+            for name in (
+                "input_rotations",
+                "checkpoints_expired",
+                "pending_overflow_rejected",
+            )
+        )
+    except (TypeError, ValueError, OverflowError):
+        collector_gap_count = 1
     clean_epoch_receipt_valid = bool(
         isinstance(checkpoint_state, dict)
         and checkpoint_state.get("schema_version") == CHECKPOINT_WRITER_STATE_SCHEMA
@@ -86,6 +103,7 @@ def load_observed_books(
         and writer_run_id
         and clean_epoch_ms > 0
         and output_start_offset >= 0
+        and collector_gap_count == 0
     )
     wanted = {str(coin).upper() for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
@@ -420,6 +438,7 @@ def load_observed_books(
             "writer_run_id": writer_run_id or None,
             "clean_epoch_ms": clean_epoch_ms or None,
             "output_start_offset": output_start_offset if output_start_offset >= 0 else None,
+            "collector_gap_count": collector_gap_count,
             "checkpoint_rows": sum(clean_checkpoint_counts.values()),
             "duplicate_checkpoint_ids": len(clean_duplicated_ids),
             "quarantined_checkpoint_metaorders": len(clean_quarantined_metaorders),

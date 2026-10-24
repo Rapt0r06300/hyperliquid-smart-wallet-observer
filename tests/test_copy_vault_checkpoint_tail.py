@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import hl_observer.collection.copy_vault_checkpoint_tail as checkpoint_module
 from hl_observer.backtesting.copy_vault_executable import (
     cluster_metaorders,
     load_observed_books,
@@ -343,3 +344,56 @@ def test_checkpoints_simultanes_du_meme_coin_partagent_une_observation_l2(
     assert len(rows) == 2
     assert len({row["checkpoint_id"] for row in rows}) == 2
     assert len({row["received_at_ms"] for row in rows}) == 1
+
+
+def test_file_replacement_is_recovered_but_invalidates_clean_epoch(tmp_path: Path) -> None:
+    now = [6_000_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    input_path = tmp_path / INPUT_RELPATH
+    _append(input_path, _fill(now[0], event="before-rotation"))
+    assert engine.poll_once()["captured"] == 1
+
+    now[0] += 1_000
+    input_path.unlink()
+    _append(input_path, _fill(now[0], event="replacement-with-a-longer-id"))
+    result = engine.poll_once()
+
+    assert result["lines"] == 1
+    assert result["captured"] == 1
+    assert result["counters"]["input_rotations"] == 1
+    assert result["replay_evidence_complete"] is False
+    _, audit = load_observed_books(tmp_path, coins={"BTC"})
+    assert audit["clean_epoch_receipt"]["receipt_valid"] is False
+    assert audit["clean_epoch_receipt"]["collector_gap_count"] == 1
+
+
+def test_pending_overflow_retains_existing_work_and_fails_closed(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    now = [7_000_000]
+    monkeypatch.setattr(checkpoint_module, "MAX_PENDING", 2)
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    existing = {
+        "coin": "ETH", "metaorder_id": "existing", "stage": "ENTRY",
+        "checkpoint_id": "existing:ENTRY", "target_wall_ms": now[0] + 1_000,
+        "attempts": 0,
+    }
+    engine.state["pending"] = [existing]
+
+    engine._schedule_fill(_fill(now[0], event="overflow"), now_ms=now[0])
+
+    assert engine.state["pending"] == [existing]
+    assert engine.state["counters"]["pending_overflow_rejected"] == 2
+    result = engine.poll_once()
+    assert result["replay_evidence_complete"] is False
+    _, audit = load_observed_books(tmp_path, coins={"BTC", "ETH"})
+    assert audit["clean_epoch_receipt"]["receipt_valid"] is False
+    assert audit["clean_epoch_receipt"]["collector_gap_count"] == 2

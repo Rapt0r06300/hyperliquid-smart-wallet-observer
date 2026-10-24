@@ -76,7 +76,7 @@ _WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS 
 WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
-                 "drops": 0, "dernier_exchange_ts": None}
+                 "drops": 0, "tape_drops": 0, "dernier_exchange_ts": None}
 _CURRENT_ROTATION_VAULTS: tuple[str, ...] = ()
 _METAORDER_RUN_LOCK = threading.Lock()
 
@@ -892,7 +892,9 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float)
         try:
             _TAPE_FILLS.put_nowait((persisted_fill, t_ws_mono * 1000))
         except asyncio.QueueFull:
-            pass
+            _HEARTBEAT_WS["tape_drops"] = int(
+                _HEARTBEAT_WS.get("tape_drops") or 0
+            ) + 1
     for nom, coh in CO.COHORTES.items():
         r = CO.traiter_fill(coh, ETATS[nom], fill, root, token=RUN_TOKEN, t_ws_mono=t_ws_mono,
                             lecteur_l2=_lecteur_l2_marquage)               # admission = book WS prewarmé si frais, sinon REST
@@ -1118,7 +1120,14 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
             souscription_ack=bool(_HEARTBEAT_WS["acks"] or messages),
             note="%d WS messages, %d fills" % (messages, int(_HEARTBEAT_WS["fills"])),
             metriques={
-                "gaps_critiques": int(_HEARTBEAT_WS["drops"]),
+                "gaps_critiques": (
+                    int(_HEARTBEAT_WS["drops"])
+                    + int(_HEARTBEAT_WS.get("tape_drops") or 0)
+                ),
+                "source_queue_drops": int(_HEARTBEAT_WS["drops"]),
+                "l2_tape_queue_drops": int(
+                    _HEARTBEAT_WS.get("tape_drops") or 0
+                ),
                 "reconnects": int(_HEARTBEAT_WS["reconnects"]),
                 "stale": False,
             },
@@ -1916,7 +1925,8 @@ async def _boucle(root: Path) -> None:
     _TAPE_FILLS = asyncio.Queue(maxsize=5000)                     # fills → tape L2 (réception MONOTONE en process)
     _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
     _HEARTBEAT_WS.update({"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
-                          "drops": 0, "dernier_exchange_ts": None})
+                          "drops": 0, "tape_drops": 0,
+                          "dernier_exchange_ts": None})
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)
     import secrets

@@ -122,7 +122,19 @@ CLES_METRIQUES = (
     "reconnects",           # reconnexions WS cumulées (quota/limite probable)
     "stale",                # dernière donnée trop vieille malgré un process vivant
     "hors_ordre",           # événements reçus hors ordre (horodatage régressif)
+    "source_queue_drops",   # userFills perdus avant persistence/reconciliation
+    "l2_tape_queue_drops",  # fills persistés mais non remis à la tape L2 dérivée
+    "checkpoint_expirations",
+    "checkpoint_queue_rejections",
+    "input_rotations",
 )
+
+_CLES_METRIQUES_ENTIERES = frozenset({
+    "gaps_critiques", "reconnects", "hors_ordre",
+    "source_queue_drops", "l2_tape_queue_drops",
+    "checkpoint_expirations", "checkpoint_queue_rejections",
+    "input_rotations",
+})
 
 
 def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
@@ -133,7 +145,7 @@ def _metriques_propres(m: Mapping[str, Any] | None) -> dict:
     for cle in CLES_METRIQUES:
         if cle in m:
             v = m[cle]
-            out[cle] = int(v) if cle in ("gaps_critiques", "reconnects", "hors_ordre") else bool(v)
+            out[cle] = int(v) if cle in _CLES_METRIQUES_ENTIERES else bool(v)
     return out
 
 

@@ -30,6 +30,18 @@ def _git(repo: Path, *args: str) -> str:
     return _run("git", *args, cwd=repo).stdout.strip()
 
 
+def _helper_allowing_test_remote(tmp_path: Path, remote_url: str) -> Path:
+    """Keep the production allowlist strict while exercising a local bare remote."""
+
+    helper = tmp_path / "push_github_safe_test.ps1"
+    escaped = str(remote_url).replace('"', '`"')
+    source = HELPER.read_text(encoding="utf-8").replace(
+        "$allowed = @(", f'$allowed = @(\n        "{escaped}",', 1,
+    )
+    helper.write_text(source, encoding="utf-8")
+    return helper
+
+
 def test_push_launchers_share_one_safe_implementation() -> None:
     main_text = MAIN_LAUNCHER.read_text(encoding="utf-8")
     helper_text = HELPER.read_text(encoding="utf-8")
@@ -119,6 +131,9 @@ def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> N
     exclude_file.write_text("*.bundle\n", encoding="utf-8")
     shutil.copy2(stale_bundle, local / stale_bundle.name)
     shutil.copy2(divergent_bundle, local / divergent_bundle.name)
+    test_helper = _helper_allowing_test_remote(
+        tmp_path, _git(local, "remote", "get-url", "origin")
+    )
 
     result = _run(
         "powershell.exe",
@@ -127,7 +142,7 @@ def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> N
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        str(HELPER),
+        str(test_helper),
         "-ProjectRoot",
         str(local),
         cwd=local,
@@ -150,7 +165,7 @@ def test_safe_push_reconciles_remote_and_skips_stale_bundle(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(os.name != "nt", reason="le helper GitHub s'execute via Windows PowerShell")
-def test_safe_push_tolerates_runtime_dirt_but_refuses_source_dirt(tmp_path: Path) -> None:
+def test_safe_push_tolerates_runtime_dirt_and_reports_source_dirt_in_dry_run(tmp_path: Path) -> None:
     git_exe = shutil.which("git")
     if git_exe is None or shutil.which("powershell.exe") is None:
         raise AssertionError("Git et Windows PowerShell sont requis")
@@ -171,12 +186,15 @@ def test_safe_push_tolerates_runtime_dirt_but_refuses_source_dirt(tmp_path: Path
     _git(seed, "remote", "add", "origin", str(remote))
     _git(seed, "push", "-u", "origin", "main")
     _run("git", "clone", "-b", "main", str(remote), str(local), cwd=tmp_path)
+    test_helper = _helper_allowing_test_remote(
+        tmp_path, _git(local, "remote", "get-url", "origin")
+    )
 
     (local / "runtime" / "state.json").write_text('{"live":true}\n', encoding="utf-8")
     runtime_result = subprocess.run(
         (
             "powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(HELPER), "-ProjectRoot", str(local),
+            "-File", str(test_helper), "-ProjectRoot", str(local),
             "-GitExecutable", git_exe, "-DryRun",
         ),
         cwd=local,
@@ -192,7 +210,7 @@ def test_safe_push_tolerates_runtime_dirt_but_refuses_source_dirt(tmp_path: Path
     source_result = subprocess.run(
         (
             "powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(HELPER), "-ProjectRoot", str(local),
+            "-File", str(test_helper), "-ProjectRoot", str(local),
             "-GitExecutable", git_exe, "-DryRun",
         ),
         cwd=local,
@@ -201,5 +219,5 @@ def test_safe_push_tolerates_runtime_dirt_but_refuses_source_dirt(tmp_path: Path
         encoding="utf-8",
         errors="replace",
     )
-    assert source_result.returncode != 0
-    assert "n'est pas committe" in source_result.stdout
+    assert source_result.returncode == 0, source_result.stdout + source_result.stderr
+    assert "Code local non committe : un vrai commit serait cree" in source_result.stdout

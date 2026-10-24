@@ -25,6 +25,7 @@ def run(root: Path, *, interval_s: float = 0.5) -> int:
     while True:
         result = engine.poll_once()
         counters = result["counters"]
+        gap_count = int(result.get("collector_gap_count") or 0)
         battre(
             root,
             "copy-vault-checkpoints",
@@ -41,6 +42,15 @@ def run(root: Path, *, interval_s: float = 0.5) -> int:
             ),
             pid=wrapper_pid,
             protocol=COMPANION_PROTOCOL,
+            metriques={
+                "gaps_critiques": gap_count,
+                "checkpoint_expirations": int(counters.get("checkpoints_expired") or 0),
+                "checkpoint_queue_rejections": int(
+                    counters.get("pending_overflow_rejected") or 0
+                ),
+                "input_rotations": int(counters.get("input_rotations") or 0),
+                "stale": False,
+            },
         )
         time.sleep(max(0.1, float(interval_s)))
 

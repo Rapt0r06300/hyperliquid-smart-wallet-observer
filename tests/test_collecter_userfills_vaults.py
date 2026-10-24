@@ -167,6 +167,26 @@ def test_fill_persiste_avec_horodatage_de_reception_causale(tmp_path, monkeypatc
     assert "received_at_ms" not in fill
 
 
+def test_file_l2_saturee_est_signalee_sans_perdre_le_fill_source(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    queue = asyncio.Queue(maxsize=1)
+    queue.put_nowait(({"existing": True}, 0.0))
+    monkeypatch.setattr(C, "_TAPE_FILLS", queue)
+    monkeypatch.setattr(C.CO, "COHORTES", {})
+    C._HEARTBEAT_WS.update({"tape_drops": 0})
+    fill = {
+        "vault": "0xV", "coin": "SOL", "ts_ms": 1000,
+        "received_at_ms": 1010, "source": "LIVE_WS", "isSnapshot": False,
+        "hash": "0xqueue-full",
+    }
+
+    C._traiter_un(tmp_path, fill, set(), 1.0)
+
+    saved = json.loads((tmp_path / C.FILLS_LIVE).read_text(encoding="utf-8"))
+    assert saved["hash"] == "0xqueue-full"
+    assert C._HEARTBEAT_WS["tape_drops"] == 1
+
+
 def test_tape_copy_vault_persiste_un_l2_causal_et_echantillonne(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
     resume = {

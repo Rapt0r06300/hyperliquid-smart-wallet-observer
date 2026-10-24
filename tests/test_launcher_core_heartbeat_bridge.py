@@ -7,6 +7,7 @@ import pytest
 
 from hl_observer.ops import preuve_de_vie as PV
 from tools import collecter_allmids as ALLMIDS
+from tools import collecter_copy_vault_checkpoints as CHECKPOINTS
 from tools import collecter_userfills_vaults as USERFILLS
 from tools import heartbeat_collecteur as HB
 
@@ -54,6 +55,7 @@ def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monk
         "acks": 1,
         "reconnects": 0,
         "drops": 0,
+        "tape_drops": 0,
         "dernier_exchange_ts": 123456,
     })
     monkeypatch.setattr(USERFILLS.os, "getppid", lambda: 5252)
@@ -71,6 +73,64 @@ def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monk
     assert heartbeat["n_ecrites_cumul"] == 2
     assert heartbeat["dernier_exchange_ts"] == 123456
     assert heartbeat["souscription_ack"] is True
+
+
+def test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2(tmp_path: Path, monkeypatch):
+    USERFILLS._HEARTBEAT_WS.update({
+        "messages": 2, "fills": 3, "acks": 1, "reconnects": 0,
+        "drops": 2, "tape_drops": 3, "dernier_exchange_ts": 123456,
+    })
+    monkeypatch.setattr(USERFILLS.os, "getppid", lambda: 5252)
+    monkeypatch.setattr(USERFILLS.VI, "heartbeat", lambda *_args, **_kwargs: None)
+
+    async def stop_after_write(_seconds):
+        raise RuntimeError("test-stop")
+
+    monkeypatch.setattr(USERFILLS.asyncio, "sleep", stop_after_write)
+    with pytest.raises(RuntimeError, match="test-stop"):
+        asyncio.run(USERFILLS._heartbeat(tmp_path, {}))
+
+    heartbeat = HB.lire(tmp_path, "userfills-live")
+    assert heartbeat["metriques"]["gaps_critiques"] == 5
+    assert heartbeat["metriques"]["source_queue_drops"] == 2
+    assert heartbeat["metriques"]["l2_tape_queue_drops"] == 3
+
+
+def test_checkpoint_companion_publie_ses_pertes_dans_le_heartbeat(
+    tmp_path: Path, monkeypatch,
+):
+    class FakeTail:
+        def __init__(self, _root):
+            self.state = {"updated_at_ms": 42}
+
+        def poll_once(self):
+            return {
+                "captured": 0, "lines": 0, "pending": 1, "expired": 2,
+                "collector_gap_count": 6,
+                "counters": {
+                    "checkpoints_captured": 0, "checkpoints_expired": 2,
+                    "pending_overflow_rejected": 3, "input_rotations": 1,
+                },
+            }
+
+    monkeypatch.setattr(CHECKPOINTS, "CopyVaultCheckpointTail", FakeTail)
+    monkeypatch.setattr(CHECKPOINTS.os, "getppid", lambda: 6262)
+
+    def stop_after_write(_seconds):
+        raise RuntimeError("test-stop")
+
+    monkeypatch.setattr(CHECKPOINTS.time, "sleep", stop_after_write)
+    with pytest.raises(RuntimeError, match="test-stop"):
+        CHECKPOINTS.run(tmp_path)
+
+    heartbeat = HB.lire(tmp_path, "copy-vault-checkpoints")
+    assert heartbeat["metriques"] == {
+        "gaps_critiques": 6,
+        "stale": False,
+        "checkpoint_expirations": 2,
+        "checkpoint_queue_rejections": 3,
+        "input_rotations": 1,
+    }
 
 
 def test_launcher_reconciles_collectors_and_cleans_up_failed_warmup():

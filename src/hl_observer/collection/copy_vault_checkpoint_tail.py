@@ -137,6 +137,7 @@ def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str,
             "checkpoints_expired": 0,
             "fetch_retries": 0,
             "input_rotations": 0,
+            "pending_overflow_rejected": 0,
         },
     }
 
@@ -147,6 +148,12 @@ def _event_identity(fill: Mapping[str, Any]) -> str:
 
 def _trim(values: list[str], limit: int) -> list[str]:
     return values[-max(1, int(limit)) :]
+
+
+def _file_identity(stat: os.stat_result) -> list[int]:
+    """Stable identity for replacement detection; size/mtime change on append."""
+
+    return [int(stat.st_dev), int(stat.st_ino)]
 
 
 def _parse_book(raw: Mapping[str, Any], *, received_at_ms: int) -> dict[str, Any] | None:
@@ -222,6 +229,11 @@ class CopyVaultCheckpointTail:
             )["counters"]
             for name, value in defaults.items():
                 counters.setdefault(name, value)
+            if "input_file_identity" not in loaded:
+                try:
+                    loaded["input_file_identity"] = _file_identity(self.input_path.stat())
+                except OSError:
+                    loaded["input_file_identity"] = None
             return loaded
         try:
             offset = self.input_path.stat().st_size
@@ -234,27 +246,36 @@ class CopyVaultCheckpointTail:
         state = _default_state(
             offset=offset, output_offset=output_offset, now_ms=self.clock_ms()
         )
+        try:
+            state["input_file_identity"] = _file_identity(self.input_path.stat())
+        except OSError:
+            state["input_file_identity"] = None
         _atomic_write(self.state_path, state)
         return state
 
     def _read_appended_lines(self) -> list[dict[str, Any]]:
         try:
-            size = self.input_path.stat().st_size
+            handle = self.input_path.open("rb")
         except OSError:
             return []
-        offset = int(self.state.get("input_offset") or 0)
-        if size < offset:
-            self.state["input_offset"] = size
-            self.state["counters"]["input_rotations"] += 1
-            return []
-        if size == offset:
-            return []
-        try:
-            with self.input_path.open("rb") as handle:
+        with handle:
+            stat = os.fstat(handle.fileno())
+            size = int(stat.st_size)
+            identity = _file_identity(stat)
+            offset = int(self.state.get("input_offset") or 0)
+            prior_identity = self.state.get("input_file_identity")
+            if (prior_identity is not None and prior_identity != identity) or size < offset:
+                offset = 0
+                self.state["input_offset"] = 0
+                self.state["counters"]["input_rotations"] += 1
+            self.state["input_file_identity"] = identity
+            if size == offset:
+                return []
+            try:
                 handle.seek(offset)
                 chunk = handle.read()
-        except OSError:
-            return []
+            except OSError:
+                return []
         complete_end = chunk.rfind(b"\n")
         if complete_end < 0:
             return []
@@ -275,6 +296,20 @@ class CopyVaultCheckpointTail:
             else:
                 self.state["counters"]["invalid_rejected"] += 1
         return rows
+
+    def _enqueue_checkpoints(self, additions: list[dict[str, Any]]) -> bool:
+        """Admit one logical checkpoint batch or reject it visibly as a unit."""
+
+        pending = list(self.state.get("pending") or [])
+        if len(pending) + len(additions) > MAX_PENDING:
+            counters = self.state["counters"]
+            counters["pending_overflow_rejected"] = int(
+                counters.get("pending_overflow_rejected") or 0
+            ) + len(additions)
+            return False
+        pending.extend(additions)
+        self.state["pending"] = pending
+        return True
 
     def _schedule_fill(self, fill: Mapping[str, Any], *, now_ms: int) -> None:
         try:
@@ -351,7 +386,6 @@ class CopyVaultCheckpointTail:
                     first_event_id=event_id,
                 )
                 previous["continuation_metaorder_id"] = continuation_id
-                pending = list(self.state.get("pending") or [])
                 base = {
                     "coin": coin,
                     "vault": vault,
@@ -362,7 +396,7 @@ class CopyVaultCheckpointTail:
                     "metaorder_id": continuation_id,
                     "attempts": 0,
                 }
-                pending.extend([
+                self._enqueue_checkpoints([
                     {
                         **base,
                         "stage": "REFERENCE",
@@ -376,7 +410,6 @@ class CopyVaultCheckpointTail:
                         "target_wall_ms": received_at_ms + COPY_DELAY_MS,
                     },
                 ])
-                self.state["pending"] = pending[-MAX_PENDING:]
                 counters = self.state["counters"]
                 counters["continuation_signals_started"] = int(
                     counters.get("continuation_signals_started") or 0
@@ -411,8 +444,7 @@ class CopyVaultCheckpointTail:
             "metaorder_id": identifier,
             "attempts": 0,
         }
-        pending = list(self.state.get("pending") or [])
-        pending.extend([
+        self._enqueue_checkpoints([
             {
                 **base,
                 "stage": "REFERENCE",
@@ -426,7 +458,6 @@ class CopyVaultCheckpointTail:
                 "target_wall_ms": received_at_ms + COPY_DELAY_MS,
             },
         ])
-        self.state["pending"] = pending[-MAX_PENDING:]
 
     @staticmethod
     def _exit_checkpoints(entry: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -534,7 +565,8 @@ class CopyVaultCheckpointTail:
                     **checkpoint,
                     "captured_wall_ms": received_at_ms,
                 }))
-        self.state["pending"] = (remaining + additions)[-MAX_PENDING:]
+        self.state["pending"] = remaining
+        self._enqueue_checkpoints(additions)
         self.state["captured_checkpoint_ids"] = _trim(captured_ids, MAX_CHECKPOINT_IDS)
         self.state["counters"]["checkpoints_captured"] += captured_now
         self.state["counters"]["checkpoints_expired"] += expired_now
@@ -548,13 +580,24 @@ class CopyVaultCheckpointTail:
         captured, expired = self._capture_due(now_ms=self.clock_ms())
         self.state["updated_at_ms"] = self.clock_ms()
         _atomic_write(self.state_path, self.state)
+        counters = dict(self.state.get("counters") or {})
+        collector_gap_count = sum(
+            int(counters.get(name) or 0)
+            for name in (
+                "input_rotations",
+                "checkpoints_expired",
+                "pending_overflow_rejected",
+            )
+        )
         return {
             "protocol": COMPANION_PROTOCOL,
             "lines": len(rows),
             "captured": captured,
             "expired": expired,
             "pending": len(self.state.get("pending") or []),
-            "counters": dict(self.state.get("counters") or {}),
+            "counters": counters,
+            "collector_gap_count": collector_gap_count,
+            "replay_evidence_complete": collector_gap_count == 0,
             "paper_read_only": True,
             "real_execution": False,
         }
