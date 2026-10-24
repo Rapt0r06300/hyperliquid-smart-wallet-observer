@@ -10,6 +10,7 @@ set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
+set "ALINA_QUANT_CPU_PERCENT=65"
 
 echo.
 echo ================================================================
@@ -19,27 +20,39 @@ echo   PAPER / READ-ONLY - aucune collecte ou transaction
 echo ================================================================
 echo.
 
-where py >nul 2>nul
-if errorlevel 1 (
-  echo [ERREUR] Python Launcher Windows introuvable.
+set "ALINA_LAB_PYTHON="
+set "ALINA_LAB_PY_ARGS="
+if exist "%~dp0tools\python\python.exe" set "ALINA_LAB_PYTHON=%~dp0tools\python\python.exe"
+if not defined ALINA_LAB_PYTHON (
+  where py >nul 2>nul
+  if not errorlevel 1 (
+    set "ALINA_LAB_PYTHON=py"
+    set "ALINA_LAB_PY_ARGS=-3"
+  )
+)
+if not defined ALINA_LAB_PYTHON (
+  echo [ERREUR] Aucun Python compatible n'a ete trouve.
   echo Aucun runtime ne sera telecharge ou installe automatiquement.
-  echo Installez/configurez Python et pytest, puis relancez ce fichier.
+  echo Preparez tools\python ou installez/configurez Python 3, puis relancez ce fichier.
   if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
   endlocal & exit /b 30
 )
 
-py -3 -c "import pytest" >nul 2>nul
+"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
 if errorlevel 1 (
-  echo [ERREUR] pytest absent du Python 3 local. Aucun paquet ne sera installe.
-  echo Le rapport ne peut pas etre lance tant que pytest n'est pas disponible.
+  echo [ERREUR] Runtime de test incomplet : pytest et typer sont obligatoires.
+  echo Installez le projet avec : py -3 -m pip install -e ".[dev]"
   if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
   endlocal & exit /b 31
 )
 
+"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
+if errorlevel 1 echo [INFO] pytest-xdist absent : repli serie sur un coeur.
+
 if /I "%~1"=="preflight" (
-  py -3 "%~dp0tools\alina_quant_lab_console.py" --preflight-only
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --preflight-only
 ) else (
-  py -3 "%~dp0tools\alina_quant_lab_console.py"
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py"
 )
 set "RC=%ERRORLEVEL%"
 echo.

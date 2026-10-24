@@ -4,6 +4,7 @@ import copy
 import json
 from pathlib import Path
 
+import tools.alina_quant_lab_console as lab
 from hl_observer.backtesting.copy_vault_v21_frozen import _verified_freeze
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.alina_quant_lab_console import (
@@ -79,3 +80,66 @@ def test_lab_covers_copy_vault_scope_paper_and_readiness_boundaries() -> None:
     } <= selected
     assert all(paths for _name, paths in groups)
     assert sum(len(paths) for _name, paths in groups) == len(selected)
+
+
+def test_lab_uses_at_most_65_percent_of_logical_cpus(monkeypatch) -> None:
+    monkeypatch.setenv("ALINA_QUANT_CPU_PERCENT", "65")
+    monkeypatch.setattr(lab.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(
+        lab.importlib.util,
+        "find_spec",
+        lambda name: object() if name == "xdist" else None,
+    )
+
+    assert lab._pytest_parallel_args(20) == ["-n", "10", "--dist", "loadfile"]
+
+
+def test_lab_falls_back_to_serial_when_xdist_is_missing(monkeypatch) -> None:
+    monkeypatch.setattr(lab.importlib.util, "find_spec", lambda _name: None)
+
+    assert lab._pytest_parallel_args(20) == []
+
+
+def test_copy_vault_lab_launcher_checks_complete_test_runtime() -> None:
+    launcher = (ROOT / "LANCER_LAB_QUANT_COPY_VAULT.cmd").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tools\\python\\python.exe" in launcher
+    assert "import pytest, typer" in launcher
+    assert 'set "ALINA_QUANT_CPU_PERCENT=65"' in launcher
+    assert '"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c' in launcher
+
+
+def test_lab_writes_complete_reports_when_a_group_is_interrupted(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("ALINA_QUANT_NO_OPEN", "1")
+    monkeypatch.setattr(lab, "ROOT", tmp_path)
+    monkeypatch.setattr(lab, "_restore_processes", lambda: [])
+    monkeypatch.setattr(lab, "_test_groups", lambda: [("interrupted", ["test_x.py"])])
+    monkeypatch.setattr(
+        lab,
+        "_run_group",
+        lambda *_args, **_kwargs: {
+            "name": "interrupted",
+            "status": "INTERRUPTED",
+            "return_code": 130,
+            "counts": lab._pytest_counts(""),
+            "seconds": 1.0,
+            "cpu_seconds": 0.1,
+            "peak_working_set_bytes": 1,
+            "log": "interrupted.log",
+        },
+    )
+
+    assert lab.run_lab() == 130
+    reports = list((tmp_path / "runtime" / "reports" / "copy_vault_quant_lab").glob("*"))
+    assert len(reports) == 1
+    result = json.loads((reports[0] / "resultat.json").read_text(encoding="utf-8"))
+    assert result["status"] == "INTERRUPTED"
+    assert "**INTERRUPTED**" in (reports[0] / "RAPPORT.md").read_text(encoding="utf-8")
+    dashboard = (reports[0] / "RAPPORT.html").read_text(encoding="utf-8")
+    assert "Laboratoire CopyVault" in dashboard
+    assert "INTERRUPTED" in dashboard
+    assert "Meilleure stratégie prouvée" in dashboard
