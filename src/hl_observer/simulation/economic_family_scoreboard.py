@@ -14,11 +14,16 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
+from hl_observer.strategies.active_scope import (
+    active_strategy_families,
+    authoritative_strategy_scope,
+    strategy_can_materialize,
+)
 
 from .economic_objective import STARTING_CAPITAL_USD, evaluate_objective
 
 SCHEMA_VERSION = "hypersmart.economic_family_scoreboards.v2"
-ACTIVE_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+ACTIVE_FAMILIES = tuple(sorted(active_strategy_families()))
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -162,6 +167,8 @@ def _campaign(root: Path, family: str) -> dict[str, Any] | None:
 
 def promotion_verdict(row: Mapping[str, Any]) -> tuple[str, list[str]]:
     """Apply the deny-by-default promotion contract to one family row."""
+    if not strategy_can_materialize(str(row.get("family") or "")):
+        return "MORE_DATA", ["DISABLED_BY_SCOPE"]
     if str(row.get("source_verdict") or "").upper() == "KILL":
         return "KILL", ["SOURCE_EVIDENCE_KILL"]
 
@@ -282,7 +289,11 @@ def build_scoreboards(root: str | Path = ".") -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "families": {row["family"]: row for row in rows},
         "active_families": list(ACTIVE_FAMILIES),
-        "disabled_families": ["cross_venue_dislocation_v1", "carry"],
+        "disabled_families": sorted(
+            entry.family
+            for entry in authoritative_strategy_scope()
+            if entry.family not in ACTIVE_FAMILIES
+        ),
         "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,

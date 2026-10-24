@@ -35,7 +35,9 @@ Alina SmartFlow est officiellement **paper/read-only**. Les invariants suivants 
 
 ## 3. Scope actif
 
-Les familles économiques actives sont Copy-Vault, Lead-Lag et Cross-Venue/Dislocation. **Carry est historique et non actif.** Une ancienne documentation ne peut pas le réactiver implicitement.
+La seule famille économique active est **Copy-Vault**. Lead-Lag, Cross-Venue/Dislocation, arbitrage, Carry/Funding Carry et les familles shadow/research-only sont **DISABLED_BY_SCOPE** pour la simulation, le labo, les replays/backtests, OOS/forward, preuves PnL, certifications et scoreboards. Leur code et leurs preuves historiques restent conservés mais ne peuvent pas les réactiver implicitement. Seule une modification revue de l'autorité centrale du scope peut changer ce contrat; aucune variable d'environnement ne peut l'élargir.
+
+Le marqueur de compatibilité documentaire « Carry est historique et non actif » demeure strictement vrai.
 
 La roadmap technique cumulative V5/776+ est distincte de la mission économique : son Done dépend de l'implémentation, du câblage, des tests et des preuves techniques de ses exigences. Atteindre +4 USD, 3×4 USD ou un PnL positif n'est pas un critère de clôture de cette roadmap technique.
 

@@ -13,6 +13,7 @@ from fastapi import APIRouter
 
 from hl_observer.config.settings import Settings
 from hl_observer.strategies.external_github_bridge import build_external_github_bridge_payload
+from hl_observer.strategies.active_scope import active_strategy_families
 from hl_observer.ui.economic_writer import EconomicWriter, latest_local_market_marks
 from hl_observer.ui.fusion_status_provider import build_fusion_status_payload
 from hl_observer.ui.state import UiState
@@ -115,6 +116,7 @@ def create_read_only_status_router(
                 "unrealized_pnl_usdc": round(float(marked.get("unrealized_pnl_usdc") or 0.0), 6),
                 "source": "SIMULATION_STATUS_READ_ONLY_PROJECTION",
             }
+            active_families = sorted(active_strategy_families())
             payload = {
                 "running": True,
                 "server_running": True,
@@ -123,6 +125,7 @@ def create_read_only_status_router(
                 "economic_writer_last_tick_ms": int(economic_writer.last_tick_ms if economic_writer else 0),
                 "economic_writer_error": economic_writer.last_error if economic_writer else None,
                 "read_only": True,
+                "active_strategy_families": active_families,
                 "status_projection_pure": True,
                 "network_reads_from_status": False,
                 "real_execution": False,
@@ -175,6 +178,7 @@ def create_read_only_status_router(
                     "market_marks_missing": int(marked.get("marks_missing") or 0),
                 },
                 "bot_simulation": {
+                    "active_strategy_families": active_families,
                     "open_positions": marked["positions"],
                     "current_equity_usdt": equity,
                     "estimated_net_pnl_usdc": net_pnl,

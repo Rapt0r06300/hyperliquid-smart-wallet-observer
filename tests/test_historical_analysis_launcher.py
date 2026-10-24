@@ -15,45 +15,29 @@ from hl_observer.ops.historical_analysis_suite import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_standard_plan_covers_replay_backtest_ab_and_diagnostics(tmp_path):
+def test_standard_plan_is_copy_vault_only_plus_neutral_integrity(tmp_path):
     plan = build_stage_plan(tmp_path, tmp_path / "out")
     keys = [stage.key for stage in plan]
     assert keys == [
         "merge_replay",
-        "pnl_improvement_lab",
         "replay_data_quality",
-        # RECABLAGE : la chaine market_truth (canonicalisation -> replay executable
-        # -> ledger reconcilie) etait testee mais sans aucun appelant. Elle est
-        # desormais une etape a part entiere du lanceur d'analyse officiel.
         "market_truth_replay",
-        "lead_lag_shadow",
-        "ab_exact",
-        "realtime_replay",
-        "closed_ledger_replay",
-        "strategy_tournament",
-        "pnl_audit",
-        "loss_attribution",
-        "latency_report",
-        "freshness_diagnostics",
+        "copy_vault_vnext",
     ]
     command_text = "\n".join(" ".join(stage.command) for stage in plan)
-    ab_command = next(stage.command for stage in plan if stage.key == "ab_exact")
     assert "--network-read" not in command_text
     assert "/exchange" not in command_text
     assert "scenario_search" not in keys
-    assert "--notional-usd" in ab_command
-    assert ab_command[ab_command.index("--notional-usd") + 1] == "50"
-    assert "--cache-path" in ab_command
+    assert all(stage.family in {None, "copy_vault"} for stage in plan)
+    assert all(stage.stage_kind == "integrity" for stage in plan if stage.family is None)
+    assert next(stage for stage in plan if stage.key == "copy_vault_vnext").family == "copy_vault"
 
 
-def test_deep_plan_is_explicit_and_keeps_standard_stages(tmp_path):
+def test_deep_plan_cannot_reactivate_paused_or_unattributed_economic_stages(tmp_path):
     plan = build_stage_plan(tmp_path, tmp_path / "out", deep=True)
     keys = [stage.key for stage in plan]
-    assert "walk_forward" in keys
-    assert "anti_overfit" in keys
-    assert keys[-1] == "scenario_search"
-    assert plan[-1].optional is True
-    assert plan[-1].timeout_seconds >= 7_200
+    assert keys == ["merge_replay", "replay_data_quality", "market_truth_replay", "copy_vault_vnext"]
+    assert all(stage.family in {None, "copy_vault"} for stage in plan)
 
 
 def test_stage_with_missing_local_data_is_skipped_without_subprocess(tmp_path):
@@ -104,7 +88,7 @@ def test_suite_always_writes_consolidated_json_and_markdown(tmp_path):
 
     code, report_path, results = run_suite(tmp_path, stage_runner=fake_runner)
     assert code == 0
-    assert len(results) == 13
+    assert len(results) == 4
     assert report_path.exists()
     latest = tmp_path / "runtime" / "reports" / "backtest_replay" / "RAPPORT_LATEST.md"
     latest_json = tmp_path / "runtime" / "reports" / "backtest_replay" / "report_latest.json"
@@ -113,7 +97,9 @@ def test_suite_always_writes_consolidated_json_and_markdown(tmp_path):
     assert payload["local_data_only"] is True
     assert payload["network_used"] is False
     assert payload["real_execution"] is False
-    assert payload["summary"]["PASSED"] == 13
+    assert payload["summary"]["PASSED"] == 4
+    assert payload["scope_mode"] == "COPY_VAULT_ONLY"
+    assert payload["active_strategy_families"] == ["copy_vault"]
 
 
 def test_consolidated_report_surfaces_pnl_findings(tmp_path):

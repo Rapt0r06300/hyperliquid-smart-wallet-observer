@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
-from hl_observer.mega_cablage.lead_lag_stage import score_lead_lag
-from hl_observer.strategies.lead_lag_paper import signaux_depuis_events, rejouer_lead_lag
 from hl_observer.ops.lab_inventaire import inventorier, bundles_depuis_fichier, LabFormatBloque
 from hl_observer.ops.lab_flux import fusionner_causalement, charger_borne
 
@@ -40,6 +38,7 @@ from hl_observer.ops.lab_eta import MoteurETA, format_hms
 from hl_observer.ops.lab_dashboard import rendre_tableau, Journal
 from hl_observer.ops.lab_rapport import ecrire_rapport
 from hl_observer.ops.rafraichisseur import RafraichisseurPeriodique
+from hl_observer.strategies.active_scope import active_strategy_families, strategy_scope_payload
 
 DOSSIER_RAPPORTS = "runtime/reports/backtest_replay"
 
@@ -293,19 +292,25 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
         _rafraichir(horodatage or "T")
 
         # 3) AUDIT CABLAGE (croise import reel + disponibilite donnees)
-        paires_ll = _paires_lead_lag(events)
-        ll = score_lead_lag(paires_ll, min_echantillons=20)
-        a_hedge = any(isinstance(e.get("cross_venue"), dict) for e in events)
-        audit = auditer(a_des_evenements=valides > 0, a_des_carnets_hedge=a_hedge,
-                        a_lead_lag=(ll.get("score") != "UNMEASURABLE"))
-        audit["lead_lag"] = ll
-        # item 13 : Lead-Lag comme VRAIE stratégie paper (signal causal -> entrée -> sortie gelée -> fill ->
-        # coûts -> ledger -> PnL IS/OOS/FORWARD). Consommée ici (chemin ANALYSER), résultat au rapport.
-        sigs_ll = signaux_depuis_events(events)
-        ll_paper = (rejouer_lead_lag(sigs_ll, config={"fee_bps": 2.5}, min_episodes=min_episodes)
-                    if sigs_ll else {"verdict": "UNMEASURABLE", "segments": {}, "placebo_net": None})
-        audit["lead_lag_paper"] = {"verdict": ll_paper["verdict"], "segments": ll_paper.get("segments", {}),
-                                   "placebo_net": ll_paper.get("placebo_net")}
+        # The laboratory keeps neutral integrity/risk plumbing and CopyVault only.
+        # Removing cross-venue annotations before MegaCablage is the execution
+        # boundary: stored evidence remains untouched, but no paused family can
+        # generate a fill or PnL in this run.
+        events_copy_vault = [
+            {key: value for key, value in event.items() if key != "cross_venue"}
+            for event in events
+        ]
+        audit = auditer(a_des_evenements=valides > 0)
+        audit["bricks"] = [
+            row for row in audit["bricks"]
+            if row.get("brique") not in {"Cross-Venue", "Lead-Lag"}
+        ]
+        audit["resume"] = {
+            status: sum(1 for row in audit["bricks"] if row.get("statut") == status)
+            for status in audit["resume"]
+        }
+        audit["scope_mode"] = "COPY_VAULT_ONLY"
+        audit["strategy_scope"] = strategy_scope_payload()
         etat.update({"en_cours": "audit cablage", "prochaine": "recherche",
                      "derniere": "audit (%d bricks utilisees)" % audit["resume"].get("CABLE ET UTILISE", 0)})
         _fin_etape()
@@ -333,7 +338,7 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
             _rafraichir(horodatage or "T")
 
         with _refr_ctx():
-            rech = R.rechercher(events, espace=espace, leader_equity_defaut=leader_equity_defaut, budget=budget,
+            rech = R.rechercher(events_copy_vault, espace=espace, leader_equity_defaut=leader_equity_defaut, budget=budget,
                                 checkpoint_path=checkpoint_path, min_episodes=min_episodes, source=source,
                                 on_eval=_on_eval)
         fills = sum(c.get("segments", {}).get("IS", {}).get("fills", 0) or 0 for c in rech["candidats"])
@@ -353,8 +358,9 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
         return {"rapport": chemins, "verdict": chemins["verdict"], "inventaire": inv, "audit": audit,
                 "recherche": rech, "events": len(events), "events_valides": valides, "periode": periode,
                 "duree_s": round(temps() - t0, 3), "tableau": etat.get("_tableau", ""),
-                "journal": str(journal.chemin), "lead_lag": ll,
-                "lead_lag_paper": audit.get("lead_lag_paper")}
+                "journal": str(journal.chemin), "scope_mode": "COPY_VAULT_ONLY",
+                "active_strategy_families": sorted(active_strategy_families()),
+                "strategy_scope": strategy_scope_payload()}
     finally:
         try:
             _verrou_analyse.unlink()                 # AUD-079: verrou TOUJOURS libere (meme sur exception)

@@ -108,6 +108,8 @@ def test_status_is_fast_and_readonly():
     assert d["read_only"] is True
     assert "equity_usdt" in d and "net_pnl_usdt" in d
     assert d["open_positions"] >= 0
+    assert d["active_strategy_families"] == ["copy_vault"]
+    assert d["bot_simulation"]["active_strategy_families"] == ["copy_vault"]
     assert elapsed < 2.0, f"status endpoint too slow: {elapsed:.2f}s (must not hit heavy path)"
 
 
@@ -520,7 +522,9 @@ def test_fusion_status_route_runs_only_from_explicit_engine_input(tmp_path, monk
     assert payload["real_execution"] is False
     assert payload["external_action"] is False
     assert payload["conflict"]["decision"] == "FOLLOW"
-    assert payload["orders_count"] >= 1
+    assert payload["orders_count"] == 0
+    assert payload["runtime"]["strategy_scope"]["active_families"] == ["copy_vault"]
+    assert "STRATEGY_SCOPE_BLOCKED_CROSS_VENUE_DISLOCATION" in payload["no_trade_reasons"]
     assert payload["paper_engine_accepted"] == 1
     assert payload["input_counts"]["leader_votes"] == 3
     assert payload["input_counts"]["distilled_signal_candidates"] == 2
@@ -536,7 +540,7 @@ def test_fusion_status_route_runs_only_from_explicit_engine_input(tmp_path, monk
     assert log_path.exists()
     logged = json.loads(log_path.read_text(encoding="utf-8-sig"))
     assert logged["status"] == "OK_LIVE_FUSION_RUNTIME"
-    assert logged["orders_count"] >= 1
+    assert logged["orders_count"] == 0
     assert logged["real_execution"] is False
 
 
@@ -663,16 +667,16 @@ def test_status_rejects_external_arbitrage_without_measured_execution_costs(tmp_
     assert payload["fusion_runtime"]["status"] == "OK_LIVE_FUSION_RUNTIME"
     assert payload["fusion_runtime"]["paper_engine_accepted"] == 0
     assert payload["fusion_persistent_adapter"]["applied_count"] == 0
-    assert "DIRECT_EXECUTION_COST_UNMEASURABLE" in payload["fusion_persistent_adapter"]["reasons"]
+    assert payload["fusion_runtime"]["runtime"]["price_discrepancies"] == []
+    assert "STRATEGY_SCOPE_BLOCKED_CROSS_VENUE_DISLOCATION" in payload["fusion_runtime"]["no_trade_reasons"]
+    assert "NO_PAPER_ORDERS" in payload["fusion_persistent_adapter"]["reasons"]
     assert payload["open_positions"] == 0
-    refusal_rows = [
+    paused_family_rows = [
         row
         for row in state.simulation_ledger_events
         if isinstance(row, dict) and row.get("reason") == "DIRECT_EXECUTION_COST_UNMEASURABLE"
     ]
-    assert refusal_rows, "the unmeasurable two-leg execution cost must be auditable"
-    assert all(row.get("paper_action_type") == "NO_TRADE" for row in refusal_rows)
-    assert all(row.get("estimated_net_pnl_usdc") is None for row in refusal_rows)
+    assert paused_family_rows == []
     assert duplicate_payload["fusion_persistent_adapter"]["applied_count"] == 0
     assert len(state.simulation_virtual_positions) == 0
 

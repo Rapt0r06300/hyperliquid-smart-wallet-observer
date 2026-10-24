@@ -32,3 +32,11 @@ def test_le_cmd_lance_la_suite_apres_portable_env_en_paper_strict():
 def test_le_cmd_propage_le_code_de_sortie():
     txt = CMD.read_text(encoding="utf-8", errors="ignore")
     assert "exit /b %RC%" in txt
+
+
+def test_launcher_announces_copy_vault_only_scope():
+    txt = (RACINE / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    assert "COPYVAULT ONLY" in txt.upper()
+    assert "FAMILLES EN PAUSE" in txt.upper()

@@ -20,7 +20,7 @@ from hl_observer.ops.final_economic_certification import (
 from hl_observer.simulation.economic_objective import evaluate_objective
 from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
 
-FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+FAMILIES = ("copy_vault",)
 
 
 def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookahead: bool = False) -> dict:
@@ -249,8 +249,8 @@ def _write_certified_workspace(root: Path) -> None:
 
 
 def test_certification_recalcule_la_gate_et_certifie_une_preuve_complete() -> None:
-    row = _certified_campaign("lead_lag")
-    result = certify_campaign("lead_lag", row)
+    row = _certified_campaign("copy_vault")
+    result = certify_campaign("copy_vault", row)
     assert result["certified"] is True
     assert result["eligible_net_pnl_usd"] >= 4.0
     assert result["proof_net_pnl_usd"] >= 4.0
@@ -267,19 +267,19 @@ def test_certification_recalcule_la_gate_et_certifie_une_preuve_complete() -> No
 
 
 def test_certification_refuse_provenance_incomplete() -> None:
-    row = _certified_campaign("lead_lag")
+    row = _certified_campaign("copy_vault")
     row["dataset_provenance"] = {}
-    result = certify_campaign("lead_lag", row)
+    result = certify_campaign("copy_vault", row)
     assert result["certified"] is False
     assert result["proof_provenance"]["complete"] is False
     assert "PROOF_PROVENANCE_INCOMPLETE" in result["reasons"]
 
 
 def test_certification_refuse_un_statut_atteint_falsifie() -> None:
-    row = _certified_campaign("lead_lag")
+    row = _certified_campaign("copy_vault")
     row["forward"]["post_freeze"] = False
     row["objective_status"] = "ATTEINT"
-    result = certify_campaign("lead_lag", row)
+    result = certify_campaign("copy_vault", row)
     assert result["certified"] is False
     assert result["status"] == "NO_GO"
     assert "OBJECTIVE_STATUS_DRIFT" in result["reasons"]
@@ -287,26 +287,26 @@ def test_certification_refuse_un_statut_atteint_falsifie() -> None:
 
 
 def test_certification_refuse_eligible_net_falsifie() -> None:
-    row = _certified_campaign("lead_lag")
+    row = _certified_campaign("copy_vault")
     row["eligible_net_pnl_usd"] = 999.0
-    result = certify_campaign("lead_lag", row)
+    result = certify_campaign("copy_vault", row)
     assert result["certified"] is False
     assert "ELIGIBLE_NET_DRIFT" in result["reasons"]
 
 
 def test_certification_refuse_famille_incoherente() -> None:
-    row = _certified_campaign("lead_lag")
-    row["family"] = "copy_vault"
-    result = certify_campaign("lead_lag", row)
+    row = _certified_campaign("copy_vault")
+    row["family"] = "lead_lag"
+    result = certify_campaign("copy_vault", row)
     assert result["certified"] is False
     assert any(reason.startswith("FAMILY_MISMATCH:") for reason in result["reasons"])
 
 
 def test_certification_refuse_couts_incomplets() -> None:
-    row = _certified_campaign("lead_lag")
+    row = _certified_campaign("copy_vault")
     row["latency_cost_usd"] = None
     row.update(evaluate_objective(row))
-    result = certify_campaign("lead_lag", row)
+    result = certify_campaign("copy_vault", row)
     assert result["certified"] is False
     assert result["costs_complete"] is False
     assert "COSTS_INCOMPLETE" in result["reasons"]
@@ -314,13 +314,13 @@ def test_certification_refuse_couts_incomplets() -> None:
 
 
 def test_certification_absente_reste_fail_closed() -> None:
-    result = certify_campaign("lead_lag", None)
+    result = certify_campaign("copy_vault", None)
     assert result["certified"] is False
     assert result["eligible_net_pnl_usd"] is None
     assert result["reasons"] == ["CAMPAIGN_MISSING_OR_UNREADABLE"]
 
 
-def test_workspace_exige_les_trois_familles_sans_compensation(tmp_path: Path) -> None:
+def test_workspace_certifie_uniquement_copy_vault(tmp_path: Path) -> None:
     _write_certified_workspace(tmp_path)
     campaign_dir = tmp_path / "runtime" / "reports" / "economic_campaigns"
 
@@ -332,77 +332,45 @@ def test_workspace_exige_les_trois_familles_sans_compensation(tmp_path: Path) ->
     assert certified["cross_family_trade_reuse_audit"]["no_reuse"] is True
     assert certified["paper_only"] is True
     assert certified["real_execution"] is False
-    assert all(row["certified"] for row in certified["families"].values())
+    assert set(certified["families"]) == {"copy_vault"}
 
-    weak = _certified_campaign("lead_lag")
+    weak = _certified_campaign("copy_vault")
     weak["forward"]["net_pnl_usd"] = -10.0
     weak.update(evaluate_objective(weak))
-    (campaign_dir / "lead_lag.json").write_text(json.dumps(weak), encoding="utf-8")
+    (campaign_dir / "copy_vault.json").write_text(json.dumps(weak), encoding="utf-8")
 
     refused = certify_workspace(tmp_path)
     assert refused["all_families_certified"] is False
     assert refused["status"] == "NO_GO"
-    assert refused["families"]["lead_lag"]["certified"] is False
-    assert refused["families"]["copy_vault"]["certified"] is True
-    assert refused["families"]["cross_venue_dislocation_v2"]["certified"] is True
+    assert refused["families"]["copy_vault"]["certified"] is False
 
 
-def test_workspace_refuse_si_une_famille_manque_ou_est_illisible(tmp_path: Path) -> None:
+def test_workspace_ignore_les_rapports_pauses_stockes(tmp_path: Path) -> None:
     campaign_dir = tmp_path / "runtime" / "reports" / "economic_campaigns"
     campaign_dir.mkdir(parents=True)
-    (campaign_dir / "copy_vault.json").write_text(
-        json.dumps(_certified_campaign("copy_vault")), encoding="utf-8"
-    )
+    (campaign_dir / "copy_vault.json").write_text(json.dumps(_certified_campaign("copy_vault")), encoding="utf-8")
+    _write_raw_proof(tmp_path, "copy_vault", first_entry_ms=1_800_000_000_000)
     (campaign_dir / "lead_lag.json").write_text("{json-invalide", encoding="utf-8")
 
     result = certify_workspace(tmp_path)
-    assert result["all_families_certified"] is False
-    assert result["families"]["copy_vault"]["certified"] is False
-    assert "GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE" in result["families"]["copy_vault"]["reasons"]
-    assert result["families"]["lead_lag"]["reasons"] == ["CAMPAIGN_MISSING_OR_UNREADABLE"]
-    assert result["families"]["cross_venue_dislocation_v2"]["reasons"] == ["CAMPAIGN_MISSING_OR_UNREADABLE"]
+    assert set(result["families"]) == {"copy_vault"}
+    assert result["all_families_certified"] is True
 
 
-def _assert_pair_collision(tmp_path: Path, left: str, right: str) -> None:
+def test_direct_paused_family_certification_fails_closed() -> None:
+    result = certify_campaign("lead_lag", {"family": "lead_lag"})
+    assert result["certified"] is False
+    assert result["reasons"] == ["DISABLED_BY_SCOPE"]
+
+
+def test_paused_family_trade_collisions_do_not_enter_active_proof(tmp_path: Path) -> None:
     _write_certified_workspace(tmp_path)
     shared = (1_800_001_000_000, 1_800_001_000_100)
-    _write_raw_proof(tmp_path, left, first_entry_ms=1, shared=shared)
-    _write_raw_proof(tmp_path, right, first_entry_ms=2, shared=shared)
+    _write_raw_proof(tmp_path, "lead_lag", first_entry_ms=1, shared=shared)
+    _write_raw_proof(tmp_path, "cross_venue_dislocation_v2", first_entry_ms=2, shared=shared)
     result = certify_workspace(tmp_path)
-    assert result["all_families_certified"] is False
-    assert "CROSS_FAMILY_SOURCE_LINEAGE_REUSE" in result["families"][left]["reasons"]
-    assert "CROSS_FAMILY_SOURCE_LINEAGE_REUSE" in result["families"][right]["reasons"]
-    pair = result["cross_family_trade_reuse_audit"]["pairwise"]
-    key = "__".join(sorted((left, right)))
-    assert pair[key]["collision_count"] == 0
-    assert pair[key]["source_lineage_collision_count"] == 1
-
-
-def test_workspace_refuse_collision_copy_lead_meme_si_ids_natifs_different(tmp_path: Path) -> None:
-    _assert_pair_collision(tmp_path, "copy_vault", "lead_lag")
-
-
-def test_workspace_refuse_collision_copy_cross_meme_si_ids_natifs_different(tmp_path: Path) -> None:
-    _assert_pair_collision(tmp_path, "copy_vault", "cross_venue_dislocation_v2")
-
-
-def test_workspace_refuse_collision_lead_cross_meme_si_ids_natifs_different(tmp_path: Path) -> None:
-    _assert_pair_collision(tmp_path, "lead_lag", "cross_venue_dislocation_v2")
-
-
-def test_workspace_refuse_collision_trois_familles(tmp_path: Path) -> None:
-    _write_certified_workspace(tmp_path)
-    shared = (1_800_002_000_000, 1_800_002_000_100)
-    for index, family in enumerate(FAMILIES):
-        _write_raw_proof(tmp_path, family, first_entry_ms=10 + index, shared=shared)
-    result = certify_workspace(tmp_path)
-    assert result["all_families_certified"] is False
-    assert result["cross_family_trade_reuse_audit"]["total_cross_family_collisions"] == 0
-    assert result["cross_family_trade_reuse_audit"]["total_cross_family_source_lineage_collisions"] == 3
-    assert all(
-        "CROSS_FAMILY_SOURCE_LINEAGE_REUSE" in result["families"][family]["reasons"]
-        for family in FAMILIES
-    )
+    assert set(result["families"]) == {"copy_vault"}
+    assert result["cross_family_trade_reuse_audit"]["pairwise"] == {}
 
 
 def test_workspace_refuse_reutilisation_oos_forward_dans_une_meme_famille(tmp_path: Path) -> None:

@@ -192,16 +192,46 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
     )
     ordered_events = merge_price_events(ordered_events)
 
-    discrepancies = detect_ws_price_discrepancies(ordered_events)
-    funding = scan_funding_rates(payload.funding_rows)
-    triangular = tuple(detect_triangular_opportunities(build_triangular_cycles(list(payload.triangular_edges))))
-    maker_quotes = _maker_quotes_from_prices(ordered_events)
+    discrepancies = (
+        detect_ws_price_discrepancies(ordered_events)
+        if strategy_can_materialize("cross_venue_dislocation")
+        else ()
+    )
+    funding = (
+        scan_funding_rates(payload.funding_rows)
+        if strategy_can_materialize("funding_carry")
+        else ()
+    )
+    triangular = (
+        tuple(
+            detect_triangular_opportunities(
+                build_triangular_cycles(list(payload.triangular_edges))
+            )
+        )
+        if strategy_can_materialize("triangular_arbitrage")
+        else ()
+    )
+    maker_quotes = (
+        _maker_quotes_from_prices(ordered_events)
+        if strategy_can_materialize("market_making")
+        else ()
+    )
     distilled_report = detect_distilled_opportunities(
         list(payload.distilled_signal_candidates),
         now_ms=evaluation_now_ms,
     )
 
     no_trade: list[str] = []
+    if not strategy_can_materialize("lead_lag"):
+        no_trade.append(strategy_scope_refusal("lead_lag"))
+    if len({event.source for event in ordered_events}) > 1 and not strategy_can_materialize(
+        "cross_venue_dislocation"
+    ):
+        no_trade.append(strategy_scope_refusal("cross_venue_dislocation"))
+    if payload.funding_rows and not strategy_can_materialize("funding_carry"):
+        no_trade.append(strategy_scope_refusal("funding_carry"))
+    if payload.triangular_edges and not strategy_can_materialize("triangular_arbitrage"):
+        no_trade.append(strategy_scope_refusal("triangular_arbitrage"))
     # REVUE 2026-07-12 : `paper_engine` est REASSIGNE plus bas (`paper_engine = distilled_engine`).
     # Si on ne lisait ses refus qu'a la fin, on perdrait ceux du moteur COPY -- justement ceux
     # qu'on veut rendre visibles. On les capture donc a la source.
@@ -235,7 +265,11 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
     else:
         _adm_floor = compute_admission_floor_for_fusion(
             funding_signals=funding, triangular=triangular,
-            distilled_opportunities=distilled_report.opportunities,
+            distilled_opportunities=(
+                distilled_report.opportunities
+                if strategy_can_materialize("external_github_profiles")
+                else ()
+            ),
             funding_rates_bps_by_coin=funding_rates_bps_for_coins([getattr(s, "coin", "") for s in funding]),
             now_ms=evaluation_now_ms,
         )
@@ -336,7 +370,11 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             no_trade.extend(conflict.reasons or ("NO_COPY_CONSENSUS",))
         if payload.distilled_signal_candidates and not distilled_report.opportunities:
             no_trade.append("NO_DISTILLED_OPPORTUNITY_PASSED_GATES")
-        if paper_engine.accepted_count == 0 and distilled_report.opportunities:
+        if (
+            paper_engine.accepted_count == 0
+            and distilled_report.opportunities
+            and strategy_can_materialize("external_github_profiles")
+        ):
             distilled_engine = run_distilled_opportunities_through_paper_engine(
                 distilled_report.opportunities,
                 market_prices=market_prices_by_coin,
@@ -382,6 +420,8 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
                 no_trade = [reason for reason in no_trade if reason not in {"NO_COPY_CONSENSUS", "COPY_CONFLICT_OR_NO_MAJORITY"}]
             else:
                 no_trade.append("DISTILLED_PAPER_ENGINE_REJECTED")
+        elif distilled_report.opportunities:
+            no_trade.append(strategy_scope_refusal("external_github_profiles"))
 
         close_order = _build_consensus_close_order(
             payload.open_positions,

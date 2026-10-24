@@ -5,6 +5,8 @@ REM  ANALYSER_BACKTESTS_REPLAYS.cmd
 REM  Analyse EXCLUSIVEMENT la derniere session COMPLETE cataloguee (jamais un scan global de la racine).
 REM  Selection+verification (checksums) -> laboratoire scope a CETTE session -> rapport neuf namespace.
 REM  PAPER STRICT : 0 ordre reel, 0 cle privee, 0 signature, aucun /exchange.
+REM  COPYVAULT ONLY : seule la famille CopyVault produit replay, backtest, OOS et PnL.
+REM  FAMILLES EN PAUSE : Lead-Lag, Cross-Venue, arbitrage, carry/funding et recherche non attribuee.
 REM ============================================================
 cd /d "%~dp0"
 REM item 6 : MEME Python que le runtime (portable), ERRORLEVEL verifie IMMEDIATEMENT, aucun repli systeme.
@@ -73,6 +75,7 @@ endlocal & exit /b %RC%
 echo.
 echo ============================================================
 echo   LABORATOIRE ALPHA - paper strict (0 ordre reel)
+echo   COPYVAULT ONLY - familles en pause : Lead-Lag, Cross-Venue, arbitrage, carry/funding
 echo   Analyse d'UNE session COMPLETE, verifiee, isolee.
 echo   Profil : %ANALYSIS_MODE%  -  budget : %HYPERSMART_LAB_BUDGET%
 echo ============================================================

@@ -21,10 +21,10 @@ class StrategyScopeEntry:
 
 
 _SCOPE: tuple[StrategyScopeEntry, ...] = (
-    StrategyScopeEntry("cross_venue_dislocation", StrategyScopeStatus.ACTIVE, True,
-                       "Executable cross-venue evidence may enter the canonical paper core."),
-    StrategyScopeEntry("lead_lag", StrategyScopeStatus.ACTIVE, True,
-                       "Frozen causal lead-lag evidence may enter the canonical paper core."),
+    StrategyScopeEntry("cross_venue_dislocation", StrategyScopeStatus.DISABLED, False,
+                       "Paused while AlinaSmartFlow simulations focus on CopyVault only."),
+    StrategyScopeEntry("lead_lag", StrategyScopeStatus.DISABLED, False,
+                       "Paused while AlinaSmartFlow simulations focus on CopyVault only."),
     StrategyScopeEntry("copy_vault", StrategyScopeStatus.ACTIVE, True,
                        "Fresh leader and vault evidence may enter the canonical paper core."),
     StrategyScopeEntry("twap_metaorder", StrategyScopeStatus.SHADOW, False,
@@ -75,6 +75,14 @@ def strategy_can_materialize(family: str) -> bool:
         and entry.status is StrategyScopeStatus.ACTIVE
         and entry.materializes_paper_economics
     )
+
+
+def require_active_strategy(family: str) -> str:
+    """Return the canonical active family or fail closed at a simulation boundary."""
+    canonical = canonical_strategy_family(family)
+    if not strategy_can_materialize(canonical):
+        raise ValueError(f"DISABLED_BY_SCOPE:{canonical or 'unknown_family'}")
+    return canonical
 
 
 def strategy_scope_status(family: str) -> StrategyScopeStatus:

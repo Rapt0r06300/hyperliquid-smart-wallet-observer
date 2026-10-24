@@ -53,7 +53,7 @@ def _payload(**overrides):
     return FusionRuntimeInput(**payload)
 
 
-def test_fusion_strategy_runtime_routes_only_v2_active_paper_strategies(monkeypatch):
+def test_fusion_strategy_runtime_executes_copy_vault_only(monkeypatch):
     # Même explicitement demandé, l'ancien bus reste hors du chemin économique.
     monkeypatch.setenv("HYPERSMART_EXTERNAL_PROFILES_SCOPE", "all")
     # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse un edge non empirique.
@@ -62,13 +62,16 @@ def test_fusion_strategy_runtime_routes_only_v2_active_paper_strategies(monkeypa
     result = run_fusion_strategy_runtime(_payload())
     assert result.session.status == "RUNNING"
     assert result.conflict.decision == "FOLLOW"
-    assert result.price_discrepancies
-    assert result.funding_signals[0].decision == "FUNDING_SPIKE"
-    assert result.triangular_opportunities
-    assert len(result.paper_orders) == 1
-    assert result.paper_orders[0].metadata["profile_family"] == "cross_exchange_arbitrage"
+    assert result.price_discrepancies == ()
+    assert result.funding_signals == ()
+    assert result.triangular_opportunities == ()
+    # CopyVault is the only family allowed to materialize. A missing/invalid
+    # vNext certification may still (correctly) keep the fail-closed gate shut.
+    assert all(order.metadata["profile_family"] == "copy_follow" for order in result.paper_orders)
     assert result.delta_neutral_positions == ()
     assert result.funding_payments == ()
+    assert "STRATEGY_SCOPE_BLOCKED_CROSS_VENUE_DISLOCATION" in result.no_trade_reasons
+    assert "STRATEGY_SCOPE_BLOCKED_LEAD_LAG" in result.no_trade_reasons
     assert "STRATEGY_SCOPE_BLOCKED_FUNDING_CARRY" in result.no_trade_reasons
     assert "STRATEGY_SCOPE_BLOCKED_TRIANGULAR_ARBITRAGE" in result.no_trade_reasons
     assert "STRATEGY_SCOPE_BLOCKED_EXTERNAL_GITHUB_PROFILES" in result.no_trade_reasons
@@ -92,6 +95,7 @@ def test_fusion_strategy_runtime_routes_only_v2_active_paper_strategies(monkeypa
     assert all(row.real_execution is False for row in result.external_profile_executions)
     assert all(row.paper_only is True for row in result.external_profile_executions)
     assert result.real_execution is False
+    assert result.strategy_scope["active_families"] == ["copy_vault"]
 
 
 def test_fusion_strategy_runtime_can_emit_paper_close_against_open_position(monkeypatch):
@@ -126,12 +130,13 @@ def test_fusion_strategy_runtime_can_emit_paper_close_against_open_position(monk
     assert close_order.metadata["close_reason"] == "leader_consensus_flipped_against_open_position"
 
 
-def test_fusion_strategy_runtime_routes_distilled_opportunity_through_canonical_paper_engine(monkeypatch):
+def test_fusion_strategy_runtime_keeps_distilled_opportunity_diagnostic_only(monkeypatch):
     # EDGE FABRIQUE (2026-07-11) : par defaut le bot refuse desormais un edge non
     # empirique. Ce test exerce l'ANCIEN chemin -> mode A/B explicite.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
     result = run_fusion_strategy_runtime(
         _payload(
+            evaluation_time_ms=1001,
             leader_votes=(
                 LeaderVote(wallet="0x1", coin="HYPE", side="LONG", score=1.0, observed_at_ms=1000),
                 LeaderVote(wallet="0x2", coin="BTC", side="SHORT", score=1.0, observed_at_ms=1000),
@@ -174,14 +179,10 @@ def test_fusion_strategy_runtime_routes_distilled_opportunity_through_canonical_
     )
 
     assert result.distilled_opportunity_report.opportunities
-    assert result.paper_engine.accepted_count == 1
-    decision = result.paper_engine.decisions[0]
-    assert decision.accepted is True
-    assert decision.position is not None
-    assert decision.position.coin == "HYPE"
-    assert decision.position.side == "LONG"
-    assert any(order.metadata.get("source") == "distilled_github_opportunity_detector" for order in result.paper_orders)
-    assert "NO_COPY_CONSENSUS" not in result.no_trade_reasons
+    assert result.paper_engine.accepted_count == 0
+    assert not any(order.metadata.get("source") == "distilled_github_opportunity_detector" for order in result.paper_orders)
+    assert "STRATEGY_SCOPE_BLOCKED_EXTERNAL_GITHUB_PROFILES" in result.no_trade_reasons
+    assert "CONSENSUS_TOO_WEAK" in result.no_trade_reasons
     assert result.real_execution is False
 
 

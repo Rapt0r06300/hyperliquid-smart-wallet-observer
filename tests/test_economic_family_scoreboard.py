@@ -56,23 +56,15 @@ def test_scoreboards_keep_families_separate_and_deny_incomplete_evidence(tmp_pat
 
     result = build_scoreboards(tmp_path)
 
-    assert set(result["families"]) == {
-        "copy_vault",
-        "lead_lag",
-        "cross_venue_dislocation_v2",
-    }
+    assert set(result["families"]) == {"copy_vault"}
     assert result["families"]["copy_vault"]["verdict"] == "MORE_DATA"
-    assert result["families"]["lead_lag"]["verdict"] == "MORE_DATA"
-    cross = result["families"]["cross_venue_dislocation_v2"]
-    assert cross["verdict"] == "KILL"
-    assert cross["net_pnl_usd"] == -0.1366
-    assert cross["liquidatable_net"] is False
-    assert result["disabled_families"] == ["cross_venue_dislocation_v1", "carry"]
+    assert "lead_lag" in result["disabled_families"]
+    assert "cross_venue_dislocation" in result["disabled_families"]
     assert result["starting_capital_usd"] == 200.0
     assert result["real_execution"] is False
 
 
-def test_promotion_requires_positive_oos_forward_placebo_and_sample() -> None:
+def test_paused_family_cannot_be_promoted_even_with_positive_stored_evidence() -> None:
     economic_contract = build_cross_venue_contract(
         mode=EconomicRunMode.CERTIFIABLE
     ).receipt()
@@ -91,14 +83,14 @@ def test_promotion_requires_positive_oos_forward_placebo_and_sample() -> None:
         "placebos": {"beaten": True},
         "liquidatable_net": True,
     }
-    assert promotion_verdict(complete) == ("PROMOTE", [])
+    assert promotion_verdict(complete) == ("MORE_DATA", ["DISABLED_BY_SCOPE"])
     incomplete = dict(complete, forward=None)
     assert promotion_verdict(incomplete)[0] == "MORE_DATA"
     negative = dict(complete, net_pnl_usd=-0.01)
-    assert promotion_verdict(negative)[0] == "KILL"
+    assert promotion_verdict(negative) == ("MORE_DATA", ["DISABLED_BY_SCOPE"])
 
 
-def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path: Path) -> None:
+def test_stored_paused_campaign_is_not_promoted_to_current_scoreboard(tmp_path: Path) -> None:
     economic_contract = build_cross_venue_contract(
         mode=EconomicRunMode.CERTIFIABLE
     ).receipt()
@@ -179,16 +171,8 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
     )
 
     result = build_scoreboards(tmp_path)
-    row = result["families"]["cross_venue_dislocation_v2"]
-
-    assert row["objective_status"] == "ATTEINT"
-    assert row["eligible_net_pnl_usd"] == 5.5
-    assert row["comparison_metric_usd"] == 5.5
-    assert row["comparison_metric_source"] == "proof_net_pnl_usd"
-    assert row["measurement_status"] == "MEASURED"
-    assert row["signal_count"] == 40
-    assert "LIQUIDATABLE_NET" not in row
-    assert list(result["families"]).count("cross_venue_dislocation_v2") == 1
+    assert set(result["families"]) == {"copy_vault"}
+    assert "cross_venue_dislocation_v2" not in result["families"]
 
 
 def test_public_paper_default_uses_the_unique_100_usd_capital() -> None:
@@ -204,10 +188,6 @@ def test_scoreboards_are_reachable_from_the_read_only_runtime() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["active_families"] == [
-        "copy_vault",
-        "lead_lag",
-        "cross_venue_dislocation_v2",
-    ]
+    assert payload["active_families"] == ["copy_vault"]
     assert payload["paper_read_only"] is True
     assert payload["real_execution"] is False

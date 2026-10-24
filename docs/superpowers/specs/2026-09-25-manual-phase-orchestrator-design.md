@@ -16,6 +16,23 @@ The user controls phase changes manually through ChatGPT/GitHub. Autonomous runt
 
 The design must preserve strict paper/read-only behavior and must never enable real orders.
 
+## Temporary CopyVault-only operating scope
+
+Until a reviewed change to the central strategy authority explicitly reactivates
+another family, `copy_vault` is the only economic family allowed to materialize
+paper intents, fills, PnL, replay/backtest/OOS/forward results, certification, or
+scoreboard rows. Lead-Lag, Cross-Venue/Dislocation, arbitrage, carry/funding,
+shadow/research-only families, aliases, and unattributed economic stages return
+`DISABLED_BY_SCOPE` or are omitted from executable plans.
+
+The official laboratory and historical-analysis launcher run a single
+CopyVault path. Family-neutral integrity and market-quality checks may remain,
+but they cannot create economic results. Historical reports and implementation
+code for paused families remain preserved for audit and reversible future
+reactivation; stored evidence never makes a paused family active. Environment
+variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
+FAIL-CLOSED and does not stop collectors or restoration processes.
+
 ## Canonical-spec governance
 
 This file is the **single canonical specification** for the current Alina Smart Flow design.

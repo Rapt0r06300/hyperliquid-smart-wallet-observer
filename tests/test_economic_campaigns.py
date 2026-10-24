@@ -396,13 +396,8 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
         },
     }
 
-    campaign = build_lead_lag_campaign(report, freeze=freeze, datasets=datasets)
-
-    assert campaign["net_pnl_usd"] == 4.5
-    assert campaign["closed_positions"] == 4
-    assert campaign["liquidatable_net"] is True
-    assert campaign["objective_status"] == "NON_ATTEINT"
-    assert "OOS_NO_LOOKAHEAD_PROOF_MISSING" in campaign["objective_reasons"]
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        build_lead_lag_campaign(report, freeze=freeze, datasets=datasets)
 
 
 def test_lead_lag_without_sized_closed_episodes_remains_unmeasured() -> None:
@@ -427,12 +422,8 @@ def test_lead_lag_without_sized_closed_episodes_remains_unmeasured() -> None:
         },
     }
 
-    campaign = build_lead_lag_campaign(report, freeze=None, datasets={"files": []})
-
-    assert campaign["source_status"] == "FUTURE_SIZED_BBO_REQUIRED"
-    assert campaign["net_pnl_usd"] is None
-    assert campaign["objective_status"] == "NON_ATTEINT"
-    assert "UNMEASURED:net_pnl_usd" in campaign["objective_reasons"]
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        build_lead_lag_campaign(report, freeze=None, datasets={"files": []})
 
 
 def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
@@ -462,15 +453,13 @@ def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
         },
     }
 
-    campaign = build_lead_lag_campaign(
-        report,
-        freeze=None,
-        datasets={"files": []},
-        require_daily=True,
-    )
-
-    assert campaign["daily_evidence"]["total_net_pnl_usd"] == 10.6
-    assert campaign["daily_evidence"]["all_days_at_or_above_target"] is True
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        build_lead_lag_campaign(
+            report,
+            freeze=None,
+            datasets={"files": []},
+            require_daily=True,
+        )
 
 
 def test_cross_campaign_keeps_unmeasured_slippage_and_two_leg_proof(tmp_path: Path) -> None:
@@ -515,14 +504,8 @@ def test_cross_campaign_keeps_unmeasured_slippage_and_two_leg_proof(tmp_path: Pa
             "inverted_direction_control": {"promotable": False},
         },
     }
-    campaign = build_cross_campaign(report, freeze=freeze, datasets=datasets)
-
-    assert campaign["all_positions_two_leg_closed"] is True
-    assert campaign["slippage_cost_usd"] is None
-    assert campaign["liquidatable_net"] is False
-    assert campaign["objective_status"] == "NON_ATTEINT"
-    assert campaign["hypothesis_audit"]["frozen_mechanism_status"] == "KILL"
-    assert campaign["hypothesis_audit"]["inverted_direction_control"]["promotable"] is False
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        build_cross_campaign(report, freeze=freeze, datasets=datasets)
 
 
 def test_campaign_json_has_no_case_insensitive_duplicate_keys(tmp_path: Path) -> None:

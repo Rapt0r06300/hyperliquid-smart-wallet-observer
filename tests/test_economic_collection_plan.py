@@ -92,14 +92,11 @@ def test_plan_distinguishes_future_data_from_killed_hypothesis() -> None:
     by_family = {row["family"]: row for row in plan["families"]}
 
     assert by_family["copy_vault"]["future_data_required_only"] is True
-    assert by_family["lead_lag"]["evidence_state"] == "FUTURE_SIZED_BBO_REQUIRED"
-    assert by_family["cross_venue_dislocation_v2"]["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
-    assert by_family["cross_venue_dislocation_v2"]["future_data_required_only"] is False
-    assert by_family["cross_venue_dislocation_v2"]["collection_actionable"] is False
+    assert set(by_family) == {"copy_vault"}
     assert "venues-collector" not in plan["required_collectors"]
     # carnet remains useful for Copy-Vault even though Cross itself is killed.
     assert "carnet-collector" in plan["required_collectors"]
-    assert plan["safe_to_claim_future_data_required_only"] is False
+    assert plan["safe_to_claim_future_data_required_only"] is True
     assert plan["goal_complete"] is False
     assert plan["real_execution"] is False
 
@@ -142,20 +139,8 @@ def test_plan_recognizes_prefreeze_maker_queue_pipeline_as_data_only() -> None:
     ]
 
     plan = build_collection_plan(campaigns, raw, now_ms=123)
-    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
-
-    assert lead["software_pipeline_ready"] is True
-    assert lead["future_data_required_only"] is True
-    assert lead["collection_actionable"] is True
-    assert lead["evidence_state"] == "FUTURE_QUEUE_EVIDENCE_REQUIRED"
-    assert lead["methodology_action"] == "COLLECT_PREDECLARED_V3_QUEUE_EVIDENCE"
-    assert lead["progress"]["canonical_path"] == "MAKER_FIFO_QUEUE"
-    assert lead["progress"]["strong_shocks_seen"] == 0
-    assert lead["progress"]["queue_proven_fills"] == 0
-    assert "carnet-collector" in lead["required_collectors"]
-    assert "runtime/data/carnet_venues.jsonl" in lead["required_artifacts"]
-    assert not any("bid_sz" in item for item in lead["exact_missing_evidence"])
-    assert any("strong-shock" in item for item in lead["exact_missing_evidence"])
+    assert [row["family"] for row in plan["families"]] == ["copy_vault"]
+    assert all(row["family"] != "lead_lag" for row in plan["families"])
 
 
 def test_plan_records_exact_collectors_progress_and_freeze() -> None:
@@ -179,9 +164,7 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
         collector_state={"profil": "harvest", "manquants": []},
         now_ms=123,
     )
-    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
-
-    assert "bbo-collector" in plan["required_collectors"]
+    assert "bbo-collector" not in plan["required_collectors"]
     assert "vault-collector" in plan["required_collectors"]
     copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
     assert "runtime/data/copy_vault_l2_tape.jsonl" in copy["required_artifacts"]
@@ -190,8 +173,7 @@ def test_plan_records_exact_collectors_progress_and_freeze() -> None:
     assert copy["progress"]["causal_protocol_book_rows"] == 1000
     assert copy["progress"]["stale_or_missing_book_rejections_across_grid"] == 9
     assert copy["progress"]["book_rejections_across_grid"]["STALE_OR_MISSING_REFERENCE_BOOK"] == 9
-    assert lead["freeze"]["campaign_id"] == "lead-freeze"
-    assert lead["progress"]["missing_top_sizes"] == 30
+    assert [row["family"] for row in plan["families"]] == ["copy_vault"]
     assert plan["collector_state"]["profil"] == "harvest"
 
 
@@ -302,16 +284,8 @@ def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
     ]
 
     plan = build_collection_plan(campaigns, raw, now_ms=123)
-    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
-
-    assert lead["evidence_state"] == "HYPOTHESIS_KILLED_OOS_FORWARD"
-    assert lead["collection_actionable"] is False
-    assert lead["future_data_required_only"] is False
-    assert lead["methodology_action"] == "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
-    assert lead["progress"]["oos_net_pnl_usd"] == -0.21
-    assert lead["progress"]["forward_net_pnl_usd"] == -0.60
-    assert "bbo-collector" not in plan["required_collectors"]
-    assert "allmids-collector" not in plan["required_collectors"]
+    assert [row["family"] for row in plan["families"]] == ["copy_vault"]
+    assert "venues-collector" not in plan["required_collectors"]
 
 
 def test_plan_kills_copy_vault_after_valid_negative_oos() -> None:
@@ -458,14 +432,7 @@ def test_plan_kills_lead_lag_after_negative_oos_without_waiting_for_forward() ->
     ]
 
     plan = build_collection_plan(campaigns, raw, now_ms=123)
-    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
-
-    assert lead["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
-    assert lead["collection_actionable"] is False
-    assert lead["future_data_required_only"] is False
-    assert lead["progress"]["oos_valid"] is True
-    assert lead["progress"]["forward_valid"] is False
-    assert "bbo-collector" not in plan["required_collectors"]
+    assert [row["family"] for row in plan["families"]] == ["copy_vault"]
 
 
 def test_plan_collects_only_predeclared_v3_queue_evidence_after_old_rule_dies() -> None:
@@ -495,15 +462,7 @@ def test_plan_collects_only_predeclared_v3_queue_evidence_after_old_rule_dies() 
     ]
 
     plan = build_collection_plan(campaigns, raw, now_ms=123)
-    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
-
-    assert lead["evidence_state"] == "NEW_HYPOTHESIS_QUEUE_DATA_REQUIRED"
-    assert lead["collection_actionable"] is True
-    assert lead["future_data_required_only"] is False
-    assert lead["methodology_action"] == "COLLECT_PREDECLARED_V3_QUEUE_EVIDENCE"
-    assert "queue events proving price-time priority" in lead["exact_missing_evidence"]
-    assert "carnet-collector" in lead["required_collectors"]
-    assert "carnet-collector" in plan["required_collectors"]
+    assert [row["family"] for row in plan["families"]] == ["copy_vault"]
 
 
 def test_plan_does_not_restart_collection_for_v3_kill_verdict() -> None:
@@ -533,15 +492,7 @@ def test_plan_does_not_restart_collection_for_v3_kill_verdict() -> None:
     ]
 
     plan = build_collection_plan(campaigns, raw, now_ms=123)
-    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
-
-    assert lead["evidence_state"] == "HYPOTHESIS_KILLED_OOS"
-    assert lead["collection_actionable"] is False
-    assert lead["methodology_action"] == (
-        "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
-    )
-    assert "bbo-collector" not in plan["required_collectors"]
-    assert "carnet-collector" not in lead["required_collectors"]
+    assert [row["family"] for row in plan["families"]] == ["copy_vault"]
 
 
 def test_copy_plan_counts_entry_exit_and_missing_coin_book_rejections() -> None:
@@ -593,5 +544,8 @@ def test_write_plan_is_strict_json_and_human_readable(tmp_path: Path) -> None:
     assert decoded["paper_read_only"] is True
     assert "NaN" not in state_path.read_text(encoding="utf-8")
     assert "Infinity" not in state_path.read_text(encoding="utf-8")
-    assert "HYPOTHESIS_KILLED_OOS" in report_path.read_text(encoding="utf-8")
-    assert "Collecte encore actionnable" in report_path.read_text(encoding="utf-8")
+    rendered = report_path.read_text(encoding="utf-8")
+    assert "## copy_vault" in rendered
+    assert "## lead_lag" not in rendered
+    assert "## cross_venue_dislocation_v2" not in rendered
+    assert "Collecte encore actionnable" in rendered

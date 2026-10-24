@@ -14,7 +14,7 @@ from hl_observer.ops.self_hosted_return import (
 )
 
 
-FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+FAMILIES = ("copy_vault",)
 
 
 def _job_result(result_dir: Path, *, workspace: Path | None) -> None:
@@ -96,7 +96,7 @@ def test_compact_campaign_segments_et_placebo_sont_bornes() -> None:
     assert compact["placebos"] == {"beaten": True}
 
 
-def test_build_return_resume_les_trois_familles_et_le_prochain_job(tmp_path: Path) -> None:
+def test_build_return_resume_copy_vault_et_le_prochain_job(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     campaign_dir = workspace / "runtime" / "reports" / "economic_campaigns"
     campaign_dir.mkdir(parents=True)
@@ -121,8 +121,7 @@ def test_build_return_resume_les_trois_familles_et_le_prochain_job(tmp_path: Pat
     assert payload["status"] == "READY_FOR_ANALYSIS"
     assert payload["technical_status"] == "SUCCESS"
     assert payload["family_summaries"]["copy_vault"]["net_pnl_usd"] == 4.25
-    assert payload["family_summaries"]["lead_lag"]["net_pnl_usd"] == -1.0
-    assert payload["family_summaries"]["cross_venue_dislocation_v2"]["net_pnl_usd"] == -1.5
+    assert set(payload["family_summaries"]) == {"copy_vault"}
     assert payload["brain_decision"] is not None
     assert payload["next_recommended_job"] is not None
     assert payload["paper_only"] is True
@@ -133,9 +132,9 @@ def test_build_return_resume_les_trois_familles_et_le_prochain_job(tmp_path: Pat
     assert md_path.is_file()
     text = md_path.read_text(encoding="utf-8")
     assert "copy_vault" in text
-    assert "lead_lag" in text
-    assert "cross_venue_dislocation_v2" in text
-    assert "Certification économique 3/3 : **NON**" in text
+    assert "lead_lag" not in text
+    assert "cross_venue_dislocation_v2" not in text
+    assert "Certification économique CopyVault 1/1 : **NON**" in text
 
 
 def test_build_return_reste_explicite_si_job_result_absent(tmp_path: Path) -> None:
@@ -195,9 +194,9 @@ def test_build_return_message_3_sur_3_uniquement_apres_certification_recalculee(
     )
     payload = build_return(result_dir)
     assert payload["economic_certification"]["all_families_certified"] is True
-    assert "trois familles sont certifiées séparément" in payload["message_fr"]
+    assert "CopyVault est certifié" in payload["message_fr"]
     _, md_path = write_return(result_dir, payload)
-    assert "Certification économique 3/3 : **OUI**" in md_path.read_text(encoding="utf-8")
+    assert "Certification économique CopyVault 1/1 : **OUI**" in md_path.read_text(encoding="utf-8")
 
 
 def test_build_return_ne_masque_pas_une_erreur_du_cerveau(
@@ -228,7 +227,7 @@ def test_write_return_affiche_famille_non_mesuree_et_aucun_next_job(tmp_path: Pa
     }
     _, md_path = write_return(tmp_path, payload)
     text = md_path.read_text(encoding="utf-8")
-    assert text.count("`NON_MESURE`") == 3
+    assert text.count("`NON_MESURE`") == 1
     assert "Aucune recommandation machine-lisible disponible" in text
 
 

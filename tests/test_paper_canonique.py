@@ -21,7 +21,7 @@ from hl_observer.ops import paper_canonique as PC  # noqa: E402
 
 # ═══════════════ §5 + scope : le carry ne peut pas émettre d'intent ═══════════════
 def test_une_strategie_active_peut_emettre_un_intent():
-    i = PC.PaperIntent(strategy="cross_venue_dislocation", coin="btc", side=1,
+    i = PC.PaperIntent(strategy="copy_vault", coin="btc", side=1,
                        notional_usd=50.0, signal_observable_at_ms=1)
     assert i.as_dict()["coin"] == "BTC" and i.as_dict()["real_execution"] is False
 
@@ -37,7 +37,7 @@ def test_les_strategies_actives_derivent_de_lautorite_unique():
         active_strategy_families, strategy_scope_status, StrategyScopeStatus)
     # P0 : paper_canonique DÉRIVE le scope de l'autorité unique (active_scope), il ne le redéclare pas.
     assert set(PC.STRATEGIES_ACTIVES) == set(active_strategy_families())
-    assert set(PC.STRATEGIES_ACTIVES) == {"cross_venue_dislocation", "lead_lag", "copy_vault"}
+    assert set(PC.STRATEGIES_ACTIVES) == {"copy_vault"}
     # twap_metaorder est SHADOW dans l'autorité -> il NE matérialise PAS d'économie paper.
     assert "twap_metaorder" not in PC.STRATEGIES_ACTIVES
     assert strategy_scope_status("twap_metaorder") is StrategyScopeStatus.SHADOW
@@ -46,7 +46,7 @@ def test_les_strategies_actives_derivent_de_lautorite_unique():
 
 def test_un_side_invalide_est_refuse():
     with pytest.raises(ValueError):
-        PC.PaperIntent(strategy="lead_lag", coin="BTC", side=0, notional_usd=50.0, signal_observable_at_ms=1)
+        PC.PaperIntent(strategy="copy_vault", coin="BTC", side=0, notional_usd=50.0, signal_observable_at_ms=1)
 
 
 # ═══════════════ §6.2 — consommation de liquidité ═══════════════
@@ -132,9 +132,9 @@ def test_un_carnet_sain_autorise_lentree():
 
 # ═══════════════ §7 — runtime-truth ═══════════════
 def test_un_flag_on_sans_producteur_est_off_de_fait():
-    obs = {"lead_lag": {"flag_on": True, "producer_alive": False}}
+    obs = {"copy_vault": {"flag_on": True, "producer_alive": False}}
     rt = PC.runtime_truth(obs, now_ms=1_000_000)
-    assert rt["strategies_actives"]["lead_lag"]["etat"] == "ON_SANS_PRODUCTEUR"
+    assert rt["strategies_actives"]["copy_vault"]["etat"] == "ON_SANS_PRODUCTEUR"
 
 
 def test_une_strategie_avec_chaine_complete_est_vivante():

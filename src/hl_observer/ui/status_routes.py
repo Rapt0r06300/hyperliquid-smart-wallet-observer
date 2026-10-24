@@ -43,6 +43,7 @@ from hl_observer.simulation.accounting_truth import (
     separate_entry_cost_usdc,
 )
 from hl_observer.strategies.engine_pnl import rapport_par_moteur as _rapport_par_moteur
+from hl_observer.strategies.active_scope import active_strategy_families
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.models import MarketSnapshot
 from hl_observer.strategies.external_github_bridge import build_external_github_bridge_payload
@@ -240,12 +241,14 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
             "source": "SIMULATION_STATUS_CANONICAL",
         }
         experimental_status = _read_experimental_paper_status(settings)
+        active_families = sorted(active_strategy_families())
         payload = {
             "running": True,
             "server_running": True,
             "engine_running": scanner["engine_running"],
             "read_only": True,
             "real_execution": False,
+            "active_strategy_families": active_families,
             # Local paper simulation, fed by REAL Hyperliquid market data.
             "mode": "LOCAL_PAPER_SIMULATION_REAL_HYPERLIQUID_DATA",
             "current_time_ms": current_ms,
@@ -296,6 +299,7 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
                 "market_marks_missing": int(marked.get("marks_missing") or 0),
             },
             "bot_simulation": {
+                "active_strategy_families": active_families,
                 "open_positions": marked["positions"],
                 "current_equity_usdt": equity,
                 "estimated_net_pnl_usdc": net_pnl,

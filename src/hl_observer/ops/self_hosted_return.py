@@ -86,7 +86,7 @@ def compact_vnext_summary(payload: Mapping[str, Any] | None) -> dict[str, Any] |
     raw_families = payload.get("families")
     families: dict[str, dict[str, Any]] = {}
     if isinstance(raw_families, Mapping):
-        for family in ("copy_vault", "lead_lag", "cross_venue"):
+        for family in CANONICAL_FAMILIES:
             row = raw_families.get(family)
             if not isinstance(row, Mapping):
                 continue
@@ -179,7 +179,7 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
             brain = None
     next_job = brain.get("next_recommended_job") if isinstance(brain, Mapping) else None
     all_certified = bool(isinstance(economic_certification, Mapping) and economic_certification.get("all_families_certified") is True)
-    return {"schema": SCHEMA, "status": "READY_FOR_ANALYSIS", "technical_status": job_result.get("status"), "completion_ready": completion_ready, "job_id": job_result.get("job_id"), "project_sha": job_result.get("project_sha"), "request_digest": job_result.get("request_digest"), "suite": job_result.get("suite"), "mode": job_result.get("mode"), "exit_code": job_result.get("exit_code"), "workspace_available": workspace_exists, "family_summaries": families, "economic_certification": economic_certification, "brain_decision": brain, "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None, "vnext_research": _load_vnext_summary(usable_workspace), "lead_lag_causal_diagnostic": _load_lead_lag_diagnostic(result_path, usable_workspace), "paper_only": True, "real_execution": False, "message_fr": "Les trois familles sont certifiées séparément avec la gate économique canonique; aucune compensation inter-familles." if all_certified else "Retour compact prêt. La certification économique reste fail-closed tant que chaque famille n'est pas certifiée séparément; aucune compensation inter-familles."}
+    return {"schema": SCHEMA, "status": "READY_FOR_ANALYSIS", "technical_status": job_result.get("status"), "completion_ready": completion_ready, "job_id": job_result.get("job_id"), "project_sha": job_result.get("project_sha"), "request_digest": job_result.get("request_digest"), "suite": job_result.get("suite"), "mode": job_result.get("mode"), "exit_code": job_result.get("exit_code"), "workspace_available": workspace_exists, "family_summaries": families, "economic_certification": economic_certification, "brain_decision": brain, "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None, "vnext_research": _load_vnext_summary(usable_workspace), "lead_lag_causal_diagnostic": None, "paper_only": True, "real_execution": False, "message_fr": "CopyVault est certifié avec la gate économique canonique." if all_certified else "Retour compact prêt. La certification économique CopyVault reste fail-closed tant que toutes ses preuves ne sont pas complètes."}
 
 
 def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Path, Path]:
@@ -190,7 +190,7 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
     json_path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     certification = payload.get("economic_certification")
     all_certified = isinstance(certification, Mapping) and certification.get("all_families_certified") is True
-    lines = ["# Alina SmartFlow — retour compact du gros run", "", f"- Job : `{payload.get('job_id')}`", f"- Statut technique : **{payload.get('technical_status')}**", f"- Suite : `{payload.get('suite')}`", f"- Mode : `{payload.get('mode')}`", f"- SHA : `{payload.get('project_sha')}`", "- Trading réel : **NON**", f"- Certification économique 3/3 : **{'OUI' if all_certified else 'NON'}**", "- Compensation PnL entre familles : **INTERDITE**", "", "## Familles économiques", "", "| Famille | Certification | Objectif | Net éligible USD | LIQUIDATABLE_NET | OOS+ | Forward+ post-freeze | Placebo battu |", "|---|---|---|---:|---|---|---|---|"]
+    lines = ["# Alina SmartFlow — retour compact du gros run", "", f"- Job : `{payload.get('job_id')}`", f"- Statut technique : **{payload.get('technical_status')}**", f"- Suite : `{payload.get('suite')}`", f"- Mode : `{payload.get('mode')}`", f"- SHA : `{payload.get('project_sha')}`", "- Trading réel : **NON**", f"- Certification économique CopyVault 1/1 : **{'OUI' if all_certified else 'NON'}**", "- Scope : **COPY_VAULT_ONLY**", "", "## Familles économiques", "", "| Famille | Certification | Objectif | Net éligible USD | LIQUIDATABLE_NET | OOS+ | Forward+ post-freeze | Placebo battu |", "|---|---|---|---:|---|---|---|---|"]
     families = payload.get("family_summaries")
     cert_rows = certification.get("families") if isinstance(certification, Mapping) else {}
     if isinstance(families, Mapping):
@@ -212,12 +212,6 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
                     lines.append(f"- `{family}` : status=`{row.get('status')}` ; selection_eligible=`{row.get('selection_eligible')}` ; physical_freeze_allowed=`{row.get('physical_freeze_allowed')}` ; freeze_candidate=`{row.get('freeze_candidate_sha256')}`")
     else:
         lines.append("- Aucun résumé vNext allowlisté disponible.")
-    diagnostic = payload.get("lead_lag_causal_diagnostic")
-    lines.extend(["", "## Diagnostic causal Lead-Lag", ""])
-    if isinstance(diagnostic, Mapping):
-        lines.extend([f"- Cause racine : `{diagnostic.get('root_cause')}`", f"- Événements : `{diagnostic.get('event_count')}`", f"- Classes : `{json.dumps(diagnostic.get('classification_counts') or {}, sort_keys=True)}`", f"- Délai premier carnet p50/p95 : `{diagnostic.get('first_book_delay_p50_ms')}` / `{diagnostic.get('first_book_delay_p95_ms')}` ms", f"- Événements publics détaillés : `{len(diagnostic.get('events') or [])}` (bornés à {MAX_DIAGNOSTIC_EVENTS})"])
-    else:
-        lines.append("- Aucun diagnostic causal allowlisté disponible.")
     next_job = payload.get("next_recommended_job")
     lines.extend(["", "## Prochain run proposé par le cerveau", ""])
     if isinstance(next_job, Mapping):

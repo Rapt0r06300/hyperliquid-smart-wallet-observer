@@ -10,7 +10,7 @@ comptabilité différente. Ce module fixe le contrat unique, en composant sur le
 
 Il ajoute ce qui manquait, en pur, testable et honnête :
 
-§5  — `PaperIntent` : le contrat d'intention commun à toutes les voies (cross-venue, lead-lag, copy, TWAP).
+§5  — `PaperIntent` : le contrat d'intention commun, actuellement limité à CopyVault.
 §6.2 — `LiquidityConsumptionLedger` : une profondeur consommée par un fill paper ne peut pas être
        reconsommée par un second ordre avant refresh du carnet (`snapshot_version`).
 §6.3 — `remplir_partiellement` : taille > profondeur ⇒ on remplit l'exécutable, le reste est un résidu
@@ -19,7 +19,7 @@ Il ajoute ce qui manquait, en pur, testable et honnête :
 §6.5 — `carnet_fiable` : gap de séquence, stale, out-of-order, reconnect ⇒ entrée interdite.
 §7  — `runtime_truth` : par stratégie, producteur vivant ? dernier événement ? moteur/ledger prêts ?
 
-Le carry n'apparaît nulle part comme stratégie active : le scope est cross-venue + lead-lag + copy.
+CopyVault est la seule stratégie active; les autres familles restent visibles mais hors exécution.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from typing import Any, Mapping, Sequence
 
 from hl_observer.strategies.active_scope import (
     active_strategy_families as _active_strategy_families,
+    authoritative_strategy_scope as _authoritative_strategy_scope,
     strategy_scope_status as _strategy_scope_status,
     StrategyScopeStatus as _StrategyScopeStatus,
 )
@@ -40,7 +41,10 @@ SCHEMA_VERSION = "hypersmart.paper_canonique.v1"
 #: intent économique via paper_canonique — même si une liste locale réapparaissait ailleurs.
 STRATEGIES_ACTIVES: tuple[str, ...] = tuple(sorted(_active_strategy_families()))
 #: Familles legacy neutralisées : jamais de signal, PnL, capital ni influence scoreboard.
-STRATEGIES_LEGACY_OFF = ("carry", "funding", "triangular", "market_making")
+STRATEGIES_LEGACY_OFF = tuple(sorted(
+    entry.family for entry in _authoritative_strategy_scope()
+    if entry.family not in STRATEGIES_ACTIVES
+))
 
 
 class ScopeViolation(ValueError):

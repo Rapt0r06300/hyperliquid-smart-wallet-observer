@@ -17,6 +17,7 @@ from typing import Any
 
 from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
+from hl_observer.strategies.active_scope import require_active_strategy
 from hl_observer.simulation.economic_campaign_provenance import (
     dataset_provenance,
     find_oldest_parameter_freeze,
@@ -480,6 +481,7 @@ def build_lead_lag_campaign(
     datasets: Mapping[str, Any],
     require_daily: bool = False,
 ) -> dict[str, Any]:
+    require_active_strategy("lead_lag")
     row = _base(
         "lead_lag",
         freeze=freeze,
@@ -569,6 +571,7 @@ def build_cross_campaign(
     datasets: Mapping[str, Any],
     require_daily: bool = False,
 ) -> dict[str, Any]:
+    require_active_strategy("cross_venue_dislocation_v2")
     row = _base(
         "cross_venue_dislocation_v2",
         freeze=freeze,

@@ -18,6 +18,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hl_observer.strategies.active_scope import active_strategy_families, strategy_scope_payload
+
 REPORTS_RELATIVE_PATH = Path("runtime") / "reports" / "backtest_replay"
 DEFAULT_STAGE_TIMEOUT_SECONDS = 1_800
 HEARTBEAT_SECONDS = 10.0
@@ -32,6 +34,8 @@ class AnalysisStage:
     required_paths: tuple[Path, ...] = ()
     timeout_seconds: int = DEFAULT_STAGE_TIMEOUT_SECONDS
     optional: bool = False
+    family: str | None = None
+    stage_kind: str = "economic"
 
 
 @dataclass(frozen=True)
@@ -419,7 +423,48 @@ def build_stage_plan(
             )
         )
 
-    return tuple(plan)
+    # One official plan: neutral integrity stages plus the canonical CopyVault
+    # campaign. The legacy mixed stages remain implemented for reversibility,
+    # but cannot enter the executable plan while the scope is CopyVault-only.
+    neutral_keys = {"merge_replay", "replay_data_quality", "market_truth_replay"}
+    scoped = [
+        AnalysisStage(
+            stage.key,
+            stage.title,
+            stage.purpose,
+            stage.command,
+            required_paths=stage.required_paths,
+            timeout_seconds=stage.timeout_seconds,
+            optional=stage.optional,
+            family=None,
+            stage_kind="integrity",
+        )
+        for stage in plan
+        if stage.key in neutral_keys
+    ]
+    scoped.append(
+        AnalysisStage(
+            "copy_vault_vnext",
+            "CopyVault vNext causal train/OOS",
+            "Execute uniquement le pack causal CopyVault et ses controles d'integrite.",
+            (
+                py,
+                "-c",
+                (
+                    "from pathlib import Path; "
+                    "from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack; "
+                    f"run_economic_vnext_pack(Path({str(root)!r}))"
+                ),
+            ),
+            required_paths=(
+                root / "runtime" / "reports" / "economic_campaigns" / "raw" / "copy_vault.json",
+            ),
+            timeout_seconds=timeout_seconds,
+            family="copy_vault",
+            stage_kind="economic",
+        )
+    )
+    return tuple(scoped)
 
 
 def _analysis_environment(root: Path) -> dict[str, str]:
@@ -825,6 +870,9 @@ def write_reports(
         "local_data_only": True,
         "network_used": False,
         "real_execution": False,
+        "scope_mode": "COPY_VAULT_ONLY",
+        "active_strategy_families": sorted(active_strategy_families()),
+        "strategy_scope": strategy_scope_payload(),
         "started_at": started_at,
         "finished_at": finished_at,
         "inputs": inventory,
@@ -847,6 +895,7 @@ def write_reports(
         f"- Debut UTC : `{started_at}`",
         f"- Fin UTC : `{finished_at}`",
         f"- Mode : `{mode}`",
+        "- Portee strategique : `COPY_VAULT_ONLY`",
         "- Sources : donnees locales existantes uniquement",
         "- Reseau : non utilise",
         "- Execution reelle : impossible",

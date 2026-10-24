@@ -8,12 +8,13 @@ import math
 from typing import Any, Iterable, Mapping
 
 from hl_observer.strategies.active_scope import (
+    active_strategy_families,
     canonical_strategy_family,
     strategy_can_materialize,
 )
 from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
 
-MODULES = ("copy_vault", "lead_lag", "cross_venue_dislocation")
+MODULES = tuple(sorted(active_strategy_families()))
 
 
 @dataclass(frozen=True)

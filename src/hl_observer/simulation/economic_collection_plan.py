@@ -1,4 +1,4 @@
-"""Truthful, resumable collection plan for the three economic campaigns.
+"""Truthful, resumable collection plan for active economic campaigns.
 
 The plan is deliberately diagnostic.  It never creates observations or turns
 an unmeasured/negative campaign into a success.  Its purpose is to distinguish
@@ -696,7 +696,7 @@ def build_collection_plan(
             "tools\\run_economic_objective_campaigns.py"
         ),
         "promotion_rule": (
-            f"all three families must independently have >= +{TARGET_NET_USD_PER_DAY:g} USD reconciled net, positive "
+            f"every active family must independently have >= +{TARGET_NET_USD_PER_DAY:g} USD reconciled net, positive "
             "purged OOS, positive true post-freeze forward, liquidatable evidence and placebo beaten"
         ),
     }

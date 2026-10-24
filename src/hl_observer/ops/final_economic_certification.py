@@ -18,6 +18,7 @@ from hl_observer.simulation.economic_proof_identity import (
     proof_events,
 )
 from hl_observer.simulation.vnext_promotion_protocol import validate_certification_entry
+from hl_observer.strategies.active_scope import strategy_can_materialize
 
 SCHEMA = "hypersmart.final_economic_certification.v2"
 CAMPAIGN_DIR = Path("runtime") / "reports" / "economic_campaigns"
@@ -107,6 +108,22 @@ def _append_reason(row: dict[str, Any], reason: str) -> None:
 
 def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) -> dict[str, Any]:
     expected = canonical_family(expected_family)
+    if not strategy_can_materialize(expected):
+        return {
+            "family": expected,
+            "status": "NO_GO",
+            "certified": False,
+            "eligible_net_pnl_usd": None,
+            "proof_net_pnl_usd": None,
+            "liquidatable_net": False,
+            "oos_positive": False,
+            "forward_positive": False,
+            "forward_post_freeze": False,
+            "placebo_beaten": False,
+            "costs_complete": False,
+            "proof_provenance": None,
+            "reasons": ["DISABLED_BY_SCOPE"],
+        }
     if payload is None:
         return {
             "family": expected,

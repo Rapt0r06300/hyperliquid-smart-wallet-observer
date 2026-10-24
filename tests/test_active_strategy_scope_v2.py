@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from hl_observer.realtime.multi_source_price_stream import PriceEvent
 from hl_observer.strategies.active_scope import (
     StrategyScopeStatus,
     active_strategy_families,
     authoritative_strategy_scope,
+    require_active_strategy,
     strategy_can_materialize,
     strategy_scope_payload,
     strategy_scope_status,
@@ -45,10 +48,8 @@ def _funding_input() -> FusionRuntimeInput:
     )
 
 
-def test_v2_scope_has_exactly_three_economic_families() -> None:
-    assert active_strategy_families() == frozenset(
-        {"cross_venue_dislocation", "lead_lag", "copy_vault"}
-    )
+def test_scope_has_exactly_one_copy_vault_economic_family() -> None:
+    assert active_strategy_families() == frozenset({"copy_vault"})
     entries = authoritative_strategy_scope()
     assert len(entries) == len({entry.family for entry in entries})
     assert all(
@@ -59,12 +60,32 @@ def test_v2_scope_has_exactly_three_economic_families() -> None:
 
 
 def test_scope_is_deny_by_default_and_has_no_environment_override(monkeypatch) -> None:
-    monkeypatch.setenv("HYPERSMART_ACTIVE_STRATEGIES", "funding_carry,market_making")
+    monkeypatch.setenv(
+        "HYPERSMART_ACTIVE_STRATEGIES",
+        "lead_lag,cross_venue_dislocation,funding_carry,market_making",
+    )
+    assert strategy_can_materialize("copy_vault") is True
+    assert strategy_can_materialize("lead_lag") is False
+    assert strategy_can_materialize("cross_venue_dislocation") is False
+    assert strategy_can_materialize("cross_venue_dislocation_v2") is False
     assert strategy_can_materialize("funding_carry") is False
     assert strategy_can_materialize("market_making") is False
     assert strategy_can_materialize("unknown_family") is False
     assert strategy_scope_status("unknown_family") is StrategyScopeStatus.DISABLED
     assert strategy_scope_payload()["environment_override_allowed"] is False
+
+
+def test_paused_family_aliases_fail_closed_at_direct_simulation_boundary() -> None:
+    assert require_active_strategy("copy_vault") == "copy_vault"
+    for family in (
+        "lead_lag",
+        "cross_venue_dislocation",
+        "cross_venue_dislocation_v2",
+        "arbitrage",
+        "unknown_family",
+    ):
+        with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+            require_active_strategy(family)
 
 
 def test_official_runtime_blocks_funding_even_when_legacy_flag_is_forced(monkeypatch) -> None:
@@ -92,11 +113,7 @@ def test_official_runtime_never_runs_external_profile_bus(monkeypatch) -> None:
 def test_runtime_payload_exposes_authoritative_scope() -> None:
     payload = run_fusion_strategy_runtime(_funding_input()).as_dict()["strategy_scope"]
     assert payload["scope_version"] == "V2-20260729"
-    assert payload["active_families"] == [
-        "copy_vault",
-        "cross_venue_dislocation",
-        "lead_lag",
-    ]
+    assert payload["active_families"] == ["copy_vault"]
 
 
 def test_official_launchers_do_not_reenable_funding_economics() -> None:

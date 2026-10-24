@@ -19,6 +19,7 @@ from hl_observer.backtesting.cross_venue_certified import (
     FOUR_FILL_CONTRACT_VERSION,
     SOURCE_MODE as CROSS_CERTIFIED_SOURCE_MODE,
 )
+from hl_observer.strategies.active_scope import strategy_can_materialize
 
 TARGET_NET_USD = 5.0
 TARGET_NET_USD_PER_DAY = 5.0
@@ -32,7 +33,7 @@ EVIDENCE_LEVEL_THRESHOLDS = (
     ("EARLY_EVIDENCE", 2, 10),
 )
 COPY_HELDOUT_MIN_N = 20
-CANONICAL_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+CANONICAL_FAMILIES = ("copy_vault",)
 _ALIASES = {
     "copy-vault": "copy_vault", "copy_vault": "copy_vault",
     "lead-lag": "lead_lag", "lead_lag": "lead_lag",
@@ -322,8 +323,8 @@ def _validate_copy_checkpoint_integrity(
 def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = TARGET_NET_USD) -> dict[str, Any]:
     issues: list[str] = []
     family = canonical_family(evidence.get("family"))
-    if family not in CANONICAL_FAMILIES:
-        issues.append("NON_CANONICAL_OR_INACTIVE_FAMILY")
+    if family not in CANONICAL_FAMILIES or not strategy_can_materialize(family):
+        issues.extend(("DISABLED_BY_SCOPE", "NON_CANONICAL_OR_INACTIVE_FAMILY"))
     if evidence.get("paper_read_only") is not True or evidence.get("real_execution") is not False:
         issues.append("NOT_PAPER_READ_ONLY")
     capital = _number(evidence.get("starting_capital_usd"))

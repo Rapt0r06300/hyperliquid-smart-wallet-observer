@@ -128,15 +128,22 @@ def test_canonical_capital_contract_is_200_usd_and_five_usd_per_day():
     assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 5.0
     assert PaperLedger().starting_balance_usdc == STARTING_CAPITAL_USD
 
-    for family in ("copy_vault", "lead_lag", "cross_venue_dislocation_v2"):
-        accepted = evaluate_objective(
-            _proof(family=family, starting_capital_usd=STARTING_CAPITAL_USD)
-        )
-        rejected = evaluate_objective(
-            _proof(family=family, starting_capital_usd=1000.0)
-        )
-        assert "INVALID_STARTING_CAPITAL" not in accepted["objective_reasons"]
-        assert "INVALID_STARTING_CAPITAL" in rejected["objective_reasons"]
+    accepted = evaluate_objective(
+        _proof(family="copy_vault", starting_capital_usd=STARTING_CAPITAL_USD)
+    )
+    rejected = evaluate_objective(
+        _proof(family="copy_vault", starting_capital_usd=1000.0)
+    )
+    assert "INVALID_STARTING_CAPITAL" not in accepted["objective_reasons"]
+    assert "INVALID_STARTING_CAPITAL" in rejected["objective_reasons"]
+
+
+def test_paused_families_cannot_receive_simulation_objective_proof():
+    for family in ("lead_lag", "cross_venue_dislocation_v2", "arbitrage"):
+        result = evaluate_objective(_proof(family=family))
+        assert result["objective_status"] == "NON_ATTEINT"
+        assert "DISABLED_BY_SCOPE" in result["objective_reasons"]
+        assert result["eligible_net_pnl_usd"] is None
 
 
 def test_arbitrage_alias_ne_cree_pas_une_quatrieme_famille():

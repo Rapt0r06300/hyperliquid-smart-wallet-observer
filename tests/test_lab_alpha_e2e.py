@@ -1,5 +1,5 @@
-"""[LAB α] E2E : « double-clic » jusqu'au rapport. Découverte auto → feed_adapter → chemin unique (Copy-Vault +
-cross-venue 2 jambes + Lead-Lag + netting + risk) → IS/OOS/FORWARD → rapport ; reprise après interruption ;
+"""[LAB α] E2E : « double-clic » jusqu'au rapport. Découverte auto → feed_adapter → chemin CopyVault-only
+→ netting + risk → IS/OOS/FORWARD → rapport ; reprise après interruption ;
 ledger réconcilié ; paper strict (0 ordre réel). Données de fixture SYNTHETIQUE (exclues du verdict économique)."""
 
 import json
@@ -49,13 +49,16 @@ def test_lab_e2e_double_clic_jusqu_au_rapport(tmp_path):
     assert "LABORATOIRE ALPHA" in res["tableau"] and Path(res["journal"]).exists()
 
 
-def test_lab_e2e_cross_venue_deux_jambes_et_lead_lag(tmp_path):
+def test_lab_e2e_excludes_paused_families_from_execution(tmp_path):
     _ecrire_donnees(tmp_path)
     res = lancer_lab(racine=tmp_path, source="SYNTHETIQUE", budget=6, horodatage="H")
-    assert res["lead_lag"]["score"] != "UNMEASURABLE"           # lead-lag mesuré sur la séquence
+    assert res["scope_mode"] == "COPY_VAULT_ONLY"
+    assert res["active_strategy_families"] == ["copy_vault"]
     par_nom = {b["brique"]: b["statut"] for b in res["audit"]["bricks"]}
-    assert par_nom["Cross-Venue"] == "CABLE ET UTILISE"
-    assert any(c.get("cross_venue", 0) for c in res["recherche"]["candidats"])   # 2 jambes exécutées
+    assert "Cross-Venue" not in par_nom
+    assert "Lead-Lag" not in par_nom
+    assert all(c.get("cross_venue", 0) == 0 for c in res["recherche"]["candidats"])
+    assert "lead_lag" not in res
 
 
 def test_lab_e2e_reprise_et_paper_strict(tmp_path):

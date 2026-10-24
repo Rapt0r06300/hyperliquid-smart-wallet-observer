@@ -1,6 +1,6 @@
 # AGENTS.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-09-28**.
+Dernière mise à jour : **2026-10-23**.
 
 Contrat compact pour tout agent intervenant dans ce dépôt. Les exigences détaillées ne sont pas dupliquées ici : elles vivent dans les documents d’autorité ci-dessous.
 
@@ -36,15 +36,11 @@ Pour Work/GitHub : cloud et GitHub-hosted uniquement. Aucun self-hosted runner, 
 
 ## Scope économique
 
-Familles actives :
+Famille active unique : **Copy-Vault**.
 
-- Copy-Vault
-- Lead-Lag
-- Cross-Venue Dislocation
+Lead-Lag, Cross-Venue Dislocation, arbitrage, Carry/Funding Carry, shadow/research-only et toute famille économique non attribuée : **DISABLED_BY_SCOPE**. Ce verrou couvre simulation UI/moteur principal, labo, replays/backtests, OOS/forward, preuve PnL, certification et scoreboard. Conserver leur code et leurs preuves historiques sans les exécuter ni les promouvoir; aucune variable d'environnement ne peut élargir le scope.
 
-Carry/Funding Carry : **DISABLED_BY_SCOPE**.
-
-Cible de recherche : au moins +5 USD net/jour pour chaque famille, indépendamment, avec 200 USD de capital paper. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé ; aucune compensation entre familles.
+Cible de recherche : au moins +5 USD net/jour pour Copy-Vault, avec 200 USD de capital paper. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
 
 ## Control plane et données
 
