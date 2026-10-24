@@ -138,6 +138,22 @@ Cette matérialisation est complète uniquement si le nombre de shards et les
 octets compressés sont exactement égaux au plan SAFE lié au catalogue. Elle
 n'écrit jamais un membre PARTIAL ou REJECT dans `usable/`.
 
+AlinaSync conserve ses validations par shard dans
+`runtime/recovery/full/SAFE_SHARDS.sqlite3`. Chaque entrée est liée à
+l'identité catalogue, au chemin, à la taille, au SHA-256 et à l'empreinte du
+fichier local. Une reprise peut ainsi ignorer la relecture SHA-256 d'un fichier
+strictement inchangé ; un fichier déplacé, remplacé ou modifié est revalidé.
+Les consommateurs doivent lire la vue `current_safe_shards`, jamais la table
+de cache brute. Cette vue n'expose des shards replayables/backtestables qu'après
+une passe autoritative complète. Pendant une reprise, après une interruption ou
+après un échec, elle reste fermée même si les validations déjà acquises sont
+conservées pour accélérer l'essai suivant.
+
+Les boutons de publication Git utilisent `GIT_LFS_SKIP_SMUDGE=1` et excluent
+les répertoires de données/runtime : ils synchronisent le code et les refs,
+mais n'hydratent aucun shard. Le seul chemin normal de téléchargement du corpus
+SAFE reste `ALINA_SYNC_COMPLETE.cmd`.
+
 `--recover-verifiable` permet de sauver toutes les pièces de source
 vérifiables même lorsqu'une ancienne archive est `starter`, sans empreinte
 ou définitivement inaccessible ; ces défauts restent dans

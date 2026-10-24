@@ -18,11 +18,13 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -987,6 +989,291 @@ def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
     )
 
 
+class _SafeShardRegistry:
+    """Durable AlinaSync-owned cache of byte-verified replay-ready shards."""
+
+    SCHEMA_VERSION = 2
+    WRITE_BATCH_SIZE = 1_000
+    UPSERT_SQL = """
+        INSERT INTO safe_shards (
+            dataset_id, release_tag, relative_path, bytes, sha256,
+            stat_dev, stat_ino, stat_mtime_ns, stat_ctime_ns,
+            catalog_sha256, validation_owner, quality_status,
+            replayable, backtestable, catalog_active, verified_at_ns
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ALINA_SYNC', 'SAFE', 1, 1, 1, ?)
+        ON CONFLICT(dataset_id, release_tag) DO UPDATE SET
+            relative_path=excluded.relative_path,
+            bytes=excluded.bytes,
+            sha256=excluded.sha256,
+            stat_dev=excluded.stat_dev,
+            stat_ino=excluded.stat_ino,
+            stat_mtime_ns=excluded.stat_mtime_ns,
+            stat_ctime_ns=excluded.stat_ctime_ns,
+            catalog_sha256=excluded.catalog_sha256,
+            validation_owner='ALINA_SYNC',
+            quality_status='SAFE',
+            replayable=1,
+            backtestable=1,
+            catalog_active=1,
+            verified_at_ns=excluded.verified_at_ns
+    """
+
+    def __init__(self, destination: Path) -> None:
+        self.destination = Path(destination)
+        self.path = self.destination / "SAFE_SHARDS.sqlite3"
+        if self.path.is_symlink():
+            raise RestoreError("symlinked SAFE shard database")
+        self.destination.mkdir(parents=True, exist_ok=True)
+        try:
+            self.connection = sqlite3.connect(
+                self.path, timeout=60.0, check_same_thread=False,
+            )
+            self.connection.execute("PRAGMA journal_mode=WAL")
+            self.connection.execute("PRAGMA synchronous=FULL")
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS safe_shards (
+                    dataset_id TEXT NOT NULL,
+                    release_tag TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    stat_dev INTEGER NOT NULL,
+                    stat_ino INTEGER NOT NULL,
+                    stat_mtime_ns INTEGER NOT NULL,
+                    stat_ctime_ns INTEGER NOT NULL,
+                    catalog_sha256 TEXT NOT NULL,
+                    validation_owner TEXT NOT NULL,
+                    quality_status TEXT NOT NULL,
+                    replayable INTEGER NOT NULL,
+                    backtestable INTEGER NOT NULL,
+                    catalog_active INTEGER NOT NULL,
+                    verified_at_ns INTEGER NOT NULL,
+                    PRIMARY KEY (dataset_id, release_tag)
+                )
+                """
+            )
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS safe_shards_active_idx "
+                "ON safe_shards(catalog_active, quality_status, replayable, backtestable)"
+            )
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS safe_shard_registry_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            # Consumers must use this view, not the raw validation cache. A
+            # crash or incomplete authoritative pass leaves run_status at
+            # IN_PROGRESS, so stale rows cannot be advertised as currently
+            # replayable/backtestable. Their prior validation remains cached
+            # to make a later resume fast.
+            self.connection.execute(
+                """
+                CREATE VIEW IF NOT EXISTS current_safe_shards AS
+                SELECT shards.*
+                  FROM safe_shards AS shards
+                  JOIN safe_shard_registry_meta AS run_status
+                    ON run_status.key = 'run_status'
+                   AND run_status.value = 'COMPLETE'
+                  JOIN safe_shard_registry_meta AS active_catalog
+                    ON active_catalog.key = 'active_catalog_sha256'
+                   AND active_catalog.value = shards.catalog_sha256
+                 WHERE shards.catalog_active = 1
+                   AND shards.validation_owner = 'ALINA_SYNC'
+                   AND shards.quality_status = 'SAFE'
+                   AND shards.replayable = 1
+                   AND shards.backtestable = 1
+                """
+            )
+            self.connection.execute(
+                "PRAGMA user_version = " + str(self.SCHEMA_VERSION)
+            )
+            self.connection.commit()
+        except sqlite3.Error as exc:
+            raise RestoreError(f"cannot open SAFE shard database: {exc}") from exc
+        self.finalized = False
+        self._owner_thread = threading.get_ident()
+        self._thread_state = threading.local()
+        self._reader_connections: list[sqlite3.Connection] = []
+        self._reader_connections_lock = threading.Lock()
+        self._pending_writes: list[tuple[object, ...]] = []
+
+    def begin_authoritative(self, catalog_sha256: str) -> None:
+        """Hide the canonical SAFE view until this full pass succeeds."""
+        try:
+            self.connection.executemany(
+                """
+                INSERT INTO safe_shard_registry_meta(key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (
+                    ("run_status", "IN_PROGRESS"),
+                    ("target_catalog_sha256", catalog_sha256),
+                    ("run_started_at_ns", str(time.time_ns())),
+                ),
+            )
+            self.connection.commit()
+        except sqlite3.Error as exc:
+            self.connection.rollback()
+            raise RestoreError(
+                f"cannot start SAFE shard database validation: {exc}"
+            ) from exc
+
+    def _reader(self) -> sqlite3.Connection:
+        if threading.get_ident() == self._owner_thread:
+            return self.connection
+        connection = getattr(self._thread_state, "connection", None)
+        if connection is None:
+            connection = sqlite3.connect(
+                self.path, timeout=60.0, check_same_thread=False,
+            )
+            connection.execute("PRAGMA query_only=ON")
+            self._thread_state.connection = connection
+            with self._reader_connections_lock:
+                self._reader_connections.append(connection)
+        return connection
+
+    def _relative(self, display_path: Path) -> str:
+        try:
+            return display_path.relative_to(self.destination).as_posix()
+        except ValueError as exc:
+            raise RestoreError("SAFE shard path escapes restore destination") from exc
+
+    @staticmethod
+    def _stat_identity(path: Path) -> tuple[int, int, int, int, int] | None:
+        try:
+            if path.is_symlink() or not path.is_file():
+                return None
+            value = path.stat()
+        except OSError:
+            return None
+        return (
+            int(value.st_size), int(value.st_dev), int(value.st_ino),
+            int(value.st_mtime_ns), int(value.st_ctime_ns),
+        )
+
+    def reusable(
+        self, display_path: Path, io_path: Path, row: Mapping[str, Any],
+        catalog_sha256: str,
+    ) -> tuple[bool, bool]:
+        identity = self._stat_identity(io_path)
+        if identity is None:
+            return False, False
+        expected_size = row.get("bytes")
+        expected_sha = str(row.get("sha256") or "").lower()
+        if identity[0] != expected_size:
+            return False, False
+        try:
+            stored = self._reader().execute(
+                """
+                SELECT relative_path, bytes, sha256, stat_dev, stat_ino,
+                       stat_mtime_ns, stat_ctime_ns, validation_owner,
+                       quality_status, replayable, backtestable, catalog_sha256
+                  FROM safe_shards
+                 WHERE dataset_id = ? AND release_tag = ?
+                """,
+                (
+                    str(row.get("dataset_id") or ""),
+                    str(row.get("release_tag") or ""),
+                ),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise RestoreError(f"cannot read SAFE shard database: {exc}") from exc
+        if stored is None:
+            return False, False
+        matches = stored[:-1] == (
+            self._relative(display_path), expected_size, expected_sha,
+            identity[1], identity[2], identity[3], identity[4],
+            "ALINA_SYNC", "SAFE", 1, 1,
+        )
+        return matches, bool(matches and stored[-1] != catalog_sha256)
+
+    def seal(
+        self, display_path: Path, io_path: Path, row: Mapping[str, Any],
+        catalog_sha256: str,
+    ) -> None:
+        if (
+            row.get("quality_status", "SAFE") != "SAFE"
+            or row.get("replay_compatible", True) is not True
+            or row.get("validation_allowed", True) is False
+            or row.get("asset_verified", True) is False
+        ):
+            raise RestoreError("cannot register a non replay-ready SAFE shard")
+        identity = self._stat_identity(io_path)
+        if identity is None or identity[0] != row.get("bytes"):
+            raise RestoreError("cannot register missing SAFE shard bytes")
+        now_ns = time.time_ns()
+        self._pending_writes.append((
+            str(row.get("dataset_id") or ""),
+            str(row.get("release_tag") or ""),
+            self._relative(display_path), identity[0],
+            str(row.get("sha256") or "").lower(),
+            identity[1], identity[2], identity[3], identity[4],
+            catalog_sha256, now_ns,
+        ))
+        if len(self._pending_writes) >= self.WRITE_BATCH_SIZE:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self._pending_writes:
+            return
+        try:
+            self.connection.executemany(self.UPSERT_SQL, self._pending_writes)
+        except sqlite3.Error as exc:
+            raise RestoreError(f"cannot update SAFE shard database: {exc}") from exc
+        self._pending_writes.clear()
+
+    def finalize(self, catalog_sha256: str) -> None:
+        try:
+            self._flush()
+            self.connection.execute(
+                "UPDATE safe_shards SET catalog_active = "
+                "CASE WHEN catalog_sha256 = ? THEN 1 ELSE 0 END",
+                (catalog_sha256,),
+            )
+            self.connection.executemany(
+                """
+                INSERT INTO safe_shard_registry_meta(key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (
+                    ("active_catalog_sha256", catalog_sha256),
+                    ("target_catalog_sha256", catalog_sha256),
+                    ("run_status", "COMPLETE"),
+                    ("run_completed_at_ns", str(time.time_ns())),
+                ),
+            )
+            self.connection.commit()
+        except sqlite3.Error as exc:
+            self.connection.rollback()
+            raise RestoreError(f"cannot finalize SAFE shard database: {exc}") from exc
+        self.finalized = True
+
+    def commit_cache(self) -> None:
+        """Persist proven rows without certifying a complete catalog pass."""
+        try:
+            self._flush()
+            self.connection.commit()
+        except sqlite3.Error as exc:
+            self.connection.rollback()
+            raise RestoreError(f"cannot update SAFE shard database: {exc}") from exc
+        self.finalized = True
+
+    def close(self) -> None:
+        if not self.finalized:
+            self.connection.rollback()
+            self._pending_writes.clear()
+        with self._reader_connections_lock:
+            readers = tuple(self._reader_connections)
+            self._reader_connections.clear()
+        for reader in readers:
+            reader.close()
+        self.connection.close()
+
+
 ANALYSIS_WORKING_SET_CLASSES = {
     "replay": "replays",
     "backtest": "backtests",
@@ -1576,6 +1863,8 @@ def _staged_materialized_asset_ok(
     tag: str,
     asset: Mapping[str, Any],
     rows: list[Mapping[str, Any]],
+    *, registry: _SafeShardRegistry | None = None,
+    catalog_sha256: str | None = None,
 ) -> bool:
     if not rows:
         return False
@@ -1603,10 +1892,17 @@ def _staged_materialized_asset_ok(
         or receipt.get("rows") != expected_rows
     ):
         return False
-    return all(
-        _verified_row_bytes(_materialized_row_target(destination, row), row)
-        for row in rows
-    )
+    def verified(row: Mapping[str, Any]) -> bool:
+        target = _materialized_row_target(destination, row)
+        if registry is not None and catalog_sha256 is not None:
+            reusable, _needs_update = registry.reusable(
+                target, _windows_io_path(target), row, catalog_sha256,
+            )
+            if reusable:
+                return True
+        return _verified_row_bytes(target, row)
+
+    return all(verified(row) for row in rows)
 
 
 def _verify_staged_materialized_assets(
@@ -1614,6 +1910,7 @@ def _verify_staged_materialized_assets(
     repository: str,
     releases: list[Mapping[str, Any]],
     rows_by_asset: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+    *, catalog_sha256: str | None = None,
 ) -> dict[tuple[str, str], bool]:
     """Verify resumable staged receipts concurrently and exactly once."""
     candidates: list[
@@ -1641,6 +1938,19 @@ def _verify_staged_materialized_assets(
         file=sys.stderr, flush=True,
     )
 
+    selected_rows = [row for rows in rows_by_asset.values() for row in rows]
+    if catalog_sha256 is None:
+        catalog_sha256 = hashlib.sha256(json.dumps([
+            {
+                "dataset_id": str(row.get("dataset_id") or ""),
+                "release_tag": str(row.get("release_tag") or ""),
+                "bytes": row.get("bytes"),
+                "sha256": str(row.get("sha256") or "").lower(),
+            }
+            for row in selected_rows
+        ], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    registry = _SafeShardRegistry(destination)
+
     def verify(
         candidate: tuple[
             tuple[str, str], Mapping[str, Any], list[Mapping[str, Any]]
@@ -1649,19 +1959,23 @@ def _verify_staged_materialized_assets(
         key, asset, rows = candidate
         return key, _staged_materialized_asset_ok(
             destination, repository, key[0], asset, rows,
+            registry=registry, catalog_sha256=catalog_sha256,
         )
 
     verified: dict[tuple[str, str], bool] = {}
-    for checked, (key, valid) in enumerate(_bounded_parallel_map(
-        verify, candidates, max_workers=VERIFY_WORKERS,
-    ), 1):
-        verified[key] = valid
-        if checked == 1 or checked % 500 == 0 or checked == len(candidates):
-            print(
-                f"ALINA_RESTORE_PROGRESS=STAGED_MATERIALIZED_ASSETS "
-                f"{checked}/{len(candidates)}",
-                file=sys.stderr, flush=True,
-            )
+    try:
+        for checked, (key, valid) in enumerate(_bounded_parallel_map(
+            verify, candidates, max_workers=VERIFY_WORKERS,
+        ), 1):
+            verified[key] = valid
+            if checked == 1 or checked % 500 == 0 or checked == len(candidates):
+                print(
+                    f"ALINA_RESTORE_PROGRESS=STAGED_MATERIALIZED_ASSETS "
+                    f"{checked}/{len(candidates)}",
+                    file=sys.stderr, flush=True,
+                )
+    finally:
+        registry.close()
     return verified
 
 
@@ -1706,8 +2020,24 @@ def _write_staged_asset_receipt(
 
 def _materialize_catalog_safe_shards(
     rows: list[Mapping[str, Any]], releases_root: Path, destination: Path,
-    *, prune_stale: bool = True,
+    *, prune_stale: bool = True, catalog_sha256: str | None = None,
+    authoritative_registry: bool = True,
 ) -> dict[str, Any]:
+    if catalog_sha256 is None:
+        catalog_sha256 = hashlib.sha256(json.dumps([
+            {
+                "dataset_id": str(row.get("dataset_id") or ""),
+                "release_tag": str(row.get("release_tag") or ""),
+                "bytes": row.get("bytes"),
+                "sha256": str(row.get("sha256") or "").lower(),
+            }
+            for row in rows
+        ], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if re.fullmatch(r"[0-9a-f]{64}", catalog_sha256) is None:
+        raise RestoreError("invalid catalog SHA-256 for SAFE shard database")
+    registry = _SafeShardRegistry(destination)
+    if authoritative_registry:
+        registry.begin_authoritative(catalog_sha256)
     expected_usable_shards = len(rows)
     expected_usable_bytes = sum(int(row["bytes"]) for row in rows)
     report: dict[str, Any] = {
@@ -1718,6 +2048,8 @@ def _materialize_catalog_safe_shards(
         "quarantined_bytes": 0, "excluded_rows": 0,
         "missing_or_corrupt_rows": 0, "verified_zip_members": 0,
         "skipped_verified_shards": 0, "stale_usable_quarantined": 0,
+        "registry_reused_shards": 0, "registry_recorded_shards": 0,
+        "safe_shard_database": str(registry.path),
         "stale_usable_quarantined_bytes": 0,
         "ignored_stale_release_manifests": 0, "failures": [],
     }
@@ -1725,7 +2057,7 @@ def _materialize_catalog_safe_shards(
     prepared_target_roots: set[Path] = set()
 
     def candidates() -> Iterator[
-        tuple[Mapping[str, Any], str, str, Path, Path]
+        tuple[Mapping[str, Any], str, str, Path, Path, Path]
     ]:
         for row in rows:
             dataset_id = str(row["dataset_id"])
@@ -1763,15 +2095,23 @@ def _materialize_catalog_safe_shards(
                 })
                 continue
             expected.add(display_target)
-            yield row, dataset_id, member, source, target
+            yield row, dataset_id, member, source, display_target, target
 
     def verify_candidate(
-        candidate: tuple[Mapping[str, Any], str, str, Path, Path],
-    ) -> tuple[Mapping[str, Any], str, str, Path, Path, bool]:
-        row, dataset_id, member, source, target = candidate
+        candidate: tuple[
+            Mapping[str, Any], str, str, Path, Path, Path,
+        ],
+    ) -> tuple[
+        Mapping[str, Any], str, str, Path, Path, Path, bool, bool, bool,
+    ]:
+        row, dataset_id, member, source, display_target, target = candidate
+        registry_reused, registry_needs_update = registry.reusable(
+            display_target, target, row, catalog_sha256,
+        )
         return (
-            row, dataset_id, member, source, target,
-            _verified_row_bytes(target, row),
+            row, dataset_id, member, source, display_target, target,
+            registry_reused or _verified_row_bytes(target, row),
+            registry_reused, registry_needs_update,
         )
 
     print(
@@ -1783,7 +2123,10 @@ def _materialize_catalog_safe_shards(
         verify_candidate, candidates(), max_workers=VERIFY_WORKERS,
     )
     for checked, candidate in enumerate(verified_candidates, 1):
-        row, dataset_id, member, source, target, already_verified = candidate
+        (
+            row, dataset_id, member, source, display_target, target,
+            already_verified, registry_reused, registry_needs_update,
+        ) = candidate
         if checked == 1 or checked % 10_000 == 0 or checked == len(rows):
             print(
                 f"ALINA_RESTORE_PROGRESS=MATERIALIZED_SAFE_SHARDS "
@@ -1791,9 +2134,20 @@ def _materialize_catalog_safe_shards(
                 file=sys.stderr, flush=True,
             )
         if already_verified:
+            if registry_needs_update:
+                registry.seal(
+                    display_target, target, row, catalog_sha256,
+                )
+                report["registry_recorded_shards"] += 1
             report["usable_shards"] += 1
             report["usable_bytes"] += int(row["bytes"])
             report["skipped_verified_shards"] += 1
+            report["registry_reused_shards"] += int(registry_reused)
+            if not registry_reused:
+                registry.seal(
+                    display_target, target, row, catalog_sha256,
+                )
+                report["registry_recorded_shards"] += 1
             continue
         tmp = target.with_suffix(target.suffix + ".partial")
         if any(path.is_symlink() for path in (
@@ -1830,6 +2184,10 @@ def _materialize_catalog_safe_shards(
             if not _verified_row_bytes(tmp, row):
                 raise RestoreError("shard size/SHA-256 mismatch")
             tmp.replace(target)
+            registry.seal(
+                display_target, target, row, catalog_sha256,
+            )
+            report["registry_recorded_shards"] += 1
             report["usable_shards"] += 1
             report["usable_bytes"] += int(row["bytes"])
         except (OSError, KeyError, zipfile.BadZipFile, RestoreError) as exc:
@@ -1842,6 +2200,8 @@ def _materialize_catalog_safe_shards(
         report["failures"].append({
             "path": str(usable_root), "error": "SYMLINKED_USABLE_SHARD_ROOT",
         })
+        registry.commit_cache()
+        registry.close()
         return report
     if prune_stale and io_usable_root.is_dir():
         for previous in sorted(io_usable_root.glob("*/*.jsonl.gz")):
@@ -1889,6 +2249,16 @@ def _materialize_catalog_safe_shards(
         and report["missing_or_corrupt_rows"] == 0
         and not report["failures"]
     )
+    if report["materialization_complete"]:
+        if authoritative_registry:
+            registry.finalize(catalog_sha256)
+        else:
+            registry.commit_cache()
+    else:
+        # Keep successful per-shard validations as an exact stat/SHA-bound
+        # resume cache, while the canonical view remains fail-closed.
+        registry.commit_cache()
+    registry.close()
     return report
 
 
@@ -3032,9 +3402,24 @@ def restore_everything(
             f"free={free_destination}"
         )
 
+    if profile == "replay-ready":
+        # From the first byte-changing stage onward, the canonical DB view must
+        # not keep advertising the preceding catalog as current. Exact prior
+        # validations remain in the raw cache and can still accelerate resume.
+        run_registry = _SafeShardRegistry(destination)
+        try:
+            run_registry.begin_authoritative(str(
+                (catalog_verification or {}).get("source_index_sha256") or ""
+            ))
+        finally:
+            run_registry.close()
+
     staged_materialized_assets = (
         _verify_staged_materialized_assets(
             destination, repository, releases, raw_rows_by_asset,
+            catalog_sha256=str(
+                (catalog_verification or {}).get("source_index_sha256") or ""
+            ),
         )
         if profile == "replay-ready"
         else {}
@@ -3180,6 +3565,12 @@ def restore_everything(
                         staged_classification = _materialize_catalog_safe_shards(
                             raw_rows, staging_releases_root, destination,
                             prune_stale=False,
+                            authoritative_registry=False,
+                            catalog_sha256=str(
+                                (catalog_verification or {}).get(
+                                    "source_index_sha256"
+                                ) or ""
+                            ),
                         )
                         if staged_classification["failures"]:
                             raise RestoreError(
@@ -3266,7 +3657,12 @@ def restore_everything(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
     report["classification"] = (
-        _materialize_catalog_safe_shards(replay_rows, releases_root, destination)
+        _materialize_catalog_safe_shards(
+            replay_rows, releases_root, destination,
+            catalog_sha256=str(
+                (catalog_verification or {}).get("source_index_sha256") or ""
+            ),
+        )
         if profile == "replay-ready"
         else _materialize_classified_shards(
             repository, releases_root, destination, catalog_safe=catalog_safe,

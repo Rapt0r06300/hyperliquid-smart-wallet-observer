@@ -1,8 +1,8 @@
 """Offline proof of canonical-main update + published-byte recovery entrypoints."""
 from __future__ import annotations
 
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -294,6 +294,9 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
             "usable_bytes": 0,
             "materialization_complete": True,
             "failures": [],
+            "safe_shard_database": str(report_dir / "SAFE_SHARDS.sqlite3"),
+            "registry_reused_shards": 7,
+            "registry_recorded_shards": 3,
         },
     }), encoding="utf-8")
     def fresh_restore(*_a, **_k):
@@ -310,6 +313,11 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     assert result["restore_report"] == "RESTORE_REPORT.json"
     assert result["source_inventory_sha256"] == "c" * 64
     assert result["catalog_index_sha256"] == catalog_sha
+    assert result["safe_shard_database"] == "SAFE_SHARDS.sqlite3"
+    assert result["safe_replayable_shards"] == 0
+    assert result["safe_backtestable_shards"] == 0
+    assert result["registry_reused_shards"] == 7
+    assert result["registry_recorded_shards"] == 3
 
 
 def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path):
@@ -339,6 +347,26 @@ def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path
 
     assert status == "RESTORE_INCOMPLETE"
     assert error == "restore report has no exact SAFE materialization parity"
+
+
+def test_incomplete_restore_never_advertises_replayable_registry_rows(tmp_path):
+    module = _module()
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "classification": {
+            "usable_shards": 99,
+            "materialization_complete": False,
+            "failures": [{"error": "MISSING_SHARD"}],
+            "safe_shard_database": str(tmp_path / "SAFE_SHARDS.sqlite3"),
+            "registry_reused_shards": 98,
+        },
+    }), encoding="utf-8")
+
+    summary = module._read_safe_shard_summary(report)
+
+    assert summary["safe_replayable_shards"] == 0
+    assert summary["safe_backtestable_shards"] == 0
+    assert summary["safe_shard_database"] is None
 
 
 def test_github_restore_workflow_runs_real_full_worktree_clone_contract():

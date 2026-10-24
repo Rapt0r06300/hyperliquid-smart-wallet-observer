@@ -348,6 +348,47 @@ def _read_restore_status(
     return status, inventory_sha, None
 
 
+def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
+    """Expose only the AlinaSync-owned SAFE registry counters in SYNC_REPORT."""
+    empty: dict[str, object] = {
+        "safe_shard_database": None,
+        "safe_replayable_shards": 0,
+        "safe_backtestable_shards": 0,
+        "registry_reused_shards": 0,
+        "registry_recorded_shards": 0,
+    }
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return empty
+    classification = payload.get("classification")
+    if not isinstance(classification, dict):
+        return empty
+    if (
+        classification.get("materialization_complete") is not True
+        or classification.get("failures") not in ([], None)
+    ):
+        return empty
+    usable = classification.get("usable_shards")
+    if type(usable) is not int or usable < 0:
+        return empty
+    database = classification.get("safe_shard_database")
+    database_name = Path(database).name if isinstance(database, str) else None
+    if database_name != "SAFE_SHARDS.sqlite3":
+        database_name = None
+    return {
+        "safe_shard_database": database_name,
+        "safe_replayable_shards": usable,
+        "safe_backtestable_shards": usable,
+        "registry_reused_shards": int(
+            classification.get("registry_reused_shards") or 0
+        ),
+        "registry_recorded_shards": int(
+            classification.get("registry_recorded_shards") or 0
+        ),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Update canonical main and preflight SAFE/replayable "
@@ -480,6 +521,7 @@ def main(argv: list[str] | None = None) -> int:
             report_dir / report_name,
             expected_catalog_sha256=catalog_sha256 if not effective_preflight else None,
         )
+        safe_shard_summary = _read_safe_shard_summary(report_dir / report_name)
         current_report = report_dir / report_name
         if current_report.is_symlink() or not current_report.is_file():
             restore_status, report_error = "RESTORE_INCOMPLETE", "missing or unsafe restore report"
@@ -531,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
                 unpack_report and unpack_report.get("status") == "SAFE_UNPACK_COMPLETE"
             ),
             "unpack_report": "UNPACK_REPORT.json" if unpack_report else None,
+            **safe_shard_summary,
         }
         path = report_dir / "SYNC_REPORT.json"
         temporary = path.with_suffix(".json.partial")

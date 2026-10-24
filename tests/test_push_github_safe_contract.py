@@ -73,6 +73,7 @@ Stage-PublishableChanges
 
 def test_codex_push_does_not_force_reset_or_rewrite_remote_history():
     ps = (ROOT / "tools" / "push_github_safe.ps1").read_text(encoding="utf-8")
+    assert '$env:GIT_LFS_SKIP_SMUDGE = "1"' in ps
     assert 'Invoke-Git @("push", "origin", "main:main")' in ps
     assert 'Invoke-Git @("commit", "-m", "chore(codex): sauvegarder modifications locales Alina")' in ps
     assert '"add", "-A", "--", "."' in ps

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import importlib.util
 import io
 import json
-import gzip
-import tarfile
-import zipfile
 import os
 import subprocess
+import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -1479,15 +1479,241 @@ def test_materialize_safe_shards_verifies_existing_targets_concurrently(
         }
         for index in range(12)
     ]
+    destination = tmp_path / "restore"
+    target_root = destination / "usable" / "shards" / "data-v2-parallel"
+    target_root.mkdir(parents=True)
+    for row in rows:
+        (target_root / f"{row['dataset_id']}.jsonl.gz").write_bytes(b"x")
 
     result = module._materialize_catalog_safe_shards(
-        rows, tmp_path / "releases", tmp_path / "restore",
+        rows, tmp_path / "releases", destination,
         prune_stale=False,
     )
 
     assert result["materialization_complete"] is True
     assert result["skipped_verified_shards"] == len(rows)
     assert maximum_active >= 2
+
+
+def test_materialize_safe_shards_persists_alinasync_validation_and_reuses_it(
+    tmp_path, monkeypatch,
+):
+    import sqlite3
+
+    module = _module()
+    payload = gzip.compress(b'{"trade_id":"safe"}\n', mtime=0)
+    digest = hashlib.sha256(payload).hexdigest()
+    tag = "data-v2-durable-safe-state"
+    row = {
+        "dataset_id": "safe-durable-one",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
+        "release_tag": tag,
+        "release_asset": "safe.jsonl.gz",
+        "bytes": len(payload),
+        "sha256": digest,
+    }
+    destination = tmp_path / "restore"
+    source = tmp_path / "releases" / tag / "safe.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    catalog_sha = "a" * 64
+
+    first = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert first["materialization_complete"] is True
+    assert first["registry_reused_shards"] == 0
+
+    database = destination / "SAFE_SHARDS.sqlite3"
+    with sqlite3.connect(database) as connection:
+        stored = connection.execute(
+            "SELECT validation_owner, quality_status, replayable, backtestable, "
+            "catalog_active, sha256 FROM safe_shards WHERE dataset_id = ?",
+            (row["dataset_id"],),
+        ).fetchone()
+        current_count = connection.execute(
+            "SELECT COUNT(*) FROM current_safe_shards"
+        ).fetchone()[0]
+        run_status = connection.execute(
+            "SELECT value FROM safe_shard_registry_meta WHERE key = 'run_status'"
+        ).fetchone()[0]
+    assert stored == ("ALINA_SYNC", "SAFE", 1, 1, 1, digest)
+    assert current_count == 1
+    assert run_status == "COMPLETE"
+
+    def forbidden_hash(_path):
+        raise AssertionError("an unchanged AlinaSync-validated shard was re-hashed")
+
+    monkeypatch.setattr(module, "_sha256", forbidden_hash)
+    second = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert second["materialization_complete"] is True
+    assert second["registry_reused_shards"] == 1
+    assert second["skipped_verified_shards"] == 1
+
+    next_catalog_sha = "c" * 64
+    third = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=next_catalog_sha,
+    )
+    assert third["registry_reused_shards"] == 1
+    assert third["registry_recorded_shards"] == 1
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT catalog_sha256, catalog_active FROM safe_shards "
+            "WHERE dataset_id = ?",
+            (row["dataset_id"],),
+        ).fetchone() == (next_catalog_sha, 1)
+
+
+def test_alinasync_registry_never_reuses_a_changed_shard(tmp_path, monkeypatch):
+    module = _module()
+    payload = gzip.compress(b'{"trade_id":"safe"}\n', mtime=0)
+    digest = hashlib.sha256(payload).hexdigest()
+    tag = "data-v2-durable-safe-state-change"
+    row = {
+        "dataset_id": "safe-durable-changed",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
+        "release_tag": tag,
+        "release_asset": "safe.jsonl.gz",
+        "bytes": len(payload),
+        "sha256": digest,
+    }
+    destination = tmp_path / "restore"
+    source = tmp_path / "releases" / tag / "safe.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    catalog_sha = "b" * 64
+    first = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert first["materialization_complete"] is True
+
+    target = destination / "usable" / "shards" / tag / "safe-durable-changed.jsonl.gz"
+    target.unlink()
+    target.write_bytes(b"x" * len(payload))
+    checked = 0
+    original = module._verified_row_bytes
+
+    def counted(path, expected):
+        nonlocal checked
+        checked += 1
+        return original(path, expected)
+
+    monkeypatch.setattr(module, "_verified_row_bytes", counted)
+    second = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert checked >= 1
+    assert second["registry_reused_shards"] == 0
+    assert second["materialization_complete"] is True
+    assert target.read_bytes() == payload
+
+
+def test_alinasync_registry_hides_safe_rows_during_incomplete_revalidation(tmp_path):
+    import sqlite3
+
+    module = _module()
+    payload = gzip.compress(b'{"trade_id":"safe"}\n', mtime=0)
+    digest = hashlib.sha256(payload).hexdigest()
+    tag = "data-v2-registry-incomplete"
+    row = {
+        "dataset_id": "safe-before-failure",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
+        "release_tag": tag,
+        "release_asset": "safe.jsonl.gz",
+        "bytes": len(payload),
+        "sha256": digest,
+    }
+    destination = tmp_path / "restore"
+    source = tmp_path / "releases" / tag / "safe.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    catalog_sha = "d" * 64
+    assert module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )["materialization_complete"] is True
+
+    target = destination / "usable" / "shards" / tag / "safe-before-failure.jsonl.gz"
+    target.unlink()
+    source.unlink()
+    failed = module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert failed["materialization_complete"] is False
+    with sqlite3.connect(destination / "SAFE_SHARDS.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM current_safe_shards"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT value FROM safe_shard_registry_meta WHERE key = 'run_status'"
+        ).fetchone()[0] == "IN_PROGRESS"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM safe_shards"
+        ).fetchone()[0] == 1
+
+
+def test_incomplete_staged_subset_does_not_invalidate_completed_registry(tmp_path):
+    import sqlite3
+
+    module = _module()
+    payload = gzip.compress(b'{"trade_id":"safe"}\n', mtime=0)
+    tag = "data-v2-registry-staged"
+    row = {
+        "dataset_id": "safe-complete",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
+        "release_tag": tag,
+        "release_asset": "safe.jsonl.gz",
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    destination = tmp_path / "restore"
+    source = tmp_path / "releases" / tag / "safe.jsonl.gz"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    catalog_sha = "e" * 64
+    assert module._materialize_catalog_safe_shards(
+        [row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )["materialization_complete"] is True
+
+    staged_row = {
+        **row,
+        "dataset_id": "safe-missing-staged",
+        "release_asset": "missing.jsonl.gz",
+    }
+    failed = module._materialize_catalog_safe_shards(
+        [staged_row], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+        authoritative_registry=False,
+    )
+    assert failed["materialization_complete"] is False
+    with sqlite3.connect(destination / "SAFE_SHARDS.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM current_safe_shards"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT value FROM safe_shard_registry_meta WHERE key = 'run_status'"
+        ).fetchone()[0] == "COMPLETE"
 
 
 def test_materialize_safe_shards_prepares_each_release_root_once(
@@ -1497,6 +1723,9 @@ def test_materialize_safe_shards_prepares_each_release_root_once(
     destination = tmp_path / "restore"
     tag = "data-v2-shared-root"
     target_root = destination / "usable" / "shards" / tag
+    target_root.mkdir(parents=True)
+    for index in range(12):
+        (target_root / f"safe-{index}.jsonl.gz").write_bytes(b"x")
     calls = 0
     original_windows_io_path = module._windows_io_path
 
@@ -2987,7 +3216,7 @@ def test_staged_receipt_verification_uses_bounded_parallel_workers(
     maximum_active = 0
     lock = threading.Lock()
 
-    def slow_receipt_check(*_args):
+    def slow_receipt_check(*_args, **_kwargs):
         nonlocal active, maximum_active
         with lock:
             active += 1

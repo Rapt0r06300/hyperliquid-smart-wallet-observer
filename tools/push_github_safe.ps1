@@ -13,6 +13,12 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Git publishing synchronizes source code and refs only. If LFS is ever
+# reintroduced upstream, merges performed by this helper must still leave its
+# payload pointers untouched; SAFE shard hydration belongs exclusively to
+# AlinaSync, with its catalog and SHA-256 gates.
+$env:GIT_LFS_SKIP_SMUDGE = "1"
+
 function Write-Step {
     param([string]$Message)
     Write-Host "  $Message" -ForegroundColor Cyan
