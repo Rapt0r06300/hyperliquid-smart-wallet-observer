@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -356,6 +357,11 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "safe_backtestable_shards": 0,
         "registry_reused_shards": 0,
         "registry_recorded_shards": 0,
+        "l2_certification_status": "NOT_AVAILABLE",
+        "l2_catalog_sha256": None,
+        "l2_snapshot_backtestable_shards": 0,
+        "l2_continuous_replayable_shards": 0,
+        "l2_blocked_shards": 0,
     }
     try:
         payload = json.loads(report_path.read_text(encoding="utf-8"))
@@ -376,7 +382,7 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
     database_name = Path(database).name if isinstance(database, str) else None
     if database_name != "SAFE_SHARDS.sqlite3":
         database_name = None
-    return {
+    summary = {
         "safe_shard_database": database_name,
         "safe_replayable_shards": usable,
         "safe_backtestable_shards": usable,
@@ -386,7 +392,55 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "registry_recorded_shards": int(
             classification.get("registry_recorded_shards") or 0
         ),
+        "l2_certification_status": "NOT_AVAILABLE",
+        "l2_catalog_sha256": None,
+        "l2_snapshot_backtestable_shards": 0,
+        "l2_continuous_replayable_shards": 0,
+        "l2_blocked_shards": 0,
     }
+    if database_name is None:
+        return summary
+    database_path = report_path.parent / database_name
+    if database_path.is_symlink() or not database_path.is_file():
+        return summary
+    verification = payload.get("catalog_verification")
+    expected_catalog = (
+        verification.get("source_index_sha256")
+        if isinstance(verification, dict) else None
+    )
+    try:
+        uri = database_path.resolve().as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+            meta = dict(connection.execute(
+                "SELECT key, value FROM l2_certification_meta "
+                "WHERE key IN ('run_status', 'active_catalog_sha256')"
+            ))
+            active_catalog = meta.get("active_catalog_sha256")
+            if (
+                meta.get("run_status") != "COMPLETE"
+                or not isinstance(expected_catalog, str)
+                or active_catalog != expected_catalog
+            ):
+                summary["l2_certification_status"] = "STALE_OR_INCOMPLETE"
+                return summary
+            counts = connection.execute("""
+                SELECT
+                    SUM(CASE WHEN snapshot_backtestable=1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN continuous_replayable=1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN status='BLOCKED' THEN 1 ELSE 0 END)
+                FROM l2_certifications
+                WHERE catalog_sha256=?
+            """, (active_catalog,)).fetchone()
+    except (OSError, sqlite3.Error, ValueError):
+        return summary
+    summary.update({
+        "l2_certification_status": "COMPLETE",
+        "l2_catalog_sha256": active_catalog,
+        "l2_snapshot_backtestable_shards": int(counts[0] or 0),
+        "l2_continuous_replayable_shards": int(counts[1] or 0),
+        "l2_blocked_shards": int(counts[2] or 0),
+    })
+    return summary
 
 
 def main(argv: list[str] | None = None) -> int:

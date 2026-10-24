@@ -13769,6 +13769,19 @@ requires a valid synchronization boundary, sufficient depth/freshness and
 continuous applicable deltas; trades-only evidence cannot claim L2 execution
 replay. Missing observations are never interpolated or fabricated.
 
+La certification L2 locale conserve deux admissions distinctes dans la base
+AlinaSync `SAFE_SHARDS.sqlite3`, liées au SHA-256 du catalogue et au SHA-256
+compressé de chaque source : `snapshot_backtestable` autorise uniquement les
+observations ponctuelles prouvées, tandis que `continuous_replayable` exige une
+ancre native et une continuité de séquence démontrée dans le shard ou entre des
+shards ordonnés. `SNAPSHOT_OBSERVATIONS_ONLY`, `RECOVERABLE_ANCHORED_SPANS` et
+`BLOCKED` ne peuvent jamais être présentés comme un replay continu. Une
+certification interrompue masque les vues courantes. Les reprises peuvent
+réutiliser un groupe venue/symbole seulement si l'identité catalogue, le
+SHA attendu, la taille et les métadonnées de chaque membre sont inchangés ;
+sinon le groupe complet est relu et rehashé. Le rapport principal reste borné
+et les détails sont conservés dans un JSONL gzip déterministe lié par SHA-256.
+
 
 ### 2026-10-17 — Publication des manifests sans arbre Git surdimensionné
 

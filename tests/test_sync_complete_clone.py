@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -367,6 +368,70 @@ def test_incomplete_restore_never_advertises_replayable_registry_rows(tmp_path):
     assert summary["safe_replayable_shards"] == 0
     assert summary["safe_backtestable_shards"] == 0
     assert summary["safe_shard_database"] is None
+
+
+def test_safe_summary_does_not_present_generic_safe_as_l2_continuity(tmp_path):
+    module = _module()
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "catalog_verification": {"source_index_sha256": "a" * 64},
+        "classification": {
+            "usable_shards": 9, "materialization_complete": True,
+            "failures": [],
+            "safe_shard_database": str(tmp_path / "SAFE_SHARDS.sqlite3"),
+        },
+    }), encoding="utf-8")
+
+    summary = module._read_safe_shard_summary(report)
+
+    assert summary["safe_replayable_shards"] == 9
+    assert summary["l2_certification_status"] == "NOT_AVAILABLE"
+    assert summary["l2_snapshot_backtestable_shards"] == 0
+    assert summary["l2_continuous_replayable_shards"] == 0
+
+
+def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
+    module = _module()
+    digest = "a" * 64
+    database = tmp_path / "SAFE_SHARDS.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE l2_certification_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO l2_certification_meta(key, value) VALUES (?, ?)",
+            [("run_status", "COMPLETE"), ("active_catalog_sha256", digest)],
+        )
+        connection.execute("""
+            CREATE TABLE l2_certifications(
+                dataset_id TEXT, catalog_sha256 TEXT, status TEXT,
+                snapshot_backtestable INTEGER, continuous_replayable INTEGER
+            )
+        """)
+        connection.executemany(
+            "INSERT INTO l2_certifications VALUES (?, ?, ?, ?, ?)",
+            [
+                ("snapshot", digest, "SNAPSHOT_OBSERVATIONS_ONLY", 1, 0),
+                ("continuous", digest, "CONTINUOUS_L2", 1, 1),
+                ("blocked", digest, "BLOCKED", 0, 0),
+            ],
+        )
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "catalog_verification": {"source_index_sha256": digest},
+        "classification": {
+            "usable_shards": 3, "materialization_complete": True,
+            "failures": [], "safe_shard_database": str(database),
+        },
+    }), encoding="utf-8")
+
+    summary = module._read_safe_shard_summary(report)
+
+    assert summary["l2_certification_status"] == "COMPLETE"
+    assert summary["l2_snapshot_backtestable_shards"] == 2
+    assert summary["l2_continuous_replayable_shards"] == 1
+    assert summary["l2_blocked_shards"] == 1
+    assert summary["l2_catalog_sha256"] == digest
 
 
 def test_github_restore_workflow_runs_real_full_worktree_clone_contract():
