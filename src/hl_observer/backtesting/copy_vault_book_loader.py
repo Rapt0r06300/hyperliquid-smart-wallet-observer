@@ -36,6 +36,8 @@ def _observed_levels(value: Any) -> list[list[float]] | None:
         for raw_level in value:
             if not isinstance(raw_level, (list, tuple)) or len(raw_level) != 2:
                 return None
+            if isinstance(raw_level[0], bool) or isinstance(raw_level[1], bool):
+                return None
             price, quantity = float(raw_level[0]), float(raw_level[1])
             if not math.isfinite(price) or not math.isfinite(quantity):
                 return None
@@ -178,6 +180,12 @@ def load_observed_books(
                     coin = str(raw.get("coin") or "").upper()
                     if wanted is not None and coin not in wanted:
                         continue
+                    if any(
+                        isinstance(raw.get(name), bool)
+                        for name in ("collecte_ts", "hl_bid", "hl_ask", "taille_min_usd")
+                    ):
+                        invalid += 1
+                        continue
                     add_row(
                         coin=coin,
                         ts_ms=int(round(float(raw["collecte_ts"]) * 1000.0)),
@@ -213,10 +221,17 @@ def load_observed_books(
                     bid = float(raw["bid"])
                     ask = float(raw["ask"])
                     capacity_usd = float(raw["capacity_usd"])
+                    raw_numeric_types_valid = not any(
+                        isinstance(raw.get(name), bool)
+                        for name in (
+                            "received_at_ms", "exchange_ts_ms", "checkpoint_target_ms",
+                            "bid", "ask", "capacity_usd",
+                        )
+                    )
                     optional_levels_valid = all(
                         name not in raw or _observed_levels(raw.get(name)) is not None
                         for name in ("bids5", "asks5")
-                    )
+                    ) and (("bids5" in raw) == ("asks5" in raw))
                     if not (
                         collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
                         and metaorder_id
@@ -232,6 +247,7 @@ def load_observed_books(
                         and received >= exchange_ts > 0
                         and received - exchange_ts <= MAX_TARGET_LAG_MS
                         and coin
+                        and raw_numeric_types_valid
                         and all(math.isfinite(value) for value in (bid, ask, capacity_usd))
                         and bid > 0
                         and ask > bid
@@ -311,6 +327,15 @@ def load_observed_books(
                     checkpoint_target_ms = (
                         int(raw["checkpoint_target_ms"]) if is_checkpoint else None
                     )
+                    if any(
+                        isinstance(raw.get(name), bool)
+                        for name in (
+                            "received_at_ms", "exchange_ts_ms", "checkpoint_target_ms",
+                            "bid", "ask", "capacity_usd",
+                        )
+                    ):
+                        invalid += 1
+                        continue
                     checkpoint_binding_valid = (
                         not is_checkpoint
                         or (
@@ -345,6 +370,7 @@ def load_observed_books(
                     if (
                         ("bids5" in raw and bids5 is None)
                         or ("asks5" in raw and asks5 is None)
+                        or (("bids5" in raw) != ("asks5" in raw))
                     ):
                         invalid += 1
                         continue

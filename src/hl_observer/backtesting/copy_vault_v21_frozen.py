@@ -53,6 +53,8 @@ def _first_fill_notional_usd(metaorder: Mapping[str, Any]) -> float | None:
     members = list(metaorder.get("member_events") or ())
     if not members or not isinstance(members[0], Mapping):
         return None
+    if isinstance(members[0].get("taille_usd"), bool):
+        return None
     try:
         value = float(members[0]["taille_usd"])
     except (TypeError, ValueError, OverflowError):
@@ -69,6 +71,8 @@ def _valid_depth_side(raw: Any) -> list[tuple[float, float]] | None:
     try:
         for level in raw:
             if not isinstance(level, (list, tuple)) or len(level) != 2:
+                return None
+            if isinstance(level[0], bool) or isinstance(level[1], bool):
                 return None
             price, quantity = float(level[0]), float(level[1])
             if (

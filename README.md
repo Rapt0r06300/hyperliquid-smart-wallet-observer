@@ -148,13 +148,15 @@ Un ancien rapport, une ancienne conversation ou un ancien `DONE` ne l'emporte ja
 
 Alina ne cherche pas à maximiser un PnL brut. Elle cherche à démontrer un résultat **net, causal, exécutable et reproductible**.
 
-Trois familles économiques seulement peuvent créer des effets paper canoniques :
+Le périmètre opérationnel temporaire est **Copy-Vault uniquement**. Une seule famille peut
+actuellement créer des effets paper canoniques dans AlinaSmartFlow, le laboratoire, les
+simulations, les replays et les backtests :
 
 | Famille | Statut | But |
 |---|---|---|
 | **Copy-Vault** | `ACTIVE` | Mesurer si les mouvements de leaders/vaults restent copiables après latence, coûts, capacité et exits. |
-| **Lead-Lag** | `ACTIVE` | Mesurer des relations causales court-terme entre venues, notamment vers Hyperliquid. |
-| **Cross-Venue Dislocation** | `ACTIVE` | Mesurer des écarts réellement exécutables entre venues après profondeur, frais, slippage et non-atomicité. |
+| **Lead-Lag** | `DISABLED` | En pause ; aucune exécution par le moteur principal ou la simulation UI. |
+| **Cross-Venue Dislocation** | `DISABLED` | En pause ; aucune exécution par le moteur principal ou la simulation UI. |
 
 Autres statuts encodés dans `src/hl_observer/strategies/active_scope.py` :
 
@@ -164,13 +166,16 @@ Autres statuts encodés dans `src/hl_observer/strategies/active_scope.py` :
 
 **Carry / Funding Carry reste `DISABLED_BY_SCOPE`.**
 
-### Cible finale
+### Cible opérationnelle actuelle
 
-La cible du projet est :
+La cible courante est :
 
-**>= +5.00 USD NET/jour PROUVÉS pour chacune des trois familles actives, séparément, sur 200 USD de capital paper.**
+**démontrer Copy-Vault seul en PAPER, avec des données SAFE, causales, exécutables,
+backtestables et replayables, sur 200 USD de capital paper.**
 
-Aucune compensation n'est autorisée entre familles. Un Copy-Vault négatif ne peut pas être “sauvé” par un Lead-Lag positif.
+Lead-Lag, Cross-Venue, arbitrage et les autres modules ne peuvent ni contribuer au PnL,
+ni compenser Copy-Vault, ni être lancés implicitement. Leur éventuelle réactivation exigera
+un changement explicite de `active_scope.py` et des tests associés.
 
 Les conclusions honnêtes sont :
 

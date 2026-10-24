@@ -156,6 +156,13 @@ def _pid_vivant(pid) -> bool:
         import psutil  # type: ignore
         return psutil.pid_exists(pid)
     except Exception:  # noqa: BLE001
+        if os.name == "nt":
+            try:
+                from superviseur_continue import _windows_create_time
+
+                return _windows_create_time(pid) is not None
+            except (ImportError, OSError, TypeError, ValueError):
+                return False
         try:
             os.kill(pid, 0)
             return True
@@ -1529,7 +1536,8 @@ def stopper(root: Path, run_id: str) -> dict:
     if ident.get("run_id") != run_id:
         return {"stop": "RUN_ID_NON_CORRESPONDANT", "attendu": ident.get("run_id")}
     _ecrire_stop_request(root, run_id)
-    if _pid_vivant(ident.get("pid")) and int(ident.get("pid", -1)) != os.getpid():
+    active_pid = int(ident.get("pid", -1))
+    if active_pid != os.getpid() and _pid_vivant(active_pid):
         return {"stop": "STOP_REQUEST_ECRIT", "run_id": run_id,
                 "detail": "la boucle principale (PID %s) va finaliser proprement" % ident.get("pid")}
     # aucune boucle vivante : on finalise ici (le run était orphelin)

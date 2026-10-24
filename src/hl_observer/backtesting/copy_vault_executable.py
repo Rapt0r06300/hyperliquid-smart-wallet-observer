@@ -50,10 +50,39 @@ from hl_observer.economics.assumptions import (
     is_certifiable_mode,
 )
 from hl_observer.economics.families import build_copy_vault_contract
-from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 from hl_observer.funding.funding_times import next_funding_time_ms
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
+
+
+def _valid_observed_book_top(row: Mapping[str, Any]) -> bool:
+    """Validate the common top-of-book fields before any economic arithmetic."""
+
+    try:
+        timestamp_raw = row["ts_ms"]
+        if any(
+            isinstance(row[name], bool)
+            for name in ("ts_ms", "bid", "ask", "capacity_usd")
+        ):
+            return False
+        timestamp = float(timestamp_raw)
+        bid = float(row["bid"])
+        ask = float(row["ask"])
+        capacity = float(row["capacity_usd"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    return bool(
+        math.isfinite(timestamp)
+        and timestamp > 0.0
+        and timestamp.is_integer()
+        and math.isfinite(bid)
+        and math.isfinite(ask)
+        and math.isfinite(capacity)
+        and bid > 0.0
+        and ask > bid
+        and capacity > 0.0
+    )
 
 
 def _first_at_or_after(
@@ -157,6 +186,16 @@ def execute_metaorder(
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
+    raw_execution_parameters = (
+        notional_usd,
+        copy_delay_ms,
+        max_reference_lag_ms,
+        max_target_lag_ms,
+        horizon_ms,
+        direction_multiplier,
+    )
+    if any(isinstance(value, bool) for value in raw_execution_parameters):
+        return None, "INVALID_EXECUTION_PARAMETERS"
     try:
         numeric_limits = (
             float(notional_usd), float(copy_delay_ms), float(max_reference_lag_ms),
@@ -171,6 +210,8 @@ def execute_metaorder(
         or direction_multiplier not in (-1, 1)
     ):
         return None, "INVALID_EXECUTION_PARAMETERS"
+    if any(isinstance(metaorder.get(key), bool) for key in ("signal_ts_ms", "direction")):
+        return None, "INVALID_METAORDER"
     try:
         signal_ms = int(metaorder["signal_ts_ms"])
         meta_direction = int(metaorder["direction"])
@@ -199,14 +240,17 @@ def execute_metaorder(
     if not books:
         return None, "NO_OBSERVED_BOOK_FOR_COIN"
     signal_ms = int(metaorder["signal_ts_ms"])
-    checkpoint_triplet, checkpoint_reason = _exact_checkpoint_triplet(
-        metaorder,
-        books,
-        horizon_ms=int(horizon_ms),
-        copy_delay_ms=int(copy_delay_ms),
-        max_reference_lag_ms=int(max_reference_lag_ms),
-        max_target_lag_ms=int(max_target_lag_ms),
-    )
+    try:
+        checkpoint_triplet, checkpoint_reason = _exact_checkpoint_triplet(
+            metaorder,
+            books,
+            horizon_ms=int(horizon_ms),
+            copy_delay_ms=int(copy_delay_ms),
+            max_reference_lag_ms=int(max_reference_lag_ms),
+            max_target_lag_ms=int(max_target_lag_ms),
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None, "INVALID_OBSERVED_BOOK"
     if checkpoint_reason is not None:
         return None, checkpoint_reason
     if checkpoint_triplet is not None:
@@ -220,7 +264,10 @@ def execute_metaorder(
         continuous_books = [row for row in books if not row.get("checkpoint_id")]
         if not continuous_books:
             return None, "MISSING_EXACT_METAORDER_CHECKPOINT"
-        timestamps = [int(row["ts_ms"]) for row in continuous_books]
+        try:
+            timestamps = [int(row["ts_ms"]) for row in continuous_books]
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None, "INVALID_OBSERVED_BOOK"
         if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
             return None, "UNSORTED_BOOK_TIMESTAMPS"
         reference, reference_lag = _last_at_or_before(
@@ -241,6 +288,10 @@ def execute_metaorder(
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
         book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
+    if not all(
+        _valid_observed_book_top(row) for row in (reference, entry, exit_book)
+    ):
+        return None, "INVALID_OBSERVED_BOOK"
     if next_funding_time_ms(int(entry["ts_ms"]), interval_hours=1) <= int(
         exit_book["ts_ms"]
     ):
@@ -638,6 +689,33 @@ def temporal_bounds(
     }
 
 
+def _temporal_purge_verified(bounds: Mapping[str, Any], *, horizon_ms: int) -> bool:
+    """Return whether the frozen walk-forward bounds prove the required embargo."""
+
+    keys = (
+        "train_start_ms",
+        "train_end_ms",
+        "validation_start_ms",
+        "validation_end_ms",
+        "oos_start_ms",
+        "oos_end_ms",
+        "purge_ms",
+    )
+    values: dict[str, int] = {}
+    for key in keys:
+        value = bounds.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False
+        values[key] = value
+    required_purge_ms = COPY_DELAY_MS + horizon_ms + MAX_TARGET_LAG_MS
+    return bool(
+        values["purge_ms"] >= required_purge_ms
+        and values["train_start_ms"] <= values["train_end_ms"]
+        < values["validation_start_ms"] <= values["validation_end_ms"]
+        < values["oos_start_ms"] <= values["oos_end_ms"]
+    )
+
+
 def calibrate_train_only(
     metaorders: list[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
@@ -724,8 +802,25 @@ def evaluate_frozen(
         max_target_lag_ms=float(MAX_TARGET_LAG_MS),
     )
     bounds = dict(frozen_parameters.get("walk_forward_bounds") or {})
-    horizon = int(frozen_parameters.get("selected_horizon_ms") or HORIZONS_MS[0])
+    certifiable_mode = is_certifiable_mode(economic_mode)
+    selected_horizon = frozen_parameters.get("selected_horizon_ms")
+    if certifiable_mode and (
+        isinstance(selected_horizon, bool)
+        or not isinstance(selected_horizon, int)
+        or selected_horizon not in HORIZONS_MS
+    ):
+        raise EconomicConfigError(
+            "horizon certifiable absent ou hors du protocole gele",
+            field="selected_horizon_ms",
+        )
+    horizon = int(selected_horizon or HORIZONS_MS[0])
     causal_all_segments = frozen_parameters.get("causal_observation_required_all_segments") is True
+    if certifiable_mode and not causal_all_segments:
+        raise EconomicConfigError(
+            "la causalite observee est obligatoire sur tous les segments certifiables",
+            field="causal_observation_required_all_segments",
+        )
+    purge_verified = _temporal_purge_verified(bounds, horizon_ms=horizon)
     proof_policy = str(frozen_parameters.get("post_freeze_proof_policy") or "")
     proof_window = None
     if proof_policy == POST_FREEZE_PROOF_POLICY:
@@ -769,6 +864,8 @@ def evaluate_frozen(
         "trades": {},
         "economic_contract": contract.receipt(),
         "assumption_snapshot_hash": contract.registry.snapshot_hash(),
+        "causal_observation_required_all_segments": causal_all_segments,
+        "temporal_purge_verified": purge_verified,
     }
     if proof_window is not None:
         result["proof_window"] = proof_window

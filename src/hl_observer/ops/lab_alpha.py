@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
-from hl_observer.ops.lab_inventaire import inventorier, bundles_depuis_fichier, LabFormatBloque
-from hl_observer.ops.lab_flux import fusionner_causalement, charger_borne
+from hl_observer.ops.lab_flux import charger_borne, fusionner_causalement
+from hl_observer.ops.lab_inventaire import inventorier
 
 
 def _venue_du_fichier(chemin) -> str:
@@ -31,10 +31,10 @@ def _venue_du_fichier(chemin) -> str:
             return venue
     from pathlib import Path as _P
     return _P(chemin).stem
-from hl_observer.ops.lab_audit import auditer
 from hl_observer.ops import lab_recherche as R
+from hl_observer.ops.lab_audit import auditer
+from hl_observer.ops.lab_dashboard import Journal, rendre_tableau
 from hl_observer.ops.lab_eta import MoteurETA, format_hms
-from hl_observer.ops.lab_dashboard import rendre_tableau, Journal
 from hl_observer.ops.lab_rapport import ecrire_rapport
 from hl_observer.ops.rafraichisseur import RafraichisseurPeriodique
 from hl_observer.strategies.active_scope import active_strategy_families, strategy_scope_payload
@@ -53,6 +53,7 @@ def acquerir_verrou_analyse(sortie: str | Path, *, pid_vivant=None) -> Path:
     dont le PID est VIVANT bloque (AnalyseVerrouilleeError)."""
     import json
     import os as _os
+
     from hl_observer.ops.preuve_de_vie import _pid_vivant_reel
     vivant = pid_vivant or _pid_vivant_reel
     verrou = Path(sortie) / ".analyse.lock"

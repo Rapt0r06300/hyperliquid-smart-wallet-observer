@@ -22,12 +22,10 @@ README = (RACINE / "README.md").read_text(encoding="utf-8")
 # Étiquettes humaines attendues pour chaque famille ACTIVE de l'autorité.
 _LABELS_ACTIFS = {
     "copy_vault": ("copy",),
-    "lead_lag": ("lead-lag", "lead lag"),
-    "cross_venue_dislocation": ("cross-venue", "dislocation"),
 }
 
 
-def test_autorite_scope_est_bien_les_trois_familles():
+def test_autorite_scope_est_bien_copy_vault_uniquement():
     # Verrou : si l'autorité change, ce test le force à rester cohérent avec le README.
     assert active_strategy_families() == frozenset(_LABELS_ACTIFS)
 

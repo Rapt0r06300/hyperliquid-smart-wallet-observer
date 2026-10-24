@@ -9,36 +9,36 @@ from hl_observer.strategies.active_scope import active_strategy_families
 def test_famille_ready_si_toutes_ses_sources_requises_pretes():
     etats = {"bbo-collector": "READY", "userfills-live": True, "allmids-collector": "OK"}
     r = R.ready_strategies(etats)
-    assert r["lead_lag"].ready and r["lead_lag"].raison == "READY"
-    assert r["cross_venue_dislocation"].ready
-    assert r["copy_vault"].ready
+    assert set(r) == {"copy_vault"}
+    assert r["copy_vault"].ready and r["copy_vault"].raison == "READY"
 
 
 def test_deny_by_default_si_source_requise_absente():
-    r = R.ready_strategies({"allmids-collector": True})   # ni bbo, ni userfills
-    assert r["lead_lag"].ready is False and "bbo-collector" in r["lead_lag"].missing_sources
+    r = R.ready_strategies({"allmids-collector": True})
     assert r["copy_vault"].ready is False and "userfills-live" in r["copy_vault"].missing_sources
 
 
 def test_source_presente_mais_pas_prete_bloque():
-    r = R.ready_strategies({"bbo-collector": "DOWN"})      # présente mais pas READY
-    assert r["lead_lag"].ready is False and "bbo-collector" in r["lead_lag"].missing_sources
+    r = R.ready_strategies({"userfills-live": "DOWN"})
+    assert r["copy_vault"].ready is False
+    assert "userfills-live" in r["copy_vault"].missing_sources
 
 
 def test_granularite_par_famille_distincte_de_ready_core():
     r = R.ready_strategies({"bbo-collector": True})
-    assert r["lead_lag"].ready is True
     assert r["copy_vault"].ready is False
 
 
 def test_warmup_incomplet_bloque_puis_debloque():
     w = BarriereWarmup()
-    w.exiger("lead_lag", buffer="bbo", minimum=100)
-    r = R.ready_strategies({"bbo-collector": True}, warmup=w)
-    assert r["lead_lag"].ready is False and r["lead_lag"].raison == "WARMUP_INCOMPLET"
-    w.observer("lead_lag", buffer="bbo", n=100)
-    r2 = R.ready_strategies({"bbo-collector": True}, warmup=w)
-    assert r2["lead_lag"].ready is True
+    w.exiger("copy_vault", buffer="userfills", minimum=100)
+    ready_sources = {"userfills-live": True, "allmids-collector": True}
+    r = R.ready_strategies(ready_sources, warmup=w)
+    assert r["copy_vault"].ready is False
+    assert r["copy_vault"].raison == "WARMUP_INCOMPLET"
+    w.observer("copy_vault", buffer="userfills", n=100)
+    r2 = R.ready_strategies(ready_sources, warmup=w)
+    assert r2["copy_vault"].ready is True
 
 
 def test_famille_sans_dependance_declaree_reste_non_ready(monkeypatch):

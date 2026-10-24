@@ -7,7 +7,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.ops import lab_recherche as L  # noqa: E402
-from hl_observer.ops.lab_recherche import evaluer_config, rechercher   # noqa: E402
+from hl_observer.ops.lab_recherche import evaluer_config, rechercher  # noqa: E402
 
 T = 1_700_000_000_000
 

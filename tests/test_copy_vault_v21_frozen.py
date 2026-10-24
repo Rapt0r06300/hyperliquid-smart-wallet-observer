@@ -175,7 +175,7 @@ def test_reference_depth_refuse_les_niveaux_non_economiques(book) -> None:
     ) is None
 
 
-@pytest.mark.parametrize("notional", [None, float("nan"), float("inf"), -1.0])
+@pytest.mark.parametrize("notional", [None, True, float("nan"), float("inf"), -1.0])
 def test_segment_refuse_un_premier_fill_non_mesurable(notional) -> None:
     candidates, audit = V21._segment_candidates(
         [{

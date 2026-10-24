@@ -24,14 +24,15 @@ CopyVault est la seule stratégie active; les autres familles restent visibles m
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from hl_observer.strategies.active_scope import (
     active_strategy_families as _active_strategy_families,
+)
+from hl_observer.strategies.active_scope import (
     authoritative_strategy_scope as _authoritative_strategy_scope,
-    strategy_scope_status as _strategy_scope_status,
-    StrategyScopeStatus as _StrategyScopeStatus,
 )
 
 SCHEMA_VERSION = "hypersmart.paper_canonique.v1"
@@ -63,6 +64,8 @@ def _finite_number(value: Any, *, name: str) -> float:
 
 
 def _non_empty(value: Any, *, name: str) -> str:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{name} ne doit pas etre vide")
     converted = str(value).strip()
     if not converted:
         raise ValueError(f"{name} ne doit pas etre vide")
@@ -94,11 +97,12 @@ class PaperIntent:
         if self.strategy not in STRATEGIES_ACTIVES:
             raise ScopeViolation(
                 "strategie hors scope actif: %r (actives: %s)" % (self.strategy, ", ".join(STRATEGIES_ACTIVES)))
-        if self.side not in (1, -1):
+        if isinstance(self.side, bool) or self.side not in (1, -1):
             raise ValueError("side doit valoir +1 ou -1")
-        _non_empty(self.coin, name="coin")
-        _non_empty(self.venue, name="venue")
-        if _finite_number(self.notional_usd, name="notional_usd") <= 0.0:
+        coin = _non_empty(self.coin, name="coin").upper()
+        venue = _non_empty(self.venue, name="venue").upper()
+        notional = _finite_number(self.notional_usd, name="notional_usd")
+        if notional <= 0.0:
             raise ValueError("notional_usd doit etre strictement positif")
         if (
             isinstance(self.signal_observable_at_ms, bool)
@@ -106,6 +110,9 @@ class PaperIntent:
             or self.signal_observable_at_ms <= 0
         ):
             raise ValueError("signal_observable_at_ms doit etre un entier positif")
+        object.__setattr__(self, "coin", coin)
+        object.__setattr__(self, "venue", venue)
+        object.__setattr__(self, "notional_usd", notional)
 
     def as_dict(self) -> dict[str, Any]:
         return {"strategy": self.strategy, "coin": self.coin.upper(), "side": self.side,
@@ -136,7 +143,7 @@ class LiquidityConsumptionLedger:
                      snapshot_version: Any, profondeur_affichee: float) -> tuple[tuple, float]:
         venue_normalisee = _non_empty(venue, name="venue").upper()
         coin_normalise = _non_empty(coin, name="coin").upper()
-        if side not in (1, -1):
+        if isinstance(side, bool) or side not in (1, -1):
             raise ValueError("side doit valoir +1 ou -1")
         prix = _finite_number(price_level, name="price_level")
         profondeur = _finite_number(profondeur_affichee, name="profondeur_affichee")
@@ -180,7 +187,9 @@ def remplir_partiellement(taille_demandee: float, niveaux: Sequence[tuple[float,
     réellement exécutable + un `residu` nommé, jamais un fill complet inventé.
     """
     reste = _finite_number(taille_demandee, name="taille_demandee")
-    if reste <= 0:
+    if reste < 0.0:
+        raise ValueError("taille_demandee doit etre positive ou nulle")
+    if reste == 0.0:
         return {"rempli": 0.0, "residu": 0.0, "vwap": None, "statut": "TAILLE_NULLE"}
     rempli = 0.0
     cout = 0.0
@@ -235,10 +244,25 @@ def carnet_fiable(*, sequence: int | None, derniere_sequence: int | None, age_ms
     raisons: list[str] = []
     if sequence is None or derniere_sequence is None:
         raisons.append("SEQUENCE_ABSENTE")
-    elif int(sequence) < int(derniere_sequence):
-        raisons.append("OUT_OF_ORDER")
-    elif int(sequence) > int(derniere_sequence) + 1:
-        raisons.append("GAP_DE_SEQUENCE")
+    else:
+        try:
+            sequence_validee = _finite_number(sequence, name="sequence")
+            derniere_validee = _finite_number(
+                derniere_sequence, name="derniere_sequence"
+            )
+            if (
+                sequence_validee < 0.0
+                or derniere_validee < 0.0
+                or not sequence_validee.is_integer()
+                or not derniere_validee.is_integer()
+            ):
+                raise ValueError("sequences entieres positives requises")
+            if sequence_validee < derniere_validee:
+                raisons.append("OUT_OF_ORDER")
+            elif sequence_validee > derniere_validee + 1:
+                raisons.append("GAP_DE_SEQUENCE")
+        except ValueError:
+            raisons.append("SEQUENCE_INVALIDE")
     if age_ms is None:
         raisons.append("AGE_INCONNU")
     else:

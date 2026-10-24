@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.mega_cablage.pipeline import MegaCablage
+from hl_observer.mega_cablage.replay_driver import separer_par_episodes
 from hl_observer.mega_cablage.runner import _EquityMap
-from hl_observer.mega_cablage.replay_driver import separer_temporel, separer_par_episodes
 from hl_observer.ops import lab_metriques as M
 from hl_observer.paper_trading import latency_truth as _LT
-from hl_observer.research import search_space as _espace_versionne   # AUD-088 : hachage VERSIONNÉ de l'espace
+from hl_observer.research import search_space as _espace_versionne  # AUD-088 : hachage VERSIONNÉ de l'espace
 
 ESPACE_DEFAUT = {
     "notional_max": [100.0, 300.0, 500.0],

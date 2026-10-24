@@ -8,8 +8,8 @@ Paper/read-only : 0 réseau, 0 ordre réel, 0 clé, 0 signature.
 """
 from __future__ import annotations
 
-import sys
 import math
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,7 +35,10 @@ def test_le_carry_et_le_legacy_ne_peuvent_pas_emettre_dintent(legacy):
 
 def test_les_strategies_actives_derivent_de_lautorite_unique():
     from hl_observer.strategies.active_scope import (
-        active_strategy_families, strategy_scope_status, StrategyScopeStatus)
+        StrategyScopeStatus,
+        active_strategy_families,
+        strategy_scope_status,
+    )
     # P0 : paper_canonique DÉRIVE le scope de l'autorité unique (active_scope), il ne le redéclare pas.
     assert set(PC.STRATEGIES_ACTIVES) == set(active_strategy_families())
     assert set(PC.STRATEGIES_ACTIVES) == {"copy_vault"}
@@ -59,13 +62,29 @@ def test_un_notional_non_economique_est_refuse(notional):
 
 @pytest.mark.parametrize(
     ("coin", "venue", "signal_ms"),
-    [("", "HL", 1), ("BTC", "", 1), ("BTC", "HL", 0), ("BTC", "HL", -1)],
+    [("", "HL", 1), (None, "HL", 1), ("BTC", "", 1),
+     ("BTC", None, 1), ("BTC", "HL", 0), ("BTC", "HL", -1)],
 )
 def test_une_identite_ou_un_timestamp_invalide_est_refuse(coin, venue, signal_ms):
     with pytest.raises(ValueError):
         PC.PaperIntent(strategy="copy_vault", coin=coin, side=1,
                        notional_usd=50.0, signal_observable_at_ms=signal_ms,
                        venue=venue)
+
+
+def test_un_booleen_ne_peut_pas_devenir_un_side_economique():
+    with pytest.raises(ValueError, match="side"):
+        PC.PaperIntent(strategy="copy_vault", coin="BTC", side=True,
+                       notional_usd=50.0, signal_observable_at_ms=1)
+
+
+def test_lintent_normalise_les_valeurs_numeriques_validees():
+    intent = PC.PaperIntent(strategy="copy_vault", coin=" btc ", side=1,
+                            notional_usd="50", signal_observable_at_ms=1,
+                            venue=" hl ")
+    assert intent.notional_usd == 50.0
+    assert intent.as_dict()["coin"] == "BTC"
+    assert intent.as_dict()["venue"] == "HL"
 
 
 # ═══════════════ §6.2 — consommation de liquidité ═══════════════
@@ -142,6 +161,7 @@ def test_un_carnet_vide_ne_remplit_rien():
     [
         (math.nan, [(100.0, 1.0)]),
         (math.inf, [(100.0, 1.0)]),
+        (-1.0, [(100.0, 1.0)]),
         (1.0, [(math.nan, 1.0)]),
         (1.0, [(100.0, math.inf)]),
         (1.0, [(100.0, -1.0)]),
@@ -211,6 +231,13 @@ def test_un_age_non_fini_est_refuse(age):
                          age_max_ms=1_000.0)
     assert r["entree_autorisee"] is False
     assert "AGE_INVALIDE" in r["raisons"]
+
+
+def test_une_sequence_non_finie_est_refusee_sans_exception():
+    r = PC.carnet_fiable(sequence=math.nan, derniere_sequence=100,
+                         age_ms=10.0, age_max_ms=1_000.0)
+    assert r["entree_autorisee"] is False
+    assert "SEQUENCE_INVALIDE" in r["raisons"]
 
 
 # ═══════════════ §7 — runtime-truth ═══════════════

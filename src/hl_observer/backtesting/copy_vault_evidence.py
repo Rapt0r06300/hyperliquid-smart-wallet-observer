@@ -24,6 +24,8 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     causal_forward = bool(forward_trades) and all(
         row.get("causal_forward_eligible") is True for row in forward_trades
     )
+    no_lookahead = evaluation.get("causal_observation_required_all_segments") is True
+    purged = evaluation.get("temporal_purge_verified") is True
 
     def proof_segment(summary: Mapping[str, Any], *, count: int) -> dict[str, Any]:
         return {key: summary.get(key) for key in (
@@ -33,7 +35,11 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
         )} | {"sample_count": count, "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True}
 
     return {
-        "oos": {**proof_segment(oos_summary, count=oos_count), "no_lookahead": True, "purged": True},
+        "oos": {
+            **proof_segment(oos_summary, count=oos_count),
+            "no_lookahead": no_lookahead,
+            "purged": purged,
+        },
         "forward": {
             **proof_segment(forward_summary, count=forward_count),
             "post_freeze": causal_forward, "causal_live_only": causal_forward,

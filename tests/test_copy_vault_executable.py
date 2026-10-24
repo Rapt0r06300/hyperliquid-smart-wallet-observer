@@ -319,7 +319,7 @@ def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [("hl_bid", float("nan")), ("hl_ask", float("inf")),
-     ("taille_min_usd", float("nan"))],
+     ("taille_min_usd", float("nan")), ("hl_bid", True)],
 )
 def test_loader_refuse_un_top_historique_non_fini(tmp_path, field, value) -> None:
     data = tmp_path / "runtime" / "data"
@@ -348,6 +348,48 @@ def test_loader_refuse_un_carnet_causal_dont_la_profondeur_est_non_finie(tmp_pat
         "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
         "bids5": [[100.0, float("nan")]],
         "asks5": [[102.0, 2.0]],
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
+
+
+def test_loader_refuse_un_booleen_comme_niveau_l2(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "bids5": [[100.0, True]], "asks5": [[102.0, 2.0]],
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
+
+
+def test_loader_refuse_un_carnet_causal_avec_un_seul_cote_l2(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "bids5": [[100.0, 2.0]],
         "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
         "causal_observation": True,
     }
@@ -602,6 +644,29 @@ def test_unsorted_continuous_books_are_rejected_before_replay() -> None:
     assert reason == "UNSORTED_BOOK_TIMESTAMPS"
 
 
+@pytest.mark.parametrize(
+    ("book_index", "field", "value"),
+    [(0, "bid", float("nan")), (1, "ask", float("inf")),
+     (2, "capacity_usd", float("nan")), (2, "capacity_usd", -1.0),
+     (0, "bid", True)],
+)
+def test_executeur_refuse_un_top_selectionne_non_economique(
+    book_index, field, value
+) -> None:
+    metaorder = cluster_metaorders([_entry("invalid-book", 1_000)])[0][0]
+    books = [
+        _book(1_000, 99.0, 101.0),
+        _book(61_000, 100.0, 102.0),
+        _book(361_000, 109.0, 111.0),
+    ]
+    books[book_index][field] = value
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "INVALID_OBSERVED_BOOK"
+
+
 def test_execution_refuse_une_position_traversant_un_funding_non_mesure() -> None:
     signal_ms = 3_500_000
     metaorder = cluster_metaorders([_entry("funding-gap", signal_ms)])[0][0]
@@ -707,6 +772,82 @@ def test_executeur_certifiable_refuse_un_override_local_de_frais() -> None:
             fee_bps=1.0,
             economic_mode=EconomicRunMode.CERTIFIABLE,
         )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "metaorder_overrides", "expected_reason"),
+    [
+        ({"notional_usd": True}, {}, "INVALID_EXECUTION_PARAMETERS"),
+        ({"horizon_ms": True}, {}, "INVALID_EXECUTION_PARAMETERS"),
+        ({"direction_multiplier": True}, {}, "INVALID_EXECUTION_PARAMETERS"),
+        ({}, {"signal_ts_ms": True}, "INVALID_METAORDER"),
+        ({}, {"direction": True}, "INVALID_METAORDER"),
+    ],
+)
+def test_executeur_refuse_les_booleens_dans_les_champs_numeriques(
+    overrides: dict[str, object],
+    metaorder_overrides: dict[str, object],
+    expected_reason: str,
+) -> None:
+    metaorder = {
+        **cluster_metaorders([_entry("boolean", 1_000, action="OPEN")])[0][0],
+        **metaorder_overrides,
+    }
+    parameters = {"horizon_ms": 300_000, **overrides}
+
+    trade, reason = execute_metaorder(metaorder, [], **parameters)
+
+    assert trade is None
+    assert reason == expected_reason
+
+
+def test_evaluation_gelee_certifiable_refuse_un_horizon_hors_protocole() -> None:
+    with pytest.raises(EconomicConfigError, match="horizon"):
+        evaluate_frozen(
+            [],
+            {},
+            frozen_parameters={
+                "selected_horizon_ms": 123_456,
+                "walk_forward_bounds": {},
+                "causal_observation_required_all_segments": True,
+            },
+            frozen_at_ms=900_000,
+            economic_mode=EconomicRunMode.CERTIFIABLE,
+        )
+
+
+def test_evaluation_gelee_certifiable_exige_la_causalite_sur_tous_les_segments() -> None:
+    with pytest.raises(EconomicConfigError, match="causalite"):
+        evaluate_frozen(
+            [],
+            {},
+            frozen_parameters={
+                "selected_horizon_ms": 300_000,
+                "walk_forward_bounds": {
+                    "train_start_ms": 1,
+                    "train_end_ms": 2,
+                    "validation_start_ms": 400_000,
+                    "validation_end_ms": 400_001,
+                    "oos_start_ms": 800_000,
+                    "oos_end_ms": 800_001,
+                    "purge_ms": COPY_DELAY_MS + 300_000 + MAX_TARGET_LAG_MS,
+                },
+            },
+            frozen_at_ms=900_000,
+            economic_mode=EconomicRunMode.CERTIFIABLE,
+        )
+
+
+def test_preuve_temporelle_ne_revendiqe_jamais_un_no_lookahead_non_prouve() -> None:
+    proof = temporal_evidence({
+        "segments": {"oos": {"summary": {}}, "forward": {"summary": {}}},
+        "trades": {"forward": []},
+        "causal_observation_required_all_segments": False,
+        "temporal_purge_verified": False,
+    })
+
+    assert proof["oos"]["no_lookahead"] is False
+    assert proof["oos"]["purged"] is False
 
 
 def test_executeur_ne_peut_pas_emprunter_les_checkpoints_dun_autre_metaordre() -> None:
@@ -913,6 +1054,7 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
     parameters = {
         "selected_horizon_ms": calibration["selected_horizon_ms"],
         "walk_forward_bounds": calibration["bounds"],
+        "causal_observation_required_all_segments": True,
     }
     evaluation = evaluate_frozen(
         metaorders,

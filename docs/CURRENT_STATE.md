@@ -10,15 +10,16 @@ Ce document est la **source de vérité lisible actuelle** pour l'état du proje
 
 Le périmètre canonique est défini par `src/hl_observer/strategies/active_scope.py`.
 
-Familles économiques paper actives au niveau du runtime :
+Famille économique paper active au niveau du runtime :
 
-- `copy_vault` ;
-- `lead_lag` ;
-- `cross_venue_dislocation`.
+- `copy_vault` uniquement.
 
-La famille Cross-Venue est nommée `cross_venue_dislocation` dans le registre runtime `active_scope.py`, tandis que la campagne/gate économique V2 utilise encore l'identifiant `cross_venue_dislocation_v2`. Cette différence de nom ne crée pas une quatrième famille et ne doit pas servir à dupliquer une stratégie, un PnL ou une preuve.
+`lead_lag`, `cross_venue_dislocation`, l'arbitrage et les autres familles sont en pause.
+Ils ne doivent être exécutés ni par le moteur principal AlinaSmartFlow, ni par la simulation
+UI, ni par le laboratoire, les backtests ou les replays tant que ce périmètre temporaire
+Copy-Vault-only reste en vigueur.
 
-`funding_carry` et les autres familles historiques ne doivent pas réapparaître comme moteurs économiques actifs sans changement explicite du scope canonique et tests associés.
+Toute réactivation exige un changement explicite du scope canonique et des tests associés.
 
 ## 2. Sécurité
 

@@ -22,12 +22,61 @@ EXCHANGE_MAX_AGE_MS = 300_000             # au-delà -> flux figé (dernier exch
 BACKOFF_S = 20.0                          # anti-tempête : pas plus d'un restart par collecteur / BACKOFF_S
 
 
+def _windows_create_time(pid: int) -> float | None:
+    """Read a Windows process creation time without sending it a console signal."""
+
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        get_process_times = kernel32.GetProcessTimes
+        get_process_times.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        )
+        get_process_times.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+        handle = open_process(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return None
+        try:
+            created = wintypes.FILETIME()
+            exited = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            if not get_process_times(
+                handle,
+                ctypes.byref(created),
+                ctypes.byref(exited),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
+            ):
+                return None
+            ticks = (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+            return ticks / 10_000_000.0 - 11_644_473_600.0
+        finally:
+            close_handle(handle)
+    except (OSError, TypeError, ValueError):
+        return None
+
+
 def _create_time(pid: int) -> float | None:
     try:
         import psutil  # type: ignore
         return float(psutil.Process(int(pid)).create_time())
     except Exception:  # noqa: BLE001
-        return None
+        return _windows_create_time(pid)
 
 
 def _proc_vivant(pid: int, start: float | None) -> bool:
@@ -37,6 +86,12 @@ def _proc_vivant(pid: int, start: float | None) -> bool:
             return False
         return (start is None) or abs(psutil.Process(int(pid)).create_time() - float(start)) < 2.0
     except Exception:  # noqa: BLE001
+        if os.name == "nt":
+            created = _windows_create_time(pid)
+            return bool(
+                created is not None
+                and (start is None or abs(created - float(start)) < 2.0)
+            )
         try:
             os.kill(int(pid), 0)
             return True
