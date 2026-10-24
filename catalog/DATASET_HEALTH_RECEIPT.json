@@ -43618,10 +43618,9 @@
     "event_intelligence_collection:PENDING": 1,
     "event_intelligence_collection:UNAVAILABLE": 24,
     "forward_paper:COMPLETE": 1,
-    "market_collection:COMPLETE": 1811,
+    "market_collection:COMPLETE": 1812,
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 24,
-    "market_collection:RUNNING": 1,
     "market_collection:UNAVAILABLE": 376,
     "module_pnl_proof:COMPLETE": 1,
     "official_archive_collection:COMPLETE": 10,
@@ -109704,26 +109703,21 @@
       "campaign_id": "market-e8-8-2026102416-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "market_collection",
-      "last_checkpoint_id": null,
-      "lease": {
-        "acquired_at": "2026-10-24T17:51:16.833244Z",
-        "expires_at": "2026-10-24T23:36:16.833244Z",
-        "lease_token_sha256": "a181955490883aadcf5e835fb47c2c3ddcdb1d3be67e231a9d4a9fafc6a04897",
-        "owner_run_id": "40116912173"
-      },
-      "lease_expires_at": "2026-10-24T23:36:16.833244Z",
-      "lease_owner": "40116912173",
+      "last_checkpoint_id": "51c5c294f95951820d80773a7cdff2837d1e02da99aa48c96cf69f13d7d94008",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
       "next_due_at": null,
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "RUNNING",
-      "status_reason": "worker_started",
-      "updated_at": "2026-10-24T17:51:16.833305Z"
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-24T19:21:50.913130Z"
     },
     {
       "analysis_stage": null,
@@ -112205,7 +112199,7 @@
     "unique_trade_count_exact": false,
     "valid_record_count_exact": false
   },
-  "dataset_commit": "b048581bf9689963cbd5f39be42daef116f3a70c",
+  "dataset_commit": "6f08fe15b0ad343b9797bc9450812dfdcdf9a922",
   "metrics_digest": "1cf357f143d7a8bef8fe115e11a19aa24e21dcf719fd24afa497d20c96d2dfa5",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
@@ -112228,7 +112222,7 @@
     "mismatches": [],
     "status": "CONSISTENT"
   },
-  "receipt_digest": "e5c559e5011c8851e16f0666c8c2d56c2fbc80f1516ae557b95b34bed511ed1a",
+  "receipt_digest": "c12b44c382ca916398cd4ce32ffd15350853012350a68559441461376bcabbc9",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "REPLAYABLE_BUT_PARTIAL": 45319,
