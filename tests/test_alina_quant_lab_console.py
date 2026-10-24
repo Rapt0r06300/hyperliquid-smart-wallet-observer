@@ -6,7 +6,12 @@ from pathlib import Path
 
 from hl_observer.backtesting.copy_vault_v21_frozen import _verified_freeze
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
-from tools.alina_quant_lab_console import _pytest_counts, assess_physical_freeze
+from tools.alina_quant_lab_console import (
+    _pytest_counts,
+    _run_group,
+    _test_groups,
+    assess_physical_freeze,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 FREEZE_PATH = ROOT / "runtime" / "codex_research" / "COPY_V21_PHYSICAL_FREEZE.json"
@@ -47,3 +52,30 @@ def test_lab_extracts_independent_pytest_summary_counts() -> None:
     assert counts["failed"] == 2
     assert counts["skipped"] == 1
     assert counts["errors"] == 0
+
+
+def test_lab_counts_a_single_collection_error() -> None:
+    counts = _pytest_counts("1 error, 3 passed in 1.2s")
+
+    assert counts["errors"] == 1
+    assert counts["passed"] == 3
+
+
+def test_lab_fails_closed_when_a_required_test_group_is_empty(tmp_path: Path) -> None:
+    result = _run_group("groupe obligatoire", [], tmp_path / "missing.log")
+
+    assert result["status"] == "FAIL"
+    assert result["return_code"] != 0
+
+
+def test_lab_covers_copy_vault_scope_paper_and_readiness_boundaries() -> None:
+    groups = _test_groups()
+    selected = {path for _name, paths in groups for path in paths}
+
+    assert {
+        "tests/test_paper_canonique.py",
+        "tests/test_strategy_readiness.py",
+        "tests/test_readme_scope_coherence.py",
+    } <= selected
+    assert all(paths for _name, paths in groups)
+    assert sum(len(paths) for _name, paths in groups) == len(selected)

@@ -14,10 +14,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tools.sous_processus_isole import creationflags
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
+
+from tools.sous_processus_isole import creationflags
 
 CORE_TESTS = (
     "tests/test_copy_vault_v21_frozen.py",
@@ -25,6 +26,13 @@ CORE_TESTS = (
 )
 INTEGRATION_TESTS = (
     "tests/test_alina_quant_lab_console.py",
+    "tests/test_paper_canonique.py",
+    "tests/test_strategy_readiness.py",
+    "tests/test_readme_scope_coherence.py",
+    "tests/test_active_strategy_scope_v2.py",
+    "tests/test_scope_source_unique.py",
+    "tests/test_simulation_readiness.py",
+    "tests/test_ui_simulation_status_fast.py",
     "tests/test_train_statistics.py",
     "tests/test_economic_campaigns.py",
     "tests/test_economic_proof_audit.py",
@@ -166,7 +174,8 @@ def _pytest_counts(output: str) -> dict[str, int]:
     keys = ("passed", "failed", "errors", "skipped", "xfailed", "xpassed")
     counts = {key: 0 for key in keys}
     for key in keys:
-        match = re.search(r"\b(\d+)\s+" + key + r"\b", output)
+        label = r"errors?" if key == "errors" else re.escape(key)
+        match = re.search(r"\b(\d+)\s+" + label + r"\b", output)
         if match:
             counts[key] = int(match.group(1))
     return counts
@@ -201,8 +210,19 @@ def _restore_processes() -> list[str]:
 def _run_group(name: str, tests: list[str], log_path: Path) -> dict[str, Any]:
     print(f"\n{'=' * 76}\nÉTAPE : {name}\nTests concernés : {len(tests)} fichier(s)", flush=True)
     if not tests:
-        print("ÉTAPE IGNORÉE : aucun test correspondant trouvé.", flush=True)
-        return {"name": name, "status": "SKIPPED", "return_code": 0, "seconds": 0.0}
+        message = "ÉCHEC FAIL-CLOSED : aucun test trouvé pour ce groupe obligatoire."
+        print(message, flush=True)
+        log_path.write_text(message + "\n", encoding="utf-8")
+        return {
+            "name": name,
+            "status": "FAIL",
+            "return_code": 4,
+            "counts": _pytest_counts(""),
+            "seconds": 0.0,
+            "cpu_seconds": None,
+            "peak_working_set_bytes": None,
+            "log": str(log_path),
+        }
 
     command = [sys.executable, "-m", "pytest", "-vv", "-ra", *tests]
     print("Commande : " + subprocess.list2cmdline(command), flush=True)
@@ -220,7 +240,12 @@ def _run_group(name: str, tests: list[str], log_path: Path) -> dict[str, Any]:
         env={
             **os.environ,
             "PYTHONPATH": os.pathsep.join(
-                [str(ROOT / "src"), str(ROOT), str(ROOT / "tools")]
+                [
+                    str(ROOT / "src"),
+                    str(ROOT),
+                    str(ROOT / "tools"),
+                    os.environ.get("PYTHONPATH", ""),
+                ]
             ),
             "PYTHONUTF8": "1",
             "PYTHONUNBUFFERED": "1",
@@ -231,17 +256,23 @@ def _run_group(name: str, tests: list[str], log_path: Path) -> dict[str, Any]:
         },
     )
     peak_working_set = 0
+    last_cpu_seconds: float | None = None
     output_lines: list[str] = []
     assert process.stdout is not None
     for line in process.stdout:
         print(line, end="", flush=True)
         output_lines.append(line)
-        working_set, _cpu = _windows_process_metrics(process.pid)
+        working_set, cpu_seconds = _windows_process_metrics(process.pid)
         if working_set is not None:
             peak_working_set = max(peak_working_set, working_set)
+        if cpu_seconds is not None:
+            last_cpu_seconds = cpu_seconds
     return_code = process.wait()
     elapsed = time.perf_counter() - started
-    _, cpu_seconds = _windows_process_metrics(process.pid)
+    _, final_cpu_seconds = _windows_process_metrics(process.pid)
+    cpu_seconds = (
+        final_cpu_seconds if final_cpu_seconds is not None else last_cpu_seconds
+    )
     full_output = "".join(output_lines)
     log_path.write_text(full_output, encoding="utf-8")
     counts = _pytest_counts(full_output)
@@ -273,7 +304,7 @@ def _run_group(name: str, tests: list[str], log_path: Path) -> dict[str, Any]:
 
 def run_lab(*, preflight_only: bool = False) -> int:
     now = datetime.now(UTC)
-    run_id = now.strftime("%Y%m%dT%H%M%SZ")
+    run_id = now.strftime("%Y%m%dT%H%M%S%fZ")
     report_dir = ROOT / "runtime" / "reports" / "copy_vault_quant_lab" / run_id
     report_dir.mkdir(parents=True, exist_ok=False)
     freeze_path = ROOT / "runtime" / "codex_research" / "COPY_V21_PHYSICAL_FREEZE.json"
@@ -317,8 +348,12 @@ def run_lab(*, preflight_only: bool = False) -> int:
 
     groups: list[dict[str, Any]] = []
     if not preflight_only:
-        for index, (name, tests) in enumerate(_test_groups(), start=1):
-            print(f"\nPROGRESSION GLOBALE : étape {index}/3", flush=True)
+        test_groups = _test_groups()
+        for index, (name, tests) in enumerate(test_groups, start=1):
+            print(
+                f"\nPROGRESSION GLOBALE : étape {index}/{len(test_groups)}",
+                flush=True,
+            )
             groups.append(
                 _run_group(name, tests, report_dir / f"etape-{index}.log")
             )
