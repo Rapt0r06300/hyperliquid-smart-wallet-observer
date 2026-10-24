@@ -9,6 +9,7 @@ Paper/read-only : 0 réseau, 0 ordre réel, 0 clé, 0 signature.
 from __future__ import annotations
 
 import sys
+import math
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,24 @@ def test_un_side_invalide_est_refuse():
         PC.PaperIntent(strategy="copy_vault", coin="BTC", side=0, notional_usd=50.0, signal_observable_at_ms=1)
 
 
+@pytest.mark.parametrize("notional", [0.0, -1.0, math.nan, math.inf, -math.inf])
+def test_un_notional_non_economique_est_refuse(notional):
+    with pytest.raises(ValueError, match="notional_usd"):
+        PC.PaperIntent(strategy="copy_vault", coin="BTC", side=1,
+                       notional_usd=notional, signal_observable_at_ms=1)
+
+
+@pytest.mark.parametrize(
+    ("coin", "venue", "signal_ms"),
+    [("", "HL", 1), ("BTC", "", 1), ("BTC", "HL", 0), ("BTC", "HL", -1)],
+)
+def test_une_identite_ou_un_timestamp_invalide_est_refuse(coin, venue, signal_ms):
+    with pytest.raises(ValueError):
+        PC.PaperIntent(strategy="copy_vault", coin=coin, side=1,
+                       notional_usd=50.0, signal_observable_at_ms=signal_ms,
+                       venue=venue)
+
+
 # ═══════════════ §6.2 — consommation de liquidité ═══════════════
 def test_une_profondeur_consommee_nest_pas_reutilisable_sur_le_meme_snapshot():
     l = PC.LiquidityConsumptionLedger()
@@ -77,6 +96,30 @@ def test_les_cotes_opposes_sont_des_files_distinctes():
     assert c["consomme"] == 5.0
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"price_level": math.nan},
+        {"price_level": 0.0},
+        {"profondeur_affichee": math.inf},
+        {"profondeur_affichee": -1.0},
+        {"quantite": math.nan},
+        {"quantite": -1.0},
+        {"side": 0},
+        {"coin": ""},
+        {"snapshot_version": ""},
+    ],
+)
+def test_le_ledger_de_liquidite_refuse_les_valeurs_invalides(overrides):
+    params = {
+        "venue": "HL", "coin": "BTC", "side": 1, "price_level": 100.0,
+        "snapshot_version": "v1", "quantite": 1.0, "profondeur_affichee": 10.0,
+    }
+    params.update(overrides)
+    with pytest.raises(ValueError):
+        PC.LiquidityConsumptionLedger().consommer(**params)
+
+
 # ═══════════════ §6.3 — fills partiels ═══════════════
 def test_une_taille_superieure_a_la_profondeur_laisse_un_residu_explicite():
     r = PC.remplir_partiellement(15.0, [(100.0, 5.0), (100.1, 5.0)])
@@ -94,6 +137,21 @@ def test_un_carnet_vide_ne_remplit_rien():
     assert r["rempli"] == 0.0 and r["residu"] == 10.0 and r["vwap"] is None
 
 
+@pytest.mark.parametrize(
+    ("taille", "niveaux"),
+    [
+        (math.nan, [(100.0, 1.0)]),
+        (math.inf, [(100.0, 1.0)]),
+        (1.0, [(math.nan, 1.0)]),
+        (1.0, [(100.0, math.inf)]),
+        (1.0, [(100.0, -1.0)]),
+    ],
+)
+def test_un_fill_partiel_refuse_les_nombres_invalides(taille, niveaux):
+    with pytest.raises(ValueError):
+        PC.remplir_partiellement(taille, niveaux)
+
+
 # ═══════════════ §6.4 — maker ═══════════════
 def test_sans_file_mesuree_le_maker_est_unmeasurable():
     r = PC.fill_maker(file_devant_nous=None, volume_traversant=100.0, taille=5.0)
@@ -105,6 +163,16 @@ def test_le_maker_nest_rempli_que_par_le_volume_au_dela_de_la_file():
     rien = PC.fill_maker(file_devant_nous=10.0, volume_traversant=8.0, taille=5.0)
     assert plein["rempli"] == 5.0                       # 18 - 10 = 8 >= 5
     assert rien["rempli"] == 0.0                        # 8 - 10 < 0 : la file n'est meme pas franchie
+
+
+@pytest.mark.parametrize(
+    ("file_devant", "volume", "taille"),
+    [(-1.0, 1.0, 1.0), (1.0, -1.0, 1.0), (1.0, 1.0, 0.0),
+     (math.nan, 1.0, 1.0), (1.0, math.inf, 1.0)],
+)
+def test_le_maker_refuse_les_mesures_invalides(file_devant, volume, taille):
+    with pytest.raises(ValueError):
+        PC.fill_maker(file_devant_nous=file_devant, volume_traversant=volume, taille=taille)
 
 
 # ═══════════════ §6.5 — carnet fiable ═══════════════
@@ -130,6 +198,21 @@ def test_un_carnet_sain_autorise_lentree():
     assert r["fiable"] is True and r["raisons"] == []
 
 
+def test_un_carnet_date_dans_le_futur_est_refuse():
+    r = PC.carnet_fiable(sequence=101, derniere_sequence=100, age_ms=-1.0,
+                         age_max_ms=1_000.0)
+    assert r["entree_autorisee"] is False
+    assert "OBSERVATION_DANS_LE_FUTUR" in r["raisons"]
+
+
+@pytest.mark.parametrize("age", [math.nan, math.inf, -math.inf])
+def test_un_age_non_fini_est_refuse(age):
+    r = PC.carnet_fiable(sequence=101, derniere_sequence=100, age_ms=age,
+                         age_max_ms=1_000.0)
+    assert r["entree_autorisee"] is False
+    assert "AGE_INVALIDE" in r["raisons"]
+
+
 # ═══════════════ §7 — runtime-truth ═══════════════
 def test_un_flag_on_sans_producteur_est_off_de_fait():
     obs = {"copy_vault": {"flag_on": True, "producer_alive": False}}
@@ -149,6 +232,17 @@ def test_un_producteur_trop_vieux_nest_pas_vivant():
                           "signal_path_alive": True, "execution_engine_alive": True, "ledger_writable": True}}
     rt = PC.runtime_truth(obs, now_ms=1_000_000, age_max_ms=120_000)
     assert rt["strategies_actives"]["copy_vault"]["etat"] == "ON_SANS_PRODUCTEUR"
+
+
+def test_un_evenement_runtime_date_dans_le_futur_nest_pas_vivant():
+    obs = {"copy_vault": {"flag_on": True, "producer_alive": True,
+                           "last_event_ms": 1_000_001,
+                           "signal_path_alive": True, "execution_engine_alive": True,
+                           "ledger_writable": True}}
+    rt = PC.runtime_truth(obs, now_ms=1_000_000, age_max_ms=120_000)
+    row = rt["strategies_actives"]["copy_vault"]
+    assert row["etat"] == "ON_SANS_PRODUCTEUR"
+    assert row["producer_alive"] is False
 
 
 def test_le_carry_est_toujours_disabled_by_scope_dans_runtime_truth():

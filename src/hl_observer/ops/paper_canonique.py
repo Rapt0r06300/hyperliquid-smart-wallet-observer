@@ -23,6 +23,7 @@ CopyVault est la seule stratégie active; les autres familles restent visibles m
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -45,6 +46,27 @@ STRATEGIES_LEGACY_OFF = tuple(sorted(
     entry.family for entry in _authoritative_strategy_scope()
     if entry.family not in STRATEGIES_ACTIVES
 ))
+
+
+def _finite_number(value: Any, *, name: str) -> float:
+    """Return one finite real value or fail before economic arithmetic."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"{name} doit etre un nombre fini")
+    try:
+        converted = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} doit etre un nombre fini") from exc
+    if not math.isfinite(converted):
+        raise ValueError(f"{name} doit etre un nombre fini")
+    return converted
+
+
+def _non_empty(value: Any, *, name: str) -> str:
+    converted = str(value).strip()
+    if not converted:
+        raise ValueError(f"{name} ne doit pas etre vide")
+    return converted
 
 
 class ScopeViolation(ValueError):
@@ -74,6 +96,16 @@ class PaperIntent:
                 "strategie hors scope actif: %r (actives: %s)" % (self.strategy, ", ".join(STRATEGIES_ACTIVES)))
         if self.side not in (1, -1):
             raise ValueError("side doit valoir +1 ou -1")
+        _non_empty(self.coin, name="coin")
+        _non_empty(self.venue, name="venue")
+        if _finite_number(self.notional_usd, name="notional_usd") <= 0.0:
+            raise ValueError("notional_usd doit etre strictement positif")
+        if (
+            isinstance(self.signal_observable_at_ms, bool)
+            or not isinstance(self.signal_observable_at_ms, int)
+            or self.signal_observable_at_ms <= 0
+        ):
+            raise ValueError("signal_observable_at_ms doit etre un entier positif")
 
     def as_dict(self) -> dict[str, Any]:
         return {"strategy": self.strategy, "coin": self.coin.upper(), "side": self.side,
@@ -99,21 +131,44 @@ class LiquidityConsumptionLedger:
 
     _consomme: dict[tuple, float] = field(default_factory=dict)
 
+    @staticmethod
+    def _cle_validee(*, venue: str, coin: str, side: int, price_level: float,
+                     snapshot_version: Any, profondeur_affichee: float) -> tuple[tuple, float]:
+        venue_normalisee = _non_empty(venue, name="venue").upper()
+        coin_normalise = _non_empty(coin, name="coin").upper()
+        if side not in (1, -1):
+            raise ValueError("side doit valoir +1 ou -1")
+        prix = _finite_number(price_level, name="price_level")
+        profondeur = _finite_number(profondeur_affichee, name="profondeur_affichee")
+        if prix <= 0.0:
+            raise ValueError("price_level doit etre strictement positif")
+        if profondeur < 0.0:
+            raise ValueError("profondeur_affichee doit etre positive ou nulle")
+        version = _non_empty(snapshot_version, name="snapshot_version")
+        return (venue_normalisee, coin_normalise, int(side), round(prix, 10), version), profondeur
+
     def disponible(self, *, venue: str, coin: str, side: int, price_level: float,
                    snapshot_version: Any, profondeur_affichee: float) -> float:
-        cle = (str(venue).upper(), str(coin).upper(), int(side), round(float(price_level), 10),
-               str(snapshot_version))
-        return max(0.0, float(profondeur_affichee) - self._consomme.get(cle, 0.0))
+        cle, profondeur = self._cle_validee(
+            venue=venue, coin=coin, side=side, price_level=price_level,
+            snapshot_version=snapshot_version, profondeur_affichee=profondeur_affichee,
+        )
+        return max(0.0, profondeur - self._consomme.get(cle, 0.0))
 
     def consommer(self, *, venue: str, coin: str, side: int, price_level: float,
                   snapshot_version: Any, quantite: float, profondeur_affichee: float) -> dict[str, Any]:
+        quantite_validee = _finite_number(quantite, name="quantite")
+        if quantite_validee < 0.0:
+            raise ValueError("quantite doit etre positive ou nulle")
         dispo = self.disponible(venue=venue, coin=coin, side=side, price_level=price_level,
                                 snapshot_version=snapshot_version, profondeur_affichee=profondeur_affichee)
-        pris = max(0.0, min(float(quantite), dispo))
-        cle = (str(venue).upper(), str(coin).upper(), int(side), round(float(price_level), 10),
-               str(snapshot_version))
+        pris = min(quantite_validee, dispo)
+        cle, _ = self._cle_validee(
+            venue=venue, coin=coin, side=side, price_level=price_level,
+            snapshot_version=snapshot_version, profondeur_affichee=profondeur_affichee,
+        )
         self._consomme[cle] = self._consomme.get(cle, 0.0) + pris
-        return {"consomme": pris, "refuse": max(0.0, float(quantite) - pris),
+        return {"consomme": pris, "refuse": max(0.0, quantite_validee - pris),
                 "restant_apres": max(0.0, dispo - pris)}
 
 
@@ -124,14 +179,17 @@ def remplir_partiellement(taille_demandee: float, niveaux: Sequence[tuple[float,
     Une taille supérieure à la profondeur totale ne se remplit jamais entièrement : on rend ce qui est
     réellement exécutable + un `residu` nommé, jamais un fill complet inventé.
     """
-    reste = float(taille_demandee)
+    reste = _finite_number(taille_demandee, name="taille_demandee")
     if reste <= 0:
         return {"rempli": 0.0, "residu": 0.0, "vwap": None, "statut": "TAILLE_NULLE"}
     rempli = 0.0
     cout = 0.0
     for prix, profondeur in niveaux:
-        p, d = float(prix), max(0.0, float(profondeur))
-        if p <= 0 or d <= 0:
+        p = _finite_number(prix, name="prix")
+        d = _finite_number(profondeur, name="profondeur")
+        if p <= 0.0 or d < 0.0:
+            raise ValueError("prix doit etre positif et profondeur positive ou nulle")
+        if d == 0.0:
             continue
         pris = min(reste, d)
         rempli += pris
@@ -152,13 +210,20 @@ def fill_maker(*, file_devant_nous: float | None, volume_traversant: float | Non
                taille: float) -> dict[str, Any]:
     """Un maker n'est PAS rempli parce que le prix a touché. Sans file ni volume mesurés :
     `MAKER_FILL_UNMEASURABLE`. Avec les deux : le fill est borné par le volume au-delà de la file."""
+    taille_validee = _finite_number(taille, name="taille")
+    if taille_validee <= 0.0:
+        raise ValueError("taille doit etre strictement positive")
     if file_devant_nous is None or volume_traversant is None:
         return {"statut": "MAKER_FILL_UNMEASURABLE", "rempli": None,
                 "raison": "file devant nous ou volume traversant non mesures : aucun fill suppose"}
-    reste_apres_file = max(0.0, float(volume_traversant) - float(file_devant_nous))
-    rempli = max(0.0, min(float(taille), reste_apres_file))
+    file_validee = _finite_number(file_devant_nous, name="file_devant_nous")
+    volume_valide = _finite_number(volume_traversant, name="volume_traversant")
+    if file_validee < 0.0 or volume_valide < 0.0:
+        raise ValueError("file_devant_nous et volume_traversant doivent etre positifs ou nuls")
+    reste_apres_file = max(0.0, volume_valide - file_validee)
+    rempli = min(taille_validee, reste_apres_file)
     return {"statut": "MAKER_FILL_MODELISE", "rempli": round(rempli, 10),
-            "fill_ratio": (round(rempli / float(taille), 6) if taille else None),
+            "fill_ratio": round(rempli / taille_validee, 6),
             "note": "modele conservateur : rempli seulement par le volume au-dela de la file",
             "real_execution": False}
 
@@ -176,10 +241,28 @@ def carnet_fiable(*, sequence: int | None, derniere_sequence: int | None, age_ms
         raisons.append("GAP_DE_SEQUENCE")
     if age_ms is None:
         raisons.append("AGE_INCONNU")
-    elif float(age_ms) > float(age_max_ms):
-        raisons.append("STALE")
-    if skew_ms is not None and abs(float(skew_ms)) > float(skew_max_ms):
-        raisons.append("SKEW_HORLOGE")
+    else:
+        try:
+            age = _finite_number(age_ms, name="age_ms")
+            age_max = _finite_number(age_max_ms, name="age_max_ms")
+            if age_max < 0.0:
+                raise ValueError("age_max_ms doit etre positif ou nul")
+            if age < 0.0:
+                raisons.append("OBSERVATION_DANS_LE_FUTUR")
+            elif age > age_max:
+                raisons.append("STALE")
+        except ValueError:
+            raisons.append("AGE_INVALIDE")
+    if skew_ms is not None:
+        try:
+            skew = _finite_number(skew_ms, name="skew_ms")
+            skew_max = _finite_number(skew_max_ms, name="skew_max_ms")
+            if skew_max < 0.0:
+                raise ValueError("skew_max_ms doit etre positif ou nul")
+            if abs(skew) > skew_max:
+                raisons.append("SKEW_HORLOGE")
+        except ValueError:
+            raisons.append("SKEW_INVALIDE")
     return {"fiable": not raisons, "entree_autorisee": not raisons, "raisons": raisons}
 
 
@@ -192,11 +275,28 @@ def runtime_truth(observations: Mapping[str, Mapping[str, Any]], *, now_ms: int,
     Les familles legacy sont listées à part, toujours `DISABLED_BY_SCOPE`.
     """
     lignes: dict[str, Any] = {}
+    try:
+        maintenant = _finite_number(now_ms, name="now_ms")
+        age_max = _finite_number(age_max_ms, name="age_max_ms")
+        if age_max < 0.0:
+            raise ValueError("age_max_ms doit etre positif ou nul")
+    except ValueError:
+        maintenant = math.nan
+        age_max = math.nan
     for strat in STRATEGIES_ACTIVES:
         o = dict(observations.get(strat) or {})
         dernier = o.get("last_event_ms")
-        age = None if not isinstance(dernier, (int, float)) else float(now_ms) - float(dernier)
-        producteur = bool(o.get("producer_alive")) and age is not None and age <= float(age_max_ms)
+        try:
+            dernier_valide = _finite_number(dernier, name="last_event_ms")
+            age = maintenant - dernier_valide
+        except ValueError:
+            age = None
+        producteur = bool(
+            o.get("producer_alive")
+            and age is not None
+            and math.isfinite(age)
+            and 0.0 <= age <= age_max
+        )
         signal = bool(o.get("signal_path_alive"))
         moteur = bool(o.get("execution_engine_alive"))
         ledger = bool(o.get("ledger_writable"))
