@@ -119,7 +119,14 @@ def load_observed_books(
         checkpoint_clean_epoch_ms: int | None = None,
     ) -> None:
         nonlocal invalid, duplicate_rows
-        if not coin or ts_ms <= 0 or bid <= 0 or ask <= bid or capacity_usd <= 0:
+        if (
+            not coin
+            or ts_ms <= 0
+            or not all(math.isfinite(value) for value in (bid, ask, capacity_usd))
+            or bid <= 0
+            or ask <= bid
+            or capacity_usd <= 0
+        ):
             invalid += 1
             return
         identity = (
@@ -206,6 +213,10 @@ def load_observed_books(
                     bid = float(raw["bid"])
                     ask = float(raw["ask"])
                     capacity_usd = float(raw["capacity_usd"])
+                    optional_levels_valid = all(
+                        name not in raw or _observed_levels(raw.get(name)) is not None
+                        for name in ("bids5", "asks5")
+                    )
                     if not (
                         collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
                         and metaorder_id
@@ -221,9 +232,11 @@ def load_observed_books(
                         and received >= exchange_ts > 0
                         and received - exchange_ts <= MAX_TARGET_LAG_MS
                         and coin
+                        and all(math.isfinite(value) for value in (bid, ask, capacity_usd))
                         and bid > 0
                         and ask > bid
                         and capacity_usd > 0
+                        and optional_levels_valid
                     ):
                         continue
                     checkpoint_counts[checkpoint_id] += 1
@@ -327,6 +340,14 @@ def load_observed_books(
                     if is_checkpoint and metaorder_id in quarantined_checkpoint_metaorders:
                         quarantined_checkpoint_rows += 1
                         continue
+                    bids5 = _observed_levels(raw.get("bids5"))
+                    asks5 = _observed_levels(raw.get("asks5"))
+                    if (
+                        ("bids5" in raw and bids5 is None)
+                        or ("asks5" in raw and asks5 is None)
+                    ):
+                        invalid += 1
+                        continue
                     add_row(
                         coin=coin,
                         ts_ms=received,
@@ -336,8 +357,8 @@ def load_observed_books(
                         source=str(raw["source"]),
                         source_line=line_number,
                         causal_observation=True,
-                        bids5=_observed_levels(raw.get("bids5")),
-                        asks5=_observed_levels(raw.get("asks5")),
+                        bids5=bids5,
+                        asks5=asks5,
                         metaorder_id=metaorder_id,
                         checkpoint_stage=checkpoint_stage,
                         checkpoint_id=checkpoint_id,

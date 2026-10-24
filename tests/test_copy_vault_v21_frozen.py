@@ -152,6 +152,54 @@ def test_reference_depth_rejects_stale_or_noncausal_books() -> None:
     ) is None
 
 
+@pytest.mark.parametrize(
+    "book",
+    [
+        {
+            "ts_ms": 1_000, "causal_observation": True,
+            "bids5": [[100.0, float("nan")]], "asks5": [[101.0, 1.0]],
+        },
+        {
+            "ts_ms": 1_000, "causal_observation": True,
+            "bids5": [[100.0, 1.0]], "asks5": [[float("inf"), 1.0]],
+        },
+        {
+            "ts_ms": 1_000, "causal_observation": True,
+            "bids5": [[100.0, -1.0]], "asks5": [[101.0, 1.0]],
+        },
+    ],
+)
+def test_reference_depth_refuse_les_niveaux_non_economiques(book) -> None:
+    assert V21._reference_depth_features(
+        {"signal_ts_ms": 1_000, "direction": 1}, [book]
+    ) is None
+
+
+@pytest.mark.parametrize("notional", [None, float("nan"), float("inf"), -1.0])
+def test_segment_refuse_un_premier_fill_non_mesurable(notional) -> None:
+    candidates, audit = V21._segment_candidates(
+        [{
+            "signal_ts_ms": 1_000,
+            "direction": 1,
+            "coin": "BTC",
+            "member_events": [{"action": "ADD", "taille_usd": notional}],
+        }],
+        {"BTC": [{
+            "ts_ms": 1_000,
+            "causal_observation": True,
+            "bids5": [[100.0, 2.0]],
+            "asks5": [[101.0, 1.0]],
+        }]},
+        start_ms=900,
+        end_ms=1_200,
+        minimum_leader_fill_notional_usd=100.0,
+        signed_depth_imbalance_minimum=-1.0,
+    )
+
+    assert candidates == []
+    assert audit["LEADER_FILL_NOTIONAL_UNMEASURABLE"] == 1
+
+
 def test_frozen_v21_opens_heldouts_sequentially(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 

@@ -49,14 +49,39 @@ def _first_action(metaorder: Mapping[str, Any]) -> str:
     return str(metaorder.get("action") or "").strip().upper()
 
 
-def _first_fill_notional_usd(metaorder: Mapping[str, Any]) -> float:
+def _first_fill_notional_usd(metaorder: Mapping[str, Any]) -> float | None:
     members = list(metaorder.get("member_events") or ())
     if not members or not isinstance(members[0], Mapping):
-        return 0.0
+        return None
     try:
-        return float(members[0].get("taille_usd") or 0.0)
+        value = float(members[0]["taille_usd"])
     except (TypeError, ValueError, OverflowError):
-        return 0.0
+        return None
+    except KeyError:
+        return None
+    return value if math.isfinite(value) and value > 0.0 else None
+
+
+def _valid_depth_side(raw: Any) -> list[tuple[float, float]] | None:
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return None
+    levels: list[tuple[float, float]] = []
+    try:
+        for level in raw:
+            if not isinstance(level, (list, tuple)) or len(level) != 2:
+                return None
+            price, quantity = float(level[0]), float(level[1])
+            if (
+                not math.isfinite(price)
+                or not math.isfinite(quantity)
+                or price <= 0.0
+                or quantity <= 0.0
+            ):
+                return None
+            levels.append((price, quantity))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return levels
 
 
 def _reference_depth_features(
@@ -65,22 +90,27 @@ def _reference_depth_features(
 ) -> tuple[float, float] | None:
     if not rows:
         return None
-    timestamps = [int(row["ts_ms"]) for row in rows]
+    try:
+        timestamps = [int(row["ts_ms"]) for row in rows]
+        signal_ms = int(metaorder["signal_ts_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if signal_ms <= 0 or any(timestamp <= 0 for timestamp in timestamps):
+        return None
     if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
         return None
-    signal_ms = int(metaorder["signal_ts_ms"])
     index = bisect.bisect_right(timestamps, signal_ms) - 1
     if index < 0 or signal_ms - timestamps[index] > FROZEN_MAX_REFERENCE_LAG_MS:
         return None
     row = rows[index]
     if row.get("causal_observation") is not True:
         return None
-    bids = list(row.get("bids5") or ())
-    asks = list(row.get("asks5") or ())
-    if not bids or not asks:
+    bids = _valid_depth_side(row.get("bids5"))
+    asks = _valid_depth_side(row.get("asks5"))
+    if bids is None or asks is None:
         return None
-    bid_usd = sum(float(level[0]) * float(level[1]) for level in bids if len(level) >= 2)
-    ask_usd = sum(float(level[0]) * float(level[1]) for level in asks if len(level) >= 2)
+    bid_usd = sum(price * quantity for price, quantity in bids)
+    ask_usd = sum(price * quantity for price, quantity in asks)
     total = bid_usd + ask_usd
     direction = int(metaorder.get("direction") or 0)
     two_sided_capacity = min(bid_usd, ask_usd)
@@ -355,6 +385,9 @@ def _segment_candidates(
             audit["DEPTH_IMBALANCE_REJECTED"] += 1
             continue
         first_notional = _first_fill_notional_usd(row)
+        if first_notional is None:
+            audit["LEADER_FILL_NOTIONAL_UNMEASURABLE"] += 1
+            continue
         if first_notional < float(minimum_leader_fill_notional_usd):
             audit["LEADER_FILL_NOTIONAL_REJECTED"] += 1
             continue

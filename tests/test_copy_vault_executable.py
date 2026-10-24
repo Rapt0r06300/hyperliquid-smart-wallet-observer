@@ -316,6 +316,51 @@ def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("hl_bid", float("nan")), ("hl_ask", float("inf")),
+     ("taille_min_usd", float("nan"))],
+)
+def test_loader_refuse_un_top_historique_non_fini(tmp_path, field, value) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "coin": "BTC", "collecte_ts": 1.0, "hl_bid": 99.0,
+        "hl_ask": 101.0, "taille_min_usd": 500.0,
+    }
+    row[field] = value
+    (data / "carnet_venues.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
+
+
+def test_loader_refuse_un_carnet_causal_dont_la_profondeur_est_non_finie(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "bids5": [[100.0, float("nan")]],
+        "asks5": [[102.0, 2.0]],
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
+
+
 def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     data = tmp_path / "runtime" / "data"
     data.mkdir(parents=True)
