@@ -13776,7 +13776,10 @@ observations ponctuelles prouvées, tandis que `continuous_replayable` exige une
 ancre native et une continuité de séquence démontrée dans le shard ou entre des
 shards ordonnés. `SNAPSHOT_OBSERVATIONS_ONLY`, `RECOVERABLE_ANCHORED_SPANS` et
 `BLOCKED` ne peuvent jamais être présentés comme un replay continu. Une
-certification interrompue masque les vues courantes. Les reprises peuvent
+réparation issue de `RECOVERABLE_ANCHORED_SPANS` est enregistrée comme asset de
+segments réancrés distinct, avec son propre SHA-256 et sa preuve ; elle ne
+reclasse jamais le shard source comme continu. Une certification interrompue
+masque les vues courantes. Les reprises peuvent
 réutiliser un groupe venue/symbole seulement si l'identité catalogue, le
 SHA attendu, la taille et les métadonnées de chaque membre sont inchangés ;
 sinon le groupe complet est relu et rehashé. Le rapport principal reste borné

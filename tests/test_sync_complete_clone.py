@@ -388,6 +388,7 @@ def test_safe_summary_does_not_present_generic_safe_as_l2_continuity(tmp_path):
     assert summary["l2_certification_status"] == "NOT_AVAILABLE"
     assert summary["l2_snapshot_backtestable_shards"] == 0
     assert summary["l2_continuous_replayable_shards"] == 0
+    assert summary["l2_reanchored_segment_assets"] == 0
 
 
 def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
@@ -416,6 +417,15 @@ def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
                 ("blocked", digest, "BLOCKED", 0, 0),
             ],
         )
+        connection.execute("""
+            CREATE TABLE l2_reanchored_segment_assets(
+                source_dataset_id TEXT, catalog_sha256 TEXT
+            )
+        """)
+        connection.execute(
+            "INSERT INTO l2_reanchored_segment_assets VALUES (?, ?)",
+            ("repaired", digest),
+        )
     report = tmp_path / "RESTORE_REPORT.json"
     report.write_text(json.dumps({
         "catalog_verification": {"source_index_sha256": digest},
@@ -431,6 +441,7 @@ def test_safe_summary_reads_only_complete_catalog_bound_l2_admission(tmp_path):
     assert summary["l2_snapshot_backtestable_shards"] == 2
     assert summary["l2_continuous_replayable_shards"] == 1
     assert summary["l2_blocked_shards"] == 1
+    assert summary["l2_reanchored_segment_assets"] == 1
     assert summary["l2_catalog_sha256"] == digest
 
 

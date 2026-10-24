@@ -361,6 +361,7 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "l2_catalog_sha256": None,
         "l2_snapshot_backtestable_shards": 0,
         "l2_continuous_replayable_shards": 0,
+        "l2_reanchored_segment_assets": 0,
         "l2_blocked_shards": 0,
     }
     try:
@@ -396,6 +397,7 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "l2_catalog_sha256": None,
         "l2_snapshot_backtestable_shards": 0,
         "l2_continuous_replayable_shards": 0,
+        "l2_reanchored_segment_assets": 0,
         "l2_blocked_shards": 0,
     }
     if database_name is None:
@@ -431,6 +433,17 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
                 FROM l2_certifications
                 WHERE catalog_sha256=?
             """, (active_catalog,)).fetchone()
+            has_repaired = connection.execute("""
+                SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='l2_reanchored_segment_assets'
+            """).fetchone()
+            repaired_count = (
+                connection.execute(
+                    "SELECT COUNT(*) FROM l2_reanchored_segment_assets "
+                    "WHERE catalog_sha256=?", (active_catalog,),
+                ).fetchone()[0]
+                if has_repaired else 0
+            )
     except (OSError, sqlite3.Error, ValueError):
         return summary
     summary.update({
@@ -438,6 +451,7 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "l2_catalog_sha256": active_catalog,
         "l2_snapshot_backtestable_shards": int(counts[0] or 0),
         "l2_continuous_replayable_shards": int(counts[1] or 0),
+        "l2_reanchored_segment_assets": int(repaired_count or 0),
         "l2_blocked_shards": int(counts[2] or 0),
     })
     return summary

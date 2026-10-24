@@ -216,6 +216,7 @@ def test_report_is_compact_and_database_separates_snapshot_from_continuous(tmp_p
     assert report["admission"] == {
         "snapshot_backtestable_shards": 2,
         "continuous_replayable_shards": 1,
+        "reanchored_segment_assets": 0,
         "blocked_shards": 0,
     }
     details = dest / report["details"]["path"]
@@ -346,3 +347,60 @@ def test_gate_recorded_rest_anchor_can_prove_following_native_delta(tmp_path):
     update["channel"] = "l2Book"
     source, info = prepare(tmp_path, [anchor, update], venue="gate")
     assert inspect_shard(source, info)["status"] == "CONTINUOUS_L2"
+
+
+def test_new_empty_local_selection_hides_previous_l2_admission(tmp_path):
+    import pytest
+    from tools.certify_local_l2 import run
+
+    root, dest, _ = _cross_shard_fixture(tmp_path)
+    run(root, dest, cross_shard=True)
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": []}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="NO_LOCALLY_DOWNLOADED_SAFE_L2_SHARDS_FOUND"):
+        run(root, dest)
+
+    with sqlite3.connect(dest / "SAFE_SHARDS.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM current_l2_snapshot_backtestable"
+        ).fetchone()[0] == 0
+
+
+def test_repaired_segments_are_registered_separately_from_native_continuity(tmp_path):
+    from tools.certify_local_l2 import run
+
+    root = tmp_path / "repo"
+    dest = root / "runtime" / "recovery" / "full"
+    stored = dest / "usable" / "shards" / "release"
+    stored.mkdir(parents=True)
+    rows = [snap(1, 100), delta(2, 101, 102, 100),
+            delta(3, 104, 106, 102), snap(4, 200),
+            delta(5, 201, 201, 200)]
+    source, row = prepare(tmp_path, rows)
+    (stored / "recoverable.jsonl.gz").write_bytes(source.read_bytes())
+    row.update({
+        "dataset_id": "recoverable", "quality_status": "SAFE",
+        "replay_compatible": True, "release_tag": "release",
+        "symbol": "BTCUSDT",
+    })
+    (root / "catalog").mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": [row]}),
+        encoding="utf-8",
+    )
+
+    report = run(root, dest, repair=True)
+
+    assert report["admission"]["reanchored_segment_assets"] == 1
+    assert report["admission"]["continuous_replayable_shards"] == 0
+    with sqlite3.connect(dest / "SAFE_SHARDS.sqlite3") as connection:
+        repaired = connection.execute(
+            "SELECT source_dataset_id, output_sha256 "
+            "FROM current_l2_reanchored_segment_assets"
+        ).fetchall()
+    with gzip.open(dest / report["details"]["path"], "rt", encoding="utf-8") as stream:
+        detail = json.loads(next(stream))
+    assert repaired == [("recoverable", detail["repair"]["sha256"])]

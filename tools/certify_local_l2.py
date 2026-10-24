@@ -460,8 +460,22 @@ class _L2AdmissionRegistry:
                 value TEXT NOT NULL
             )
         """)
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS l2_reanchored_segment_assets (
+                source_dataset_id TEXT NOT NULL,
+                release_tag TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL,
+                output_sha256 TEXT NOT NULL,
+                output_path TEXT NOT NULL,
+                catalog_sha256 TEXT NOT NULL,
+                proof_json TEXT NOT NULL,
+                certified_at_ns INTEGER NOT NULL,
+                PRIMARY KEY(source_dataset_id, release_tag, output_sha256)
+            )
+        """)
         self.connection.execute("DROP VIEW IF EXISTS current_l2_snapshot_backtestable")
         self.connection.execute("DROP VIEW IF EXISTS current_l2_continuous_replayable")
+        self.connection.execute("DROP VIEW IF EXISTS current_l2_reanchored_segment_assets")
         base = """
             SELECT cert.* FROM l2_certifications AS cert
             JOIN l2_certification_meta AS state
@@ -478,6 +492,15 @@ class _L2AdmissionRegistry:
             "CREATE VIEW current_l2_continuous_replayable AS " + base
             + " WHERE cert.continuous_replayable=1"
         )
+        self.connection.execute("""
+            CREATE VIEW current_l2_reanchored_segment_assets AS
+            SELECT repaired.* FROM l2_reanchored_segment_assets AS repaired
+            JOIN l2_certification_meta AS state
+              ON state.key='run_status' AND state.value='COMPLETE'
+            JOIN l2_certification_meta AS catalog
+              ON catalog.key='active_catalog_sha256'
+             AND catalog.value=repaired.catalog_sha256
+        """)
         self.connection.commit()
 
     def _meta(self, rows):
@@ -501,6 +524,7 @@ class _L2AdmissionRegistry:
             raise ValueError("INVALID_L2_FINALIZATION_SHA256")
         now = time.time_ns()
         values = []
+        repaired_values = []
         for row in rows:
             status = str(row.get("status") or "BLOCKED")
             values.append((
@@ -514,6 +538,19 @@ class _L2AdmissionRegistry:
                 json.dumps(row.get("reasons") or {}, sort_keys=True,
                            separators=(",", ":")), now,
             ))
+            repair = row.get("repair")
+            if isinstance(repair, dict) and "repair_error" not in row:
+                output_sha = str(repair.get("sha256") or "")
+                output_path = str(repair.get("path") or "")
+                if SHA.fullmatch(output_sha) is None or not output_path:
+                    raise ValueError("INVALID_L2_REPAIR_PROOF")
+                repaired_values.append((
+                    str(row.get("dataset_id") or ""),
+                    str(row.get("release_tag") or ""),
+                    str(row.get("source_sha256") or ""), output_sha,
+                    output_path, str(catalog_sha256),
+                    json.dumps(repair, sort_keys=True, separators=(",", ":")), now,
+                ))
         try:
             self.connection.execute("BEGIN IMMEDIATE")
             self.connection.executemany("""
@@ -535,6 +572,17 @@ class _L2AdmissionRegistry:
                     reasons_json=excluded.reasons_json,
                     certified_at_ns=excluded.certified_at_ns
             """, values)
+            self.connection.execute(
+                "DELETE FROM l2_reanchored_segment_assets WHERE catalog_sha256=?",
+                (str(catalog_sha256),),
+            )
+            self.connection.executemany("""
+                INSERT INTO l2_reanchored_segment_assets (
+                    source_dataset_id, release_tag, source_sha256,
+                    output_sha256, output_path, catalog_sha256,
+                    proof_json, certified_at_ns
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, repaired_values)
             self._meta((
                 ("active_catalog_sha256", str(catalog_sha256)),
                 ("details_sha256", str(details_sha256)),
@@ -550,6 +598,7 @@ class _L2AdmissionRegistry:
         if view not in {
             "current_l2_snapshot_backtestable",
             "current_l2_continuous_replayable",
+            "current_l2_reanchored_segment_assets",
         }:
             raise ValueError("UNSAFE_L2_VIEW")
         return int(self.connection.execute(
@@ -651,8 +700,6 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
     missing_count = indexed_count - len(selected)
     if limit:
         selected = selected[:limit]
-    if not selected:
-        raise ValueError("NO_LOCALLY_DOWNLOADED_SAFE_L2_SHARDS_FOUND")
     catalog_sha256 = digest_file(catalog)
     # Before any work, retire a previous green run so interrupted runs fail closed.
     report_path = destination / "LOCAL_L2_CERTIFICATION.json"
@@ -663,6 +710,9 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
     })
     registry = _L2AdmissionRegistry(destination)
     registry.begin(catalog_sha256)
+    if not selected:
+        registry.close()
+        raise ValueError("NO_LOCALLY_DOWNLOADED_SAFE_L2_SHARDS_FOUND")
     receipt_dir = destination / "LOCAL_L2_RECEIPTS"
     if receipt_dir.is_symlink():
         raise ValueError("UNSAFE_L2_RECEIPT_DIRECTORY")
@@ -804,6 +854,10 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
         item["status"] in _L2AdmissionRegistry.CONTINUOUS_STATUSES
         for item in outputs
     )
+    reanchored_segment_assets = sum(
+        isinstance(item.get("repair"), dict) and "repair_error" not in item
+        for item in outputs
+    )
     reasons = Counter()
     by_venue = {}
     for item in outputs:
@@ -822,6 +876,7 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
         "admission": {
             "snapshot_backtestable_shards": snapshot_backtestable,
             "continuous_replayable_shards": continuous_replayable,
+            "reanchored_segment_assets": reanchored_segment_assets,
             "blocked_shards": int(totals.get("BLOCKED", 0)),
         },
         "reason_shard_counts": dict(sorted(reasons.items())),
