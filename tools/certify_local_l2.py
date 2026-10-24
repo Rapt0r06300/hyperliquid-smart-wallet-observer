@@ -128,8 +128,17 @@ def native_frame(row, venue):
         low = None
         bid, ask = data.get("bids"), data.get("asks")
     elif venue == "gate":
-        snap = snap and data.get("full") is True
-        seq, prev, low = integer(data.get("u")), None, integer(data.get("U"))
+        provenance = row.get("provenance")
+        recorded_rest_anchor = (
+            snap
+            and row.get("source_id") == "gate_public_rest"
+            and isinstance(provenance, dict)
+            and provenance.get("snapshot_role")
+            == "official_base_for_incremental_depth"
+        )
+        snap = snap and (data.get("full") is True or recorded_rest_anchor)
+        seq = integer(data.get("id") if recorded_rest_anchor else data.get("u"))
+        prev, low = None, integer(data.get("U"))
         bid, ask = data.get("b", data.get("bids")), data.get("a", data.get("asks"))
     elif venue == "hyperliquid":
         book = message.get("data", message)
@@ -370,6 +379,47 @@ def atomic_jsonl_gzip(path, rows):
             "format": "jsonl"}
 
 
+def atomic_json_gzip(path, value):
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("UNSAFE_REPORT_PATH")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=".l2-cache-", suffix=".json.gz.tmp"
+    )
+    os.close(fd)
+    tmp = Path(temporary)
+    try:
+        with tmp.open("wb") as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as stream:
+                stream.write(json.dumps(
+                    value, sort_keys=True, ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8"))
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _cross_shard_group_identity(group):
+    rows = []
+    for path, row in group:
+        if path.is_file() and not path.is_symlink():
+            stat = path.stat()
+            local = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+        else:
+            local = {"size": None, "mtime_ns": None}
+        rows.append({
+            "dataset_id": str(row.get("dataset_id") or ""),
+            "release_tag": str(row.get("release_tag") or ""),
+            "sha256": str(row.get("sha256") or ""),
+            "bytes": row.get("bytes"), "path": str(path),
+            "symlink": path.is_symlink(), **local,
+        })
+    return hashlib.sha256(json.dumps(
+        rows, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+
+
 class _L2AdmissionRegistry:
     """Transactional, SHA-bound L2 use classes in AlinaSync's database."""
 
@@ -592,8 +642,6 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
             path = (destination / "usable" / "shards" / _safe_component(row["release_tag"])
                     / (_safe_component(row["dataset_id"]) + ".jsonl.gz"))
             selected.append((path, row))
-    if cross_shard and resume:
-        raise ValueError("CROSS_SHARD_REQUIRES_FRESH_FULL_HASH_SCAN_NOT_RESUME")
     indexed_count = len(selected)
     if not include_missing:
         # User is auditing shards ALREADY on the PC, not attempting another
@@ -674,11 +722,45 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
                 item[1].get("start_ts_ms") if type(item[1].get("start_ts_ms")) is int else -1,
                 str(item[1].get("dataset_id")),
             ))
+            group_key = "|".join((
+                str(sorted_group[0][1].get("venue") or "").lower(),
+                str(sorted_group[0][1].get("symbol") or "").upper(),
+            ))
+            receipt = destination / "LOCAL_L2_GROUP_RECEIPTS" / (
+                hashlib.sha256(group_key.encode("utf-8")).hexdigest() + ".json.gz"
+            )
+            identity = _cross_shard_group_identity(sorted_group)
+            if resume and receipt.is_file() and not receipt.is_symlink():
+                try:
+                    with gzip.open(receipt, "rt", encoding="utf-8") as stream:
+                        cached = json.load(stream)
+                    cached_rows = cached.get("rows")
+                    expected_ids = [str(item[1].get("dataset_id") or "")
+                                    for item in sorted_group]
+                    if (
+                        cached.get("schema") == "alina.local_l2_group_receipt.v1"
+                        and cached.get("identity") == identity
+                        and isinstance(cached_rows, list)
+                        and [str(item.get("dataset_id") or "")
+                             for item in cached_rows] == expected_ids
+                    ):
+                        return [
+                            (path, {**item, "stat_cache_reused_without_new_hash": True})
+                            for (path, _), item in zip(sorted_group, cached_rows)
+                        ]
+                except (OSError, ValueError, KeyError, TypeError, gzip.BadGzipFile):
+                    pass
             for path, row in sorted_group:
                 if type(row.get("start_ts_ms")) is not int:
                     state.clear()  # no proven ordering between shards
                 item = inspect_shard(path, row, carry=state)
                 rows.append((path, item))
+            atomic_json_gzip(receipt, {
+                "schema": "alina.local_l2_group_receipt.v1",
+                "identity": identity,
+                "group_key": group_key,
+                "rows": [item for _, item in rows],
+            })
             return rows
         tasks = list(groups.values())
     else:
@@ -766,11 +848,11 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4))
     parser.add_argument("--limit", type=int, default=0, help="optional smoke-test cap")
     parser.add_argument("--repair", action="store_true", help="create separate proven spans")
-    parser.add_argument("--resume", action="store_true", help="trust prior SHA receipts by unchanged size+mtime; not a fresh byte verification")
+    parser.add_argument("--resume", action="store_true", help="reuse prior SHA receipts for unchanged files or complete cross-shard groups; not a fresh byte verification")
     parser.add_argument("--include-missing", action="store_true",
                         help="also report indexed SAFE L2 files that are not yet downloaded as BLOCKED")
     parser.add_argument("--cross-shard", action="store_true",
-                        help="verify native continuity across sorted same-venue/symbol shards; incompatible with --resume")
+                        help="verify native continuity across sorted same-venue/symbol shards")
     args = parser.parse_args(argv)
     if args.limit < 0 or args.workers <= 0 or args.workers > 16:
         parser.error("--limit must be >=0 and --workers must be 1..16")

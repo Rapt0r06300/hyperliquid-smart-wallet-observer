@@ -2,7 +2,7 @@
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 2
 echo ALINA_LOCAL_L2_AUDIT: checking already downloaded SAFE shards, no download.
-if "%~1"=="" (set "ALINA_L2_ARGS=--repair --cross-shard") else (set "ALINA_L2_ARGS=--repair %*")
+if "%~1"=="" (set "ALINA_L2_ARGS=--repair --cross-shard --resume") else (set "ALINA_L2_ARGS=--repair %*")
 if exist "%~dp0tools\python\python.exe" (
   "%~dp0tools\python\python.exe" tools\certify_local_l2.py %ALINA_L2_ARGS%
   goto :done

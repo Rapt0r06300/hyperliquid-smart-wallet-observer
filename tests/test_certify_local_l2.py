@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import sqlite3
 
 from tools.certify_local_l2 import inspect_shard, salvage
@@ -258,3 +259,90 @@ def test_l2_database_begin_hides_previous_complete_admission(tmp_path):
     registry.begin("d" * 64)
     assert registry.count_view("current_l2_continuous_replayable") == 0
     registry.close()
+
+
+def _cross_shard_fixture(tmp_path):
+    root = tmp_path / "repo"
+    dest = root / "runtime" / "recovery" / "full"
+    stored = dest / "usable" / "shards" / "release"
+    stored.mkdir(parents=True)
+    anchor_path, anchor = prepare(tmp_path, [snap(1, 100)])
+    anchor_bytes = anchor_path.read_bytes()
+    continuation_path, continuation = prepare(
+        tmp_path, [delta(2, 101, 102, 100)]
+    )
+    (stored / "anchor.jsonl.gz").write_bytes(anchor_bytes)
+    (stored / "continuation.jsonl.gz").write_bytes(continuation_path.read_bytes())
+    common = {
+        "quality_status": "SAFE", "replay_compatible": True,
+        "release_tag": "release", "symbol": "BTCUSDT",
+    }
+    anchor.update(common, dataset_id="anchor", start_ts_ms=1)
+    continuation.update(common, dataset_id="continuation", start_ts_ms=2)
+    (root / "catalog").mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2",
+                    "shards": [anchor, continuation]}), encoding="utf-8"
+    )
+    return root, dest, stored
+
+
+def test_cross_shard_resume_reuses_unchanged_complete_group(tmp_path, monkeypatch):
+    import tools.certify_local_l2 as module
+
+    root, dest, _ = _cross_shard_fixture(tmp_path)
+    first = module.run(root, dest, cross_shard=True)
+    assert first["totals"] == {
+        "SNAPSHOT_OBSERVATIONS_ONLY": 1,
+        "CONTINUOUS_L2_CROSS_SHARD": 1,
+    }
+
+    def unexpected_scan(*_args, **_kwargs):
+        raise AssertionError("unchanged group was rescanned")
+
+    monkeypatch.setattr(module, "inspect_shard", unexpected_scan)
+    second = module.run(root, dest, cross_shard=True, resume=True)
+    assert second["cache_reused_without_new_hash"] == 2
+    assert second["totals"] == first["totals"]
+
+
+def test_cross_shard_resume_invalidates_whole_group_when_member_stat_changes(
+    tmp_path, monkeypatch
+):
+    import tools.certify_local_l2 as module
+
+    root, dest, stored = _cross_shard_fixture(tmp_path)
+    module.run(root, dest, cross_shard=True)
+    target = stored / "continuation.jsonl.gz"
+    stat = target.stat()
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    original = module.inspect_shard
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(args[0])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "inspect_shard", counted)
+    module.run(root, dest, cross_shard=True, resume=True)
+    assert len(calls) == 2
+
+
+def test_gate_recorded_rest_anchor_can_prove_following_native_delta(tmp_path):
+    raw = {
+        "id": 100, "current": 1,
+        "bids": [["99", "2"]], "asks": [["101", "3"]],
+    }
+    anchor = make("SNAPSHOT", raw, 1, venue="gate")
+    anchor.update({
+        "source_id": "gate_public_rest", "channel": "l2Book",
+        "provenance": {"snapshot_role": "official_base_for_incremental_depth"},
+    })
+    update = make("UPDATE", {
+        "channel": "futures.order_book_update", "event": "update",
+        "result": {"U": 101, "u": 102, "t": 2,
+                   "b": [["99", "4"]], "a": []},
+    }, 2, venue="gate")
+    update["channel"] = "l2Book"
+    source, info = prepare(tmp_path, [anchor, update], venue="gate")
+    assert inspect_shard(source, info)["status"] == "CONTINUOUS_L2"
