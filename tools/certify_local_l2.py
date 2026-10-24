@@ -17,8 +17,10 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import sys
 import tempfile
+import time
 
 FAMILIES = {"l2", "l2book", "book", "copy_vault_l2", "l2book_snapshot"}
 MAX_LINE = 64 * 1024 * 1024
@@ -152,7 +154,8 @@ def inspect_shard(path, entry, *, carry=None):
     """Immutable SHA, full gzip/JSONL, native L2 sequences and actual anchors."""
     path = Path(path)
     venue = str(entry.get("venue") or "").lower()
-    result = {"dataset_id": entry.get("dataset_id"), "venue": venue,
+    result = {"dataset_id": entry.get("dataset_id"),
+              "release_tag": entry.get("release_tag"), "venue": venue,
               "family": entry.get("family"), "source": str(path),
               "source_sha256": entry.get("sha256"), "status": "BLOCKED",
               "records": 0, "valid_records": 0, "reasons": {},
@@ -320,6 +323,12 @@ def inspect_shard(path, entry, *, carry=None):
                 "last_received": prior_received, "last_mono": prior_mono,
                 "last_connection": last_connection, "dataset_id": entry.get("dataset_id"),
             })
+    if result["status"] == "SNAPSHOT_OBSERVATIONS_ONLY":
+        # Every accepted snapshot is independently usable. Retaining one
+        # segment object per snapshot made large reports grow to multiple GiB
+        # without adding replay evidence.
+        result["segment_count"] = len(result["segments"])
+        result["segments"] = []
     return result
 
 
@@ -334,6 +343,171 @@ def atomic_json(path, value):
         json.dump(value, output, indent=2, sort_keys=True, ensure_ascii=False)
         output.write("\n")
     os.replace(tmp, path)
+
+
+def atomic_jsonl_gzip(path, rows):
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("UNSAFE_REPORT_PATH")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=".l2-rows-", suffix=".jsonl.gz.tmp"
+    )
+    os.close(fd)
+    tmp = Path(temporary)
+    try:
+        with tmp.open("wb") as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as stream:
+                for row in rows:
+                    stream.write(json.dumps(
+                        row, sort_keys=True, ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8") + b"\n")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return {"path": path.name, "bytes": path.stat().st_size,
+            "sha256": digest_file(path), "compression": "gzip",
+            "format": "jsonl"}
+
+
+class _L2AdmissionRegistry:
+    """Transactional, SHA-bound L2 use classes in AlinaSync's database."""
+
+    SNAPSHOT_STATUSES = {
+        "SNAPSHOT_OBSERVATIONS_ONLY", "CONTINUOUS_L2",
+        "CONTINUOUS_L2_CROSS_SHARD",
+    }
+    CONTINUOUS_STATUSES = {"CONTINUOUS_L2", "CONTINUOUS_L2_CROSS_SHARD"}
+
+    def __init__(self, destination):
+        self.path = Path(destination) / "SAFE_SHARDS.sqlite3"
+        if self.path.is_symlink() or self.path.parent.is_symlink():
+            raise ValueError("UNSAFE_L2_ADMISSION_DATABASE")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(self.path, timeout=60.0)
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS l2_certifications (
+                dataset_id TEXT NOT NULL,
+                release_tag TEXT NOT NULL,
+                source_sha256 TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                catalog_sha256 TEXT NOT NULL,
+                status TEXT NOT NULL,
+                snapshot_backtestable INTEGER NOT NULL,
+                continuous_replayable INTEGER NOT NULL,
+                records INTEGER NOT NULL,
+                valid_records INTEGER NOT NULL,
+                reasons_json TEXT NOT NULL,
+                certified_at_ns INTEGER NOT NULL,
+                PRIMARY KEY(dataset_id, release_tag)
+            )
+        """)
+        self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS l2_certification_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        self.connection.execute("DROP VIEW IF EXISTS current_l2_snapshot_backtestable")
+        self.connection.execute("DROP VIEW IF EXISTS current_l2_continuous_replayable")
+        base = """
+            SELECT cert.* FROM l2_certifications AS cert
+            JOIN l2_certification_meta AS state
+              ON state.key='run_status' AND state.value='COMPLETE'
+            JOIN l2_certification_meta AS catalog
+              ON catalog.key='active_catalog_sha256'
+             AND catalog.value=cert.catalog_sha256
+        """
+        self.connection.execute(
+            "CREATE VIEW current_l2_snapshot_backtestable AS " + base
+            + " WHERE cert.snapshot_backtestable=1"
+        )
+        self.connection.execute(
+            "CREATE VIEW current_l2_continuous_replayable AS " + base
+            + " WHERE cert.continuous_replayable=1"
+        )
+        self.connection.commit()
+
+    def _meta(self, rows):
+        self.connection.executemany("""
+            INSERT INTO l2_certification_meta(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        """, rows)
+
+    def begin(self, catalog_sha256):
+        if SHA.fullmatch(str(catalog_sha256)) is None:
+            raise ValueError("INVALID_L2_CATALOG_SHA256")
+        with self.connection:
+            self._meta((
+                ("run_status", "IN_PROGRESS"),
+                ("target_catalog_sha256", str(catalog_sha256)),
+                ("run_started_at_ns", str(time.time_ns())),
+            ))
+
+    def finalize(self, catalog_sha256, rows, *, details_sha256):
+        if SHA.fullmatch(str(catalog_sha256)) is None or SHA.fullmatch(str(details_sha256)) is None:
+            raise ValueError("INVALID_L2_FINALIZATION_SHA256")
+        now = time.time_ns()
+        values = []
+        for row in rows:
+            status = str(row.get("status") or "BLOCKED")
+            values.append((
+                str(row.get("dataset_id") or ""),
+                str(row.get("release_tag") or ""),
+                str(row.get("source_sha256") or ""),
+                str(row.get("source") or ""), str(catalog_sha256), status,
+                int(status in self.SNAPSHOT_STATUSES),
+                int(status in self.CONTINUOUS_STATUSES),
+                int(row.get("records") or 0), int(row.get("valid_records") or 0),
+                json.dumps(row.get("reasons") or {}, sort_keys=True,
+                           separators=(",", ":")), now,
+            ))
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            self.connection.executemany("""
+                INSERT INTO l2_certifications (
+                    dataset_id, release_tag, source_sha256, source_path,
+                    catalog_sha256, status, snapshot_backtestable,
+                    continuous_replayable, records, valid_records,
+                    reasons_json, certified_at_ns
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(dataset_id, release_tag) DO UPDATE SET
+                    source_sha256=excluded.source_sha256,
+                    source_path=excluded.source_path,
+                    catalog_sha256=excluded.catalog_sha256,
+                    status=excluded.status,
+                    snapshot_backtestable=excluded.snapshot_backtestable,
+                    continuous_replayable=excluded.continuous_replayable,
+                    records=excluded.records,
+                    valid_records=excluded.valid_records,
+                    reasons_json=excluded.reasons_json,
+                    certified_at_ns=excluded.certified_at_ns
+            """, values)
+            self._meta((
+                ("active_catalog_sha256", str(catalog_sha256)),
+                ("details_sha256", str(details_sha256)),
+                ("run_completed_at_ns", str(now)),
+                ("run_status", "COMPLETE"),
+            ))
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def count_view(self, view):
+        if view not in {
+            "current_l2_snapshot_backtestable",
+            "current_l2_continuous_replayable",
+        }:
+            raise ValueError("UNSAFE_L2_VIEW")
+        return int(self.connection.execute(
+            f"SELECT COUNT(*) FROM {view}"
+        ).fetchone()[0])
+
+    def close(self):
+        self.connection.close()
 
 
 def salvage(source, folder, record):
@@ -431,6 +605,7 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
         selected = selected[:limit]
     if not selected:
         raise ValueError("NO_LOCALLY_DOWNLOADED_SAFE_L2_SHARDS_FOUND")
+    catalog_sha256 = digest_file(catalog)
     # Before any work, retire a previous green run so interrupted runs fail closed.
     report_path = destination / "LOCAL_L2_CERTIFICATION.json"
     atomic_json(report_path, {
@@ -438,6 +613,8 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
         "status": "IN_PROGRESS_NOT_CERTIFIED", "selected_count": len(selected),
         "paper_only": True,
     })
+    registry = _L2AdmissionRegistry(destination)
+    registry.begin(catalog_sha256)
     receipt_dir = destination / "LOCAL_L2_RECEIPTS"
     if receipt_dir.is_symlink():
         raise ValueError("UNSAFE_L2_RECEIPT_DIRECTORY")
@@ -530,16 +707,49 @@ def run(root, destination, *, workers=4, limit=0, repair=False, resume=False, cr
     outputs.sort(key=lambda x: str(x["dataset_id"]))
     totals = dict(Counter(x["status"] for x in outputs))
     repair_failures = sum("repair_error" in x for x in outputs)
+    details = atomic_jsonl_gzip(
+        destination / "LOCAL_L2_CERTIFICATION_ROWS.jsonl.gz", outputs
+    )
+    registry.finalize(
+        catalog_sha256, outputs, details_sha256=details["sha256"]
+    )
+    registry.close()
+    snapshot_backtestable = sum(
+        item["status"] in _L2AdmissionRegistry.SNAPSHOT_STATUSES
+        for item in outputs
+    )
+    continuous_replayable = sum(
+        item["status"] in _L2AdmissionRegistry.CONTINUOUS_STATUSES
+        for item in outputs
+    )
+    reasons = Counter()
+    by_venue = {}
+    for item in outputs:
+        reasons.update((item.get("reasons") or {}).keys())
+        venue = str(item.get("venue") or "unknown")
+        by_venue.setdefault(venue, Counter())[item["status"]] += 1
     report = {
         "schema": "alina.local_l2_certification.v1",
-        "catalog_sha256": digest_file(catalog),
+        "catalog_sha256": catalog_sha256,
         "status": "LOCAL_L2_AUDIT_COMPLETE_NOT_GLOBAL_REPLAY_CERTIFICATION",
         "totals": totals, "repair_failures": repair_failures,
         "cross_shard_mode": cross_shard,
         "indexed_safe_l2_shards": indexed_count,
         "not_downloaded_locally": missing_count,
         "cache_reused_without_new_hash": sum(x.get("stat_cache_reused_without_new_hash", False) for x in outputs),
-        "l2_rows": outputs, "paper_only": True,
+        "admission": {
+            "snapshot_backtestable_shards": snapshot_backtestable,
+            "continuous_replayable_shards": continuous_replayable,
+            "blocked_shards": int(totals.get("BLOCKED", 0)),
+        },
+        "reason_shard_counts": dict(sorted(reasons.items())),
+        "venue_status_counts": {
+            venue: dict(sorted(counts.items()))
+            for venue, counts in sorted(by_venue.items())
+        },
+        "details": details,
+        "safe_shard_database": str(registry.path),
+        "paper_only": True,
         "read_only_sources": True,
         "warning": "SAFE and SHA-256 are not proof of L2 continuity. "
                    "Recovered segments require native re-anchors; separate "

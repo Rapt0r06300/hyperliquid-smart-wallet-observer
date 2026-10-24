@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import sqlite3
 
 from tools.certify_local_l2 import inspect_shard, salvage
 
@@ -176,3 +177,84 @@ def test_missing_catalog_shards_are_counted_not_mislabeled_corrupt(tmp_path):
     assert report["indexed_safe_l2_shards"] == 2
     assert report["not_downloaded_locally"] == 1
     assert report["totals"] == {"SNAPSHOT_OBSERVATIONS_ONLY": 1}
+
+
+def test_report_is_compact_and_database_separates_snapshot_from_continuous(tmp_path):
+    from tools.certify_local_l2 import run
+
+    root = tmp_path / "repo"
+    dest = root / "runtime" / "recovery" / "full"
+    stored = dest / "usable" / "shards" / "release"
+    stored.mkdir(parents=True)
+    continuous_path, continuous = prepare(
+        tmp_path, [snap(1, 100), delta(2, 101, 102, 100)]
+    )
+    continuous_bytes = continuous_path.read_bytes()
+    snapshot_path, snapshot = prepare(tmp_path, [snap(3, 200)])
+    (stored / "continuous.jsonl.gz").write_bytes(continuous_bytes)
+    (stored / "snapshot.jsonl.gz").write_bytes(snapshot_path.read_bytes())
+    continuous.update({
+        "dataset_id": "continuous", "quality_status": "SAFE",
+        "replay_compatible": True, "release_tag": "release",
+        "symbol": "BTCUSDT",
+    })
+    snapshot.update({
+        "dataset_id": "snapshot", "quality_status": "SAFE",
+        "replay_compatible": True, "release_tag": "release",
+        "symbol": "ETHUSDT",
+    })
+    (root / "catalog").mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": [continuous, snapshot]}),
+        encoding="utf-8",
+    )
+
+    report = run(root, dest, workers=2)
+
+    assert "l2_rows" not in report
+    assert report["admission"] == {
+        "snapshot_backtestable_shards": 2,
+        "continuous_replayable_shards": 1,
+        "blocked_shards": 0,
+    }
+    details = dest / report["details"]["path"]
+    assert details.name == "LOCAL_L2_CERTIFICATION_ROWS.jsonl.gz"
+    assert details.stat().st_size == report["details"]["bytes"]
+    assert hashlib.sha256(details.read_bytes()).hexdigest() == report["details"]["sha256"]
+    with gzip.open(details, "rt", encoding="utf-8") as stream:
+        rows = [json.loads(line) for line in stream]
+    assert {row["dataset_id"] for row in rows} == {"continuous", "snapshot"}
+
+    with sqlite3.connect(dest / "SAFE_SHARDS.sqlite3") as connection:
+        snapshot_ids = {
+            row[0] for row in connection.execute(
+                "SELECT dataset_id FROM current_l2_snapshot_backtestable"
+            )
+        }
+        replay_ids = {
+            row[0] for row in connection.execute(
+                "SELECT dataset_id FROM current_l2_continuous_replayable"
+            )
+        }
+    assert snapshot_ids == {"continuous", "snapshot"}
+    assert replay_ids == {"continuous"}
+
+
+def test_l2_database_begin_hides_previous_complete_admission(tmp_path):
+    from tools.certify_local_l2 import _L2AdmissionRegistry
+
+    registry = _L2AdmissionRegistry(tmp_path)
+    registry.begin("a" * 64)
+    registry.finalize(
+        "a" * 64,
+        [{
+            "dataset_id": "old", "release_tag": "r", "source_sha256": "b" * 64,
+            "source": "old.gz", "status": "CONTINUOUS_L2", "records": 1,
+            "valid_records": 1, "reasons": {}, "segments": [],
+        }],
+        details_sha256="c" * 64,
+    )
+    assert registry.count_view("current_l2_continuous_replayable") == 1
+    registry.begin("d" * 64)
+    assert registry.count_view("current_l2_continuous_replayable") == 0
+    registry.close()
