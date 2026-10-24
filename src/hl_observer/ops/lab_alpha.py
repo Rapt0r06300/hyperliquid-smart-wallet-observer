@@ -1,6 +1,6 @@
 """[LAB α] ORCHESTRATEUR du laboratoire — le point d'entrée unique lancé par ANALYSER_BACKTESTS_REPLAYS.cmd.
-Au lancement il enchaîne, sur le CHEMIN CANONIQUE UNIQUE (données → feed_adapter → MegaCablage → Copy-Vault +
-Cross-Venue + Lead-Lag → netting/routing → risk → fills paper → PaperLedger → PnL) :
+Au lancement il enchaîne, sur le CHEMIN CANONIQUE UNIQUE (données → feed_adapter → MegaCablage → Copy-Vault
+→ netting/routing → risk → fills paper → PaperLedger → PnL) :
 
     1) inventaire des sources   2) lecture multi-format → bundles → events (feed_adapter)
     3) audit des câblages       4) recherche IS/OOS/FORWARD + stress + placebo + gate
@@ -24,8 +24,7 @@ from hl_observer.ops.lab_flux import fusionner_causalement, charger_borne
 
 
 def _venue_du_fichier(chemin) -> str:
-    """item 9 : déduit la VENUE d'un artefact depuis son chemin (pour l'étiquetage cross-venue).
-    Cross-Venue et Lead-Lag ont besoin de savoir de quelle venue vient chaque tick après la fusion."""
+    """Déduit la venue d'un artefact pour préserver sa provenance dans la fusion causale."""
     bas = str(chemin).lower()
     for venue in ("binance", "hyperliquid", "dydx", "bybit", "okx", "coinbase"):
         if venue in bas:
@@ -134,21 +133,6 @@ def _ecrire_manifeste_run(sortie: Path, *, run_id: Any, data_hash: str, git_head
     except OSError:
         import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
         _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
-
-
-def _paires_lead_lag(events: list[dict[str, Any]]) -> list[tuple[Any, Any]]:
-    """Paires (signe_leader, Δmid_futur) par coin (ordre temporel) pour mesurer le lead-lag réel."""
-    par_coin: dict[str, list] = {}
-    for e in events:
-        mid = e.get("mid", e.get("px"))
-        if isinstance(mid, (int, float)) and e.get("signe"):
-            par_coin.setdefault(str(e.get("coin")), []).append((e.get("ts_ms") or 0, e.get("signe"), mid))
-    paires: list[tuple[Any, Any]] = []
-    for _coin, série in par_coin.items():
-        série.sort(key=lambda t: t[0])
-        for i in range(len(série) - 1):
-            paires.append((série[i][1], série[i + 1][2] - série[i][2]))
-    return paires
 
 
 def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budget: int = 32,
@@ -269,7 +253,8 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
             # item 9 : FUSION CAUSALE (tri-fusion externe) et non une concaténation naïve fichier-par-fichier.
             # Le shard global est ordonné exchange_ts→recv_ts→sequence→source ; une FENÊTRE bornée en est
             # alors un échantillon temporel REPRÉSENTATIF de TOUTES les venues (item 8), pas « tout le
-            # fichier 1 puis le fichier 2 ». Indispensable au Lead-Lag Binance→Hyperliquid et au Cross-Venue.
+            # fichier 1 puis le fichier 2 ». La provenance multi-venue reste une propriété d'intégrité,
+            # même si les familles autres que CopyVault sont hors scope économique.
             info_shard = fusionner_causalement(
                 fichiers_lisibles, shard, source_de=_venue_du_fichier, git_sha=(sha_git or ""),
                 checkpoint_path=sortie / ("events_shard.%s.checkpoint.json" % ns))
@@ -293,9 +278,8 @@ def lancer_lab(*, racine: str | Path, sortie_dir: str | Path | None = None, budg
 
         # 3) AUDIT CABLAGE (croise import reel + disponibilite donnees)
         # The laboratory keeps neutral integrity/risk plumbing and CopyVault only.
-        # Removing cross-venue annotations before MegaCablage is the execution
-        # boundary: stored evidence remains untouched, but no paused family can
-        # generate a fill or PnL in this run.
+        # Retirer les annotations legacy est une première frontière; lab_recherche
+        # désactive aussi explicitement Cross-Venue à la construction de MegaCablage.
         events_copy_vault = [
             {key: value for key, value in event.items() if key != "cross_venue"}
             for event in events

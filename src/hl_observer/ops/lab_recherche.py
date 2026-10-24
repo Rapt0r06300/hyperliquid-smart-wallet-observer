@@ -1,8 +1,8 @@
-"""[LAB α] RECHERCHE intelligente du meilleur PnL NET. Chaque candidat est rejoué par le CHEMIN CANONIQUE UNIQUE
-(MegaCablage) — jamais un moteur parallèle. Stratégie : grille LARGE d'abord, élimination rapide des familles
-négatives, approfondissement des zones prometteuses, CACHE déterministe (aucune reconfig retestée), REPRISE via
-checkpoint (un run interrompu ne recommence pas), BUDGET séparé par module (Copy-Vault / Cross-Venue / Lead-Lag /
-Combine). Pour chaque candidat : IS/OOS/FORWARD, stress ADVERSE_P95/P99 (coûts majorés), PLACEBO (signaux inversés
+"""[LAB α] RECHERCHE intelligente du meilleur PnL NET CopyVault. Chaque candidat est rejoué par le CHEMIN
+CANONIQUE UNIQUE (MegaCablage) — jamais un moteur parallèle. Stratégie : grille LARGE d'abord, élimination rapide,
+approfondissement des zones prometteuses, CACHE déterministe (aucune reconfig retestée), REPRISE via checkpoint
+(un run interrompu ne recommence pas). Pour chaque candidat : IS/OOS/FORWARD, stress ADVERSE_P95/P99 (coûts
+majorés), PLACEBO (signaux inversés
 → doit ~s'annuler), puis métriques + gate de promotion dur. Aucune donnée synthétique n'entre dans le verdict
 (le caller passe des événements RÉELS). 0 réseau, 0 ordre réel.
 """
@@ -24,8 +24,9 @@ ESPACE_DEFAUT = {
     "notional_max": [100.0, 300.0, 500.0],
     "fee_bps": [2.5, 4.5],
     "min_fill_ratio": [0.5, 0.85],
-    "seuil_edge_cross_venue_bps": [1.0, 5.0],
 }
+_COPY_VAULT_SEARCH_KEYS = frozenset(ESPACE_DEFAUT)
+_PAUSED_SEARCH_KEYS = frozenset({"seuil_edge_cross_venue_bps", "module"})
 # item 12 : sévérité de QUEUE croissante (P95 = queue modérée, P99 = queue extrême). Ce n'est PAS un
 # multiplicateur de fee_bps : il pondère les composantes de MARCHÉ (spread/latence/slippage/adverse).
 _SEVERITE_ADVERSE = {"ADVERSE_P95": 1.0, "ADVERSE_P99": 1.9}
@@ -41,9 +42,27 @@ def empreinte_espace_defaut(espace: dict[str, list] | None = None) -> str:
     DÉTERMINISTE (clés ET valeurs triées) qui CHANGE dès que l'espace change. Réutilise le hachage
     versionné de `search_space` (l'espace adaptatif est un espace d'EXÉCUTION : notional/fee/fill/seuil),
     ce qui câble ce module jusqu'ici orphelin et donne une identité inter-modules stable."""
-    espace = ESPACE_DEFAUT if espace is None else espace
+    espace = _espace_copy_vault(ESPACE_DEFAUT if espace is None else espace)
     jetons = ["%s=%s" % (k, ",".join(sorted(str(x) for x in espace[k]))) for k in sorted(espace)]
     return _espace_versionne.hash_espace({"execution": jetons})
+
+
+def _espace_copy_vault(espace: dict[str, list]) -> dict[str, list]:
+    inconnues = set(espace) - _COPY_VAULT_SEARCH_KEYS - _PAUSED_SEARCH_KEYS
+    if inconnues:
+        raise ValueError(f"parametres de recherche CopyVault inconnus: {sorted(inconnues)}")
+    actif = {key: list(espace[key]) for key in _COPY_VAULT_SEARCH_KEYS if key in espace}
+    manquantes = _COPY_VAULT_SEARCH_KEYS - set(actif)
+    if manquantes:
+        raise ValueError(f"parametres de recherche CopyVault manquants: {sorted(manquantes)}")
+    return actif
+
+
+def _config_copy_vault(config: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {key: config[key] for key in sorted(_COPY_VAULT_SEARCH_KEYS)}
+    except KeyError as exc:
+        raise ValueError(f"parametre CopyVault manquant: {exc.args[0]}") from exc
 
 
 def cout_adverse_bps(config: dict[str, Any], *, niveau: str, spread_bps: float | None = None,
@@ -92,7 +111,7 @@ def _cle_cache(config: dict[str, Any], data_hash: str,
     # AUD-093 : la LATENCE (modèle de stress figé, paramètre de coût pertinent) entre dans la clé — un
     # changement du modèle de latence périme le cache au lieu de resservir un résultat obsolète.
     lat = _LATENCE_STRESS if latence is None else latence
-    payload = (json.dumps(config, sort_keys=True) + "|" + data_hash + "|"
+    payload = (json.dumps(_config_copy_vault(config), sort_keys=True) + "|" + data_hash + "|"
                + json.dumps(lat, sort_keys=True))
     return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
@@ -102,9 +121,14 @@ def _rejouer_riche(evenements: list[dict[str, Any]], *, config: dict[str, Any],
     """Rejoue un segment via MegaCablage et extrait un résultat riche (net, courbe equity, nets par tick, notional,
     contributions par coin, fills/missed, réconciliation)."""
     depart = 1000.0
-    pipe = MegaCablage(notre_equity=depart, notional_max=config["notional_max"], fee_bps=config["fee_bps"],
-                       min_fill_ratio=config["min_fill_ratio"],
-                       seuil_edge_cross_venue_bps=config["seuil_edge_cross_venue_bps"])
+    active_config = _config_copy_vault(config)
+    pipe = MegaCablage(
+        notre_equity=depart,
+        notional_max=active_config["notional_max"],
+        fee_bps=active_config["fee_bps"],
+        min_fill_ratio=active_config["min_fill_ratio"],
+        cross_venue_paper=False,
+    )
     if evenements:
         pipe.traiter_replay(list(evenements), leader_equity_par_vault=_EquityMap({}, leader_equity_defaut))
     courbe = [depart] + [t["pnl"]["equity"] for t in pipe.trace]
@@ -121,7 +145,9 @@ def _rejouer_riche(evenements: list[dict[str, Any]], *, config: dict[str, Any],
             "equity": pnl["equity"], "reconcilie": bool(pnl["reconcilie"]), "fees": pnl["fees"],
             "fills": len(fills), "missed": missed, "courbe_equity": courbe, "nets": nets,
             "notional_traite": notional, "contributions": contrib,
-            "cross_venue": pipe.resume()["cross_venue_executes"]}
+            # Backward-compatible diagnostic field. This must stay exactly zero
+            # because the paused family is disabled at pipeline construction.
+            "cross_venue": 0}
 
 
 def _rejouer_adverse(evenements: list[dict[str, Any]], *, config: dict[str, Any], niveau: str,
@@ -187,12 +213,11 @@ def evaluer_config(evenements: list[dict[str, Any]], config: dict[str, Any], *,
 
 
 def _grille(espace: dict[str, list]) -> list[dict[str, Any]]:
+    espace = _espace_copy_vault(espace)
     cles = sorted(espace)
     combos: list[dict[str, Any]] = [{}]
     for c in cles:
         combos = [{**base, c: v} for base in combos for v in espace[c]]
-    for cfg in combos:
-        cfg.setdefault("module", "COMBINE")
     return combos
 
 
