@@ -31,10 +31,21 @@
     {
       "event": "operator_request",
       "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "at": "2026-10-25T16:14:37.520109Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
     }
   ],
   "kind": "copy_vault_collection",
-  "lease": null,
+  "lease": {
+    "acquired_at": "2026-10-25T16:14:37.520042Z",
+    "expires_at": "2026-10-25T21:59:37.520042Z",
+    "lease_token_sha256": "679aad1f8c62e06860459935f9502c4f373adcae68306b4c4374d6cd8e9dba04",
+    "owner_run_id": "40209869738"
+  },
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -52,9 +63,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "PENDING",
-  "status_reason": "created",
+  "status": "RUNNING",
+  "status_reason": "worker_started",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-25T16:05:04.014357Z",
+  "updated_at": "2026-10-25T16:14:37.520109Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
