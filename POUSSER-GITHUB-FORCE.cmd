@@ -9,8 +9,8 @@ rem AlinaSync alone downloads/validates/unpacks SAFE shards.
 rem No forced push, reset, clean, stash or automatic deletion of data.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
-set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-9b1663e"
-set "ALINA_BOOTSTRAP_REF=9b1663e6712f6a3262b652305aa7aff855a41492"
+set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-8d632ee"
+set "ALINA_BOOTSTRAP_REF=8d632ee8266d5854ce0d7a9791c9c71775e10f86"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
@@ -83,8 +83,15 @@ rem A user may only have updated this CMD, not its Python companion.
 rem Download the *pinned code-only helper* into %TEMP% if absent.
 rem Do not overwrite a local version modified by Codex or Claude.
 set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
-if exist "%ALINA_ENGINE%" goto :engine_ready
-echo [INFO] Moteur local absent; chargement de son code seul...
+if not exist "%ALINA_ENGINE%" goto :get_engine
+rem Never overwrite local Codex/Claude changes to the sync engine.
+rem If it predates safe conflict kits, use pinned, isolated code in TEMP.
+findstr /C:"alina.git_conflict_kit.v1" "%ALINA_ENGINE%" >nul 2>nul
+if not errorlevel 1 goto :engine_ready
+echo [INFO] Moteur local ancien conserve. Utilisation temporaire du moteur recent.
+
+:get_engine
+echo [INFO] Chargement du moteur Git Sync seul; aucun shard...
 call :prepare_bootstrap
 if errorlevel 1 goto :missing_engine
 set "ALINA_ENGINE=%ALINA_BOOTSTRAP%\alina_git_code_sync.py"
