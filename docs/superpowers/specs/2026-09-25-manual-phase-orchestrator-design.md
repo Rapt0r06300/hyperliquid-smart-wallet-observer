@@ -33,6 +33,65 @@ reactivation; stored evidence never makes a paused family active. Environment
 variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
 FAIL-CLOSED and does not stop collectors or restoration processes.
 
+### Copy-Vault multi-venue portfolio discovery (2026-10-25)
+
+Copy-Vault discovery may examine public trader portfolios across CEX and DEX
+venues. This expands the source discovery and collection universe while keeping
+Copy-Vault as the sole active economic family; it does not reactivate
+Cross-Venue, arbitrage, Lead-Lag, or any other family.
+
+Portfolio identity is venue-scoped: `(venue, network, native_account_id)`.
+Never merge identical-looking addresses across chains or venues, and never rank
+raw venue leaderboard scores as if they were comparable. Keep venue-native
+metrics and evidence alongside normalized metrics with explicit definitions.
+
+Discovery is broad and read-only. Promotion into a tracked portfolio set
+requires a stable, publicly observable identity and a source with documented,
+permitted access. Opaque CEX aliases, truncated identities, unsupported APIs,
+and scraped/private account data remain discovery-only or are rejected; they
+must not be guessed, deanonymized, or treated as trackable portfolios.
+
+After selection, collectors follow only the frozen, bounded set and record
+venue-native fills/trades, position transitions, account/NAV context and capital
+flows where publicly available, plus source/receive timestamps, raw hashes,
+coverage gaps and reconciliation receipts. Missing fields remain unknown.
+Selection timestamps, reasons, input metrics and source snapshots are immutable
+and retained across later ranking changes.
+
+Each candidate is evaluated only against market and execution evidence from its
+own venue. Cross-venue copying or using one venue's leader events to create
+economic results on another venue remains disabled unless a separate reviewed
+change activates that strategy family. A venue without complete, validated
+collection and replay support can produce a discovery/coverage report only; it
+cannot produce an economic score, PnL, or promotion. Hyperliquid remains the
+only currently certified Copy-Vault SAFE replay path until each additional
+venue passes the same evidence and replay gates.
+
+#### Current venue capability status
+
+- **Hyperliquid:** existing public wallet/vault discovery, AlinaSync SAFE
+  collection and certified Copy-Vault replay remain active.
+- **OKX CEX Copy Trading:** the explicit opt-in
+  `tools/collect_okx_copy_traders.py --network-read` path and the
+  GitHub-hosted `collect-okx-copy-traders.yml` workflow read the documented
+  public leader-ranks, current-subpositions and subpositions-history endpoints.
+  The workflow is gated by the canonical `COLLECT` phase and stops when its
+  phase epoch changes. Transient GET failures are retried; a shortlist is
+  frozen only after all requested ranking pages are present. Failed or
+  API-truncated observations retain raw responses and hashes but mark the
+  cycle incomplete, and cannot be used for economic evaluation. GitHub Actions
+  artifacts retain these research observations for at most 90 days.
+  The exchange's public completed-position history covers at most the recent
+  three months; it does not provide the complete fees, funding, capital-flow or
+  follower execution evidence needed for economic proof. OKX observations are
+  therefore not admitted to the Hyperliquid SAFE bridge or Copy-Vault scorer.
+  This observer supplements, and does not replace, the Hyperliquid SAFE
+  collectors.
+- **Other CEX and DEX portfolios:** no automatic adapter is enabled until a
+  stable public identity, documented unauthenticated read path, provenance and
+  venue-native replay contract are implemented. A market-data adapter alone
+  does not establish access to trader portfolios.
+
 ## Canonical-spec governance
 
 This file is the **single canonical specification** for the current Alina Smart Flow design.

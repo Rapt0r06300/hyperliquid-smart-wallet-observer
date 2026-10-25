@@ -19,6 +19,7 @@ from hl_observer.wallets.discovery_sources import (
     WalletDiscoveryCandidate,
     WalletDiscoverySourceResult,
     build_discovery_sources,
+    has_portfolio_tracking_adapter,
 )
 
 
@@ -54,10 +55,14 @@ class WalletDiscoveryResult(BaseModel):
     source_results: list[WalletDiscoverySourceResult] = Field(default_factory=list)
     candidates_found: int = 0
     candidates_after_filter: int = 0
+    candidates_pnl_measured: int = 0
     candidates_positive_pnl: int = 0
+    candidates_roi_measured: int = 0
     candidates_positive_roi: int = 0
     selected_wallets: list[ScoredWalletCandidate] = Field(default_factory=list)
     selected_by_coin: dict[str, int] = Field(default_factory=dict)
+    candidates_by_venue: dict[str, int] = Field(default_factory=dict)
+    selected_by_venue: dict[str, int] = Field(default_factory=dict)
     top_wallets_by_coin: dict[str, list[str]] = Field(default_factory=dict)
     rejected: list[dict[str, Any]] = Field(default_factory=list)
     errors_count: int = 0
@@ -150,8 +155,19 @@ def _run_wallet_discovery_with_session(
                 result.notes.append(f"{source_result.source_name}: source preparee non active")
             all_candidates.extend(source_result.candidates)
         result.candidates_found = len(all_candidates)
-        result.candidates_positive_pnl = sum(1 for candidate in all_candidates if (candidate.external_pnl_usdc or 0) > 0)
-        result.candidates_positive_roi = sum(1 for candidate in all_candidates if (candidate.external_roi_pct or 0) > 0)
+        for candidate in all_candidates:
+            venue_key = f"{candidate.venue.lower()}/{candidate.network.lower()}"
+            result.candidates_by_venue[venue_key] = result.candidates_by_venue.get(venue_key, 0) + 1
+        result.candidates_pnl_measured = sum(1 for candidate in all_candidates if candidate.external_pnl_usdc is not None)
+        result.candidates_positive_pnl = sum(
+            1 for candidate in all_candidates
+            if candidate.external_pnl_usdc is not None and candidate.external_pnl_usdc > 0
+        )
+        result.candidates_roi_measured = sum(1 for candidate in all_candidates if candidate.external_roi_pct is not None)
+        result.candidates_positive_roi = sum(
+            1 for candidate in all_candidates
+            if candidate.external_roi_pct is not None and candidate.external_roi_pct > 0
+        )
         coin_filtered_candidates = _filter_candidates_by_coin(plan, all_candidates)
         unique_candidates, rejected = dedupe_candidates(coin_filtered_candidates)
         result.candidates_after_filter = len(unique_candidates)
@@ -164,6 +180,8 @@ def _run_wallet_discovery_with_session(
             item.selected_for_backfill = selected
             if selected:
                 result.selected_wallets.append(item)
+                venue_key = f"{item.candidate.venue.lower()}/{item.candidate.network.lower()}"
+                result.selected_by_venue[venue_key] = result.selected_by_venue.get(venue_key, 0) + 1
                 coin_key = item.candidate.coin or "GLOBAL"
                 result.selected_by_coin[coin_key] = result.selected_by_coin.get(coin_key, 0) + 1
                 result.top_wallets_by_coin.setdefault(coin_key, []).append(str(item.candidate.address))
@@ -228,13 +246,21 @@ def format_discovery_report(result: WalletDiscoveryResult) -> str:
         "wallet discovery report",
         f"sources essayees: {result.sources_attempted}",
         f"wallets candidats trouves: {result.candidates_found}",
-        f"wallets pnl positif: {result.candidates_positive_pnl}",
-        f"wallets roi positif: {result.candidates_positive_roi}",
+        f"wallets PnL mesure: {result.candidates_pnl_measured} | positif: {result.candidates_positive_pnl}",
+        f"wallets ROI mesure: {result.candidates_roi_measured} | positif: {result.candidates_positive_roi}",
         f"wallets apres filtre: {result.candidates_after_filter}",
         f"wallets selectionnes: {len(result.selected_wallets)}",
         f"wallets rejetes: {len(result.rejected)}",
         f"etat: {result.state}",
     ]
+    if result.candidates_by_venue:
+        lines.append("portefeuilles candidats par plateforme: " + ", ".join(
+            f"{venue}={count}" for venue, count in sorted(result.candidates_by_venue.items())
+        ))
+    if result.selected_by_venue:
+        lines.append("portefeuilles retenus pour collecte: " + ", ".join(
+            f"{venue}={count}" for venue, count in sorted(result.selected_by_venue.items())
+        ))
     if selected:
         lines.append(f"prochains backfills: {', '.join(str(wallet) for wallet in selected)}")
     if result.selected_by_coin:
@@ -271,6 +297,16 @@ def _score_and_select(
             require_positive_roi=plan.require_positive_roi,
             allow_incomplete_external_metrics=plan.allow_incomplete_external_metrics,
         )
+        if score.decision == WalletDiscoveryDecision.SELECT_FOR_BACKFILL and candidate.external_pnl_usdc is None:
+            score = score.model_copy(update={
+                "decision": WalletDiscoveryDecision.OBSERVE_ONLY,
+                "reasons": [*score.reasons, "portfolio_pnl_unmeasured"],
+            })
+        if score.decision == WalletDiscoveryDecision.SELECT_FOR_BACKFILL and not has_portfolio_tracking_adapter(candidate):
+            score = score.model_copy(update={
+                "decision": WalletDiscoveryDecision.OBSERVE_ONLY,
+                "reasons": [*score.reasons, "venue_tracking_adapter_not_ready"],
+            })
         scored.append(ScoredWalletCandidate(candidate=candidate, score=score))
     return scored
 
