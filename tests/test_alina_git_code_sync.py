@@ -277,7 +277,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     normal_end = source.index('echo Consultez runtime\\reports\\git-sync\\LAST_SYNC.json')
-    self_check = source.index(":portable_self_check")
+    self_check = source.index("\n:portable_self_check\n")
     assert "goto :finish" in source[normal_end:self_check]
     assert "ALINA_SYNC_COMPLETE" not in source
     assert "restore_alina.py" not in source
