@@ -79,12 +79,12 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert '"vault_shard_count":1' in text
     assert '"vault_shard_index":0' in text
     assert '"copy_vault_mode":"two_speed_broad_rest_priority_ws"' in text
-    assert "copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8" in text
+    assert "copy-vault-e$PHASE_EPOCH-broad-$COPY_BUCKET-v8" in text
     assert "copy-vault-two-speed-broad-rest-priority-ws-v8" in text
     assert "selection_file" in text
     assert "selection_sha256" in text
     assert "catalog/copy_vault_selections" in text
-    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"' in text
+    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$COPY_BUCKET.json"' in text
     assert "official_archive_collection" in text
     assert "event_intelligence_collection" in text
     for kind in ("replay", "backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"):
@@ -149,7 +149,11 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "fromJSON(needs.select.outputs.copy_matrix)" in controller
     assert "fromJSON(needs.select.outputs.other_matrix)" in controller
     assert "relay_collect:" in controller
-    assert "gh workflow run resumable-campaign-controller.yml" in controller
+    assert "copy_active: ${{ steps.due.outputs.copy_active }}" in controller
+    assert "create-resumable-campaigns.yml" in controller
+    assert '"${{ needs.select.outputs.copy_active }}" != "true"' in controller
+    assert 'gh workflow run "$workflow"' in controller
+    assert 'workflow="resumable-campaign-controller.yml"' in controller
     assert "ref: ${{ steps.pin.outputs.sha }}" in worker
     assert "Claim durable campaign lease" in worker
     assert "Persist collection data or analysis evidence" in worker

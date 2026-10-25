@@ -75,9 +75,18 @@ def cluster_metaorders(
         except (TypeError, ValueError, OverflowError) as exc:
             _noter_echec("backtesting/copy_vault_executable.py:observed_at_ms", exc)
         causal_live = (
-            raw.get("source") == "LIVE_WS"
-            and raw.get("is_snapshot") is False
-            and observed_at_ms is not None
+            observed_at_ms is not None
+            and (
+                (
+                    raw.get("source") == "LIVE_WS"
+                    and raw.get("is_snapshot") is False
+                )
+                or (
+                    raw.get("source") == "REST_BACKFILL"
+                    and raw.get("historical_bootstrap") is False
+                    and raw.get("window_reconciliation_complete") is True
+                )
+            )
         )
         canonical.append({
             **dict(raw),
@@ -115,6 +124,9 @@ def cluster_metaorders(
                     else row["ts_ms"]
                 ),
                 "signal_source": row.get("source") or "REST_BACKFILL",
+                "signal_observed_at_ms": row["observed_at_ms"],
+                "historical_bootstrap": row.get("historical_bootstrap"),
+                "window_reconciliation_complete": row.get("window_reconciliation_complete"),
                 "causal_forward_eligible": row["causal_forward_eligible"],
                 "last_fill_ts_ms": row["ts_ms"],
                 "fill_count": 0,
@@ -143,6 +155,8 @@ def cluster_metaorders(
             "observed_at_ms": row["observed_at_ms"],
             "source": row.get("source") or "REST_BACKFILL",
             "causal_forward_eligible": row["causal_forward_eligible"],
+            "historical_bootstrap": row.get("historical_bootstrap"),
+            "window_reconciliation_complete": row.get("window_reconciliation_complete"),
             "action": row["action"],
             "taille_usd": max(0.0, float(row.get("taille_usd") or 0.0)),
             "cumulative_leader_notional_usd": cluster["leader_notional_usd"],

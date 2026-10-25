@@ -319,7 +319,7 @@ def test_forward_eligible_evaluation_wires_capacity_and_stress_diagnostics(
         10_000.0,
     ]
     assert report["capacity_diagnostic"]["promotion_eligible"] is False
-    assert report["stress_diagnostic"]["scenario_count"] == 13
+    assert report["stress_diagnostic"]["scenario_count"] == 14
     assert report["stress_diagnostic"]["promotion_eligible"] is False
 
 
@@ -529,13 +529,16 @@ def test_stress_books_widen_spread_and_reduce_depth_without_mutating_input() -> 
 def test_stress_matrix_is_predeclared_diagnostic_and_lists_unmeasured_axes() -> None:
     result = V21.evaluate_stress_matrix([], {}, _freeze())
 
-    assert result["scenario_count"] == 13
+    assert result["scenario_count"] == 14
     assert result["scope"] == "DIAGNOSTIC_ONLY"
     assert result["economic_proof"] is False
     assert result["promotion_eligible"] is False
     assert result["scenarios"][0]["scenario"] == "BASELINE_REFERENCE"
     assert result["scenarios"][1]["scenario"] == "FEE_X2"
     assert result["scenarios"][2]["scenario"] == "SPREAD_X2"
+    assert "OBSERVED_L2_PARTIAL_FILL" in {
+        row["scenario"] for row in result["scenarios"]
+    }
     assert result["scenarios"][-1]["scenario"] == "EXTRA_DELAY_300000MS"
     assert result["not_evaluated"]["funding_adverse"] == (
         "UNMEASURABLE_FUNDING_ROWS_NOT_WIRED"

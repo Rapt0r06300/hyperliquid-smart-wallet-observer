@@ -14083,3 +14083,57 @@ discontinue rend l'objectif `UNMEASURABLE`. Le nombre de jours actifs est
 déterminé par la présence de trades, pas par un PnL non nul. La couverture
 n'est jamais déduite des seuls trades ou snapshots, et la référence de
 5 USD/jour reste informative, sans seuil de promotion.
+
+
+### 2026-10-26 — Collecte Copy-Vault continue des fills, avec reprise durable
+
+La sélection Copy-Vault conserve l'univers public complet. Chaque campagne
+combine les dix abonnements WebSocket maximum, un balayage REST tournant de
+128 portefeuilles hors abonnement, et la réconciliation de changements d'état
+qui ne sont pas déjà couverts. Les checkpoints par adresse ne sont repris que
+depuis des manifests de campagne `COMPLETE` et portent le schéma
+`alina.copy_vault_fill_checkpoint.v1`. Une fenêtre forward n'avance son curseur
+qu'après une réponse `userFillsByTime` exacte, intégralement parsée et vérifiée.
+Les erreurs et limites de débit laissent le curseur inchangé ; un délai de
+reprise par portefeuille empêche une adresse indisponible de bloquer la rotation.
+
+Les leaders sont aussi traités par bootstrap historique tournant (deux adresses
+au plus par campagne). Chaque réponse plafonnée est subdivisée en fenêtres
+strictes, traitées des plus récentes aux plus anciennes ; les fenêtres non
+terminées sont checkpointées puis reprises. La campagne impose un budget
+commun de requêtes et de poids REST. La couverture historique est COMPLETE
+seulement si le plafond public visible est atteint ou si toutes les fenêtres
+jusqu'au plancher sont vérifiées. Une couverture partielle demeure explicitement
+PARTIAL et ne devient jamais une preuve OOS, forward-paper ou de PnL.
+
+Les fenêtres REST historiques publiées sous l'ancien nom de famille
+`copy_vault_fills` restent lisibles si et seulement si leur provenance porte
+`history_bootstrap=true` et une fenêtre exacte ; les nouveaux shards utilisent
+`copy_vault_snapshot`. Le bridge place ces deux formes dans le fichier
+historique TRAIN. Les fenêtres REST non historiques exigent explicitement
+`history_bootstrap=false`, une fenêtre exacte, et un horodatage de réception
+causal. Les validations VALIDATION/OOS/FORWARD du laboratoire local utilisent
+uniquement les entrées live causales ou ces fenêtres REST prospectives vérifiées.
+Les historiques peuvent élargir TRAIN mais ne traversent jamais ces segments.
+
+Les fills de bootstrap ont une identité de source distincte,
+`hyperliquid_info_user_fills_by_time_history`, et leur provenance
+`history_bootstrap=true` est conservée dans manifest, bridge et ligne de
+recherche. Ils restent non causaux (`REST_BACKFILL`) et sont étiquetés
+`forward_only=false`. Toute admission SAFE exige toujours la réponse source
+authentique, le hash du shard, une fenêtre exacte, l'identité native du
+portefeuille et des timestamps dans cette fenêtre. Le bridge ne transforme pas
+un historique complet en preuve économique.
+
+Le créateur de campagne doit exécuter le script de sélection depuis le checkout
+qui contient `catalog/campaigns`; le fichier gelé lie par SHA-256 l'univers et
+les checkpoints utilisés par le worker. Déterministes tests couvrent l'adaptation
+au plafond 2 000, le budget de campagne, la rotation/reprise par portefeuille,
+la sélection historique, la persistance des métadonnées d'historique dans les
+manifests V2 et le refus de promouvoir l'historique en forward.
+
+Le contrôleur COLLECT crée une nouvelle sélection et campagne Copy-Vault dès
+qu'aucune campagne active n'existe pour l'epoch courant. L'identité de cette
+sélection et du manifest est unique à chaque création ; une seule campagne
+Copy-Vault peut occuper le lane courant. Elle repart du dernier checkpoint
+durablement publié.

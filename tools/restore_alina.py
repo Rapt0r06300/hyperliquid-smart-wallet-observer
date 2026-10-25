@@ -1649,6 +1649,7 @@ def _load_replay_ready_plan(
     metrics_path: Path,
     *,
     index_holder: list[dict[str, Any]] | None = None,
+    selected_families: set[str] | None = None,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, Any], list[Mapping[str, Any]], dict[tuple[str, str], tuple[int, str]]]:
     """Return the exact SAFE/replayable rows and their immutable outer assets."""
     print("ALINA_RESTORE_PHASE=VERIFY_CANONICAL_PARTITIONS", file=sys.stderr, flush=True)
@@ -1673,11 +1674,22 @@ def _load_replay_ready_plan(
         f"ALINA_RESTORE_PHASE=SELECT_SAFE_ROWS total={len(index['shards'])} safe={len(safe)}",
         file=sys.stderr, flush=True,
     )
+    normalized_families = (
+        {str(value).strip().lower() for value in selected_families}
+        if selected_families is not None else None
+    )
+    if normalized_families is not None and (not normalized_families or "" in normalized_families):
+        raise RestoreError("selected replay families must be non-empty identifiers")
     rows: list[Mapping[str, Any]] = []
     required: dict[tuple[str, str], tuple[int, str]] = {}
     logical_bytes = 0
     for row in index["shards"]:
         if str(row.get("dataset_id") or "") not in safe:
+            continue
+        if (
+            normalized_families is not None
+            and str(row.get("family") or "").strip().lower() not in normalized_families
+        ):
             continue
         tag = str(row.get("release_tag") or "")
         member = str(row.get("release_asset") or "")
@@ -1711,8 +1723,12 @@ def _load_replay_ready_plan(
         "profile": "replay-ready",
         "required_release_assets": len(required),
         "safe_logical_bytes": logical_bytes,
+        "selection_families": (
+            sorted(normalized_families) if normalized_families is not None else None
+        ),
     })
-    return safe, proof, rows, required
+    selected_ids = {str(row.get("dataset_id") or "") for row in rows}
+    return {key: value for key, value in safe.items() if key in selected_ids}, proof, rows, required
 
 
 def _select_replay_ready_releases(
@@ -2965,6 +2981,7 @@ def restore_everything(
     prune_unselected: bool = False,
     prune_only: bool = False,
     max_download_bytes: int | None = None,
+    selected_families: set[str] | None = None,
 ) -> dict[str, Any]:
     if prune_only and (profile != "replay-ready" or preflight_only or workspace is not None):
         raise RestoreError("cache pruning requires replay-ready without restore, preflight or snapshots")
@@ -2983,8 +3000,15 @@ def restore_everything(
         if metrics_path is None:
             raise RestoreError("canonical DATA_METRICS is required with DATA_INDEX")
         if profile == "replay-ready":
-            (catalog_safe, catalog_verification, replay_rows,
-             replay_required) = _load_replay_ready_plan(catalog_path, metrics_path)
+            if selected_families is None:
+                (catalog_safe, catalog_verification, replay_rows,
+                 replay_required) = _load_replay_ready_plan(catalog_path, metrics_path)
+            else:
+                (catalog_safe, catalog_verification, replay_rows,
+                 replay_required) = _load_replay_ready_plan(
+                    catalog_path, metrics_path,
+                    selected_families=selected_families,
+                )
         else:
             catalog_safe, catalog_verification = _load_current_safe_catalog(
                 catalog_path, metrics_path
@@ -3465,6 +3489,9 @@ def restore_everything(
         "read_only": True,
         "real_execution": False,
         "catalog_verification": catalog_verification,
+        "selection_families": (
+            sorted(selected_families) if selected_families is not None else None
+        ),
         "certified_working_set": (
             {
                 **{key: value for key, value in working_set.items()
@@ -3659,6 +3686,7 @@ def restore_everything(
     report["classification"] = (
         _materialize_catalog_safe_shards(
             replay_rows, releases_root, destination,
+            prune_stale=selected_families is None,
             catalog_sha256=str(
                 (catalog_verification or {}).get("source_index_sha256") or ""
             ),
@@ -3819,6 +3847,7 @@ def restore_everything(
         ),
         "source_destination_match": bool(complete),
     })
+    report["generated_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     report_path = destination / "RESTORE_REPORT.json"
     report_partial = report_path.with_name(report_path.name + ".partial")
     report_partial.write_text(
@@ -3881,6 +3910,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--metrics", default="catalog/DATA_METRICS.json",
                         help="SHA-bound canonical metrics required for catalog verification")
     parser.add_argument(
+        "--family", action="append", default=[],
+        help="limit a replay-ready restoration to an exact SAFE family; repeatable",
+    )
+    parser.add_argument(
         "--workspace",
         default=".",
         help="fresh clone root used only with --materialize-local-snapshot",
@@ -3905,6 +3938,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.unlimited_download and not args.replay_ready:
         print("ALINA_RESTORE_FAIL: --unlimited-download requires --replay-ready", file=sys.stderr)
+        return 2
+    if args.family and not args.replay_ready:
+        print("ALINA_RESTORE_FAIL: --family requires --replay-ready", file=sys.stderr)
         return 2
     if args.unlimited_download and (args.prune_cache_only or args.preflight_only):
         print("ALINA_RESTORE_FAIL: unlimited download is incompatible with prune/preflight", file=sys.stderr)
@@ -3948,6 +3984,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             prune_only=args.prune_cache_only,
             max_download_bytes=(0 if args.prune_cache_only else None if args.unlimited_download else args.max_download_gib * (1024 ** 3)),
+            selected_families=set(args.family) if args.family else None,
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot

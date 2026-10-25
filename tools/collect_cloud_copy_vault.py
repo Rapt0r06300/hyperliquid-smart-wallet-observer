@@ -17,13 +17,14 @@ import asyncio
 import gzip
 import hashlib
 import json
+import math
 import shutil
 import sys
 import time
 import uuid
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 import httpx
 import websockets
@@ -72,6 +73,11 @@ BROAD_SWEEP_CONCURRENCY = 8
 MAX_PRIORITY_WS_VAULTS = 10
 PRIORITY_AUDIT_ROTATION_SLOTS = 2
 MAX_CHANGED_VAULT_RECONCILIATIONS = 32
+MAX_REST_VAULT_RECONCILIATIONS = 128
+MAX_HISTORY_BOOTSTRAPS_PER_CAMPAIGN = 2
+USERFILLS_WEIGHT_BUDGET_PER_MINUTE = 900
+USERFILLS_CAMPAIGN_WEIGHT_BUDGET = 40_000
+USERFILLS_CAMPAIGN_REQUEST_BUDGET = 2_048
 
 
 class AsyncTickSink:
@@ -135,6 +141,58 @@ class AsyncTickSink:
     async def close(self) -> None:
         self._stop = True
         await self.queue.join()
+
+
+class UserFillsBudgetExhausted(RuntimeError):
+    """Campaign-wide public REST request/weight budget was reached."""
+
+
+class UserFillsRateGate:
+    """Keep sequential userFillsByTime calls below the public REST weight limit."""
+
+    def __init__(
+        self,
+        *,
+        weight_budget_per_minute: int = USERFILLS_WEIGHT_BUDGET_PER_MINUTE,
+        campaign_weight_budget: int = USERFILLS_CAMPAIGN_WEIGHT_BUDGET,
+        campaign_request_budget: int = USERFILLS_CAMPAIGN_REQUEST_BUDGET,
+    ) -> None:
+        self.weight_budget_per_minute = max(1, int(weight_budget_per_minute))
+        self.campaign_weight_budget = max(20, int(campaign_weight_budget))
+        self.campaign_request_budget = max(1, int(campaign_request_budget))
+        self.weight_used = 0
+        self.request_count = 0
+        self._next_at = 0.0
+        self._lock = asyncio.Lock()
+
+    @property
+    def exhausted(self) -> bool:
+        return (
+            self.request_count >= self.campaign_request_budget
+            or self.weight_used + 120 > self.campaign_weight_budget
+        )
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            if (
+                self.request_count >= self.campaign_request_budget
+                or self.weight_used + 120 > self.campaign_weight_budget
+            ):
+                raise UserFillsBudgetExhausted("campaign userFillsByTime budget exhausted")
+            self.request_count += 1
+            self.weight_used += 20
+            now = time.monotonic()
+            slot = max(now, self._next_at)
+            self._next_at = slot + 20 * 60.0 / self.weight_budget_per_minute
+        if slot > now:
+            await asyncio.sleep(slot - now)
+
+    async def record(self, weight: int) -> None:
+        extra_weight = max(0, int(weight) - 20)
+        delay = extra_weight * 60.0 / self.weight_budget_per_minute
+        async with self._lock:
+            self.weight_used += extra_weight
+            self._next_at = max(self._next_at, time.monotonic()) + delay
 
 
 async def _emit_with_backpressure(sink: Any, envelope: TickEnvelope) -> None:
@@ -926,23 +984,34 @@ async def _post_userfills(
     vault: str,
     start_ms: int,
     end_ms: int,
+    *,
+    rate_gate: UserFillsRateGate | None = None,
 ) -> list[dict[str, Any]]:
-    response = await client.post(
-        "/info",
-        json={
-            "type": "userFillsByTime",
-            "user": vault,
-            "startTime": int(start_ms),
-            "endTime": int(end_ms),
-            "aggregateByTime": False,
-        },
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise ValueError("userFillsByTime returned non-list")
-    if any(not isinstance(row, dict) for row in payload):
-        raise ValueError("userFillsByTime returned non-object row")
+    if rate_gate is not None:
+        await rate_gate.acquire()
+    try:
+        response = await client.post(
+            "/info",
+            json={
+                "type": "userFillsByTime",
+                "user": vault,
+                "startTime": int(start_ms),
+                "endTime": int(end_ms),
+                "aggregateByTime": False,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError("userFillsByTime returned non-list")
+        if any(not isinstance(row, dict) for row in payload):
+            raise ValueError("userFillsByTime returned non-object row")
+    except Exception:
+        if rate_gate is not None:
+            await rate_gate.record(20)
+        raise
+    if rate_gate is not None:
+        await rate_gate.record(20 + math.ceil(len(payload) / 20))
     return payload
 
 
@@ -954,6 +1023,7 @@ async def exact_window_backfill(
     end_ms: int,
     min_window_ms: int = 1_000,
     max_requests: int = MAX_RECONCILIATION_REQUESTS_PER_VAULT,
+    rate_gate: UserFillsRateGate | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Adaptive exact-window REST reconciliation using the 2,000 response cap."""
     pending: deque[tuple[int, int]] = deque([(int(start_ms), int(end_ms))])
@@ -972,7 +1042,14 @@ async def exact_window_backfill(
         left, right = pending.popleft()
         requests += 1
         try:
-            raw = await _post_userfills(client, vault, left, right)
+            raw = await _post_userfills(
+                client, vault, left, right, rate_gate=rate_gate
+            )
+        except UserFillsBudgetExhausted:
+            requests -= 1
+            pending.appendleft((left, right))
+            request_budget_exhausted = True
+            break
         except Exception as exc:
             failures.append(
                 {
@@ -994,17 +1071,27 @@ async def exact_window_backfill(
                     }
                 )
                 parsed = parser_fills(raw, vault=vault)
-                invalid_source_rows += len(raw) - len(parsed)
-                accepted.extend(parsed)
+                in_window = [
+                    row for row in parsed
+                    if int(row.get("ts_ms") or -1) >= left
+                    and int(row.get("ts_ms") or -1) <= right
+                ]
+                invalid_source_rows += len(raw) - len(in_window)
+                accepted.extend(in_window)
                 continue
-            middle = left + max(1, span // 2)
-            pending.appendleft((middle, right))
+            middle = left + span // 2
+            pending.appendleft((middle + 1, right))
             pending.appendleft((left, middle))
             splits += 1
             continue
         parsed = parser_fills(raw, vault=vault)
-        invalid_source_rows += len(raw) - len(parsed)
-        accepted.extend(parsed)
+        in_window = [
+            row for row in parsed
+            if int(row.get("ts_ms") or -1) >= left
+            and int(row.get("ts_ms") or -1) <= right
+        ]
+        invalid_source_rows += len(raw) - len(in_window)
+        accepted.extend(in_window)
 
     rows = dedupliquer(accepted)
     return rows, {
@@ -1026,12 +1113,152 @@ async def exact_window_backfill(
     }
 
 
+async def recent_history_backfill(
+    client: httpx.AsyncClient,
+    vault: str,
+    *,
+    end_ms: int,
+    target_fills: int = 10_000,
+    max_requests: int = 128,
+    min_window_ms: int = 1_000,
+    pending_windows: Sequence[Sequence[int]] | None = None,
+    on_window_complete: Callable[[int, int, list[dict[str, Any]]], Awaitable[None]] | None = None,
+    rate_gate: UserFillsRateGate | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch the latest address history in exact windows, resuming unfinished ranges.
+
+    Hyperliquid caps the result at 2,000 fills per response. Capped windows are
+    split newest-first; only exact, fully parsed windows are emitted to the sink.
+    """
+    target = max(1, int(target_fills))
+    pending: list[tuple[int, int]] = []
+    source_windows = pending_windows or ((1, int(end_ms)),)
+    for raw_window in source_windows:
+        if not isinstance(raw_window, Sequence) or len(raw_window) != 2:
+            continue
+        try:
+            left, right = int(raw_window[0]), int(raw_window[1])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if 1 <= left <= right <= int(end_ms):
+            pending.append((left, right))
+    if not pending:
+        pending = [(1, int(end_ms))]
+
+    accepted: list[dict[str, Any]] = []
+    completed: list[dict[str, int]] = []
+    failed: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    requests = 0
+    splits = 0
+    invalid_source_rows = 0
+    request_budget_exhausted = False
+
+    while pending:
+        unique_so_far = len(dedupliquer(accepted))
+        if unique_so_far >= target:
+            break
+        if requests >= max(1, int(max_requests)):
+            request_budget_exhausted = True
+            break
+        index = max(range(len(pending)), key=lambda item: (pending[item][1], pending[item][0]))
+        left, right = pending.pop(index)
+        requests += 1
+        try:
+            raw = await _post_userfills(
+                client, vault, left, right, rate_gate=rate_gate
+            )
+        except UserFillsBudgetExhausted:
+            requests -= 1
+            pending.append((left, right))
+            request_budget_exhausted = True
+            break
+        except Exception as exc:
+            failed.append({"start_ms": left, "end_ms": right, "error": type(exc).__name__})
+            continue
+
+        if len(raw) >= CAP_USERFILLS:
+            middle = left + (right - left) // 2
+            if right - left < max(2, int(min_window_ms)) or middle < left or middle >= right:
+                blocked.append({
+                    "start_ms": left,
+                    "end_ms": right,
+                    "rows": len(raw),
+                    "cap": CAP_USERFILLS,
+                })
+                continue
+            pending.extend(((left, middle), (middle + 1, right)))
+            splits += 1
+            continue
+
+        parsed = parser_fills(raw, vault=vault)
+        in_window = [
+            row for row in parsed
+            if int(row.get("ts_ms") or -1) >= left
+            and int(row.get("ts_ms") or -1) <= right
+        ]
+        invalid = len(raw) - len(in_window)
+        invalid_source_rows += invalid
+        if invalid:
+            failed.append({
+                "start_ms": left,
+                "end_ms": right,
+                "error": "INVALID_OR_OUT_OF_WINDOW_SOURCE_ROWS",
+                "invalid_rows": invalid,
+            })
+            continue
+
+        remaining_target = max(0, target - len(dedupliquer(accepted)))
+        selected_rows = sorted(
+            in_window,
+            key=lambda row: (int(row.get("ts_ms") or 0), canonical_fill_id(row)),
+        )[-remaining_target:] if remaining_target else []
+        accepted.extend(selected_rows)
+        completed.append({"start_ms": left, "end_ms": right, "rows": len(selected_rows)})
+        if on_window_complete is not None and selected_rows:
+            await on_window_complete(left, right, selected_rows)
+
+    deduped = dedupliquer(accepted)
+    visible_ceiling = len(deduped) >= target
+    remaining = [] if visible_ceiling else list(pending)
+    remaining.extend(
+        (int(row["start_ms"]), int(row["end_ms"]))
+        for row in failed
+        if isinstance(row.get("start_ms"), int) and isinstance(row.get("end_ms"), int)
+    )
+    remaining.extend(
+        (int(row["start_ms"]), int(row["end_ms"]))
+        for row in blocked
+    )
+    remaining = sorted(set(remaining), key=lambda item: (item[1], item[0]), reverse=True)
+    exhausted_to_floor = not remaining and not failed and not blocked
+    complete = visible_ceiling or exhausted_to_floor
+    return dedupliquer(deduped)[-target:], {
+        "status": "COMPLETE" if complete else "PARTIAL",
+        "requested_start_ms": 1,
+        "requested_end_ms": int(end_ms),
+        "requests": requests,
+        "splits": splits,
+        "rows": min(len(deduped), target),
+        "visible_fill_ceiling": visible_ceiling,
+        "exhausted_to_floor": exhausted_to_floor,
+        "request_budget_exhausted": request_budget_exhausted,
+        "pending_windows": len(remaining),
+        "pending_window_ranges": [[left, right] for left, right in remaining],
+        "failed_windows": failed,
+        "cap_blocked_windows": blocked,
+        "invalid_source_rows": invalid_source_rows,
+        "completed_windows": completed,
+    }
+
+
 async def reconcile_forward_window(
     vaults: list[str],
     *,
     start_ms_by_vault: Mapping[str, int],
     end_ms: int,
     live_ids: Mapping[str, set[str]],
+    rate_gate: UserFillsRateGate | None = None,
 ) -> dict[str, dict[str, Any]]:
     reports: dict[str, dict[str, Any]] = {}
     async with httpx.AsyncClient(
@@ -1040,6 +1267,24 @@ async def reconcile_forward_window(
     ) as client:
         for vault in vaults:
             start_ms = start_ms_by_vault.get(vault)
+            if rate_gate is not None and rate_gate.exhausted:
+                reports[vault] = {
+                    "status": "UNAVAILABLE",
+                    "live_count": len(live_ids.get(vault, set())),
+                    "reference_count": 0,
+                    "matched_count": 0,
+                    "missing_from_live": None,
+                    "live_only": len(live_ids.get(vault, set())),
+                    "duplicate_live_keys": 0,
+                    "audit": {
+                        "status": "PARTIAL",
+                        "reason": "CAMPAIGN_USERFILLS_BUDGET_EXHAUSTED",
+                        "requested_start_ms": start_ms,
+                        "requested_end_ms": int(end_ms),
+                        "rows": 0,
+                    },
+                }
+                continue
             if start_ms is None:
                 reports[vault] = {
                     "status": "UNAVAILABLE",
@@ -1065,6 +1310,7 @@ async def reconcile_forward_window(
                         vault,
                         start_ms=int(start_ms),
                         end_ms=end_ms,
+                        rate_gate=rate_gate,
                     ),
                     timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
                 )
@@ -1115,6 +1361,65 @@ async def reconcile_forward_window(
                 "audit": audit,
             }
     return reports
+
+
+def rest_fills_envelope(
+    vault: str,
+    fills: list[dict[str, Any]],
+    *,
+    start_ms: int,
+    end_ms: int,
+    complete: bool,
+    historical: bool = False,
+) -> TickEnvelope:
+    """Build one provenance-bound REST fill envelope for an exact time window."""
+    now_ms = int(time.time() * 1_000)
+    fill_ids = {canonical_fill_id({**fill, "vault": vault}) for fill in fills}
+    return TickEnvelope(
+        source_id=(
+            "hyperliquid_info_user_fills_by_time_history"
+            if historical else "hyperliquid_info_user_fills_by_time"
+        ),
+        channel="copy_vault_snapshot" if historical else "copy_vault_fills",
+        instrument=vault,
+        event_kind=(FeedEventKind.SNAPSHOT if historical else FeedEventKind.EVENT),
+        raw_payload={
+            "request": {
+                "type": "userFillsByTime",
+                "user": vault,
+                "startTime": int(start_ms),
+                "endTime": int(end_ms),
+                "aggregateByTime": False,
+            },
+            "fills": fills,
+        },
+        exchange_ts_ms=max(int(fill["ts_ms"]) for fill in fills),
+        received_ts_ms=now_ms,
+        local_monotonic_ns=time.monotonic_ns(),
+        connection_id=f"copy-vault-rest-{uuid.uuid4().hex}",
+        sequence=None,
+        provenance={
+            "url": INFO_URL,
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "https",
+            "endpoint": "/info",
+            "request_type": "userFillsByTime",
+            "authenticated": False,
+            "selection_causal": True,
+            "timestamp_semantics": "exchange_event_time",
+            "window_reconciliation_complete": bool(complete),
+            "history_bootstrap": bool(historical),
+        },
+        parsed_summary={
+            "event_count": len(fill_ids),
+            "first_fill_ts_ms": min(int(fill["ts_ms"]) for fill in fills),
+            "last_fill_ts_ms": max(int(fill["ts_ms"]) for fill in fills),
+            "exact_window": bool(complete),
+            "history_bootstrap": bool(historical),
+            "data_gate_ready": False,
+        },
+    )
 
 
 def changed_vault_addresses(
@@ -1177,6 +1482,8 @@ async def collect_changed_vault_fills(
     start_ms: int,
     end_ms: int,
     excluded_vaults: set[str],
+    fill_checkpoints: Mapping[str, Mapping[str, Any]] | None = None,
+    rate_gate: UserFillsRateGate | None = None,
     max_vaults: int = MAX_CHANGED_VAULT_RECONCILIATIONS,
 ) -> dict[str, Any]:
     """Backfill changed broad-sweep wallets and preserve coverage failures."""
@@ -1186,16 +1493,51 @@ async def collect_changed_vault_fills(
     limit = max(0, int(max_vaults))
     selected = changed[:limit]
     reports: dict[str, dict[str, Any]] = {}
+    checkpoint_updates: dict[str, dict[str, Any]] = {}
     fills_collected = 0
     async with httpx.AsyncClient(
         base_url="https://api.hyperliquid.xyz", timeout=15.0
     ) as client:
         for row in selected:
+            if rate_gate is not None and rate_gate.exhausted:
+                break
             vault = str(row["address"]).lower()
+            checkpoint = (fill_checkpoints or {}).get(vault, {})
+            pending_start = checkpoint.get("forward_pending_start_ms") if isinstance(checkpoint, Mapping) else None
+            previous_end = checkpoint.get("last_forward_end_ms") if isinstance(checkpoint, Mapping) else None
+            try:
+                if pending_start is not None:
+                    wallet_start_ms = int(pending_start)
+                else:
+                    wallet_start_ms = max(int(start_ms), int(previous_end) + 1) if previous_end is not None else int(start_ms)
+            except (TypeError, ValueError, OverflowError):
+                wallet_start_ms = int(start_ms)
+            if wallet_start_ms >= int(end_ms):
+                reports[vault] = {
+                    "status": "ALREADY_COVERED",
+                    "method": "exact_userFillsByTime_window",
+                    "live_count": 0,
+                    "reference_count": 0,
+                    "matched_count": 0,
+                    "missing_from_live": 0,
+                    "live_only": 0,
+                    "audit": {
+                        "status": "COMPLETE",
+                        "requested_start_ms": wallet_start_ms,
+                        "requested_end_ms": int(end_ms),
+                        "requests": 0,
+                        "rows": 0,
+                    },
+                }
+                continue
             try:
                 fills, audit = await asyncio.wait_for(
                     exact_window_backfill(
-                        client, vault, start_ms=int(start_ms), end_ms=int(end_ms)
+                        client,
+                        vault,
+                        start_ms=wallet_start_ms,
+                        end_ms=int(end_ms),
+                        rate_gate=rate_gate,
                     ),
                     timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
                 )
@@ -1204,53 +1546,19 @@ async def collect_changed_vault_fills(
                 audit = {
                     "status": "PARTIAL",
                     "reason": "REFERENCE_TIMEOUT",
-                    "requested_start_ms": int(start_ms),
+                    "requested_start_ms": wallet_start_ms,
                     "requested_end_ms": int(end_ms),
                     "rows": 0,
                 }
             complete = str(audit.get("status") or "").upper() == "COMPLETE"
             fill_ids = {canonical_fill_id({**fill, "vault": vault}) for fill in fills}
             if fills:
-                now_ms = int(time.time() * 1_000)
-                envelope = TickEnvelope(
-                    source_id="hyperliquid_info_user_fills_by_time",
-                    channel="copy_vault_fills",
-                    instrument=vault,
-                    event_kind=FeedEventKind.EVENT,
-                    raw_payload={
-                        "request": {
-                            "type": "userFillsByTime",
-                            "user": vault,
-                            "startTime": int(start_ms),
-                            "endTime": int(end_ms),
-                            "aggregateByTime": False,
-                        },
-                        "fills": fills,
-                    },
-                    exchange_ts_ms=max(int(fill["ts_ms"]) for fill in fills),
-                    received_ts_ms=now_ms,
-                    local_monotonic_ns=time.monotonic_ns(),
-                    connection_id=f"copy-vault-rest-{uuid.uuid4().hex}",
-                    sequence=None,
-                    provenance={
-                        "url": INFO_URL,
-                        "network": "mainnet",
-                        "access": "read_only",
-                        "transport": "https",
-                        "endpoint": "/info",
-                        "request_type": "userFillsByTime",
-                        "authenticated": False,
-                        "selection_causal": True,
-                        "timestamp_semantics": "exchange_event_time",
-                        "window_reconciliation_complete": complete,
-                    },
-                    parsed_summary={
-                        "event_count": len(fill_ids),
-                        "first_fill_ts_ms": min(int(fill["ts_ms"]) for fill in fills),
-                        "last_fill_ts_ms": max(int(fill["ts_ms"]) for fill in fills),
-                        "exact_window": complete,
-                        "data_gate_ready": False,
-                    },
+                envelope = rest_fills_envelope(
+                    vault,
+                    fills,
+                    start_ms=wallet_start_ms,
+                    end_ms=int(end_ms),
+                    complete=complete,
                 )
                 await _emit_with_backpressure(sink, envelope)
                 fills_collected += len(fill_ids)
@@ -1264,18 +1572,45 @@ async def collect_changed_vault_fills(
                 "live_only": 0,
                 "audit": audit,
             }
+            updated_checkpoint = dict(checkpoint) if isinstance(checkpoint, Mapping) else {}
+            updated_checkpoint["checkpoint_schema"] = "alina.copy_vault_fill_checkpoint.v1"
+            updated_checkpoint["last_forward_attempt_ms"] = int(time.time() * 1_000)
+            if complete:
+                updated_checkpoint.update({
+                    "last_forward_start_ms": wallet_start_ms,
+                    "last_forward_end_ms": int(end_ms),
+                    "last_forward_status": "SOURCE_CONTINUITY_VERIFIED",
+                    "forward_failure_count": 0,
+                })
+                updated_checkpoint.pop("forward_pending_start_ms", None)
+                updated_checkpoint.pop("forward_retry_after_ms", None)
+            else:
+                updated_checkpoint.setdefault("forward_pending_start_ms", wallet_start_ms)
+                updated_checkpoint["last_forward_status"] = "PARTIAL"
+                failures = min(16, int(updated_checkpoint.get("forward_failure_count") or 0) + 1)
+                updated_checkpoint["forward_failure_count"] = failures
+                updated_checkpoint["forward_retry_after_ms"] = (
+                    int(time.time() * 1_000)
+                    + min(24 * 60 * 60_000, 60 * 60_000 * (2 ** min(5, failures - 1)))
+                )
+            checkpoint_updates[vault] = updated_checkpoint
+    attempted = set(reports)
+    unattempted = [str(row["address"]).lower() for row in selected if str(row["address"]).lower() not in attempted]
     incomplete = sum(
         1 for report in reports.values()
-        if report["status"] != "SOURCE_CONTINUITY_VERIFIED"
+        if report["status"] not in {"SOURCE_CONTINUITY_VERIFIED", "ALREADY_COVERED"}
     )
-    deferred = max(0, len(changed) - len(selected))
+    deferred = max(0, len(changed) - len(selected)) + len(unattempted)
     missing_state = int(coverage["missing_state_wallets"])
     return {
         "status": "COMPLETE" if not incomplete and not deferred and not missing_state else "PARTIAL",
         **coverage,
         "reconciled_wallets": len(selected),
         "deferred_wallets": deferred,
-        "deferred_vaults": [str(row["address"]).lower() for row in changed[len(selected):]],
+        "deferred_vaults": (
+            [str(row["address"]).lower() for row in changed[len(selected):]]
+            + unattempted
+        ),
         "incomplete_wallets": incomplete,
         "incomplete_vaults": sorted(
             vault for vault, report in reports.items()
@@ -1285,6 +1620,289 @@ async def collect_changed_vault_fills(
         "start_ts_ms": int(start_ms),
         "end_ts_ms": int(end_ms),
         "wallet_reports": reports,
+        "vault_checkpoints": checkpoint_updates,
+    }
+
+
+async def collect_checkpointed_vault_fills(
+    candidates: Sequence[Any],
+    fill_checkpoints: Mapping[str, Mapping[str, Any]],
+    sink: Any,
+    *,
+    start_ms: int,
+    end_ms: int,
+    excluded_vaults: set[str],
+    rate_gate: UserFillsRateGate,
+    max_vaults: int = MAX_REST_VAULT_RECONCILIATIONS,
+) -> dict[str, Any]:
+    """Poll a rotating, checkpointed REST slice outside the ten live WS users."""
+    excluded = {str(value).strip().lower() for value in excluded_vaults}
+    all_candidates: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        raw_address = item.get("address") if isinstance(item, Mapping) else item
+        vault = str(raw_address or "").strip().lower()
+        if not vault or vault in seen or vault in excluded:
+            continue
+        seen.add(vault)
+        all_candidates.append(vault)
+    selected = all_candidates[:max(1, int(max_vaults))]
+
+    reports: dict[str, dict[str, Any]] = {}
+    updates: dict[str, dict[str, Any]] = {}
+    fills_collected = 0
+    async with httpx.AsyncClient(
+        base_url="https://api.hyperliquid.xyz", timeout=15.0
+    ) as client:
+        for vault in selected:
+            if rate_gate.exhausted:
+                break
+            previous = fill_checkpoints.get(vault, {})
+            checkpoint = dict(previous) if isinstance(previous, Mapping) else {}
+            checkpoint["checkpoint_schema"] = "alina.copy_vault_fill_checkpoint.v1"
+            try:
+                pending_start = checkpoint.get("forward_pending_start_ms")
+                previous_end = checkpoint.get("last_forward_end_ms")
+                if pending_start is not None:
+                    window_start = int(pending_start)
+                else:
+                    window_start = (
+                        max(int(start_ms), int(previous_end) + 1)
+                        if previous_end is not None else int(start_ms)
+                    )
+            except (TypeError, ValueError, OverflowError):
+                window_start = int(start_ms)
+            now_attempt_ms = int(time.time() * 1_000)
+            if window_start >= int(end_ms):
+                reports[vault] = {
+                    "status": "ALREADY_COVERED",
+                    "method": "exact_userFillsByTime_window",
+                    "audit": {
+                        "status": "COMPLETE",
+                        "requested_start_ms": window_start,
+                        "requested_end_ms": int(end_ms),
+                        "requests": 0,
+                        "rows": 0,
+                    },
+                }
+                continue
+            try:
+                fills, audit = await asyncio.wait_for(
+                    exact_window_backfill(
+                        client,
+                        vault,
+                        start_ms=window_start,
+                        end_ms=int(end_ms),
+                        rate_gate=rate_gate,
+                    ),
+                    timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
+                )
+            except TimeoutError:
+                fills = []
+                audit = {
+                    "status": "PARTIAL",
+                    "reason": "REFERENCE_TIMEOUT",
+                    "requested_start_ms": window_start,
+                    "requested_end_ms": int(end_ms),
+                    "rows": 0,
+                }
+            complete = str(audit.get("status") or "").upper() == "COMPLETE"
+            if complete and fills:
+                await _emit_with_backpressure(
+                    sink,
+                    rest_fills_envelope(
+                        vault,
+                        fills,
+                        start_ms=window_start,
+                        end_ms=int(end_ms),
+                        complete=True,
+                    ),
+                )
+                fills_collected += len({canonical_fill_id({**row, "vault": vault}) for row in fills})
+            checkpoint["last_forward_attempt_ms"] = now_attempt_ms
+            if complete:
+                checkpoint.update({
+                    "last_forward_start_ms": window_start,
+                    "last_forward_end_ms": int(end_ms),
+                    "last_forward_status": "SOURCE_CONTINUITY_VERIFIED",
+                    "forward_failure_count": 0,
+                })
+                checkpoint.pop("forward_pending_start_ms", None)
+                checkpoint.pop("forward_retry_after_ms", None)
+                status = "SOURCE_CONTINUITY_VERIFIED"
+            else:
+                checkpoint.setdefault("forward_pending_start_ms", window_start)
+                checkpoint["last_forward_status"] = "PARTIAL"
+                failures = min(16, int(checkpoint.get("forward_failure_count") or 0) + 1)
+                checkpoint["forward_failure_count"] = failures
+                checkpoint["forward_retry_after_ms"] = (
+                    int(time.time() * 1_000)
+                    + min(24 * 60 * 60_000, 60 * 60_000 * (2 ** min(5, failures - 1)))
+                )
+                status = "UNAVAILABLE"
+            updates[vault] = checkpoint
+            reports[vault] = {
+                "status": status,
+                "method": "checkpointed_exact_userFillsByTime_window",
+                "live_count": 0,
+                "reference_count": int(audit.get("rows") or 0),
+                "matched_count": 0,
+                "missing_from_live": None,
+                "live_only": 0,
+                "audit": audit,
+            }
+    return {
+        "status": "COMPLETE" if all(
+            row.get("status") in {"SOURCE_CONTINUITY_VERIFIED", "ALREADY_COVERED"}
+            for row in reports.values()
+        ) and len(selected) == len(all_candidates) and len(reports) == len(selected) else "PARTIAL",
+        "selected_wallets": len(selected),
+        "deferred_wallets": (
+            max(0, len(all_candidates) - len(selected))
+            + max(0, len(selected) - len(reports))
+        ),
+        "fills_collected": fills_collected,
+        "start_ts_ms": int(start_ms),
+        "end_ts_ms": int(end_ms),
+        "wallet_reports": reports,
+        "vault_checkpoints": updates,
+    }
+
+
+async def bootstrap_vault_history(
+    vaults: Sequence[str],
+    fill_checkpoints: Mapping[str, Mapping[str, Any]],
+    sink: Any,
+    *,
+    end_ms: int,
+    rate_gate: UserFillsRateGate,
+    target_fills: int = 10_000,
+    max_requests_per_vault: int = 128,
+) -> dict[str, Any]:
+    """Incrementally recover bounded public history for frozen Copy-Vault leaders."""
+    reports: dict[str, dict[str, Any]] = {}
+    updates: dict[str, dict[str, Any]] = {}
+    fills_collected = 0
+    requested_vaults = [
+        str(vault).strip().lower()
+        for vault in vaults[:MAX_HISTORY_BOOTSTRAPS_PER_CAMPAIGN]
+        if str(vault).strip()
+    ]
+    async with httpx.AsyncClient(
+        base_url="https://api.hyperliquid.xyz", timeout=15.0
+    ) as client:
+        for raw_vault in requested_vaults:
+            if rate_gate.exhausted:
+                break
+            vault = str(raw_vault).strip().lower()
+            if not vault:
+                continue
+            previous = fill_checkpoints.get(vault, {})
+            checkpoint = dict(previous) if isinstance(previous, Mapping) else {}
+            checkpoint["checkpoint_schema"] = "alina.copy_vault_fill_checkpoint.v1"
+            if checkpoint.get("history_complete") is True:
+                continue
+            try:
+                prior_count = max(0, int(checkpoint.get("history_fill_count") or 0))
+                prior_end_raw = checkpoint.get("history_coverage_end_ms")
+                prior_end = int(prior_end_raw) if prior_end_raw is not None else None
+                pending = [
+                    [int(pair[0]), int(pair[1])]
+                    for pair in checkpoint.get("history_pending_windows", [])
+                    if isinstance(pair, Sequence) and len(pair) == 2
+                ]
+            except (TypeError, ValueError, OverflowError):
+                prior_count, prior_end, pending = 0, None, []
+            if prior_end is None:
+                pending = pending or [[1, int(end_ms)]]
+            elif prior_end < int(end_ms):
+                pending.append([prior_end + 1, int(end_ms)])
+            if not pending:
+                pending = [[1, int(end_ms)]]
+
+            async def emit_window(left: int, right: int, fills: list[dict[str, Any]]) -> None:
+                await _emit_with_backpressure(
+                    sink,
+                    rest_fills_envelope(
+                        vault,
+                        fills,
+                        start_ms=left,
+                        end_ms=right,
+                        complete=True,
+                        historical=True,
+                    ),
+                )
+
+            try:
+                fills, audit = await recent_history_backfill(
+                    client,
+                    vault,
+                    end_ms=int(end_ms),
+                    target_fills=max(1, int(target_fills) - prior_count),
+                    max_requests=max_requests_per_vault,
+                    pending_windows=pending,
+                    on_window_complete=emit_window,
+                    rate_gate=rate_gate,
+                )
+            except Exception as exc:
+                fills = []
+                audit = {
+                    "status": "PARTIAL",
+                    "reason": type(exc).__name__,
+                    "pending_window_ranges": pending,
+                    "rows": 0,
+                }
+            complete = str(audit.get("status") or "").upper() == "COMPLETE"
+            added = len({canonical_fill_id({**row, "vault": vault}) for row in fills})
+            fills_collected += added
+            checkpoint.update({
+                "history_complete": complete,
+                "history_status": "COMPLETE" if complete else "PARTIAL",
+                "history_fill_count": min(int(target_fills), prior_count + added),
+                "history_coverage_end_ms": int(end_ms),
+                "history_pending_windows": audit.get("pending_window_ranges") or [],
+                "history_last_attempt_ms": int(time.time() * 1_000),
+                "history_last_audit": {
+                    key: value for key, value in audit.items()
+                    if key not in {"completed_windows", "failed_windows", "cap_blocked_windows"}
+                },
+            })
+            if audit.get("cap_blocked_windows"):
+                checkpoint["history_retry_after_ms"] = int(time.time() * 1_000) + 7 * 86_400_000
+                checkpoint["history_failure_count"] = min(
+                    16, int(checkpoint.get("history_failure_count") or 0) + 1
+                )
+            elif audit.get("failed_windows") or audit.get("reason"):
+                failures = min(
+                    16, int(checkpoint.get("history_failure_count") or 0) + 1
+                )
+                checkpoint["history_failure_count"] = failures
+                checkpoint["history_retry_after_ms"] = (
+                    int(time.time() * 1_000)
+                    + min(24 * 60 * 60_000, 60 * 60_000 * (2 ** min(5, failures - 1)))
+                )
+            else:
+                checkpoint.pop("history_retry_after_ms", None)
+                checkpoint["history_failure_count"] = 0
+            updates[vault] = checkpoint
+            reports[vault] = {
+                "status": "SOURCE_CONTINUITY_VERIFIED" if complete else "UNAVAILABLE",
+                "history_scan_status": "COMPLETE" if complete else "PARTIAL",
+                "fills_collected": added,
+                "history_fill_count": checkpoint["history_fill_count"],
+                "audit": audit,
+            }
+    return {
+        "status": "COMPLETE" if (
+            len(reports) == len(requested_vaults)
+            and all(row.get("history_scan_status") == "COMPLETE" for row in reports.values())
+        ) else "PARTIAL",
+        "wallet_count": len(reports),
+        "deferred_wallets": max(0, len(requested_vaults) - len(reports)),
+        "fills_collected": fills_collected,
+        "wallet_reports": reports,
+        "vault_checkpoints": updates,
+        "history_scope": "latest address history, bounded by public API visibility and request budget",
     }
 
 
@@ -1314,7 +1932,23 @@ def build_copy_vault_bundle(
         vault = str(preliminary.get("symbol") or "").lower()
         family = str(preliminary.get("family") or "")
         report = reconciliation.get(vault, {})
-        if family == "copy_vault_fills":
+        provenance = preliminary.get("provenance") or {}
+        historical_window = (
+            preliminary.get("source")
+            in {
+                "hyperliquid_info_user_fills_by_time_history",
+                "hyperliquid_info_user_fills_by_time",
+            }
+            and provenance.get("request_type") == "userFillsByTime"
+            and provenance.get("window_reconciliation_complete") is True
+            and provenance.get("history_bootstrap") is True
+        )
+        if family == "copy_vault_fills" and historical_window:
+            preliminary["reconciliation"] = {
+                "status": "SOURCE_CONTINUITY_VERIFIED",
+                "method": "exact_userFillsByTime_history_window_legacy_family",
+            }
+        elif family == "copy_vault_fills":
             preliminary["reconciliation"] = {
                 "status": str(report.get("status") or "UNVERIFIED").upper(),
                 "method": report.get("method"),
@@ -1324,6 +1958,19 @@ def build_copy_vault_bundle(
                 "missing_from_live": report.get("missing_from_live"),
                 "live_only": report.get("live_only"),
                 "audit": report.get("audit"),
+            }
+        elif (
+            family == "copy_vault_snapshot"
+            and preliminary.get("source")
+            == "hyperliquid_info_user_fills_by_time_history"
+            and historical_window
+        ):
+            # Each history shard is one exact REST window. The overall wallet
+            # bootstrap may remain partial; only the verified window itself is
+            # admitted as historical research evidence, never as forward proof.
+            preliminary["reconciliation"] = {
+                "status": "SOURCE_CONTINUITY_VERIFIED",
+                "method": "exact_userFillsByTime_history_window",
             }
         elif family in {"copy_vault_positions", "copy_vault_selection"}:
             # Immutable public HTTP observation, not an exchange-timestamped
@@ -1350,7 +1997,10 @@ def build_copy_vault_bundle(
         preliminary["copy_vault_selection"] = {
             "selected_at_ms": selection.get("selected_at_ms"),
             "observation_only": True,
-            "forward_only": True,
+            "forward_only": str(preliminary.get("source") or "")
+            != "hyperliquid_info_user_fills_by_time_history",
+            "historical_bootstrap": str(preliminary.get("source") or "")
+            == "hyperliquid_info_user_fills_by_time_history",
         }
         manifest = finalize_manifest(preliminary)
         if not locally_replay_admissible(manifest):
@@ -1499,6 +2149,24 @@ async def collect(
     if not vaults:
         raise RuntimeError("selected Copy-Vault lane is empty")
     validate_user_subscription_budget(vaults)
+    raw_checkpoints = selection.get("fill_checkpoints")
+    fill_checkpoints = {
+        str(address).strip().lower(): dict(value)
+        for address, value in raw_checkpoints.items()
+        if isinstance(raw_checkpoints, Mapping)
+        and isinstance(value, Mapping)
+        and str(address).strip()
+    } if isinstance(raw_checkpoints, Mapping) else {}
+    forward_candidates_raw = selection.get("forward_reconcile_vaults")
+    forward_candidates = (
+        [str(value).strip().lower() for value in forward_candidates_raw if str(value).strip()]
+        if isinstance(forward_candidates_raw, list) else []
+    )
+    history_bootstrap_vaults_raw = selection.get("history_bootstrap_vaults")
+    history_bootstrap_vaults = (
+        [str(value).strip().lower() for value in history_bootstrap_vaults_raw if str(value).strip()]
+        if isinstance(history_bootstrap_vaults_raw, list) else []
+    )
 
     for row in selected_rows:
         await _emit_with_backpressure(sink, selection_envelope(row, selection))
@@ -1591,6 +2259,7 @@ async def collect(
             )
 
     end_ms = int(time.time() * 1_000)
+    userfills_rate_gate = UserFillsRateGate()
     targeted_reconciliation: dict[str, Any] = {
         "status": "NOT_APPLICABLE",
         "changed_wallets": 0,
@@ -1600,6 +2269,60 @@ async def collect(
         "fills_collected": 0,
         "wallet_reports": {},
     }
+    reports = await reconcile_forward_window(
+        vaults,
+        start_ms_by_vault=observation_start_ms,
+        end_ms=end_ms,
+        live_ids=live_ids,
+        rate_gate=userfills_rate_gate,
+    )
+    checkpoint_updates: dict[str, dict[str, Any]] = {}
+    for vault, report in reports.items():
+        if report.get("status") == "MATCHED":
+            checkpoint = dict(fill_checkpoints.get(vault, {}))
+            audit = report.get("audit") if isinstance(report.get("audit"), Mapping) else {}
+            checkpoint.update({
+                "checkpoint_schema": "alina.copy_vault_fill_checkpoint.v1",
+                "last_forward_start_ms": int(audit.get("requested_start_ms") or 0),
+                "last_forward_end_ms": int(end_ms),
+                "last_forward_status": "SOURCE_CONTINUITY_VERIFIED",
+                "last_forward_attempt_ms": int(time.time() * 1_000),
+                "forward_failure_count": 0,
+            })
+            checkpoint.pop("forward_pending_start_ms", None)
+            checkpoint.pop("forward_retry_after_ms", None)
+            checkpoint_updates[vault] = checkpoint
+        elif report.get("status") in {"UNAVAILABLE", "PARTIAL", "MISMATCH"}:
+            audit = report.get("audit") if isinstance(report.get("audit"), Mapping) else {}
+            requested_start = audit.get("requested_start_ms")
+            if isinstance(requested_start, int) and requested_start > 0:
+                checkpoint = dict(fill_checkpoints.get(vault, {}))
+                checkpoint["checkpoint_schema"] = "alina.copy_vault_fill_checkpoint.v1"
+                checkpoint.setdefault("forward_pending_start_ms", requested_start)
+                checkpoint["last_forward_attempt_ms"] = int(time.time() * 1_000)
+                checkpoint["last_forward_status"] = "PARTIAL"
+                failures = min(16, int(checkpoint.get("forward_failure_count") or 0) + 1)
+                checkpoint["forward_failure_count"] = failures
+                checkpoint["forward_retry_after_ms"] = (
+                    int(time.time() * 1_000)
+                    + min(24 * 60 * 60_000, 60 * 60_000 * (2 ** min(5, failures - 1)))
+                )
+                checkpoint_updates[vault] = checkpoint
+    forward_poll = await collect_checkpointed_vault_fills(
+        forward_candidates,
+        {**fill_checkpoints, **checkpoint_updates},
+        sink,
+        start_ms=campaign_window_start_ms,
+        end_ms=end_ms,
+        excluded_vaults=set(vaults),
+        rate_gate=userfills_rate_gate,
+    )
+    reports.update(forward_poll.get("wallet_reports") or {})
+    checkpoint_updates.update({
+        str(address).lower(): dict(value)
+        for address, value in (forward_poll.get("vault_checkpoints") or {}).items()
+        if isinstance(value, Mapping)
+    })
     if two_speed:
         start_states = broad_start.get("states")
         end_states = broad_end.get("states")
@@ -1611,7 +2334,9 @@ async def collect(
                 sink,
                 start_ms=campaign_window_start_ms,
                 end_ms=end_ms,
-                excluded_vaults=set(vaults),
+                excluded_vaults=set(vaults) | set(forward_poll.get("wallet_reports") or {}),
+                fill_checkpoints={**fill_checkpoints, **checkpoint_updates},
+                rate_gate=userfills_rate_gate,
             )
         else:
             targeted_reconciliation = {
@@ -1620,13 +2345,26 @@ async def collect(
                 "reason": "BROAD_SWEEP_STATE_MISSING",
                 "missing_state_wallets": full_count,
             }
-    reports = await reconcile_forward_window(
-        vaults,
-        start_ms_by_vault=observation_start_ms,
+    targeted_wallet_reports = targeted_reconciliation.get("wallet_reports") or {}
+    reports.update(targeted_wallet_reports)
+    checkpoint_updates.update({
+        str(address).lower(): dict(value)
+        for address, value in (targeted_reconciliation.get("vault_checkpoints") or {}).items()
+        if isinstance(value, Mapping)
+    })
+    history_bootstrap = await bootstrap_vault_history(
+        history_bootstrap_vaults,
+        {**fill_checkpoints, **checkpoint_updates},
+        sink,
         end_ms=end_ms,
-        live_ids=live_ids,
+        rate_gate=userfills_rate_gate,
     )
-    reports.update(targeted_reconciliation.get("wallet_reports") or {})
+    reports.update(history_bootstrap.get("wallet_reports") or {})
+    checkpoint_updates.update({
+        str(address).lower(): dict(value)
+        for address, value in (history_bootstrap.get("vault_checkpoints") or {}).items()
+        if isinstance(value, Mapping)
+    })
     await sink.close()
     await writer_task
     await asyncio.to_thread(writer.rotate_all)
@@ -1677,6 +2415,16 @@ async def collect(
             for key, value in targeted_reconciliation.items()
             if key != "wallet_reports"
         },
+        "forward_rest_reconciliation": {
+            key: value
+            for key, value in forward_poll.items()
+            if key not in {"wallet_reports", "vault_checkpoints"}
+        },
+        "historical_bootstrap": {
+            key: value
+            for key, value in history_bootstrap.items()
+            if key not in {"wallet_reports", "vault_checkpoints"}
+        },
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "backpressure_events": sink.backpressure_events,
@@ -1684,6 +2432,7 @@ async def collect(
         "live_fill_counts": dict(sorted(live_fill_counts.items())),
         "reconnect_counts": dict(sorted(reconnect_counts.items())),
         "reconciliation": reports,
+        "vault_checkpoints": checkpoint_updates,
         "bundle": {
             "shard_count": index["shard_count"],
             "safe_count": index["safe_count"],

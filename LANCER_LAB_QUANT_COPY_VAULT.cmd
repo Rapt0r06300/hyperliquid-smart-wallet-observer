@@ -17,15 +17,19 @@ if not defined ALINA_LAB_MODE set "ALINA_LAB_MODE=safe"
 echo.
 echo ================================================================
 echo   ALINA SMART FLOW - COPY-VAULT LAB
-echo   Double clic : shards SAFE locaux, vrais replays/backtests
-echo   Modes : safe / tests / preflight / research / legacy
-echo   PAPER / READ-ONLY - aucun ordre, aucune collecte
+echo   Double clic : usine de replays/backtests SAFE en continu
+echo   Sources : tous les shards SAFE Copy-Vault du catalogue AlinaSync courant
+echo   Chaque lancement : index SAFE local relu, shards verifies et corpus recompose
+echo   Arret volontaire : Ctrl+C ; reprise automatique au prochain lancement
+echo   Modes : safe / once / tests / preflight / research / legacy
+echo   PAPER / READ-ONLY - Copy-Vault uniquement, candidats TRAIN geles
 echo ================================================================
 echo.
 
 set "ALINA_LAB_PYTHON="
 set "ALINA_LAB_PY_ARGS="
-if exist "%~dp0tools\python\python.exe" set "ALINA_LAB_PYTHON=%~dp0tools\python\python.exe"
+if exist "%~dp0.venv\Scripts\python.exe" set "ALINA_LAB_PYTHON=%~dp0.venv\Scripts\python.exe"
+if not defined ALINA_LAB_PYTHON if exist "%~dp0tools\python\python.exe" set "ALINA_LAB_PYTHON=%~dp0tools\python\python.exe"
 if not defined ALINA_LAB_PYTHON (
   where py >nul 2>nul
   if not errorlevel 1 (
@@ -36,6 +40,14 @@ if not defined ALINA_LAB_PYTHON (
 if not defined ALINA_LAB_PYTHON (
   echo [ERREUR] Python 3 introuvable; aucun telechargement automatique.
   set "RC=30"
+  goto :done
+)
+
+"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import fastapi, httpx, numpy, pandas, pydantic, requests, scipy, typer, yaml, websocket" >nul 2>nul
+if errorlevel 1 (
+  echo [ERREUR] Dependances runtime manquantes pour ce Python.
+  echo Installation : "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -m pip install -e ".[dev]"
+  set "RC=31"
   goto :done
 )
 
@@ -68,9 +80,11 @@ if /I "%ALINA_LAB_MODE%"=="tests" (
   )
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --research --dataset-root "%~2"
 ) else if /I "%ALINA_LAB_MODE%"=="safe" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --safe-research --continuous
+) else if /I "%ALINA_LAB_MODE%"=="once" (
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --safe-research
 ) else (
-  echo [ERREUR] Mode inconnu: %ALINA_LAB_MODE% [safe, tests, preflight, research, legacy]
+  echo [ERREUR] Mode inconnu: %ALINA_LAB_MODE% [safe, once, tests, preflight, research, legacy]
   set "RC=2"
   goto :done
 )
@@ -79,6 +93,8 @@ set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" (
   echo [FIN] Commande executee; seuls les rapports economiques determinent le resultat.
+) else if "%RC%"=="130" (
+  echo [ARRET PROPRE] Ctrl+C recu. Checkpoint et rapport HTML sauvegardes; relancez pour reprendre.
 ) else (
   echo [NO_GO] Code %RC%. Aucune rentabilite n'est prouvee.
 )

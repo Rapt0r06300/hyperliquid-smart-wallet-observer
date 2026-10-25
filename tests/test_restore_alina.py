@@ -35,6 +35,13 @@ def _asset(name: str, url: str, payload: bytes) -> dict:
     }
 
 
+def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable on this Windows host: {exc}")
+
+
 def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkeypatch):
     module = _module()
     shard = b'{"trade_id":"abc","px":"100"}\n'
@@ -1237,6 +1244,42 @@ def test_replay_ready_catalog_partition_reader_invoked_only_once(tmp_path, monke
     assert [item["dataset_id"] for item in rows] == ["safe-once"]
     assert len(required) == 1
     assert "ALINA_RESTORE_PHASE=SAFE_PLAN_READY" in capsys.readouterr().err
+
+
+def test_replay_ready_plan_can_select_only_copy_vault_families(tmp_path):
+    module = _module()
+    rows = []
+    for dataset_id, family in (("copy-fill", "copy_vault_fills"), ("other-bbo", "bbo")):
+        payload = dataset_id.encode()
+        rows.append({
+            "dataset_id": dataset_id,
+            "family": family,
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "release_tag": "data-v2-test",
+            "release_asset": dataset_id + ".jsonl.gz",
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": rows}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 2},
+    }), encoding="utf-8")
+
+    safe, proof, selected, required = module._load_replay_ready_plan(
+        index_path,
+        metrics_path,
+        selected_families={"copy_vault_fills", "copy_vault_l2"},
+    )
+
+    assert set(safe) == {"copy-fill"}
+    assert [row["dataset_id"] for row in selected] == ["copy-fill"]
+    assert set(required) == {("data-v2-test", "copy-fill.jsonl.gz")}
+    assert proof["selection_families"] == ["copy_vault_fills", "copy_vault_l2"]
 
 
 def test_catalog_refuses_explicitly_denied_safe_and_accepts_compact_evidence(tmp_path):
@@ -3070,6 +3113,49 @@ def test_replay_ready_recovers_historical_safe_asset_missing_from_inventory(tmp_
             tag / "historical-safe.jsonl.gz").read_bytes() == payload
 
 
+def test_filtered_replay_restore_preserves_other_family_materializations(tmp_path, monkeypatch):
+    module = _module()
+    payload = b'{"channel":"copy_vault_fills"}\n'
+    digest = hashlib.sha256(payload).hexdigest()
+    tag = "data-v2-copy-only"
+    name = "copy.jsonl.gz"
+    asset = {**_asset(name, "https://example.invalid/copy", payload), "id": 77, "state": "uploaded"}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([{
+        "id": 7, "tag_name": tag, "assets": [asset],
+    }]))
+
+    def download(_url, target, **_kw):
+        target.write_bytes(payload)
+        return len(payload), digest
+
+    monkeypatch.setattr(module, "_download_to_path", download)
+    index = tmp_path / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shards": [{
+        "dataset_id": "copy-safe", "family": "copy_vault_fills",
+        "quality_status": "SAFE", "replay_compatible": True,
+        "release_tag": tag, "release_asset": name,
+        "bytes": len(payload), "sha256": digest,
+    }]}), encoding="utf-8")
+    metrics = tmp_path / "DATA_METRICS.json"
+    metrics.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+    destination = tmp_path / "restored"
+    unrelated = destination / "usable" / "shards" / "other-family" / "keep.jsonl.gz"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_bytes(b"preserve-me")
+
+    report = module.restore_everything(
+        "owner/repo", destination, catalog_path=index, metrics_path=metrics,
+        profile="replay-ready", selected_families={"copy_vault_fills"},
+    )
+
+    assert report["status"] == "REPLAY_READY_COMPLETE"
+    assert unrelated.read_bytes() == b"preserve-me"
+
+
 def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkeypatch):
     module = _module()
     safe_bytes = b'{"trade_id":"safe"}\n'
@@ -3403,7 +3489,7 @@ def test_replay_ready_materialization_refuses_symlinked_usable_tree(tmp_path):
     destination.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (destination / "usable").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(destination / "usable", outside, target_is_directory=True)
     row = {
         "dataset_id": "safe-one", "release_tag": "data-v2-safe",
         "release_asset": "safe.jsonl.gz", "bytes": len(payload),
@@ -3427,7 +3513,7 @@ def test_replay_ready_stale_cleanup_refuses_symlinked_shards(tmp_path):
     outside = tmp_path / "unrelated-data.bin"
     outside.write_bytes(b"must not follow, hash, move or delete")
     linked = stale_dir / "old.jsonl.gz"
-    linked.symlink_to(outside)
+    _symlink_or_skip(linked, outside)
 
     report = module._materialize_catalog_safe_shards(
         [], tmp_path / "releases", destination,
@@ -3448,7 +3534,9 @@ def test_replay_ready_stale_cleanup_refuses_symlinked_root(tmp_path):
     outside.mkdir()
     (outside / "old-release").mkdir()
     (outside / "old-release" / "old.jsonl.gz").write_bytes(b"non-catalog")
-    (destination / "usable" / "shards").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(
+        destination / "usable" / "shards", outside, target_is_directory=True,
+    )
 
     report = module._materialize_catalog_safe_shards(
         [], tmp_path / "releases", destination,
@@ -3471,7 +3559,7 @@ def test_replay_ready_prune_preserves_unknown_corrupt_and_symlinked_files(tmp_pa
     outside = tmp_path / "outside.bin"
     outside.write_bytes(expected)
     linked = release_dir / "linked.bin"
-    linked.symlink_to(outside)
+    _symlink_or_skip(linked, outside)
     releases = [{"tag_name": "old-release", "assets": [
         _asset("asset.bin", "https://example.invalid/asset", expected),
         _asset("linked.bin", "https://example.invalid/linked", expected),
@@ -3560,7 +3648,9 @@ def test_prune_never_follows_symlinked_release_directory(tmp_path):
     (outside / "asset.bin").write_bytes(payload)
     releases_root = tmp_path / "releases"
     releases_root.mkdir()
-    (releases_root / "old-release").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(
+        releases_root / "old-release", outside, target_is_directory=True,
+    )
     release = {"tag_name": "old-release", "assets": [
         _asset("asset.bin", "https://example.invalid/asset", payload),
     ]}

@@ -68,6 +68,7 @@ _FAMILY_PRIORITY={
     "userfills":5,
     "user_fills":5,
     "copy_vault_fills":6,
+    "copy_vault_snapshot":6,
     "copy_vault_l2":7,
     "copy_vault_positions":8,
     "external_events":9,
@@ -420,7 +421,7 @@ def _candidate(
     metadata_repair=bool(
         row.get("replay_compatible") is True
         and str(row.get("quality_status") or "").upper()=="PARTIAL"
-        and family in {"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
+        and family in {"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills","copy_vault_snapshot"}
         and row.get("unique_trade_count_exact") is not True
         and _global_unique_evidence_valid(row,unique_evidence)
     )

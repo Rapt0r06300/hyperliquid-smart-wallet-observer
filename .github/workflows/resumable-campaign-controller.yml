@@ -32,6 +32,7 @@ jobs:
       other_count: ${{ steps.due.outputs.other_count }}
       phase: ${{ steps.due.outputs.phase }}
       phase_epoch: ${{ steps.due.outputs.phase_epoch }}
+      copy_active: ${{ steps.due.outputs.copy_active }}
     steps:
       - name: Checkout Alina repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -150,7 +151,9 @@ jobs:
           # so separate runners must not be assumed to multiply Hyperliquid's
           # per-IP unique-user subscription allowance.
           active_copy=False
+          current_copy_active=False
           active_other=0
+          active_statuses={"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"}
           collection_other_kinds={
               "market_collection",
               "event_intelligence_collection",
@@ -166,14 +169,15 @@ jobs:
                   # A RUNNING lease from a prior collection epoch must
                   # never consume capacity in the current COLLECT epoch.
                   or int(row.get("phase_epoch") or 0)!=phase_epoch
-                  or row.get("status")!="RUNNING"
+                  or str(row.get("status") or "") not in active_statuses
               ):
                   continue
               kind=str(row.get("kind") or "")
               if kind=="copy_vault_collection":
-                  active_copy=True
+                  current_copy_active=True
+                  active_copy = active_copy or row.get("status")=="RUNNING"
               elif kind in collection_other_kinds:
-                  active_other+=1
+                  active_other+=int(row.get("status")=="RUNNING")
           copy_ids=copy_ids[:1]
           if active_copy:
               copy_ids=[]
@@ -188,6 +192,7 @@ jobs:
           ordinary_ids=ordinary_ids[:max(0,other_capacity-len(reserved_canary))]
           other_ids=reserved_canary+ordinary_ids
           print("copy_count="+str(len(copy_ids)))
+          print("copy_active="+str(current_copy_active).lower())
           print("copy_matrix="+json.dumps({"campaign_id":copy_ids},separators=(",",":")))
           print("other_count="+str(len(other_ids)))
           print("other_matrix="+json.dumps({"campaign_id":other_ids},separators=(",",":")))
@@ -237,9 +242,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ needs.select.outputs.copy_count }}" = "0" ] && [ "${{ needs.select.outputs.copy_active }}" != "true" ]; then
+            workflow="create-resumable-campaigns.yml"
+            echo "No current-epoch Copy-Vault work is queued; creating a new frozen campaign."
+          else
+            workflow="resumable-campaign-controller.yml"
+          fi
           for attempt in 1 2 3 4 5 6; do
             set +e
-            output="$(gh workflow run resumable-campaign-controller.yml \
+            output="$(gh workflow run "$workflow" \
               --repo "$GITHUB_REPOSITORY" \
               --ref main 2>&1)"
             rc=$?

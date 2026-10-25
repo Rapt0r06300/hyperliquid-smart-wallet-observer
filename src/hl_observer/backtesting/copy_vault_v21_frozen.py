@@ -410,6 +410,7 @@ def _settle(
     capital_scenario_usd: float | None = None,
     execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
     fee_bps: float | None = None,
+    allow_partial_fill: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
     if capital_scenario_usd is not None:
         try:
@@ -497,6 +498,7 @@ def _settle(
             notional_usd=notional_usd,
             fee_bps=fee_bps,
             require_causal_books=True,
+            allow_partial_fill=allow_partial_fill,
         )
         placebo, placebo_reason = cv.execute_metaorder(
             metaorder,
@@ -509,6 +511,7 @@ def _settle(
             notional_usd=notional_usd,
             fee_bps=fee_bps,
             require_causal_books=True,
+            allow_partial_fill=allow_partial_fill,
         )
         if actual is None or placebo is None:
             if actual is None:
@@ -552,6 +555,7 @@ def _settle(
             "retuned_on_heldout": False,
             "paper_read_only": True,
             "real_execution": False,
+            "partial_fill_diagnostic": allow_partial_fill,
         }
         if capital_scenario_usd is not None:
             common.update({
@@ -581,6 +585,7 @@ def _evaluate_segment(
     capital_scenario_usd: float | None = None,
     execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
     fee_bps: float | None = None,
+    allow_partial_fill: bool = False,
     complete_utc_day_starts_ms: Sequence[object] | None = None,
 ) -> dict[str, Any]:
     candidates, candidate_audit = _segment_candidates(
@@ -599,6 +604,7 @@ def _evaluate_segment(
         capital_scenario_usd=capital_scenario_usd,
         execution_delay_ms=execution_delay_ms,
         fee_bps=fee_bps,
+        allow_partial_fill=allow_partial_fill,
     )
     assessment = assess_train_variant(
         trades,
@@ -743,6 +749,42 @@ def evaluate_capacity_scenarios(
     }
 
 
+def evaluate_partial_fill_diagnostic(
+    metaorders: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    freeze_payload: Mapping[str, Any],
+    *,
+    segment: str = "train",
+) -> dict[str, Any]:
+    """Diagnostic replay using only the common executable quantity at both L2 legs."""
+    freeze = _verified_freeze(freeze_payload)
+    name = str(segment).strip().lower()
+    result = _evaluate_segment(
+        metaorders,
+        books_by_coin,
+        segment=f"{name}_partial_fill_diagnostic",
+        start_ms=_segment_start_ms(freeze, name),
+        end_ms=_segment_end_ms(freeze, name),
+        params=freeze["parameters"],
+        capital_scenario_usd=float(PAPER_EQUITY_USD),
+        allow_partial_fill=True,
+    )
+    partial_count = sum(1 for row in result.get("trades") or () if row.get("partial_fill") is True)
+    return {
+        "schema_version": "hypersmart.copy_vault_partial_fill_diagnostic.v1",
+        "segment": name,
+        "scope": "DIAGNOSTIC_ONLY",
+        "economic_proof": False,
+        "promotion_eligible": False,
+        "partial_fill_trade_count": partial_count,
+        "requested_fill_model": "EXACT_OBSERVED_L2_COMMON_EXECUTABLE_QUANTITY",
+        "limitations": ["queue_position_not_observed", "time_priority_not_observed", "no_forward_proof"],
+        "result": result,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def _stress_books(
     books_by_coin: Mapping[str, list[dict[str, Any]]],
     *,
@@ -821,12 +863,13 @@ def evaluate_stress_matrix(
     canonical_fee_bps = float(frais_taker_bps("HYPERLIQUID"))
     scenarios: list[dict[str, Any]] = []
     definitions = [
-        ("BASELINE_REFERENCE", {}, FROZEN_COPY_DELAY_MS, None),
-        ("FEE_X2", {}, FROZEN_COPY_DELAY_MS, canonical_fee_bps * 2.0),
-        ("SPREAD_X2", {"spread_multiplier": 2.0}, FROZEN_COPY_DELAY_MS, None),
-        ("SPREAD_X3", {"spread_multiplier": 3.0}, FROZEN_COPY_DELAY_MS, None),
-        ("DEPTH_50_PERCENT", {"depth_multiplier": 0.5}, FROZEN_COPY_DELAY_MS, None),
-        ("DEPTH_25_PERCENT", {"depth_multiplier": 0.25}, FROZEN_COPY_DELAY_MS, None),
+        ("BASELINE_REFERENCE", {}, FROZEN_COPY_DELAY_MS, None, False),
+        ("FEE_X2", {}, FROZEN_COPY_DELAY_MS, canonical_fee_bps * 2.0, False),
+        ("SPREAD_X2", {"spread_multiplier": 2.0}, FROZEN_COPY_DELAY_MS, None, False),
+        ("SPREAD_X3", {"spread_multiplier": 3.0}, FROZEN_COPY_DELAY_MS, None, False),
+        ("DEPTH_50_PERCENT", {"depth_multiplier": 0.5}, FROZEN_COPY_DELAY_MS, None, False),
+        ("DEPTH_25_PERCENT", {"depth_multiplier": 0.25}, FROZEN_COPY_DELAY_MS, None, False),
+        ("OBSERVED_L2_PARTIAL_FILL", {}, FROZEN_COPY_DELAY_MS, None, True),
     ]
     definitions.extend(
         (
@@ -834,10 +877,11 @@ def evaluate_stress_matrix(
             {},
             FROZEN_COPY_DELAY_MS + int(extra_ms),
             None,
+            False,
         )
         for extra_ms in (100, 500, 1_000, 5_000, 30_000, 60_000, 300_000)
     )
-    for name, book_stress, delay_ms, stressed_fee_bps in definitions:
+    for name, book_stress, delay_ms, stressed_fee_bps, partial_fill in definitions:
         stressed_books = (
             _stress_books(books_by_coin, **book_stress)
             if book_stress
@@ -853,6 +897,7 @@ def evaluate_stress_matrix(
             capital_scenario_usd=float(PAPER_EQUITY_USD),
             execution_delay_ms=delay_ms,
             fee_bps=stressed_fee_bps,
+            allow_partial_fill=partial_fill,
         )
         scenarios.append(
             {
@@ -862,6 +907,7 @@ def evaluate_stress_matrix(
                 "fee_bps": stressed_fee_bps,
                 "spread_multiplier": book_stress.get("spread_multiplier", 1.0),
                 "depth_multiplier": book_stress.get("depth_multiplier", 1.0),
+                "partial_fill_enabled": partial_fill,
                 "result": result,
             }
         )
@@ -877,7 +923,7 @@ def evaluate_stress_matrix(
             "funding_adverse": "UNMEASURABLE_FUNDING_ROWS_NOT_WIRED",
             "bull_bear_sideways_regimes": "UNMEASURABLE_REGIME_LABELS_NOT_PROVEN",
             "missing_leader_data": "NOT_SIMULATED_WITHOUT_MEASURED_OBSERVATION_GAPS",
-            "partial_fills": "NOT_MODELED_BY_CURRENT_ALL_OR_NONE_EXECUTOR",
+            "partial_fills": "DIAGNOSTIC_ONLY: exact common quantity executable at both observed L2 legs; queue position and time-priority not modeled",
             "missing_venue": "NOT_APPLICABLE_SINGLE_VENUE_COPY_VAULT",
             "instrument_minimums_and_lot_rules": "NOT_EVALUATED",
         },
@@ -1053,5 +1099,6 @@ __all__ = [
     "evaluate_capacity_scenarios",
     "evaluate_frozen_v21",
     "evaluate_frozen_v21_segment",
+    "evaluate_partial_fill_diagnostic",
     "evaluate_stress_matrix",
 ]

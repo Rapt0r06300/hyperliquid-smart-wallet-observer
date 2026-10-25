@@ -503,6 +503,16 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
             "incomplete_wallets": 1,
             "fills_collected": 7,
             "missing_state_wallets": 4
+          },
+          "vault_checkpoints": {
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+              "last_forward_start_ms": 1000,
+              "last_forward_end_ms": 61000,
+              "last_forward_status": "SOURCE_CONTINUITY_VERIFIED",
+              "history_complete": false,
+              "history_pending_windows": [[0, 500]]
+            },
+            "not-an-address": {"last_forward_end_ms": 61000}
           }
         }""",
         encoding="utf-8",
@@ -532,3 +542,5 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
     assert metrics["incomplete_wallets"] == 1
     assert metrics["fills_collected"] == 7
     assert metrics["missing_state_wallets"] == 4
+    assert metrics["vault_checkpoints"]["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]["last_forward_end_ms"] == 61000
+    assert "not-an-address" not in metrics["vault_checkpoints"]

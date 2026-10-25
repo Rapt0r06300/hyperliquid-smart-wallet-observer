@@ -95,6 +95,14 @@ def _raw_envelope(record: dict[str, Any], channel: str) -> tuple[dict[str, Any],
         "copy_vault_fills": {
             "hyperliquid_public_userfills",
             "hyperliquid_info_user_fills_by_time",
+            "hyperliquid_info_user_fills_by_time_history",
+        },
+        "copy_vault_snapshot": {
+            "hyperliquid_public_userfills",
+            "hyperliquid_info_user_fills_by_time_history",
+            # Historical windows were published under the legacy fills family
+            # before the TRAIN-only snapshot channel was introduced.
+            "hyperliquid_info_user_fills_by_time",
         },
         "copy_vault_l2": {"hyperliquid_public_copy_l2"},
     }[channel]
@@ -128,17 +136,36 @@ def _raw_envelope(record: dict[str, Any], channel: str) -> tuple[dict[str, Any],
     return message, receive, exchange
 
 
-def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
-    message, receive, exchange = _raw_envelope(record, "copy_vault_fills")
+def _fills(
+    record: dict[str, Any], *, channel: str = "copy_vault_fills",
+) -> tuple[list[dict[str, Any]], int]:
+    if channel not in {"copy_vault_fills", "copy_vault_snapshot"}:
+        raise SafeBridgeError("invalid Copy-Vault fill family")
+    message, receive, exchange = _raw_envelope(record, channel)
     provenance = record["provenance"]
     vault = str(record.get("instrument") or "").strip().lower()
-    if record.get("source_id") == "hyperliquid_info_user_fills_by_time":
+    source_id = str(record.get("source_id") or "")
+    if source_id in {
+        "hyperliquid_info_user_fills_by_time",
+        "hyperliquid_info_user_fills_by_time_history",
+    }:
+        history_flag = provenance.get("history_bootstrap")
+        historical_bootstrap = (
+            True if source_id.endswith("_history") else history_flag is True
+        )
+        expected_channels = (
+            {"copy_vault_snapshot", "copy_vault_fills"}
+            if historical_bootstrap else {"copy_vault_fills"}
+        )
         request = message.get("request")
         raw_fills = message.get("fills")
         if (
-            provenance.get("transport") != "https"
+            channel not in expected_channels
+            or provenance.get("transport") != "https"
             or provenance.get("request_type") != "userFillsByTime"
             or provenance.get("window_reconciliation_complete") is not True
+            or not isinstance(history_flag, bool)
+            or history_flag is not historical_bootstrap
             or not isinstance(request, dict)
             or request.get("type") != "userFillsByTime"
             or str(request.get("user") or "").lower() != vault
@@ -183,6 +210,8 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
                 "recv_mono_ns": record.get("local_monotonic_ns"),
                 "connection_id": str(record.get("connection_id") or ""),
                 "source": "REST_BACKFILL",
+                "historical_bootstrap": historical_bootstrap,
+                "window_reconciliation_complete": True,
                 "isSnapshot": False,
             })
             normalized.append(fill)
@@ -198,6 +227,13 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         or (data.get("user") and str(data["user"]).lower() != vault)
     ):
         raise SafeBridgeError("Copy-Vault fill identity or message mismatch")
+    if channel == "copy_vault_snapshot":
+        if (
+            source_id != "hyperliquid_public_userfills"
+            or data.get("isSnapshot") is not True
+        ):
+            raise SafeBridgeError("Copy-Vault snapshot family contains a non-snapshot event")
+        return [], len(data.get("fills") or [])
     if data.get("isSnapshot") is True:
         return [], len(data.get("fills") or [])
     if data.get("isSnapshot") not in (None, False):
@@ -292,7 +328,12 @@ def _safe_registry_rows(
     if (
         restore.get("repository") != "Rapt0r06300/hyperliquid-smart-wallet-observer"
         or restore.get("status") != "REPLAY_READY_COMPLETE"
-        or selection_families != ["copy_vault_fills", "copy_vault_l2"]
+        or not isinstance(selection_families, list)
+        or any(not isinstance(family, str) for family in selection_families)
+        or not {"copy_vault_fills", "copy_vault_l2"}.issubset(selection_families)
+        or set(selection_families) - {
+            "copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot",
+        }
         or not isinstance(classification, dict)
         or classification.get("materialization_complete") is not True
         or classification.get("failures") not in (None, [])
@@ -351,9 +392,12 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     paths = {
         "copy_vault_fills": destination / "vault_fills_live.jsonl",
         "copy_vault_l2": destination / "copy_vault_l2_tape.jsonl",
+        "copy_vault_snapshot": destination / "vault_fills.jsonl",
     }
     counts = {
         "copy_vault_fills": 0,
+        "copy_vault_snapshot": 0,
+        "historical_bootstrap_fills": 0,
         "copy_vault_l2": 0,
         "snapshots_excluded": 0,
         "stale_l2_excluded": 0,
@@ -362,7 +406,7 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     inputs: list[dict[str, Any]] = []
     total = len(registry)
     try:
-        with paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out, paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out:
+        with paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out, paths["copy_vault_snapshot"].open("w", encoding="utf-8", newline="\n") as history_out, paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out:
             for i, (relative, size, sha, _registered_stat_identity) in enumerate(registry, 1):
                 archive = _safe_archive(recovery, relative)
                 if not archive.is_file():
@@ -402,12 +446,19 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
                             if record_channel != channel:
                                 raise SafeBridgeError(f"mixed channel in SAFE shard: {relative}")
                             rows += 1
-                            if channel == "copy_vault_fills":
-                                normalized, excluded = _fills(record)
+                            if channel in {"copy_vault_fills", "copy_vault_snapshot"}:
+                                normalized, excluded = _fills(record, channel=channel)
                                 counts["snapshots_excluded"] += excluded
                                 for fill in normalized:
-                                    fill_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
-                                counts[channel] += len(normalized)
+                                    historical = fill.get("historical_bootstrap") is True
+                                    target = history_out if historical else fill_out
+                                    target.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
+                                    counts[
+                                        "copy_vault_snapshot" if historical else "copy_vault_fills"
+                                    ] += 1
+                                    counts["historical_bootstrap_fills"] += int(
+                                        historical
+                                    )
                             else:
                                 try:
                                     book = _book(record)
@@ -430,7 +481,7 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
                 })
                 if len(inputs) % 100 == 0 or i == total:
                     print(f"ALINA_COPY_SAFE_PROGRESS={i}/{total} selected={len(inputs)}", flush=True)
-        if not counts["copy_vault_fills"] or not counts["copy_vault_l2"]:
+        if not (counts["copy_vault_fills"] + counts["copy_vault_snapshot"]) or not counts["copy_vault_l2"]:
             raise SafeBridgeError("SAFE corpus lacks both causal fills and subsecond L2")
         digest = selection.hexdigest()
         outputs = {name: {"path": "runtime/data/" + path.name,
@@ -451,12 +502,28 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             "paper_read_only": True,
             "real_execution": False,
             "snapshot_fills_excluded": True,
+            "historical_bootstrap_fills_separate": True,
+            "historical_bootstrap_fills": counts["historical_bootstrap_fills"],
+            "forward_proof_from_historical_bootstrap": False,
             "economic_proof": False,
         }
         proof_dir = stage / "runtime" / "reports" / "datasets"
         proof_dir.mkdir(parents=True)
         (proof_dir / "SELECTION_PROVENANCE.json").write_text(
             json.dumps(provenance, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        (stage / "SAFE_INPUT_MANIFEST.json").write_text(
+            json.dumps({
+                "schema_version": "hypersmart.copy_vault_safe_input_manifest.v1",
+                "status": "READY",
+                "catalog_sha256": catalog,
+                "selection_digest": digest,
+                "selected_shards": len(inputs),
+                "selected_raw_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
+                "counts": counts,
+                "paper_read_only": True,
+                "real_execution": False,
+            }, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
         final = parent / digest[:24]
         if final.exists():

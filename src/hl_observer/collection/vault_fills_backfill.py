@@ -259,6 +259,10 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
                     "is_snapshot": raw_snapshot if isinstance(raw_snapshot, bool) else None,
                     "observed_at_ms": f.get("received_at_ms"),
                     "stable_event_id": f.get("stable_event_id"),
+                    **({"historical_bootstrap": f["historical_bootstrap"]}
+                       if isinstance(f.get("historical_bootstrap"), bool) else {}),
+                    **({"window_reconciliation_complete": f["window_reconciliation_complete"]}
+                       if isinstance(f.get("window_reconciliation_complete"), bool) else {}),
                 })
 
             eps = 1e-9

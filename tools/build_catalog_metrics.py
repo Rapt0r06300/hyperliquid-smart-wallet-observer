@@ -26,6 +26,7 @@ TRADE_FAMILIES = {
     "userfills",
     "user_fills",
     "copy_vault_fills",
+    "copy_vault_snapshot",
 }
 BYBIT_IDENTITY_VERSION = "full_native_or_deterministic_composite_string_v3"
 GLOBAL_IDENTITY_VERSION = "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string"

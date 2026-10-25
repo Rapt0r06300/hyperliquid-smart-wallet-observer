@@ -30,6 +30,7 @@ TRADE_FAMILIES = {
     "userfills",
     "user_fills",
     "copy_vault_fills",
+    "copy_vault_snapshot",
 }
 
 

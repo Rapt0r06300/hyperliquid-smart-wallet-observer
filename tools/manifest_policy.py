@@ -44,6 +44,7 @@ _MATCHED_RECONCILIATION_FAMILIES = {
     "userfills",
     "user_fills",
     "copy_vault_fills",
+    "copy_vault_snapshot",
 }
 _CONTINUITY_RECONCILIATION = {
     "MATCHED",
@@ -237,7 +238,7 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
 
     trade_family = str(manifest.get("family") or "").lower() in {
         "trades", "agg_trades", "fills", "userfills", "user_fills",
-        "copy_vault_fills",
+        "copy_vault_fills", "copy_vault_snapshot",
     }
     if trade_family:
         trade_count = _int(manifest.get("trade_count"))
@@ -278,10 +279,18 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             reasons.append("PARENT_L2_SHARD_NOT_VERIFIED")
 
     if family in _MATCHED_RECONCILIATION_FAMILIES:
-        if family == "copy_vault_fills" and "https" in transports:
+        if family in {"copy_vault_fills", "copy_vault_snapshot"} and "https" in transports:
+            # ``copy_vault_fills`` is the legacy family name for exact REST
+            # windows. Older published history therefore remains admissible
+            # as TRAIN input when its explicit history marker is true. New
+            # history shards use the distinct snapshot family; that family
+            # must never contain a forward window.
+            history_flag = provenance.get("history_bootstrap")
             if not (
                 provenance.get("request_type") == "userFillsByTime"
                 and provenance.get("window_reconciliation_complete") is True
+                and isinstance(history_flag, bool)
+                and (family != "copy_vault_snapshot" or history_flag is True)
             ):
                 reasons.append("COPY_VAULT_REST_WINDOW_NOT_VERIFIED")
         if historical_archive:

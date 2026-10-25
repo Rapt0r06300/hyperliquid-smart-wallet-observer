@@ -64,6 +64,34 @@ def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) ->
     }
 
 
+def _history_envelope() -> dict:
+    raw = json.dumps({
+        "request": {
+            "type": "userFillsByTime", "user": "0xabc",
+            "startTime": 1, "endTime": 100_000, "aggregateByTime": False,
+        },
+        "fills": [{
+            "vault": "0xabc", "coin": "BTC", "px": 100.0, "sz": 1.0,
+            "signe": 1, "dir": "Open Long", "ts_ms": 100_000,
+            "tid": 321, "oid": 123, "hash": "0xhistory",
+        }],
+    }, sort_keys=True, separators=(",", ":"))
+    return {
+        "schema_version": "hypersmart.tick.v1",
+        "source_id": "hyperliquid_info_user_fills_by_time_history",
+        "channel": "copy_vault_snapshot", "instrument": "0xabc",
+        "exchange_ts_ms": 100_000, "received_ts_ms": 100_050,
+        "local_monotonic_ns": 12345678, "connection_id": "history-1",
+        "read_only": True, "real_execution": False,
+        "raw_payload": raw, "raw_sha256": _sha(raw.encode("utf-8")),
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "https", "request_type": "userFillsByTime",
+            "window_reconciliation_complete": True, "history_bootstrap": True,
+        },
+    }
+
+
 def test_exact_rest_backfill_is_normalized_only_with_complete_window_provenance():
     row = {
         "schema_version": "hypersmart.tick.v1",
@@ -91,7 +119,7 @@ def test_exact_rest_backfill_is_normalized_only_with_complete_window_provenance(
         "provenance": {
             "access": "read_only", "authenticated": False,
             "transport": "https", "request_type": "userFillsByTime",
-            "window_reconciliation_complete": True,
+            "window_reconciliation_complete": True, "history_bootstrap": False,
         },
     }
     row["raw_sha256"] = _sha(row["raw_payload"].encode("utf-8"))
@@ -126,6 +154,63 @@ def test_rest_backfill_without_complete_window_proof_is_rejected():
     row["raw_sha256"] = _sha(row["raw_payload"].encode("utf-8"))
     with pytest.raises(SafeBridgeError, match="complete window"):
         _fills(row)
+
+
+def test_historical_rest_bootstrap_is_marked_and_not_mislabeled_forward():
+    row = {
+        "schema_version": "hypersmart.tick.v1",
+        "source_id": "hyperliquid_info_user_fills_by_time_history",
+        "channel": "copy_vault_fills",
+        "instrument": "0xabc",
+        "exchange_ts_ms": 100_000,
+        "received_ts_ms": 100_050,
+        "local_monotonic_ns": 12345678,
+        "connection_id": "copy-vault-history-1",
+        "read_only": True,
+        "real_execution": False,
+        "raw_payload": json.dumps({
+            "request": {
+                "type": "userFillsByTime", "user": "0xabc",
+                "startTime": 1, "endTime": 101_000,
+                "aggregateByTime": False,
+            },
+            "fills": [{
+                "vault": "0xabc", "coin": "BTC", "px": 100.0, "sz": 1.0,
+                "signe": 1, "dir": "Open Long", "ts_ms": 100_000,
+                "tid": 321, "oid": 123, "hash": "0x123",
+            }],
+        }, sort_keys=True, separators=(",", ":")),
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "https", "request_type": "userFillsByTime",
+            "window_reconciliation_complete": True, "history_bootstrap": True,
+        },
+    }
+    row["raw_sha256"] = _sha(row["raw_payload"].encode("utf-8"))
+
+    fills, excluded = _fills(row)
+
+    assert excluded == 0
+    assert fills[0]["source"] == "REST_BACKFILL"
+    assert fills[0]["historical_bootstrap"] is True
+
+
+def test_bridge_routes_historical_rest_to_train_file_separately(tmp_path: Path) -> None:
+    _corpus(tmp_path, [
+        _history_envelope(), _envelope("copy_vault_fills"), _envelope("copy_vault_l2"),
+    ])
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["counts"]["copy_vault_snapshot"] == 1
+    assert report["counts"]["copy_vault_fills"] == 1
+    workspace = Path(report["workspace"])
+    historical = json.loads((workspace / "runtime/data/vault_fills.jsonl").read_text())
+    forward = json.loads((workspace / "runtime/data/vault_fills_live.jsonl").read_text())
+    assert historical["historical_bootstrap"] is True
+    assert forward["source"] == "LIVE_WS"
+    binding = json.loads((workspace / "SAFE_INPUT_MANIFEST.json").read_text())
+    assert binding["selection_digest"] == report["selection_digest"]
 
 
 def _corpus(tmp_path: Path, envelopes: list[dict]) -> Path:
@@ -179,7 +264,7 @@ def _corpus(tmp_path: Path, envelopes: list[dict]) -> Path:
     (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
         "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "status": "REPLAY_READY_COMPLETE",
-        "selection_families": ["copy_vault_fills", "copy_vault_l2"],
+        "selection_families": ["copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot"],
         "catalog_verification": {"source_index_sha256": catalog},
         "classification": {
             "materialization_complete": True, "usable_shards": len(envelopes),
@@ -237,7 +322,7 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
 
     sources = discover_family_sources(workspace)
     assert {p.name for p in sources["copy_vault"]} == {
-        "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
+        "vault_fills.jsonl", "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
     }
     books, book_audit = load_observed_books(workspace, coins={"BTC"})
     assert len(books.get("BTC", [])) == 1
