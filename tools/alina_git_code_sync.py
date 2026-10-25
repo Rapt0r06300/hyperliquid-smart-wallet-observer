@@ -251,12 +251,10 @@ class Synchronizer:
                 raise SyncBlocked(f"Fichier trop volumineux: {path}")
             if full.stat().st_size <= 2 * 1024 * 1024:
                 sample = full.read_bytes()
-                if any(token in sample for token in (
-                    b"-----BEGIN PRIVATE KEY-----",
-                    b"-----BEGIN RSA PRIVATE KEY-----",
-                    b"-----BEGIN OPENSSH PRIVATE KEY-----",
-                    b"-----BEGIN EC PRIVATE KEY-----",
-                )):
+                if re.search(
+                    rb"(?m)^-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----\\r?$",
+                    sample,
+                ):
                     raise SyncBlocked(f"Materiel de cle privee detecte: {path}")
         if self.command("diff", "--cached", "--check", check=False).returncode:
             self.say("[ATTENTION] Espaces non conformes dans un WIP, code preserve.")
