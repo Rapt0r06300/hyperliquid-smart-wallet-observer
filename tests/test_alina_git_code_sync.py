@@ -232,3 +232,20 @@ def test_tracked_modified_data_never_overwritten(repos):
     rc, receipt = run_sync(local)
     assert rc == 2 and receipt["status"] == "NO_GO"
     assert data.read_text() == "my latest local bytes\n"
+
+
+def test_pem_private_key_prevented_before_staging(repos):
+    local, _, origin = repos
+    original = git(origin, "rev-parse", "main")
+    local_key = local / "src" / "oops.txt"
+    local_key.write_text(
+        "-----BEGIN PRIVATE KEY-----\n"
+        "not-a-real-key\n"
+        "-----END PRIVATE KEY-----\n"
+    )
+    rc, receipt = run_sync(local)
+    assert rc == 2 and receipt["status"] == "NO_GO"
+    assert git(local, "diff", "--cached", "--name-only") == ""
+    assert git(local, "rev-parse", "HEAD") == original
+    assert git(origin, "rev-parse", "main") == original
+    assert local_key.exists()
