@@ -12,11 +12,14 @@ set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 set "ALINA_QUANT_CPU_PERCENT=65"
 
+set "ALINA_LAB_MODE=%~1"
+if not defined ALINA_LAB_MODE set "ALINA_LAB_MODE=safe"
 echo.
 echo ================================================================
-echo   ALINA SMART FLOW - LAB QUANT COPY-VAULT
-echo   Double clic : tests logiciels (pas une recherche economique)
-echo   PAPER / READ-ONLY - aucune collecte ou transaction
+echo   ALINA SMART FLOW - COPY-VAULT LAB
+echo   Double clic : recherche economique sur shards SAFE locaux
+echo   Mode tests : LANCER_LAB_QUANT_COPY_VAULT.cmd tests
+echo   PAPER / READ-ONLY - aucun ordre, aucune collecte
 echo ================================================================
 echo.
 
@@ -31,52 +34,44 @@ if not defined ALINA_LAB_PYTHON (
   )
 )
 if not defined ALINA_LAB_PYTHON (
-  echo [ERREUR] Aucun Python compatible n'a ete trouve.
-  echo Aucun runtime ne sera telecharge ou installe automatiquement.
-  echo Preparez tools\python ou installez/configurez Python 3, puis relancez ce fichier.
-  if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
-  endlocal & exit /b 30
+  echo [ERREUR] Python 3 introuvable; aucun telechargement automatique.
+  set "RC=30"
+  goto :done
 )
 
-if /I not "%~1"=="research" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
-if /I not "%~1"=="research" if errorlevel 1 (
-  echo [ERREUR] Runtime de test incomplet : pytest et typer sont obligatoires.
-  echo Installez le projet avec : py -3 -m pip install -e ".[dev]"
-  if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
-  endlocal & exit /b 31
-)
-
-if /I not "%~1"=="research" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
-if /I not "%~1"=="research" if errorlevel 1 echo [INFO] pytest-xdist absent : repli serie sur un coeur.
-
-if /I "%~1"=="research" (
+if /I "%ALINA_LAB_MODE%"=="tests" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
+  if errorlevel 1 (
+    echo [ERREUR] Installez les dependances: py -3 -m pip install -e ".[dev]"
+    set "RC=31"
+    goto :done
+  )
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
+  if errorlevel 1 echo [INFO] xdist absent, tests en serie.
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py"
+) else if /I "%ALINA_LAB_MODE%"=="preflight" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --preflight-only
+) else if /I "%ALINA_LAB_MODE%"=="research" (
   if "%~2"=="" (
-    echo [ERREUR] Usage : LANCER_LAB_QUANT_COPY_VAULT.cmd research "CHEMIN_WORKSPACE_FULL_COLD"
-    echo Un dossier SAFE decompresse seul ne prouve pas la compatibilite economique.
-    if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
-    endlocal & exit /b 2
+    echo [ERREUR] Indiquez le chemin du workspace FULL/COLD en deuxieme argument.
+    set "RC=2"
+    goto :done
   )
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --research --dataset-root "%~2"
-) else if /I "%~1"=="preflight" (
-  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --preflight-only
+) else if /I "%ALINA_LAB_MODE%"=="safe" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --safe-research
 ) else (
-  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py"
+  echo [ERREUR] Mode inconnu: %ALINA_LAB_MODE% [safe, tests, preflight, research]
+  set "RC=2"
+  goto :done
 )
 set "RC=%ERRORLEVEL%"
+:done
 echo.
-if /I "%~1"=="preflight" (
-  echo [INFO] Pre-verification terminee; les tests n'ont pas ete lances.
-) else if /I "%~1"=="research" (
-  if "%RC%"=="0" (
-    echo [FIN] Campagne executee; consultez les rapports pour savoir si une hypothese est prouvee.
-  ) else (
-    echo [ECHEC] Recherche non validee, code %RC%.
-  )
-) else if "%RC%"=="0" (
-  echo [FIN] Tests termines sans echec. Cela ne prouve pas la rentabilite.
+if "%RC%"=="0" (
+  echo [FIN] Commande executee; seuls les rapports economiques determinent le resultat.
 ) else (
-  echo [ATTENTION] Code %RC%. Lisez le rapport et les journaux affiches ci-dessus.
+  echo [NO_GO] Code %RC%. Aucune rentabilite n'est prouvee.
 )
-echo.
 if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
 endlocal & exit /b %RC%
