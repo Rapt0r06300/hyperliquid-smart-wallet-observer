@@ -49,7 +49,15 @@ if errorlevel 1 (
 "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
 if errorlevel 1 echo [INFO] pytest-xdist absent : repli serie sur un coeur.
 
-if /I "%~1"=="preflight" (
+if /I "%~1"=="research" (
+  if "%~2"=="" (
+    echo [ERREUR] Usage : LANCER_LAB_QUANT_COPY_VAULT.cmd research "CHEMIN_WORKSPACE_FULL_COLD"
+    echo Un dossier SAFE decompresse seul ne prouve pas la compatibilite economique.
+    if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
+    endlocal & exit /b 2
+  )
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --research --dataset-root "%~2"
+) else if /I "%~1"=="preflight" (
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --preflight-only
 ) else (
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py"
@@ -59,7 +67,7 @@ echo.
 if /I "%~1"=="preflight" (
   echo [INFO] Pre-verification terminee; les tests n'ont pas ete lances.
 ) else if "%RC%"=="0" (
-  echo [FIN] Tests termines sans echec. Cela ne prouve pas la rentabilite.
+  echo [FIN] Commande terminee sans echec. Un resultat economique doit etre verifie dans les rapports.
 ) else (
   echo [ATTENTION] Code %RC%. Lisez le rapport et les journaux affiches ci-dessus.
 )
