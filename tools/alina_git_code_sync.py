@@ -394,8 +394,8 @@ class Synchronizer:
         instructions = [
             "# Alina - conflits Git (copies locales NON publiees)",
             "",
-            f"Commit local protege : \`{local}\`",
-            f"HEAD distant observe : \`{remote}\`",
+            f"Commit local protege : `{local}`",
+            f"HEAD distant observe : `{remote}`",
             "",
             "Ne supprimer ni la logique locale ni la logique GitHub.",
             "Analyser chaque triplet base/local/github, fusionner les intentions",
@@ -408,7 +408,7 @@ class Synchronizer:
             if _protected(path):
                 raise SyncBlocked("Conflit sur chemin protege : " + path)
             entry: dict[str, object] = {"path": path, "versions": {}}
-            instructions.append(f"- \`{path}\` : prefixe \`{i:02d}-\`")
+            instructions.append(f"- `{path}` : prefixe `{i:02d}-`")
             for label, spec in (
                 ("base", f":1:{path}"),
                 ("local", f":2:{path}"),
