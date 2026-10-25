@@ -64,6 +64,25 @@ POUSSER-GITHUB-FORCE.cmd --portable-self-check
 - **Self-check** : vérifie que le lanceur, Git et Python sont disponibles
   sans modifier le dépôt ni contacter GitHub.
 
+## Diagnostic de conflits conservant les deux versions
+
+Si Git signale des conflits, le moteur capture les quatre vues par fichier
+(base commune, commit local Codex/Claude, version GitHub, tentative de fusion)
+dans `runtime/reports/git-sync/conflicts/<local>-<remote>/`.
+
+Chaque contenu est conservé avec son SHA-256 dans `manifest.json`;
+`RESOLUTION.md` explique comment les fournir à Codex/Claude pour une
+réconciliation sémantique avec tests. Le kit reste **uniquement local**
+et les copies ne sont pas des remplacements automatiques de code.
+Le programme exécute ensuite `git merge --abort`, ce qui garde le
+checkpoint Git local et tous les commits distants intacts.
+
+Lorsqu'on ne dispose que d'un ancien `tools/alina_git_code_sync.py`, le
+lanceur Windows actualisé utilise temporairement une version du moteur
+à commit épinglé téléchargée dans `%TEMP%` sans écraser les modifications
+existantes. Il télécharge exclusivement le *code* de synchronisation,
+jamais les shards.
+
 ## Situations bloquantes et reprise
 
 - **Fichiers exclus déjà indexés ou modifications locales de données Git
