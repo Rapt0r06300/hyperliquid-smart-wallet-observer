@@ -15,7 +15,7 @@ set "ALINA_QUANT_CPU_PERCENT=65"
 echo.
 echo ================================================================
 echo   ALINA SMART FLOW - LAB QUANT COPY-VAULT
-echo   Double clic : inventaire + freeze + tests locaux detailles
+echo   Double clic : tests logiciels (pas une recherche economique)
 echo   PAPER / READ-ONLY - aucune collecte ou transaction
 echo ================================================================
 echo.
@@ -38,16 +38,16 @@ if not defined ALINA_LAB_PYTHON (
   endlocal & exit /b 30
 )
 
-"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
-if errorlevel 1 (
+if /I not "%~1"=="research" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
+if /I not "%~1"=="research" if errorlevel 1 (
   echo [ERREUR] Runtime de test incomplet : pytest et typer sont obligatoires.
   echo Installez le projet avec : py -3 -m pip install -e ".[dev]"
   if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
   endlocal & exit /b 31
 )
 
-"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
-if errorlevel 1 echo [INFO] pytest-xdist absent : repli serie sur un coeur.
+if /I not "%~1"=="research" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
+if /I not "%~1"=="research" if errorlevel 1 echo [INFO] pytest-xdist absent : repli serie sur un coeur.
 
 if /I "%~1"=="research" (
   if "%~2"=="" (
@@ -66,8 +66,14 @@ set "RC=%ERRORLEVEL%"
 echo.
 if /I "%~1"=="preflight" (
   echo [INFO] Pre-verification terminee; les tests n'ont pas ete lances.
+) else if /I "%~1"=="research" (
+  if "%RC%"=="0" (
+    echo [FIN] Campagne executee; consultez les rapports pour savoir si une hypothese est prouvee.
+  ) else (
+    echo [ECHEC] Recherche non validee, code %RC%.
+  )
 ) else if "%RC%"=="0" (
-  echo [FIN] Commande terminee sans echec. Un resultat economique doit etre verifie dans les rapports.
+  echo [FIN] Tests termines sans echec. Cela ne prouve pas la rentabilite.
 ) else (
   echo [ATTENTION] Code %RC%. Lisez le rapport et les journaux affiches ci-dessus.
 )
