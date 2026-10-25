@@ -285,11 +285,12 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
     assert 'call :download_source "tools/install_portable_git.ps1"' in source
     assert 'call :download_source "tools/alina_git_code_sync.py"' in source
-    assert "ALINA_BOOTSTRAP_REF=9b1663e6712f6a3262b652305aa7aff855a41492" in source
+    assert "ALINA_BOOTSTRAP_REF=8d632ee8266d5854ce0d7a9791c9c71775e10f86" in source
     assert '-File "%ALINA_INSTALLER%"' in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
-    assert 'if exist "%ALINA_ENGINE%" goto :engine_ready' in source
+    assert ':get_engine' in source
+    assert 'findstr /C:"alina.git_conflict_kit.v1"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
     assert "GIT_LFS_SKIP_SMUDGE=1" in source
     assert "restore_alina.py" not in source
