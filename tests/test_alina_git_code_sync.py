@@ -269,15 +269,18 @@ def test_nested_python_dataset_and_runtime_directories_are_source(repos):
 
 
 def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
-    """A broken local PREPARER_GIT_PORTABLE.cmd must not block a clean launcher."""
-    launcher = (Path(__file__).resolve().parents[1] / "POUSSER-GITHUB-FORCE.cmd")
+    """Double-click resolves missing local helpers without fetching shards."""
+    launcher = Path(__file__).resolve().parents[1] / "POUSSER-GITHUB-FORCE.cmd"
     source = launcher.read_text(encoding="utf-8-sig")
     assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
-    assert '-File "%~dp0tools\\install_portable_git.ps1"' in source
+    assert 'call :download_source "tools/install_portable_git.ps1"' in source
+    assert 'call :download_source "tools/alina_git_code_sync.py"' in source
+    assert "ALINA_BOOTSTRAP_REF=9b1663e6712f6a3262b652305aa7aff855a41492" in source
+    assert '-File "%ALINA_INSTALLER%"' in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
-    normal_end = source.index('echo Consultez runtime\\reports\\git-sync\\LAST_SYNC.json')
-    self_check = source.index("\n:portable_self_check\n")
-    assert "goto :finish" in source[normal_end:self_check]
-    assert "ALINA_SYNC_COMPLETE" not in source
+    assert 'if exist "%ALINA_ENGINE%" goto :engine_ready' in source
+    assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
+    assert "GIT_LFS_SKIP_SMUDGE=1" in source
     assert "restore_alina.py" not in source
+    assert "alina_sync" not in source.casefold()
