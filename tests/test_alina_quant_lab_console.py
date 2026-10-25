@@ -186,3 +186,30 @@ def test_research_mode_runs_existing_dataset_campaign(monkeypatch, tmp_path: Pat
     assert str(tmp_path) in cmd
     assert kwargs["env"]["HL_ENABLE_MAINNET_EXECUTION"] == "0"
     assert kwargs["env"]["HL_ENABLE_TESTNET_EXECUTION"] == "0"
+
+def test_safe_inspection_does_not_promote_unverified_shards(tmp_path: Path) -> None:
+    from tools.alina_quant_lab_console import inspect_local_safe_corpus
+
+    result = inspect_local_safe_corpus(tmp_path)
+    assert result["status"] == "NOT_CERTIFIED"
+    assert result["safe_registry_rows"] is None
+
+
+def test_safe_inspection_rejects_unbound_unpack_report(tmp_path: Path) -> None:
+    from tools.alina_quant_lab_console import inspect_local_safe_corpus
+
+    folder = tmp_path / "runtime" / "recovery" / "full"
+    folder.mkdir(parents=True)
+    (folder / "RESTORE_REPORT.json").write_text(
+        json.dumps({
+            "status": "REPLAY_READY_COMPLETE",
+            "classification": {"materialization_complete": True},
+            "catalog_verification": {"source_index_sha256": "a" * 64},
+        }), encoding="utf-8",
+    )
+    (folder / "UNPACK_REPORT.json").write_text(
+        json.dumps({"status": "SAFE_UNPACK_COMPLETE", "catalog_index_sha256": "b" * 64}),
+        encoding="utf-8",
+    )
+    result = inspect_local_safe_corpus(tmp_path)
+    assert result["status"] == "NOT_CERTIFIED"
