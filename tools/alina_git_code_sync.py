@@ -46,6 +46,7 @@ SENSITIVE_PARTS = {
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
+GIT_SYNC_ENGINE_BUILD = "2026-10-25-local-change-retry-v1"
 
 
 class SyncBlocked(RuntimeError):
