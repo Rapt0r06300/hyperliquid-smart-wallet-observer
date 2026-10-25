@@ -7,15 +7,70 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "3901a38cfc964f70f02cbfecf71502df4a25a772",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "collection_metrics": {
+          "accepted_frames": 0,
+          "basis": "published_bundle_manifests",
+          "bbo_frames": 0,
+          "compressed_bytes": 0,
+          "duration_s": 1.0,
+          "ended_at_ms": 0,
+          "l2_frames": 0,
+          "partial_count": 0,
+          "persisted_frames": 0,
+          "queue_drops": 0,
+          "record_count_observed": 0,
+          "reject_count": 0,
+          "safe_count": 0,
+          "shard_count": 0,
+          "started_at_ms": 0,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 0,
+          "trade_shard_count": 0,
+          "trade_shards_exact": 0,
+          "uncompressed_bytes": 0,
+          "uncompressed_size_coverage_complete": true
+        },
+        "failure_category": "DATA_AVAILABILITY",
+        "output_root": "/home/runner/work/_temp/campaign-output/archives-bybit-btc-e8-20261025-v4/0/bundle",
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_official_archive_backfill.py",
+              "--venue",
+              "bybit"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "{\n  \"archives\": [\n    {\n      \"checksum_verified\": false,\n      \"coin\": \"BTC\",\n      \"compressed_sha256\": \"e2e58212973f78c4cf40e7a6d687ddf62118ec2d3ec7cecc1f2e02315c838766\",\n      \"date\": \"2026-10-24\",\n      \"event_count\": 1068346,\n      \"first_exchange_ts_ms\": 1792800000036,\n      \"last_exchange_ts_ms\": 1792886399590,\n      \"source_url\": \"https://public.bybit.com/trading/BTCUSDT/BTCUSDT2026-10-24.csv.gz\",\n      \"stream_type\": \"trades\",\n      \"symbol\": \"BTCUSDT\",\n      \"timestamp_semantics\": \"historical_exchange_time_only\",\n      \"venue\": \"bybit\"\n    }\n  ],\n  \"bundle_partial_count\": 0,\n  \"bundle_path\": \"/home/runner/work/_temp/campaign-output/archives-bybit-btc-e8-20261025-v4/0/bundle\",\n  \"bundle_safe_count\": 0,\n  \"bundle_shard_count\": 0,\n  \"coin\": \"BTC\",\n  \"end_date\": \"2026-10-24\",\n  \"event_count\": 1068346,\n  \"raw_shard_count\": 7,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.official_archive_backfill.v1\",\n  \"start_date\": \"2026-10-24\",\n  \"symbol\": \"BTCUSDT\",\n  \"venue\": \"bybit\"\n}\n"
+          }
+        ],
+        "reason": "no_durable_collection_events",
+        "status": "UNAVAILABLE"
+      },
+      "sha256": "fc8ceb3bc1000a7a769a33308a8f0c45b768e235faa2918a14f36dbef2a82e3b"
+    }
+  },
   "config_sha256": "699ff3e2e077a54ddb3fabe59ca872e28750b1838f28f416a5fcdc9bfecf64c0",
   "consecutive_failures": 0,
   "created_at": "2026-10-25T11:16:44.509601+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "fc8ceb3bc1000a7a769a33308a8f0c45b768e235faa2918a14f36dbef2a82e3b",
     "coin": "BTC",
     "end_date": "2026-10-24",
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "40196396057",
     "max_days": 1,
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "start_date": "2026-10-24",
     "symbol": "BTCUSDT",
     "venue": "bybit"
@@ -34,15 +89,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-25T13:42:15.613122Z",
+      "from": "RUNNING",
+      "reason": "no_durable_collection_events",
+      "to": "UNAVAILABLE"
     }
   ],
   "kind": "official_archive_collection",
-  "lease": {
-    "acquired_at": "2026-10-25T13:39:45.026369Z",
-    "expires_at": "2026-10-25T19:24:45.026369Z",
-    "lease_token_sha256": "9009c4740aa08383224d1dddc64eb1abacf2bdd383cf20daf2a2d608aead188f",
-    "owner_run_id": "40196396057"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -60,9 +116,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-25T13:39:45.026439Z",
+  "status": "UNAVAILABLE",
+  "status_reason": "no_durable_collection_events",
+  "terminal_evidence_digest": "47bbfcb28ce45c5201dff5c792836192db733cba7bef09b50a58498a3ee74543",
+  "updated_at": "2026-10-25T13:42:15.613122Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
