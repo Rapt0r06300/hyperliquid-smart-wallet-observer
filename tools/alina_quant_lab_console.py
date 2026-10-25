@@ -68,8 +68,16 @@ def inspect_local_safe_corpus(root: Path) -> dict[str, Any]:
             return result
         with sqlite3.connect(registry.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0) as db:
             count = db.execute("SELECT COUNT(*) FROM current_safe_shards").fetchone()[0]
-        return {"status": "CERTIFIED_UNPACKED" if count > 0 else "EMPTY_REGISTRY",
-                "safe_registry_rows": int(count)}
+        expected = (restored.get("classification") or {}).get("usable_shards")
+        unpack_count = expanded.get("certified_shards")
+        status = (
+            "RECEIPTS_MATCH_NOT_REHASHED"
+            if type(count) is int and count > 0
+            and type(expected) is int and expected == count
+            and type(unpack_count) is int and unpack_count == count
+            else "COUNT_MISMATCH"
+        )
+        return {"status": status, "safe_registry_rows": int(count)}
     except (OSError, ValueError, TypeError, sqlite3.Error, AttributeError):
         return result
 
