@@ -142,6 +142,19 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert book["causal_observation"] is True
     assert book["received_at_ms"] == 100_050
     assert len(book["bids5"]) == len(book["asks5"]) == 5
+    # Prove downstream canonical source discovery and causal book loader consume
+    # the generated payload, not just that its files exist.
+    from hl_observer.datasets.source_discovery import discover_family_sources
+    from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
+
+    sources = discover_family_sources(workspace)
+    assert {p.name for p in sources["copy_vault"]} == {
+        "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
+    }
+    books, book_audit = load_observed_books(workspace, coins={"BTC"})
+    assert len(books.get("BTC", [])) == 1
+    assert book_audit["valid_rows"] == 1
+    assert books["BTC"][0]["causal_observation"] is True
     proof = json.loads((
         workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
     ).read_text())
