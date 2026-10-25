@@ -307,3 +307,85 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert "GIT_LFS_SKIP_SMUDGE=1" in source
     assert "restore_alina.py" not in source
     assert "alina_sync" not in source.casefold()
+
+
+def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
+    local, _, origin = repos
+    original = git(origin, "rev-parse", "main")
+
+    class LateEdit(Synchronizer):
+        wrote = False
+
+        def command(self, *args, **kwargs):
+            result = super().command(*args, **kwargs)
+            if args and args[0] == "fetch" and not self.wrote:
+                self.wrote = True
+                (local / "src" / "added_during_fetch.py").write_text(
+                    "late = True\n", encoding="utf-8"
+                )
+            return result
+
+    task = LateEdit(local, allow_test_remote=True)
+    assert task.run() == 0
+    assert task.report["status"] == "SYNCHRONIZED"
+    assert task.report["publishable_paths_seen"] == 1
+    assert task.report["late_checkpoint_attempts"] == 1
+    assert task.report["late_local_paths"] == ["src/added_during_fetch.py"]
+    assert task.report["push_attempts"] == 1
+    assert git(origin, "rev-parse", "main") != original
+    assert git(origin, "show", "main:src/added_during_fetch.py") == "late = True"
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+
+
+def test_late_invalid_python_saved_locally_never_pushed(repos):
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+
+    class LateInvalid(Synchronizer):
+        wrote = False
+
+        def command(self, *args, **kwargs):
+            result = super().command(*args, **kwargs)
+            if args and args[0] == "fetch" and not self.wrote:
+                self.wrote = True
+                (local / "src" / "incomplete.py").write_text(
+                    "def broken(:\n", encoding="utf-8"
+                )
+            return result
+
+    task = LateInvalid(local, allow_test_remote=True)
+    assert task.run() == 2
+    assert task.report["status"] == "NO_GO"
+    assert task.report["local_commit_created"] is True
+    assert task.report["local_syntax_check"] == "FAILED_WIP_CHECKPOINT_PRESERVED"
+    assert git(origin, "rev-parse", "main") == before
+    assert git(local, "show", "HEAD:src/incomplete.py") == "def broken(:"
+
+
+def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+
+    class AlwaysChanging(Synchronizer):
+        n = 0
+
+        def command(self, *args, **kwargs):
+            result = super().command(*args, **kwargs)
+            if args and args[0] == "fetch":
+                self.n += 1
+                (local / "src" / f"concurrent_{self.n}.py").write_text(
+                    f"value = {self.n}\n", encoding="utf-8"
+                )
+            return result
+
+    task = AlwaysChanging(local, allow_test_remote=True)
+    assert task.run() == 2
+    assert task.report["status"] == "NO_GO"
+    assert task.report["push_attempts"] == 0
+    assert task.report["late_checkpoint_attempts"] == 3
+    assert "src/concurrent_4.py" in task.report["late_local_paths"]
+    assert "change encore" in task.report["error"]
+    assert git(origin, "rev-parse", "main") == before
+    for i in range(1, 4):
+        assert git(local, "show", f"HEAD:src/concurrent_{i}.py") == f"value = {i}"
+    assert (local / "src/concurrent_4.py").is_file()
