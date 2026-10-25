@@ -3,21 +3,32 @@ chcp 65001 >nul
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 set "GIT_LFS_SKIP_SMUDGE=1"
-set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
-if exist "%HYPERSMART_GIT%" goto :git_ready
-for %%G in (git.exe) do if not "%%~$PATH:G"=="" set "HYPERSMART_GIT=%%~$PATH:G"
-if exist "%HYPERSMART_GIT%" goto :git_ready
+set "HYPERSMART_GIT="
+if exist "%~dp0tools\git\cmd\git.exe" set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
+if not defined HYPERSMART_GIT if exist "%ProgramFiles%\Git\cmd\git.exe" set "HYPERSMART_GIT=%ProgramFiles%\Git\cmd\git.exe"
+if not defined HYPERSMART_GIT if exist "%LOCALAPPDATA%\Programs\Git\cmd\git.exe" set "HYPERSMART_GIT=%LOCALAPPDATA%\Programs\Git\cmd\git.exe"
+if not defined HYPERSMART_GIT for %%G in (git.exe) do if not "%%~$PATH:G"=="" set "HYPERSMART_GIT=%%~$PATH:G"
+if defined HYPERSMART_GIT goto :git_ready
 
-echo [INFO] Git absent : preparation du Git portable officiel (PAS de shards).
-set "HYPERSMART_NO_PAUSE=1"
-call "%~dp0PREPARER_GIT_PORTABLE.cmd"
+echo [INFO] Git absent : installation du Git portable officiel, AUCUN shard.
+if not exist "%~dp0tools\install_portable_git.ps1" (
+  echo [NO_GO] Installateur Git manquant : tools\install_portable_git.ps1
+  set "RC=30"
+  goto :finish
+)
+rem Invoke installer directly: an old local PREPARER_GIT_PORTABLE.cmd
+rem might have broken encoding; never execute that secondary batch file.
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%~dp0tools\install_portable_git.ps1" ^
+  -ProjectRoot "%~dp0."
 if errorlevel 1 (
-  echo [NO_GO] Installation de Git impossible. Rien n'a ete pousse.
+  echo [NO_GO] Git n'a pas pu etre installe. Aucun push.
   set "RC=30"
   goto :finish
 )
 set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
 if not exist "%HYPERSMART_GIT%" (
+  echo [NO_GO] Git portable absent apres preparation.
   set "RC=30"
   goto :finish
 )
@@ -76,6 +87,7 @@ if "%RC%"=="0" (
   echo [NO_GO] Synchronisation incomplete, aucune perte volontaire. Code %RC%.
   echo Consultez runtime\reports\git-sync\LAST_SYNC.json
 )
+goto :finish
 
 :portable_self_check
 "%HYPERSMART_GIT%" --version >nul 2>nul
