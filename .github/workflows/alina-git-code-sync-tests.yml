@@ -15,17 +15,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: alina-git-sync-tests-\${{ github.ref }}
+  group: alina-git-sync-tests-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   no-loss-sync-contracts:
-    name: Code-only sync, disposable remotes (\${{ matrix.os }})
+    name: Code-only sync, disposable remotes (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    runs-on: \${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
       PYTHONPATH: .
