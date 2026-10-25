@@ -265,3 +265,19 @@ def test_nested_python_dataset_and_runtime_directories_are_source(repos):
     assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
     for name in paths:
         assert git(origin, "show", f"main:{name}") == "is_real_code = True"
+
+
+
+def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
+    """A broken local PREPARER_GIT_PORTABLE.cmd must not block a clean launcher."""
+    launcher = (Path(__file__).resolve().parents[1] / "POUSSER-GITHUB-FORCE.cmd")
+    source = launcher.read_text(encoding="utf-8-sig")
+    assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
+    assert '-File "%~dp0tools\\install_portable_git.ps1"' in source
+    assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
+    assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
+    normal_end = source.index('echo Consultez runtime\\reports\\git-sync\\LAST_SYNC.json')
+    self_check = source.index(":portable_self_check")
+    assert "goto :finish" in source[normal_end:self_check]
+    assert "ALINA_SYNC_COMPLETE" not in source
+    assert "restore_alina.py" not in source
