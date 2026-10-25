@@ -237,6 +237,22 @@ class Synchronizer:
                 raise SyncBlocked(f"Fichier >95 Mio interdit dans Git: {path}")
         return eligible
 
+    @staticmethod
+    def _check_file_payload(path: str, full: Path) -> None:
+        if not full.is_file():
+            return
+        if full.stat().st_size > MAX_BLOB_BYTES:
+            raise SyncBlocked(f"Fichier trop volumineux: {path}")
+        if full.stat().st_size <= 2 * 1024 * 1024:
+            sample = full.read_bytes()
+            if any(line in {
+                b"-----BEGIN PRIVATE KEY-----",
+                b"-----BEGIN RSA PRIVATE KEY-----",
+                b"-----BEGIN OPENSSH PRIVATE KEY-----",
+                b"-----BEGIN EC PRIVATE KEY-----",
+            } for line in sample.splitlines()):
+                raise SyncBlocked(f"Materiel de cle privee detecte: {path}")
+
     def _verify_stage(self) -> None:
         staged = _paths(
             self.command("diff", "--cached", "--name-only", "-z").stdout
@@ -244,20 +260,7 @@ class Synchronizer:
         if any(_protected(path) for path in staged):
             raise SyncBlocked("L'index contient une archive, des donnees ou un secret.")
         for path in staged:
-            full = self.root / path
-            if not full.is_file():
-                continue
-            if full.stat().st_size > MAX_BLOB_BYTES:
-                raise SyncBlocked(f"Fichier trop volumineux: {path}")
-            if full.stat().st_size <= 2 * 1024 * 1024:
-                sample = full.read_bytes()
-                if any(line in {
-                    b"-----BEGIN PRIVATE KEY-----",
-                    b"-----BEGIN RSA PRIVATE KEY-----",
-                    b"-----BEGIN OPENSSH PRIVATE KEY-----",
-                    b"-----BEGIN EC PRIVATE KEY-----",
-                } for line in sample.splitlines()):
-                    raise SyncBlocked(f"Materiel de cle privee detecte: {path}")
+            self._check_file_payload(path, self.root / path)
         if self.command("diff", "--cached", "--check", check=False).returncode:
             self.say("[ATTENTION] Espaces non conformes dans un WIP, code preserve.")
 
@@ -270,6 +273,9 @@ class Synchronizer:
             if p.endswith(".py") and (self.root / p).is_file()
         ]
         self.say(f"Fichiers de code locaux a sauvegarder: {len(eligible)}")
+        # Detect high-confidence private-key material BEFORE writing Git blobs.
+        for path in eligible:
+            self._check_file_payload(path, self.root / path)
         if self.dry_run or not eligible:
             return
         pathspec = b"\0".join(path.encode("utf-8") for path in eligible) + b"\0"
@@ -439,7 +445,9 @@ class Synchronizer:
 
     def _write_report(self) -> None:
         dest = self.root / "runtime" / "reports" / "git-sync"
-        if dest.is_symlink():
+        if any(p.is_symlink() for p in (
+            self.root / "runtime", self.root / "runtime" / "reports", dest,
+        )):
             return
         try:
             dest.mkdir(parents=True, exist_ok=True)
