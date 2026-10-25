@@ -67,7 +67,14 @@ def _protected(path: str) -> bool:
     if not parts or normalized.startswith("/") or ".." in parts:
         return True
     lower = tuple(part.casefold() for part in parts)
-    if any(part in PROTECTED_DIRS or part in SENSITIVE_PARTS for part in lower[:-1]):
+    # Root data trees are excluded; equally named Python package subfolders
+    # (src/hl_observer/datasets, src/hl_observer/runtime, etc.) ARE CODE.
+    if lower[0] in PROTECTED_DIRS:
+        return True
+    if any(part in SENSITIVE_PARTS for part in lower[:-1]):
+        return True
+    if any(part in {".git", ".venv", "venv", "node_modules", "__pycache__"}
+           for part in lower[:-1]):
         return True
     name = lower[-1]
     if name.startswith(".env") or name.endswith(".env"):
