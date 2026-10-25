@@ -639,7 +639,30 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="lance une campagne économique réelle sur --dataset-root, sans collecte",
     )
+    parser.add_argument(
+        "--safe-research",
+        action="store_true",
+        help="convertit les shards SAFE AlinaSync certifiés en workspace et lance la campagne",
+    )
     args = parser.parse_args(argv)
+    if args.safe_research:
+        if args.research or args.preflight_only or args.dataset_root is not None:
+            parser.error("--safe-research est incompatible avec les autres modes")
+        from tools.copy_vault_safe_bridge import SafeBridgeError, build_safe_copy_workspace
+
+        try:
+            safe_result = build_safe_copy_workspace(ROOT)
+        except (SafeBridgeError, OSError, ValueError, TypeError) as exc:
+            print(f"SAFE_RESEARCH_NO_GO: {exc}", flush=True)
+            return 2
+        print(
+            "ALINA_SAFE_SHARDS_CONSUMED=" + str(safe_result["selected_shards"])
+            + " | FILLS=" + str(safe_result["counts"]["copy_vault_fills"])
+            + " | L2=" + str(safe_result["counts"]["copy_vault_l2"]),
+            flush=True,
+        )
+        args.research = True
+        args.dataset_root = Path(safe_result["workspace"])
     if args.research:
         if args.preflight_only:
             parser.error("--research et --preflight-only sont incompatibles")
