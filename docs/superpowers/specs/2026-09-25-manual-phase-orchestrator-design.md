@@ -251,6 +251,16 @@ Instead, use a two-speed design:
 4. reserve scarce user-specific WebSocket slots for the highest-priority causally selected leaders;
 5. rotate those priority slots based only on information already known at the rotation time.
 
+The hosted Copy-Vault collector must execute step 3: query each changed vault over
+the exact broad-sweep observation window, adaptively split any response that
+reaches the 2,000-fill API cap, and keep the raw request window, exact counts,
+source timestamps, and reconciliation audit with the fill shard. A bounded
+per-run queue may defer excess changed vaults only when it records their
+identities and reports the campaign as partial; incomplete windows cannot be
+admitted as SAFE. This REST reconciliation is observed historical evidence for
+that window, not a claim of WebSocket-forward continuity or evidence outside
+the recorded interval.
+
 This converts Hyperliquid's user-specific WebSocket limit from a universe cap into a low-latency priority layer.
 
 #### Lead-Lag collection contract

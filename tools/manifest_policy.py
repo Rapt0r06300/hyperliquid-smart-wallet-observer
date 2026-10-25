@@ -43,6 +43,7 @@ _MATCHED_RECONCILIATION_FAMILIES = {
     "fills",
     "userfills",
     "user_fills",
+    "copy_vault_fills",
 }
 _CONTINUITY_RECONCILIATION = {
     "MATCHED",
@@ -277,6 +278,12 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             reasons.append("PARENT_L2_SHARD_NOT_VERIFIED")
 
     if family in _MATCHED_RECONCILIATION_FAMILIES:
+        if family == "copy_vault_fills" and "https" in transports:
+            if not (
+                provenance.get("request_type") == "userFillsByTime"
+                and provenance.get("window_reconciliation_complete") is True
+            ):
+                reasons.append("COPY_VAULT_REST_WINDOW_NOT_VERIFIED")
         if historical_archive:
             if reconciliation_status not in {"MATCHED", "SOURCE_ARCHIVE_VERIFIED"}:
                 reasons.append("RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED")

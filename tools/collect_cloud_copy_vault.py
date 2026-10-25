@@ -71,6 +71,7 @@ BROAD_SWEEP_REQUEST_INTERVAL_S = 0.14
 BROAD_SWEEP_CONCURRENCY = 8
 MAX_PRIORITY_WS_VAULTS = 10
 PRIORITY_AUDIT_ROTATION_SLOTS = 2
+MAX_CHANGED_VAULT_RECONCILIATIONS = 32
 
 
 class AsyncTickSink:
@@ -940,7 +941,9 @@ async def _post_userfills(
     payload = response.json()
     if not isinstance(payload, list):
         raise ValueError("userFillsByTime returned non-list")
-    return [row for row in payload if isinstance(row, dict)]
+    if any(not isinstance(row, dict) for row in payload):
+        raise ValueError("userFillsByTime returned non-object row")
+    return payload
 
 
 async def exact_window_backfill(
@@ -960,6 +963,7 @@ async def exact_window_backfill(
     requests = 0
     splits = 0
     request_budget_exhausted = False
+    invalid_source_rows = 0
 
     while pending:
         if requests >= max(1, int(max_requests)):
@@ -989,20 +993,24 @@ async def exact_window_backfill(
                         "cap": CAP_USERFILLS,
                     }
                 )
-                accepted.extend(parser_fills(raw, vault=vault))
+                parsed = parser_fills(raw, vault=vault)
+                invalid_source_rows += len(raw) - len(parsed)
+                accepted.extend(parsed)
                 continue
             middle = left + max(1, span // 2)
             pending.appendleft((middle, right))
             pending.appendleft((left, middle))
             splits += 1
             continue
-        accepted.extend(parser_fills(raw, vault=vault))
+        parsed = parser_fills(raw, vault=vault)
+        invalid_source_rows += len(raw) - len(parsed)
+        accepted.extend(parsed)
 
     rows = dedupliquer(accepted)
     return rows, {
         "status": (
             "COMPLETE"
-            if not failures and not capped_minimum and not request_budget_exhausted
+            if not failures and not capped_minimum and not request_budget_exhausted and not invalid_source_rows
             else "PARTIAL"
         ),
         "requested_start_ms": int(start_ms),
@@ -1012,6 +1020,7 @@ async def exact_window_backfill(
         "failed_windows": failures,
         "cap_blocked_windows": capped_minimum,
         "request_budget_exhausted": request_budget_exhausted,
+        "invalid_source_rows": invalid_source_rows,
         "pending_windows": len(pending),
         "rows": len(rows),
     }
@@ -1108,6 +1117,177 @@ async def reconcile_forward_window(
     return reports
 
 
+def changed_vault_addresses(
+    rows: list[Mapping[str, Any]],
+    start_states: Mapping[str, Any],
+    end_states: Mapping[str, Any],
+    *,
+    excluded_vaults: set[str],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Return causal broad-state changes and exact observation-coverage counts."""
+    universe = {
+        str(row.get("address") or "").strip().lower(): dict(row)
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("address") or "").strip()
+    }
+    start = {str(key).lower(): value for key, value in start_states.items()}
+    end = {str(key).lower(): value for key, value in end_states.items()}
+    comparable = set(universe) & set(start) & set(end)
+    missing = set(universe) - comparable
+    changed: list[dict[str, Any]] = []
+    for address in comparable:
+        if address in {str(item).lower() for item in excluded_vaults}:
+            continue
+        left = start[address]
+        right = end[address]
+        if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+            missing.add(address)
+            continue
+        if str(left.get("position_fingerprint") or "") == str(
+            right.get("position_fingerprint") or ""
+        ):
+            continue
+        row = universe[address]
+        row["broad_n_positions"] = int(right.get("n_positions") or 0)
+        row["broad_expo_brute_usd"] = float(right.get("expo_brute_usd") or 0.0)
+        changed.append(row)
+    changed.sort(
+        key=lambda row: (
+            -int(row.get("broad_n_positions") or 0),
+            -float(row.get("broad_expo_brute_usd") or 0.0),
+            -float(row.get("tvl_usd") or 0.0),
+            str(row.get("address") or "").lower(),
+        )
+    )
+    return changed, {
+        "universe_wallets": len(universe),
+        "comparable_wallets": len(comparable) - len(missing & comparable),
+        "missing_state_wallets": len(missing),
+        "missing_state_vaults": sorted(missing),
+        "changed_wallets": len(changed),
+    }
+
+
+async def collect_changed_vault_fills(
+    rows: list[Mapping[str, Any]],
+    start_states: Mapping[str, Any],
+    end_states: Mapping[str, Any],
+    sink: Any,
+    *,
+    start_ms: int,
+    end_ms: int,
+    excluded_vaults: set[str],
+    max_vaults: int = MAX_CHANGED_VAULT_RECONCILIATIONS,
+) -> dict[str, Any]:
+    """Backfill changed broad-sweep wallets and preserve coverage failures."""
+    changed, coverage = changed_vault_addresses(
+        rows, start_states, end_states, excluded_vaults=excluded_vaults
+    )
+    limit = max(0, int(max_vaults))
+    selected = changed[:limit]
+    reports: dict[str, dict[str, Any]] = {}
+    fills_collected = 0
+    async with httpx.AsyncClient(
+        base_url="https://api.hyperliquid.xyz", timeout=15.0
+    ) as client:
+        for row in selected:
+            vault = str(row["address"]).lower()
+            try:
+                fills, audit = await asyncio.wait_for(
+                    exact_window_backfill(
+                        client, vault, start_ms=int(start_ms), end_ms=int(end_ms)
+                    ),
+                    timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
+                )
+            except TimeoutError:
+                fills = []
+                audit = {
+                    "status": "PARTIAL",
+                    "reason": "REFERENCE_TIMEOUT",
+                    "requested_start_ms": int(start_ms),
+                    "requested_end_ms": int(end_ms),
+                    "rows": 0,
+                }
+            complete = str(audit.get("status") or "").upper() == "COMPLETE"
+            fill_ids = {canonical_fill_id({**fill, "vault": vault}) for fill in fills}
+            if fills:
+                now_ms = int(time.time() * 1_000)
+                envelope = TickEnvelope(
+                    source_id="hyperliquid_info_user_fills_by_time",
+                    channel="copy_vault_fills",
+                    instrument=vault,
+                    event_kind=FeedEventKind.EVENT,
+                    raw_payload={
+                        "request": {
+                            "type": "userFillsByTime",
+                            "user": vault,
+                            "startTime": int(start_ms),
+                            "endTime": int(end_ms),
+                            "aggregateByTime": False,
+                        },
+                        "fills": fills,
+                    },
+                    exchange_ts_ms=max(int(fill["ts_ms"]) for fill in fills),
+                    received_ts_ms=now_ms,
+                    local_monotonic_ns=time.monotonic_ns(),
+                    connection_id=f"copy-vault-rest-{uuid.uuid4().hex}",
+                    sequence=None,
+                    provenance={
+                        "url": INFO_URL,
+                        "network": "mainnet",
+                        "access": "read_only",
+                        "transport": "https",
+                        "endpoint": "/info",
+                        "request_type": "userFillsByTime",
+                        "authenticated": False,
+                        "selection_causal": True,
+                        "timestamp_semantics": "exchange_event_time",
+                        "window_reconciliation_complete": complete,
+                    },
+                    parsed_summary={
+                        "event_count": len(fill_ids),
+                        "first_fill_ts_ms": min(int(fill["ts_ms"]) for fill in fills),
+                        "last_fill_ts_ms": max(int(fill["ts_ms"]) for fill in fills),
+                        "exact_window": complete,
+                        "data_gate_ready": False,
+                    },
+                )
+                await _emit_with_backpressure(sink, envelope)
+                fills_collected += len(fill_ids)
+            reports[vault] = {
+                "status": "SOURCE_CONTINUITY_VERIFIED" if complete else "UNAVAILABLE",
+                "method": "exact_userFillsByTime_window",
+                "live_count": len(fill_ids),
+                "reference_count": len(fill_ids),
+                "matched_count": len(fill_ids) if complete else 0,
+                "missing_from_live": 0 if complete else None,
+                "live_only": 0,
+                "audit": audit,
+            }
+    incomplete = sum(
+        1 for report in reports.values()
+        if report["status"] != "SOURCE_CONTINUITY_VERIFIED"
+    )
+    deferred = max(0, len(changed) - len(selected))
+    missing_state = int(coverage["missing_state_wallets"])
+    return {
+        "status": "COMPLETE" if not incomplete and not deferred and not missing_state else "PARTIAL",
+        **coverage,
+        "reconciled_wallets": len(selected),
+        "deferred_wallets": deferred,
+        "deferred_vaults": [str(row["address"]).lower() for row in changed[len(selected):]],
+        "incomplete_wallets": incomplete,
+        "incomplete_vaults": sorted(
+            vault for vault, report in reports.items()
+            if report["status"] != "SOURCE_CONTINUITY_VERIFIED"
+        ),
+        "fills_collected": fills_collected,
+        "start_ts_ms": int(start_ms),
+        "end_ts_ms": int(end_ms),
+        "wallet_reports": reports,
+    }
+
+
 def build_copy_vault_bundle(
     raw_root: Path,
     output: Path,
@@ -1137,11 +1317,13 @@ def build_copy_vault_bundle(
         if family == "copy_vault_fills":
             preliminary["reconciliation"] = {
                 "status": str(report.get("status") or "UNVERIFIED").upper(),
+                "method": report.get("method"),
                 "live_count": report.get("live_count"),
                 "reference_count": report.get("reference_count"),
                 "matched_count": report.get("matched_count"),
                 "missing_from_live": report.get("missing_from_live"),
                 "live_only": report.get("live_only"),
+                "audit": report.get("audit"),
             }
         elif family in {"copy_vault_positions", "copy_vault_selection"}:
             # Immutable public HTTP observation, not an exchange-timestamped
@@ -1268,6 +1450,7 @@ async def collect(
     broad_start: dict[str, Any] = {}
     broad_end: dict[str, Any] = {}
     changed_fingerprints = 0
+    campaign_window_start_ms = int(time.time() * 1_000)
 
     if two_speed:
         universe_rows = list(selected_rows)
@@ -1408,12 +1591,42 @@ async def collect(
             )
 
     end_ms = int(time.time() * 1_000)
+    targeted_reconciliation: dict[str, Any] = {
+        "status": "NOT_APPLICABLE",
+        "changed_wallets": 0,
+        "reconciled_wallets": 0,
+        "deferred_wallets": 0,
+        "incomplete_wallets": 0,
+        "fills_collected": 0,
+        "wallet_reports": {},
+    }
+    if two_speed:
+        start_states = broad_start.get("states")
+        end_states = broad_end.get("states")
+        if isinstance(start_states, Mapping) and isinstance(end_states, Mapping):
+            targeted_reconciliation = await collect_changed_vault_fills(
+                universe_rows,
+                start_states,
+                end_states,
+                sink,
+                start_ms=campaign_window_start_ms,
+                end_ms=end_ms,
+                excluded_vaults=set(vaults),
+            )
+        else:
+            targeted_reconciliation = {
+                **targeted_reconciliation,
+                "status": "UNAVAILABLE",
+                "reason": "BROAD_SWEEP_STATE_MISSING",
+                "missing_state_wallets": full_count,
+            }
     reports = await reconcile_forward_window(
         vaults,
         start_ms_by_vault=observation_start_ms,
         end_ms=end_ms,
         live_ids=live_ids,
     )
+    reports.update(targeted_reconciliation.get("wallet_reports") or {})
     await sink.close()
     await writer_task
     await asyncio.to_thread(writer.rotate_all)
@@ -1459,6 +1672,11 @@ async def collect(
         "broad_sweep_start": _compact_sweep_metrics(broad_start),
         "broad_sweep_end": _compact_sweep_metrics(broad_end),
         "broad_position_fingerprints_changed": changed_fingerprints,
+        "targeted_change_reconciliation": {
+            key: value
+            for key, value in targeted_reconciliation.items()
+            if key != "wallet_reports"
+        },
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "backpressure_events": sink.backpressure_events,

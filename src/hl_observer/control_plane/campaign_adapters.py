@@ -517,6 +517,8 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         queue_drops = sum(_bounded_int(v, 0, 0, 2**63 - 1) for v in drops.values())
     else:
         queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
+    targeted = summary.get("targeted_change_reconciliation")
+    targeted = targeted if isinstance(targeted, dict) else {}
 
     return {
         "started_at_ms": _bounded_int(
@@ -545,6 +547,28 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         ),
         "bbo_frames": bbo_frames,
         "queue_drops": queue_drops,
+        "targeted_reconciliation_status": str(targeted.get("status") or "UNAVAILABLE"),
+        "changed_wallets": _bounded_int(targeted.get("changed_wallets"), 0, 0, 2**31 - 1),
+        "reconciled_wallets": _bounded_int(targeted.get("reconciled_wallets"), 0, 0, 2**31 - 1),
+        "deferred_wallets": _bounded_int(targeted.get("deferred_wallets"), 0, 0, 2**31 - 1),
+        "incomplete_wallets": _bounded_int(targeted.get("incomplete_wallets"), 0, 0, 2**31 - 1),
+        "missing_state_wallets": _bounded_int(targeted.get("missing_state_wallets"), 0, 0, 2**31 - 1),
+        "fills_collected": _bounded_int(targeted.get("fills_collected"), 0, 0, 2**63 - 1),
+        "deferred_vaults": [
+            str(value).lower()
+            for value in targeted.get("deferred_vaults", [])
+            if isinstance(value, str)
+        ][:100_000],
+        "missing_state_vaults": [
+            str(value).lower()
+            for value in targeted.get("missing_state_vaults", [])
+            if isinstance(value, str)
+        ][:100_000],
+        "incomplete_vaults": [
+            str(value).lower()
+            for value in targeted.get("incomplete_vaults", [])
+            if isinstance(value, str)
+        ][:100_000],
         "shard_count": _bounded_int(index.get("shard_count"), 0, 0, 2**63 - 1),
         "safe_count": _bounded_int(index.get("safe_count"), 0, 0, 2**63 - 1),
         "partial_count": _bounded_int(

@@ -128,6 +128,24 @@ def test_clean_live_trade_continuity_can_be_safe() -> None:
     assert classify_manifest(value)[0] == "SAFE"
 
 
+def test_exact_rest_window_reconciliation_can_qualify_copy_vault_fills() -> None:
+    value = manifest()
+    value["family"] = "copy_vault_fills"
+    value["source"] = "hyperliquid_info_user_fills_by_time"
+    value["provenance"].update({
+        "transports": ["https"],
+        "request_type": "userFillsByTime",
+        "window_reconciliation_complete": True,
+    })
+    value["reconciliation"] = {
+        "status": "SOURCE_CONTINUITY_VERIFIED",
+        "method": "exact_userFillsByTime_window",
+    }
+    status, reasons = classify_manifest(value)
+    assert status == "SAFE"
+    assert reasons == []
+
+
 def test_http_snapshot_can_use_snapshot_verified() -> None:
     value = manifest()
     value["family"] = "open_interest"
