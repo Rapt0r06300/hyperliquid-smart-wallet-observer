@@ -9,8 +9,8 @@ rem AlinaSync alone downloads/validates/unpacks SAFE shards.
 rem No forced push, reset, clean, stash or automatic deletion of data.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
-set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-0490e42"
-set "ALINA_BOOTSTRAP_REF=0490e428230716cdbebc874eca998098950e3604"
+set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-a459f33"
+set "ALINA_BOOTSTRAP_REF=a459f332bce22533ad43d23093c06c777f629c4c"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
@@ -86,7 +86,7 @@ set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
 if not exist "%ALINA_ENGINE%" goto :get_engine
 rem Never overwrite local Codex/Claude changes to the sync engine.
 rem If it predates safe conflict kits, use pinned, isolated code in TEMP.
-findstr /C:"alina.git_conflict_kit.v1" "%ALINA_ENGINE%" >nul 2>nul
+findstr /C:"2026-10-25-local-change-retry-v1" "%ALINA_ENGINE%" >nul 2>nul
 if not errorlevel 1 goto :engine_ready
 echo [INFO] Moteur local ancien conserve. Utilisation temporaire du moteur recent.
 
