@@ -115,8 +115,13 @@ not mean the platform has no private or undocumented endpoint.
 | Bybit Copy Trading | Official API walkthrough covers authenticated master-trader order placement; no qualifying unauthenticated leader identity/history contract was verified | Disabled |
 | Bitget Copy Trading | Official copy-trading APIs include read-only permissions tied to a UID/account; these do not establish anonymous public leader history | Disabled |
 | Gate Copy Trading | Public leaderboards are visible on the product site; official API documentation reviewed did not establish an unauthenticated stable leader-history endpoint | Disabled |
-| BingX, MEXC, HTX, BloFin | Official public market-data APIs are not evidence of public copy-trader identity/history. No qualifying unauthenticated end-to-end portfolio contract was verified in this survey | Disabled pending official endpoint and access-contract verification |
+| BingX | Official docs list copy-trading account/leader operations, but the reviewed docs do not establish an unauthenticated third-party leader-history contract | Disabled pending endpoint-level public access verification |
+| MEXC | Public market-data docs do not establish public third-party copy-leader identity plus history | Disabled pending official endpoint and access-contract verification |
+| HTX | Public market-data docs do not establish public third-party copy-leader identity plus history | Disabled pending official endpoint and access-contract verification |
+| BloFin Copy Trading | The docs expose position, order, and position-history routes under account/trade paths. BloFin documents API-key permissions and requires signed headers for private REST requests; no public third-party leader identity/history contract was verified | Disabled; account-authenticated data cannot be used to follow third parties |
 | KuCoin Copy Trading | The documented Copy Trading fills endpoint is private and scoped to the authenticated lead-trader API account | Disabled for following third-party portfolios |
+| Toobit Copy Trading | Official leader endpoints state every request is signed and reads only the leader attached to the API key; historical orders include PnL, timestamps, quantities, and open/close fees | Disabled for third-party discovery; do not use account credentials |
+| XT Futures Copy Trading | Official docs expose public-named leader detail/history routes by numeric account ID and an IP rate limit. However, the general access contract says requests require a signature unless the endpoint explicitly says otherwise; the leader-history page does not state that exception. Discovery and anonymous access therefore remain unverified | Disabled pending explicit confirmation that these exact endpoints are unauthenticated and a documented public leader-discovery feed |
 | Limitless Exchange | Official learning docs describe HMAC-authenticated portfolio history for the caller; a separate public-by-address SDK route surfaced, but its current official API contract and completeness were not verified | Disabled pending primary-doc verification |
 
 Primary documentation reviewed: [OKX API v5](https://www.okx.com/docs-v5/en/),
@@ -127,6 +132,12 @@ Primary documentation reviewed: [OKX API v5](https://www.okx.com/docs-v5/en/),
 [Bybit Copy Trading API](https://bybit-exchange.github.io/docs/v5/copytrade),
 [Bitget Copy Trading APIs](https://www.bitget.com/docs/catalog/copy-trading/public-private),
 [Gate API v4](https://www.gate.com/docs/developers/apiv4/en/),
+[BingX API docs](https://bingx-api.github.io/docs/),
+[BloFin API docs](https://docs.blofin.com/index.html),
+[Toobit Copy Trading leader endpoints](https://api-docs.toobit.com/api/copy-trading-leader),
+[XT public leader history](https://doc.xt.com/docs/futures-copy/Copy%20Trading/PublicGetLeaderHistoryOrders),
+[XT public leader info](https://doc.xt.com/docs/futures-copy/Copy%20Trading/PublicGetLeaderInfo),
+[XT API access rules](https://doc.xt.com/docs/futures-copy/Access%20Description/BasicInformationOfTheInterface),
 [KuCoin Copy Trading fills](https://www.kucoin.com/docs-new/rest/copy-trading/get-futures-fills),
 [Binance API authentication](https://developers.binance.com/en/docs/products/spot/rest-api), and
 [Limitless historical data](https://academy.limitless.exchange/academies/api_academy/11_HistoricalData.html).
