@@ -143,3 +143,46 @@ def test_lab_writes_complete_reports_when_a_group_is_interrupted(
     assert "Laboratoire CopyVault" in dashboard
     assert "INTERRUPTED" in dashboard
     assert "Meilleure stratégie prouvée" in dashboard
+
+
+def test_research_mode_refuses_missing_provenance(tmp_path: Path, capsys) -> None:
+    from tools.alina_quant_lab_console import main
+
+    assert main(["--research", "--dataset-root", str(tmp_path)]) == 2
+    assert "RESEARCH_NO_GO" in capsys.readouterr().out
+
+
+def test_research_mode_refuses_workspace_without_copy_data(tmp_path: Path, capsys) -> None:
+    from tools.alina_quant_lab_console import main
+
+    provenance = tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    provenance.parent.mkdir(parents=True)
+    provenance.write_text("{}", encoding="utf-8")
+    assert main(["--research", "--dataset-root", str(tmp_path)]) == 2
+    assert "aucune source Copy-Vault" in capsys.readouterr().out
+
+
+def test_research_mode_runs_existing_dataset_campaign(monkeypatch, tmp_path: Path) -> None:
+    from tools import alina_quant_lab_console as lab
+
+    provenance = tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    provenance.parent.mkdir(parents=True)
+    provenance.write_text("{}", encoding="utf-8")
+    source = tmp_path / "runtime" / "data" / "vault_fills.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"coin": "BTC"}\\n', encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Finished", (), {"returncode": 0})()
+
+    monkeypatch.setattr(lab.subprocess, "run", fake_run)
+    assert lab.main(["--research", "--dataset-root", str(tmp_path)]) == 0
+    assert calls
+    cmd, kwargs = calls[0]
+    assert "--no-start-collection" in cmd
+    assert "--root" in cmd
+    assert str(tmp_path) in cmd
+    assert kwargs["env"]["HL_ENABLE_MAINNET_EXECUTION"] == "0"
+    assert kwargs["env"]["HL_ENABLE_TESTNET_EXECUTION"] == "0"
