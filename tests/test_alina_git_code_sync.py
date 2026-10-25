@@ -156,6 +156,16 @@ def test_conflicting_edits_abort_merge_and_keep_both_commits(repos):
     assert git(local, "rev-parse", "refs/alina-sync/last-local-checkpoint") == git(
         local, "rev-parse", "HEAD"
     )
+    kit = local / receipt["conflict_kit"]
+    assert kit.is_dir() and (kit / "RESOLUTION.md").is_file()
+    manifest = json.loads((kit / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["includes_shards"] is False
+    assert manifest["no_auto_choice"] is True
+    assert manifest["local_head"] == git(local, "rev-parse", "HEAD")
+    assert manifest["files"][0]["path"] == "src/base.py"
+    assert (kit / "00-base.txt").read_text() == "base = 1\\n".replace("\\n", "\n")
+    assert (kit / "00-local.txt").read_text() == "base = 300\\n".replace("\\n", "\n")
+    assert (kit / "00-github.txt").read_text() == "base = 200\\n".replace("\\n", "\n")
 
 
 def test_dry_run_does_not_mutate_git(repos):
