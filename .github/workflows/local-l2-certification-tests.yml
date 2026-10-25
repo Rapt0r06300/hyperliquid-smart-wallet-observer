@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 8
     env:
-      PYTHONPATH: ${{ runner.os == 'Windows' && 'src;.' || 'src:.' }}
+      PYTHONPATH: ${{ matrix.os == 'windows-latest' && 'src;.' || 'src:.' }}
       REAL_MAINNET_TRADING: 'false'
       ENABLE_REAL_ORDERS: '0'
       HL_ENABLE_MAINNET_EXECUTION: '0'
