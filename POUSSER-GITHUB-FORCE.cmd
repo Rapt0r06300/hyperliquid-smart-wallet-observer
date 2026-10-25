@@ -9,8 +9,8 @@ rem AlinaSync alone downloads/validates/unpacks SAFE shards.
 rem No forced push, reset, clean, stash or automatic deletion of data.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
-set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-8d632ee"
-set "ALINA_BOOTSTRAP_REF=8d632ee8266d5854ce0d7a9791c9c71775e10f86"
+set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-0490e42"
+set "ALINA_BOOTSTRAP_REF=0490e428230716cdbebc874eca998098950e3604"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
