@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 1599297,
+  "collection_run_id": "market-e8-9-2026102505-v7-0",
+  "collector_version": "041053136613e29605200f06db8e7a0f861238f3",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-jellyjelly-usdt-swap-1792908823736-1792912322795-910e31873d4f",
+  "end_ts_ms": 1792912322795,
+  "event_count": 18958,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "invalid_record_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 18958,
+  "release": {
+    "asset_id": 674391388,
+    "asset_name": "packed-shards-0053.zip",
+    "member_name": "okx-public-ws-ticker-jellyjelly-usdt-swap-1792908823736-1792912322795-910e31873d4f.jsonl.gz",
+    "release_id": 423216701,
+    "release_tag": "data-v2-campaign-market-e8-9-2026102505-v7-u0",
+    "remote_digest": "sha256:de0bd86c36d2d880d329ef0b6453ece5a4eef2316ce5f8ad2121cf5e1595a275",
+    "remote_size": 64421509,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-ticker-jellyjelly-usdt-swap-1792908823736-1792912322795-910e31873d4f.jsonl.gz",
+  "release_asset_id": 674391388,
+  "release_container_asset": "packed-shards-0053.zip",
+  "release_id": 423216701,
+  "release_member": "okx-public-ws-ticker-jellyjelly-usdt-swap-1792908823736-1792912322795-910e31873d4f.jsonl.gz",
+  "release_remote_digest": "sha256:de0bd86c36d2d880d329ef0b6453ece5a4eef2316ce5f8ad2121cf5e1595a275",
+  "release_remote_size": 64421509,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026102505-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "910e31873d4f81c779d7fa4cfa8866e982aab0412e9e17a6d9c1fed6e144d6f4",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1792908823736,
+  "symbol": "JELLYJELLY-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 18958,
+      "max": 139.0,
+      "min": 23.5,
+      "p50": 31.0,
+      "p95": 78.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-034c00fa79fb4dba8a2c8852e470b3c5"
+    ],
+    "first_exchange_ts_ms": 1792908823359,
+    "last_exchange_ts_ms": 1792912322666,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 18958,
+      "max": 1263.0,
+      "min": 77.0,
+      "p50": 139.0,
+      "p95": 178.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 18958,
+      "max": 429.10081,
+      "min": 0.0,
+      "p50": 148.968584,
+      "p95": 151.435895
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 31690570,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}
