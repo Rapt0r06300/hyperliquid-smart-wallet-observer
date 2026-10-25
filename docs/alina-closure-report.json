@@ -3211,17 +3211,17 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "67249afcee44aa96d79818bc6915cc268258786f",
   "copy_vault_coverage_receipt": {
-    "digest": "4d6e388ec62f9dbd3dce600a4a6bd68edaa74d778811f9503a318c8b05c3fbdd",
+    "digest": "52bfec55c465ca9f6f1b86953e225b82ab24b2394ab3c98891d4047a273127c9",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
-      "publication_complete": true,
+      "publication_complete": false,
       "selection_present": true,
       "selection_verified": true,
       "sharding_present": true,
       "ten_user_limit_respected": true
     },
-    "status": "OBSERVED"
+    "status": "MORE_DATA"
   },
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 0,
@@ -3247,25 +3247,25 @@
     "phase_epoch": 8,
     "profitability_claimed": false,
     "quarantined_record_count": 57380372,
-    "raw_record_count": 1428208804,
-    "raw_trade_count": 59297199,
+    "raw_record_count": 1431666233,
+    "raw_trade_count": 59403827,
     "rejected_shard_count": 15052,
-    "replay_compatible_shard_count": 1726590,
+    "replay_compatible_shard_count": 1732001,
     "replay_unclassified_candidate_count": 0,
-    "safe_shard_count": 1726590,
+    "safe_shard_count": 1732001,
     "status": "NOT_ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
     "unique_record_count": 224819946,
-    "unique_record_ratio": 0.15741392,
+    "unique_record_ratio": 0.15703377,
     "unique_trade_count_exact": false,
     "unique_trade_count_global": null,
     "valid_record_count": 224819946,
-    "valid_record_ratio": 0.15741392
+    "valid_record_ratio": 0.15703377
   },
-  "dataset_health_digest": "722825e596a925931cd1c2900af886fdc429ac17fc59bd57b3aaf6b9c34aa6b5",
+  "dataset_health_digest": "1a6bac327a4d49043e8611683cc2f678edb7fbed58e177eaf0ab811133a56616",
   "dataset_selection_id": null,
-  "dataset_v2_head": "0c1f0d730983da72e32a03029c5100a6a4abd9f3",
+  "dataset_v2_head": "604afdd1879841ccc22cf8a3241c292a86f18c80",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "e60abc85be8b35c93dc7c33cda1e818233264859da3d7419c4299287839a9ba8",
@@ -3298,7 +3298,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-25T06:32:43.763516Z",
+  "generated_at_utc": "2026-10-25T06:56:02.017985Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -3330,7 +3330,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "0c1f0d730983da72e32a03029c5100a6a4abd9f3",
+  "main_alina_head": "604afdd1879841ccc22cf8a3241c292a86f18c80",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -3362,10 +3362,10 @@
   "phase": "COLLECT",
   "phase_epoch": 8,
   "quarantined_record_count": 57380372,
-  "raw_record_count": 1428208804,
-  "raw_trade_count": 59297199,
+  "raw_record_count": 1431666233,
+  "raw_trade_count": 59403827,
   "real_execution_reachable": false,
-  "receipt_digest": "e627a3c05b3a3d06a0317727628cb231a32beca7413a87525c87113d77f75311",
+  "receipt_digest": "ee6c130892b956cc8f05f31ead33c50855201cf7c63c36358b3d28d1026ca1a5",
   "rejected_count": 15052,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
@@ -3373,9 +3373,9 @@
     "global unique trade count coverage is incomplete",
     "analysis campaigns are not all terminal COMPLETE"
   ],
-  "replay_compatible_count": 1726590,
+  "replay_compatible_count": 1732001,
   "replay_remaining_candidates": 0,
-  "safe_count": 1726590,
+  "safe_count": 1732001,
   "schema_version": "alina.final_closure_receipt.v1",
   "scoreboard_artifact": null,
   "scoreboard_provenance": {
@@ -3450,7 +3450,7 @@
   "two_segment_resume_status": "PROVEN",
   "uncompressed_size_coverage": true,
   "uncompressed_size_exact": true,
-  "uncompressed_size_exact_assets": 1787177,
+  "uncompressed_size_exact_assets": 1792588,
   "uncompressed_size_unavailable_assets": 0,
   "unique_record_count": 224819946,
   "unique_trade_count_exact": false,
