@@ -588,7 +588,71 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="inspecte les modules et le freeze, sans lancer les tests",
     )
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        help="workspace FULL/COLD certifié, préparé à partir des shards SAFE",
+    )
+    parser.add_argument(
+        "--research",
+        action="store_true",
+        help="lance une campagne économique réelle sur --dataset-root, sans collecte",
+    )
     args = parser.parse_args(argv)
+    if args.research:
+        if args.preflight_only:
+            parser.error("--research et --preflight-only sont incompatibles")
+        if args.dataset_root is None:
+            parser.error("--research exige --dataset-root")
+        from hl_observer.datasets.source_discovery import (
+            is_dataset_workspace, discover_family_sources,
+        )
+        dataset = args.dataset_root.resolve()
+        if not is_dataset_workspace(dataset):
+            print(
+                "RESEARCH_NO_GO: provenance FULL/COLD absente. "
+                "Les fichiers de runtime/recovery/full/usable/unpacked ne sont "
+                "pas automatiquement un workspace économique compatible. "
+                "Ne pas les remplacer par des données factices.",
+                flush=True,
+            )
+            return 2
+        sources = discover_family_sources(dataset)
+        copy_sources = sources.get("copy_vault") or []
+        if not copy_sources:
+            print(
+                "RESEARCH_NO_GO: aucune source Copy-Vault reconnue dans le "
+                "workspace; données SAFE téléchargées != données consommées.",
+                flush=True,
+            )
+            return 2
+        cmd = [
+            sys.executable, "-u",
+            str(ROOT / "tools" / "run_dataset_economic_campaigns.py"),
+            "--root", str(dataset),
+            "--no-start-collection",
+        ]
+        print(
+            "RESEARCH_INPUT_WORKSPACE=" + str(dataset)
+            + " COPY_VAULT_FILES=" + str(len(copy_sources)),
+            flush=True,
+        )
+        print("RESEARCH_COMMAND=" + subprocess.list2cmdline(cmd), flush=True)
+        return subprocess.run(
+            cmd, cwd=ROOT, check=False,
+            env={
+                **os.environ,
+                "HL_ENABLE_MAINNET_EXECUTION": "0",
+                "HL_ENABLE_TESTNET_EXECUTION": "0",
+                "REAL_MAINNET_TRADING": "false",
+                "TESTNET_ONLY": "true",
+                "PYTHONPATH": os.pathsep.join(
+                    [str(ROOT / "src"), str(ROOT), os.environ.get("PYTHONPATH", "")]
+                ),
+            },
+        ).returncode
+    if args.dataset_root is not None:
+        parser.error("--dataset-root nécessite --research")
     return run_lab(preflight_only=args.preflight_only)
 
 
