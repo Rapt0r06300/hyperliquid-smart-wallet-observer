@@ -207,7 +207,9 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _safe_registry_rows(recovery: Path) -> tuple[str, list[tuple[str, int, str, tuple[int, int, int, int]]]]:
+def _safe_registry_rows(
+    recovery: Path, catalog_path: Path,
+) -> tuple[str, list[tuple[str, int, str, tuple[int, int, int, int]]]]:
     restore = _read_json(recovery / "RESTORE_REPORT.json")
     unpack = _read_json(recovery / "UNPACK_REPORT.json")
     binding = restore.get("catalog_verification")
@@ -224,6 +226,11 @@ def _safe_registry_rows(recovery: Path) -> tuple[str, list[tuple[str, int, str, 
         or not isinstance(catalog, str) or len(catalog) != 64
     ):
         raise SafeBridgeError("AlinaSync SAFE restoration and extraction are not certified")
+    if (
+        catalog_path.is_symlink() or not catalog_path.is_file()
+        or _digest(catalog_path) != catalog
+    ):
+        raise SafeBridgeError("active DATA_INDEX changed; synchronize AlinaSync before research")
     db_path = recovery / "SAFE_SHARDS.sqlite3"
     if db_path.is_symlink() or not db_path.is_file():
         raise SafeBridgeError("missing SAFE_SHARDS registry")
@@ -255,7 +262,7 @@ def _safe_registry_rows(recovery: Path) -> tuple[str, list[tuple[str, int, str, 
 def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     root = Path(root).resolve()
     recovery = root / "runtime" / "recovery" / "full"
-    catalog, registry = _safe_registry_rows(recovery)
+    catalog, registry = _safe_registry_rows(recovery, root / "catalog" / "DATA_INDEX.json")
     parent = root / "runtime" / "research_lab" / "copy_vault_safe"
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
