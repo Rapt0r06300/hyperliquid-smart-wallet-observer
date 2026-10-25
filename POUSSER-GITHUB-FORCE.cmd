@@ -48,18 +48,7 @@ if not exist "%~dp0tools\alina_git_code_sync.py" (
   set "RC=32"
   goto :finish
 )
-if /I "%~1"=="--portable-self-check" (
-  "%HYPERSMART_GIT%" --version >nul 2>nul
-  if errorlevel 1 (
-    set "RC=33"
-    goto :finish
-  )
-  "%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% -c "import ast, pathlib; ast.parse(pathlib.Path('tools/alina_git_code_sync.py').read_bytes())"
-  set "RC=%ERRORLEVEL%"
-  if not "%RC%"=="0" goto :finish
-  echo PORTABLE_GITHUB_PUSH_CHECK_OK
-  goto :finish
-)
+if /I "%~1"=="--portable-self-check" goto :portable_self_check
 
 set "SYNC_MODE="
 if /I "%~1"=="--dry-run" set "SYNC_MODE=--dry-run"
@@ -87,6 +76,17 @@ if "%RC%"=="0" (
   echo [NO_GO] Synchronisation incomplete, aucune perte volontaire. Code %RC%.
   echo Consultez runtime\reports\git-sync\LAST_SYNC.json
 )
+
+:portable_self_check
+"%HYPERSMART_GIT%" --version >nul 2>nul
+if errorlevel 1 (
+  set "RC=33"
+  goto :finish
+)
+"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% -c "import ast, pathlib; ast.parse(pathlib.Path('tools/alina_git_code_sync.py').read_bytes())"
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" goto :finish
+echo PORTABLE_GITHUB_PUSH_CHECK_OK
 
 :finish
 if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
