@@ -67,7 +67,10 @@ def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) ->
 def _corpus(tmp_path: Path, envelopes: list[dict]) -> Path:
     recovery = tmp_path / "runtime" / "recovery" / "full"
     recovery.mkdir(parents=True)
-    catalog = "a" * 64
+    index = tmp_path / "catalog" / "DATA_INDEX.json"
+    index.parent.mkdir(parents=True)
+    index.write_text('{"schema": "test_catalog"}\\n', encoding="utf-8")
+    catalog = _sha(index.read_bytes())
     db = sqlite3.connect(recovery / "SAFE_SHARDS.sqlite3")
     db.execute("CREATE TABLE safe_shard_registry_meta (key TEXT, value TEXT)")
     db.executemany(
@@ -194,4 +197,13 @@ def test_bridge_rejects_stale_safe_registry(tmp_path: Path) -> None:
     db.commit()
     db.close()
     with pytest.raises(SafeBridgeError, match="does not match final catalog"):
+        build_safe_copy_workspace(tmp_path)
+
+
+def test_bridge_refuses_stale_catalog_after_alinasync(tmp_path: Path) -> None:
+    _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    (tmp_path / "catalog" / "DATA_INDEX.json").write_text(
+        '{"schema": "changed_catalog"}\\n', encoding="utf-8",
+    )
+    with pytest.raises(SafeBridgeError, match="active DATA_INDEX changed"):
         build_safe_copy_workspace(tmp_path)
