@@ -16,7 +16,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
-
 OKX_LEADER_ID_RE = re.compile(r"^[A-Fa-f0-9]{16,32}$")
 PUBLIC_PATHS = {
     "ranks": "/api/v5/copytrading/public-lead-traders",
@@ -243,6 +242,7 @@ class OkxPublicCopyTradingClient:
                     "request": request,
                     "rows": rows,
                     "row_count": len(rows),
+                    "response_received_at_ms": int(time.time() * 1000),
                     "possibly_truncated_at_api_limit": len(rows) >= int(bounded_limit),
                     "response_sha256": _payload_hash(payload),
                     "response": payload,

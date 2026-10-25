@@ -105,7 +105,7 @@ def test_discovery_deduplicates_wallets(tmp_path, monkeypatch):
     assert result.candidates_after_filter == 1
 
 
-def test_discovery_selects_top_wallets_for_backfill(tmp_path):
+def test_discovery_does_not_select_wallet_without_measured_pnl(tmp_path):
     settings = _settings(tmp_path)
     session_factory = _session_factory(settings.database_url)
     with session_factory() as session:
@@ -118,10 +118,48 @@ def test_discovery_selects_top_wallets_for_backfill(tmp_path):
         session_factory=session_factory,
     )
 
-    assert result.selected_wallets
+    assert not result.selected_wallets
+    assert "portfolio_pnl_unmeasured" in result.rejected[0]["reason"]
 
 
-def test_discovery_stores_candidates(tmp_path):
+def test_discovery_selects_measured_positive_hyperliquid_wallet(tmp_path, monkeypatch):
+    class MeasuredSource(WalletDiscoverySource):
+        name = "measured"
+        source_type = "test"
+        reliability_score = 0.9
+
+        def fetch_candidates(self, *, session=None, limit=50):
+            return WalletDiscoverySourceResult(
+                source_name=self.name,
+                source_type=self.source_type,
+                reliability_score=self.reliability_score,
+                status="ok",
+                candidates=[WalletDiscoveryCandidate(
+                    address=VALID_WALLET,
+                    venue="hyperliquid",
+                    network="hyperliquid",
+                    source_name=self.name,
+                    source_type=self.source_type,
+                    confidence_score=self.reliability_score,
+                    external_pnl_usdc=250.0,
+                    external_roi_pct=5.0,
+                )],
+            )
+
+    settings = _settings(tmp_path)
+    session_factory = _session_factory(settings.database_url)
+    monkeypatch.setattr(discovery_module, "build_discovery_sources", lambda _sources: [MeasuredSource()])
+
+    result = run_wallet_discovery(
+        WalletDiscoveryPlan(sources=["measured"], dry_run=True, min_discovery_score=50),
+        settings,
+        session_factory=session_factory,
+    )
+
+    assert [item.candidate.address for item in result.selected_wallets] == [VALID_WALLET]
+
+
+def test_discovery_stores_unmeasured_candidates_without_auto_watchlisting(tmp_path):
     settings = _settings(tmp_path)
     session_factory = _session_factory(settings.database_url)
     with session_factory() as session:
@@ -136,7 +174,7 @@ def test_discovery_stores_candidates(tmp_path):
 
     with session_factory() as session:
         assert session.query(WalletCandidateModel).count() == 1
-        assert session.query(AutoWatchlist).count() == 1
+        assert session.query(AutoWatchlist).count() == 0
 
 
 def test_discovery_stores_source_status(tmp_path):

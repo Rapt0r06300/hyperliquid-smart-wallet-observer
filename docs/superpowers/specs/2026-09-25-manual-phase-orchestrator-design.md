@@ -75,12 +75,15 @@ venue passes the same evidence and replay gates.
   `tools/collect_okx_copy_traders.py --network-read` path and the
   GitHub-hosted `collect-okx-copy-traders.yml` workflow read the documented
   public leader-ranks, current-subpositions and subpositions-history endpoints.
-  The workflow is gated by the canonical `COLLECT` phase and stops when its
-  phase epoch changes. Transient GET failures are retried; a shortlist is
+  The workflow is gated by the canonical `COLLECT` phase and polls the remote
+  canonical phase JSON while collecting; it stops fail-closed when the phase
+  or epoch changes or the phase source becomes unavailable. Transient GET failures are retried; a shortlist is
   frozen only after all requested ranking pages are present. Failed or
   API-truncated observations retain raw responses and hashes but mark the
-  cycle incomplete, and cannot be used for economic evaluation. GitHub Actions
-  artifacts retain these research observations for at most 90 days.
+  cycle incomplete, and cannot be used for economic evaluation. Each run also
+  publishes the exact JSON observations and a per-file SHA-256 manifest as a
+  separate research-only GitHub Release asset; a 90-day Actions artifact remains
+  a convenient duplicate. These releases are not SAFE dataset releases.
   The exchange's public completed-position history covers at most the recent
   three months; it does not provide the complete fees, funding, capital-flow or
   follower execution evidence needed for economic proof. OKX observations are
@@ -91,6 +94,42 @@ venue passes the same evidence and replay gates.
   stable public identity, documented unauthenticated read path, provenance and
   venue-native replay contract are implemented. A market-data adapter alone
   does not establish access to trader portfolios.
+
+#### Platform API survey (2026-10-25)
+
+This is a survey of official documentation for public Copy-Trading portfolios
+and address-level trade history, not a claim that every product in every
+region was queried live. A venue is not enabled merely because its website
+shows a leaderboard. “Not verified” means no documented, unauthenticated,
+stable identity plus history contract was established in this review; it does
+not mean the platform has no private or undocumented endpoint.
+
+| Venue/product | Officially documented access found | Lab disposition |
+|---|---|---|
+| Hyperliquid | Public wallet/vault endpoints and existing AlinaSync SAFE shards | Active certified Copy-Vault path |
+| OKX Copy Trading | Public leader ranking and public position endpoints; history limited to the venue's documented recent window and missing full costs/capital flows | Research observer only; never SAFE/PnL proof |
+| Orderly Network | Official zero-auth read-only Public Info API documents `topAddresses`, address-scoped `trades`, `accountState`, `fundingPayments`, and `userDepositsWithdrawals`, with opaque cursors; documented as a separate venue | Adapter candidate; not enabled until collection, completeness, market mapping and replay gates are implemented |
+| dYdX Chain | Official Indexer docs expose public address/subaccount fills, transfers, historical PnL, positions and market data; address is an input, not a verified global copy-trader discovery feed | Adapter candidate only after discovery, pagination/retention and exact-count coverage are implemented |
+| Drift / current protocol data API | Public historical records are documented, but the located archive states it contains parsed records and is not a complete certified Copy-Vault source; public leader discovery was not established | Discovery/research candidate; disabled for proof |
+| Binance Copy Trading | Official Copy Trading REST family documents lead-status/account-oriented endpoints and key-pair authentication; no qualifying unauthenticated leader-history contract was verified | Disabled; do not use account credentials |
+| Bybit Copy Trading | Official API walkthrough covers authenticated master-trader order placement; no qualifying unauthenticated leader identity/history contract was verified | Disabled |
+| Bitget Copy Trading | Official copy-trading APIs include read-only permissions tied to a UID/account; these do not establish anonymous public leader history | Disabled |
+| Gate Copy Trading | Public leaderboards are visible on the product site; official API documentation reviewed did not establish an unauthenticated stable leader-history endpoint | Disabled |
+| BingX, MEXC, HTX, BloFin | Official public market-data APIs are not evidence of public copy-trader identity/history. No qualifying unauthenticated end-to-end portfolio contract was verified in this survey | Disabled pending official endpoint and access-contract verification |
+| KuCoin Copy Trading | The documented Copy Trading fills endpoint is private and scoped to the authenticated lead-trader API account | Disabled for following third-party portfolios |
+| Limitless Exchange | Official learning docs describe HMAC-authenticated portfolio history for the caller; a separate public-by-address SDK route surfaced, but its current official API contract and completeness were not verified | Disabled pending primary-doc verification |
+
+Primary documentation reviewed: [OKX API v5](https://www.okx.com/docs-v5/en/),
+[Orderly Public Info API](https://github.com/OrderlyNetwork/documentation-public/blob/main/build-on-omnichain/public-info-api/overview.mdx),
+[dYdX Indexer Client](https://docs.dydx.exchange/api_integration-clients/indexer_client),
+[Drift historical data API](https://velocity-exchange.github.io/v2-teacher/),
+[Binance Copy Trading API catalog](https://developers.binance.com/en/docs/catalog/advanced-trading-copy-trading),
+[Bybit Copy Trading API](https://bybit-exchange.github.io/docs/v5/copytrade),
+[Bitget Copy Trading APIs](https://www.bitget.com/docs/catalog/copy-trading/public-private),
+[Gate API v4](https://www.gate.com/docs/developers/apiv4/en/),
+[KuCoin Copy Trading fills](https://www.kucoin.com/docs-new/rest/copy-trading/get-futures-fills),
+[Binance API authentication](https://developers.binance.com/en/docs/products/spot/rest-api), and
+[Limitless historical data](https://academy.limitless.exchange/academies/api_academy/11_HistoricalData.html).
 
 ## Canonical-spec governance
 

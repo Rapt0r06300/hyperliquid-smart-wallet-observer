@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: okx-copy-trader-observations
@@ -64,6 +64,7 @@ jobs:
               --network-read \
               --follow \
               --phase-state control/alina-phase.json \
+              --phase-state-url "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/control/alina-phase.json" \
               --top 15 \
               --max-pages-per-sort 100 \
               --history-limit 100 \
@@ -74,5 +75,27 @@ jobs:
         with:
           name: okx-copy-vault-observations-${{ github.run_id }}
           path: runtime/reports/okx_copy_vault/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
+
+      - name: Publish a durable research-only GitHub Release snapshot
+        if: always() && steps.phase.outputs.allowed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPORT_ROOT="runtime/reports/okx_copy_vault"
+          if [[ ! -d "$REPORT_ROOT" ]] || ! find "$REPORT_ROOT" -type f -name '*.json' -print -quit | grep -q .; then
+            echo "No observation JSON exists; no empty release will be created."
+            exit 0
+          fi
+          TAG="copyvault-okx-observations-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ARCHIVE="$RUNNER_TEMP/${TAG}.zip"
+          python tools/package_okx_observations.py "$REPORT_ROOT" "$ARCHIVE"
+          sha256sum "$ARCHIVE"
+          gh release create "$TAG" "$ARCHIVE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Copy-Vault OKX research observations ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}" \
+            --notes "Read-only OKX research observations with a per-file SHA-256 manifest. These assets are not SAFE shards, replay evidence, or economic proof."

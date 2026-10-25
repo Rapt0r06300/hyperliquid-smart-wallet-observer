@@ -19,11 +19,15 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.config.loader import load_settings  # noqa: E402
+from hl_observer.control_plane.phase_state import AlinaPhaseState  # noqa: E402
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db  # noqa: E402
 from hl_observer.storage.repositories import CollectionRepository  # noqa: E402
 from hl_observer.wallets.okx_copy_trading import (  # noqa: E402
@@ -34,6 +38,67 @@ from hl_observer.wallets.okx_copy_trading import (  # noqa: E402
 
 REPORT_ROOT = ROOT / "runtime" / "reports" / "okx_copy_vault"
 SELECTION_SCHEMA = "alina.okx_copy_trader_selection.v1"
+PHASE_POLL_INTERVAL_SECONDS = 10.0
+CANONICAL_PHASE_URL = (
+    "https://raw.githubusercontent.com/Rapt0r06300/"
+    "hyperliquid-smart-wallet-observer/main/control/alina-phase.json"
+)
+
+
+def _validated_phase_snapshot(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("phase snapshot is not an object")
+    return AlinaPhaseState.from_dict(payload).to_dict()
+
+
+def _read_phase_snapshot(path: Path | None, url: str | None) -> dict[str, Any]:
+    if url:
+        parsed = urlparse(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "raw.githubusercontent.com"
+            or url != CANONICAL_PHASE_URL
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("phase URL must target canonical main phase state on raw.githubusercontent.com")
+        request = Request(url, headers={"Accept": "application/json", "User-Agent": "AlinaSmartFlow-read-only/1.0"})
+        with urlopen(request, timeout=15) as response:
+            if response.status != 200:
+                raise ValueError(f"remote phase state returned HTTP {response.status}")
+            payload = json.loads(response.read().decode("utf-8"))
+    elif path:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        raise ValueError("a local or canonical remote phase-state source is required")
+    return _validated_phase_snapshot(payload)
+
+
+class PhaseEpochGuard:
+    """Poll canonical phase state during a long read-only observation job."""
+
+    def __init__(self, *, expected_epoch: int, path: Path | None, url: str | None) -> None:
+        self.expected_epoch = expected_epoch
+        self.path = path
+        self.url = url
+        self._last_checked_at = float("-inf")
+        self._allowed = False
+        self.reason = "phase state has not been checked"
+
+    def is_current(self) -> bool:
+        now = time.monotonic()
+        if now - self._last_checked_at < PHASE_POLL_INTERVAL_SECONDS:
+            return self._allowed
+        self._last_checked_at = now
+        try:
+            state = _read_phase_snapshot(self.path, self.url)
+        except (OSError, ValueError, URLError, TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
+            self._allowed = False
+            self.reason = f"phase state unavailable or invalid ({type(exc).__name__})"
+            return False
+        self._allowed = state["phase"] == "COLLECT" and state["epoch"] == self.expected_epoch
+        self.reason = "current" if self._allowed else f"phase={state['phase']} epoch={state['epoch']}"
+        return self._allowed
 
 
 def _now_id() -> str:
@@ -139,6 +204,7 @@ def collect_cycle(
     settings: Any,
     output_dir: Path,
     cycle_id: str,
+    phase_guard: PhaseEpochGuard | None = None,
 ) -> dict[str, Any]:
     init_db(settings.database_url)
     engine = create_sqlite_engine(settings.database_url)
@@ -149,6 +215,7 @@ def collect_cycle(
     raw_dir = output_dir / "responses"
     raw_dir.mkdir(parents=True, exist_ok=True)
     tracked = selection["tracked"]
+    stopped_for_phase_change = False
     with sessions() as session:
         repo = CollectionRepository(session)
         run = repo.create_collection_run(
@@ -175,6 +242,9 @@ def collect_cycle(
                 success=True,
             )
         for leader in tracked:
+            if phase_guard is not None and not phase_guard.is_current():
+                stopped_for_phase_change = True
+                break
             code = str(leader["native_account_id"])
             identity = f"okx:{code}"
             try:
@@ -226,6 +296,9 @@ def collect_cycle(
                     raw_assets.append({
                         "identity": identity,
                         "endpoint": name,
+                        "request": request,
+                        "source_timestamp_ms": response["response"].get("ts"),
+                        "response_received_at_ms": response.get("response_received_at_ms"),
                         "path": str(raw_path.relative_to(output_dir)),
                         "response_sha256": str(response["response_sha256"]),
                         "file_sha256": hashlib.sha256(raw_path.read_bytes()).hexdigest(),
@@ -271,7 +344,11 @@ def collect_cycle(
                     is_consistent=True,
                     error_message=message,
                 )
-        repo.finish_collection_run(run, success=not failures, errors_count=len(failures))
+        repo.finish_collection_run(
+            run,
+            success=not failures and not stopped_for_phase_change,
+            errors_count=len(failures),
+        )
         session.commit()
         run_id = run.id
     engine.dispose()
@@ -281,11 +358,14 @@ def collect_cycle(
         "selection_id": selection["selection_id"],
         "collection_run_id": run_id,
         "venue": "okx",
+        "phase_epoch": phase_guard.expected_epoch if phase_guard else None,
         "tracked_count": len(tracked),
         "observed_count": len(observed),
         "cycle_complete": not failures and all(
             item["successful_endpoint_count"] == 2 for item in observed
-        ),
+        ) and not stopped_for_phase_change,
+        "stopped_for_phase_change": stopped_for_phase_change,
+        "phase_stop_reason": phase_guard.reason if stopped_for_phase_change and phase_guard else None,
         "failures": failures,
         "observations": observed,
         "raw_assets": raw_assets,
@@ -304,6 +384,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--follow", action="store_true", help="repeat collection for this frozen set until Ctrl+C")
     parser.add_argument("--interval-seconds", type=int, default=300, help="pause between follow cycles")
     parser.add_argument("--phase-state", type=Path, help="stop continuous collection when this canonical state leaves COLLECT")
+    parser.add_argument("--phase-state-url", help="poll the canonical main phase JSON over HTTPS during long-running collection")
     parser.add_argument("--base-url", default="https://www.okx.com", help="official OKX API hostname only")
     return parser
 
@@ -312,6 +393,9 @@ def main() -> int:
     args = _parser().parse_args()
     if not args.network_read:
         print("Refus : ajoutez --network-read pour autoriser les GET publics OKX.")
+        return 2
+    if args.follow and not args.phase_state_url:
+        print("Refus : --follow exige --phase-state-url pour suivre l'epoch canonique distante.")
         return 2
     if not 1 <= args.top <= 50 or not 1 <= args.history_limit <= 100 or not 1 <= args.max_pages_per_sort <= 100:
         print("Refus : limites invalides.")
@@ -323,15 +407,20 @@ def main() -> int:
     if os.getenv("HYPERSMART_DISABLE_RAW_STORAGE", "0").strip().lower() in {"1", "true", "yes", "on"}:
         print("Refus : HYPERSMART_DISABLE_RAW_STORAGE empêche la persistance des réponses publiques.")
         return 2
-    expected_phase_epoch: int | None = None
-    if args.phase_state:
+    phase_guard: PhaseEpochGuard | None = None
+    if args.phase_state or args.phase_state_url:
         try:
-            phase = json.loads(args.phase_state.read_text(encoding="utf-8"))
+            phase = _read_phase_snapshot(args.phase_state, args.phase_state_url)
             if phase.get("phase") != "COLLECT" or not isinstance(phase.get("epoch"), int):
                 print("Refus : le control plane n'est pas en phase COLLECT.")
                 return 2
-            expected_phase_epoch = int(phase["epoch"])
-        except (OSError, ValueError, AttributeError) as exc:
+            phase_guard = PhaseEpochGuard(
+                expected_epoch=int(phase["epoch"]),
+                path=args.phase_state,
+                url=args.phase_state_url,
+            )
+            print(f"Phase COLLECT épinglée à l'epoch {phase_guard.expected_epoch}; source relue pendant la collecte.")
+        except (OSError, ValueError, AttributeError, URLError, TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
             print(f"Refus : état du control plane illisible ({type(exc).__name__}).")
             return 2
     client = OkxPublicCopyTradingClient(base_url=args.base_url, timeout_seconds=settings.collection.request_timeout_seconds)
@@ -368,15 +457,9 @@ def main() -> int:
     cycles = 0
     try:
         while True:
-            if args.phase_state:
-                try:
-                    phase = json.loads(args.phase_state.read_text(encoding="utf-8"))
-                    if phase.get("phase") != "COLLECT" or phase.get("epoch") != expected_phase_epoch:
-                        print("Phase/epoch modifiée : arrêt propre de la collecte continue.")
-                        break
-                except (OSError, ValueError, AttributeError) as exc:
-                    print(f"État de phase invalide; arrêt fail-closed ({type(exc).__name__}).")
-                    break
+            if phase_guard is not None and not phase_guard.is_current():
+                print(f"Phase/epoch modifiée ou source indisponible ({phase_guard.reason}); arrêt fail-closed.")
+                break
             cycles += 1
             print(f"[2/2] Collecte des positions ouvertes et clôturées — cycle {cycles}...")
             cycle_id = _now_id()
@@ -388,6 +471,7 @@ def main() -> int:
                 settings=settings,
                 output_dir=report_dir,
                 cycle_id=cycle_id,
+                phase_guard=phase_guard,
             )
             report_path = report_dir / "RAPPORT.json"
             _write_immutable_json(report_path, report)
@@ -397,6 +481,9 @@ def main() -> int:
                 "preuve économique : NON"
             )
             print(f"Rapport : {report_path}")
+            if report["stopped_for_phase_change"]:
+                print(f"Arrêt fail-closed dans le cycle : {report['phase_stop_reason']}.")
+                break
             if not args.follow:
                 break
             interval = max(30, min(86_400, int(args.interval_seconds)))
