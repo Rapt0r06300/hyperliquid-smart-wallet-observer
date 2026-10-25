@@ -322,9 +322,10 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
                         rows += 1
                 inputs.append({
                     "relative_path": relative, "sha256": sha,
-                    "jsonl_sha256": seal["jsonl_sha256"], "channel": channel, "frames": rows,
+                    "jsonl_sha256": seal["jsonl_sha256"], "jsonl_bytes": seal["jsonl_bytes"],
+                    "channel": channel, "frames": rows,
                 })
-                if len(inputs) % 100 == 0:
+                if len(inputs) % 100 == 0 or i == total:
                     print(f"ALINA_COPY_SAFE_PROGRESS={i}/{total} selected={len(inputs)}", flush=True)
         if not counts["copy_vault_fills"] or not counts["copy_vault_l2"]:
             raise SafeBridgeError("SAFE corpus lacks both causal fills and subsecond L2")
@@ -339,7 +340,7 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             "catalog_sha256": catalog,
             "selection_digest": digest,
             "selected_files": len(inputs),
-            "selected_raw_bytes": sum(row["bytes"] for row in outputs.values()),
+            "selected_raw_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
             "safe_input_shards": inputs,
             "outputs": outputs,
             "counts": counts,
