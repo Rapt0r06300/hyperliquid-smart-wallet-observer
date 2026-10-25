@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -46,6 +47,31 @@ INTEGRATION_TESTS = (
     "tests/test_paper_trading_import_boundaries.py",
     "tests/test_unknown_execution_code_quarantine.py",
 )
+
+
+def inspect_local_safe_corpus(root: Path) -> dict[str, Any]:
+    """Read-only AlinaSync registry inspection; not economic source certification."""
+    recovery = root / "runtime" / "recovery" / "full"
+    result: dict[str, Any] = {"status": "NOT_CERTIFIED", "safe_registry_rows": None}
+    try:
+        restored = json.loads((recovery / "RESTORE_REPORT.json").read_text(encoding="utf-8"))
+        expanded = json.loads((recovery / "UNPACK_REPORT.json").read_text(encoding="utf-8"))
+        registry = recovery / "SAFE_SHARDS.sqlite3"
+        catalog = (restored.get("catalog_verification") or {}).get("source_index_sha256")
+        if not (
+            restored.get("status") == "REPLAY_READY_COMPLETE"
+            and (restored.get("classification") or {}).get("materialization_complete") is True
+            and expanded.get("status") == "SAFE_UNPACK_COMPLETE"
+            and catalog and expanded.get("catalog_index_sha256") == catalog
+            and registry.is_file() and not registry.is_symlink()
+        ):
+            return result
+        with sqlite3.connect(registry.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0) as db:
+            count = db.execute("SELECT COUNT(*) FROM current_safe_shards").fetchone()[0]
+        return {"status": "CERTIFIED_UNPACKED" if count > 0 else "EMPTY_REGISTRY",
+                "safe_registry_rows": int(count)}
+    except (OSError, ValueError, TypeError, sqlite3.Error, AttributeError):
+        return result
 
 
 def assess_physical_freeze(path: Path) -> dict[str, Any]:
@@ -446,6 +472,13 @@ def run_lab(*, preflight_only: bool = False) -> int:
     print("ALINA SMART FLOW — LABORATOIRE QUANT LOCAL", flush=True)
     print("PAPER / READ-ONLY : aucun ordre, aucune collecte, aucun téléchargement.", flush=True)
     print(f"Dépôt : {ROOT}\nHEAD : {head}", flush=True)
+    safe = inspect_local_safe_corpus(ROOT)
+    print(
+        "ALINASYNC SAFE : " + str(safe["status"])
+        + " | registre shards=" + str(safe["safe_registry_rows"])
+        + " | liaison avec les campagnes non prouvee",
+        flush=True,
+    )
     print("\nMODULES LOCAUX DÉTECTÉS", flush=True)
     for relative in (
         "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
