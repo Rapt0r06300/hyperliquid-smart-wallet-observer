@@ -278,6 +278,18 @@ def test_nested_python_dataset_and_runtime_directories_are_source(repos):
 
 
 
+def test_conflict_kit_python_source_has_no_invalid_escape_warnings() -> None:
+    import warnings
+
+    source = (Path(__file__).resolve().parents[1] /
+              "tools/alina_git_code_sync.py").read_text(encoding="utf-8")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SyntaxWarning)
+        compile(source, "tools/alina_git_code_sync.py", "exec")
+    assert "alina.git_conflict_kit.v1" in source
+    assert r"\`" not in source
+
+
 def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     """Double-click resolves missing local helpers without fetching shards."""
     launcher = Path(__file__).resolve().parents[1] / "POUSSER-GITHUB-FORCE.cmd"
