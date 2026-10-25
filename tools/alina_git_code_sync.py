@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -361,6 +362,110 @@ class Synchronizer:
                     "Fusion interdite pour proteger les donnees."
                 )
 
+    def _capture_conflicts(self, conflicted: list[str], local: str,
+                           remote: str) -> None:
+        """Save exact 3-way inputs locally before aborting a failed merge.
+
+        Never write outside runtime/reports; never post payload to GitHub.
+        This is a manual/AI-assisted resolution kit, NOT an unsafe auto-merge.
+        """
+        root = self.root / "runtime"
+        reports = root / "reports"
+        sync_dir = reports / "git-sync"
+        dest = sync_dir / "conflicts" / (local[:12] + "-" + remote[:12])
+        parents = (root, reports, sync_dir, sync_dir / "conflicts", dest)
+        if any(p.is_symlink() for p in parents):
+            raise SyncBlocked("Chemin runtime du dossier de conflits non fiable.")
+        dest.mkdir(parents=True, exist_ok=True)
+        manifest: dict[str, object] = {
+            "schema": "alina.git_conflict_kit.v1",
+            "local_head": local,
+            "remote_head": remote,
+            "git_stage_roles": {
+                "base": "common ancestor",
+                "local": "checkpoint Codex/Claude (stage 2)",
+                "github": "origin/main (stage 3)",
+                "conflict": "Git tentative de fusion, NON resolue",
+            },
+            "files": [],
+            "includes_shards": False,
+            "no_auto_choice": True,
+        }
+        instructions = [
+            "# Alina - conflits Git (copies locales NON publiees)",
+            "",
+            f"Commit local protege : `{local}`",
+            f"HEAD distant observe : `{remote}`",
+            "",
+            "Ne supprimer ni la logique locale ni la logique GitHub.",
+            "Analyser chaque triplet base/local/github, fusionner les intentions",
+            "et tester les comportements avant de valider.",
+            "Ces copies sont des diagnostics, jamais des fichiers a committer.",
+            "",
+            "## Fichiers",
+        ]
+        for i, path in enumerate(conflicted):
+            if _protected(path):
+                raise SyncBlocked("Conflit sur chemin protege : " + path)
+            entry: dict[str, object] = {"path": path, "versions": {}}
+            instructions.append(f"- `{path}` : prefixe `{i:02d}-`")
+            for label, spec in (
+                ("base", f":1:{path}"),
+                ("local", f":2:{path}"),
+                ("github", f":3:{path}"),
+            ):
+                outcome = self.command("show", spec, check=False)
+                if outcome.returncode:
+                    entry["versions"][label] = {"status": "ABSENT"}
+                    continue
+                raw = outcome.stdout
+                if len(raw) > 2 * 1024 * 1024:
+                    entry["versions"][label] = {"status": "TOO_LARGE"}
+                    continue
+                name = f"{i:02d}-{label}.txt"
+                (dest / name).write_bytes(raw)
+                entry["versions"][label] = {
+                    "file": name,
+                    "bytes": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                }
+            conflict_path = self.root / path
+            if conflict_path.is_file() and not conflict_path.is_symlink():
+                raw = conflict_path.read_bytes()
+                if len(raw) <= 2 * 1024 * 1024:
+                    name = f"{i:02d}-conflict.txt"
+                    (dest / name).write_bytes(raw)
+                    entry["versions"]["conflict"] = {
+                        "file": name,
+                        "bytes": len(raw),
+                        "sha256": hashlib.sha256(raw).hexdigest(),
+                    }
+            manifest["files"].append(entry)
+        instructions += [
+            "",
+            "## Reprise conseillee (Codex/Claude dans le clone local)",
+            "",
+            "1. Ouvrir le manifest.json et les 3 versions de chaque conflit.",
+            "2. Comparer au HEAD local et a origin/main, jamais choisir",
+            "   systematiquement --ours ou --theirs.",
+            "3. Resoudre sur un vrai merge Git, appliquer les modifications",
+            "   coherentes, lancer tests locaux, puis creer le commit de fusion.",
+            "4. Relancer POUSSER-GITHUB-FORCE.cmd pour verifier le push.",
+            "",
+            "Ce kit ne restaure rien automatiquement. Les originaux et les",
+            "commits sont preserves grace a git merge --abort.",
+        ]
+        (dest / "RESOLUTION.md").write_text(
+            "\n".join(instructions) + "\n", encoding="utf-8"
+        )
+        (dest / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        self.report["conflict_kit"] = str(dest.relative_to(self.root)).replace("\\", "/")
+        self.report["conflict_files"] = conflicted
+        self.say("Kit de reconciliation local: " + str(self.report["conflict_kit"]))
+
     def reconcile(self) -> None:
         self.say("Git fetch origin/main : objets Git seulement, jamais AlinaSync...")
         self.command(
@@ -393,15 +498,29 @@ class Synchronizer:
             conflicted = _paths(self.command(
                 "diff", "--name-only", "--diff-filter=U", "-z"
             ).stdout)
-            if self.command("merge", "--abort", check=False).returncode:
+            if conflicted:
+                try:
+                    self._capture_conflicts(conflicted, local, remote)
+                except (OSError, SyncBlocked) as exc:
+                    self.report["conflict_kit_error"] = str(exc)
+                    self.say("Kit de conflits non ecrit: " + str(exc))
+            merge_marker = Path(self.text("rev-parse", "--absolute-git-dir")) / "MERGE_HEAD"
+            if merge_marker.exists():
+                if self.command("merge", "--abort", check=False).returncode:
+                    raise SyncBlocked(
+                        "Echec de merge --abort. Conserver les fichiers et "
+                        "intervenir manuellement: " + ", ".join(conflicted[:12])
+                    )
+            if not conflicted:
                 raise SyncBlocked(
-                    "Conflit et echec de merge --abort. Intervention manuelle: "
-                    + ", ".join(conflicted[:12])
+                    "Git merge refuse (sans conflits index detectes); "
+                    "aucune decision automatique: "
+                    + outcome.stderr.decode("utf-8", errors="replace")[:900]
                 )
             raise SyncBlocked(
                 "Conflit de code: " + ", ".join(conflicted[:12])
                 + ". Fusion annulee; deux historiques intacts. "
-                "Inspecter avec Codex/Claude avant de relancer."
+                "Voir kit de reconciliation dans runtime/reports/git-sync/conflicts."
             )
         self.report["merge_commits_created"] = (
             int(self.report["merge_commits_created"]) + 1

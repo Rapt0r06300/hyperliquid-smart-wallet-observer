@@ -1,0 +1,104 @@
+{
+  "analysis_stage": null,
+  "attempts": 0,
+  "campaign_id": "event-e8-2026102511-v5",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "3901a38cfc964f70f02cbfecf71502df4a25a772",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {
+    "0": {
+      "result": {
+        "command": [
+          "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+          "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_event_intelligence_v2.py",
+          "--output",
+          "/home/runner/work/_temp/campaign-output/event-e8-2026102511-v5/0"
+        ],
+        "failure_category": "QUALITY",
+        "phase": "unit",
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_event_intelligence_v2.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/event-e8-2026102511-v5/0"
+            ],
+            "name": "unit",
+            "returncode": 1,
+            "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/live_status.py\", line 34, in load_status\n    payload = json.loads(target.read_text(encoding=\"utf-8\"))\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/docs/event-intelligence-120-status.json'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_event_intelligence_v2.py\", line 29, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_event_intelligence_v2.py\", line 19, in main\n    result = build_public_event_bundle(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/dataset_v2.py\", line 216, in build_public_event_bundle\n    contract = integration_contract()\n               ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/integration_registry.py\", line 100, in integration_contract\n    \"wiring\": wiring_contract(),\n              ^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/live_status.py\", line 57, in wiring_contract\n    payload = load_status(path)\n              ^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/live_status.py\", line 36, in load_status\n    raise EventIntelligenceStatusError(f\"status artifact unavailable: {target}\") from exc\nhl_observer.event_intelligence.live_status.EventIntelligenceStatusError: status artifact unavailable: /home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/docs/event-intelligence-120-status.json\n",
+            "stdout": ""
+          }
+        ],
+        "reason": "adapter_failed",
+        "returncode": 1,
+        "status": "FAILED",
+        "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/live_status.py\", line 34, in load_status\n    payload = json.loads(target.read_text(encoding=\"utf-8\"))\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/docs/event-intelligence-120-status.json'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_event_intelligence_v2.py\", line 29, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_event_intelligence_v2.py\", line 19, in main\n    result = build_public_event_bundle(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/dataset_v2.py\", line 216, in build_public_event_bundle\n    contract = integration_contract()\n               ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/integration_registry.py\", line 100, in integration_contract\n    \"wiring\": wiring_contract(),\n              ^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/live_status.py\", line 57, in wiring_contract\n    payload = load_status(path)\n              ^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/event_intelligence/live_status.py\", line 36, in load_status\n    raise EventIntelligenceStatusError(f\"status artifact unavailable: {target}\") from exc\nhl_observer.event_intelligence.live_status.EventIntelligenceStatusError: status artifact unavailable: /home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/docs/event-intelligence-120-status.json\n",
+        "stdout": ""
+      },
+      "sha256": "b4c14ec000c0bebb7412ac6a84ef3df81498eea7078844ce3fbdb84645fc8b71"
+    }
+  },
+  "config_sha256": "dd35ebf6332244b5890c47cc9d000e3bb6ba7006ecb9b4efe08aeda14fe370d0",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-25T11:16:44.283725+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "checkpoint_id": "b4c14ec000c0bebb7412ac6a84ef3df81498eea7078844ce3fbdb84645fc8b71",
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "40196396057",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-11-01T11:16:44.283725+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "at": "2026-10-25T13:27:14.417448Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-25T13:28:43.023624Z",
+      "from": "RUNNING",
+      "reason": "adapter_failed",
+      "to": "FAILED"
+    }
+  ],
+  "kind": "event_intelligence_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 8,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "FAILED",
+  "status_reason": "adapter_failed",
+  "terminal_evidence_digest": "58da9dc3becf137c448de12a169723de23a8492b1f3e0f6c4e4a9dfbc18e955e",
+  "updated_at": "2026-10-25T13:28:43.023624Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

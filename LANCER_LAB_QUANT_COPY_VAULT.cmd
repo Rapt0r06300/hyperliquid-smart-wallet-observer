@@ -12,12 +12,14 @@ set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 set "ALINA_QUANT_CPU_PERCENT=65"
 
+set "ALINA_LAB_MODE=%~1"
+if not defined ALINA_LAB_MODE set "ALINA_LAB_MODE=safe"
 echo.
 echo ================================================================
-echo   ALINA SMART FLOW - LAB QUANT COPY-VAULT
-echo   Double clic : shards SAFE + vrais replays/backtests + freeze candidat
-echo   TRAIN / VALIDATION / OOS / FORWARD separes - objectif 5 USD/jour
-echo   PAPER / READ-ONLY - aucune collecte reseau ni transaction
+echo   ALINA SMART FLOW - COPY-VAULT LAB
+echo   Double clic : shards SAFE locaux, vrais replays/backtests
+echo   Modes : safe / tests / preflight / research / legacy
+echo   PAPER / READ-ONLY - aucun ordre, aucune collecte
 echo ================================================================
 echo.
 
@@ -32,40 +34,53 @@ if not defined ALINA_LAB_PYTHON (
   )
 )
 if not defined ALINA_LAB_PYTHON (
-  echo [ERREUR] Aucun Python compatible n'a ete trouve.
-  echo Aucun runtime ne sera telecharge ou installe automatiquement.
-  echo Preparez tools\python ou installez/configurez Python 3, puis relancez ce fichier.
-  if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
-  endlocal & exit /b 30
+  echo [ERREUR] Python 3 introuvable; aucun telechargement automatique.
+  set "RC=30"
+  goto :done
 )
 
-"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pydantic, pytest, typer; import hl_observer.backtesting.copy_vault_v21_frozen" >nul 2>nul
-if errorlevel 1 (
-  echo [ERREUR] Ce Python ne contient pas le moteur Alina et ses dependances.
-  echo Installez le projet avec : py -3 -m pip install -e ".[dev]"
-  if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
-  endlocal & exit /b 31
-)
-
-"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
-if errorlevel 1 echo [INFO] pytest-xdist absent : repli serie sur un coeur.
-
-if /I "%~1"=="preflight" (
-  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --preflight-only
-) else if /I "%~1"=="tests" (
-  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --tests-only
-) else (
+if /I "%ALINA_LAB_MODE%"=="tests" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
+  if errorlevel 1 (
+    echo [ERREUR] Installez les dependances: py -3 -m pip install -e ".[dev]"
+    set "RC=31"
+    goto :done
+  )
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import xdist" >nul 2>nul
+  if errorlevel 1 echo [INFO] xdist absent, tests en serie.
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py"
+) else if /I "%ALINA_LAB_MODE%"=="preflight" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --preflight-only
+) else if /I "%ALINA_LAB_MODE%"=="legacy" (
+  rem Preserve the Codex/Claude local economic laboratory as explicit opt-in.
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pydantic, pytest, typer" >nul 2>nul
+  if errorlevel 1 (
+    echo [NO_GO] Installez les dependances du laboratoire local : py -3 -m pip install -e ".[dev]"
+    set "RC=31"
+    goto :done
+  )
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --legacy-local-economic
+) else if /I "%ALINA_LAB_MODE%"=="research" (
+  if "%~2"=="" (
+    echo [ERREUR] Indiquez le chemin du workspace FULL/COLD en deuxieme argument.
+    set "RC=2"
+    goto :done
+  )
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --research --dataset-root "%~2"
+) else if /I "%ALINA_LAB_MODE%"=="safe" (
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --safe-research
+) else (
+  echo [ERREUR] Mode inconnu: %ALINA_LAB_MODE% [safe, tests, preflight, research, legacy]
+  set "RC=2"
+  goto :done
 )
 set "RC=%ERRORLEVEL%"
+:done
 echo.
-if /I "%~1"=="preflight" (
-  echo [INFO] Pre-verification terminee; les tests n'ont pas ete lances.
-) else if "%RC%"=="0" (
-  echo [FIN] Campagne terminee. Le verdict economique exact est dans le rapport HTML.
+if "%RC%"=="0" (
+  echo [FIN] Commande executee; seuls les rapports economiques determinent le resultat.
 ) else (
-  echo [ATTENTION] Code %RC%. Lisez le rapport et les journaux affiches ci-dessus.
+  echo [NO_GO] Code %RC%. Aucune rentabilite n'est prouvee.
 )
-echo.
 if /I not "%ALINA_QUANT_NO_PAUSE%"=="1" pause
 endlocal & exit /b %RC%

@@ -77,13 +77,15 @@ def test_dashboard_compares_current_copy_vault_with_challenger(tmp_path: Path) -
         "freeze_verdict": "candidat seulement",
     }
 
-    dashboard = lab._write_html_report(tmp_path, summary).read_text(encoding="utf-8")
+    dashboard = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
 
     assert "Copy‑Vault actuel" in dashboard
     assert "+1.2500 USD/jour" in dashboard
     assert "+2.7500 USD/jour" in dashboard
     assert "+1.5000 USD/jour" in dashboard
     assert "Amélioration mesurée" in dashboard
+
+
 
 
 def test_lab_fails_closed_when_a_required_test_group_is_empty(tmp_path: Path) -> None:
@@ -130,11 +132,9 @@ def test_copy_vault_lab_launcher_checks_complete_test_runtime() -> None:
     )
 
     assert "tools\\python\\python.exe" in launcher
-    assert "import pydantic, pytest, typer" in launcher
+    assert "import pytest, typer" in launcher
     assert 'set "ALINA_QUANT_CPU_PERCENT=65"' in launcher
     assert '"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c' in launcher
-    assert "--tests-only" in launcher
-    assert "vrais replays/backtests" in launcher
 
 
 def test_lab_writes_complete_reports_when_a_group_is_interrupted(
@@ -159,7 +159,7 @@ def test_lab_writes_complete_reports_when_a_group_is_interrupted(
         },
     )
 
-    assert lab.run_lab(tests_only=True) == 130
+    assert lab.run_lab() == 130
     reports = list((tmp_path / "runtime" / "reports" / "copy_vault_quant_lab").glob("*"))
     assert len(reports) == 1
     result = json.loads((reports[0] / "resultat.json").read_text(encoding="utf-8"))
@@ -168,4 +168,135 @@ def test_lab_writes_complete_reports_when_a_group_is_interrupted(
     dashboard = (reports[0] / "RAPPORT.html").read_text(encoding="utf-8")
     assert "Laboratoire CopyVault" in dashboard
     assert "INTERRUPTED" in dashboard
-    assert "Stratégie économiquement prouvée" in dashboard
+    assert "Meilleure stratégie prouvée" in dashboard
+
+
+def test_research_mode_refuses_missing_provenance(tmp_path: Path, capsys) -> None:
+    from tools.alina_quant_lab_console import main
+
+    assert main(["--research", "--dataset-root", str(tmp_path)]) == 2
+    assert "RESEARCH_NO_GO" in capsys.readouterr().out
+
+
+def test_research_mode_refuses_workspace_without_copy_data(tmp_path: Path, capsys) -> None:
+    from tools.alina_quant_lab_console import main
+
+    provenance = tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    provenance.parent.mkdir(parents=True)
+    provenance.write_text("{}", encoding="utf-8")
+    assert main(["--research", "--dataset-root", str(tmp_path)]) == 2
+    assert "aucune source Copy-Vault" in capsys.readouterr().out
+
+
+def test_research_mode_runs_existing_dataset_campaign(monkeypatch, tmp_path: Path) -> None:
+    from tools import alina_quant_lab_console as lab
+
+    provenance = tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    provenance.parent.mkdir(parents=True)
+    provenance.write_text("{}", encoding="utf-8")
+    source = tmp_path / "runtime" / "data" / "vault_fills.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"coin": "BTC"}\\n', encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Finished", (), {"returncode": 0})()
+
+    monkeypatch.setattr(lab.subprocess, "run", fake_run)
+    assert lab.main(["--research", "--dataset-root", str(tmp_path)]) == 0
+    assert calls
+    cmd, kwargs = calls[0]
+    assert "--no-start-collection" in cmd
+    assert "--root" in cmd
+    assert str(tmp_path) in cmd
+    assert kwargs["env"]["HL_ENABLE_MAINNET_EXECUTION"] == "0"
+    assert kwargs["env"]["HL_ENABLE_TESTNET_EXECUTION"] == "0"
+
+def test_safe_inspection_does_not_promote_unverified_shards(tmp_path: Path) -> None:
+    from tools.alina_quant_lab_console import inspect_local_safe_corpus
+
+    result = inspect_local_safe_corpus(tmp_path)
+    assert result["status"] == "NOT_CERTIFIED"
+    assert result["safe_registry_rows"] is None
+
+
+def test_safe_inspection_rejects_unbound_unpack_report(tmp_path: Path) -> None:
+    from tools.alina_quant_lab_console import inspect_local_safe_corpus
+
+    folder = tmp_path / "runtime" / "recovery" / "full"
+    folder.mkdir(parents=True)
+    (folder / "RESTORE_REPORT.json").write_text(
+        json.dumps({
+            "status": "REPLAY_READY_COMPLETE",
+            "classification": {"materialization_complete": True},
+            "catalog_verification": {"source_index_sha256": "a" * 64},
+        }), encoding="utf-8",
+    )
+    (folder / "UNPACK_REPORT.json").write_text(
+        json.dumps({"status": "SAFE_UNPACK_COMPLETE", "catalog_index_sha256": "b" * 64}),
+        encoding="utf-8",
+    )
+    result = inspect_local_safe_corpus(tmp_path)
+    assert result["status"] == "NOT_CERTIFIED"
+
+
+def test_safe_research_builds_workspace_then_runs_existing_campaign(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    from tools import alina_quant_lab_console as lab
+    from tools import copy_vault_safe_bridge as bridge
+
+    provenance = (
+        tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    )
+    provenance.parent.mkdir(parents=True)
+    provenance.write_text('{"source_kind": "alina-sync-safe-unpacked"}', encoding="utf-8")
+    source = tmp_path / "runtime" / "data" / "vault_fills_live.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"source": "LIVE_WS"}\\n', encoding="utf-8")
+    book = source.parent / "copy_vault_l2_tape.jsonl"
+    book.write_text('{"source": "HYPERLIQUID_L2_WS"}\\n', encoding="utf-8")
+
+    calls = []
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Done", (), {"returncode": 0})()
+
+    monkeypatch.setattr(lab, "ROOT", tmp_path)
+    monkeypatch.setattr(bridge, "build_safe_copy_workspace", lambda root: {
+        "workspace": str(tmp_path), "selected_shards": 2,
+        "counts": {"copy_vault_fills": 1, "copy_vault_l2": 1},
+    })
+    monkeypatch.setattr(lab.subprocess, "run", fake_run)
+    assert lab.main(["--safe-research"]) == 0
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command[-3:] == ["--root", str(tmp_path), "--no-start-collection"]
+    assert options["env"]["REAL_MAINNET_TRADING"] == "false"
+
+
+def test_legacy_economic_dispatch_keeps_safe_research_separate(monkeypatch) -> None:
+    monkeypatch.setattr(lab, "run_economic_lab", lambda **_kw: 47)
+    assert lab.main(["--legacy-local-economic"]) == 47
+
+
+def test_legacy_economic_missing_optional_module_is_no_go(monkeypatch) -> None:
+    import builtins
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "hl_observer.backtesting.copy_vault_local_lab":
+            raise ImportError("optional module deliberately absent in clean clone")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    assert lab.run_economic_lab() == 2
+
+
+def test_launcher_keeps_safe_default_and_local_legacy_mode() -> None:
+    source = (ROOT / "LANCER_LAB_QUANT_COPY_VAULT.cmd").read_text(encoding="utf-8")
+    assert 'set "ALINA_LAB_MODE=safe"' in source
+    assert "--safe-research" in source
+    assert '--legacy-local-economic' in source
+    assert '"--tests-only"' not in source
