@@ -214,7 +214,7 @@ class Synchronizer:
         # Git prunes excluded directories; never descend into SAFE shards.
         args = ["ls-files", "--others", "--exclude-standard", "-z"]
         for directory in sorted(PROTECTED_DIRS):
-            args.extend(["-x", f"{directory}/", "-x", f"{directory}/**"])
+            args.extend(["-x", f"/{directory}/", "-x", f"/{directory}/**"])
         untracked = _paths(self.command(*args).stdout)
         return staged, tracked, untracked
 
