@@ -45,10 +45,16 @@ SENSITIVE_PARTS = {
 }
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
+MAX_LOCAL_CHANGE_RETRIES = 3
+GIT_SYNC_ENGINE_BUILD = "2026-10-25-local-change-retry-v1"
 
 
 class SyncBlocked(RuntimeError):
     """Unsafe to proceed while preserving local and remote history."""
+
+
+class LocalEditsDetected(SyncBlocked):
+    """Source changed while network or Git reconciliation was in flight."""
 
 
 def _paths(data: bytes) -> list[str]:
@@ -328,9 +334,17 @@ class Synchronizer:
         staged, tracked, untracked = self._inventory()
         eligible = self._check_candidates(staged, tracked, untracked)
         if eligible:
-            raise SyncBlocked(
-                "Nouvelles modifications Codex/Claude detectees pendant le sync. "
-                "Aucune n'est ecrasee; relancer pour les sauvegarder."
+            self.report["late_local_paths"] = eligible[:100]
+            self.report["late_local_count"] = len(eligible)
+            self.report["late_local_types"] = {
+                "staged": [p for p in staged if p in eligible][:100],
+                "tracked": [p for p in tracked if p in eligible][:100],
+                "untracked": [p for p in untracked if p in eligible][:100],
+            }
+            raise LocalEditsDetected(
+                f"{len(eligible)} modification(s) arrivee(s) pendant Git Sync : "
+                + ", ".join(eligible[:12])
+                + ". Contenu conserve sur disque."
             )
 
     def remote_sha(self) -> str:
@@ -527,9 +541,30 @@ class Synchronizer:
         )
 
     def publish(self) -> None:
-        for attempt in range(1, MAX_RACE_RETRIES + 1):
-            self.reconcile()
-            self._assert_no_new_code_changes()
+        local_retries = 0
+        push_races = 0
+        while local_retries <= MAX_LOCAL_CHANGE_RETRIES and push_races <= MAX_RACE_RETRIES:
+            try:
+                self.reconcile()
+                self._assert_no_new_code_changes()
+            except LocalEditsDetected as exc:
+                if local_retries >= MAX_LOCAL_CHANGE_RETRIES:
+                    raise SyncBlocked(
+                        "Le code change encore pendant la synchronisation "
+                        f"apres {MAX_LOCAL_CHANGE_RETRIES} sauvegardes : {exc}. "
+                        "Fermer les editeurs qui reecrivent des fichiers avant de relancer."
+                    ) from exc
+                local_retries += 1
+                self.report["late_checkpoint_attempts"] = local_retries
+                self.say(
+                    f"Nouveau code detecte apres fetch. "
+                    f"Sauvegarde prudente ({local_retries}/{MAX_LOCAL_CHANGE_RETRIES})..."
+                )
+                self.checkpoint()
+                self._syntax_gate()
+                # Never merge or push before rechecking the worktree and remote.
+                continue
+
             local = self.text("rev-parse", "HEAD")
             current_remote = self.remote_sha()
             if local == current_remote:
@@ -542,24 +577,29 @@ class Synchronizer:
                 check=False,
             ).returncode:
                 self.say("GitHub a avance; nouvelle reconciliation bornee.")
+                push_races += 1
                 continue
             self.say(
-                f"Push sans force vers main ({attempt}/{MAX_RACE_RETRIES})..."
+                f"Push sans force vers main ({push_races + 1}/{MAX_RACE_RETRIES})..."
             )
             self.report["push_attempts"] = int(self.report["push_attempts"]) + 1
             pushed = self.command(
                 "push", "origin", "HEAD:refs/heads/main", check=False
             )
             if pushed.returncode == 0:
+                self.report["push_completed"] = True
+                self.report["pushed_head"] = local
                 if self.remote_sha() == local:
                     self.report["status"] = "SYNCHRONIZED"
                     self.report["head_after"] = local
                     self.say("SHA local = SHA GitHub; synchronisation verifiee.")
                     return
                 self.say("GitHub a de nouveau avance; fusion supplementaire.")
+                push_races += 1
                 continue
             if self.remote_sha() != current_remote:
                 self.say("Push non-fast-forward refuse; GitHub avance, reprise...")
+                push_races += 1
                 continue
             err = pushed.stderr.decode("utf-8", errors="replace").strip()
             raise SyncBlocked(
@@ -567,8 +607,10 @@ class Synchronizer:
                 + err[:1500]
             )
         raise SyncBlocked(
-            "GitHub avance trop souvent: 5 tentatives sans force ni perte."
+            "GitHub avance trop souvent, ou le code local change trop "
+            "frequemment: limite de tentatives atteinte. Aucun push force."
         )
+
 
     def _write_report(self) -> None:
         dest = self.root / "runtime" / "reports" / "git-sync"
