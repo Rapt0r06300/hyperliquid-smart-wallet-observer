@@ -215,6 +215,7 @@ class Synchronizer:
         args = ["ls-files", "--others", "--exclude-standard", "-z"]
         for directory in sorted(PROTECTED_DIRS):
             args.extend(["-x", f"/{directory}/", "-x", f"/{directory}/**"])
+        args.extend(["-x", "/tools/git/", "-x", "/tools/python/"])
         untracked = _paths(self.command(*args).stdout)
         return staged, tracked, untracked
 
