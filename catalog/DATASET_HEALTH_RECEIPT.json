@@ -1,7 +1,6 @@
 {
   "backlog_by_kind": {
     "copy_vault_collection": 295,
-    "event_intelligence_collection": 2,
     "market_collection": 23
   },
   "by_family": {
@@ -43613,15 +43612,13 @@
     "copy_vault_collection:PENDING": 290,
     "copy_vault_collection:STUCK": 5,
     "event_intelligence_collection:COMPLETE": 47,
-    "event_intelligence_collection:FAILED": 38,
+    "event_intelligence_collection:FAILED": 40,
     "event_intelligence_collection:PARTIAL": 32,
-    "event_intelligence_collection:PENDING": 2,
     "event_intelligence_collection:UNAVAILABLE": 24,
     "forward_paper:COMPLETE": 1,
-    "market_collection:COMPLETE": 1876,
+    "market_collection:COMPLETE": 1877,
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 23,
-    "market_collection:RUNNING": 1,
     "market_collection:UNAVAILABLE": 376,
     "module_pnl_proof:COMPLETE": 1,
     "official_archive_collection:COMPLETE": 10,
@@ -63372,11 +63369,11 @@
       "campaign_id": "event-e8-2026102500-v5",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "event_intelligence_collection",
-      "last_checkpoint_id": null,
+      "last_checkpoint_id": "b61366fbee08a50c44eb82df779673b0f17a85c2df175ed4eada4fd6a776f821",
       "lease": null,
       "lease_expires_at": null,
       "lease_owner": null,
@@ -63384,9 +63381,9 @@
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "PENDING",
-      "status_reason": "created",
-      "updated_at": "2026-10-25T00:59:35.983985Z"
+      "status": "FAILED",
+      "status_reason": "adapter_failed",
+      "updated_at": "2026-10-25T05:06:49.969362Z"
     },
     {
       "analysis_stage": null,
@@ -63394,11 +63391,11 @@
       "campaign_id": "event-e8-2026102501-v5",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "event_intelligence_collection",
-      "last_checkpoint_id": null,
+      "last_checkpoint_id": "165c6aa0093dfeeb3f6a97bdd11f8159574d24388e349af2fcddf14f7635ed61",
       "lease": null,
       "lease_expires_at": null,
       "lease_owner": null,
@@ -63406,9 +63403,9 @@
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "PENDING",
-      "status_reason": "created",
-      "updated_at": "2026-10-25T01:27:13.302020Z"
+      "status": "FAILED",
+      "status_reason": "adapter_failed",
+      "updated_at": "2026-10-25T05:07:15.701387Z"
     },
     {
       "analysis_stage": null,
@@ -78002,26 +77999,21 @@
       "campaign_id": "market-e8-1-2026102501-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "market_collection",
-      "last_checkpoint_id": null,
-      "lease": {
-        "acquired_at": "2026-10-25T03:28:52.728239Z",
-        "expires_at": "2026-10-25T09:13:52.728239Z",
-        "lease_token_sha256": "e08e34079137921ba68f5243fb33f4562ba05cd088345dd1fad2c96814441ff7",
-        "owner_run_id": "40157667634"
-      },
-      "lease_expires_at": "2026-10-25T09:13:52.728239Z",
-      "lease_owner": "40157667634",
+      "last_checkpoint_id": "039ea195b5bb1b41eb9b9636a31bd6b5d8ed995f55103370ea5afce413b46640",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
       "next_due_at": null,
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "RUNNING",
-      "status_reason": "worker_started",
-      "updated_at": "2026-10-25T03:28:52.728284Z"
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-25T04:53:54.195938Z"
     },
     {
       "analysis_stage": null,
@@ -113767,13 +113759,13 @@
     "unique_trade_count_exact": false,
     "valid_record_count_exact": false
   },
-  "dataset_commit": "c85e8bd9d7ead98d0f48922d0d2601304bf0d58b",
-  "metrics_digest": "5083afa4ff64ddc030d01ef8879fced65c5956a3212a95080d888cdf418adc20",
+  "dataset_commit": "6598636a9d9fd8a16989b40a16cc0350b35ee449",
+  "metrics_digest": "74096adcb63c20a7c431370d0a3d840dfd80e1326f3194714b016b146b53526b",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
   "oldest_next_due_at": "2026-10-02T18:10:03.324968Z",
   "oldest_pending_updated_at": "2026-10-01T04:38:09.193828Z",
-  "pending_campaign_count": 315,
+  "pending_campaign_count": 313,
   "phase": {
     "analysis_stage": null,
     "collection_cutoff_at_utc": null,
@@ -113790,7 +113782,7 @@
     "mismatches": [],
     "status": "CONSISTENT"
   },
-  "receipt_digest": "07d720f386cefd9d87f5917302d6db7165e3cbdd82fa98a60caa186fd2aead3e",
+  "receipt_digest": "722825e596a925931cd1c2900af886fdc429ac17fc59bd57b3aaf6b9c34aa6b5",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "REPLAYABLE_BUT_PARTIAL": 45319,
@@ -113837,7 +113829,7 @@
   ],
   "totals": {
     "GAP_COUNT_COVERAGE_COMPLETE": false,
-    "GAP_COUNT_MISSING_SHARDS": 55392,
+    "GAP_COUNT_MISSING_SHARDS": 33559,
     "GLOBAL_UNIQUE_FAILURE_REASON_COUNT": 0,
     "GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE": false,
     "GLOBAL_UNIQUE_TRADE_IDENTITY_DIGEST": null,
@@ -113852,7 +113844,7 @@
     "TOTAL_COMPRESSED_BYTES": 163614208967,
     "TOTAL_CROSS_SHARD_OVERLAP_TRADES": 0,
     "TOTAL_DUPLICATE_RECORDS": 0,
-    "TOTAL_GAP_RECORDS": 0,
+    "TOTAL_GAP_RECORDS": 23217875,
     "TOTAL_INVALID_RECORDS": 0,
     "TOTAL_L2_RECORDS": 350802766,
     "TOTAL_QUARANTINED_RECORDS": 57380372,
