@@ -249,3 +249,19 @@ def test_pem_private_key_prevented_before_staging(repos):
     assert git(local, "rev-parse", "HEAD") == original
     assert git(origin, "rev-parse", "main") == original
     assert local_key.exists()
+
+
+def test_nested_python_dataset_and_runtime_directories_are_source(repos):
+    local, _, origin = repos
+    paths = (
+        "src/hl_observer/datasets/new_adapter.py",
+        "src/hl_observer/runtime/new_worker.py",
+    )
+    for name in paths:
+        dst = local / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text("is_real_code = True\n", encoding="utf-8")
+    rc, receipt = run_sync(local)
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    for name in paths:
+        assert git(origin, "show", f"main:{name}") == "is_real_code = True"
