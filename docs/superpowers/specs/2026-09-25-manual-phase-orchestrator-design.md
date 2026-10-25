@@ -108,7 +108,7 @@ not mean the platform has no private or undocumented endpoint.
 |---|---|---|
 | Hyperliquid | Public wallet/vault endpoints and existing AlinaSync SAFE shards | Active certified Copy-Vault path |
 | OKX Copy Trading | Public leader ranking and public position endpoints; history limited to the venue's documented recent window and missing full costs/capital flows | Research observer only; never SAFE/PnL proof |
-| Orderly Network | Official zero-auth read-only Public Info API documents `topAddresses`, address-scoped `trades`, `accountState`, `fundingPayments`, and `userDepositsWithdrawals`, with opaque cursors; documented as a separate venue | Adapter candidate; not enabled until collection, completeness, market mapping and replay gates are implemented |
+| Orderly Network | Official zero-auth read-only Public Info API documents address leaderboard discovery and address-scoped `trades`, `accountState`, `fundingPayments`, and `userDepositsWithdrawals`, with opaque cursors. Top-address snapshots are cached for 30 minutes; archived trades older than 24 hours refresh hourly and omit `realized_pnl` | Strongest unauthenticated adapter candidate; not enabled until collection, completeness, market mapping and replay gates are implemented. Archived PnL must be reconstructed and reconciled before any economic scoring |
 | dYdX Chain | Official Indexer docs expose public address/subaccount fills, transfers, historical PnL, positions and market data; address is an input, not a verified global copy-trader discovery feed | Adapter candidate only after discovery, pagination/retention and exact-count coverage are implemented |
 | Drift / current protocol data API | Public historical records are documented, but the located archive states it contains parsed records and is not a complete certified Copy-Vault source; public leader discovery was not established | Discovery/research candidate; disabled for proof |
 | Binance Copy Trading | Official Copy Trading REST family documents lead-status/account-oriented endpoints and key-pair authentication; no qualifying unauthenticated leader-history contract was verified | Disabled; do not use account credentials |
@@ -126,6 +126,8 @@ not mean the platform has no private or undocumented endpoint.
 
 Primary documentation reviewed: [OKX API v5](https://www.okx.com/docs-v5/en/),
 [Orderly Public Info API](https://github.com/OrderlyNetwork/documentation-public/blob/main/build-on-omnichain/public-info-api/overview.mdx),
+[Orderly top-address discovery](https://orderly.network/docs/build-on-omnichain/public-info-api/platform/top-addresses),
+[Orderly address trades](https://orderly.network/docs/build-on-omnichain/public-info-api/account/trades),
 [dYdX Indexer Client](https://docs.dydx.exchange/api_integration-clients/indexer_client),
 [Drift historical data API](https://velocity-exchange.github.io/v2-teacher/),
 [Binance Copy Trading API catalog](https://developers.binance.com/en/docs/catalog/advanced-trading-copy-trading),
