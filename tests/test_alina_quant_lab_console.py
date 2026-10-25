@@ -213,3 +213,38 @@ def test_safe_inspection_rejects_unbound_unpack_report(tmp_path: Path) -> None:
     )
     result = inspect_local_safe_corpus(tmp_path)
     assert result["status"] == "NOT_CERTIFIED"
+
+
+def test_safe_research_builds_workspace_then_runs_existing_campaign(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    from tools import alina_quant_lab_console as lab
+    from tools import copy_vault_safe_bridge as bridge
+
+    provenance = (
+        tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
+    )
+    provenance.parent.mkdir(parents=True)
+    provenance.write_text('{"source_kind": "alina-sync-safe-unpacked"}', encoding="utf-8")
+    source = tmp_path / "runtime" / "data" / "vault_fills_live.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"source": "LIVE_WS"}\\n', encoding="utf-8")
+    book = source.parent / "copy_vault_l2_tape.jsonl"
+    book.write_text('{"source": "HYPERLIQUID_L2_WS"}\\n', encoding="utf-8")
+
+    calls = []
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Done", (), {"returncode": 0})()
+
+    monkeypatch.setattr(lab, "ROOT", tmp_path)
+    monkeypatch.setattr(bridge, "build_safe_copy_workspace", lambda root: {
+        "workspace": str(tmp_path), "selected_shards": 2,
+        "counts": {"copy_vault_fills": 1, "copy_vault_l2": 1},
+    })
+    monkeypatch.setattr(lab.subprocess, "run", fake_run)
+    assert lab.main(["--safe-research"]) == 0
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command[-3:] == ["--root", str(tmp_path), "--no-start-collection"]
+    assert options["env"]["REAL_MAINNET_TRADING"] == "false"
