@@ -62,6 +62,30 @@ def test_lab_counts_a_single_collection_error() -> None:
     assert counts["passed"] == 3
 
 
+def test_dashboard_compares_current_copy_vault_with_challenger(tmp_path: Path) -> None:
+    summary = {
+        "run_id": "comparison", "head": "abc", "status": "PROMISING",
+        "safe_inputs": {"verified_assets": 2, "unique_fills": 3, "unique_books": 4},
+        "current_copy_vault": {
+            "status": "MEASURED", "validation": {"daily_mean_net_pnl_usd": 1.25},
+        },
+        "economic_result": {
+            "status": "PROMISING", "reason": "heldout pending", "candidates_tested": 12,
+            "freeze_created": True, "economically_proven": False,
+            "validation": {"daily_mean_net_pnl_usd": 2.75},
+        },
+        "freeze_verdict": "candidat seulement",
+    }
+
+    dashboard = lab._write_html_report(tmp_path, summary).read_text(encoding="utf-8")
+
+    assert "Copy‑Vault actuel" in dashboard
+    assert "+1.2500 USD/jour" in dashboard
+    assert "+2.7500 USD/jour" in dashboard
+    assert "+1.5000 USD/jour" in dashboard
+    assert "Amélioration mesurée" in dashboard
+
+
 def test_lab_fails_closed_when_a_required_test_group_is_empty(tmp_path: Path) -> None:
     result = _run_group("groupe obligatoire", [], tmp_path / "missing.log")
 
@@ -106,9 +130,11 @@ def test_copy_vault_lab_launcher_checks_complete_test_runtime() -> None:
     )
 
     assert "tools\\python\\python.exe" in launcher
-    assert "import pytest, typer" in launcher
+    assert "import pydantic, pytest, typer" in launcher
     assert 'set "ALINA_QUANT_CPU_PERCENT=65"' in launcher
     assert '"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c' in launcher
+    assert "--tests-only" in launcher
+    assert "vrais replays/backtests" in launcher
 
 
 def test_lab_writes_complete_reports_when_a_group_is_interrupted(
@@ -133,7 +159,7 @@ def test_lab_writes_complete_reports_when_a_group_is_interrupted(
         },
     )
 
-    assert lab.run_lab() == 130
+    assert lab.run_lab(tests_only=True) == 130
     reports = list((tmp_path / "runtime" / "reports" / "copy_vault_quant_lab").glob("*"))
     assert len(reports) == 1
     result = json.loads((reports[0] / "resultat.json").read_text(encoding="utf-8"))
@@ -142,4 +168,4 @@ def test_lab_writes_complete_reports_when_a_group_is_interrupted(
     dashboard = (reports[0] / "RAPPORT.html").read_text(encoding="utf-8")
     assert "Laboratoire CopyVault" in dashboard
     assert "INTERRUPTED" in dashboard
-    assert "Meilleure stratégie prouvée" in dashboard
+    assert "Stratégie économiquement prouvée" in dashboard
