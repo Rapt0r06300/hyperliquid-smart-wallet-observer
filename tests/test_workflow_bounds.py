@@ -461,6 +461,29 @@ def test_safe_restore_parity_uses_same_lossless_alias_compaction_as_writers():
     assert "Run deterministic restore tests" in text
 
 
+def test_safe_restore_regression_checks_current_code_sync_launcher() -> None:
+    text = _workflow("alina-restore-safe-regression.yml")
+    assert "tools/alina_git_code_sync.py" in text
+    assert "tests/test_alina_git_code_sync.py" in text
+    assert "tests/test_push_github_launcher.py" in text
+    assert "tools/push_github_safe.ps1" not in text
+    assert "Prove every Git wrapper forwards all arguments" not in text
+    assert "PREPARER_GIT_PORTABLE.cmd" in text
+
+
+def test_git_code_sync_safety_runs_cross_platform_on_pull_requests() -> None:
+    text = _workflow("alina-git-code-sync-tests.yml")
+    assert "pull_request:" in text
+    assert "filter: blob:none" in text
+    assert "sparse-checkout:" in text
+    assert "tests/test_alina_git_code_sync.py" in text
+    assert "tests/test_push_github_launcher.py" in text
+    assert "tests/test_push_github_safe_contract.py" in text
+    sparse = text.split("sparse-checkout: |", 1)[1].split("persist-credentials:", 1)[0]
+    assert "datasets" not in sparse
+    assert "catalog" not in sparse
+
+
 def test_pip_cache_discovery_is_bounded_in_every_workflow() -> None:
     root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
     for path in root.glob("*.yml"):
