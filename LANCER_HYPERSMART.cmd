@@ -685,6 +685,7 @@ if /I "%SUB%"=="stop"              goto :cmd_stop
 if /I "%SUB%"=="restart"           goto :cmd_restart
 if /I "%SUB%"=="restart-userfills" goto :cmd_ruserfills
 if /I "%SUB%"=="collectors"        goto :cmd_collectors
+if /I "%SUB%"=="collectors-harvest" goto :cmd_collectors_harvest
 if /I "%SUB%"=="collectors-maintenance" goto :cmd_collectors_maintenance
 if /I "%SUB%"=="collectors-research"    goto :cmd_collectors_research
 if /I "%SUB%"=="collectors-all"         goto :cmd_collectors_all
@@ -725,6 +726,7 @@ echo     stop                arret cible ^(collecteurs + userfills^), jamais un 
 echo     restart             stop puis autopilot
 echo     restart-userfills   recharge le collecteur userfills avec le code courant
 echo     collectors          demarre/reanime allMids + BBO + userFills ^(CORE^)
+echo     collectors-harvest  collecte HARVEST; checkpoints causaux via LANCER_COLLECTEURS_COPY_VAULT.cmd
 echo     collectors-maintenance   outils periodiques explicites
 echo     collectors-research      collecteurs de recherche explicites
 echo     collectors-all           tous les collecteurs ^(diagnostic exceptionnel^)
@@ -886,6 +888,16 @@ echo   Profil CORE actif. Journaux : runtime\logs\. Le moteur n'a pas ete touche
 echo.
 goto :fin
 
+:cmd_collectors_harvest
+echo.
+echo   Demarrage du profil HARVEST ^(collecte Copy-Vault, sans moteur principal^)...
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous harvest
+set "RC=%ERRORLEVEL%"
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
+if "%RC%"=="0" set "RC=%ERRORLEVEL%"
+echo.
+goto :fin
+
 :cmd_collectors_maintenance
 echo.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
@@ -903,7 +915,9 @@ goto :fin
 :cmd_collectors_all
 echo.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous all
+set "RC=%ERRORLEVEL%"
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status all
+if "%RC%"=="0" set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 

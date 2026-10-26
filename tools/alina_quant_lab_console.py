@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import html
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -652,13 +655,24 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     history = list(summary.get("improvement_history") or [])
     inputs = dict(summary.get("safe_inputs") or {})
     status = str(summary.get("status") or "UNKNOWN")
-    status_class = "ok" if status == "PROVEN" else ("warn" if status in {"PROMISING", "MORE_DATA", "UNMEASURABLE", "PREFLIGHT_ONLY"} else "bad")
+    live = dict(summary.get("live") or {})
+    auto_refresh = "<meta http-equiv='refresh' content='5'>" if live.get("active") is True else ""
+    status_class = "ok" if status == "PROVEN" else (
+        "warn" if status in {
+            "PROMISING", "MORE_DATA", "UNMEASURABLE", "PREFLIGHT_ONLY", "RUNNING",
+            "SEARCH_RUNNING", "DATASET_CHANGED", "INTERRUPTED", "SEARCH_SPACE_EXHAUSTED",
+        } else "bad"
+    )
     def value(source: Mapping[str, Any], segment: str) -> float | None:
         row = source.get(segment) if isinstance(source.get(segment), dict) else {}
         value = row.get("daily_mean_net_pnl_usd")
         return None if value is None else float(value)
     def display(number: float | None) -> str:
-        return "non mesurable" if number is None else f"{number:+.4f} USD/jour"
+        try:
+            measured = float(number)
+        except (TypeError, ValueError, OverflowError):
+            return "non mesurable"
+        return "non mesurable" if not math.isfinite(measured) else f"{measured:+.4f} USD/jour"
     def latest(source: Mapping[str, Any]) -> float | None:
         for segment in ("forward", "oos", "validation", "train"):
             measured = value(source, segment)
@@ -688,14 +702,29 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     if candidate_daily is None and historical_best.get("daily_net_pnl_usd") is not None:
         candidate_daily = float(historical_best["daily_net_pnl_usd"])
         candidate_is_historical = True
+    best_candidate = economic.get("best_candidate") if isinstance(economic.get("best_candidate"), Mapping) else {}
+    best_train = best_candidate.get("train") if isinstance(best_candidate.get("train"), Mapping) else {}
+    baseline_train = economic.get("baseline_train") if isinstance(economic.get("baseline_train"), Mapping) else {}
+    baseline_stats = baseline_train.get("statistics") if isinstance(baseline_train.get("statistics"), Mapping) else {}
+    baseline_mean = baseline_train.get("active_day_mean_net_pnl_usd")
+    if baseline_mean is None:
+        baseline_mean = baseline_stats.get("mean_net_pnl_usd_per_active_day")
+    candidate_train_mean = best_train.get("active_day_mean_net_pnl_usd")
+    if candidate_train_mean is None:
+        candidate_train_mean = best_train.get("daily_mean_net_pnl_usd")
+    if candidate_train_mean is not None:
+        candidate_daily = float(candidate_train_mean)
     improvement = (
         candidate_daily - current_daily
         if candidate_daily is not None and current_daily is not None else None
     )
+    if candidate_train_mean is not None and baseline_mean is not None:
+        improvement = float(candidate_train_mean) - float(baseline_mean)
     if improvement is None and historical.get("improvement_usd_per_day") is not None:
         improvement = float(historical["improvement_usd_per_day"])
     history_rows = []
     for row in reversed(history[-20:]):
+        comparison = row.get("comparison") if isinstance(row.get("comparison"), Mapping) else {}
         history_rows.append(
             "<tr>"
             f"<td>{html.escape(str(row.get('run_id') or ''))}</td>"
@@ -703,6 +732,7 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
             f"<td>{display(row.get('baseline_daily_net_usd'))}</td>"
             f"<td>{display(row.get('candidate_daily_net_usd'))}</td>"
             f"<td>{display(row.get('improvement_usd_per_day'))}</td>"
+            f"<td>{display(comparison.get('improvement')) if comparison.get('metric') == 'BONFERRONI_LCB_USD_PER_ACTIVE_TRAIN_DAY' else 'non mesurable'}</td>"
             f"<td>{'OUI' if row.get('economically_proven') is True else 'NON'}</td>"
             "</tr>"
         )
@@ -711,11 +741,36 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         economic.get("freeze_created") is True
         or historical.get("improvement_found") is True
     )
+    last_trial = live.get("last_trial") if isinstance(live.get("last_trial"), Mapping) else {}
+    progress_count = live.get("candidates_tested", economic.get("candidates_tested", 0)) or 0
+    search_bound = live.get("search_space_upper_bound", economic.get("search_space_upper_bound"))
+    elapsed = live.get("elapsed_seconds")
+    elapsed_display = f"{float(elapsed):,.0f} s" if elapsed is not None else "—"
+    current_candidate_score = best_candidate.get("score_usd_per_active_day")
+    verified_assets_display = live.get("safe_verified_assets", inputs.get("verified_assets", 0))
+    expected_assets_display = live.get("safe_expected_assets", inputs.get("expected_safe_shards", 0))
+    unique_fills_display = live.get("safe_unique_fills", inputs.get("unique_fills", 0))
+    unique_books_display = live.get("safe_unique_books", inputs.get("unique_books", 0))
+    verified_hashes_recomputed = int(inputs.get("hashes_recomputed") or 0)
+    verified_hashes_reused = int(inputs.get("cached_hashes_reused_after_stat_match") or 0)
+    catalog_status_display = str(inputs.get("safe_catalog_status") or "audit en cours")
+    missing_shards_display = inputs.get("missing_shards")
+    reason_display = (
+        str(live.get("message") or "campagne active; aucun verdict final")
+        if status in {"RUNNING", "SEARCH_RUNNING"} and not economic.get("reason")
+        else _human_reason(economic.get("reason"))
+    )
+    improvement_note = (
+        "gain moyen TRAIN face au baseline TRAIN, sur la même sélection SAFE; résultat exploratoire"
+        if candidate_train_mean is not None and baseline_mean is not None
+        else "écart contre le Copy‑Vault actuel, comparable seulement sur le même segment"
+    )
     target = report_dir / "RAPPORT.html"
-    target.write_text(
+    html_content = (
         "<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Laboratoire CopyVault</title><style>"
+        + auto_refresh
+        + "<title>Laboratoire CopyVault</title><style>"
         ":root{color-scheme:dark}body{font:16px system-ui;margin:0;background:#09111f;color:#e7edf7}"
         "main{max-width:1050px;margin:auto;padding:32px}h1{margin-bottom:6px}.muted{color:#9fb0c8}"
         ".hero,.card{background:#111d30;border:1px solid #29405f;border-radius:14px;padding:20px}"
@@ -723,22 +778,41 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         ".status{font-weight:800;font-size:1.15rem}.ok{color:#54e38e}.warn{color:#ffd166}.bad{color:#ff6b7a}"
         ".answer{font-size:1.25rem}.path{overflow-wrap:anywhere;color:#9fb0c8}"
         "code{color:#8fd3ff}li{margin:.5rem 0}table{width:100%;border-collapse:collapse}"
+        ".live{border-left:5px solid #43c7f5}.live strong{color:#8fd3ff}.small{font-size:.95rem}"
         "th,td{text-align:left;padding:9px;border-bottom:1px solid #29405f}</style></head><body><main>"
         "<h1>Laboratoire CopyVault</h1>"
         f"<p class='muted'>Run {html.escape(str(summary.get('run_id') or ''))} · HEAD "
         f"<code>{html.escape(str(summary.get('head') or ''))}</code></p>"
+        f"<section class='hero live'><h2>En direct : {html.escape(str(live.get('stage') or 'ÉTAT DU LABORATOIRE'))}</h2>"
+        f"<p class='answer'>{html.escape(str(live.get('message') or 'Aucune activité en cours.'))}</p>"
+        f"<p class='small'>Durée de cette session : {html.escape(elapsed_display)} · "
+        f"Essais uniques : {int(progress_count):,}"
+        f"{(' / ' + format(int(search_bound), ',') + ' combinaisons déclarées') if search_bound is not None else ''} · "
+        f"Shards SAFE vérifiés : {int(verified_assets_display or 0):,} / {int(expected_assets_display or 0):,} · "
+        f"Fills / carnets reconstruits : {int(unique_fills_display or 0):,} / {int(unique_books_display or 0):,}</p>"
+        f"<p class='small'>Catalogue : {html.escape(catalog_status_display)} · "
+        f"shards locaux absents : {html.escape(str(missing_shards_display if missing_shards_display is not None else 'calcul en cours'))} · "
+        f"corpus complet : {'oui' if inputs.get('data_complete') is True else 'non' if inputs.get('data_complete') is False else 'calcul en cours'}</p>"
+        f"<p class='small'>Dernier essai : {html.escape(str(last_trial.get('trial_number') or '—'))} · "
+        f"{html.escape(str(last_trial.get('status') or '—'))} · "
+        f"score conservateur du meilleur candidat TRAIN : {display(current_candidate_score)} · "
+        f"moyenne TRAIN actuelle : {display(baseline_mean)}</p>"
+        f"<p class='small'>Base de comparaison : {html.escape(str(economic.get('baseline_comparison_basis') or 'pas encore calculée'))}. "
+        "Le score LCB pénalise les essais multiples; le résultat TRAIN ne vaut pas preuve indépendante.</p>"
+        f"<p class='muted'>Mis à jour : {html.escape(str(live.get('updated_at_utc') or '—'))}. "
+        f"{('Cette page s’actualise toutes les 5 secondes.' if live.get('active') is True else 'Session arrêtée; rapport final.')}</p></section>"
         f"<section class='hero'><p class='status {status_class}'>VERDICT : {html.escape(status)}</p>"
         f"<p class='answer'><b>Stratégie économiquement prouvée :</b> {'OUI' if proven else 'NON'}</p>"
         f"<p><b>Candidat gelé pour comparaison suivante :</b> {'OUI' if frozen else 'NON'}</p>"
         f"<p><b>Objectif :</b> {OBJECTIVE_USD_PER_DAY:.2f} USD nets/jour avec {PAPER_CAPITAL_USD:.0f} USD paper.</p>"
-        f"<p><b>Pourquoi :</b> {html.escape(_human_reason(economic.get('reason')))}</p></section>"
+        f"<p><b>Pourquoi :</b> {html.escape(reason_display)}</p></section>"
         "<h2>Comparaison avec le Copy‑Vault actuel</h2><section class='grid'>"
         f"<article class='card'><h3>Copy‑Vault actuel</h3><p class='answer'>{'≈ ' if current_daily is None and current_display_daily is not None else ''}{display(current_display_daily)}</p>"
         f"<p class='muted'>{html.escape(str(current.get('status') or 'NON MESURÉ'))} — {html.escape(_human_reason(current.get('reason')))}</p></article>"
-        f"<article class='card'><h3>Meilleur candidat</h3><p class='answer'>{display(candidate_daily)}</p>"
+        f"<article class='card'><h3>Meilleur candidat TRAIN</h3><p class='answer'>{display(candidate_daily)}</p>"
         f"<p class='muted'>{html.escape(str((historical.get('status') if candidate_is_historical else economic.get('status')) or 'NON MESURÉ'))}</p></article>"
         f"<article class='card'><h3>Amélioration mesurée</h3><p class='answer'>{display(improvement)}</p>"
-        "<p class='muted'>candidat moins Copy‑Vault actuel, uniquement si les deux sont comparables</p></article></section>"
+        f"<p class='muted'>{html.escape(improvement_note)}</p></article></section>"
         + (
             "<p class='muted'>Estimation actuelle fondée sur le dernier TRAIN V21 : "
             f"environ {display(current_display_daily)}, borne statistique conservatrice "
@@ -765,25 +839,397 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"<article class='card'><h3>FORWARD</h3><p>actuel {display(value(current, 'forward'))}<br>candidat {display(value(economic, 'forward'))}</p></article></section>"
         "<h2>Historique conservé des améliorations</h2>"
         + (
-            "<table><thead><tr><th>Run</th><th>État</th><th>Avant</th><th>Candidat</th><th>Gain</th><th>Prouvé</th></tr></thead>"
+            "<table><thead><tr><th>Run</th><th>État</th><th>Avant/jour</th><th>Candidat/jour</th><th>Gain moyen</th><th>Gain LCB TRAIN</th><th>Prouvé</th></tr></thead>"
             f"<tbody>{''.join(history_rows)}</tbody></table>"
             if history_rows else "<p>Aucun candidat amélioré n'a encore pu être mesuré et gelé.</p>"
         )
         +
         "<h2>Ce que ce run a réellement fait</h2><ul>"
-        f"<li>{int(inputs.get('verified_assets') or 0)} fichiers Copy‑Vault vérifiés à nouveau par taille et SHA‑256.</li>"
+        f"<li>{int(inputs.get('verified_assets') or 0)} shards SAFE contrôlés par taille et identité locale; "
+        f"{verified_hashes_recomputed:,} SHA‑256 calculés cette passe et {verified_hashes_reused:,} réutilisés après identité inchangée.</li>"
         f"<li>{int(inputs.get('unique_fills') or 0)} fills leader uniques et {int(inputs.get('unique_books') or 0)} carnets L2 uniques reconstruits.</li>"
         f"<li>{int(economic.get('candidates_tested') or 0) + int(historical.get('trial_count') or 0)} configurations réellement rejouées, coûts et liquidité observée inclus.</li>"
         "<li>Recherche sur TRAIN uniquement; VALIDATION, OOS et FORWARD ne servent jamais au réglage.</li>"
         "<li>Aucune collecte réseau, aucun ordre, aucune clé et aucune transaction.</li></ul>"
         f"<h2>Verdict simple</h2><p>{html.escape(str(summary.get('freeze_verdict') or ''))}</p>"
         f"<p class='path'>Données machine : {html.escape(str(report_dir / 'resultat.json'))}</p>"
-        "</main></body></html>",
-        encoding="utf-8",
+        "</main></body></html>"
     )
+    temporary = target.with_suffix(".html.partial")
+    temporary.write_text(html_content, encoding="utf-8")
+    os.replace(temporary, target)
     return target
 
-def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) -> int:
+
+def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> Path:
+    """Atomically refresh the machine result and readable report during a run."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    result_path = report_dir / "resultat.json"
+    temporary = result_path.with_suffix(".json.partial")
+    public_summary = dict(summary)
+    safe = dict(public_summary.get("safe_inputs") or {})
+    for key in [name for name in safe if str(name).startswith("_")]:
+        safe.pop(key, None)
+    public_summary["safe_inputs"] = safe
+    temporary.write_text(
+        json.dumps(public_summary, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, result_path)
+    economic = dict(summary.get("economic_result") or {})
+    inputs = dict(summary.get("safe_inputs") or {})
+    live = dict(summary.get("live") or {})
+    lines = [
+        "# Laboratoire CopyVault — état en direct",
+        "",
+        f"- Run : `{summary.get('run_id')}` · HEAD `{summary.get('head')}`",
+        f"- État : **{summary.get('status', 'UNKNOWN')}**",
+        f"- Activité : {live.get('message', 'préparation')}",
+        f"- Données SAFE : {inputs.get('verified_assets', 0)} / {inputs.get('expected_safe_shards', 0)} shards vérifiés; "
+        f"{inputs.get('unique_fills', 0)} fills et {inputs.get('unique_books', 0)} carnets uniques.",
+        f"- Essais uniques : {economic.get('candidates_tested', 0)} · candidat gelé : "
+        f"{'oui' if economic.get('freeze_created') else 'non'} · preuve économique : "
+        f"{'oui' if economic.get('economically_proven') else 'non'}.",
+        "- Toute la recherche est PAPER / READ-ONLY; aucune collecte réseau ni aucun ordre.",
+        "",
+        "Le score TRAIN sert à la recherche uniquement. Une amélioration TRAIN gelée reste exploratoire "
+        "jusqu'à validation indépendante et forward paper postérieur au gel.",
+    ]
+    md_path = report_dir / "RAPPORT.md"
+    md_tmp = md_path.with_suffix(".md.partial")
+    md_tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(md_tmp, md_path)
+    return _write_economic_html_report(report_dir, summary)
+
+
+def _local_safe_watch_fingerprint(root: Path, watch_files: list[str]) -> str:
+    digest = hashlib.sha256()
+    index_path = root / "catalog" / "DATA_INDEX.json"
+    for path in [index_path, *(Path(value) for value in watch_files)]:
+        digest.update(str(path).encode("utf-8", errors="replace"))
+        try:
+            stat = path.stat()
+            digest.update(
+                f"\0{stat.st_size}\0{stat.st_dev}\0{stat.st_ino}\0{stat.st_mtime_ns}\0{stat.st_ctime_ns}".encode()
+            )
+        except OSError:
+            digest.update(b"\0MISSING")
+    return digest.hexdigest()
+
+
+def _run_continuous_safe_lab(
+    report_dir: Path, *, run_id: str, head: str, continuous: bool,
+) -> int:
+    from hl_observer.backtesting.copy_vault_local_lab import (
+        OBJECTIVE_USD_PER_DAY, PAPER_CAPITAL_USD, evaluate_current_copy_vault,
+        _search_space_size, load_improvement_history, materialize_safe_workspace,
+        run_local_campaign,
+    )
+
+    start_monotonic = time.monotonic()
+    recovery = ROOT / "runtime" / "recovery" / "full"
+    workspace = report_dir / "workspace"
+    persist_lock = threading.RLock()
+    heartbeat_stop = threading.Event()
+    history_error: str | None = None
+    try:
+        initial_history = load_improvement_history(ROOT)
+    except (OSError, ValueError, TypeError) as exc:
+        initial_history = []
+        history_error = f"{type(exc).__name__}: {exc}"
+    summary: dict[str, Any] = {
+        "run_id": run_id, "head": head, "paper_read_only": True,
+        "network_or_collection_started": False,
+        "status": "RUNNING",
+        "freeze_verdict": "Recherche TRAIN en cours; aucun résultat held-out n'est ouvert pendant la recherche.",
+        "safe_inputs": {}, "current_copy_vault": {}, "historical_replay": {},
+        "improvement_history": initial_history, "economic_result": {},
+        "live": {
+            "active": True, "stage": "INITIALISATION", "message": "préparation du labo local",
+            "search_space_upper_bound": _search_space_size(), "candidates_tested": 0,
+        },
+    }
+
+    def persist() -> None:
+        with persist_lock:
+            summary["live"]["elapsed_seconds"] = round(time.monotonic() - start_monotonic, 1)
+            summary["live"]["updated_at_utc"] = datetime.now(UTC).isoformat()
+            _write_economic_report_bundle(report_dir, summary)
+
+    def update_summary(
+        *, fields: Mapping[str, Any] | None = None,
+        live: Mapping[str, Any] | None = None,
+    ) -> None:
+        with persist_lock:
+            if fields:
+                summary.update(fields)
+            if live:
+                summary["live"].update(live)
+
+    def heartbeat() -> None:
+        while not heartbeat_stop.wait(5):
+            with persist_lock:
+                active = summary.get("live", {}).get("active") is True
+            if active:
+                try:
+                    persist()
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    # The main thread reports and persists the underlying failure.
+                    continue
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat, name="copy-vault-report-heartbeat", daemon=True,
+    )
+
+    print("ALINA SMART FLOW — LABORATOIRE CONTINU COPY-VAULT", flush=True)
+    print("PAPER / READ-ONLY · vérification locale SAFE · aucun téléchargement · Ctrl+C pour arrêter.", flush=True)
+    html_report = _write_economic_report_bundle(report_dir, summary)
+    print(f"INTERFACE EN DIRECT : {html_report}", flush=True)
+    _open_report(html_report)
+    heartbeat_thread.start()
+    last_scan_dashboard = 0.0
+    last_scan_console = 0.0
+
+    def on_scan_progress(message: str) -> None:
+        nonlocal last_scan_dashboard, last_scan_console
+        live_update: dict[str, Any] = {
+            "stage": "VÉRIFICATION / RECONSTRUCTION DES SHARDS SAFE", "message": message,
+        }
+        numbers = [int(value.replace(",", "")) for value in re.findall(r"\d[\d,]*", message)]
+        if message.startswith("Audit SAFE") and len(numbers) >= 3:
+            live_update.update({
+                "safe_verified_assets": numbers[2], "safe_expected_assets": numbers[1],
+            })
+        elif message.startswith("Reconstruction SAFE") and len(numbers) >= 5:
+            live_update.update({
+                "safe_reconstructed_assets": numbers[0], "safe_expected_assets": numbers[1],
+                "safe_raw_frames": numbers[2], "safe_unique_fills": numbers[3],
+                "safe_unique_books": numbers[4],
+            })
+        update_summary(live=live_update)
+        now = time.monotonic()
+        if now - last_scan_dashboard >= 5:
+            persist()
+            last_scan_dashboard = now
+        if now - last_scan_console >= 15:
+            print("[SAFE] " + message, flush=True)
+            last_scan_console = now
+
+    try:
+        if history_error is not None:
+            raise RuntimeError("IMMUTABLE_IMPROVEMENT_HISTORY_UNREADABLE: " + history_error)
+        while True:
+            update_summary(live={"stage": "VÉRIFICATION SAFE LOCALE", "message": "contrôle SHA-256 des shards CopyVault présents"})
+            persist()
+            safe_inputs = materialize_safe_workspace(
+                recovery, workspace, progress=on_scan_progress,
+            )
+            update_summary(fields={
+                "safe_inputs": safe_inputs,
+                "improvement_history": load_improvement_history(ROOT),
+            })
+            print(
+                f"SAFE local : {safe_inputs.get('verified_assets', 0)}/{safe_inputs.get('expected_safe_shards', 0)} shards · "
+                f"{safe_inputs.get('unique_fills', 0)} fills · {safe_inputs.get('unique_books', 0)} carnets · "
+                f"{safe_inputs.get('missing_shards', 0)} absents · {safe_inputs.get('partial_shards_excluded', 0)} PARTIAL exclus.",
+                flush=True,
+            )
+            if safe_inputs.get("replay_inputs_available") is not True:
+                state = "MORE_DATA" if safe_inputs.get("expected_safe_shards") else "UNMEASURABLE"
+                update_summary(fields={
+                    "status": state,
+                    "economic_result": {
+                        "status": state,
+                        "reason": safe_inputs.get("reason") or "NO_EXECUTABLE_LOCAL_SAFE_INPUTS",
+                        "candidates_tested": 0,
+                        "freeze_created": False,
+                        "economically_proven": False,
+                        "heldout_evaluated": False,
+                    },
+                }, live={"stage": "ATTENTE DE DONNÉES SAFE LOCALES", "message": "aucun signal et carnet L2 causal suffisants; le labo vérifie les mises à jour locales"})
+                persist()
+                if not continuous:
+                    update_summary(live={"active": False, "stage": "RUN PONCTUEL TERMINÉ", "message": "données insuffisantes; aucun replay économique lancé"})
+                    persist()
+                    return 0
+                watch_files = list(safe_inputs.get("_watch_files") or [])
+                fingerprint = _local_safe_watch_fingerprint(ROOT, watch_files)
+                waiting_seconds = 0
+                while True:
+                    time.sleep(10)
+                    waiting_seconds += 10
+                    if _local_safe_watch_fingerprint(ROOT, watch_files) != fingerprint:
+                        print("Changement local détecté; nouvelle vérification des shards SAFE.", flush=True)
+                        break
+                    update_summary(live={
+                        "stage": "ATTENTE DE DONNÉES SAFE LOCALES",
+                        "message": f"toujours ouvert · données insuffisantes · attente {waiting_seconds}s · Ctrl+C pour terminer",
+                        "waiting_seconds": waiting_seconds,
+                    })
+                    persist()
+                continue
+
+            update_summary(fields={
+                "current_copy_vault": evaluate_current_copy_vault(
+                    workspace, ROOT / "runtime" / "codex_research" / "COPY_V21_PHYSICAL_FREEZE.json"
+                ),
+            })
+            watch_files = list(safe_inputs.get("_watch_files") or [])
+            fingerprint = _local_safe_watch_fingerprint(ROOT, watch_files)
+            campaign_root = (
+                ROOT / "runtime" / "codex_research" / "copy_vault_continuous_lab"
+                / str(safe_inputs.get("selection_digest"))
+            )
+
+            def dataset_changed() -> bool:
+                return _local_safe_watch_fingerprint(ROOT, watch_files) != fingerprint
+
+            last_dashboard = 0.0
+
+            def on_update(result: Mapping[str, Any]) -> None:
+                nonlocal last_dashboard
+                result_trial = dict(result.get("last_trial") or {})
+                fields: dict[str, Any] = {
+                    "economic_result": dict(result),
+                    "status": "RUNNING",
+                    "improvement_history": load_improvement_history(ROOT),
+                }
+                if result_trial.get("strict_improvement_over_baseline_and_prior_best") is True:
+                    candidate = result.get("best_candidate")
+                    candidate_id = candidate.get("candidate_id") if isinstance(candidate, Mapping) else "inconnu"
+                    score = candidate.get("score_usd_per_active_day") if isinstance(candidate, Mapping) else None
+                    fields["freeze_verdict"] = (
+                        f"Candidat TRAIN gelé {candidate_id}; score conservateur {score:+.4f} USD/jour actif. "
+                        "Résultat exploratoire uniquement; validation indépendante et forward restent à faire."
+                        if isinstance(score, (int, float))
+                        else f"Candidat TRAIN gelé {candidate_id}; score conservateur non mesurable."
+                    )
+                update_summary(fields=fields, live={
+                    "active": True,
+                    "stage": "REPLAY TRAIN · RECHERCHE MULTI-PARAMÈTRES",
+                    "message": (
+                        f"{int(result.get('candidates_tested') or 0):,} configurations uniques · "
+                        f"dernier essai {result_trial.get('trial_number', '—')} · "
+                        f"{result_trial.get('status', 'en cours')} · Ctrl+C pour arrêter proprement"
+                    ),
+                    "candidates_tested": result.get("candidates_tested"),
+                    "search_space_upper_bound": result.get("search_space_upper_bound"),
+                    "last_trial": result_trial,
+                })
+                now = time.monotonic()
+                if result_trial.get("strict_improvement_over_baseline_and_prior_best") or now - last_dashboard >= 5:
+                    persist()
+                    last_dashboard = now
+
+            def on_replay_progress(message: str) -> None:
+                print("[REPLAY] " + message, flush=True)
+                with persist_lock:
+                    tested = summary.get("economic_result", {}).get("candidates_tested", 0)
+                update_summary(live={
+                    "stage": "REPLAY TRAIN · ÉVALUATION EN COURS",
+                    "message": message,
+                    "candidates_tested": tested,
+                })
+
+            update_summary(live={"stage": "REPLAY TRAIN", "message": "chargement des cycles et préparation du flux de candidats"})
+            persist()
+            result = run_local_campaign(
+                workspace,
+                continuous=continuous,
+                campaign_root=campaign_root,
+                max_trials=128,
+                progress=on_replay_progress,
+                on_update=on_update,
+                input_change_check=dataset_changed,
+            )
+            update_summary(fields={
+                "economic_result": result,
+                "improvement_history": load_improvement_history(ROOT),
+            })
+            if result.get("status") == "DATASET_CHANGED":
+                update_summary(fields={"status": "RUNNING"}, live={"stage": "NOUVELLE VERSION SAFE DÉTECTÉE", "message": "checkpoint conservé; reconstruction du corpus actualisé"})
+                persist()
+                continue
+            if result.get("status") == "INTERRUPTED":
+                update_summary(fields={
+                    "status": "INTERRUPTED",
+                    "freeze_verdict": "Arrêt Ctrl+C propre; les essais complets et candidats gelés sont conservés. Aucune preuve OOS/forward n'est revendiquée.",
+                }, live={"active": False, "stage": "ARRÊT PROPRE", "message": "checkpoint et tableau de bord final écrits"})
+                persist()
+                print("[FIN] arrêt propre; tous les essais complets sont dans TRIALS.jsonl.", flush=True)
+                return 130
+            if result.get("status") == "SEARCH_SPACE_EXHAUSTED":
+                if not continuous:
+                    update_summary(fields={"status": "SEARCH_SPACE_EXHAUSTED"}, live={"active": False, "stage": "ESPACE DE RECHERCHE ÉPUISÉ", "message": "aucune combinaison unique restante dans les domaines déclarés"})
+                    persist()
+                    return 0
+                update_summary(fields={"status": "SEARCH_SPACE_EXHAUSTED"}, live={
+                    "active": True,
+                    "stage": "ESPACE DE RECHERCHE ÉPUISÉ · ATTENTE DE NOUVEAUX SHARDS",
+                    "message": "toutes les combinaisons déclarées ont été évaluées; le labo reste ouvert jusqu'à une nouvelle version SAFE ou Ctrl+C",
+                })
+                persist()
+                while not dataset_changed():
+                    time.sleep(10)
+                    persist()
+                update_summary(fields={"status": "RUNNING"}, live={
+                    "stage": "NOUVELLE VERSION SAFE DÉTECTÉE",
+                    "message": "nouveau corpus détecté; audit et recherche reprennent avec son empreinte",
+                })
+                continue
+            if result.get("status") == "TECHNICAL_FAILURE":
+                update_summary(fields={"status": "TECHNICAL_FAILURE"}, live={"active": False, "stage": "ERREUR TECHNIQUE", "message": str(result.get("reason") or "échec technique")})
+                persist()
+                return 1
+            if not continuous:
+                update_summary(fields={"status": str(result.get("status") or "MORE_DATA")}, live={"active": False, "stage": "RUN PONCTUEL TERMINÉ", "message": "batch fini; le résultat reste TRAIN exploratoire"})
+                persist()
+                return 0
+            # The search can continue in-process indefinitely; normally only
+            # Ctrl+C or a changed local SAFE selection leaves this loop.
+            if result.get("status") in {"MORE_DATA", "UNMEASURABLE"}:
+                update_summary(fields={"status": str(result.get("status"))}, live={"stage": "ATTENTE DE NOUVELLES DONNÉES", "message": "signal/L2 ou jours indépendants insuffisants; aucun score inventé"})
+                persist()
+                while not dataset_changed():
+                    time.sleep(10)
+                    persist()
+                continue
+    except KeyboardInterrupt:
+        update_summary(fields={
+            "status": "INTERRUPTED",
+            "freeze_verdict": "Arrêt Ctrl+C pendant préparation/attente; les rapports et reçus déjà écrits sont conservés.",
+        }, live={"active": False, "stage": "ARRÊT PROPRE", "message": "arrêt demandé; état local sauvegardé"})
+        persist()
+        print("[FIN] arrêt Ctrl+C propre.", flush=True)
+        return 130
+    except Exception as exc:  # noqa: BLE001 - persist an honest technical failure
+        with persist_lock:
+            candidates_tested = int(summary.get("live", {}).get("candidates_tested") or 0)
+        update_summary(fields={
+            "status": "TECHNICAL_FAILURE",
+            "economic_result": {
+                "status": "TECHNICAL_FAILURE",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "candidates_tested": candidates_tested,
+                "freeze_created": False,
+                "economically_proven": False,
+                "heldout_evaluated": False,
+            },
+            "freeze_verdict": "Échec technique; les essais déjà inscrits dans le registre append-only sont conservés. Aucun résultat économique n'est déclaré.",
+        }, live={"active": False, "stage": "ERREUR TECHNIQUE", "message": f"{type(exc).__name__}: {exc}"})
+        try:
+            persist()
+        except OSError:
+            pass
+        print(f"[ERREUR] {type(exc).__name__}: {exc}", flush=True)
+        return 1
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
+
+def run_economic_lab(
+    *, preflight_only: bool = False, tests_only: bool = False, continuous: bool = False,
+) -> int:
     # Imported only for explicit local legacy economic runs. A clean GitHub
     # clone can lack this optional Codex/Claude module: fail closed, do not
     # substitute fake fills, synthetic books or pretend to have proven profit.
@@ -811,6 +1257,8 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
         ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False
     )
     head = head_run.stdout.strip() if head_run.returncode == 0 else "INCONNU"
+    if continuous:
+        return _run_continuous_safe_lab(report_dir, run_id=run_id, head=head, continuous=True)
     print("ALINA SMART FLOW — VRAI LABORATOIRE REPLAY / BACKTEST COPY-VAULT", flush=True)
     print("PAPER / READ-ONLY : données locales uniquement, aucun ordre ni téléchargement.", flush=True)
     print(f"Dépôt : {ROOT}\nHEAD : {head}", flush=True)
@@ -1057,7 +1505,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--safe-research",
         action="store_true",
-        help="convertit les shards SAFE AlinaSync certifiés en workspace et lance la campagne",
+        help="audite les shards SAFE locaux et lance le labo CopyVault en continu jusqu'à Ctrl+C",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="avec --safe-research, exécute un batch borné au lieu de rester ouvert",
     )
     parser.add_argument(
         "--legacy-local-economic", action="store_true",
@@ -1065,27 +1518,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.legacy_local_economic:
-        if args.safe_research or args.research or args.preflight_only or args.dataset_root is not None:
+        if args.safe_research or args.research or args.preflight_only or args.dataset_root is not None or args.once:
             parser.error("--legacy-local-economic est incompatible avec les autres modes")
         return run_economic_lab()
     if args.safe_research:
         if args.research or args.preflight_only or args.dataset_root is not None:
             parser.error("--safe-research est incompatible avec les autres modes")
-        from tools.copy_vault_safe_bridge import SafeBridgeError, build_safe_copy_workspace
-
-        try:
-            safe_result = build_safe_copy_workspace(ROOT)
-        except (SafeBridgeError, OSError, ValueError, TypeError) as exc:
-            print(f"SAFE_RESEARCH_NO_GO: {exc}", flush=True)
-            return 2
-        print(
-            "ALINA_SAFE_SHARDS_CONSUMED=" + str(safe_result["selected_shards"])
-            + " | FILLS=" + str(safe_result["counts"]["copy_vault_fills"])
-            + " | L2=" + str(safe_result["counts"]["copy_vault_l2"]),
-            flush=True,
-        )
-        args.research = True
-        args.dataset_root = Path(safe_result["workspace"])
+        return run_economic_lab(continuous=not args.once)
+    if args.once:
+        parser.error("--once ne s'utilise qu'avec --safe-research")
     if args.research:
         if args.preflight_only:
             parser.error("--research et --preflight-only sont incompatibles")

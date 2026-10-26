@@ -155,21 +155,48 @@ def _tail(path: Path, *, lines: int = 8) -> list[str]:
 
 
 def _active_collector_protocols(
-    root: Path, active: Mapping[str, int]
+    root: Path,
+    active: Mapping[str, int],
+    *,
+    processes: list[dict[str, Any]] | None = None,
+    now: float | None = None,
 ) -> dict[str, str]:
-    """Read protocol markers only from heartbeats owned by the active PID."""
+    """Read fresh protocol markers owned by an active wrapper or its descendants.
+
+    Windows Python launchers and venv shims may add child processes between
+    the recorded Popen PID and the PID stored in a collector heartbeat.
+    """
 
     protocols: dict[str, str] = {}
     heartbeat_dir = root / "runtime" / "research_lab" / "heartbeats"
+    children: dict[int, set[int]] = {}
+    for row in processes or ():
+        try:
+            child_pid = int(row.get("pid"))
+            parent_pid = int(row.get("ppid"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        children.setdefault(parent_pid, set()).add(child_pid)
+    now_ms = int((time.time() if now is None else float(now)) * 1000)
     for name, pid in active.items():
+        owned_pids = {int(pid)}
+        pending = [int(pid)]
+        while pending:
+            parent_pid = pending.pop()
+            for child_pid in children.get(parent_pid, ()):
+                if child_pid not in owned_pids:
+                    owned_pids.add(child_pid)
+                    pending.append(child_pid)
         path = heartbeat_dir / f"{name}.json"
         try:
             heartbeat = json.loads(path.read_text(encoding="utf-8"))
             heartbeat_pid = int(heartbeat.get("pid"))
+            heartbeat_ts_ms = int(heartbeat.get("ts_ms"))
         except (OSError, ValueError, TypeError):
             continue
         protocol = str(heartbeat.get("protocol") or "").strip()
-        if heartbeat_pid == int(pid) and protocol:
+        age_ms = now_ms - heartbeat_ts_ms
+        if heartbeat_pid in owned_pids and 0 <= age_ms <= 60_000 and protocol:
             protocols[name] = protocol
     return protocols
 
@@ -296,7 +323,14 @@ def start_bounded_collectors(
         "startup_log_tails": log_tails,
     }
     _atomic_write(project_root / STATE_RELPATH, state)
-    return state
+    return {
+        **state,
+        "protocols": _active_collector_protocols(
+            project_root,
+            state["pids"],
+            processes=inventory(project_root),
+        ),
+    }
 
 
 def attach_bounded_collectors(
@@ -446,7 +480,12 @@ def attach_bounded_collectors(
         },
     }
     _atomic_write(state_path, state)
-    active_protocols = _active_collector_protocols(project_root, combined_pids)
+    active_protocols = _active_collector_protocols(
+        project_root,
+        combined_pids,
+        processes=inventory(project_root),
+        now=now,
+    )
     return {
         **{key: value for key, value in state.items() if key != "startup_log_tails"},
         "status": "ACTIVE" if not missing else "DEGRADED",
@@ -598,7 +637,9 @@ def inspect_bounded_collectors(
         if owns_recorded_collector(name, pid)
     }
     stopped = sorted(name for name in recorded if name not in active)
-    protocols = _active_collector_protocols(project_root, active)
+    protocols = _active_collector_protocols(
+        project_root, active, processes=live_rows, now=now
+    )
 
     lease_public = persisted.get("lease") if isinstance(persisted.get("lease"), dict) else None
     lease_required = bool(persisted.get("demarres_et_verifies"))
@@ -656,6 +697,60 @@ def inspect_bounded_collectors(
     }
 
 
+def renew_bounded_collection_lease(
+    root: str | Path,
+    lease_id: str,
+    *,
+    duration_s: float,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Extend only the currently recorded campaign lease, without changing its identity.
+
+    A short TTL lets the watchdog keep collectors alive while it is present and
+    makes them stop automatically shortly after the watchdog is closed.
+    """
+
+    project_root = Path(root).resolve()
+    state_path = project_root / STATE_RELPATH
+    lease_path = project_root / LEASE_RELPATH
+    try:
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        current = json.loads(lease_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        return {"renewed": False, "reason": f"LEASE_STATE_UNREADABLE:{type(exc).__name__}"}
+
+    expected_id = str(lease_id or "").strip()
+    persisted_lease = persisted.get("lease") if isinstance(persisted, dict) else None
+    persisted_id = _mapping_lease_id(persisted_lease)
+    if not expected_id or persisted_id != expected_id:
+        return {"renewed": False, "reason": "LEASE_STATE_ID_MISMATCH"}
+    if not isinstance(current, dict) or str(current.get("lease_id") or "") != expected_id:
+        return {"renewed": False, "reason": "LEASE_REPLACED"}
+
+    token = str(current.get("token") or "")
+    valid, reason, validated = validate_lease(
+        lease_path,
+        token,
+        project_root,
+        now=now,
+    )
+    if not valid or not isinstance(validated, dict):
+        return {"renewed": False, "reason": reason or "LEASE_INVALID"}
+
+    try:
+        ttl = float(duration_s)
+    except (TypeError, ValueError, OverflowError):
+        return {"renewed": False, "reason": "LEASE_TTL_INVALID"}
+    if not 30.0 <= ttl <= 7 * 24 * 60 * 60:
+        return {"renewed": False, "reason": "LEASE_TTL_OUT_OF_RANGE"}
+
+    issued_s = time.time() if now is None else float(now)
+    updated = dict(validated)
+    updated["expires_at_ms"] = int((issued_s + ttl) * 1000)
+    _atomic_write(lease_path, updated)
+    return {"renewed": True, "lease": public_lease(updated), "reason": "OK"}
+
+
 def _mapping_lease_id(value: object) -> str:
     if not isinstance(value, Mapping):
         return ""
@@ -668,6 +763,7 @@ __all__ = [
     "attach_bounded_collectors",
     "ensure_bounded_collectors",
     "inspect_bounded_collectors",
+    "renew_bounded_collection_lease",
     "resolve_project_python",
     "start_bounded_collectors",
 ]

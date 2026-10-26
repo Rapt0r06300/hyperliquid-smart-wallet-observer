@@ -11,7 +11,17 @@ from pathlib import Path
 
 import pytest
 
-from tools.alina_git_code_sync import Synchronizer
+from tools.alina_git_code_sync import Synchronizer, _status_paths
+
+
+def test_status_paths_parse_spaces_and_rename_records():
+    raw = (
+        b" M src/file with space.py\0"
+        b"R  docs/new name.md\0docs/old name.md\0"
+    )
+    assert _status_paths(raw) == [
+        "src/file with space.py", "docs/new name.md", "docs/old name.md",
+    ]
 
 
 def git(root: Path, *args: str, allow_error: bool = False) -> str:
@@ -242,6 +252,7 @@ def test_tracked_modified_data_never_overwritten(repos):
     rc, receipt = run_sync(local)
     assert rc == 2 and receipt["status"] == "NO_GO"
     assert data.read_text() == "my latest local bytes\n"
+    assert git(origin, "show", "main:data/safe.jsonl") == "initial"
 
 
 def test_pem_private_key_prevented_before_staging(repos):

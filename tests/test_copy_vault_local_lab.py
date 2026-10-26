@@ -23,14 +23,14 @@ def _write_gzip(path: Path, row: dict) -> tuple[int, str]:
 
 
 def test_materialize_safe_workspace_unwraps_verified_copy_vault_assets(tmp_path: Path) -> None:
-    recovery = tmp_path / "recovery"
+    recovery = tmp_path / "runtime" / "recovery" / "full"
     tag = "data-v2-campaign-copy-vault-test"
     fills_payload = json.dumps({
         "channel": "userFills",
         "data": {"user": "0xabc", "isSnapshot": True, "fills": [{
             "time": 1_000, "coin": "BTC", "px": "100", "sz": "2",
             "side": "B", "dir": "Open Long", "startPosition": "0",
-            "oid": 7, "tid": 8, "hash": "0xfill",
+            "oid": 7, "tid": 8, "hash": "0xfill", "fee": "0.1",
         }]},
     }, separators=(",", ":"))
     fill_wrapper = {
@@ -55,17 +55,36 @@ def test_materialize_safe_workspace_unwraps_verified_copy_vault_assets(tmp_path:
     l2_name = "hyperliquid-public-copy-l2-copy-vault-l2-btc-test.jsonl.gz"
     fill_size, fill_sha = _write_gzip(recovery / "usable" / "shards" / tag / fill_name, fill_wrapper)
     l2_size, l2_sha = _write_gzip(recovery / "usable" / "shards" / tag / l2_name, l2_wrapper)
-    report = {
-        "catalog_verification": {"profile": "replay-ready", "safe_catalog_shards": 2},
-        "classification": {"missing_or_corrupt_rows": 0, "quarantined_shards": 0},
-        "releases": [{"tag": tag, "assets": [
-            {"name": fill_name, "size_bytes": fill_size, "sha256": fill_sha,
-             "status": "MATERIALIZED_VERIFIED", "verification_status": "VERIFIED"},
-            {"name": l2_name, "size_bytes": l2_size, "sha256": l2_sha,
-             "status": "MATERIALIZED_VERIFIED", "verification_status": "VERIFIED"},
-        ]}],
+    index_rows = []
+    for dataset_id, family, asset_name, size, sha in (
+        ("cv-fill-test", "copy_vault_fills", fill_name, fill_size, fill_sha),
+        ("cv-l2-test", "copy_vault_l2", l2_name, l2_size, l2_sha),
+    ):
+        manifest_path = f"datasets/sharded/safe/aa/bb/{dataset_id}.manifest.json"
+        manifest = {
+            "schema": "alina.shard_manifest.v2", "quality_status": "SAFE",
+            "replay_compatible": True, "asset_verified": True,
+            "proof_of_pnl_allowed": False, "dataset_id": dataset_id,
+            "family": family, "release_tag": tag, "release_asset": asset_name,
+            "bytes": size, "sha256": sha,
+        }
+        manifest_file = tmp_path / manifest_path
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+        index_rows.append({
+            "dataset_id": dataset_id, "family": family, "quality_status": "SAFE",
+            "replay_compatible": True, "release_tag": tag,
+            "release_asset": asset_name, "manifest_path": manifest_path,
+            "bytes": size, "sha256": sha,
+        })
+    catalog = {
+        "schema": "alina.data_index.v2",
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "shards": index_rows,
     }
-    (recovery / "RESTORE_REPORT.json").write_text(json.dumps(report), encoding="utf-8")
+    catalog_file = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog_file.parent.mkdir(parents=True, exist_ok=True)
+    catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
 
     result = materialize_safe_workspace(recovery, tmp_path / "workspace")
 

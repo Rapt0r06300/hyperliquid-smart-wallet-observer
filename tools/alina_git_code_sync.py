@@ -68,6 +68,33 @@ def _paths(data: bytes) -> list[str]:
         raise SyncBlocked("Nom Git non UTF-8, selection automatique refusee.") from exc
 
 
+def _status_paths(data: bytes) -> list[str]:
+    """Decode tracked paths from `git status --porcelain=v1 -z` safely."""
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        raise SyncBlocked("Sortie Git status NUL tronquee; inventaire abandonne.")
+    records = data[:-1].split(b"\0")
+    paths: list[str] = []
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if len(record) < 4 or record[2:3] != b" ":
+            raise SyncBlocked("Enregistrement Git status invalide; inventaire abandonne.")
+        status, path = record[:2], record[3:]
+        try:
+            paths.append(path.decode("utf-8"))
+            if b"R" in status or b"C" in status:
+                if index >= len(records):
+                    raise SyncBlocked("Ancien chemin de renommage Git absent.")
+                paths.append(records[index].decode("utf-8"))
+                index += 1
+        except UnicodeDecodeError as exc:
+            raise SyncBlocked("Nom Git status non UTF-8; inventaire abandonne.") from exc
+    return paths
+
+
 def _protected(path: str) -> bool:
     normalized = path.replace("\\", "/")
     parts = PurePosixPath(normalized).parts
@@ -215,8 +242,11 @@ class Synchronizer:
         staged = _paths(
             self.command("diff", "--cached", "--name-only", "-z").stdout
         )
-        tracked = _paths(
-            self.command("ls-files", "--modified", "--deleted", "-z").stdout
+        # `ls-files --modified` forces an expensive worktree stat across all
+        # 1.8M+ tracked dataset paths in this repository. `git status`
+        # reuses Git's index/stat cache and reports the same changed paths fast.
+        tracked = _status_paths(
+            self.command("status", "--porcelain=v1", "-z", "--untracked-files=no").stdout
         )
         # Git prunes excluded directories; never descend into SAFE shards.
         args = ["ls-files", "--others", "--exclude-standard", "-z"]

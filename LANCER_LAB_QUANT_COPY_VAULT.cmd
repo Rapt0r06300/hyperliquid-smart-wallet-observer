@@ -17,7 +17,8 @@ if not defined ALINA_LAB_MODE set "ALINA_LAB_MODE=safe"
 echo.
 echo ================================================================
 echo   ALINA SMART FLOW - COPY-VAULT LAB
-echo   Double clic : shards SAFE locaux, vrais replays/backtests
+echo   Double clic : shards SAFE locaux, replays/backtests en continu
+echo   Arret propre : CTRL+C dans cette fenetre
 echo   Modes : safe / tests / preflight / research / legacy
 echo   PAPER / READ-ONLY - aucun ordre, aucune collecte
 echo ================================================================
@@ -26,6 +27,7 @@ echo.
 set "ALINA_LAB_PYTHON="
 set "ALINA_LAB_PY_ARGS="
 if exist "%~dp0tools\python\python.exe" set "ALINA_LAB_PYTHON=%~dp0tools\python\python.exe"
+if not defined ALINA_LAB_PYTHON if exist "%~dp0.venv\Scripts\python.exe" set "ALINA_LAB_PYTHON=%~dp0.venv\Scripts\python.exe"
 if not defined ALINA_LAB_PYTHON (
   where py >nul 2>nul
   if not errorlevel 1 (
@@ -79,6 +81,8 @@ set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" (
   echo [FIN] Commande executee; seuls les rapports economiques determinent le resultat.
+) else if "%RC%"=="130" (
+  echo [ARRET] CTRL+C pris en compte. Essais complets et candidats geles conserves; rapport final ecrit.
 ) else (
   echo [NO_GO] Code %RC%. Aucune rentabilite n'est prouvee.
 )
