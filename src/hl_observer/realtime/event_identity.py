@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping
-
+from typing import Any
 
 _VOLATILE_FIELDS = {
     "received_at_ms",
@@ -77,7 +77,7 @@ class CanonicalFrameEvent:
     event_index_in_frame: int
     stable_event_id: str
     exchange_ts_ms: int | None
-    received_at_ms: int
+    received_at_ms: int | None
     payload: Mapping[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
@@ -89,7 +89,7 @@ def canonicalize_frame(
     *,
     source: str,
     channel: str,
-    received_at_ms: int,
+    received_at_ms: int | None,
     frame_sequence: int | None = None,
     exchange_ts_fields: tuple[str, ...] = ("time", "timestamp", "ts_ms", "exchange_ts_ms"),
 ) -> list[CanonicalFrameEvent]:
@@ -120,7 +120,9 @@ def canonicalize_frame(
                     channel=channel,
                 ),
                 exchange_ts_ms=exchange_ts,
-                received_at_ms=int(received_at_ms),
+                received_at_ms=(
+                    None if received_at_ms is None else int(received_at_ms)
+                ),
                 payload=payload,
             )
         )

@@ -78,6 +78,19 @@ def test_parser_preserves_unknown_snapshot_classification():
     }])[0]["is_snapshot"] is None
 
 
+@pytest.mark.parametrize("received_at_ms", [None, "invalid", 0, -1])
+def test_parser_never_invents_a_receive_timestamp(received_at_ms):
+    msg = {"channel": "userFills", "data": {"fills": [
+        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000}
+    ]}}
+    kwargs = {} if received_at_ms is None else {"received_at_ms": received_at_ms}
+
+    [fill] = UL.parser_message_userfills(msg, vault="0xA", **kwargs)
+
+    assert fill["ts_ms"] == 1000
+    assert fill["received_at_ms"] is None
+
+
 def test_stable_event_id_ne_depend_pas_du_moment_de_reception():
     msg = {"channel": "userFills", "data": {"fills": [
         {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "dir": "Open Long", "time": 1000,

@@ -9,7 +9,6 @@ la boucle WS autour de ces fonctions. Lecture seule. 0 ordre, 0 clé, 0 signatur
 """
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from hl_observer.realtime.event_identity import canonicalize_frame
@@ -97,9 +96,9 @@ def parser_message_userfills(
     """Normalise un message WS userFills en conservant DEUX horloges distinctes.
 
     ``ts_ms`` vient de l'exchange (fill ``time``). ``received_at_ms`` est l'heure murale locale de
-    réception du frame WS, injectée par le collecteur au plus près de ``ws.recv``. Si le cœur est appelé
-    seul, elle est capturée une seule fois à l'entrée de cette fonction. On ne remplace JAMAIS la réception
-    par le timestamp exchange : cela fabriquerait une latence nulle et détruirait la preuve causale.
+    réception du frame WS, injectée par le collecteur au plus près de ``ws.recv``. Si elle manque ou est
+    invalide, elle reste ``None`` : ni l'heure courante ni le timestamp exchange ne la remplacent.
+    Cela évite de fabriquer une latence ou une preuve causale.
 
     `isSnapshot` est propagé (le snapshot initial rejoue l'historique : à IGNORER pour trader). Tolérant.
     Le champ `liquidation` de WsFill est préservé lorsqu'il existe.
@@ -116,10 +115,12 @@ def parser_message_userfills(
         frame_sequence = int(sequence_raw) if sequence_raw is not None else None
     except (TypeError, ValueError):
         frame_sequence = None
-    try:
-        frame_received_at_ms = int(received_at_ms) if received_at_ms is not None else int(time.time() * 1_000)
-    except (TypeError, ValueError, OverflowError):
-        frame_received_at_ms = int(time.time() * 1_000)
+    frame_received_at_ms: int | None = None
+    if isinstance(received_at_ms, int) and not isinstance(received_at_ms, bool):
+        frame_received_at_ms = received_at_ms if received_at_ms > 0 else None
+    elif isinstance(received_at_ms, str) and received_at_ms.strip().isdecimal():
+        parsed_received_at_ms = int(received_at_ms.strip())
+        frame_received_at_ms = parsed_received_at_ms if parsed_received_at_ms > 0 else None
 
     raw_fills = [item for item in (fills or []) if isinstance(item, dict)]
     frame_events = canonicalize_frame(
