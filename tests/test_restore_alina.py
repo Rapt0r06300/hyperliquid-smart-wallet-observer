@@ -1201,9 +1201,47 @@ def test_canonical_catalog_requires_sha_bound_metrics_and_unique_id(tmp_path):
         module._load_current_safe_catalog(index_path, metrics_path)
 
 
-
-def test_replay_ready_catalog_partition_reader_invoked_only_once(tmp_path, monkeypatch, capsys):
+def test_safe_catalog_refuses_index_change_during_streamed_validation(
+    tmp_path, monkeypatch,
+):
     module = _module()
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    safe_row = {
+        "dataset_id": "safe-race",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "asset_verified": True,
+        "validation_allowed": True,
+        "sha256": "c" * 64,
+        "release_tag": "data-v2-race",
+    }
+    original_index = {"shards": [safe_row]}
+    index_path.write_text(json.dumps(original_index), encoding="utf-8")
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+
+    original_select = module.select_index_rows
+    def mutate_after_selection(path, predicate, **kwargs):
+        metadata, rows = original_select(path, predicate, **kwargs)
+        index_path.write_text(json.dumps({"shards": []}), encoding="utf-8")
+        return metadata, rows
+    monkeypatch.setattr(module, "select_index_rows", mutate_after_selection)
+
+    with pytest.raises(module.RestoreError, match="changed during validation"):
+        module._load_current_safe_catalog(index_path, metrics_path)
+
+
+
+def test_replay_ready_plan_selects_verified_rows_without_reconstructing_catalog(
+    tmp_path, monkeypatch, capsys,
+):
+    module = _module()
+    from tools.partitioned_data_index import partition_index
+
     raw = b"safe-data"
     row = {
         "dataset_id": "safe-once",
@@ -1215,7 +1253,15 @@ def test_replay_ready_catalog_partition_reader_invoked_only_once(tmp_path, monke
         "sha256": hashlib.sha256(raw).hexdigest(),
     }
     index_path = tmp_path / "DATA_INDEX.json"
-    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
+    root, partitions = partition_index(
+        {"schema": "alina.dataset_index.v1", "shards": [row]},
+        max_partition_bytes=4096,
+    )
+    index_path.write_text(json.dumps(root), encoding="utf-8")
+    for relative, payload in partitions.items():
+        target = index_path.parent / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
     metrics_path = tmp_path / "DATA_METRICS.json"
     metrics_path.write_text(json.dumps({
         "schema_version": "alina.data_metrics.v4",
@@ -1223,20 +1269,67 @@ def test_replay_ready_catalog_partition_reader_invoked_only_once(tmp_path, monke
         "totals": {"TOTAL_SHARDS": 1},
     }), encoding="utf-8")
 
-    original_read = module.read_index
-    calls = []
-    def counted_read(path, **kwargs):
-        calls.append(path)
-        return original_read(path, **kwargs)
-    monkeypatch.setattr(module, "read_index", counted_read)
+    def forbidden_full_read(*_args, **_kwargs):
+        raise AssertionError("replay-ready must not reconstruct the full catalogue")
+    monkeypatch.setattr(module, "read_index", forbidden_full_read, raising=False)
 
-    safe, proof, rows, required = module._load_replay_ready_plan(index_path, metrics_path)
-    assert len(calls) == 1
+    proof, rows, required = module._load_replay_ready_plan(index_path, metrics_path)
     assert proof["safe_catalog_shards"] == 1
-    assert list(safe) == ["safe-once"]
     assert [item["dataset_id"] for item in rows] == ["safe-once"]
     assert len(required) == 1
     assert "ALINA_RESTORE_PHASE=SAFE_PLAN_READY" in capsys.readouterr().err
+
+
+def test_copy_vault_restore_plan_is_scoped_to_all_copy_vault_safe_families(tmp_path):
+    module = _module()
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    rows = [
+        {
+            "dataset_id": "cv-fill", "family": "copy_vault_fills",
+            "quality_status": "SAFE", "replay_compatible": True,
+            "release_tag": "cv-release", "release_asset": "fills.jsonl.gz",
+            "bytes": 11, "sha256": "a" * 64,
+        },
+        {
+            "dataset_id": "cv-position", "family": "copy_vault_positions",
+            "quality_status": "SAFE", "replay_compatible": True,
+            "release_tag": "cv-release", "release_asset": "positions.jsonl.gz",
+            "bytes": 13, "sha256": "b" * 64,
+        },
+        {
+            "dataset_id": "other-safe", "family": "trades",
+            "quality_status": "SAFE", "replay_compatible": True,
+            "release_tag": "other-release", "release_asset": "trades.jsonl.gz",
+            "bytes": 17, "sha256": "c" * 64,
+        },
+        {
+            "dataset_id": "cv-partial", "family": "copy_vault_l2",
+            "quality_status": "PARTIAL", "replay_compatible": False,
+            "release_tag": "cv-release", "release_asset": "partial.jsonl.gz",
+            "bytes": 19, "sha256": "d" * 64,
+        },
+    ]
+    index_path.write_text(json.dumps({"schema": "alina.data_index.v2", "shards": rows}),
+                          encoding="utf-8")
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": len(rows)},
+    }), encoding="utf-8")
+
+    proof, selected, required = module._load_replay_ready_plan(
+        index_path, metrics_path, copy_vault_only=True,
+    )
+
+    assert proof["indexed_shards"] == 4
+    assert proof["safe_catalog_shards"] == 2
+    assert proof["selection_scope"] == "COPY_VAULT_ONLY"
+    assert proof["selection_families"] == [
+        "copy_vault_fills", "copy_vault_positions",
+    ]
+    assert [row["dataset_id"] for row in selected] == ["cv-fill", "cv-position"]
+    assert len(required) == 2
 
 
 def test_catalog_refuses_explicitly_denied_safe_and_accepts_compact_evidence(tmp_path):
@@ -1269,8 +1362,7 @@ def test_catalog_refuses_explicitly_denied_safe_and_accepts_compact_evidence(tmp
     compact = {key: value for key, value in row.items()
                if key not in {"asset_verified", "validation_allowed"}}
     write(compact)
-    safe, _proof, rows, _required = module._load_replay_ready_plan(index_path, metrics_path)
-    assert set(safe) == {"uncertified-safe"}
+    _proof, rows, _required = module._load_replay_ready_plan(index_path, metrics_path)
     assert [item["dataset_id"] for item in rows] == ["uncertified-safe"]
 
     for invalid in ("asset_verified", "validation_allowed", "replay_compatible",
@@ -3331,9 +3423,16 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
     assert result["classification"]["quarantined_shards"] == 0
     assert not list((restored_root / "usable").rglob("*partial-one*"))
     assert not list((restored_root / "usable").rglob("*reject-one*"))
+    unrelated_safe = (
+        restored_root / "usable" / "shards" / "preserved-market-family"
+        / "market-safe.jsonl.gz"
+    )
+    unrelated_safe.parent.mkdir(parents=True)
+    unrelated_safe.write_bytes(b"historical-safe-shard")
 
     # A previously cached mixed ZIP can still contain PARTIAL/REJECT bytes.
-    # Reusing it must not leave those bytes in the clean local restore cache.
+    # Preserve the raw archive; only individually verified SAFE members enter
+    # the usable replay tree.
     cached_outer = restored_root / "releases" / tag / "mixed.zip"
     cached_outer.parent.mkdir(parents=True, exist_ok=True)
     cached_outer.write_bytes(packed)
@@ -3342,9 +3441,11 @@ def test_replay_ready_mixed_zip_materializes_only_safe_and_never_non_safe(
         metrics_path=metrics_path, profile="replay-ready", prune_unselected=True,
     )
     assert second["status"] == "REPLAY_READY_COMPLETE"
-    assert not cached_outer.exists()
-    assert second["retired_selected_cache"]["assets"] == 1
-    assert second["retired_selected_cache"]["bytes"] == len(packed)
+    assert cached_outer.read_bytes() == packed
+    assert second["selected_release_cache"]["policy"] == "PRESERVE_RAW_RELEASE_CACHE"
+    assert second["selected_release_cache"]["removed_assets"] == 0
+    assert second["selected_release_cache"]["removed_bytes"] == 0
+    assert unrelated_safe.read_bytes() == b"historical-safe-shard"
     assert fetched == [url]
     assert sorted(p.name for p in usable.glob("*.jsonl.gz")) == [
         "safe-one.jsonl.gz",
@@ -3931,8 +4032,7 @@ def test_replay_download_budget_is_checked_before_pruning_or_any_payload(
         "release_asset": "safe.jsonl.gz", "bytes": len(safe_bytes),
         "sha256": safe_sha,
     }
-    monkeypatch.setattr(module, "_load_replay_ready_plan", lambda *_a: (
-        {"safe": (safe_sha, "data-v2-budget")},
+    monkeypatch.setattr(module, "_load_replay_ready_plan", lambda *_a, **_kw: (
         {"source_index_sha256": "a" * 64, "safe_catalog_shards": 1},
         [row],
         {("data-v2-budget", "safe.jsonl.gz"): (len(safe_bytes), safe_sha)},

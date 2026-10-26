@@ -63,6 +63,19 @@ def test_parser_message_userfills_separe_exchange_et_reception_ws():
     assert fill["received_at_ms"] - fill["ts_ms"] == 500
     assert fill["tid"] == 7 and fill["oid"] == 11
     assert fill["frame_sequence"] == 42
+    assert fill["isSnapshot"] is None
+
+
+def test_parser_preserves_unknown_snapshot_classification():
+    msg = {"channel": "userFills", "data": {"user": "0xA", "fills": [
+        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000}
+    ]}}
+    [fill] = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1500)
+    assert fill["isSnapshot"] is None
+    assert UL.liquidations_confirmees([{
+        **fill,
+        "liquidation": {"liquidatedUser": "0xB"},
+    }])[0]["is_snapshot"] is None
 
 
 def test_stable_event_id_ne_depend_pas_du_moment_de_reception():

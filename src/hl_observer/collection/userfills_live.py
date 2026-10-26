@@ -106,7 +106,9 @@ def parser_message_userfills(
     """
     data = msg.get("data") if isinstance(msg, dict) else None
     fills = (data or {}).get("fills") if isinstance(data, dict) else None
-    est_snapshot = bool((data or {}).get("isSnapshot")) if isinstance(data, dict) else False
+    snapshot_value = data.get("isSnapshot") if isinstance(data, dict) else None
+    # Missing or malformed isSnapshot is unknown, never an implicit live event.
+    est_snapshot = snapshot_value if type(snapshot_value) is bool else None
     sequence_raw = msg.get("sequence", msg.get("seq")) if isinstance(msg, dict) else None
     if sequence_raw is None and isinstance(data, dict):
         sequence_raw = data.get("sequence", data.get("seq"))
@@ -175,7 +177,7 @@ def liquidations_confirmees(fills: list[dict]) -> list[dict]:
         out.append({"vault": f.get("vault"), "coin": f.get("coin"), "px": f.get("px"), "sz": f.get("sz"),
                     "signe": f.get("signe"), "ts_ms": f.get("ts_ms"), "dir": f.get("dir"), "hash": f.get("hash"),
                     "tid": f.get("tid"), "oid": f.get("oid"),
-                    "is_snapshot": bool(f.get("isSnapshot")),
+                    "is_snapshot": f.get("isSnapshot"),
                     "frame_sequence": f.get("frame_sequence"),
                     "event_index_in_frame": f.get("event_index_in_frame"),
                     "stable_event_id": f.get("stable_event_id"),

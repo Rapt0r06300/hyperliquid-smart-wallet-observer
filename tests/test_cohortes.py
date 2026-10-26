@@ -177,6 +177,21 @@ def test_dedup_snapshot_et_hash(tmp_path):
     assert CO.traiter_fill(CO.ALPHA, etat, _fill(hash="x"), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"]) is None  # hash déjà vu
 
 
+def test_fill_sans_statut_snapshot_ne_peut_pas_ouvrir_de_position(tmp_path):
+    _setup(tmp_path)
+    etat = CO.etat_initial(CO.ALPHA, tmp_path)
+    assert CO.traiter_fill(
+        CO.ALPHA,
+        etat,
+        _fill(isSnapshot=None),
+        tmp_path,
+        now_ms=1e12,
+        lecteur_l2=_l2,
+        token=etat["token"],
+    ) is None
+    assert etat["store"]["ouvertes"] == {}
+
+
 def test_leader_close_sort_inline(tmp_path):
     _setup(tmp_path)
     now = 1_000_000_000_500.0

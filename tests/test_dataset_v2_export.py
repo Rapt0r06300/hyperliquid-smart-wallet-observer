@@ -428,6 +428,33 @@ def test_clean_trade_shard_is_replay_compatible(tmp_path) -> None:
     assert manifest["trade_identity_digests_exact"] is True
 
 
+def test_copy_vault_fill_without_snapshot_flag_is_not_replay_compatible(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="hyperliquid_public_userfills",
+            channel="copy_vault_fills",
+            instrument="0x" + "1" * 40,
+            event_kind="UNCLASSIFIED",
+            raw_payload={
+                "channel": "userFills",
+                "data": {"user": "0x" + "1" * 40, "fills": [{"tid": 1}]},
+            },
+            exchange_ts_ms=1_000,
+            received_ts_ms=1_005,
+            local_monotonic_ns=1_000_000,
+            connection_id="copy-vault-1",
+            provenance={"access": "read_only", "authenticated": False, "transport": "websocket"},
+            parsed_summary={"event_count": 1},
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["replay_compatible"] is False
+    assert "COPY_VAULT_SNAPSHOT_STATUS_UNKNOWN" in manifest["replay_reason"]
+    assert manifest["unclassified_copy_vault_frame_count"] == 1
+
+
 def test_clean_capacity_tape_shard_is_replay_compatible(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
     writer.append(

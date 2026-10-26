@@ -162,6 +162,54 @@ def test_local_campaign_explains_insufficient_signal_days_before_search(
     assert result["candidates_tested"] == 0
 
 
+def test_local_campaign_identifies_absent_live_forward_fills(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    data_dir = workspace / "runtime" / "data"
+    data_dir.mkdir(parents=True)
+    tape_manifest = {}
+    for name in ("vault_fills.jsonl", "copy_vault_l2_tape.jsonl"):
+        payload = b"{}\n"
+        (data_dir / name).write_bytes(payload)
+        tape_manifest[name] = {
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    (workspace / "SAFE_INPUT_MANIFEST.json").write_text(json.dumps({
+        "paper_read_only": True,
+        "real_execution": False,
+        "selection_digest": "a" * 64,
+        "source_index_sha256": "b" * 64,
+        "status": "MORE_DATA",
+        "safe_catalog_status": "SAFE_COMPLETE",
+        "replay_inputs_available": True,
+        "unique_fills": 1,
+        "unique_books": 1,
+        "data_complete": False,
+        "materialized_tapes": tape_manifest,
+    }), encoding="utf-8")
+    signal_ms = 10 * 86_400_000 + 10_000
+    metaorders = [{"signal_ts_ms": signal_ms, "action": "ADD", "coin": "BTC"}]
+    books = {"BTC": [{"ts_ms": signal_ms - 31_000}]}
+
+    class Pipeline:
+        @staticmethod
+        def charger_entrees_alpha_notional_fixe_avec_audit(_workspace):
+            return [], {"live_fill_rows": 0, "causal_live_fill_rows": 0, "historical_fill_rows": 1}
+
+    monkeypatch.setattr(local_lab, "_load_pipeline", lambda: Pipeline())
+    monkeypatch.setattr(local_lab.cv, "cluster_metaorders", lambda _entries: (metaorders, {}))
+    monkeypatch.setattr(local_lab.cv, "load_observed_books", lambda *_args, **_kwargs: (books, {}))
+
+    result = local_lab.run_local_campaign(workspace)
+
+    assert result["status"] == "MORE_DATA"
+    assert result["reason"] == "NO_SAFE_LIVE_FORWARD_FILLS"
+    assert result["alignment_reason"] == "NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS"
+    assert result["live_fill_rows"] == 0
+    assert result["historical_fill_rows"] == 1
+    assert result["candidates_tested"] == 0
+
+
 @pytest.mark.parametrize(
     ("report_status", "gaps", "expected_status", "expected_complete"),
     [

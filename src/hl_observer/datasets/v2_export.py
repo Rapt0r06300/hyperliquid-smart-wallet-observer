@@ -100,6 +100,7 @@ def build_manifest_from_tick_shard(
     trade_count = 0
     historical_fill_observation_count = 0
     historical_fill_observation_count_exact = True
+    unclassified_copy_vault_frame_count = 0
     uncompressed_bytes = 0
     trade_identity_digests: set[str] = set()
     trade_identity_complete = True
@@ -151,6 +152,22 @@ def build_manifest_from_tick_shard(
                     count = _int(parsed.get("fill_count"))
                 record_trade_count = max(1, int(count or 1))
                 trade_count += record_trade_count
+                if channel == "copy_vault_fills":
+                    try:
+                        raw_payload = json.loads(record.get("raw_payload"))
+                        fill_data = raw_payload.get("data") if isinstance(raw_payload, Mapping) else None
+                        snapshot_flag = (
+                            fill_data.get("isSnapshot")
+                            if isinstance(fill_data, Mapping)
+                            else None
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        snapshot_flag = None
+                    if type(snapshot_flag) is not bool:
+                        unclassified_copy_vault_frame_count += 1
+                        invalid_record_count += 1
+                        gap_count += 1
+                        trade_identity_complete = False
             if channel == "copy_vault_snapshot":
                 try:
                     raw_payload = json.loads(record.get("raw_payload"))
@@ -401,6 +418,8 @@ def build_manifest_from_tick_shard(
         replay_reasons.append("DESYNC")
     if invalid_record_count > 0:
         replay_reasons.append("INVALID_EVENT_RECORD")
+    if unclassified_copy_vault_frame_count > 0:
+        replay_reasons.append("COPY_VAULT_SNAPSHOT_STATUS_UNKNOWN")
     replay_compatible = not replay_reasons
 
     return {
@@ -419,6 +438,7 @@ def build_manifest_from_tick_shard(
         "record_count": event_count,
         "trade_count": trade_count,
         "trade_count_exact": channel in _TRADE_CHANNELS,
+        "unclassified_copy_vault_frame_count": unclassified_copy_vault_frame_count,
         "historical_fill_observation_count": (
             historical_fill_observation_count
             if channel == "copy_vault_snapshot"
@@ -467,6 +487,7 @@ def build_manifest_from_tick_shard(
             "missing_monotonic_count": missing_monotonic_count,
             "desync_count": desync_count,
             "invalid_record_count": invalid_record_count,
+            "unclassified_copy_vault_frame_count": unclassified_copy_vault_frame_count,
             "duplicates_deduped": duplicate_count == 0,
         },
         "synchronization": {

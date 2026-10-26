@@ -940,8 +940,8 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     # plus le gate (contournable) ; il ne sert qu'à l'audit du journal.
     if token is None or token != etat.get("token"):
         return {"refus": "PROVENANCE_NON_AUTORISEE", "coin": fill.get("coin")}
-    if fill.get("isSnapshot"):
-        return None                                               # snapshot initial : on ne trade pas dessus
+    if fill.get("isSnapshot") is not False:
+        return None                                               # snapshot ou statut inconnu : pas de signal live
     h = fill.get("hash")
     if h:
         if h in etat["vus"]:

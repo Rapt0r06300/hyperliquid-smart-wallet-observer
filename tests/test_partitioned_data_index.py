@@ -88,6 +88,7 @@ def test_select_index_rows_does_not_reconstruct_partitioned_catalogue(
 
     assert metadata["release_repository_default"] == logical["release_repository_default"]
     assert metadata["schema"] == logical["schema"]
+    assert metadata["_verified_shard_count"] == len(logical["shards"])
     assert [row["dataset_id"] for row in rows] == ["data-001", "data-007"]
 
 

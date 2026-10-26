@@ -34,9 +34,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Iterator, Mapping, TypeVar
 
 try:
-    from tools.partitioned_data_index import read_index
+    from tools.partitioned_data_index import select_index_rows
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index
+    from partitioned_data_index import select_index_rows
 
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 USER_AGENT = "alina-smartflow-disaster-restore/1"
@@ -1575,72 +1575,106 @@ def materialize_analysis_evidence(
 def _load_current_safe_catalog(
     index_path: Path,
     metrics_path: Path,
-    *,
-    validated_index: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, tuple[str, str]], dict[str, Any]]:
     """Bind SAFE restoration to the latest index with SHA-matched metrics.
 
     A historical Release manifest may say SAFE although a later reconciliation
     downgraded the same shard. Immutable Release claims cannot override the
-    current catalog's quality decision.
+    current catalog's quality decision. Only SAFE rows are retained; the
+    partition reader still verifies the complete catalog's hashes, counts and
+    global dataset-ID uniqueness without reconstructing every row in memory.
     """
+    safe_rows, proof = _load_current_safe_rows(index_path, metrics_path)
+    safe = {
+        str(row["dataset_id"]): (
+            str(row["sha256"]).lower(), str(row["release_tag"]),
+        )
+        for row in safe_rows
+    }
+    return safe, proof
+
+
+def _load_current_safe_rows(
+    index_path: Path,
+    metrics_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+    family_prefix: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Select SAFE rows after verifying the catalog partition by partition."""
     try:
+        if index_path.is_symlink() or not index_path.is_file():
+            raise RestoreError("canonical DATA_INDEX is missing or unsafe")
         index_bytes = index_path.read_bytes()
-        try:
-            index = validated_index if validated_index is not None else read_index(index_path)
-        except ValueError as exc:
-            # Preserve the canonical restore contract after the shared
-            # partition reader detects an invalid identity earlier.
-            if "PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID" in str(exc):
-                raise RestoreError("missing or duplicated dataset_id in canonical catalog") from exc
-            raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RestoreError(f"invalid or missing canonical catalog/metrics: {exc}") from exc
-    if not isinstance(index, Mapping) or not isinstance(index.get("shards"), list):
-        raise RestoreError("canonical DATA_INDEX has no valid shards array")
+    try:
+        metadata, safe_rows = select_index_rows(
+            index_path,
+            lambda row: (
+                row.get("quality_status") == "SAFE"
+                and (
+                    family_prefix is None
+                    or str(row.get("family") or "").startswith(family_prefix)
+                )
+            ),
+            progress_callback=progress_callback,
+        )
+    except OSError as exc:
+        raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
+    except ValueError as exc:
+        if "PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID" in str(exc):
+            raise RestoreError("missing or duplicated dataset_id in canonical catalog") from exc
+        raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
+    if not isinstance(metadata, Mapping):
+        raise RestoreError("canonical DATA_INDEX has no valid metadata")
     if not isinstance(metrics, Mapping) or not isinstance(metrics.get("totals"), Mapping):
         raise RestoreError("canonical DATA_METRICS has no valid totals")
     digest = hashlib.sha256(index_bytes).hexdigest()
+    try:
+        current_digest = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise RestoreError("canonical DATA_INDEX changed during validation") from exc
+    if current_digest != digest:
+        raise RestoreError("canonical DATA_INDEX changed during validation")
+    indexed_shards = metadata.get("_verified_shard_count")
     if (
         metrics.get("schema_version") != "alina.data_metrics.v4"
         or metrics.get("source_index_sha256") != digest
         or type(metrics["totals"].get("TOTAL_SHARDS")) is not int
-        or metrics["totals"]["TOTAL_SHARDS"] != len(index["shards"])
+        or type(indexed_shards) is not int
+        or metrics["totals"]["TOTAL_SHARDS"] != indexed_shards
     ):
         raise RestoreError("canonical DATA_METRICS does not match current DATA_INDEX")
-    safe: dict[str, tuple[str, str]] = {}
-    seen: set[str] = set()
-    for row in index["shards"]:
-        if not isinstance(row, Mapping):
-            raise RestoreError("malformed canonical catalog shard row")
+    for row in safe_rows:
         identity = str(row.get("dataset_id") or "")
-        if not identity or identity in seen:
+        if not identity:
             raise RestoreError("missing or duplicated dataset_id in canonical catalog")
-        seen.add(identity)
         sha = str(row.get("sha256") or "").lower()
         tag = str(row.get("release_tag") or "")
-        if row.get("quality_status") == "SAFE":
-            # Legacy compact indexes can omit asset_verified and
-            # validation_allowed: immutable manifest evidence and exact
-            # Release SHA/size are independently verified during hydration.
-            # An explicitly negative admission is never overridden; missing
-            # redundant index flags cannot be mistaken for remote verification.
-            if (
-                row.get("replay_compatible") is not True
-                or row.get("asset_verified") is False
-                or row.get("validation_allowed") is False
-                or re.fullmatch(r"[0-9a-f]{64}", sha) is None
-                or not tag
-            ):
-                raise RestoreError(
-                    f"SAFE_CATALOG_NOT_FULLY_CERTIFIED: {identity}"
-                )
-            safe[identity] = (sha, tag)
-    return safe, {
+        # Legacy compact indexes can omit asset_verified and
+        # validation_allowed; immutable manifest evidence and exact
+        # Release SHA/size are independently verified during hydration.
+        # An explicitly negative admission is never overridden.
+        if (
+            row.get("replay_compatible") is not True
+            or row.get("asset_verified") is False
+            or row.get("validation_allowed") is False
+            or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+            or not tag
+        ):
+            raise RestoreError(
+                f"SAFE_CATALOG_NOT_FULLY_CERTIFIED: {identity}"
+            )
+    families = sorted({str(row.get("family") or "") for row in safe_rows})
+    scope = "COPY_VAULT_ONLY" if family_prefix == "copy_vault_" else "ALL_SAFE_REPLAYABLE"
+    return safe_rows, {
         "source_index_sha256": digest,
-        "indexed_shards": len(seen),
-        "safe_catalog_shards": len(safe),
+        "indexed_shards": indexed_shards,
+        "safe_catalog_shards": len(safe_rows),
+        "selection_scope": scope,
+        "selection_families": families,
     }
 
 
@@ -1648,37 +1682,26 @@ def _load_replay_ready_plan(
     index_path: Path,
     metrics_path: Path,
     *,
-    index_holder: list[dict[str, Any]] | None = None,
-) -> tuple[dict[str, tuple[str, str]], dict[str, Any], list[Mapping[str, Any]], dict[tuple[str, str], tuple[int, str]]]:
+    copy_vault_only: bool = False,
+) -> tuple[dict[str, Any], list[Mapping[str, Any]], dict[tuple[str, str], tuple[int, str]]]:
     """Return the exact SAFE/replayable rows and their immutable outer assets."""
     print("ALINA_RESTORE_PHASE=VERIFY_CANONICAL_PARTITIONS", file=sys.stderr, flush=True)
-    try:
-        index = read_index(
-            index_path, progress_callback=lambda done, total: print(
-                f"ALINA_CATALOG_PARTITIONS={done}/{total}",
-                file=sys.stderr, flush=True,
-            ),
-        )
-    except (OSError, ValueError) as exc:
-        raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
-    # Optional internal hand-off avoids reconstructing the same partitions
-    # a second time for offline catalog budget calculations.
-    if index_holder is not None:
-        index_holder.append(index)
     print("ALINA_RESTORE_PHASE=VERIFY_SAFE_ADMISSION", file=sys.stderr, flush=True)
-    safe, proof = _load_current_safe_catalog(
-        index_path, metrics_path, validated_index=index,
+    rows, proof = _load_current_safe_rows(
+        index_path, metrics_path,
+        progress_callback=lambda done, total: print(
+            f"ALINA_CATALOG_PARTITIONS={done}/{total}",
+            file=sys.stderr, flush=True,
+        ),
+        family_prefix="copy_vault_" if copy_vault_only else None,
     )
     print(
-        f"ALINA_RESTORE_PHASE=SELECT_SAFE_ROWS total={len(index['shards'])} safe={len(safe)}",
+        f"ALINA_RESTORE_PHASE=SELECT_SAFE_ROWS total={proof['indexed_shards']} safe={len(rows)}",
         file=sys.stderr, flush=True,
     )
-    rows: list[Mapping[str, Any]] = []
     required: dict[tuple[str, str], tuple[int, str]] = {}
     logical_bytes = 0
-    for row in index["shards"]:
-        if str(row.get("dataset_id") or "") not in safe:
-            continue
+    for row in rows:
         tag = str(row.get("release_tag") or "")
         member = str(row.get("release_asset") or "")
         outer = str(row.get("release_container_asset") or member)
@@ -1700,7 +1723,6 @@ def _load_replay_ready_plan(
         if key in required and required[key] != evidence:
             raise RestoreError("conflicting SAFE catalog evidence for Release asset")
         required[key] = evidence
-        rows.append(row)
         logical_bytes += int(row["bytes"])
     print(
         f"ALINA_RESTORE_PHASE=SAFE_PLAN_READY shards={len(rows)} release_assets={len(required)}",
@@ -1712,7 +1734,7 @@ def _load_replay_ready_plan(
         "required_release_assets": len(required),
         "safe_logical_bytes": logical_bytes,
     })
-    return safe, proof, rows, required
+    return proof, rows, required
 
 
 def _select_replay_ready_releases(
@@ -2260,56 +2282,6 @@ def _materialize_catalog_safe_shards(
         registry.commit_cache()
     registry.close()
     return report
-
-
-def _retire_verified_selected_cache(
-    releases: list[Mapping[str, Any]],
-    releases_root: Path,
-    destination: Path,
-    repository: str,
-    rows_by_asset: Mapping[tuple[str, str], list[Mapping[str, Any]]],
-) -> dict[str, Any]:
-    """Remove selected raw cache only AFTER all SAFE members are SHA-verified.
-
-    Old mixed ZIP caches may physically contain REJECT or PARTIAL members.
-    They must not remain in the clean replay-ready restoration once their
-    selected SAFE members have been materialized with immutable receipts.
-    """
-    result: dict[str, Any] = {"assets": 0, "bytes": 0, "failures": []}
-    for release in releases:
-        tag = str(release.get("tag_name") or "")
-        for asset in release.get("assets") or []:
-            name = str(asset.get("name") or "")
-            rows = rows_by_asset.get((tag, name), [])
-            if not rows:
-                continue
-            cache = releases_root / _safe_component(tag) / _safe_component(name)
-            if cache.is_symlink():
-                result["failures"].append({
-                    "release_tag": tag, "asset_name": name,
-                    "reason": "SELECTED_CACHE_SYMLINK_NOT_RETIRED",
-                })
-                continue
-            if not cache.exists():
-                continue
-            try:
-                if not _asset_ok(cache, asset):
-                    raise RestoreError("selected cache does not match immutable Release")
-                # A receipt can only be sealed after EACH selected logical
-                # member is present and its exact bytes/size match the index.
-                _write_staged_asset_receipt(
-                    destination, repository, tag, asset, rows
-                )
-                amount = cache.stat().st_size
-                cache.unlink()
-                result["assets"] += 1
-                result["bytes"] += amount
-            except (OSError, RestoreError) as exc:
-                result["failures"].append({
-                    "release_tag": tag, "asset_name": name,
-                    "reason": str(exc),
-                })
-    return result
 
 
 def _safe_replay_row(
@@ -2965,11 +2937,14 @@ def restore_everything(
     prune_unselected: bool = False,
     prune_only: bool = False,
     max_download_bytes: int | None = None,
+    copy_vault_only: bool = False,
 ) -> dict[str, Any]:
     if prune_only and (profile != "replay-ready" or preflight_only or workspace is not None):
         raise RestoreError("cache pruning requires replay-ready without restore, preflight or snapshots")
     if profile not in {"full-archive", "replay-ready"}:
         raise RestoreError(f"unknown restore profile: {profile}")
+    if copy_vault_only and profile != "replay-ready":
+        raise RestoreError("Copy-Vault-only scope requires replay-ready profile")
     if max_download_bytes is not None and (
         type(max_download_bytes) is not int or max_download_bytes < 0
     ):
@@ -2983,8 +2958,10 @@ def restore_everything(
         if metrics_path is None:
             raise RestoreError("canonical DATA_METRICS is required with DATA_INDEX")
         if profile == "replay-ready":
-            (catalog_safe, catalog_verification, replay_rows,
-             replay_required) = _load_replay_ready_plan(catalog_path, metrics_path)
+            (catalog_verification, replay_rows,
+             replay_required) = _load_replay_ready_plan(
+                catalog_path, metrics_path, copy_vault_only=copy_vault_only,
+            )
         else:
             catalog_safe, catalog_verification = _load_current_safe_catalog(
                 catalog_path, metrics_path
@@ -3337,6 +3314,14 @@ def restore_everything(
             ),
             "repository": repository,
             "profile": profile,
+            "selection_scope": (
+                catalog_verification.get("selection_scope")
+                if catalog_verification is not None else "FULL_ARCHIVE"
+            ),
+            "selection_families": (
+                catalog_verification.get("selection_families", [])
+                if catalog_verification is not None else []
+            ),
             "preflight_verification_mode": preflight_verification_mode,
             "source_inventory_sha256": source_inventory_sha256,
             "release_count": len(releases),
@@ -3465,6 +3450,14 @@ def restore_everything(
         "read_only": True,
         "real_execution": False,
         "catalog_verification": catalog_verification,
+        "selection_scope": (
+            catalog_verification.get("selection_scope")
+            if catalog_verification is not None else "FULL_ARCHIVE"
+        ),
+        "selection_families": (
+            catalog_verification.get("selection_families", [])
+            if catalog_verification is not None else []
+        ),
         "certified_working_set": (
             {
                 **{key: value for key, value in working_set.items()
@@ -3659,6 +3652,10 @@ def restore_everything(
     report["classification"] = (
         _materialize_catalog_safe_shards(
             replay_rows, releases_root, destination,
+            # A scoped Copy-Vault restore must not move unrelated or stale
+            # SAFE shards out of the user's usable tree. The active registry
+            # binds only this selection; preserved extras remain unadmitted.
+            prune_stale=False,
             catalog_sha256=str(
                 (catalog_verification or {}).get("source_index_sha256") or ""
             ),
@@ -3669,17 +3666,12 @@ def restore_everything(
             allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
         )
     )
-    report["retired_selected_cache"] = {
-        "assets": 0, "bytes": 0, "failures": [],
+    report["selected_release_cache"] = {
+        "policy": "PRESERVE_RAW_RELEASE_CACHE",
+        "removed_assets": 0,
+        "removed_bytes": 0,
+        "reason": "RAW_RELEASE_ASSETS_REMAIN_ARCHIVED; ONLY_SHA_VERIFIED_SAFE_MEMBERS_ENTER_USABLE",
     }
-    if profile == "replay-ready" and not report["classification"]["failures"]:
-        report["retired_selected_cache"] = _retire_verified_selected_cache(
-            releases, releases_root, destination, repository, raw_rows_by_asset
-        )
-        report["failures"].extend(
-            {"stage": "selected_cache_retirement", **failure}
-            for failure in report["retired_selected_cache"]["failures"]
-        )
     report["analysis_evidence"] = {
         "required": 0,
         "materialized": 0,
@@ -3859,6 +3851,10 @@ def main(argv: list[str] | None = None) -> int:
         help="explicitly allow all selected SAFE Release transfers without a GiB cap",
     )
     parser.add_argument(
+        "--copy-vault-only", action="store_true",
+        help="restore only SAFE replayable catalog families whose name starts with copy_vault_",
+    )
+    parser.add_argument(
         "--prune-cache-only", action="store_true",
         help="remove only locally SHA-verified, unselected Release cache copies; "
              "never download market payloads or claim a completed restoration",
@@ -3906,6 +3902,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.unlimited_download and not args.replay_ready:
         print("ALINA_RESTORE_FAIL: --unlimited-download requires --replay-ready", file=sys.stderr)
         return 2
+    if args.copy_vault_only and not args.replay_ready:
+        print("ALINA_RESTORE_FAIL: --copy-vault-only requires --replay-ready", file=sys.stderr)
+        return 2
     if args.unlimited_download and (args.prune_cache_only or args.preflight_only):
         print("ALINA_RESTORE_FAIL: unlimited download is incompatible with prune/preflight", file=sys.stderr)
         return 2
@@ -3948,6 +3947,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             prune_only=args.prune_cache_only,
             max_download_bytes=(0 if args.prune_cache_only else None if args.unlimited_download else args.max_download_gib * (1024 ** 3)),
+            copy_vault_only=args.copy_vault_only,
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot

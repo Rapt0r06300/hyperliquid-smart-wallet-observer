@@ -1204,6 +1204,9 @@ def run_local_campaign(
         "verified_safe_shards": input_manifest.get("verified_assets"),
         "missing_safe_shards": input_manifest.get("missing_shards"),
         "entries": len(entries), "metaorders": len(metaorders),
+        "live_fill_rows": entries_audit.get("live_fill_rows"),
+        "causal_live_fill_rows": entries_audit.get("causal_live_fill_rows"),
+        "historical_fill_rows": entries_audit.get("historical_fill_rows"),
         "book_rows": sum(len(rows) for rows in books.values()),
         "signal_coverage": signal_coverage,
         "temporally_aligned_add_signals": aligned_adds,
@@ -1216,10 +1219,17 @@ def run_local_campaign(
             "freeze_created": False, "economically_proven": False,
         }
     if aligned_adds == 0:
+        causal_live_fill_rows = entries_audit.get("causal_live_fill_rows")
+        reason = (
+            "NO_SAFE_LIVE_FORWARD_FILLS"
+            if type(causal_live_fill_rows) is int and causal_live_fill_rows == 0
+            else "NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS"
+        )
         return {
             **base,
             "status": "MORE_DATA",
-            "reason": "NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS",
+            "reason": reason,
+            "alignment_reason": "NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS",
             "candidates_tested": 0,
             "freeze_created": False,
             "economically_proven": False,

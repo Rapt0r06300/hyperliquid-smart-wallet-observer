@@ -77,6 +77,32 @@ def test_snapshot_and_live_userfills_are_separate_families() -> None:
     assert live_fills[0]["connection_id"] == "copy-test"
 
 
+def test_missing_snapshot_flag_is_preserved_but_never_classified_live() -> None:
+    envelope, fills = C.userfills_envelope(
+        {
+            "channel": "userFills",
+            "data": {
+                "user": "0x" + "1" * 40,
+                "fills": [{
+                    "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+                    "time": 1_000, "dir": "Open Long", "hash": "0xunknown",
+                    "tid": 3, "oid": 3,
+                }],
+            },
+        },
+        vault="0x" + "1" * 40,
+        receive_wall_ms=1_010,
+        receive_mono_ns=123,
+        connection_id="copy-test",
+    )
+    assert envelope is not None
+    assert envelope.channel == "copy_vault_fills"
+    assert envelope.event_kind == "UNCLASSIFIED"
+    assert envelope.parsed_summary["snapshot_flag_status"] == "MISSING_OR_INVALID"
+    assert envelope.parsed_summary["is_snapshot"] is None
+    assert fills[0]["isSnapshot"] is None
+
+
 def test_selection_envelope_is_observation_only_and_causal() -> None:
     address = "0x" + "2" * 40
     selection = {

@@ -140,6 +140,11 @@ def test_restore_delegates_to_existing_engine_and_propagates_failure(monkeypatch
     assert kwargs["env"]["GIT_LFS_SKIP_SMUDGE"] == "1"
     assert kwargs["env"]["GH_TOKEN"] == "token-for-test"
 
+    calls.clear()
+    assert module.restore_published(tmp_path, copy_vault_only=True) == 3
+    command, _kwargs = calls[0]
+    assert "--copy-vault-only" in command
+
 
 def test_cache_prune_only_passes_zero_byte_budget_to_existing_engine(
     monkeypatch, tmp_path,
@@ -590,6 +595,38 @@ def test_catalog_budget_deduplicates_shared_release_zip_and_preserves_quarantine
     assert report["historical_release_total_bytes"] is None
     assert report["unselected_assets_proven_unrecoverable"] is False
     assert report["unselected_payloads_deleted"] is False
+
+
+def test_catalog_budget_copy_vault_scope_excludes_other_safe_families(tmp_path):
+    module = _module()
+    rows = [
+        {
+            "dataset_id": "cv", "quality_status": "SAFE", "replay_compatible": True,
+            "validation_allowed": True, "asset_verified": True,
+            "sha256": "a" * 64, "bytes": 20, "release_asset": "cv.jsonl.gz",
+            "venue": "hyperliquid", "family": "copy_vault_fills",
+            "event_count": 2, "start_ts_ms": 100, "end_ts_ms": 200,
+            "release_tag": "cv-release",
+        },
+        {
+            "dataset_id": "other", "quality_status": "SAFE", "replay_compatible": True,
+            "validation_allowed": True, "asset_verified": True,
+            "sha256": "b" * 64, "bytes": 50, "release_asset": "other.jsonl.gz",
+            "venue": "okx", "family": "trades", "event_count": 5,
+            "start_ts_ms": 100, "end_ts_ms": 300,
+            "release_tag": "other-release",
+        },
+    ]
+    index, metrics = _write_catalog_budget_fixture(tmp_path, rows)
+
+    report = module.calculate_catalog_budget(index, metrics, copy_vault_only=True)
+
+    assert report["selection_scope"] == "COPY_VAULT_ONLY"
+    assert report["selection_families"] == ["copy_vault_fills"]
+    assert report["indexed_shards"] == 2
+    assert report["replay_selected_shards"] == 1
+    assert report["by_family"] == {"copy_vault_fills": {"shards": 1, "logical_bytes": 20}}
+    assert "okx" not in report["safe_by_venue_family"]
 
 
 def test_catalog_budget_rejects_stale_metrics_and_unknown_bytes(tmp_path):

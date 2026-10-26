@@ -101,6 +101,31 @@ def test_snapshot_initial_ignore_et_curseur_pose():
     assert len(cur["0xV"]["event_ids_at_ts"]) == 2
 
 
+def test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur():
+    cur = {}
+    assert C.fills_a_traiter("0xV", [_f(100, snap=None)], cur) == []
+    assert cur == {}
+
+
+def test_trame_non_classee_est_conservee_comme_preuve_brute(tmp_path):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    message = {
+        "channel": "userFills",
+        "data": {"user": "0xV", "fills": [{"tid": 7}]},
+    }
+    C._journal_userfills_non_classe(
+        tmp_path,
+        vault="0xV",
+        message=message,
+        received_at_ms=1010,
+        connection_id="ws-1",
+    )
+    saved = json.loads((tmp_path / C.FILLS_UNCLASSIFIED).read_text(encoding="utf-8"))
+    assert saved["raw_payload"] == message
+    assert saved["reason"] == "IS_SNAPSHOT_FLAG_MISSING_OR_INVALID"
+    assert saved["read_only"] is True and saved["real_execution"] is False
+
+
 def test_reconnexion_rejoue_les_inconnus_recents_et_migre_legacy():
     cur = {"0xV": 200}
     a = C.fills_a_traiter(

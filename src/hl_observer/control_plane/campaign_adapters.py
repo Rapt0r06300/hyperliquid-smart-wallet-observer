@@ -16,6 +16,8 @@ from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 ROOT = Path(__file__).resolve().parents[3]
 ECONOMIC_KINDS = frozenset({"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"})
+HISTORICAL_BACKFILL_AUDIT_SCHEMA = "alina.copy_vault.historical_backfill_audit.v1"
+MAX_DURABLE_HISTORY_AUDIT_BYTES = 1_048_576
 ANALYSIS_STAGE_BY_KIND = {
     "replay": "REPLAY",
     "backtest": "BACKTEST",
@@ -537,7 +539,7 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     else:
         queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
 
-    return {
+    metrics = {
         "started_at_ms": _bounded_int(
             summary.get("started_at_ms"), 0, 0, 2**63 - 1
         ),
@@ -583,6 +585,37 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         ),
         "basis": "published_bundle_manifests",
     }
+    if "historical_backfill" in index:
+        raw_reports = index.get("historical_backfill")
+        audit: dict[str, Any] = {
+            "schema": HISTORICAL_BACKFILL_AUDIT_SCHEMA,
+            "source": "BUNDLE_INDEX.json",
+            "status": "INVALID_SOURCE",
+            "report_count": 0,
+            "reports_sha256": None,
+            "reports": {},
+        }
+        if isinstance(raw_reports, dict) and all(
+            isinstance(address, str) and isinstance(report, dict)
+            for address, report in raw_reports.items()
+        ):
+            reports = raw_reports
+            serialized = json.dumps(
+                reports,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            audit["report_count"] = len(reports)
+            audit["reports_sha256"] = hashlib.sha256(serialized).hexdigest()
+            audit["reports_bytes"] = len(serialized)
+            if len(serialized) <= MAX_DURABLE_HISTORY_AUDIT_BYTES:
+                audit["status"] = "COMPLETE"
+                audit["reports"] = reports
+            else:
+                audit["status"] = "OVERSIZE_FAIL_CLOSED"
+        metrics["historical_backfill_audit"] = audit
+    return metrics
 
 
 def run_one_unit(

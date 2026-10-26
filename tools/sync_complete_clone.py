@@ -118,7 +118,8 @@ def restore_published(root: Path, *, preflight: bool = False,
                       snapshot: bool = True,
                       max_download_gib: int | None = None,
                       prune_only: bool = False,
-                      unlimited_download: bool = False) -> int:
+                      unlimited_download: bool = False,
+                      copy_vault_only: bool = False) -> int:
     """Delegate all byte-verification and SAFE gates to the ONE restore engine."""
     root = root.resolve()
     cmd = [
@@ -128,6 +129,8 @@ def restore_published(root: Path, *, preflight: bool = False,
         "--catalog", str(root / "catalog" / "DATA_INDEX.json"),
         "--metrics", str(root / "catalog" / "DATA_METRICS.json"),
     ]
+    if copy_vault_only:
+        cmd.append("--copy-vault-only")
     if preflight and prune_only:
         raise SyncError("cannot combine cache pruning with restoration preflight")
     if prune_only:
@@ -167,27 +170,44 @@ def restore_published(root: Path, *, preflight: bool = False,
 
 
 
-def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
+def calculate_catalog_budget(
+    index_path: Path, metrics_path: Path, *, copy_vault_only: bool = False,
+) -> dict:
     """Offline, SHA-bound storage budget; never equate archive size with replay data.
 
     These are manifest bytes, NOT downloaded/verified bytes or economic proof.
     """
     try:
         from tools.restore_alina import _load_replay_ready_plan
+        from tools.partitioned_data_index import select_index_rows
     except ModuleNotFoundError:
         from restore_alina import _load_replay_ready_plan
+        from partitioned_data_index import select_index_rows
 
     # This existing canonical verifier rejects stale metrics, malformed SAFE
-    # asset identities, and incompletely reconstructed index partitions.
-    # Reuse the already SHA-verified logical index: a second full pass
-    # over a large partitioned catalog is expensive and can look frozen.
-    verified_index: list[dict] = []
-    _safe, proof, replay_rows, required = _load_replay_ready_plan(
-        index_path, metrics_path, index_holder=verified_index
+    # asset identities, and incomplete catalog partitions. The budget report
+    # needs rows from every quality class, so scan again through the bounded
+    # partition selector after releasing the SAFE replay row set. Bind both
+    # passes to the same exact index SHA rather than retaining the full index.
+    proof, replay_rows, required = _load_replay_ready_plan(
+        index_path, metrics_path, copy_vault_only=copy_vault_only,
     )
-    if len(verified_index) != 1:
-        raise ValueError("BUDGET_VERIFIED_CATALOG_UNAVAILABLE")
-    index = verified_index[0]
+    replay_shard_count = len(replay_rows)
+    replay_logical_bytes = int(proof["safe_logical_bytes"])
+    del replay_rows
+    metadata, index_rows = select_index_rows(
+        index_path,
+        lambda row: (
+            not copy_vault_only
+            or str(row.get("family") or "").startswith("copy_vault_")
+        ),
+    )
+    if (
+        metadata.get("_verified_shard_count") != proof["indexed_shards"]
+        or hashlib.sha256(index_path.read_bytes()).hexdigest()
+        != proof["source_index_sha256"]
+    ):
+        raise ValueError("BUDGET_VERIFIED_CATALOG_CHANGED")
     by_quality: dict[str, dict[str, int]] = {}
     by_venue: dict[str, dict[str, int]] = {}
     by_family: dict[str, dict[str, int]] = {}
@@ -199,7 +219,7 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
         bucket["shards"] += 1
         bucket["logical_bytes"] += size
 
-    for row in index["shards"]:
+    for row in index_rows:
         if not isinstance(row, dict):
             raise ValueError("BUDGET_INVALID_INDEX_ROW")
         status = row.get("quality_status")
@@ -246,10 +266,7 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
                 bucket["time_bounds_missing_shards"] += 1
         total_logical_bytes += size
 
-    replay_logical_bytes = sum(int(row["bytes"]) for row in replay_rows)
-    if replay_logical_bytes != proof["safe_logical_bytes"]:
-        raise ValueError("BUDGET_REPLAY_TOTAL_MISMATCH")
-    if by_quality.get("SAFE_REPLAY", {}).get("shards", 0) != len(replay_rows):
+    if by_quality.get("SAFE_REPLAY", {}).get("shards", 0) != replay_shard_count:
         raise ValueError("BUDGET_REPLAY_SHARD_COUNT_MISMATCH")
 
     # One Release ZIP can hold many logical shards: count its network bytes
@@ -258,6 +275,8 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
     return {
         "schema": "alina.catalog_storage_budget.v1",
         "status": "CATALOG_ONLY_NOT_RESTORED",
+        "selection_scope": proof["selection_scope"],
+        "selection_families": proof["selection_families"],
         "source_index_sha256": proof["source_index_sha256"],
         "indexed_shards": proof["indexed_shards"],
         "logical_shard_bytes_all_qualities": total_logical_bytes,
@@ -272,7 +291,7 @@ def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
             "Earliest and latest declared shard timestamps only; NOT continuous "
             "coverage or an executable replay/backtest certificate."
         ),
-        "replay_selected_shards": len(replay_rows),
+        "replay_selected_shards": replay_shard_count,
         "replay_selected_logical_bytes": replay_logical_bytes,
         "replay_selected_release_assets": len(required),
         "replay_selected_release_download_bytes": selected_outer_bytes,
@@ -496,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
         help="restore all catalog-selected SAFE/replayable assets without a download cap",
     )
     parser.add_argument(
+        "--copy-vault-only", action="store_true",
+        help="restrict SAFE restoration and catalog accounting to copy_vault_* families",
+    )
+    parser.add_argument(
         "--catalog-budget", action="store_true",
         help="offline SAFE/PARTIAL/REJECT and replay-ready byte accounting; "
              "no git fetch, GitHub API, payload download or local mutations",
@@ -507,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
             report = calculate_catalog_budget(
                 root / "catalog" / "DATA_INDEX.json",
                 root / "catalog" / "DATA_METRICS.json",
+                copy_vault_only=args.copy_vault_only,
             )
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             print(f"ALINA_BUDGET_FAIL: {exc}", file=sys.stderr)
@@ -568,6 +592,7 @@ def main(argv: list[str] | None = None) -> int:
             max_download_gib=(None if args.all_safe else args.max_download_gib) if effective_download else None,
             prune_only=args.prune_cache_only,
             unlimited_download=args.all_safe,
+            copy_vault_only=args.copy_vault_only,
         )
         if args.prune_cache_only:
             # The restore engine writes CACHE_PRUNE_REPORT.json; never turn a
@@ -631,6 +656,9 @@ def main(argv: list[str] | None = None) -> int:
             "restore_exit_code": code,
             "market_payload_download_opt_in": bool(effective_download),
             "download_cap_gib": (None if args.all_safe else args.max_download_gib) if effective_download else None,
+            "selection_scope": (
+                "COPY_VAULT_ONLY" if args.copy_vault_only else "ALL_SAFE_REPLAYABLE"
+            ),
             "status": "REPLAY_READY_COMPLETE" if certified else "RESTORE_INCOMPLETE",
             "restore_report": report_name,
             "restore_report_status": restore_status,

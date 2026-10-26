@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 _ADDRESS = re.compile(r"0x[0-9a-f]{40}\Z")
+_HISTORICAL_BACKFILL_AUDIT_SCHEMA = "alina.copy_vault.historical_backfill_audit.v1"
+_MAX_HISTORY_AUDIT_BYTES = 1_048_576
 
 
 def _digest(value: Any) -> str:
@@ -20,6 +22,52 @@ def _digest(value: Any) -> str:
         ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _history_reports_from_payload(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Read a hash-bound structured audit, or a complete legacy JSON stdout."""
+    metrics = payload.get("collection_metrics")
+    if isinstance(metrics, Mapping) and "historical_backfill_audit" in metrics:
+        audit = metrics.get("historical_backfill_audit")
+        if not isinstance(audit, Mapping):
+            return None
+        reports = audit.get("reports")
+        if (
+            audit.get("schema") != _HISTORICAL_BACKFILL_AUDIT_SCHEMA
+            or audit.get("source") != "BUNDLE_INDEX.json"
+            or audit.get("status") != "COMPLETE"
+            or not isinstance(reports, Mapping)
+            or type(audit.get("report_count")) is not int
+            or audit.get("report_count") != len(reports)
+            or any(
+                not isinstance(address, str) or not isinstance(report, Mapping)
+                for address, report in reports.items()
+            )
+            or audit.get("reports_sha256") != _digest(dict(reports))
+        ):
+            return None
+        serialized = json.dumps(
+            dict(reports),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        if len(serialized) > _MAX_HISTORY_AUDIT_BYTES:
+            return None
+        reports_bytes = audit.get("reports_bytes")
+        if type(reports_bytes) is int and reports_bytes != len(serialized):
+            return None
+        return reports
+
+    raw_stdout = payload.get("stdout")
+    if not isinstance(raw_stdout, str):
+        return None
+    try:
+        summary = json.loads(raw_stdout)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    reports = summary.get("historical_backfill") if isinstance(summary, Mapping) else None
+    return reports if isinstance(reports, Mapping) else None
 
 
 def _read_json(path: Path) -> Mapping[str, Any] | None:
@@ -138,15 +186,8 @@ def load_history_checkpoints(
             release_tag = payload.get("release_tag")
             if not isinstance(release_tag, str) or not release_tag.strip():
                 continue
-            raw_stdout = payload.get("stdout")
-            if not isinstance(raw_stdout, str):
-                continue
-            try:
-                summary = json.loads(raw_stdout)
-            except (TypeError, json.JSONDecodeError):
-                continue
-            reports = summary.get("historical_backfill") if isinstance(summary, Mapping) else None
-            if not isinstance(reports, Mapping):
+            reports = _history_reports_from_payload(payload)
+            if reports is None:
                 continue
             campaign_with_release = {**campaign, "release_tag": release_tag}
             for raw_address, raw_report in reports.items():
@@ -178,6 +219,7 @@ def load_release_history_audits(
     """Match SAFE Copy-Vault releases to committed REST coverage receipts."""
     wanted = {str(tag) for tag in release_tags if str(tag).strip()}
     reports_by_release: dict[str, list[dict[str, Any]]] = {}
+    durable_receipt_tags: set[str] = set()
     try:
         paths = sorted(Path(campaign_dir).glob("copy-vault-*.json"))
     except OSError:
@@ -206,14 +248,8 @@ def load_release_history_audits(
                 or release_tag not in wanted
             ):
                 continue
-            raw_stdout = payload.get("stdout")
-            if not isinstance(raw_stdout, str):
-                continue
-            try:
-                summary = json.loads(raw_stdout)
-            except (TypeError, json.JSONDecodeError):
-                continue
-            reports = summary.get("historical_backfill") if isinstance(summary, Mapping) else None
+            durable_receipt_tags.add(release_tag)
+            reports = _history_reports_from_payload(payload)
             if not isinstance(reports, Mapping) or not reports:
                 continue
             rows = reports_by_release.setdefault(release_tag, [])
@@ -252,7 +288,10 @@ def load_release_history_audits(
                     ),
                 })
 
-    unknown = sorted(wanted - set(reports_by_release))
+    audited_release_tags = set(reports_by_release)
+    unknown = sorted(wanted - audited_release_tags)
+    missing_receipt_tags = sorted(wanted - durable_receipt_tags)
+    receipt_without_audit_tags = sorted(durable_receipt_tags - audited_release_tags)
     reports = [row for tag in sorted(reports_by_release) for row in reports_by_release[tag]]
     partial = [
         row for row in reports
@@ -276,6 +315,9 @@ def load_release_history_audits(
         "status": "COMPLETE" if not unknown and not partial else "PARTIAL",
         "expected_release_count": len(wanted),
         "audited_release_count": len(reports_by_release),
+        "durable_receipt_release_count": len(durable_receipt_tags),
+        "missing_durable_receipt_tags": missing_receipt_tags,
+        "receipt_without_backfill_audit_tags": receipt_without_audit_tags,
         "unknown_release_tags": unknown,
         "partial_report_count": len(partial),
         "reports": reports,

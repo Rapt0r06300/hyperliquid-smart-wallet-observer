@@ -225,7 +225,11 @@ def select_index_rows(
             seen.add(ident)
             if predicate(row):
                 selected.append(row)
-        return {key: value for key, value in root.items() if key != "shards"}, selected
+        metadata = {key: value for key, value in root.items() if key != "shards"}
+        if "_verified_shard_count" in metadata:
+            raise ValueError("DATA_INDEX_RESERVED_METADATA")
+        metadata["_verified_shard_count"] = len(seen)
+        return metadata, selected
 
     limit = root.get("partition_max_bytes")
     count = root.get("shard_count")
@@ -315,6 +319,9 @@ def select_index_rows(
             "partition_max_bytes", "schema",
         }
     }
+    if "_verified_shard_count" in metadata:
+        raise ValueError("PARTITION_PARITY_RESERVED_METADATA")
+    metadata["_verified_shard_count"] = observed_count
     metadata["schema"] = legacy_schema
     return metadata, selected
 

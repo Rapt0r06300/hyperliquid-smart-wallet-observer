@@ -51,6 +51,7 @@ import collecter_vaults as CV  # noqa: E402  (univers officiel public, observati
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
+FILLS_UNCLASSIFIED = Path("runtime") / "data" / "userfills_unclassified.jsonl"
 COPY_VAULT_L2_TAPE = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 JOURNAL = Path("runtime") / "data" / "fills_journal.jsonl"       # CHAQUE fill live non-snapshot + gate + latence
 LIQ_CONFIRMEES = Path("runtime") / "data" / "liquidations_confirmees.jsonl"  # 25/07 : fill.liquidation non-null = REAL_LIQUIDATION
@@ -76,7 +77,8 @@ _WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS 
 WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
-                 "drops": 0, "tape_drops": 0, "dernier_exchange_ts": None}
+                 "drops": 0, "tape_drops": 0, "unclassified_snapshot_frames": 0,
+                 "dernier_exchange_ts": None}
 _CURRENT_ROTATION_VAULTS: tuple[str, ...] = ()
 _METAORDER_RUN_LOCK = threading.Lock()
 
@@ -336,7 +338,11 @@ def fills_a_traiter(vault: str, fills: list[dict], curseurs: dict) -> list[dict]
     if not fills:
         return []
 
-    est_snap = bool(fills[0].get("isSnapshot"))
+    snapshot_flags = {fill.get("isSnapshot") for fill in fills}
+    if len(snapshot_flags) != 1 or any(type(flag) is not bool for flag in snapshot_flags):
+        return []
+
+    est_snap = fills[0]["isSnapshot"]
     raw_cursor = curseurs.get(vault, 0)
     cur_ts, ids_at_cur, legacy = _cursor_state(raw_cursor)
 
@@ -456,9 +462,9 @@ def _journal_liquidations(root: Path, recs: list, *, socket_id: str = "") -> Non
                     event_age_ms = wall_ms - int(r.get("ts_ms"))
                 except (TypeError, ValueError):
                     event_age_ms = None
-                is_snapshot = bool(r.get("is_snapshot"))
+                is_snapshot = r.get("is_snapshot")
                 causal_forward = (
-                    not is_snapshot
+                    is_snapshot is False
                     and event_age_ms is not None
                     and 0 <= event_age_ms <= 30_000
                 )
@@ -476,7 +482,13 @@ def _journal_liquidations(root: Path, recs: list, *, socket_id: str = "") -> Non
                     "causal_forward_reason": (
                         "ELIGIBLE_LIVE_WS"
                         if causal_forward
-                        else ("SNAPSHOT" if is_snapshot else "STALE_OR_INVALID_EXCHANGE_TIME")
+                        else (
+                            "SNAPSHOT"
+                            if is_snapshot is True
+                            else "SNAPSHOT_STATUS_UNKNOWN"
+                            if is_snapshot is not False
+                            else "STALE_OR_INVALID_EXCHANGE_TIME"
+                        )
                     ),
                     "socket": socket_id,
                     "run_id": RUN_ID,
@@ -951,6 +963,34 @@ def _vault_du_message(msg, connus_par_lc: dict) -> str | None:
     return connus_par_lc.get(str(u).lower()) if u else None
 
 
+def _journal_userfills_non_classe(
+    root: Path,
+    *,
+    vault: str,
+    message: dict,
+    received_at_ms: int,
+    connection_id: str,
+) -> None:
+    """Persist raw WS evidence when its native snapshot/live marker is unknown."""
+    path = root / FILLS_UNCLASSIFIED
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "schema": "alina.userfills_unclassified.v1",
+        "source": "hyperliquid_public_userfills",
+        "vault": vault,
+        "received_at_ms": int(received_at_ms),
+        "connection_id": connection_id,
+        "reason": "IS_SNAPSHOT_FLAG_MISSING_OR_INVALID",
+        "raw_payload": message,
+        "read_only": True,
+        "real_execution": False,
+    }
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, socket_id: str = "A") -> None:
     """UNE socket WS pour un SHARD de ≤5 userFills (HL cape ~5/connexion). 2 shards (A,B) de 5 + la socket L2
     = 3 connexions au total (< 10). Démux par data.user ; ACK réel = subscriptionResponse. Si CETTE socket
@@ -991,6 +1031,24 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     if not vault:
                         continue
                     _HEARTBEAT_WS["messages"] += 1
+                    data = msg.get("data")
+                    snapshot_flag = data.get("isSnapshot") if isinstance(data, dict) else None
+                    if type(snapshot_flag) is not bool:
+                        _HEARTBEAT_WS["unclassified_snapshot_frames"] += 1
+                        try:
+                            _journal_userfills_non_classe(
+                                root,
+                                vault=vault,
+                                message=msg,
+                                received_at_ms=recv_wall_ms,
+                                connection_id=connection_id,
+                            )
+                        except (OSError, TypeError, ValueError) as exc:
+                            print(
+                                "[userfills] frame non classe non sauvegardee (%s)"
+                                % type(exc).__name__,
+                                flush=True,
+                            )
                     if vault not in confirmes:                     # 1er message (snapshot/fill) = ABONNEMENT CONFIRMÉ (fiable,
                         confirmes.add(vault)                       # contrairement au subscriptionResponse partiel de HL)
                         print("[userfills] socket %s vault CONFIRME (1er msg) %s [%d/%d]" % (socket_id, vault[:10], len(confirmes), len(vaults)), flush=True)
@@ -1120,6 +1178,9 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
             souscription_ack=bool(_HEARTBEAT_WS["acks"] or messages),
             note="%d WS messages, %d fills" % (messages, int(_HEARTBEAT_WS["fills"])),
             metriques={
+                "unclassified_snapshot_frames": int(
+                    _HEARTBEAT_WS.get("unclassified_snapshot_frames") or 0
+                ),
                 "gaps_critiques": (
                     int(_HEARTBEAT_WS["drops"])
                     + int(_HEARTBEAT_WS.get("tape_drops") or 0)

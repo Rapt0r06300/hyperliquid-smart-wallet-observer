@@ -85,6 +85,28 @@ def annotate_collection(
                 queue_drops=int(drops or 0)
             frame_metrics_complete=True
 
+    collection_metrics = payload.get("collection_metrics")
+    merged_collection_metrics = (
+        dict(collection_metrics) if isinstance(collection_metrics, dict) else {}
+    )
+    merged_collection_metrics.update({
+        "trade_count_observed":trade_count,
+        "trade_count_coverage_complete":trade_shards == trade_shards_exact,
+        "trade_shard_count":trade_shards,
+        "trade_shards_exact":trade_shards_exact,
+        "record_count_observed":record_count,
+        "accepted_frames":accepted_frames,
+        "persisted_frames":persisted_frames,
+        "l2_frames":l2_frames,
+        "queue_drops":queue_drops,
+        "frame_metrics_complete":frame_metrics_complete,
+        "shard_count":int(manifest.get("shard_count") or 0),
+        "safe_count":int(manifest.get("safe_count") or 0),
+        "partial_count":int(manifest.get("partial_count") or 0),
+        "reject_count":int(manifest.get("reject_count") or 0),
+        "compressed_bytes":compressed_bytes,
+        "basis":"published_run_manifest",
+    })
     payload.update({
         "release_tag":str(tag),
         "release_repository":str(repository),
@@ -94,24 +116,7 @@ def annotate_collection(
         "reject_count":int(manifest.get("reject_count") or 0),
         "durable_persisted":True,
         "source_admission":manifest.get("source_admission"),
-        "collection_metrics":{
-            "trade_count_observed":trade_count,
-            "trade_count_coverage_complete":trade_shards == trade_shards_exact,
-            "trade_shard_count":trade_shards,
-            "trade_shards_exact":trade_shards_exact,
-            "record_count_observed":record_count,
-            "accepted_frames":accepted_frames,
-            "persisted_frames":persisted_frames,
-            "l2_frames":l2_frames,
-            "queue_drops":queue_drops,
-            "frame_metrics_complete":frame_metrics_complete,
-            "shard_count":int(manifest.get("shard_count") or 0),
-            "safe_count":int(manifest.get("safe_count") or 0),
-            "partial_count":int(manifest.get("partial_count") or 0),
-            "reject_count":int(manifest.get("reject_count") or 0),
-            "compressed_bytes":compressed_bytes,
-            "basis":"published_run_manifest",
-        },
+        "collection_metrics":merged_collection_metrics,
     })
     _write_result(result_path,row)
     return row

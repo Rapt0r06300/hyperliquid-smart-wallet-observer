@@ -93,7 +93,12 @@ def construire_evenements(*, userfills_msg: Any = None, l2_par_coin: dict[str, A
     evenements: list[dict[str, Any]] = []
     fills = parser_message_userfills(userfills_msg, vault=vault) if userfills_msg else []
     for f in fills:
-        if f.get("isSnapshot") and not inclure_snapshot:
+        snapshot_flag = f.get("isSnapshot")
+        if snapshot_flag is False:
+            pass
+        elif snapshot_flag is True and inclure_snapshot:
+            pass
+        else:
             continue
         coin = str(f.get("coin", "")).upper()
         ev = {"coin": coin, "px": f.get("px"), "sz": f.get("sz"), "signe": f.get("signe"),

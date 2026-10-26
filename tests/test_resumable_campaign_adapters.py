@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 import time
 
@@ -517,3 +518,48 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
     assert metrics["duration_s"] == 60.0
     assert metrics["accepted_frames"] == 10
     assert metrics["persisted_frames"] == 10
+
+
+def test_collection_checkpoint_metrics_preserve_historical_backfill_audit(tmp_path):
+    address = "0x" + "a" * 40
+    report = {
+        "status": "COMPLETE",
+        "request_audit_status": "COMPLETE",
+        "requested_start_ms": 1_000,
+        "requested_end_ms": 2_000,
+        "rows": 3,
+        "checkpoint_advance_allowed": True,
+        "unresolved_gaps": [],
+        "retention_cap_reached": False,
+        "request_budget_exhausted": False,
+        "pending_windows": 0,
+        "invalid_fill_count": 0,
+        "failed_windows": [],
+        "cap_blocked_windows": [],
+    }
+    index = {
+        "manifests": [],
+        "shard_count": 1,
+        "safe_count": 1,
+        "partial_count": 0,
+        "reject_count": 0,
+        "historical_backfill": {address: report},
+    }
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(index), encoding="utf-8"
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    audit = metrics["historical_backfill_audit"]
+    assert audit["source"] == "BUNDLE_INDEX.json"
+    assert audit["reports"] == {address: report}
+    assert audit["report_count"] == 1
+    assert audit["reports_sha256"] == hashlib.sha256(
+        json.dumps(
+            {address: report},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()

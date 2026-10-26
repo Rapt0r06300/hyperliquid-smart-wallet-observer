@@ -54,34 +54,82 @@ INTEGRATION_TESTS = (
 
 
 def inspect_local_safe_corpus(root: Path) -> dict[str, Any]:
-    """Read-only AlinaSync registry inspection; not economic source certification."""
+    """Inspect AlinaSync receipts; the Copy-Vault loader separately rehashes shards."""
     recovery = root / "runtime" / "recovery" / "full"
-    result: dict[str, Any] = {"status": "NOT_CERTIFIED", "safe_registry_rows": None}
+    result: dict[str, Any] = {
+        "status": "NOT_CERTIFIED", "safe_registry_rows": None,
+        "selection_scope": None, "reason": "RESTORE_RECEIPTS_MISSING_OR_INVALID",
+    }
     try:
-        restored = json.loads((recovery / "RESTORE_REPORT.json").read_text(encoding="utf-8"))
-        expanded = json.loads((recovery / "UNPACK_REPORT.json").read_text(encoding="utf-8"))
+        restore_path = recovery / "RESTORE_REPORT.json"
+        index_path = root / "catalog" / "DATA_INDEX.json"
         registry = recovery / "SAFE_SHARDS.sqlite3"
-        catalog = (restored.get("catalog_verification") or {}).get("source_index_sha256")
+        if any(path.is_symlink() for path in (recovery, restore_path, index_path, registry)):
+            return {**result, "reason": "SYMLINKED_RESTORE_EVIDENCE"}
+        restored = json.loads(restore_path.read_text(encoding="utf-8"))
+        if not isinstance(restored, dict) or not index_path.is_file():
+            return {**result, "reason": "RESTORE_REPORT_OR_ACTIVE_CATALOG_MISSING"}
+        digest = hashlib.sha256()
+        with index_path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        current_catalog = digest.hexdigest()
+        binding = restored.get("catalog_verification")
+        binding = binding if isinstance(binding, Mapping) else {}
+        catalog = binding.get("source_index_sha256")
+        scope = restored.get("selection_scope") or binding.get("selection_scope")
+        families = restored.get("selection_families") or binding.get("selection_families")
+        classification = restored.get("classification")
         if not (
             restored.get("status") == "REPLAY_READY_COMPLETE"
-            and (restored.get("classification") or {}).get("materialization_complete") is True
-            and expanded.get("status") == "SAFE_UNPACK_COMPLETE"
-            and catalog and expanded.get("catalog_index_sha256") == catalog
+            and restored.get("repository") == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+            and isinstance(classification, Mapping)
+            and classification.get("materialization_complete") is True
+            and classification.get("failures") in (None, [])
+            and catalog == current_catalog
+            and scope in {"COPY_VAULT_ONLY", "ALL_SAFE_REPLAYABLE"}
+            and isinstance(families, list)
+            and (scope != "COPY_VAULT_ONLY" or (
+                bool(families) and all(
+                    isinstance(family, str) and family.startswith("copy_vault_")
+                    for family in families
+                )
+            ))
+            and type(classification.get("usable_shards")) is int
+            and classification.get("usable_shards") > 0
+            and classification.get("expected_usable_shards")
+            == classification.get("usable_shards")
             and registry.is_file() and not registry.is_symlink()
         ):
-            return result
+            return {**result, "reason": "RESTORE_REPORT_NOT_BOUND_TO_ACTIVE_SCOPE_AND_CATALOG"}
         with sqlite3.connect(registry.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0) as db:
+            metadata = dict(db.execute(
+                "SELECT key, value FROM safe_shard_registry_meta "
+                "WHERE key IN ('run_status','active_catalog_sha256','target_catalog_sha256')"
+            ))
+            if (
+                metadata.get("run_status") != "COMPLETE"
+                or metadata.get("active_catalog_sha256") != current_catalog
+                or metadata.get("target_catalog_sha256") != current_catalog
+            ):
+                return {
+                    **result, "selection_scope": scope,
+                    "reason": "SAFE_REGISTRY_NOT_FINAL_FOR_ACTIVE_CATALOG",
+                }
             count = db.execute("SELECT COUNT(*) FROM current_safe_shards").fetchone()[0]
-        expected = (restored.get("classification") or {}).get("usable_shards")
-        unpack_count = expanded.get("certified_shards")
-        status = (
-            "RECEIPTS_MATCH_NOT_REHASHED"
-            if type(count) is int and count > 0
-            and type(expected) is int and expected == count
-            and type(unpack_count) is int and unpack_count == count
-            else "COUNT_MISMATCH"
-        )
-        return {"status": status, "safe_registry_rows": int(count)}
+        expected = classification.get("usable_shards")
+        if type(count) is not int or count != expected:
+            return {
+                **result, "selection_scope": scope,
+                "safe_registry_rows": int(count) if type(count) is int else None,
+                "reason": "RESTORE_AND_SAFE_REGISTRY_COUNTS_DISAGREE",
+            }
+        return {
+            "status": "RESTORE_RECEIPTS_MATCH_NOT_REHASHED",
+            "safe_registry_rows": count,
+            "selection_scope": scope,
+            "reason": "RESTORE_AND_REGISTRY_RECEIPTS_MATCH; LAB_REHASHES_SHARDS_BEFORE_REPLAY",
+        }
     except (OSError, ValueError, TypeError, sqlite3.Error, AttributeError):
         return result
 
@@ -488,7 +536,8 @@ def run_lab(*, preflight_only: bool = False) -> int:
     print(
         "ALINASYNC SAFE : " + str(safe["status"])
         + " | registre shards=" + str(safe["safe_registry_rows"])
-        + " | liaison avec les campagnes non prouvee",
+        + " | portée=" + str(safe.get("selection_scope") or "inconnue")
+        + " | les SHA-256 des shards sont recalculés par le labo avant replay",
         flush=True,
     )
     print("\nMODULES LOCAUX DÉTECTÉS", flush=True)
@@ -632,6 +681,9 @@ def run_lab(*, preflight_only: bool = False) -> int:
 OBJECTIVE_USD_PER_DAY = 5.0  # dashboard placeholder; replaced from optional module on execution
 PAPER_CAPITAL_USD = 1000.0   # never a trading instruction
 REASON_LABELS = {
+    "NO_SAFE_LIVE_FORWARD_FILLS": (
+        "aucun fill live causal n'est présent dans les shards SAFE; les snapshots historiques ne prouvent pas le forward"
+    ),
     "NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS": (
         "aucun carnet L2 observé n'est disponible au moment du signal (ou dans les 30 secondes avant)"
     ),
@@ -814,11 +866,46 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     )
     payload_audit = inputs.get("payload_audit")
     payload_audit = payload_audit if isinstance(payload_audit, Mapping) else {}
+    historical_coverage = inputs.get("historical_coverage_audit")
+    historical_coverage = (
+        historical_coverage if isinstance(historical_coverage, Mapping) else {}
+    )
+    coverage_expected = historical_coverage.get("expected_release_count")
+    coverage_audited = historical_coverage.get("audited_release_count")
+    coverage_receipts = historical_coverage.get("durable_receipt_release_count")
+    coverage_missing_receipts = historical_coverage.get("missing_durable_receipt_tags")
+    coverage_without_audit = historical_coverage.get("receipt_without_backfill_audit_tags")
+    if type(coverage_expected) is int and type(coverage_audited) is int:
+        receipt_text = (
+            f"; {int(coverage_receipts):,}/{coverage_expected:,} reçus durables de collecte"
+            if type(coverage_receipts) is int else ""
+        )
+        missing_receipt_count = (
+            len(coverage_missing_receipts)
+            if isinstance(coverage_missing_receipts, list)
+            else max(0, coverage_expected - int(coverage_receipts or 0))
+        )
+        no_audit_count = (
+            len(coverage_without_audit)
+            if isinstance(coverage_without_audit, list)
+            else max(0, coverage_expected - coverage_audited - missing_receipt_count)
+        )
+        historical_coverage_text = (
+            f"Audit de backfill historique : {coverage_audited:,}/{coverage_expected:,} releases SAFE "
+            f"avec un rapport exploitable{receipt_text}; {no_audit_count:,} reçu(s) sans audit de backfill "
+            f"et {missing_receipt_count:,} sans reçu durable. Ce compteur concerne la preuve de couverture, "
+            "pas le nombre de shards locaux présents."
+        ).replace(",", " ")
+    else:
+        historical_coverage_text = "Audit de backfill historique : reçu ou couverture non mesuré."
     safe_exclusion_summary = _safe_copy_vault_exclusion_summary(inputs)
     payload_rejection_labels = {
         "INVALID_OR_NONCAUSAL_L2_REJECTED": "carnets L2 invalides ou non causaux",
         "INVALID_OR_INCOMPLETE_FILL_REJECTED": "fills invalides ou incomplets",
         "FILL_LIST_INVALID": "listes de fills invalides",
+        "SNAPSHOT_FAMILY_FLAG_MISMATCH": (
+            "trames userFills sans marqueur isSnapshot valide pour leur famille, exclues"
+        ),
     }
     payload_rejection_text = "; ".join(
         f"{int(count):,}".replace(",", " ") + " "
@@ -868,10 +955,12 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"corpus complet : {'oui' if inputs.get('data_complete') is True else 'non' if inputs.get('data_complete') is False else 'calcul en cours'}</p>"
         f"<p class='small'>Contenu refusé : {html.escape(payload_rejection_text)}. "
         "Les fichiers SAFE vérifiés et la qualité de leurs événements sont affichés séparément.</p>"
+        f"<p class='small'>{html.escape(historical_coverage_text)}</p>"
         f"<p class='small'>Contexte SAFE hors replay économique : {html.escape(safe_exclusion_summary)}.</p>"
         + (
             f"<p class='small'>Signaux leader : {int(signal_day_count):,} / {int(signal_day_minimum):,} jours UTC distincts · "
             f"fenêtre observée : {signal_span_text} h · cycles reconstruits : {int(economic.get('metaorders') or 0):,} · "
+            f"fills live causaux : {html.escape(str(economic.get('causal_live_fill_rows') if economic.get('causal_live_fill_rows') is not None else 'non mesuré'))} · "
             f"signaux ADD avec L2 causal dans les 30 s : "
             f"{aligned_add_signals_text}</p>"
             if type(signal_day_count) is int and type(signal_day_minimum) is int else ""
@@ -971,6 +1060,8 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
         f"- Données SAFE : {inputs.get('verified_assets', 0)} / {inputs.get('expected_safe_shards', 0)} shards vérifiés; "
         f"{inputs.get('unique_fills', 0)} fills et {inputs.get('unique_books', 0)} carnets uniques.",
         f"- Contexte SAFE hors PnL : {_safe_copy_vault_exclusion_summary(inputs)}.",
+        f"- {historical_coverage_text}",
+        f"- Enregistrements refusés : {payload_rejection_text}.",
         f"- Essais uniques : {economic.get('candidates_tested', 0)} · candidat gelé : "
         f"{'oui' if economic.get('freeze_created') else 'non'} · preuve économique : "
         f"{'oui' if economic.get('economically_proven') else 'non'}.",
@@ -1316,6 +1407,7 @@ def _run_continuous_safe_lab(
 
 def run_economic_lab(
     *, preflight_only: bool = False, tests_only: bool = False, continuous: bool = False,
+    safe_research_mode: bool = False,
 ) -> int:
     # Imported only for explicit local legacy economic runs. A clean GitHub
     # clone can lack this optional Codex/Claude module: fail closed, do not
@@ -1381,25 +1473,79 @@ def run_economic_lab(
         recovery = ROOT / "runtime" / "recovery" / "full"
         workspace = report_dir / "workspace"
         print("\n[1/4] Vérification SAFE : taille + SHA-256 de chaque shard Copy-Vault...", flush=True)
-        safe_inputs = materialize_safe_workspace(recovery, workspace)
+        last_safe_progress = 0.0
+
+        def show_safe_progress(message: str) -> None:
+            nonlocal last_safe_progress
+            now_monotonic = time.monotonic()
+            if last_safe_progress == 0.0 or now_monotonic - last_safe_progress >= 5.0:
+                print(f"[SAFE] {message}", flush=True)
+                last_safe_progress = now_monotonic
+
+        safe_inputs = materialize_safe_workspace(
+            recovery, workspace,
+            progress=show_safe_progress if safe_research_mode else None,
+        )
         print(
             f"      {safe_inputs.get('verified_assets', 0)} fichiers vérifiés; "
             f"{safe_inputs.get('unique_fills', 0)} fills; {safe_inputs.get('unique_books', 0)} carnets L2.",
             flush=True,
         )
+        print(
+            "      Fills non-snapshot uniques : "
+            + str(safe_inputs.get("incremental_unique_fills", "non mesuré"))
+            + " · snapshots historiques : "
+            + str(safe_inputs.get("historical_unique_fills", "non mesuré")),
+            flush=True,
+        )
+        coverage = safe_inputs.get("historical_coverage_audit")
+        if isinstance(coverage, Mapping):
+            expected_releases = coverage.get("expected_release_count")
+            audited_releases = coverage.get("audited_release_count")
+            durable_receipts = coverage.get("durable_receipt_release_count")
+            no_audit = coverage.get("receipt_without_backfill_audit_tags")
+            missing_receipts = coverage.get("missing_durable_receipt_tags")
+            if type(expected_releases) is int and type(audited_releases) is int:
+                print(
+                    "      Audit backfill historique : "
+                    f"{audited_releases}/{expected_releases} exploitables; "
+                    f"reçus durables {durable_receipts if type(durable_receipts) is int else 'non mesurés'}/"
+                    f"{expected_releases}; reçus sans audit {len(no_audit) if isinstance(no_audit, list) else 'non mesurés'}; "
+                    f"reçus manquants {len(missing_receipts) if isinstance(missing_receipts, list) else 'non mesurés'}. "
+                    "Ce n'est pas un décompte de shards absents.",
+                    flush=True,
+                )
+        rejected_counts = safe_inputs.get("payload_audit")
+        if isinstance(rejected_counts, Mapping) and rejected_counts:
+            details = "; ".join(
+                f"{count} {str(reason).replace('_', ' ').lower()}"
+                for reason, count in sorted(rejected_counts.items())
+                if type(count) is int and count > 0
+            )
+            if details:
+                print("      Trames non admises au replay : " + details, flush=True)
         if preflight_only:
             overall_status = "PREFLIGHT_ONLY"
             economic_result = {
                 "status": "NOT_RUN_PREFLIGHT_ONLY", "reason": safe_inputs.get("reason"),
                 "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
             }
-        elif safe_inputs.get("status") != "READY":
+        elif (
+            safe_inputs.get("status") not in {"READY", "MORE_DATA"}
+            or safe_inputs.get("replay_inputs_available") is not True
+        ):
             overall_status = "UNMEASURABLE"
             economic_result = {
                 "status": "UNMEASURABLE", "reason": safe_inputs.get("reason"),
                 "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
             }
         else:
+            if safe_inputs.get("data_complete") is not True:
+                print(
+                    "      Corpus incomplet : replay TRAIN exploratoire sur les seuls "
+                    "enregistrements validés; aucune preuve économique ne sera déclarée.",
+                    flush=True,
+                )
             print("[2/4] Reconstruction des épisodes et des signaux leader...", flush=True)
             current_copy_vault = evaluate_current_copy_vault(
                 workspace,
@@ -1492,8 +1638,10 @@ def run_economic_lab(
     elif historical_replay.get("status") == "COMPLETED_EXPLORATORY":
         freeze_verdict = (
             f"{int(historical_replay.get('trial_count') or 0)} scénarios historiques ont été "
-            "rejoués sans trouver mieux que le Copy-Vault actuel; les données fraîches restent "
-            "non mesurables faute d'alignement causal signal/L2."
+            "rejoués sans trouver mieux que le Copy-Vault actuel; les résultats récents restent "
+            "non mesurables : "
+            + _human_reason(economic_result.get("reason"))
+            + "."
         )
     else:
         freeze_verdict = (
@@ -1615,7 +1763,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.safe_research:
         if args.research or args.preflight_only or args.dataset_root is not None:
             parser.error("--safe-research est incompatible avec les autres modes")
-        return run_economic_lab(continuous=not args.once)
+        return run_economic_lab(
+            continuous=not args.once, safe_research_mode=True,
+        )
     if args.once:
         parser.error("--once ne s'utilise qu'avec --safe-research")
     if args.research:

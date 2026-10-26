@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import sqlite3
 from pathlib import Path
 
 import tools.alina_quant_lab_console as lab
@@ -146,6 +148,34 @@ def test_dashboard_explains_missing_signal_days_and_safe_payload_rejections(
     assert "0/100 sélection fichiers locaux repérés (100 absents)" in dashboard
 
 
+def test_dashboard_separates_missing_backfill_audit_from_missing_shards(tmp_path: Path) -> None:
+    summary = {
+        "run_id": "backfill-audit", "head": "abc", "status": "MORE_DATA",
+        "safe_inputs": {
+            "verified_assets": 15_256, "expected_safe_shards": 15_256,
+            "missing_shards": 0, "unique_fills": 14_285, "unique_books": 50_170,
+            "incremental_unique_fills": 0, "historical_unique_fills": 14_285,
+            "payload_audit": {"SNAPSHOT_FAMILY_FLAG_MISMATCH": 35},
+            "historical_coverage_audit": {
+                "expected_release_count": 66, "audited_release_count": 0,
+                "durable_receipt_release_count": 66,
+                "missing_durable_receipt_tags": [],
+                "receipt_without_backfill_audit_tags": [f"tag-{i}" for i in range(66)],
+            },
+        },
+        "economic_result": {"status": "MORE_DATA", "reason": "NO_SAFE_LIVE_FORWARD_FILLS"},
+    }
+
+    dashboard = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
+
+    assert "Audit de backfill historique : 0/66" in dashboard
+    assert "66/66 reçus durables de collecte" in dashboard
+    assert "66 reçu(s) sans audit de backfill et 0 sans reçu durable" in dashboard
+    assert "pas le nombre de shards locaux présents" in dashboard
+    assert "35 trames userFills sans marqueur isSnapshot valide" in dashboard
+    assert "shards locaux absents : 0" in dashboard
+
+
 
 
 def test_lab_fails_closed_when_a_required_test_group_is_empty(tmp_path: Path) -> None:
@@ -281,24 +311,73 @@ def test_safe_inspection_does_not_promote_unverified_shards(tmp_path: Path) -> N
     assert result["safe_registry_rows"] is None
 
 
-def test_safe_inspection_rejects_unbound_unpack_report(tmp_path: Path) -> None:
+def _write_restore_registry(
+    root: Path, *, run_status: str = "COMPLETE", scope: str = "COPY_VAULT_ONLY",
+) -> str:
+    recovery = root / "runtime" / "recovery" / "full"
+    recovery.mkdir(parents=True)
+    catalog_path = root / "catalog" / "DATA_INDEX.json"
+    catalog_path.parent.mkdir(parents=True)
+    catalog_path.write_text('{"schema":"fixture"}\n', encoding="utf-8")
+    catalog = hashlib.sha256(catalog_path.read_bytes()).hexdigest()
+    families = ["copy_vault_fills", "copy_vault_l2"]
+    db = sqlite3.connect(recovery / "SAFE_SHARDS.sqlite3")
+    db.execute("CREATE TABLE safe_shard_registry_meta (key TEXT PRIMARY KEY, value TEXT)")
+    db.executemany(
+        "INSERT INTO safe_shard_registry_meta VALUES (?, ?)",
+        [
+            ("run_status", run_status),
+            ("active_catalog_sha256", catalog),
+            ("target_catalog_sha256", catalog),
+        ],
+    )
+    db.execute("CREATE TABLE current_safe_shards (dataset_id TEXT)")
+    db.executemany("INSERT INTO current_safe_shards VALUES (?)", [("fill",), ("book",)])
+    db.commit()
+    db.close()
+    (recovery / "RESTORE_REPORT.json").write_text(json.dumps({
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "status": "REPLAY_READY_COMPLETE",
+        "selection_scope": scope,
+        "selection_families": families,
+        "catalog_verification": {
+            "source_index_sha256": catalog,
+            "selection_scope": scope,
+            "selection_families": families,
+        },
+        "classification": {
+            "materialization_complete": True,
+            "expected_usable_shards": 2,
+            "usable_shards": 2,
+            "failures": [],
+        },
+    }), encoding="utf-8")
+    return catalog
+
+
+def test_safe_inspection_accepts_compressed_restore_without_unpack_report(tmp_path: Path) -> None:
     from tools.alina_quant_lab_console import inspect_local_safe_corpus
 
-    folder = tmp_path / "runtime" / "recovery" / "full"
-    folder.mkdir(parents=True)
-    (folder / "RESTORE_REPORT.json").write_text(
-        json.dumps({
-            "status": "REPLAY_READY_COMPLETE",
-            "classification": {"materialization_complete": True},
-            "catalog_verification": {"source_index_sha256": "a" * 64},
-        }), encoding="utf-8",
-    )
-    (folder / "UNPACK_REPORT.json").write_text(
-        json.dumps({"status": "SAFE_UNPACK_COMPLETE", "catalog_index_sha256": "b" * 64}),
-        encoding="utf-8",
-    )
+    _write_restore_registry(tmp_path)
+
     result = inspect_local_safe_corpus(tmp_path)
+
+    assert not (tmp_path / "runtime/recovery/full/UNPACK_REPORT.json").exists()
+    assert result["status"] == "RESTORE_RECEIPTS_MATCH_NOT_REHASHED"
+    assert result["safe_registry_rows"] == 2
+    assert result["selection_scope"] == "COPY_VAULT_ONLY"
+    assert "LAB_REHASHES_SHARDS_BEFORE_REPLAY" in result["reason"]
+
+
+def test_safe_inspection_rejects_registry_while_restore_is_in_progress(tmp_path: Path) -> None:
+    from tools.alina_quant_lab_console import inspect_local_safe_corpus
+
+    _write_restore_registry(tmp_path, run_status="IN_PROGRESS")
+
+    result = inspect_local_safe_corpus(tmp_path)
+
     assert result["status"] == "NOT_CERTIFIED"
+    assert result["reason"] == "SAFE_REGISTRY_NOT_FINAL_FOR_ACTIVE_CATALOG"
 
 
 def test_safe_research_builds_workspace_then_runs_existing_campaign(
@@ -309,13 +388,17 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
 
     calls = []
     materializations = []
+    progress_messages = []
 
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
         return type("Done", (), {"returncode": 0, "stdout": "a" * 40 + "\n"})()
 
-    def fake_materialize(recovery, workspace):
+    def fake_materialize(recovery, workspace, *, progress=None):
         materializations.append((recovery, workspace))
+        if progress is not None:
+            progress("test de progression SAFE")
+            progress_messages.append("callback configuré")
         return {
             "status": "UNMEASURABLE", "reason": "NO_SAFE_TEST_FIXTURE",
             "verified_assets": 0, "expected_safe_shards": 0,
@@ -337,6 +420,7 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
     assert len(calls) == 1
     assert calls[0][0] == ["git", "rev-parse", "HEAD"]
     assert len(materializations) == 1
+    assert progress_messages == ["callback configuré"]
     recovery, workspace = materializations[0]
     assert recovery == tmp_path / "runtime" / "recovery" / "full"
     assert workspace.name == "workspace"
@@ -344,6 +428,71 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
     assert json.loads((workspace.parent / "resultat.json").read_text(encoding="utf-8"))[
         "network_or_collection_started"
     ] is False
+
+
+def test_safe_research_replays_valid_rows_when_corpus_is_incomplete(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    from hl_observer.backtesting import copy_vault_local_lab as local_lab
+    from tools import alina_quant_lab_console as console
+
+    campaign_calls = []
+    historical_calls = []
+
+    monkeypatch.setattr(console, "ROOT", tmp_path)
+    monkeypatch.setattr(console, "_open_report", lambda _path: None)
+    monkeypatch.setattr(
+        console.subprocess, "run",
+        lambda *_args, **_kwargs: type("Done", (), {
+            "returncode": 0, "stdout": "a" * 40 + "\n",
+        })(),
+    )
+    monkeypatch.setattr(
+        local_lab, "materialize_safe_workspace",
+        lambda *_args, **_kwargs: {
+            "status": "MORE_DATA", "reason": "SAFE_PAYLOAD_ROWS_REJECTED",
+            "replay_inputs_available": True, "data_complete": False,
+            "verified_assets": 12, "expected_safe_shards": 12,
+            "unique_fills": 8, "unique_books": 40,
+            "missing_shards": 0, "partial_shards_excluded": 0,
+            "payload_rejected_records": 2,
+        },
+    )
+    monkeypatch.setattr(
+        local_lab, "evaluate_current_copy_vault",
+        lambda *_args, **_kwargs: {"status": "UNMEASURABLE", "reason": "INCOMPLETE"},
+    )
+
+    def run_campaign(workspace, **kwargs):
+        campaign_calls.append((workspace, kwargs))
+        return {
+            "status": "MORE_DATA", "reason": "NO_SAFE_LIVE_FORWARD_FILLS",
+            "candidates_tested": 0, "freeze_created": False,
+            "economically_proven": False, "data_complete": False,
+        }
+
+    def run_historical(*_args, **_kwargs):
+        historical_calls.append(True)
+        return {
+            "status": "COMPLETED_EXPLORATORY", "trial_count": 99,
+            "improvement_found": False,
+        }
+
+    monkeypatch.setattr(local_lab, "run_local_campaign", run_campaign)
+    monkeypatch.setattr(local_lab, "run_historical_trade_replay", run_historical)
+    monkeypatch.setattr(local_lab, "load_improvement_history", lambda _root: [])
+
+    assert console.main(["--safe-research", "--once"]) == 0
+
+    assert len(campaign_calls) == 1
+    assert len(historical_calls) == 1
+    report = json.loads(next(
+        (tmp_path / "runtime/reports/copy_vault_quant_lab").glob("*/resultat.json")
+    ).read_text(encoding="utf-8"))
+    assert report["status"] == "MORE_DATA"
+    assert report["safe_inputs"]["data_complete"] is False
+    assert report["economic_result"]["economically_proven"] is False
+    assert "aucun fill live causal" in report["freeze_verdict"]
 
 
 def test_legacy_economic_dispatch_keeps_safe_research_separate(monkeypatch) -> None:
@@ -368,5 +517,8 @@ def test_launcher_keeps_safe_default_and_local_legacy_mode() -> None:
     source = (ROOT / "LANCER_LAB_QUANT_COPY_VAULT.cmd").read_text(encoding="utf-8")
     assert 'set "ALINA_LAB_MODE=safe"' in source
     assert "--safe-research" in source
+    assert '"%ALINA_LAB_MODE%"=="once"' in source
+    assert "--safe-research --once" in source
+    assert "safe (continu) / once (un passage)" in source
     assert '--legacy-local-economic' in source
     assert '"--tests-only"' not in source

@@ -41,26 +41,42 @@ def _json_atomic(path: Path, value: dict) -> None:
     tmp.replace(path)
 
 
-def _catalog_safe_bytes(index_path: Path, destination: Path, digest: str) -> dict[Path, tuple[int, str]]:
-    """Re-derive every admissible gzip identity from SHA-bound canonical index."""
+def _catalog_safe_bytes(
+    index_path: Path,
+    destination: Path,
+    digest: str,
+    *,
+    family_prefix: str | None = None,
+) -> tuple[dict[Path, tuple[int, str]], list[str]]:
+    """Re-derive the selected gzip identities from the SHA-bound catalog."""
     if index_path.is_symlink() or not index_path.is_file():
         raise SafeUnpackError("canonical catalog missing or symlinked")
     if _hash(index_path) != digest:
         raise SafeUnpackError("canonical DATA_INDEX changed after SAFE restoration")
     try:
-        from tools.partitioned_data_index import read_index
+        from tools.partitioned_data_index import select_index_rows
         from tools.restore_alina import _safe_component
     except ModuleNotFoundError:
-        from partitioned_data_index import read_index
+        from partitioned_data_index import select_index_rows
         from restore_alina import _safe_component
     try:
-        canonical = read_index(index_path)
+        _metadata, rows = select_index_rows(
+            index_path,
+            lambda row: (
+                row.get("quality_status") == "SAFE"
+                and (
+                    family_prefix is None
+                    or str(row.get("family") or "").startswith(family_prefix)
+                )
+            ),
+        )
     except (ValueError, OSError, TypeError) as exc:
         raise SafeUnpackError(f"canonical catalog partition verification failed: {exc}") from exc
+    if _hash(index_path) != digest:
+        raise SafeUnpackError("canonical DATA_INDEX changed during SAFE selection")
     expected: dict[Path, tuple[int, str]] = {}
-    for row in canonical["shards"]:
-        if row.get("quality_status") != "SAFE":
-            continue
+    families: set[str] = set()
+    for row in rows:
         if (row.get("replay_compatible") is not True
                 or row.get("validation_allowed") is False
                 or row.get("asset_verified") is False):
@@ -79,7 +95,8 @@ def _catalog_safe_bytes(index_path: Path, destination: Path, digest: str) -> dic
         if path in expected:
             raise SafeUnpackError(f"duplicated SAFE shard output path: {path}")
         expected[path] = (size, sha)
-    return expected
+        families.add(str(row.get("family") or ""))
+    return expected, sorted(families)
 
 
 def expand_safe_corpus(
@@ -99,6 +116,11 @@ def expand_safe_corpus(
     restored = json.loads(certificate.read_text(encoding="utf-8"))
     classification = restored.get("classification")
     binding = restored.get("catalog_verification")
+    selection_scope = str(
+        restored.get("selection_scope")
+        or (binding.get("selection_scope") if isinstance(binding, dict) else "")
+        or "ALL_SAFE_REPLAYABLE"
+    )
     if (restored.get("status") != "REPLAY_READY_COMPLETE"
             or restored.get("repository") != CANONICAL_REPOSITORY
             or not isinstance(classification, dict)
@@ -109,16 +131,26 @@ def expand_safe_corpus(
     expected = classification.get("usable_shards")
     if type(expected) is not int or expected <= 0:
         raise SafeUnpackError("no certified SAFE shards to unpack")
+    if selection_scope not in {"ALL_SAFE_REPLAYABLE", "COPY_VAULT_ONLY"}:
+        raise SafeUnpackError("unsupported SAFE restoration scope")
     srcroot = destination / "usable" / "shards"
     outroot = destination / "usable" / "unpacked"
     if any(x.is_symlink() for x in (destination / "usable", srcroot, outroot)):
         raise SafeUnpackError("symlinked SAFE data root")
-    expected_gz = _catalog_safe_bytes(Path(catalog_path), destination, catalog_sha256)
+    expected_gz, catalog_families = _catalog_safe_bytes(
+        Path(catalog_path), destination, catalog_sha256,
+        family_prefix="copy_vault_" if selection_scope == "COPY_VAULT_ONLY" else None,
+    )
+    declared_families = restored.get("selection_families")
+    if declared_families is None and isinstance(binding, dict):
+        declared_families = binding.get("selection_families")
+    if declared_families is not None and declared_families != catalog_families:
+        raise SafeUnpackError("restore report SAFE family scope does not match canonical catalog")
     if len(expected_gz) != expected:
         raise SafeUnpackError(
             f"certified SAFE catalog count mismatch: {len(expected_gz)} != {expected}"
         )
-    sources = sorted(srcroot.glob("*/*.jsonl.gz"))
+    sources = sorted(expected_gz)
     if len(sources) != expected:
         raise SafeUnpackError(f"SAFE gzip count mismatch: {len(sources)} != {expected}")
     planned = []
@@ -190,28 +222,29 @@ def expand_safe_corpus(
     # Old previously-expanded SAFE files must never pollute a changed working
     # set. Quarantine only sealed byte-identical outputs; never destroy them.
     stale_outputs = 0
-    for stale in sorted(outroot.glob("*/*.jsonl")):
-        if stale in selected_targets:
-            continue
-        seal = stale.with_suffix(".jsonl.alina.json")
-        if (stale.is_symlink() or stale.parent.is_symlink() or seal.is_symlink()
-                or not stale.is_file() or not seal.is_file()):
-            raise SafeUnpackError(f"unverifiable stale JSONL: {stale}")
-        proof = json.loads(seal.read_text(encoding="utf-8"))
-        if (proof.get("jsonl_sha256") != _hash(stale)
-                or proof.get("jsonl_bytes") != stale.stat().st_size):
-            raise SafeUnpackError(f"modified stale JSONL: {stale}")
-        quarantine_dir = destination / "quarantine" / "stale_unpacked" / stale.parent.name
-        if quarantine_dir.is_symlink():
-            raise SafeUnpackError(f"symlinked stale quarantine: {quarantine_dir}")
-        quarantine_dir.mkdir(parents=True, exist_ok=True)
-        archived = quarantine_dir / (stale.name + "." + _hash(stale)[:16] + ".stale")
-        archived_seal = archived.with_suffix(archived.suffix + ".alina.json")
-        if archived.exists() or archived_seal.exists():
-            raise SafeUnpackError(f"stale quarantine destination already exists: {archived}")
-        stale.replace(archived)
-        seal.replace(archived_seal)
-        stale_outputs += 1
+    if selection_scope == "ALL_SAFE_REPLAYABLE":
+        for stale in sorted(outroot.glob("*/*.jsonl")):
+            if stale in selected_targets:
+                continue
+            seal = stale.with_suffix(".jsonl.alina.json")
+            if (stale.is_symlink() or stale.parent.is_symlink() or seal.is_symlink()
+                    or not stale.is_file() or not seal.is_file()):
+                raise SafeUnpackError(f"unverifiable stale JSONL: {stale}")
+            proof = json.loads(seal.read_text(encoding="utf-8"))
+            if (proof.get("jsonl_sha256") != _hash(stale)
+                    or proof.get("jsonl_bytes") != stale.stat().st_size):
+                raise SafeUnpackError(f"modified stale JSONL: {stale}")
+            quarantine_dir = destination / "quarantine" / "stale_unpacked" / stale.parent.name
+            if quarantine_dir.is_symlink():
+                raise SafeUnpackError(f"symlinked stale quarantine: {quarantine_dir}")
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            archived = quarantine_dir / (stale.name + "." + _hash(stale)[:16] + ".stale")
+            archived_seal = archived.with_suffix(archived.suffix + ".alina.json")
+            if archived.exists() or archived_seal.exists():
+                raise SafeUnpackError(f"stale quarantine destination already exists: {archived}")
+            stale.replace(archived)
+            seal.replace(archived_seal)
+            stale_outputs += 1
     free = shutil.disk_usage(destination).free
     if required_bytes + RESERVE_BYTES > free:
         raise SafeUnpackError(
@@ -279,6 +312,8 @@ def expand_safe_corpus(
         "schema": "alina.safe_unpack_report.v1",
         "status": "SAFE_UNPACK_COMPLETE",
         "catalog_index_sha256": catalog_sha256,
+        "selection_scope": selection_scope,
+        "selection_families": catalog_families,
         "certified_shards": expected,
         "created": created,
         "reused_verified": reused,

@@ -36,6 +36,16 @@ def test_userfills_joint_au_book_et_mid_snapshot_ignore():
     assert construire_evenements(userfills_msg=uf_snap, l2_par_coin={"BTC": L2}, vault="0xabc")["evenements"] == []
 
 
+def test_userfills_sans_marqueur_snapshot_ne_devient_pas_un_signal_live():
+    unknown = {
+        "channel": "userFills",
+        "data": {"user": "0xabc", "fills": UF["data"]["fills"]},
+    }
+    assert construire_evenements(
+        userfills_msg=unknown, l2_par_coin={"BTC": L2}, vault="0xabc"
+    )["evenements"] == []
+
+
 def test_flux_reel_traverse_le_pipeline():
     out = construire_evenements(userfills_msg=UF, l2_par_coin={"BTC": L2}, vault="0xabc")
     p = MegaCablage(notre_equity=1000.0, notional_max=500.0)

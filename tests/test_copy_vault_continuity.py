@@ -153,6 +153,141 @@ def test_safe_release_without_matching_campaign_receipt_is_partial(tmp_path):
 
     assert result["status"] == "PARTIAL"
     assert result["unknown_release_tags"] == ["data-v2-campaign-unmatched"]
+    assert result["missing_durable_receipt_tags"] == ["data-v2-campaign-unmatched"]
+    assert result["receipt_without_backfill_audit_tags"] == []
+
+
+def test_durable_collection_receipt_without_backfill_report_is_not_a_missing_shard(tmp_path):
+    campaign = _completed_campaign()
+    payload = campaign["completed_units"]["unit-0"]["result"]
+    stdout = json.loads(payload["stdout"])
+    stdout.pop("historical_backfill", None)
+    payload["stdout"] = json.dumps(stdout, sort_keys=True)
+    import hashlib
+    payload_digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    campaign["completed_units"]["unit-0"]["sha256"] = payload_digest
+    (tmp_path / "copy-vault-campaign-receipt.json").write_text(
+        json.dumps(campaign), encoding="utf-8"
+    )
+
+    result = load_release_history_audits(
+        tmp_path,
+        release_tags={"data-v2-campaign-copy-vault-test-u0"},
+    )
+
+    assert result["status"] == "PARTIAL"
+    assert result["audited_release_count"] == 0
+    assert result["durable_receipt_release_count"] == 1
+    assert result["receipt_without_backfill_audit_tags"] == [
+        "data-v2-campaign-copy-vault-test-u0"
+    ]
+    assert result["missing_durable_receipt_tags"] == []
+
+
+def test_structured_backfill_audit_survives_truncated_campaign_stdout(tmp_path):
+    campaign = _completed_campaign()
+    unit = campaign["completed_units"]["unit-0"]
+    payload = unit["result"]
+    address = "0x" + "a" * 40
+    report = {
+        "status": "COMPLETE",
+        "request_audit_status": "COMPLETE",
+        "checkpoint_advance_allowed": True,
+        "retention_cap_reached": False,
+        "requested_start_ms": 1_000,
+        "requested_end_ms": 2_000,
+        "rows": 3,
+        "pending_windows": 0,
+        "request_budget_exhausted": False,
+        "invalid_fill_count": 0,
+        "failed_windows": [],
+        "cap_blocked_windows": [],
+        "unresolved_gaps": [],
+    }
+    reports = {address: report}
+    payload["collection_metrics"] = {
+        "historical_backfill_audit": {
+            "schema": "alina.copy_vault.historical_backfill_audit.v1",
+            "source": "BUNDLE_INDEX.json",
+            "status": "COMPLETE",
+            "report_count": 1,
+            "reports_sha256": hashlib.sha256(
+                json.dumps(
+                    reports,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+            "reports": reports,
+        }
+    }
+    payload["stdout"] = "{" + " " * 8_000
+    unit["sha256"] = hashlib.sha256(
+        json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    receipt = tmp_path / "copy-vault-campaign-receipt.json"
+    receipt.write_text(json.dumps(campaign), encoding="utf-8")
+
+    audited = load_release_history_audits(
+        tmp_path,
+        release_tags={"data-v2-campaign-copy-vault-test-u0"},
+    )
+    checkpoints = load_history_checkpoints(
+        tmp_path,
+        phase_epoch=7,
+        addresses={address},
+    )
+
+    assert audited["status"] == "COMPLETE"
+    assert audited["audited_release_count"] == 1
+    assert checkpoints[address]["last_reconciled_end_ms"] == 2_000
+
+
+def test_invalid_structured_backfill_digest_does_not_fall_back_to_stdout(tmp_path):
+    campaign = _completed_campaign()
+    unit = campaign["completed_units"]["unit-0"]
+    unit["result"]["collection_metrics"] = {
+        "historical_backfill_audit": {
+            "schema": "alina.copy_vault.historical_backfill_audit.v1",
+            "source": "BUNDLE_INDEX.json",
+            "status": "COMPLETE",
+            "report_count": 1,
+            "reports_sha256": "0" * 64,
+            "reports": {"0x" + "a" * 40: {"status": "COMPLETE"}},
+        }
+    }
+    unit["sha256"] = hashlib.sha256(
+        json.dumps(
+            unit["result"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    (tmp_path / "copy-vault-campaign-receipt.json").write_text(
+        json.dumps(campaign), encoding="utf-8"
+    )
+
+    audited = load_release_history_audits(
+        tmp_path,
+        release_tags={"data-v2-campaign-copy-vault-test-u0"},
+    )
+    checkpoints = load_history_checkpoints(
+        tmp_path,
+        phase_epoch=7,
+        addresses={"0x" + "a" * 40},
+    )
+
+    assert audited["audited_release_count"] == 0
+    assert audited["receipt_without_backfill_audit_tags"] == [
+        "data-v2-campaign-copy-vault-test-u0"
+    ]
+    assert checkpoints == {}
 
 
 def test_safe_release_receipt_requires_explicit_complete_audit_fields(tmp_path):

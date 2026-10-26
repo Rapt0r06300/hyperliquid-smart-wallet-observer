@@ -26,6 +26,7 @@ def _bind_catalog(root, source, dataset_id):
         "schema": "alina.data_index.v2",
         "shards": [{
             "dataset_id": dataset_id,
+            "family": "trades",
             "release_tag": source.parent.name,
             "release_asset": source.name,
             "quality_status": "SAFE",
@@ -59,6 +60,57 @@ def test_unpacked_safe_is_verified_and_resumable(tmp_path):
     assert _expand(tmp_path)["reused_verified"] == 1
     seal = json.loads(target.with_suffix(".jsonl.alina.json").read_text())
     assert seal["jsonl_sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def test_copy_vault_only_unpack_ignores_and_preserves_other_safe_families(tmp_path):
+    selected = tmp_path / "usable" / "shards" / "cv-release" / "cv.jsonl.gz"
+    unrelated = tmp_path / "usable" / "shards" / "other-release" / "trades.jsonl.gz"
+    selected.parent.mkdir(parents=True)
+    unrelated.parent.mkdir(parents=True)
+    selected.write_bytes(gzip.compress(b'{"copy_vault":true}\n', mtime=0))
+    unrelated.write_bytes(gzip.compress(b'{"other":true}\n', mtime=0))
+    rows = []
+    for dataset_id, family, source in (
+        ("cv", "copy_vault_fills", selected),
+        ("other", "trades", unrelated),
+    ):
+        rows.append({
+            "dataset_id": dataset_id,
+            "family": family,
+            "release_tag": source.parent.name,
+            "release_asset": source.name,
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "bytes": source.stat().st_size,
+        })
+    index = tmp_path / "catalog" / "DATA_INDEX.json"
+    index.parent.mkdir(parents=True)
+    index.write_text(json.dumps({"schema": "alina.data_index.v2", "shards": rows}),
+                     encoding="utf-8")
+    digest = _digest(tmp_path)
+    (tmp_path / "RESTORE_REPORT.json").write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "selection_scope": "COPY_VAULT_ONLY",
+        "selection_families": ["copy_vault_fills"],
+        "classification": {"materialization_complete": True, "usable_shards": 1},
+        "catalog_verification": {
+            "source_index_sha256": digest,
+            "selection_scope": "COPY_VAULT_ONLY",
+            "selection_families": ["copy_vault_fills"],
+        },
+    }), encoding="utf-8")
+
+    report = _expand(tmp_path)
+
+    assert report["status"] == "SAFE_UNPACK_COMPLETE"
+    assert report["selection_scope"] == "COPY_VAULT_ONLY"
+    assert report["selection_families"] == ["copy_vault_fills"]
+    assert report["certified_shards"] == 1
+    assert (tmp_path / "usable" / "unpacked" / "cv-release" / "cv.jsonl").is_file()
+    assert not (tmp_path / "usable" / "unpacked" / "other-release" / "trades.jsonl").exists()
+    assert unrelated.is_file()
 
 
 def test_tampered_unpacked_shard_fails_closed(tmp_path):

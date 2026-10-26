@@ -271,6 +271,9 @@ def userfills_envelope(
     receive_mono_ns: int,
     connection_id: str,
 ) -> tuple[TickEnvelope | None, list[dict[str, Any]]]:
+    data = message.get("data")
+    snapshot_value = data.get("isSnapshot") if isinstance(data, Mapping) else None
+    snapshot_flag_valid = type(snapshot_value) is bool
     fills = parser_message_userfills(
         message,
         vault=vault,
@@ -280,8 +283,9 @@ def userfills_envelope(
     )
     if not fills:
         return None, []
-    data = message.get("data")
-    is_snapshot = bool(data.get("isSnapshot")) if isinstance(data, Mapping) else False
+    is_snapshot = snapshot_value if snapshot_flag_valid else None
+    for fill in fills:
+        fill["isSnapshot"] = is_snapshot
     exchange_times = [
         int(fill["ts_ms"])
         for fill in fills
@@ -302,8 +306,14 @@ def userfills_envelope(
         except (TypeError, ValueError, OverflowError):
             pass
 
-    channel = "copy_vault_snapshot" if is_snapshot else "copy_vault_fills"
-    event_kind = FeedEventKind.SNAPSHOT if is_snapshot else FeedEventKind.EVENT
+    channel = "copy_vault_snapshot" if is_snapshot is True else "copy_vault_fills"
+    event_kind = (
+        FeedEventKind.SNAPSHOT
+        if is_snapshot is True
+        else FeedEventKind.EVENT
+        if is_snapshot is False
+        else "UNCLASSIFIED"
+    )
     return (
         TickEnvelope(
             source_id="hyperliquid_public_userfills",
@@ -327,6 +337,7 @@ def userfills_envelope(
             parsed_summary={
                 "event_count": len(fills),
                 "is_snapshot": is_snapshot,
+                "snapshot_flag_status": "VALID" if snapshot_flag_valid else "MISSING_OR_INVALID",
                 "first_fill_ts_ms": min(exchange_times) if exchange_times else None,
                 "last_fill_ts_ms": exchange_ts_ms,
                 "data_gate_ready": False,
@@ -865,6 +876,7 @@ async def _socket_group(
     observation_start_ms: dict[str, int],
     live_ids: dict[str, set[str]],
     live_fill_counts: dict[str, int],
+    unclassified_fill_counts: dict[str, int],
     reconnect_counts: dict[str, int],
     l2_request_queue: asyncio.Queue[str],
     l2_known_coins: set[str],
@@ -949,6 +961,8 @@ async def _socket_group(
                             continue
                         envelope.reconnect_count = reconnect_counts.get(vault, 0)
                         await _emit_with_backpressure(sink, envelope)
+                        if envelope.parsed_summary.get("snapshot_flag_status") != "VALID":
+                            unclassified_fill_counts[vault] += len(fills)
 
                         # Pre-warm public execution L2 from every observed coin,
                         # including the initial snapshot. Snapshot fills never count
@@ -961,7 +975,11 @@ async def _socket_group(
 
                         # Selection time is only universe provenance. Forward
                         # reconciliation starts when this hosted lane can observe.
-                        if envelope.channel != "copy_vault_fills":
+                        if (
+                            envelope.channel != "copy_vault_fills"
+                            or envelope.parsed_summary.get("snapshot_flag_status") != "VALID"
+                            or envelope.parsed_summary.get("is_snapshot") is not False
+                        ):
                             continue
                         for fill in fills:
                             try:
@@ -1720,6 +1738,7 @@ async def collect(
 
     live_ids: dict[str, set[str]] = defaultdict(set)
     live_fill_counts: dict[str, int] = defaultdict(int)
+    unclassified_fill_counts: dict[str, int] = defaultdict(int)
     observation_start_ms: dict[str, int] = {}
     reconnect_counts: dict[str, int] = defaultdict(int)
     l2_request_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -1745,6 +1764,7 @@ async def collect(
                 observation_start_ms=observation_start_ms,
                 live_ids=live_ids,
                 live_fill_counts=live_fill_counts,
+                unclassified_fill_counts=unclassified_fill_counts,
                 reconnect_counts=reconnect_counts,
                 l2_request_queue=l2_request_queue,
                 l2_known_coins=l2_known_coins,
@@ -1876,6 +1896,7 @@ async def collect(
         "backpressure_events": sink.backpressure_events,
         "queue_drops": sum(int(v) for v in sink.drops.values()),
         "live_fill_counts": dict(sorted(live_fill_counts.items())),
+        "unclassified_userfills_fill_counts": dict(sorted(unclassified_fill_counts.items())),
         "reconnect_counts": dict(sorted(reconnect_counts.items())),
         "reconciliation": reports,
         "historical_backfill": historical_reports,
