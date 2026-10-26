@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tools import alina_git_code_sync as sync_module
 from tools.alina_git_code_sync import Synchronizer, _status_paths
 
 
@@ -43,6 +44,48 @@ def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> Non
     assert untracked == []
     assert any(args[:2] == ("status", "--porcelain=v1") for args in commands)
     assert not any("--modified" in args or "--deleted" in args for args in commands)
+
+
+def test_git_command_prints_named_step_duration_and_exit_code(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    calls = []
+
+    def fake_run_git(root, git, args, **kwargs):
+        calls.append((tuple(args), kwargs))
+        return subprocess.CompletedProcess([git, *args], 0, b"", b"")
+
+    monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
+    task = Synchronizer(tmp_path)
+    task.command("status", "--porcelain=v1", "-z", "--untracked-files=no")
+
+    output = capsys.readouterr().out
+    assert "[GIT 001]" in output
+    assert "Inventaire des modifications locales" in output
+    assert "code=0" in output
+    assert "duree=" in output
+    assert len(task.report["git_commands"]) == 1
+    assert calls[0][1]["live_stderr"] is False
+
+
+@pytest.mark.parametrize("verb", ["fetch", "push"])
+def test_network_git_commands_stream_progress_to_terminal(
+    tmp_path: Path, monkeypatch, capsys, verb: str,
+) -> None:
+    calls = []
+
+    def fake_run_git(root, git, args, **kwargs):
+        calls.append((tuple(args), kwargs))
+        return subprocess.CompletedProcess([git, *args], 0, b"", None)
+
+    monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
+    task = Synchronizer(tmp_path)
+    task.command(verb, "--progress", "origin")
+
+    output = capsys.readouterr().out
+    assert "GitHub" in output
+    assert "code=0" in output
+    assert calls[0][1]["live_stderr"] is True
 
 
 def git(root: Path, *args: str, allow_error: bool = False) -> str:
@@ -341,6 +384,9 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert "GIT_LFS_SKIP_SMUDGE=1" in source
     assert "restore_alina.py" not in source
     assert "alina_sync" not in source.casefold()
+    assert "[ETAPE 1/6]" in source
+    assert "[ETAPE 6/6]" in source
+    assert "DRY-RUN TERMINE" in source
 
 
 def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
