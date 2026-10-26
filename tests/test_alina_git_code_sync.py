@@ -384,8 +384,8 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert "GIT_LFS_SKIP_SMUDGE=1" in source
     assert "restore_alina.py" not in source
     assert "alina_sync" not in source.casefold()
-    assert "[ETAPE 1/6]" in source
-    assert "[ETAPE 6/6]" in source
+    assert "[LANCEUR 1/6]" in source
+    assert "[LANCEUR 6/6]" in source
     assert "DRY-RUN TERMINE" in source
 
 

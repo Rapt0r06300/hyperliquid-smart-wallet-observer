@@ -32,6 +32,11 @@ echo  Double clic : sauvegarde WIP, fusion prudente et push
 echo  AUCUN telechargement de shards : reserve a AlinaSync
 echo  Aucun push force, reset ni effacement des donnees
 echo ============================================================
+echo [LANCEUR 1/6] Racine du depot et mode d'execution
+echo Depot : %ALINA_ROOT%
+if /I "%SYNC_OPTION%"=="--dry-run" echo Mode : simulation en lecture seule
+if /I "%SYNC_OPTION%"=="--wip-only" echo Mode : checkpoint local uniquement
+if not defined SYNC_OPTION echo Mode : synchronisation prudente vers GitHub main
 
 rem Prefer embedded Git, then standard Windows installation locations.
 if exist "%ALINA_ROOT%tools\git\cmd\git.exe" set "HYPERSMART_GIT=%ALINA_ROOT%tools\git\cmd\git.exe"
@@ -59,10 +64,13 @@ if not exist "%ALINA_ROOT%tools\git\cmd\git.exe" goto :missing_git
 set "HYPERSMART_GIT=%ALINA_ROOT%tools\git\cmd\git.exe"
 
 :git_ready
-"%HYPERSMART_GIT%" --version >nul 2>nul
+echo [LANCEUR 2/6] Verification de Git
+echo Git : %HYPERSMART_GIT%
+"%HYPERSMART_GIT%" --version
 if errorlevel 1 goto :missing_git
 
 rem Locate Python without changing the system configuration.
+echo [LANCEUR 3/6] Recherche de Python 3.10 ou plus
 if exist "%ALINA_ROOT%tools\python\python.exe" set "HYPERSMART_PYTHON=%ALINA_ROOT%tools\python\python.exe"
 if defined HYPERSMART_PYTHON goto :python_ready
 where py.exe >nul 2>nul
@@ -79,6 +87,8 @@ set "HYPERSMART_PYTHON=python"
 :python_ready
 "%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul
 if errorlevel 1 goto :missing_python
+echo Python : %HYPERSMART_PYTHON% %HYPERSMART_PY_ARGS%
+"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% --version
 
 rem A user may only have updated this CMD, not its Python companion.
 rem Download the *pinned code-only helper* into %TEMP% if absent.
@@ -102,18 +112,31 @@ findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%" >nul 2>nul
 if errorlevel 1 goto :invalid_engine
 
 :engine_ready
+echo [LANCEUR 4/6] Verification du moteur de synchronisation
+echo Moteur : %ALINA_ENGINE%
 "%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_ENGINE%" >nul 2>nul
 if errorlevel 1 goto :invalid_engine
+echo [OK] Version du moteur et syntaxe Python valides
 
 if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check
 
 echo.
-echo [INFO] Reconciliation des commits locaux et GitHub main...
+echo [LANCEUR 5/6] Demarrage du moteur; chaque commande Git sera detaillee ci-dessous
 "%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" goto :sync_failed
 echo.
-echo [OK] Synchronisation terminee, voir runtime\reports\git-sync\LAST_SYNC.json
+if /I "%SYNC_OPTION%"=="--dry-run" goto :dry_run_done
+if /I "%SYNC_OPTION%"=="--wip-only" goto :wip_done
+echo [OK] Synchronisation terminee et verifiee.
+goto :finish
+
+:dry_run_done
+echo [DRY-RUN TERMINE] Controle reussi; aucun fichier Git modifie et aucun push effectue.
+goto :finish
+
+:wip_done
+echo [CHECKPOINT TERMINE] Sauvegarde locale uniquement; aucun push effectue.
 goto :finish
 
 :self_check
@@ -171,6 +194,8 @@ if not exist "%~2" exit /b 44
 exit /b 0
 
 :finish
+echo [LANCEUR 6/6] Fin du lanceur - code retour %RC%
+if exist "%ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json" echo Rapport detaille : %ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json
 if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
 popd
 endlocal & exit /b %RC%

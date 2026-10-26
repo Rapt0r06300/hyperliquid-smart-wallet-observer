@@ -16,6 +16,8 @@ import os
 import re
 import subprocess
 import tempfile
+import time
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 CANONICAL = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -124,26 +126,86 @@ def _protected(path: str) -> bool:
     return name in ("thumbs.db", "desktop.ini")
 
 
-def _run_git(root: Path, git: str, args: list[str], *,
-             input_bytes: bytes | None = None, check: bool = True,
-             timeout: int = 300) -> subprocess.CompletedProcess[bytes]:
+def _git_operation_label(args: list[str]) -> str:
+    """Return a safe, user-facing description without echoing raw arguments."""
+    verb = args[0] if args else ""
+    if verb == "rev-parse":
+        return "Verifier le depot et son HEAD"
+    if verb == "branch":
+        return "Verifier la branche active"
+    if verb == "remote":
+        return "Verifier le depot GitHub canonique"
+    if verb == "status":
+        return "Inventaire des modifications locales"
+    if verb == "ls-files":
+        return "Inventaire Git cible (sans lire les shards)"
+    if verb == "diff":
+        return "Comparer les fichiers suivis par Git"
+    if verb == "fetch":
+        return "Recevoir les objets Git de GitHub main"
+    if verb == "merge-base":
+        return "Comparer l'historique local et GitHub"
+    if verb == "merge":
+        return "Integrer les commits GitHub sans ecraser le travail local"
+    if verb == "push":
+        return "Publier vers GitHub main sans force"
+    if verb == "add":
+        return "Preparer les fichiers de code admissibles"
+    if verb == "commit":
+        return "Creer le checkpoint local du travail"
+    if verb == "update-ref":
+        return "Enregistrer le checkpoint Git local"
+    if verb == "show":
+        return "Lire une version Git pour le diagnostic de conflit"
+    return "Commande Git de controle"
+
+
+def _run_git(
+    root: Path,
+    git: str,
+    args: list[str],
+    *,
+    input_bytes: bytes | None = None,
+    timeout: int = 300,
+    live_stderr: bool = False,
+    on_progress=None,
+) -> subprocess.CompletedProcess[bytes]:
     env = dict(os.environ)
     env["GIT_LFS_SKIP_SMUDGE"] = "1"
     env["GIT_OPTIONAL_LOCKS"] = (
         "0" if args and args[0] in {"ls-files", "status", "diff"} else "1"
     )
-    completed = subprocess.run(
-        [git, *args], cwd=root, input=input_bytes, capture_output=True,
-        env=env, timeout=timeout, check=False,
+    command = [git, *args]
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        cwd=root,
+        stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=None if live_stderr else subprocess.PIPE,
+        env=env,
     )
-    if check and completed.returncode:
-        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
-        stdout = completed.stdout.decode("utf-8", errors="replace").strip()
-        raise SyncBlocked(
-            f"git {args[0]} a echoue (code {completed.returncode}): "
-            f"{(stderr or stdout)[:1400]}"
-        )
-    return completed
+    while True:
+        elapsed = time.monotonic() - started
+        remaining = timeout - elapsed
+        if remaining <= 0:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=stdout, stderr=stderr,
+            )
+        try:
+            stdout, stderr = process.communicate(
+                input=input_bytes, timeout=min(8.0, remaining),
+            )
+            break
+        except subprocess.TimeoutExpired:
+            if on_progress is not None:
+                on_progress(time.monotonic() - started)
+            # communicate() can accept input only once. After its first call,
+            # stdin has been closed and later calls must not send bytes again.
+            input_bytes = None
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 @contextlib.contextmanager
@@ -182,6 +244,7 @@ class Synchronizer:
         self.dry_run = dry_run
         self.allow_test_remote = allow_test_remote
         self.changed_python_paths: list[str] = []
+        self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
             "mode": "DRY_RUN" if dry_run else "SYNC",
@@ -193,26 +256,92 @@ class Synchronizer:
             "merge_commits_created": 0,
             "push_attempts": 0,
             "local_syntax_check": "NOT_RUN",
+            "git_commands": [],
         }
 
     def command(self, *args: str, input_bytes: bytes | None = None,
                 check: bool = True) -> subprocess.CompletedProcess[bytes]:
-        return _run_git(
-            self.root, self.git, list(args), input_bytes=input_bytes, check=check
+        git_args = list(args)
+        label = _git_operation_label(git_args)
+        self._command_count += 1
+        command_number = self._command_count
+        live_stderr = bool(git_args and git_args[0] in {"fetch", "push"})
+        self.say(f"[GIT {command_number:03d}] {label} ...")
+        started = time.monotonic()
+
+        def progress(elapsed: float) -> None:
+            self.say(f"[EN COURS] {label} | {elapsed:.0f} s ecoulees")
+
+        try:
+            completed = _run_git(
+                self.root,
+                self.git,
+                git_args,
+                input_bytes=input_bytes,
+                live_stderr=live_stderr,
+                on_progress=progress,
+            )
+        except subprocess.TimeoutExpired:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            self._record_git_command(command_number, label, -1, elapsed_ms)
+            self.say(
+                f"[TIMEOUT] {label} apres {elapsed_ms / 1000:.1f} s; "
+                "le processus Git a ete arrete."
+            )
+            raise
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        self._record_git_command(
+            command_number, label, completed.returncode, elapsed_ms,
         )
+        outcome = "OK" if completed.returncode == 0 else "ECHEC"
+        self.say(
+            f"[{outcome}] {label} | code={completed.returncode} | "
+            f"duree={elapsed_ms / 1000:.2f} s"
+        )
+        if check and completed.returncode:
+            stderr = (completed.stderr or b"").decode(
+                "utf-8", errors="replace",
+            ).strip()
+            stdout = (completed.stdout or b"").decode(
+                "utf-8", errors="replace",
+            ).strip()
+            detail = stderr or stdout
+            if live_stderr and not detail:
+                detail = "detail Git affiche dans le terminal ci-dessus"
+            raise SyncBlocked(
+                f"git {git_args[0]} a echoue (code {completed.returncode}): "
+                f"{detail[:1400]}"
+            )
+        return completed
+
+    def _record_git_command(
+        self, number: int, label: str, exit_code: int, elapsed_ms: int,
+    ) -> None:
+        commands = self.report.setdefault("git_commands", [])
+        if isinstance(commands, list):
+            commands.append({
+                "number": number,
+                "operation": label,
+                "exit_code": exit_code,
+                "duration_ms": elapsed_ms,
+            })
 
     def text(self, *args: str) -> str:
         return self.command(*args).stdout.decode("utf-8", errors="replace").strip()
 
     @staticmethod
     def say(message: str) -> None:
-        print("  " + message, flush=True)
+        stamp = datetime.now().astimezone().strftime("%H:%M:%S")
+        print(f"[{stamp}] {message}", flush=True)
 
     def preflight(self) -> Path:
+        self.say("[MOTEUR 1/5] Controle du depot, de main et du remote autorise.")
         top = Path(self.text("rev-parse", "--show-toplevel")).resolve()
         if top != self.root:
             raise SyncBlocked(f"Lanceur hors racine du depot: {top}")
-        if self.text("branch", "--show-current") != "main":
+        branch = self.text("branch", "--show-current")
+        if branch != "main":
             raise SyncBlocked("Seule main est autorisee; aucun checkout automatique.")
         if self.text("rev-parse", "--is-shallow-repository") == "true":
             raise SyncBlocked("Clone shallow: historique insuffisant pour fusionner.")
@@ -235,9 +364,17 @@ class Synchronizer:
             raise SyncBlocked("Conflits Git deja en cours dans l'index.")
         self.report["head_before"] = self.text("rev-parse", "HEAD")
         self.report["remote"] = remote
+        self.say(
+            f"[PREFLIGHT OK] branche={branch} | HEAD="
+            f"{str(self.report['head_before'])[:12]} | remote canonique confirme."
+        )
         return gitdir
 
     def _inventory(self) -> tuple[list[str], list[str], list[str]]:
+        self.say(
+            "[MOTEUR 2/5] Inventaire des changements de code; les dossiers "
+            "de donnees restent exclus."
+        )
         staged = _paths(
             self.command("diff", "--cached", "--name-only", "-z").stdout
         )
@@ -253,6 +390,10 @@ class Synchronizer:
             args.extend(["-x", f"/{directory}/", "-x", f"/{directory}/**"])
         args.extend(["-x", "/tools/git/", "-x", "/tools/python/"])
         untracked = _paths(self.command(*args).stdout)
+        self.say(
+            f"[INVENTAIRE] deja stages={len(staged)} | suivis modifies="
+            f"{len(tracked)} | nouveaux={len(untracked)}."
+        )
         return staged, tracked, untracked
 
     def _check_candidates(
@@ -279,6 +420,14 @@ class Synchronizer:
                 raise SyncBlocked(f"Lien symbolique non publiable automatiquement: {path}")
             if absolute.is_file() and absolute.stat().st_size > MAX_BLOB_BYTES:
                 raise SyncBlocked(f"Fichier >95 Mio interdit dans Git: {path}")
+        self.say(
+            f"[FILTRE] {len(eligible)} fichier(s) de code admissible(s); "
+            "donnees, binaires et secrets exclus."
+        )
+        for path in eligible[:30]:
+            self.say(f"  [CODE] {path}")
+        if len(eligible) > 30:
+            self.say(f"  [CODE] ... {len(eligible) - 30} autre(s) fichier(s).")
         return eligible
 
     @staticmethod
@@ -316,11 +465,17 @@ class Synchronizer:
             p for p in eligible
             if p.endswith(".py") and (self.root / p).is_file()
         ]
-        self.say(f"Fichiers de code locaux a sauvegarder: {len(eligible)}")
+        self.say(
+            f"[MOTEUR 3/5] Fichiers de code locaux admissibles: {len(eligible)}."
+        )
         # Detect high-confidence private-key material BEFORE writing Git blobs.
         for path in eligible:
             self._check_file_payload(path, self.root / path)
         if self.dry_run or not eligible:
+            if self.dry_run:
+                self.say("[DRY-RUN] Aucun fichier prepare ou committe.")
+            else:
+                self.say("[CHECKPOINT] Rien a sauvegarder; aucun commit vide.")
             return
         pathspec = b"\0".join(path.encode("utf-8") for path in eligible) + b"\0"
         self.command(
@@ -347,8 +502,16 @@ class Synchronizer:
     def _syntax_gate(self) -> None:
         if not self.changed_python_paths:
             self.report["local_syntax_check"] = "NO_PYTHON_CHANGED"
+            self.say("[ETAPE 4/6] Controle syntaxique ignore: aucun Python modifie.")
             return
-        for path in self.changed_python_paths:
+        self.say(
+            f"[MOTEUR 4/5] Verification syntaxique de "
+            f"{len(self.changed_python_paths)} fichier(s) Python."
+        )
+        for index, path in enumerate(self.changed_python_paths, 1):
+            self.say(
+                f"[PYTHON {index}/{len(self.changed_python_paths)}] {path}"
+            )
             try:
                 ast.parse((self.root / path).read_bytes(), filename=path)
             except (SyntaxError, UnicodeError, ValueError) as exc:
@@ -358,6 +521,7 @@ class Synchronizer:
                     "WIP sauvegarde en commit local, NON pousse."
                 ) from exc
         self.report["local_syntax_check"] = "PASS_NOT_PROOF_OF_TESTS"
+        self.say("[SYNTAXE OK] Tous les fichiers Python admissibles compilent.")
 
     def _assert_no_new_code_changes(self) -> None:
         staged, tracked, untracked = self._inventory()
@@ -390,6 +554,10 @@ class Synchronizer:
         # without traversing runtime/shards or hydrating any LFS assets.
         changed = _paths(
             self.command("diff", "--name-only", "-z", "HEAD", remote).stdout
+        )
+        self.say(
+            f"[GARDE DONNEES] Inspection de {len(changed)} chemin(s) distant(s) "
+            "susceptibles d'affecter des fichiers locaux proteges."
         )
         for path in changed:
             if not _protected(path):
@@ -510,13 +678,19 @@ class Synchronizer:
         self.say("Kit de reconciliation local: " + str(self.report["conflict_kit"]))
 
     def reconcile(self) -> None:
-        self.say("Git fetch origin/main : objets Git seulement, jamais AlinaSync...")
+        self.say(
+            "[MOTEUR 5/5] Recuperation de main depuis GitHub "
+            "(objets Git seulement, aucun shard)."
+        )
         self.command(
-            "fetch", "--no-tags", "origin",
+            "fetch", "--progress", "--no-tags", "origin",
             "refs/heads/main:refs/remotes/origin/main",
         )
         remote = self.text("rev-parse", "refs/remotes/origin/main")
         local = self.text("rev-parse", "HEAD")
+        self.say(
+            f"[COMPARAISON] local={local[:12]} | GitHub={remote[:12]}"
+        )
         if local == remote or self.command(
             "merge-base", "--is-ancestor", remote, local, check=False
         ).returncode == 0:
@@ -527,13 +701,20 @@ class Synchronizer:
         if self.command(
             "merge-base", "--is-ancestor", local, remote, check=False
         ).returncode == 0:
-            self.say("Fast-forward : adoption des nouveaux commits GitHub.")
+            self.say(
+                "[INTEGRATION] Avance rapide possible: adoption des commits "
+                "GitHub sans creer de commit de fusion."
+            )
             self.command("merge", "--ff-only", remote)
+            self.say("[INTEGRATION OK] HEAD local aligne sur GitHub main.")
             return
         self.command(
             "update-ref", "refs/alina-sync/last-local-checkpoint", local
         )
-        self.say("Fusion trois-voies du travail local et de GitHub...")
+        self.say(
+            "[INTEGRATION] Historiques divergents: fusion trois-voies; "
+            "aucun choix automatique en cas de conflit."
+        )
         outcome = self.command(
             "merge", "--no-edit", "--no-ff", remote, check=False
         )
@@ -614,7 +795,8 @@ class Synchronizer:
             )
             self.report["push_attempts"] = int(self.report["push_attempts"]) + 1
             pushed = self.command(
-                "push", "origin", "HEAD:refs/heads/main", check=False
+                "push", "--progress", "origin", "HEAD:refs/heads/main",
+                check=False,
             )
             if pushed.returncode == 0:
                 self.report["push_completed"] = True
@@ -631,7 +813,11 @@ class Synchronizer:
                 self.say("Push non-fast-forward refuse; GitHub avance, reprise...")
                 push_races += 1
                 continue
-            err = pushed.stderr.decode("utf-8", errors="replace").strip()
+            err = (pushed.stderr or b"").decode(
+                "utf-8", errors="replace",
+            ).strip()
+            if not err:
+                err = "detail Git affiche dans le terminal ci-dessus"
             raise SyncBlocked(
                 "Push refuse (authentification, protection ou reseau): "
                 + err[:1500]
@@ -663,6 +849,15 @@ class Synchronizer:
             self.say(f"Journal non ecrit, sans effet sur Git: {exc}")
 
     def run(self, *, wip_only: bool = False) -> int:
+        run_started = time.monotonic()
+        self.report["started_at_utc"] = datetime.now(UTC).isoformat()
+        self.say(
+            "[DEBUT] Mode="
+            + ("DRY-RUN (lecture seule)" if self.dry_run else
+               "CHECKPOINT LOCAL" if wip_only else "SYNCHRONISATION")
+            + " | aucun telechargement de shard | aucun push force."
+        )
+        result_code = 0
         try:
             gitdir = self.preflight()
             with _mutex(gitdir):
@@ -670,29 +865,47 @@ class Synchronizer:
                 if self.dry_run:
                     self.report["remote_sha_observed"] = self.remote_sha()
                     self.report["status"] = "DRY_RUN_ONLY"
-                    self.say("Dry-run: aucun add, commit, fetch, merge ou push.")
+                    self.say(
+                        "[DRY-RUN TERMINE] HEAD local="
+                        f"{str(self.report.get('head_before', ''))[:12]} | "
+                        f"HEAD GitHub={str(self.report['remote_sha_observed'])[:12]}."
+                    )
+                    self.say(
+                        "Aucun add, commit, fetch, merge ou push n'a ete execute."
+                    )
                 elif wip_only:
                     self.report["status"] = "LOCAL_CHECKPOINT_ONLY"
                     self.report["head_after"] = self.text("rev-parse", "HEAD")
-                    self.say("Commit WIP local seulement, aucun acces GitHub.")
+                    self.say(
+                        "[CHECKPOINT LOCAL TERMINE] Travail conserve sur main; "
+                        "aucun acces GitHub ni push."
+                    )
                 else:
                     self._syntax_gate()
                     self.publish()
                     self._assert_no_new_code_changes()
                     if self.text("rev-parse", "HEAD") != self.remote_sha():
                         raise SyncBlocked("GitHub a avance; relancer pour finaliser.")
-            return 0
         except (SyncBlocked, subprocess.TimeoutExpired, OSError) as exc:
             self.report["status"] = "NO_GO"
             self.report["error"] = str(exc)
-            print("  [NO_GO] " + str(exc), flush=True)
-            print(
-                "  Aucun shard telecharge; aucun push force, reset ou clean.",
-                flush=True,
+            self.say("[NO_GO] " + str(exc))
+            self.say(
+                "Aucun shard telecharge; aucun push force, reset ou clean."
             )
-            return 2
+            result_code = 2
         finally:
+            elapsed_ms = int((time.monotonic() - run_started) * 1000)
+            self.report["duration_ms"] = elapsed_ms
+            self.report["finished_at_utc"] = datetime.now(UTC).isoformat()
+            self.report["exit_code"] = result_code
+            status = str(self.report.get("status") or "UNKNOWN")
+            self.say(
+                f"[FIN] statut={status} | code retour={result_code} | "
+                f"duree totale={elapsed_ms / 1000:.1f} s"
+            )
             self._write_report()
+        return result_code
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -708,7 +921,7 @@ def main(argv: list[str] | None = None) -> int:
     if options.dry_run and options.wip_only:
         parser.error("Modes --dry-run et --wip-only incompatibles.")
     print(
-        "ALINA CODE SYNC — main local <-> GitHub main — ZERO shard — sans force",
+        "ALINA CODE SYNC - main local <-> GitHub main - ZERO shard - sans force",
         flush=True,
     )
     return Synchronizer(
