@@ -1,15 +1,15 @@
 {
-  "generated_at_utc": "2026-10-26T04:49:28.996299Z",
-  "github_run_id": "40270218438",
-  "github_sha": "61c0e69c47f68ffdf700062e562f1bf26acc72e6",
+  "generated_at_utc": "2026-10-26T15:26:58.114609Z",
+  "github_run_id": "40347045864",
+  "github_sha": "1d796da5ea14dc6074306c238cb2f715cee137a7",
   "native_heartbeat_present": true,
-  "native_records_written": 25924,
+  "native_records_written": 141159,
   "paper_read_only": true,
   "real_execution": false,
-  "receipt_digest": "04152697564019f27fb464b83f282b78b8a0dff5b8d38e5aac2a8798d0aee98d",
+  "receipt_digest": "4860c524cf3997590d2dc3ef2c534c266b4a409c22f9b89c642ad0c567a1a0ac",
   "runner_kind": "github-hosted",
   "runner_network": {
-    "public_ip": "172.203.198.198",
+    "public_ip": "52.186.175.104",
     "source_url": "https://api64.ipify.org?format=json",
     "status": "OBSERVED"
   },
@@ -28,31 +28,31 @@
         "venue_status": "HEALTHY"
       },
       "clock_sync_evidence": {
-        "clock_offset_ms": 33.0,
-        "clock_probe_receive_wall_ts_ms": 1792990150203,
-        "clock_probe_rtt_ms": 1180.0,
-        "clock_probe_server_ts_ms": 1792990149646,
+        "clock_offset_ms": 118.0,
+        "clock_probe_receive_wall_ts_ms": 1793028401544,
+        "clock_probe_rtt_ms": 1034.0,
+        "clock_probe_server_ts_ms": 1793028401145,
         "clock_probe_source": "websocket_api_depth_roundtrip",
-        "clock_uncertainty_ms": 590.0
+        "clock_uncertainty_ms": 517.0
       },
       "deep_l2_health": {
         "books_exploitable": 2,
         "clock_sync": {
-          "clock_offset_ms": 33.0,
-          "clock_probe_receive_wall_ts_ms": 1792990150203,
-          "clock_probe_rtt_ms": 1180.0,
-          "clock_probe_server_ts_ms": 1792990149646,
+          "clock_offset_ms": 118.0,
+          "clock_probe_receive_wall_ts_ms": 1793028401544,
+          "clock_probe_rtt_ms": 1034.0,
+          "clock_probe_server_ts_ms": 1793028401145,
           "clock_probe_source": "websocket_api_depth_roundtrip",
-          "clock_uncertainty_ms": 590.0
+          "clock_uncertainty_ms": 517.0
         },
         "frames_received": 226,
         "full_snapshot_unavailable_symbols": [],
         "last_error": "",
-        "partial_fallback_frames": 217,
+        "partial_fallback_frames": 223,
         "partial_fallback_levels": 20,
         "partial_fallback_publications": 0,
         "pending_resyncs": 0,
-        "publications": 205,
+        "publications": 206,
         "read_only": true,
         "real_execution": false,
         "reconnects": 0,
@@ -78,18 +78,18 @@
         "ws_last_error": ""
       },
       "network_observed": true,
-      "observed_at_utc": "2026-10-26T04:49:28.996299Z",
-      "reason": "BINANCE_WS_OBSERVED:bbo=2:trades=78:l2_full=205:l2_partial=0:l2_exploitable=205",
+      "observed_at_utc": "2026-10-26T15:26:58.114609Z",
+      "reason": "BINANCE_WS_OBSERVED:bbo=1:trades=348:l2_full=206:l2_partial=0:l2_exploitable=206",
       "rest_probe_observed": false,
       "rest_probe_reason": "BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
       "runtime_status": "HEALTHY",
       "ws_frames": {
-        "bbo": 2,
-        "l2_exploitable_frames": 205,
-        "l2_full_publications": 205,
+        "bbo": 1,
+        "l2_exploitable_frames": 206,
+        "l2_full_publications": 206,
         "l2_partial_publications": 0,
-        "l2_publications": 205,
-        "trades": 78
+        "l2_publications": 206,
+        "trades": 348
       }
     },
     "bitget": {
@@ -105,50 +105,57 @@
         "venue_status": "HEALTHY"
       },
       "channel_counts": {
-        "bbo": 1237,
-        "instrument_metadata": 857,
-        "l2Book": 862,
-        "native_market": 4713,
-        "ticker": 2375,
-        "trades": 1503
+        "bbo": 3242,
+        "instrument_metadata": 860,
+        "l2Book": 1122,
+        "liquidations": 8,
+        "native_market": 7682,
+        "ticker": 2250,
+        "trades": 3746
       },
-      "last_event_ms": 1792990109758,
+      "last_event_ms": 1793028080018,
       "network_observed": true,
-      "observed_at_utc": "2026-10-26T04:49:28.996299Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1792990109758;channels=bbo:1237,l2:862,trades:1503",
+      "observed_at_utc": "2026-10-26T15:26:58.114609Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1793028080018;channels=bbo:3242,l2:1122,trades:3746",
       "runtime_status": "HEALTHY"
     },
     "bybit": {
       "capability_runtime": {
-        "bbo": "DEGRADED",
+        "bbo": "HEALTHY",
         "clock_sync": "HEALTHY",
-        "l2": "DEGRADED",
-        "official_archive": "DEGRADED",
-        "recovery": "DEGRADED",
-        "replay_adapter": "DEGRADED",
-        "sequence_integrity": "DEGRADED",
-        "trades": "DEGRADED",
-        "venue_status": "DEGRADED"
+        "l2": "HEALTHY",
+        "official_archive": "HEALTHY",
+        "recovery": "HEALTHY",
+        "replay_adapter": "HEALTHY",
+        "sequence_integrity": "HEALTHY",
+        "trades": "HEALTHY",
+        "venue_status": "HEALTHY"
       },
-      "channel_counts": {},
+      "channel_counts": {
+        "bbo": 71506,
+        "l2Book": 38951,
+        "native_market": 136105,
+        "ticker": 25648,
+        "trades": 46294
+      },
       "clock_sync_evidence": {
-        "offset_ms": -111.0,
-        "receive_wall_ts_ms": 1792990095111,
-        "rtt_ms": 442.0,
-        "send_wall_ts_ms": 1792990094669,
-        "server_ts_ms": 1792990094779,
+        "offset_ms": -113.0,
+        "receive_wall_ts_ms": 1793028065407,
+        "rtt_ms": 446.0,
+        "send_wall_ts_ms": 1793028064961,
+        "server_ts_ms": 1793028065071,
         "source": "websocket_public_ping:stream.bybit.com:option",
         "status": "OK",
-        "uncertainty_ms": 221.0,
+        "uncertainty_ms": 223.0,
         "venue": "bybit"
       },
-      "last_event_ms": 0,
-      "network_observed": false,
-      "observed_at_utc": "2026-10-26T04:49:28.996299Z",
-      "reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
+      "last_event_ms": 1793028366491,
+      "network_observed": true,
+      "observed_at_utc": "2026-10-26T15:26:58.114609Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1793028366491;channels=bbo:71506,l2:38951,trades:46294",
       "rest_probe_observed": false,
       "rest_probe_reason": "BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country }",
-      "runtime_status": "DEGRADED"
+      "runtime_status": "HEALTHY"
     },
     "gate": {
       "capability_runtime": {
@@ -163,16 +170,16 @@
         "venue_status": "HEALTHY"
       },
       "channel_counts": {
-        "bbo": 1379,
+        "bbo": 3324,
         "instrument_metadata": 1061,
-        "l2Book": 930,
-        "native_market": 2284,
-        "trades": 204
+        "l2Book": 1443,
+        "native_market": 4742,
+        "trades": 2752
       },
-      "last_event_ms": 1792990096897,
+      "last_event_ms": 1793028067181,
       "network_observed": true,
-      "observed_at_utc": "2026-10-26T04:49:28.996299Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1792990096897;channels=bbo:1379,l2:930,trades:204",
+      "observed_at_utc": "2026-10-26T15:26:58.114609Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1793028067181;channels=bbo:3324,l2:1443,trades:2752",
       "runtime_status": "HEALTHY"
     },
     "hyperliquid": {
@@ -188,7 +195,7 @@
         "venue_status": "HEALTHY"
       },
       "network_observed": true,
-      "observed_at_utc": "2026-10-26T04:49:28.996299Z",
+      "observed_at_utc": "2026-10-26T15:26:58.114609Z",
       "reason": "HYPERLIQUID_META_OK:234",
       "runtime_status": "HEALTHY"
     },
@@ -205,17 +212,17 @@
         "venue_status": "HEALTHY"
       },
       "channel_counts": {
-        "bbo": 1375,
+        "bbo": 956,
         "instrument_metadata": 507,
-        "l2Book": 1194,
-        "native_market": 3683,
-        "ticker": 1039,
-        "trades": 721
+        "l2Book": 354,
+        "native_market": 1681,
+        "ticker": 296,
+        "trades": 1772
       },
-      "last_event_ms": 1792990109763,
+      "last_event_ms": 1793028080019,
       "network_observed": true,
-      "observed_at_utc": "2026-10-26T04:49:28.996299Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1792990109763;channels=bbo:1375,l2:1194,trades:721",
+      "observed_at_utc": "2026-10-26T15:26:58.114609Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1793028080019;channels=bbo:956,l2:354,trades:1772",
       "runtime_status": "HEALTHY"
     }
   }
