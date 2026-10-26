@@ -14137,3 +14137,33 @@ qu'aucune campagne active n'existe pour l'epoch courant. L'identité de cette
 sélection et du manifest est unique à chaque création ; une seule campagne
 Copy-Vault peut occuper le lane courant. Elle repart du dernier checkpoint
 durablement publié.
+
+### 2026-10-26 — Partitions vérifiées pour les preuves de taille et de comptage
+
+Les tables `sizes` de `UNCOMPRESSED_SIZE_PATCH.json` et `records` de
+`RECORD_COUNT_PATCH.json` conservent une représentation logique complète,
+indexée par `dataset_id` et liée au SHA-256 de l'asset. Les fichiers inline
+historiques restent lisibles. Tout nouvel écrit logique dépassant 8 MiB utilise
+un manifeste `alina.catalog_patch_partitioned.v1` dans le fichier racine et des
+parties JSON adjacentes sous `uncompressed-size-patch-parts/` ou
+`record-count-patch-parts/`. Chaque partie est au plus 8 MiB et son descripteur
+lie le nom ordonné, le nombre d'entrées, la taille exacte et le SHA-256 complet.
+
+Un lecteur partagé doit reconstruire et valider l'ensemble des parties avant
+d'exposer la table logique : format et table attendus, chemins gérés sans
+traversée ni lien symbolique, numérotation contiguë, ordre des identités, hash,
+taille et comptes locaux/globaux exacts. Une partie absente, dupliquée,
+corrompue, mal ordonnée ou d'un format inconnu invalide la lecture entière ;
+aucun sous-ensemble ne peut être présenté comme une couverture complète. Les
+mesures, leur fusion SHA-liée contre le `DATA_INDEX` courant, les métriques,
+l'audit de quarantaine et la matérialisation des manifests utilisent ce même
+lecteur. Le writer publie d'abord les parties immuables, remplace le manifeste
+atomiquement, puis retire uniquement ses anciennes parties gérées. Les preuves
+ne sont jamais tronquées pour respecter la limite GitHub d'un blob.
+
+La publication de mesures préserve le manifeste et toutes ses parties hors du
+checkout éphémère avant de repartir du dernier `main`, recalcule la fusion sur
+le catalogue courant et versionne les racines et parties comme une seule
+publication. Les métriques restent liées au SHA du `DATA_INDEX`; les données
+absentes ou invalides restent incomplètes et ne deviennent jamais zéro ni
+preuve exacte.
