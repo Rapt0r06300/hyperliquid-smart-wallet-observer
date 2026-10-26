@@ -1,4 +1,7 @@
-"""Contract for explicit local Codex -> single GitHub main publishing."""
+"""Contracts for the Python-backed local-main to GitHub-main launcher."""
+from __future__ import annotations
+
+import json
 import os
 import shutil
 import subprocess
@@ -7,101 +10,90 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+HELPER = ROOT / "tools" / "push_github_safe.ps1"
 
 
-@pytest.mark.skipif(os.name != "nt", reason="le helper s'execute via Windows PowerShell")
-def test_stage_publishable_changes_ignores_runtime_directories(tmp_path: Path):
-    git_exe = shutil.which("git")
-    assert git_exe is not None
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    for args in (
-        ("init", "-b", "main"),
-        ("config", "user.name", "Alina Test"),
-        ("config", "user.email", "alina-test@example.invalid"),
-    ):
-        subprocess.run((git_exe, *args), cwd=repo, check=True, capture_output=True)
-    (repo / ".gitignore").write_text("data/\nlogs/\nruntime/\n", encoding="utf-8")
-    (repo / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
-    subprocess.run((git_exe, "add", "."), cwd=repo, check=True)
-    subprocess.run((git_exe, "commit", "-m", "base"), cwd=repo, check=True, capture_output=True)
-    (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
-    (repo / "data").mkdir()
-    (repo / "logs").mkdir()
-    (repo / "data" / "shard.jsonl").write_text("{}\n", encoding="utf-8")
-    (repo / "logs" / "collector.log").write_text("live\n", encoding="utf-8")
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell shim is Windows-only")
+@pytest.mark.parametrize(
+    ("mode", "expected_flag"),
+    (("DryRun", "--dry-run"), ("WipOnly", "--wip-only")),
+)
+def test_powershell_shim_forwards_arguments_and_python_exit_code(
+    tmp_path: Path, mode: str, expected_flag: str,
+) -> None:
+    powershell = shutil.which("powershell.exe")
+    assert powershell is not None
 
-    helper = ROOT / "tools" / "push_github_safe.ps1"
-    harness = tmp_path / "stage-test.ps1"
-    harness.write_text(
-        """
-param([string]$Helper, [string]$GitExecutable, [string]$Repo)
-$tokens = $null
-$errors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile($Helper, [ref]$tokens, [ref]$errors)
-foreach ($name in @('Invoke-Git', 'Get-GitText', 'Stage-PublishableChanges')) {
-    $fn = $ast.Find({
-        param($node)
-        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
-    }, $true)
-    if ($null -eq $fn) { throw "Fonction absente: $name" }
-    Invoke-Expression $fn.Extent.Text
-}
-$script:GitExecutable = $GitExecutable
-Set-Location -LiteralPath $Repo
-Stage-PublishableChanges
-& $GitExecutable diff --cached --name-only
-""".strip(),
+    project = tmp_path / "project with spaces"
+    tools = project / "tools"
+    tools.mkdir(parents=True)
+    driver = tools / "alina_git_code_sync.py"
+    driver.write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['ALINA_SYNC_CAPTURE']).write_text("
+        "json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+        "raise SystemExit(int(os.environ['ALINA_SYNC_STUB_EXIT']))\n",
         encoding="utf-8",
     )
-
+    capture = tmp_path / "captured argv.json"
+    harness = tmp_path / "invoke-wrapper.ps1"
+    harness.write_text(
+        "param([string]$Helper, [string]$Root, [string]$Git, [string]$Mode)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "if ($Mode -eq 'DryRun') { & $Helper -ProjectRoot $Root -GitExecutable $Git -DryRun }\n"
+        "else { & $Helper -ProjectRoot $Root -GitExecutable $Git -WipOnly }\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["ALINA_SYNC_CAPTURE"] = str(capture)
+    env["ALINA_SYNC_STUB_EXIT"] = "23"
+    git_path = str(tmp_path / "git executable with spaces.exe")
     result = subprocess.run(
         (
-            "powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(harness), "-Helper", str(helper), "-GitExecutable", git_exe,
-            "-Repo", str(repo),
+            powershell, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", str(harness), str(HELPER), str(project), git_path, mode,
         ),
+        cwd=ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "app.py"
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert json.loads(capture.read_text(encoding="utf-8")) == [
+        "--root", str(project.resolve()), "--git", git_path, expected_flag,
+    ]
 
 
-def test_codex_push_does_not_force_reset_or_rewrite_remote_history():
-    ps = (ROOT / "tools" / "push_github_safe.ps1").read_text(encoding="utf-8")
-    assert '$env:GIT_LFS_SKIP_SMUDGE = "1"' in ps
-    assert 'Invoke-Git @("push", "origin", "main:main")' in ps
-    assert 'Invoke-Git @("commit", "-m", "chore(codex): sauvegarder modifications locales Alina")' in ps
-    assert '"add", "-A", "--", "."' in ps
-    assert '"merge", "--no-edit", $Ref' in ps
-    assert '"fetch", "--prune", "origin", "main"' in ps
-    assert 'if ($allowed -cnotcontains $remoteUrl)' in ps
-    assert 'if (-not (Test-Git @("diff", "--cached", "--quiet")))' in ps
-    assert 'Fichier potentiellement secret interdit' in ps
-    assert 'Fichier > 95 Mio' in ps
-    assert 'Get-RemoteMainSha' in ps
-    assert 'Invoke-Git @("push", "--force"' not in ps
-    assert 'Invoke-Git @("reset", "--hard"' not in ps
+def test_powershell_compatibility_layer_delegates_to_single_python_engine() -> None:
+    source = HELPER.read_text(encoding="utf-8")
+
+    assert '$driver = Join-Path $ProjectRoot "tools\\alina_git_code_sync.py"' in source
+    assert '$command = @($driver, "--root", $ProjectRoot, "--git", $GitExecutable)' in source
+    assert 'if ($DryRun) { $command += "--dry-run" }' in source
+    assert 'if ($WipOnly) { $command += "--wip-only" }' in source
+    assert "& $python @pyArgs @command" in source
+    assert "Invoke-Git" not in source
 
 
-def test_button_retains_main_and_propagates_push_failure():
-    button = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
-    assert "tools\\push_github_safe.ps1" in button
-    assert 'for %%G in (git.exe)' in button
-    assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' in button
-    assert "if errorlevel 1 goto :git_install_failed" in button
-    assert ':git_ready' in button
-    assert "if not \"%RC%\"==\"0\" goto :echec_code" in button
-    assert "endlocal & exit /b %RC%" in button
-    assert "git push --force" not in button.lower()
+def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> None:
+    launcher = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8-sig")
+
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-10-26-status-inventory-v2" in launcher
+    assert 'call :download_source "tools/alina_git_code_sync.py"' in launcher
+    assert '"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%' in launcher
+    assert 'SYNC_OPTION=--dry-run' in launcher
+    assert 'SYNC_OPTION=--wip-only' in launcher
+    assert "git push --force" not in launcher.casefold()
+    assert "git reset --hard" not in launcher.casefold()
 
 
-def test_alias_buttons_invoke_single_canonical_push():
+def test_alias_launchers_call_the_single_canonical_cmd_and_propagate_status() -> None:
     for name in ("POUSSER_TOUT_LE_TRAVAIL.cmd", "REPARER_ET_POUSSER.cmd"):
-        text = (ROOT / name).read_text(encoding="utf-8")
-        assert 'call "%~dp0POUSSER-GITHUB-FORCE.cmd"' in text
-        assert 'endlocal & exit /b %RC%' in text
+        source = (ROOT / name).read_text(encoding="utf-8-sig")
+        assert 'call "%~dp0POUSSER-GITHUB-FORCE.cmd"' in source
+        assert "endlocal & exit /b %RC%" in source

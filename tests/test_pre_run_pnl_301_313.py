@@ -38,28 +38,47 @@ def _proof(family: str, *, oos_net: float = 2.6, forward_net: float = 2.6):
     return row
 
 
-def test_301_couts_incomplets_interdisent_la_promotion():
-    rows = [_proof("copy_vault"), _proof("lead_lag"), _proof("cross_venue_dislocation_v2")]; rows[1]["forward"] = dict(rows[1]["forward"]); rows[1]["forward"]["slippage_cost_usd"] = None
-    result = evaluate_all_families(rows)
-    assert result["objective_status"] == "NON_ATTEINT" and result["all_families_independently_reached"] is False
-    assert "FAMILY_TARGET_NOT_REACHED:lead_lag" in result["objective_reasons"]
+def test_301_couts_copy_vault_incomplets_interdisent_la_promotion():
+    row = _proof("copy_vault")
+    row["forward"] = dict(row["forward"])
+    row["forward"]["slippage_cost_usd"] = None
+    result = evaluate_all_families([row])
+    assert result["canonical_families"] == ["copy_vault"]
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["all_families_independently_reached"] is False
+    assert "FAMILY_TARGET_NOT_REACHED:copy_vault" in result["objective_reasons"]
 
 
-def test_cible_cinq_dollars_est_constante_et_independante_par_famille():
+def test_cible_cinq_dollars_s_applique_a_copy_vault_uniquement():
     assert TARGET_NET_USD == 5.0
-    result = evaluate_all_families([_proof("copy_vault", oos_net=4, forward_net=4), _proof("lead_lag", oos_net=.4, forward_net=.5), _proof("cross_venue_dislocation_v2", oos_net=4, forward_net=4)])
-    assert result["display_total_proof_net_usd"] > 4.0 and result["global_compensation_allowed"] is False
-    assert result["objective_status"] == "NON_ATTEINT" and result["family_status"]["lead_lag"] == "NON_ATTEINT"
+    result = evaluate_all_families([_proof("copy_vault", oos_net=.4, forward_net=.5)])
+    assert result["canonical_families"] == ["copy_vault"]
+    assert result["display_total_proof_net_usd"] == .9
+    assert result["global_compensation_allowed"] is False
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["family_status"]["copy_vault"] == "NON_ATTEINT"
 
 
-def test_les_trois_familles_doivent_toutes_etre_presentes_une_seule_fois():
-    missing = evaluate_all_families([_proof("copy_vault"), _proof("lead_lag")]); assert "MISSING_FAMILY:cross_venue_dislocation_v2" in missing["objective_reasons"]
-    duplicate = evaluate_all_families([_proof("copy_vault"), _proof("lead_lag"), _proof("cross_venue_dislocation_v2"), _proof("arbitrage")]); assert "DUPLICATE_FAMILY:cross_venue_dislocation_v2" in duplicate["objective_reasons"]
+def test_seul_copy_vault_est_requis_et_les_familles_desactivees_sont_refusees():
+    missing = evaluate_all_families([])
+    assert missing["canonical_families"] == ["copy_vault"]
+    assert "MISSING_FAMILY:copy_vault" in missing["objective_reasons"]
+    result = evaluate_all_families([
+        _proof("copy_vault"),
+        _proof("lead_lag"),
+        _proof("cross_venue_dislocation_v2"),
+    ])
+    assert result["all_families_independently_reached"] is False
+    assert "UNEXPECTED_FAMILY:lead_lag" in result["objective_reasons"]
+    assert "UNEXPECTED_FAMILY:cross_venue_dislocation_v2" in result["objective_reasons"]
 
 
-def test_preuve_complete_des_trois_familles_peut_seule_passer():
-    result = evaluate_all_families([_proof("copy_vault"), _proof("lead_lag"), _proof("cross_venue_dislocation_v2")])
-    assert result["target_net_usd_per_family"] == 5.0 and result["all_families_independently_reached"] is True and result["objective_status"] == "ATTEINT"
+def test_preuve_copy_vault_complete_passe_sans_exiger_de_famille_desactivee():
+    result = evaluate_all_families([_proof("copy_vault")])
+    assert result["target_net_usd_per_family"] == 5.0
+    assert result["canonical_families"] == ["copy_vault"]
+    assert result["all_families_independently_reached"] is True
+    assert result["objective_status"] == "ATTEINT"
 
 
 def test_garde_775_refuse_explicitement_l_ancien_master_v6():

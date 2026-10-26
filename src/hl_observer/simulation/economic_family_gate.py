@@ -1,8 +1,7 @@
-"""Gate économique commune aux trois familles actives HyperSmart.
+"""Gate économique pour la seule famille active : Copy-Vault.
 
-La cible +5 USD est INDÉPENDANTE par famille. Une somme globale positive ne
-peut jamais compenser une famille non prouvée. Ce module ne crée ni signal,
-ni fill, ni ordre : il ne fait qu'agréger les preuves paper existantes.
+Les lignes des familles hors périmètre sont rejetées. Ce module ne crée ni
+signal, ni fill, ni ordre : il évalue les preuves paper existantes.
 """
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ from .economic_objective import CANONICAL_FAMILIES, TARGET_NET_USD, canonical_fa
 
 
 def evaluate_all_families(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Évalue les 3 familles séparément et échoue fermé sur toute ambiguïté."""
+    """Évalue les familles canoniques et échoue fermé sur toute ambiguïté."""
     by_family: dict[str, Mapping[str, Any]] = {}
     duplicate_families: list[str] = []
     unexpected_families: list[str] = []
