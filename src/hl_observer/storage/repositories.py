@@ -885,7 +885,16 @@ class DiscoveryRepository:
             external_funding_fee=candidate.external_funding_fee,
             first_seen_ms=candidate.first_seen_ms or now,
             last_seen_ms=candidate.last_seen_ms or now,
-            raw_payload_json=candidate.raw_payload,
+            raw_payload_json={
+                **(candidate.raw_payload or {}),
+                "portfolio_identity": {
+                    "venue": candidate.venue,
+                    "network": candidate.network,
+                    "identity_kind": candidate.identity_kind,
+                    "native_id": candidate.address,
+                    "identity_key": candidate.portfolio_identity,
+                },
+            },
             confidence_score=candidate.confidence_score,
             selected_for_backfill=selected_for_backfill,
             rejection_reason=rejection_reason,

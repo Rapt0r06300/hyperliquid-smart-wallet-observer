@@ -647,6 +647,7 @@ def test_metrics_ignore_stale_record_and_size_patch_sha(tmp_path, monkeypatch):
     import json
 
     import tools.build_catalog_metrics as metrics
+    from tools.catalog_patch_store import write_catalog_patch
 
     cat = tmp_path / "catalog"
     cat.mkdir()
@@ -664,17 +665,17 @@ def test_metrics_ignore_stale_record_and_size_patch_sha(tmp_path, monkeypatch):
             "uncompressed_size_exact": True,
         }]
     }), encoding="utf-8")
-    (cat / "RECORD_COUNT_PATCH.json").write_text(json.dumps({
+    write_catalog_patch(cat / "RECORD_COUNT_PATCH.json", {
         "records": {"reuse": {
             "asset_sha256": "b" * 64, "record_count": 1000,
             "valid_record_count": 1000, "unique_record_count": 1000,
             "exact": True,
         }}
-    }), encoding="utf-8")
-    (cat / "UNCOMPRESSED_SIZE_PATCH.json").write_text(json.dumps({
+    }, table="records", inline_limit_bytes=1)
+    write_catalog_patch(cat / "UNCOMPRESSED_SIZE_PATCH.json", {
         "sizes": {"reuse": {"asset_sha256": "b" * 64,
                             "uncompressed_bytes": 123456}}
-    }), encoding="utf-8")
+    }, table="sizes", inline_limit_bytes=1)
     monkeypatch.setattr(metrics, "ROOT", tmp_path)
     monkeypatch.setattr(metrics, "INDEX", cat / "DATA_INDEX.json")
     monkeypatch.setattr(metrics, "METRICS", cat / "DATA_METRICS.json")

@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 
 from tools.build_quarantine_audit import build
-from tools.repair_stale_safe_classifications import repair
+from tools.catalog_patch_store import write_catalog_patch
 from tools.index_run_manifest import _sharded_receipt_path
+from tools.repair_stale_safe_classifications import repair
 
 
 def _manifest(dataset_id: str, *, safe_now: bool) -> dict:
@@ -92,6 +93,24 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
             "manifest_path": f"datasets/quarantine/{manifest['dataset_id']}.manifest.json",
         })
     (catalog / "DATA_INDEX.json").write_text(json.dumps({"shards": rows}), encoding="utf-8")
+    write_catalog_patch(
+        catalog / "RECORD_COUNT_PATCH.json",
+        {
+            "records": {
+                manifest["dataset_id"]: {
+                    "asset_sha256": manifest["sha256"],
+                    "record_count": 10,
+                    "valid_record_count": 10,
+                    "invalid_record_count": 0,
+                    "unique_record_count": 10,
+                    "exact": True,
+                }
+                for manifest in (first, second)
+            }
+        },
+        table="records",
+        inline_limit_bytes=1,
+    )
     source_sha = hashlib.sha256((catalog / "DATA_INDEX.json").read_bytes()).hexdigest()
     (catalog / "DATA_METRICS.json").write_text(
         json.dumps({

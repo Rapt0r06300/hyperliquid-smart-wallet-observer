@@ -7,6 +7,7 @@ observed records become Copy-Vault inputs. No network, trading or collectors.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import math
@@ -26,6 +27,21 @@ from hl_observer.collection.userfills_live import parser_message_userfills  # no
 
 class SafeBridgeError(RuntimeError):
     """A SAFE corpus is absent, inconsistent or unusable for Copy-Vault."""
+
+
+class StaleCopyVaultBook(SafeBridgeError):
+    """A real L2 observation exists but is too old for economic replay."""
+
+
+class ShallowCopyVaultBook(SafeBridgeError):
+    """A real L2 observation lacks the five levels required for execution."""
+
+
+def _windows_io_path(path: Path) -> Path:
+    absolute = os.path.abspath(path)
+    if os.name == "nt" and not absolute.startswith("\\\\?\\"):
+        return Path("\\\\?\\" + absolute)
+    return Path(absolute)
 
 
 def _digest(path: Path) -> str:
@@ -48,7 +64,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     return result
 
 
-def _safe_paths(recovery: Path, relative: str) -> tuple[Path, Path, Path]:
+def _safe_archive(recovery: Path, relative: str) -> Path:
     parsed = PurePosixPath(relative)
     parts = parsed.parts
     if (
@@ -59,14 +75,9 @@ def _safe_paths(recovery: Path, relative: str) -> tuple[Path, Path, Path]:
     ):
         raise SafeBridgeError(f"unsafe SAFE registry path: {relative}")
     archive = recovery.joinpath(*parts)
-    extracted = recovery / "usable" / "unpacked" / parts[2] / parts[3][:-3]
-    seal = extracted.with_suffix(".jsonl.alina.json")
-    if any(path.is_symlink() for path in (
-        recovery / "usable", archive.parent, archive, recovery / "usable" / "unpacked",
-        extracted.parent, extracted, seal,
-    )):
+    if any(path.is_symlink() for path in (recovery / "usable", archive.parent, archive)):
         raise SafeBridgeError(f"symlinked SAFE input: {relative}")
-    return archive, extracted, seal
+    return _windows_io_path(archive)
 
 
 def _source_record(line: bytes) -> dict[str, Any]:
@@ -80,16 +91,27 @@ def _source_record(line: bytes) -> dict[str, Any]:
 
 
 def _raw_envelope(record: dict[str, Any], channel: str) -> tuple[dict[str, Any], int, int]:
-    expected_source = {
-        "copy_vault_fills": "hyperliquid_public_userfills",
-        "copy_vault_l2": "hyperliquid_public_copy_l2",
+    expected_sources = {
+        "copy_vault_fills": {
+            "hyperliquid_public_userfills",
+            "hyperliquid_info_user_fills_by_time",
+            "hyperliquid_info_user_fills_by_time_history",
+        },
+        "copy_vault_snapshot": {
+            "hyperliquid_public_userfills",
+            "hyperliquid_info_user_fills_by_time_history",
+            # Historical windows were published under the legacy fills family
+            # before the TRAIN-only snapshot channel was introduced.
+            "hyperliquid_info_user_fills_by_time",
+        },
+        "copy_vault_l2": {"hyperliquid_public_copy_l2"},
     }[channel]
     provenance = record.get("provenance")
     raw = record.get("raw_payload")
     if (
         record.get("schema_version") != "hypersmart.tick.v1"
         or record.get("channel") != channel
-        or record.get("source_id") != expected_source
+        or record.get("source_id") not in expected_sources
         or record.get("read_only") is not True
         or record.get("real_execution") is not False
         or not isinstance(provenance, dict)
@@ -114,10 +136,90 @@ def _raw_envelope(record: dict[str, Any], channel: str) -> tuple[dict[str, Any],
     return message, receive, exchange
 
 
-def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
-    message, receive, exchange = _raw_envelope(record, "copy_vault_fills")
-    data = message.get("data")
+def _fills(
+    record: dict[str, Any], *, channel: str = "copy_vault_fills",
+) -> tuple[list[dict[str, Any]], int]:
+    if channel not in {"copy_vault_fills", "copy_vault_snapshot"}:
+        raise SafeBridgeError("invalid Copy-Vault fill family")
+    message, receive, exchange = _raw_envelope(record, channel)
+    provenance = record["provenance"]
     vault = str(record.get("instrument") or "").strip().lower()
+    source_id = str(record.get("source_id") or "")
+    if source_id in {
+        "hyperliquid_info_user_fills_by_time",
+        "hyperliquid_info_user_fills_by_time_history",
+    }:
+        history_flag = provenance.get("history_bootstrap")
+        historical_bootstrap = (
+            True if source_id.endswith("_history") else history_flag is True
+        )
+        expected_channels = (
+            {"copy_vault_snapshot", "copy_vault_fills"}
+            if historical_bootstrap else {"copy_vault_fills"}
+        )
+        request = message.get("request")
+        raw_fills = message.get("fills")
+        if (
+            channel not in expected_channels
+            or provenance.get("transport") != "https"
+            or provenance.get("request_type") != "userFillsByTime"
+            or provenance.get("window_reconciliation_complete") is not True
+            or not isinstance(history_flag, bool)
+            or history_flag is not historical_bootstrap
+            or not isinstance(request, dict)
+            or request.get("type") != "userFillsByTime"
+            or str(request.get("user") or "").lower() != vault
+            or not isinstance(raw_fills, list)
+            or not raw_fills
+        ):
+            raise SafeBridgeError("REST fills lack a verified complete window")
+        try:
+            start_ms = int(request["startTime"])
+            end_ms = int(request["endTime"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise SafeBridgeError("REST fills have invalid window bounds") from exc
+        if start_ms <= 0 or end_ms < start_ms:
+            raise SafeBridgeError("REST fills have invalid window bounds")
+        normalized: list[dict[str, Any]] = []
+        for raw_fill in raw_fills:
+            if not isinstance(raw_fill, dict):
+                raise SafeBridgeError("REST fill is not an object")
+            fill = dict(raw_fill)
+            try:
+                ts_ms = int(fill["ts_ms"])
+                px = float(fill["px"])
+                sz = float(fill["sz"])
+                signe = int(fill["signe"])
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise SafeBridgeError("REST fill is missing normalized fields") from exc
+            if (
+                str(fill.get("vault") or "").lower() != vault
+                or not start_ms <= ts_ms <= end_ms
+                or ts_ms > receive
+                or signe not in (-1, 1)
+                or not math.isfinite(px) or px <= 0
+                or not math.isfinite(sz) or sz <= 0
+            ):
+                raise SafeBridgeError("REST fill identity or window mismatch")
+            fill.update({
+                "ts_ms": ts_ms,
+                "px": px,
+                "sz": sz,
+                "signe": signe,
+                "received_at_ms": receive,
+                "recv_mono_ns": record.get("local_monotonic_ns"),
+                "connection_id": str(record.get("connection_id") or ""),
+                "source": "REST_BACKFILL",
+                "historical_bootstrap": historical_bootstrap,
+                "window_reconciliation_complete": True,
+                "isSnapshot": False,
+            })
+            normalized.append(fill)
+        if max(int(fill["ts_ms"]) for fill in normalized) != exchange:
+            raise SafeBridgeError("REST fill timestamp does not match envelope")
+        return normalized, 0
+
+    data = message.get("data")
     if (
         message.get("channel") != "userFills"
         or not isinstance(data, dict)
@@ -125,10 +227,20 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         or (data.get("user") and str(data["user"]).lower() != vault)
     ):
         raise SafeBridgeError("Copy-Vault fill identity or message mismatch")
+    if channel == "copy_vault_snapshot":
+        if (
+            source_id != "hyperliquid_public_userfills"
+            or data.get("isSnapshot") is not True
+        ):
+            raise SafeBridgeError("Copy-Vault snapshot family contains a non-snapshot event")
+        return [], len(data.get("fills") or [])
     if data.get("isSnapshot") is True:
         return [], len(data.get("fills") or [])
-    if data.get("isSnapshot") is not False:
-        raise SafeBridgeError("Copy-Vault fill snapshot flag missing")
+    if data.get("isSnapshot") not in (None, False):
+        raise SafeBridgeError("Copy-Vault fill snapshot flag invalid")
+    # Older public userFills frames omit isSnapshot. The outer immutable
+    # Alina envelope already classifies these bytes as copy_vault_fills;
+    # snapshot frames use the distinct copy_vault_snapshot family.
     fills = parser_message_userfills(
         message, vault=vault, received_at_ms=receive,
         receive_mono_ns=record.get("local_monotonic_ns"),
@@ -149,7 +261,7 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
 
 def _levels(side: Any, *, descending: bool) -> list[list[float]]:
     if not isinstance(side, list) or len(side) < 5:
-        raise SafeBridgeError("L2 has fewer than five levels")
+        raise ShallowCopyVaultBook("L2 has fewer than five levels")
     output: list[list[float]] = []
     previous: float | None = None
     for entry in side[:5]:
@@ -175,12 +287,10 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
     if message.get("channel") != "l2Book" or not isinstance(data, dict):
         raise SafeBridgeError("invalid L2 websocket envelope")
     coin = str(record.get("instrument") or "").upper()
-    if (
-        not coin or str(data.get("coin") or "").upper() != coin
-        or data.get("time") != exchange
-        or receive - exchange > 1_000
-    ):
-        raise SafeBridgeError("L2 missing identity, exchange timestamp or subsecond freshness")
+    if not coin or str(data.get("coin") or "").upper() != coin or data.get("time") != exchange:
+        raise SafeBridgeError("L2 missing identity or exchange timestamp")
+    if receive - exchange > 1_000:
+        raise StaleCopyVaultBook("L2 observation exceeds one-second freshness gate")
     sides = data.get("levels")
     if not isinstance(sides, list) or len(sides) != 2:
         raise SafeBridgeError("invalid L2 book sides")
@@ -211,21 +321,25 @@ def _safe_registry_rows(
     recovery: Path, catalog_path: Path,
 ) -> tuple[str, list[tuple[str, int, str, tuple[int, int, int, int]]]]:
     restore = _read_json(recovery / "RESTORE_REPORT.json")
-    unpack = _read_json(recovery / "UNPACK_REPORT.json")
     binding = restore.get("catalog_verification")
     classification = restore.get("classification")
     catalog = binding.get("source_index_sha256") if isinstance(binding, dict) else None
+    selection_families = restore.get("selection_families")
     if (
         restore.get("repository") != "Rapt0r06300/hyperliquid-smart-wallet-observer"
         or restore.get("status") != "REPLAY_READY_COMPLETE"
+        or not isinstance(selection_families, list)
+        or any(not isinstance(family, str) for family in selection_families)
+        or not {"copy_vault_fills", "copy_vault_l2"}.issubset(selection_families)
+        or set(selection_families) - {
+            "copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot",
+        }
         or not isinstance(classification, dict)
         or classification.get("materialization_complete") is not True
         or classification.get("failures") not in (None, [])
-        or unpack.get("status") != "SAFE_UNPACK_COMPLETE"
-        or unpack.get("catalog_index_sha256") != catalog
         or not isinstance(catalog, str) or len(catalog) != 64
     ):
-        raise SafeBridgeError("AlinaSync SAFE restoration and extraction are not certified")
+        raise SafeBridgeError("AlinaSync Copy-Vault SAFE restoration is not certified")
     if (
         catalog_path.is_symlink() or not catalog_path.is_file()
         or _digest(catalog_path) != catalog
@@ -250,9 +364,8 @@ def _safe_registry_rows(
     except sqlite3.Error as exc:
         raise SafeBridgeError("unreadable SAFE_SHARDS registry") from exc
     expected = classification.get("usable_shards")
-    if (type(expected) is not int or expected <= 0 or len(raw) != expected
-            or unpack.get("certified_shards") != expected):
-        raise SafeBridgeError("SAFE archive, extraction and registry shard counts disagree")
+    if type(expected) is not int or expected <= 0 or len(raw) != expected:
+        raise SafeBridgeError("SAFE archive and registry shard counts disagree")
     return catalog, [
         (str(row[0]), int(row[1]), str(row[2]), tuple(int(v) for v in row[3:]))
         for row in raw
@@ -267,7 +380,10 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
     parent.mkdir(parents=True, exist_ok=True)
-    selection = hashlib.sha256(catalog.encode("ascii"))
+    bridge_sha256 = _digest(Path(__file__).resolve())
+    selection = hashlib.sha256()
+    selection.update(catalog.encode("ascii"))
+    selection.update(bridge_sha256.encode("ascii"))
     # Immutable artifact name is scoped to the certified input set; unchanged
     # inputs are reused only if the output byte digests still match.
     stage = Path(tempfile.mkdtemp(prefix=".copy-safe-", dir=parent))
@@ -276,75 +392,107 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     paths = {
         "copy_vault_fills": destination / "vault_fills_live.jsonl",
         "copy_vault_l2": destination / "copy_vault_l2_tape.jsonl",
+        "copy_vault_snapshot": destination / "vault_fills.jsonl",
     }
-    counts = {"copy_vault_fills": 0, "copy_vault_l2": 0, "snapshots_excluded": 0}
+    counts = {
+        "copy_vault_fills": 0,
+        "copy_vault_snapshot": 0,
+        "historical_bootstrap_fills": 0,
+        "copy_vault_l2": 0,
+        "snapshots_excluded": 0,
+        "stale_l2_excluded": 0,
+        "shallow_l2_excluded": 0,
+    }
     inputs: list[dict[str, Any]] = []
     total = len(registry)
     try:
-        with paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out, paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out:
-            for i, (relative, size, sha, stat_identity) in enumerate(registry, 1):
-                archive, plain, seal_path = _safe_paths(recovery, relative)
-                if not archive.is_file() or not plain.is_file() or not seal_path.is_file():
+        with paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out, paths["copy_vault_snapshot"].open("w", encoding="utf-8", newline="\n") as history_out, paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out:
+            for i, (relative, size, sha, _registered_stat_identity) in enumerate(registry, 1):
+                archive = _safe_archive(recovery, relative)
+                if not archive.is_file():
                     raise SafeBridgeError(f"missing registered SAFE shard: {relative}")
-                stat = archive.stat()
-                if (
-                    (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns) != stat_identity
-                    or stat.st_size != size
-                ):
-                    raise SafeBridgeError(f"registered SAFE shard was modified: {relative}")
-                with plain.open("rb") as handle:
-                    first = handle.readline()
-                if not first:
-                    raise SafeBridgeError(f"empty SAFE shard: {relative}")
-                peek = _source_record(first)
-                channel = peek.get("channel")
-                if channel not in paths:
-                    continue
-                seal = _read_json(seal_path)
-                if (
-                    seal.get("schema") != "alina.safe_jsonl_proof.v1"
-                    or seal.get("compressed_sha256") != sha
-                    or _digest(archive) != sha
-                    or seal.get("jsonl_sha256") != _digest(plain)
-                    or seal.get("jsonl_bytes") != plain.stat().st_size
-                ):
+                before_hash = archive.stat()
+                if before_hash.st_size != size:
+                    raise SafeBridgeError(f"registered SAFE shard was modified: size mismatch: {relative}")
+                if _digest(archive) != sha:
                     raise SafeBridgeError(f"SAFE shard byte proof mismatch: {relative}")
+                after_hash = archive.stat()
+                if (
+                    before_hash.st_dev, before_hash.st_ino, before_hash.st_size,
+                    before_hash.st_mtime_ns, before_hash.st_ctime_ns,
+                ) != (
+                    after_hash.st_dev, after_hash.st_ino, after_hash.st_size,
+                    after_hash.st_mtime_ns, after_hash.st_ctime_ns,
+                ):
+                    raise SafeBridgeError(f"SAFE shard changed while being verified: {relative}")
                 selection.update(relative.encode("utf-8"))
                 selection.update(sha.encode("ascii"))
                 rows = 0
-                with plain.open("rb") as stream:
-                    for line in stream:
-                        record = _source_record(line)
-                        if record.get("channel") != channel:
-                            raise SafeBridgeError(f"mixed channel in SAFE shard: {relative}")
-                        if channel == "copy_vault_fills":
-                            normalized, excluded = _fills(record)
-                            counts["snapshots_excluded"] += excluded
-                            for fill in normalized:
-                                fill_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
-                            counts[channel] += len(normalized)
-                        else:
-                            l2_out.write(json.dumps(_book(record), sort_keys=True, allow_nan=False) + "\n")
-                            counts[channel] += 1
-                        rows += 1
+                raw_bytes = 0
+                channel = None
+                try:
+                    stream = gzip.open(archive, "rb")
+                    with stream:
+                        for line in stream:
+                            raw_bytes += len(line)
+                            record = _source_record(line)
+                            record_channel = record.get("channel")
+                            if channel is None:
+                                channel = record_channel
+                                if channel not in paths:
+                                    raise SafeBridgeError(
+                                        f"non-Copy-Vault shard in scoped registry: {relative}"
+                                    )
+                            if record_channel != channel:
+                                raise SafeBridgeError(f"mixed channel in SAFE shard: {relative}")
+                            rows += 1
+                            if channel in {"copy_vault_fills", "copy_vault_snapshot"}:
+                                normalized, excluded = _fills(record, channel=channel)
+                                counts["snapshots_excluded"] += excluded
+                                for fill in normalized:
+                                    historical = fill.get("historical_bootstrap") is True
+                                    target = history_out if historical else fill_out
+                                    target.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
+                                    counts[
+                                        "copy_vault_snapshot" if historical else "copy_vault_fills"
+                                    ] += 1
+                                    counts["historical_bootstrap_fills"] += int(
+                                        historical
+                                    )
+                            else:
+                                try:
+                                    book = _book(record)
+                                except StaleCopyVaultBook:
+                                    counts["stale_l2_excluded"] += 1
+                                    continue
+                                except ShallowCopyVaultBook:
+                                    counts["shallow_l2_excluded"] += 1
+                                    continue
+                                l2_out.write(json.dumps(book, sort_keys=True, allow_nan=False) + "\n")
+                                counts[channel] += 1
+                except (OSError, EOFError) as exc:
+                    raise SafeBridgeError(f"invalid compressed SAFE shard: {relative}") from exc
+                if rows == 0 or channel is None:
+                    raise SafeBridgeError(f"empty SAFE shard: {relative}")
                 inputs.append({
                     "relative_path": relative, "sha256": sha,
-                    "jsonl_sha256": seal["jsonl_sha256"], "jsonl_bytes": seal["jsonl_bytes"],
+                    "compressed_bytes": size, "jsonl_bytes": raw_bytes,
                     "channel": channel, "frames": rows,
                 })
                 if len(inputs) % 100 == 0 or i == total:
                     print(f"ALINA_COPY_SAFE_PROGRESS={i}/{total} selected={len(inputs)}", flush=True)
-        if not counts["copy_vault_fills"] or not counts["copy_vault_l2"]:
+        if not (counts["copy_vault_fills"] + counts["copy_vault_snapshot"]) or not counts["copy_vault_l2"]:
             raise SafeBridgeError("SAFE corpus lacks both causal fills and subsecond L2")
         digest = selection.hexdigest()
         outputs = {name: {"path": "runtime/data/" + path.name,
                           "sha256": _digest(path), "bytes": path.stat().st_size}
                    for name, path in paths.items()}
         provenance = {
-            "schema": "hypersmart.dataset_selection_provenance.v3",
-            "source_kind": "alina-sync-safe-unpacked",
+            "schema": "hypersmart.dataset_selection_provenance.v4",
+            "source_kind": "alina-sync-safe-compressed",
             "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "catalog_sha256": catalog,
+            "bridge_sha256": bridge_sha256,
             "selection_digest": digest,
             "selected_files": len(inputs),
             "selected_raw_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
@@ -354,12 +502,28 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             "paper_read_only": True,
             "real_execution": False,
             "snapshot_fills_excluded": True,
+            "historical_bootstrap_fills_separate": True,
+            "historical_bootstrap_fills": counts["historical_bootstrap_fills"],
+            "forward_proof_from_historical_bootstrap": False,
             "economic_proof": False,
         }
         proof_dir = stage / "runtime" / "reports" / "datasets"
         proof_dir.mkdir(parents=True)
         (proof_dir / "SELECTION_PROVENANCE.json").write_text(
             json.dumps(provenance, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        (stage / "SAFE_INPUT_MANIFEST.json").write_text(
+            json.dumps({
+                "schema_version": "hypersmart.copy_vault_safe_input_manifest.v1",
+                "status": "READY",
+                "catalog_sha256": catalog,
+                "selection_digest": digest,
+                "selected_shards": len(inputs),
+                "selected_raw_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
+                "counts": counts,
+                "paper_read_only": True,
+                "real_execution": False,
+            }, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
         final = parent / digest[:24]
         if final.exists():
@@ -375,6 +539,8 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
         return {
             "status": "SAFE_COPY_WORKSPACE_READY", "workspace": str(final),
             "catalog_sha256": catalog, "selected_shards": len(inputs),
+            "selection_digest": digest,
+            "selected_raw_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
             "counts": counts, "outputs": outputs, "economic_proof": False,
         }
     except Exception:

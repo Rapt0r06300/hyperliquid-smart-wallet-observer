@@ -72,8 +72,11 @@ def test_collect_campaign_identity_and_frozen_inputs_are_epoch_scoped() -> None:
     text = _text()
     assert 'MARKET_PLAN_DIR="catalog/market_collection_plans/e$PHASE_EPOCH/$BUCKET"' in text
     assert '"market-e$PHASE_EPOCH-$MARKET_SHARD-$BUCKET-v7"' in text
-    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"' in text
-    assert '"copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8"' in text
+    assert 'COPY_BUCKET="$(date -u +%Y%m%dT%H%M%S)"' in text
+    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$COPY_BUCKET.json"' in text
+    assert 'python tools/freeze_copy_vault_selection.py --output "$COPY_SELECTION" --phase-epoch "$PHASE_EPOCH"' in text
+    assert 'python alina/tools/freeze_copy_vault_selection.py' not in text
+    assert '"copy-vault-e$PHASE_EPOCH-broad-$COPY_BUCKET-v8"' in text
     assert '"copy-vault-two-speed-broad-rest-priority-ws-v8"' in text
     assert '"max_ws_vaults":10' in text
     assert '"vault_shard_count":1' in text

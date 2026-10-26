@@ -79,12 +79,12 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert '"vault_shard_count":1' in text
     assert '"vault_shard_index":0' in text
     assert '"copy_vault_mode":"two_speed_broad_rest_priority_ws"' in text
-    assert "copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8" in text
+    assert "copy-vault-e$PHASE_EPOCH-broad-$COPY_BUCKET-v8" in text
     assert "copy-vault-two-speed-broad-rest-priority-ws-v8" in text
     assert "selection_file" in text
     assert "selection_sha256" in text
     assert "catalog/copy_vault_selections" in text
-    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"' in text
+    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$COPY_BUCKET.json"' in text
     assert "official_archive_collection" in text
     assert "event_intelligence_collection" in text
     for kind in ("replay", "backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"):
@@ -149,7 +149,11 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "fromJSON(needs.select.outputs.copy_matrix)" in controller
     assert "fromJSON(needs.select.outputs.other_matrix)" in controller
     assert "relay_collect:" in controller
-    assert "gh workflow run resumable-campaign-controller.yml" in controller
+    assert "copy_active: ${{ steps.due.outputs.copy_active }}" in controller
+    assert "create-resumable-campaigns.yml" in controller
+    assert '"${{ needs.select.outputs.copy_active }}" != "true"' in controller
+    assert 'gh workflow run "$workflow"' in controller
+    assert 'workflow="resumable-campaign-controller.yml"' in controller
     assert "ref: ${{ steps.pin.outputs.sha }}" in worker
     assert "Claim durable campaign lease" in worker
     assert "Persist collection data or analysis evidence" in worker
@@ -457,6 +461,29 @@ def test_safe_restore_parity_uses_same_lossless_alias_compaction_as_writers():
     assert "Run deterministic restore tests" in text
 
 
+def test_safe_restore_regression_checks_current_code_sync_launcher() -> None:
+    text = _workflow("alina-restore-safe-regression.yml")
+    assert "tools/alina_git_code_sync.py" in text
+    assert "tests/test_alina_git_code_sync.py" in text
+    assert "tests/test_push_github_launcher.py" in text
+    assert "tools/push_github_safe.ps1" not in text
+    assert "Prove every Git wrapper forwards all arguments" not in text
+    assert "PREPARER_GIT_PORTABLE.cmd" in text
+
+
+def test_git_code_sync_safety_runs_cross_platform_on_pull_requests() -> None:
+    text = _workflow("alina-git-code-sync-tests.yml")
+    assert "pull_request:" in text
+    assert "filter: blob:none" in text
+    assert "sparse-checkout:" in text
+    assert "tests/test_alina_git_code_sync.py" in text
+    assert "tests/test_push_github_launcher.py" in text
+    assert "tests/test_push_github_safe_contract.py" in text
+    sparse = text.split("sparse-checkout: |", 1)[1].split("persist-credentials:", 1)[0]
+    assert "datasets" not in sparse
+    assert "catalog" not in sparse
+
+
 def test_pip_cache_discovery_is_bounded_in_every_workflow() -> None:
     root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
     for path in root.glob("*.yml"):
@@ -476,6 +503,34 @@ def test_campaign_workflows_sparse_checkout_excludes_principal_dataset_tree() ->
         workflow = _workflow(name)
         assert workflow.count("actions/checkout@") == checkout_count
         assert workflow.count("sparse-checkout:") == checkout_count
+
+
+def test_code_ci_workflows_use_sparse_checkouts_without_market_data_payloads() -> None:
+    expected = {
+        "labo-continu-ci.yml": 1,
+        "hyperlab-ci.yml": 1,
+        "event-intelligence-ci.yml": 1,
+        "security-quality.yml": 3,
+    }
+    required_code_dirs = (
+        ".github",
+        "docs",
+        "src",
+        "tests",
+        "tools",
+    )
+    for name, checkout_count in expected.items():
+        workflow = _workflow(name)
+        assert workflow.count("actions/checkout@") == checkout_count, name
+        assert workflow.count("filter: blob:none") == checkout_count, name
+        sparse_blocks = workflow.split("sparse-checkout: |")[1:]
+        assert len(sparse_blocks) == checkout_count, name
+        for sparse in sparse_blocks:
+            block = sparse.split("persist-credentials:", 1)[0]
+            assert "/datasets/" not in block, name
+            assert "/catalog/" not in block, name
+            for directory in required_code_dirs:
+                assert f"\n            {directory}\n" in block, (name, directory)
 
 
 def test_terminal_cleanup_sparse_checkout_includes_python_package() -> None:

@@ -23,14 +23,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting.copy_vault_v21_frozen import SCHEMA_VERSION as COPY_V21_EVALUATION_SCHEMA  # noqa: E402
 from hl_observer.backtesting.copy_vault_v21_frozen import evaluate_frozen_v21  # noqa: E402
-from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack  # noqa: E402
 from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
     DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
     diagnose_causal_book_coverage,
 )
 from hl_observer.datasets.economic_multi_source import (  # noqa: E402
     install_copy_vault_adapter,
-    install_cross_venue_adapter,
     write_economic_source_coverage,
 )
 from hl_observer.datasets.source_discovery import (  # noqa: E402
@@ -224,8 +222,8 @@ def run_dataset_campaigns(
     canonical.assert_execution_disabled()
 
     copy_sources = _copy_original_sources(data_root)
-    cross_sources = _cross_original_sources(data_root)
-    lead_sources = _unique_paths(load_family_source_paths(data_root, "lead_lag"))
+    cross_sources: list[Path] = []
+    lead_sources: list[Path] = []
 
     original_tool_loader = canonical._tool
     adapter_state: dict[str, object] = {}
@@ -239,11 +237,6 @@ def run_dataset_campaigns(
                 data_root,
                 copy_tool=tool,
                 copy_executable=canonical.copy_vault_executable,
-            )
-        elif name == "hypersmart_cross_campaign":
-            adapter_state["cross_venue"] = install_cross_venue_adapter(
-                data_root,
-                cross_tool=tool,
             )
         return tool
 
@@ -272,6 +265,7 @@ def run_dataset_campaigns(
         start_collection=False,
         collection_duration_s=collection_duration_s,
         collection_startup_wait_s=collection_startup_wait_s,
+        copy_vault_only=True,
     )
     # Strong postcondition: the canonical loaded module was never changed.
     if canonical._tool is not original_tool_loader or canonical.dataset_provenance is not original_provenance:
@@ -283,10 +277,11 @@ def run_dataset_campaigns(
         lead_consumed=lead_sources,
         cross_consumed=cross_sources,
     )
-    # vNext research is intentionally downstream of the canonical campaign.
-    # It can only propose a later freeze and cannot alter the just-computed
-    # canonical verdicts or scoreboards.
-    vnext_research = run_economic_vnext_pack(data_root, lead_sources=lead_sources)
+    vnext_research = {
+        "status": "DISABLED_BY_SCOPE",
+        "active_family": "copy_vault",
+        "summary_path": None,
+    }
 
     copy_v21: dict[str, Any] = {
         "schema_version": COPY_V21_EVALUATION_SCHEMA,

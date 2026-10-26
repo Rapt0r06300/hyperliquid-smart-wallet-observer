@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -24,12 +25,16 @@ def context(kind: str, **partition):
     )
 
 
+def _script_path(command):
+    return Path(command).as_posix()
+
+
 def test_market_command_uses_real_collector_cli(tmp_path):
     cmd, output = build_command(
         context("market_collection", output_root=str(tmp_path), duration_s=10, coins="BTC")
     )
     assert cmd[0] == sys.executable
-    assert cmd[1].endswith("tools/collect_cloud_window.py")
+    assert _script_path(cmd[1]).endswith("tools/collect_cloud_window.py")
     assert "--output" in cmd
     assert "--duration-s" in cmd
     assert "--campaign-unit-json" not in cmd
@@ -48,7 +53,7 @@ def test_official_archive_uses_existing_backfill_tool(tmp_path):
             start_date="2026-09-24",
         )
     )
-    assert cmd[1].endswith("tools/collect_official_archive_backfill.py")
+    assert _script_path(cmd[1]).endswith("tools/collect_official_archive_backfill.py")
     assert output is not None and output.name == "bundle"
 
 
@@ -86,7 +91,7 @@ def test_backtest_command_targets_economic_runner(tmp_path):
     cmd, output = build_command(
         context("backtest", workspace_root=str(tmp_path))
     )
-    assert cmd[1].endswith("tools/run_economic_objective_campaigns.py")
+    assert _script_path(cmd[1]).endswith("tools/run_economic_objective_campaigns.py")
     assert "--no-start-collection" in cmd
     assert output == tmp_path
 
@@ -155,7 +160,7 @@ def test_economic_run_materializes_then_backtests_in_same_unit(tmp_path):
     assert out.progressed is True
     assert len(calls) == 2
     assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
-    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
+    assert _script_path(calls[1][1]).endswith("tools/run_economic_objective_campaigns.py")
     assert out.payload["safe_workspace"] == str(tmp_path)
 
 
@@ -202,8 +207,8 @@ def test_module_pnl_proof_runs_strict_audit_after_campaign(tmp_path):
     assert out.status == "COMPLETE"
     assert len(calls) == 3
     assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
-    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
-    assert calls[2][1].endswith("tools/audit_economic_objectives.py")
+    assert _script_path(calls[1][1]).endswith("tools/run_economic_objective_campaigns.py")
+    assert _script_path(calls[2][1]).endswith("tools/audit_economic_objectives.py")
     assert [phase["name"] for phase in out.payload["phases"]] == [
         "materialize_safe_v2",
         "economic_campaign",
@@ -255,7 +260,7 @@ def test_module_pnl_unmeasurable_is_complete_stage_not_technical_failure(tmp_pat
 
     def runner(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+        if _script_path(cmd[1]).endswith("tools/audit_economic_objectives.py"):
             _write_economic_audit(
                 tmp_path,
                 all_ledgers_valid=False,
@@ -292,7 +297,7 @@ def test_module_pnl_audit_exit_two_without_receipt_remains_technical_failure(tmp
 
     def runner(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+        if _script_path(cmd[1]).endswith("tools/audit_economic_objectives.py"):
             return AuditResult()
         return Result()
 
@@ -319,7 +324,7 @@ def test_module_pnl_more_data_and_kill_are_semantic_not_crashes(tmp_path):
 
         def runner(cmd, _calls=calls, _classifications=classifications, **kwargs):
             _calls.append(list(cmd))
-            if cmd[1].endswith("tools/audit_economic_objectives.py"):
+            if _script_path(cmd[1]).endswith("tools/audit_economic_objectives.py"):
                 _write_economic_audit(
                     tmp_path,
                     all_ledgers_valid=True,
@@ -489,7 +494,26 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
           "duration_s": 60.0,
           "accepted_frames": 10,
           "persisted_frames": 10,
-          "queue_drops": {}
+          "queue_drops": {},
+          "targeted_change_reconciliation": {
+            "status": "PARTIAL",
+            "changed_wallets": 5,
+            "reconciled_wallets": 3,
+            "deferred_wallets": 2,
+            "incomplete_wallets": 1,
+            "fills_collected": 7,
+            "missing_state_wallets": 4
+          },
+          "vault_checkpoints": {
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+              "last_forward_start_ms": 1000,
+              "last_forward_end_ms": 61000,
+              "last_forward_status": "SOURCE_CONTINUITY_VERIFIED",
+              "history_complete": false,
+              "history_pending_windows": [[0, 500]]
+            },
+            "not-an-address": {"last_forward_end_ms": 61000}
+          }
         }""",
         encoding="utf-8",
     )
@@ -511,3 +535,12 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
     assert metrics["duration_s"] == 60.0
     assert metrics["accepted_frames"] == 10
     assert metrics["persisted_frames"] == 10
+    assert metrics["targeted_reconciliation_status"] == "PARTIAL"
+    assert metrics["changed_wallets"] == 5
+    assert metrics["reconciled_wallets"] == 3
+    assert metrics["deferred_wallets"] == 2
+    assert metrics["incomplete_wallets"] == 1
+    assert metrics["fills_collected"] == 7
+    assert metrics["missing_state_wallets"] == 4
+    assert metrics["vault_checkpoints"]["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]["last_forward_end_ms"] == 61000
+    assert "not-an-address" not in metrics["vault_checkpoints"]

@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError:
     from backfill_exact_trade_counts import _native_trade_keys, _summary_trade_count
 
-TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
+TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills","copy_vault_snapshot"}
 REPLAYABLE_FAMILIES={"cross_venue_capacity_tape","capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
 VERIFIER_VERSION="alina.replay.compatibility.v8"
 

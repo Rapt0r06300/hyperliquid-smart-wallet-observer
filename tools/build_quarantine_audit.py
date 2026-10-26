@@ -20,6 +20,11 @@ try:
 except ModuleNotFoundError:
     from partitioned_data_index import read_index
 
+try:
+    from tools.catalog_patch_store import read_catalog_patch
+except ModuleNotFoundError:
+    from catalog_patch_store import read_catalog_patch
+
 ROOT = Path(__file__).resolve().parents[1]
 PARTITION_SCHEMA = "alina.quarantine_audit_partitioned.v1"
 PARTITION_DIRECTORY = "quarantine-audit-parts"
@@ -186,7 +191,7 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
             raise ValueError("QUARANTINE_DUPLICATE_IDENTITY") from exc
         raise ValueError(f"QUARANTINE_INVALID_INDEX:{exc}") from exc
     metrics = _load(metrics_path, {})
-    record_patch = _load(record_patch_path, {})
+    record_patch = read_catalog_patch(record_patch_path, expected_table="records")
     replay_patch = _load(base / "catalog" / "REPLAY_COMPAT_PATCH.json", {})
     replay_results = replay_patch.get("results") if isinstance(replay_patch, Mapping) else {}
     replay_failures = replay_patch.get("transient_failures") if isinstance(replay_patch, Mapping) else {}

@@ -47,7 +47,7 @@ def annotate_collection(
     if not isinstance(manifests,list):
         manifests=[]
     trade_families={
-        "trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"
+        "trades","agg_trades","fills","userfills","user_fills","copy_vault_fills","copy_vault_snapshot"
     }
     trade_count=0
     trade_shards=0

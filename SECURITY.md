@@ -135,17 +135,15 @@ Interdit notamment :
 - compenser l'échec d'une famille par le profit d'une autre ;
 - transformer `MORE_DATA` ou `UNMEASURABLE` en `PROVEN` sans preuve.
 
-La cible de recherche **>= +5 USD NET/jour** par famille, sur 200 USD paper, n'a jamais priorité sur l'intégrité de la preuve.
+La cible de recherche **>= +5 USD NET/jour pour Copy-Vault**, sur 200 USD paper, n'a jamais priorité sur l'intégrité de la preuve.
 
-## 8. Sécurité des trois familles actives
+## 8. Sécurité du scope économique actif
 
-Familles actives :
+La seule famille économique active est **Copy-Vault**.
 
-- Copy-Vault
-- Lead-Lag
-- Cross-Venue Dislocation
+Les familles suivantes sont `DISABLED_BY_SCOPE` pour toute simulation, replay/backtest, mesure PnL, OOS/forward, certification et scoreboard : Lead-Lag, Cross-Venue Dislocation, arbitrage, Carry/Funding Carry, shadow/research-only et toute famille non attribuée. Une réactivation exige une modification revue de l'autorité centrale du scope. Aucune variable d'environnement ne peut élargir le scope.
 
-`Carry / Funding Carry = DISABLED_BY_SCOPE`.
+Les règles Lead-Lag et Cross-Venue ci-dessous sont conservées comme contraintes de sécurité pour une éventuelle réactivation revue. Elles ne les rendent pas exécutables dans le scope courant.
 
 ### Copy-Vault
 

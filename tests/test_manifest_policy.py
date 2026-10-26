@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
@@ -126,6 +128,67 @@ def test_clean_live_trade_continuity_can_be_safe() -> None:
 
     value["reconciliation"] = {"status": "MATCHED"}
     assert classify_manifest(value)[0] == "SAFE"
+
+
+def test_exact_rest_window_reconciliation_can_qualify_copy_vault_fills() -> None:
+    value = manifest()
+    value["family"] = "copy_vault_fills"
+    value["source"] = "hyperliquid_info_user_fills_by_time"
+    value["provenance"].update({
+        "transports": ["https"],
+        "request_type": "userFillsByTime",
+        "window_reconciliation_complete": True,
+        "history_bootstrap": False,
+    })
+    value["reconciliation"] = {
+        "status": "SOURCE_CONTINUITY_VERIFIED",
+        "method": "exact_userFillsByTime_window",
+    }
+    status, reasons = classify_manifest(value)
+    assert status == "SAFE"
+    assert reasons == []
+
+
+@pytest.mark.parametrize("family", ["copy_vault_fills", "copy_vault_snapshot"])
+def test_exact_historical_rest_window_is_safe_but_explicitly_historical(family: str) -> None:
+    value = manifest()
+    value["family"] = family
+    value["source"] = "hyperliquid_info_user_fills_by_time_history"
+    value["provenance"].update({
+        "transports": ["https"],
+        "request_type": "userFillsByTime",
+        "window_reconciliation_complete": True,
+        "history_bootstrap": True,
+    })
+    value["reconciliation"] = {
+        "status": "SOURCE_CONTINUITY_VERIFIED",
+        "method": "exact_userFillsByTime_history_window",
+    }
+
+    status, reasons = classify_manifest(value)
+
+    assert status == "SAFE"
+    assert reasons == []
+
+
+def test_rest_history_cannot_be_marked_forward_without_explicit_false_history_flag() -> None:
+    value = manifest()
+    value["family"] = "copy_vault_fills"
+    value["source"] = "hyperliquid_info_user_fills_by_time"
+    value["provenance"].update({
+        "transports": ["https"],
+        "request_type": "userFillsByTime",
+        "window_reconciliation_complete": True,
+    })
+    value["reconciliation"] = {
+        "status": "SOURCE_CONTINUITY_VERIFIED",
+        "method": "exact_userFillsByTime_window",
+    }
+
+    status, reasons = classify_manifest(value)
+
+    assert status == "PARTIAL"
+    assert "COPY_VAULT_REST_WINDOW_NOT_VERIFIED" in reasons
 
 
 def test_http_snapshot_can_use_snapshot_verified() -> None:

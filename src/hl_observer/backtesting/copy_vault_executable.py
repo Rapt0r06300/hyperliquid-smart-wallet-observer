@@ -183,6 +183,7 @@ def execute_metaorder(
     notional_usd: float = NOTIONAL_USD,
     fee_bps: float | None = None,
     require_causal_books: bool = False,
+    allow_partial_fill: bool = False,
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
@@ -331,7 +332,9 @@ def execute_metaorder(
     causal_books = all(row.get("causal_observation") is True for row in (reference, entry, exit_book))
     if require_causal_books and not causal_books:
         return None, "NON_CAUSAL_FORWARD_BOOK"
-    if min(float(entry["capacity_usd"]), float(exit_book["capacity_usd"])) < float(notional_usd):
+    requested_notional_usd = float(notional_usd)
+    observed_capacity_usd = min(float(entry["capacity_usd"]), float(exit_book["capacity_usd"]))
+    if observed_capacity_usd < requested_notional_usd and not allow_partial_fill:
         return None, "OBSERVED_TOP_CAPACITY_TOO_LOW"
     direction = meta_direction * int(direction_multiplier)
     if direction not in (-1, 1):
@@ -362,21 +365,45 @@ def execute_metaorder(
         descending=direction > 0,
     )
     exact_l2_observed = entry_levels is not None and exit_levels is not None
+    trade_notional_usd = requested_notional_usd
     if is_certifiable_mode(economic_mode) and not exact_l2_observed:
         return None, "MISSING_EXACT_L2_LEVELS"
     if exact_l2_observed:
-        entry_fill = _walk_quote_notional(entry_levels, float(notional_usd))
-        if entry_fill is None:
-            return None, "INSUFFICIENT_OBSERVED_ENTRY_DEPTH"
-        entry_exec, quantity = entry_fill
-        walked_exit = _walk_base_quantity(exit_levels, quantity)
-        if walked_exit is None:
-            return None, "INSUFFICIENT_OBSERVED_EXIT_DEPTH"
-        exit_exec = walked_exit
+        if allow_partial_fill:
+            upper = min(requested_notional_usd, observed_capacity_usd)
+            lower = 0.0
+            best_fill = None
+            for _ in range(52):
+                target_quote = (lower + upper) / 2.0
+                entry_fill = _walk_quote_notional(entry_levels, target_quote)
+                walked_exit = (
+                    _walk_base_quantity(exit_levels, entry_fill[1])
+                    if entry_fill is not None else None
+                )
+                if entry_fill is not None and walked_exit is not None:
+                    lower = target_quote
+                    best_fill = (entry_fill, walked_exit)
+                else:
+                    upper = target_quote
+            if best_fill is None or lower < 0.01:
+                return None, "INSUFFICIENT_OBSERVED_PARTIAL_DEPTH"
+            (entry_exec, quantity), exit_exec = best_fill
+            trade_notional_usd = lower
+        else:
+            entry_fill = _walk_quote_notional(entry_levels, requested_notional_usd)
+            if entry_fill is None:
+                return None, "INSUFFICIENT_OBSERVED_ENTRY_DEPTH"
+            entry_exec, quantity = entry_fill
+            walked_exit = _walk_base_quantity(exit_levels, quantity)
+            if walked_exit is None:
+                return None, "INSUFFICIENT_OBSERVED_EXIT_DEPTH"
+            exit_exec = walked_exit
     else:
+        if allow_partial_fill:
+            return None, "PARTIAL_FILL_REQUIRES_EXACT_OBSERVED_L2"
         entry_exec = top_entry_exec
         exit_exec = top_exit_exec
-        quantity = float(notional_usd) / entry_exec
+        quantity = requested_notional_usd / entry_exec
     gross_from_reference = quantity * direction * (exit_mid - reference_mid)
     signed_latency_usd = quantity * direction * (entry_mid - reference_mid)
     latency = max(0.0, signed_latency_usd)
@@ -518,7 +545,11 @@ def execute_metaorder(
         "exit_top_price": top_exit_exec,
         "exact_l2_vwap_observed": exact_l2_observed,
         "quantity": quantity,
-        "notional_usd": float(notional_usd),
+        "notional_usd": trade_notional_usd,
+        "requested_notional_usd": requested_notional_usd,
+        "fill_fraction": trade_notional_usd / requested_notional_usd,
+        "partial_fill": trade_notional_usd + 1e-8 < requested_notional_usd,
+        "fill_model": "OBSERVED_L2_COMMON_EXECUTABLE_QUANTITY_DIAGNOSTIC" if allow_partial_fill else "ALL_OR_NONE_OBSERVED_L2",
         "entry_capacity_usd": float(entry["capacity_usd"]),
         "exit_capacity_usd": float(exit_book["capacity_usd"]),
         "gross_pnl_usd": gross_pnl,

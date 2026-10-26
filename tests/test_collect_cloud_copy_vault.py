@@ -201,6 +201,113 @@ def test_exact_window_backfill_fails_closed_when_request_budget_is_exhausted() -
     asyncio.run(scenario())
 
 
+def test_exact_window_backfill_marks_unparseable_source_rows_partial() -> None:
+    address = "0x" + "a" * 40
+
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[{"coin": "BTC", "px": "bad"}])
+
+        client = httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        )
+        rows, audit = await C.exact_window_backfill(
+            client, address, start_ms=10_000, end_ms=20_000,
+        )
+        await client.aclose()
+        assert rows == []
+        assert audit["status"] == "PARTIAL"
+        assert audit["invalid_source_rows"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_recent_history_backfill_keeps_the_latest_fill_ceiling(monkeypatch) -> None:
+    address = "0x" + "b" * 40
+    fills = [
+        {
+            "vault": address, "coin": "BTC", "px": "100", "sz": "1",
+            "side": "B", "time": 10_000 + index, "dir": "Open Long",
+            "hash": f"0x{index:064x}", "tid": index, "oid": index,
+        }
+        for index in range(5)
+    ]
+
+    async def scenario():
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=fills)
+
+        client = httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        )
+        rows, audit = await C.recent_history_backfill(
+            client, address, end_ms=20_000, target_fills=3, max_requests=8,
+        )
+        await client.aclose()
+        assert [row["ts_ms"] for row in rows] == [10_002, 10_003, 10_004]
+        assert audit["status"] == "COMPLETE"
+        assert audit["visible_fill_ceiling"] is True
+        assert audit["rows"] == 3
+
+    asyncio.run(scenario())
+
+
+def test_recent_history_backfill_never_calls_a_capped_window_complete():
+    address = "0x" + "c" * 40
+
+    async def scenario():
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            rows = [
+                {
+                    "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+                    "time": 1_000 + index, "dir": "Open Long",
+                    "hash": f"0x{index:064x}", "tid": index, "oid": index,
+                }
+                for index in range(C.CAP_USERFILLS)
+            ]
+            return httpx.Response(200, json=rows)
+
+        client = httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        )
+        rows, audit = await C.recent_history_backfill(
+            client, address, end_ms=20_000, target_fills=10_000,
+            max_requests=1,
+        )
+        await client.aclose()
+        assert rows == []
+        assert audit["status"] == "PARTIAL"
+        assert audit["request_budget_exhausted"] is True
+        assert audit["pending_windows"] > 0
+
+    asyncio.run(scenario())
+
+
+def test_userfills_gate_enforces_the_campaign_weight_budget():
+    async def scenario():
+        gate = C.UserFillsRateGate(
+            weight_budget_per_minute=900,
+            campaign_weight_budget=120,
+            campaign_request_budget=10,
+        )
+        await gate.acquire()
+        await gate.record(120)
+        assert gate.request_count == 1
+        assert gate.weight_used == 120
+        assert gate.exhausted is True
+        try:
+            await gate.acquire()
+        except C.UserFillsBudgetExhausted:
+            pass
+        else:
+            raise AssertionError("campaign weight budget must stop another REST request")
+
+    asyncio.run(scenario())
+
+
 def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
     raw = tmp_path / "raw"
     output = tmp_path / "bundle"
@@ -445,6 +552,185 @@ def test_two_speed_ws_selection_never_exceeds_user_limit_and_rotates() -> None:
     } != {
         row["address"] for row in selected_b if row["ws_selection_reason"] == "AUDIT_ROTATION"
     }
+
+
+def test_changed_broad_state_wallets_get_rest_fill_reconciliation(monkeypatch) -> None:
+    address = "0x" + "8" * 40
+    another = "0x" + "9" * 40
+    rows = [
+        {"address": address, "tvl_usd": 1000},
+        {"address": another, "tvl_usd": 500},
+    ]
+    fill = {
+        "vault": address,
+        "coin": "BTC",
+        "px": "100",
+        "sz": "0.1",
+        "side": "B",
+        "ts_ms": 1500,
+        "hash": "0xfill",
+        "tid": 42,
+        "oid": 7,
+    }
+    calls = []
+
+    async def backfill(_client, vault, *, start_ms, end_ms, max_requests=None, rate_gate=None):
+        calls.append((vault, start_ms, end_ms))
+        return ([fill] if vault == address else []), {
+            "status": "COMPLETE",
+            "requests": 1,
+            "rows": 1 if vault == address else 0,
+        }
+
+    monkeypatch.setattr(C, "exact_window_backfill", backfill)
+
+    class Sink:
+        def __init__(self):
+            self.rows = []
+
+        async def emit_async(self, row):
+            self.rows.append(row)
+
+    async def scenario():
+        sink = Sink()
+        summary = await C.collect_changed_vault_fills(
+            rows,
+            {address: {"position_fingerprint": "a"}, another: {"position_fingerprint": "same"}},
+            {address: {"position_fingerprint": "b"}, another: {"position_fingerprint": "same"}},
+            sink,
+            start_ms=1000,
+            end_ms=2000,
+            excluded_vaults=set(),
+            max_vaults=10,
+        )
+        assert summary["changed_wallets"] == 1
+        assert summary["reconciled_wallets"] == 1
+        assert summary["deferred_wallets"] == 0
+        assert summary["fills_collected"] == 1
+        assert summary["vault_checkpoints"][address]["last_forward_end_ms"] == 2000
+        assert summary["incomplete_wallets"] == 0
+        assert calls == [(address, 1000, 2000)]
+        assert len(sink.rows) == 1
+        envelope = sink.rows[0]
+        assert envelope.channel == "copy_vault_fills"
+        assert envelope.instrument == address
+        assert envelope.provenance["transport"] == "https"
+        assert envelope.provenance["request_type"] == "userFillsByTime"
+        assert envelope.parsed_summary["event_count"] == 1
+        assert envelope.parsed_summary["exact_window"] is True
+
+    asyncio.run(scenario())
+
+
+def test_checkpointed_rest_poll_advances_only_an_exact_window(monkeypatch):
+    address = "0x" + "d" * 40
+    fill = {
+        "vault": address,
+        "coin": "BTC",
+        "px": "100",
+        "sz": "0.1",
+        "side": "B",
+        "ts_ms": 1500,
+        "hash": "0xcheckpoint",
+        "tid": 55,
+        "oid": 9,
+    }
+    calls = []
+
+    async def backfill(_client, vault, *, start_ms, end_ms, rate_gate=None):
+        calls.append((vault, start_ms, end_ms))
+        return [fill], {"status": "COMPLETE", "rows": 1}
+
+    monkeypatch.setattr(C, "exact_window_backfill", backfill)
+
+    class Sink:
+        def __init__(self):
+            self.rows = []
+
+        async def emit_async(self, row):
+            self.rows.append(row)
+
+    async def scenario():
+        sink = Sink()
+        summary = await C.collect_checkpointed_vault_fills(
+            [address],
+            {},
+            sink,
+            start_ms=1000,
+            end_ms=2000,
+            excluded_vaults=set(),
+            rate_gate=C.UserFillsRateGate(),
+        )
+        assert summary["status"] == "COMPLETE"
+        assert calls == [(address, 1000, 2000)]
+        assert summary["vault_checkpoints"][address]["last_forward_end_ms"] == 2000
+        assert summary["wallet_reports"][address]["status"] == "SOURCE_CONTINUITY_VERIFIED"
+        assert sink.rows[0].provenance["window_reconciliation_complete"] is True
+
+    asyncio.run(scenario())
+
+
+def test_checkpointed_rest_poll_keeps_the_unfinished_start_without_advancing(monkeypatch):
+    address = "0x" + "e" * 40
+
+    async def partial(_client, _vault, *, start_ms, end_ms, rate_gate=None):
+        return [], {
+            "status": "PARTIAL",
+            "requested_start_ms": start_ms,
+            "requested_end_ms": end_ms,
+            "request_budget_exhausted": True,
+        }
+
+    monkeypatch.setattr(C, "exact_window_backfill", partial)
+
+    class Sink:
+        async def emit_async(self, _row):
+            raise AssertionError("no partial rows are admitted")
+
+    async def scenario():
+        summary = await C.collect_checkpointed_vault_fills(
+            [address],
+            {},
+            Sink(),
+            start_ms=1000,
+            end_ms=2000,
+            excluded_vaults=set(),
+            rate_gate=C.UserFillsRateGate(),
+        )
+        checkpoint = summary["vault_checkpoints"][address]
+        assert "last_forward_end_ms" not in checkpoint
+        assert checkpoint["forward_pending_start_ms"] == 1000
+        assert checkpoint["last_forward_status"] == "PARTIAL"
+
+    asyncio.run(scenario())
+
+
+def test_changed_wallet_backfill_reports_deferred_and_partial_coverage(monkeypatch) -> None:
+    addresses = ["0x" + f"{index:040x}" for index in range(3)]
+
+    async def partial(*_args, **_kwargs):
+        return [], {"status": "PARTIAL", "requests": 1, "rows": 0}
+
+    monkeypatch.setattr(C, "exact_window_backfill", partial)
+
+    class Sink:
+        async def emit_async(self, _row):
+            raise AssertionError("no rows should be emitted")
+
+    async def scenario():
+        start = {a: {"position_fingerprint": "old"} for a in addresses}
+        end = {a: {"position_fingerprint": "new"} for a in addresses}
+        summary = await C.collect_changed_vault_fills(
+            [{"address": a} for a in addresses], start, end, Sink(),
+            start_ms=1000, end_ms=2000, excluded_vaults=set(), max_vaults=2,
+        )
+        assert summary["changed_wallets"] == 3
+        assert summary["reconciled_wallets"] == 2
+        assert summary["deferred_wallets"] == 1
+        assert summary["incomplete_wallets"] == 2
+        assert summary["status"] == "PARTIAL"
+
+    asyncio.run(scenario())
 
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from check_repo_governance import local_failures
+from tools.check_repo_governance import local_failures
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,7 +20,7 @@ def test_security_quality_workflow_is_fail_closed() -> None:
     assert "requirements-ci-tools.txt" in text
     assert "python -m pip_audit" in text
     assert "ci-resolved-requirements.txt" in text
-    assert "needs: [governance, supply-chain]" in text
+    assert "needs: [scope, governance, supply-chain]" in text
     assert "coverage-ratchet" not in text
     assert "python -m coverage run --source=src" not in text
     assert "python tools/check_coverage_ratchet.py" not in text
@@ -82,10 +82,10 @@ def test_ci_quality_tools_are_exactly_pinned_and_non_vulnerable() -> None:
         "pip-audit==2.10.1",
         "pytest==9.0.3",
         "pytest-timeout==2.4.0",
-        "setuptools==83.0.0",
+        "setuptools==84.1.0",
     ]
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"setuptools>=83.0.0"' in pyproject
+    assert '"setuptools>=84.1.0"' in pyproject
     assert '"pytest>=9.0.3,<10"' in pyproject
     assert "pytest>=8,<9" not in pyproject
 

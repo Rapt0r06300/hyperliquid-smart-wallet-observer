@@ -125,48 +125,87 @@ def _nav_asof(
 
 
 def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
-    """Merge backfill and causal WS increments without replaying snapshots."""
+    """Merge verified history and forward fills without replaying snapshots."""
 
     historical = _charger_jsonl(root / FILLS)
     live_rows = _charger_jsonl(root / FILLS_LIVE)
-    live_incremental = [
+    live_candidates = [
         row for row in live_rows
-        if row.get("source") == "LIVE_WS" and row.get("isSnapshot") is False
+        if (
+            row.get("source") == "LIVE_WS" and row.get("isSnapshot") is False
+        ) or row.get("source") == "REST_BACKFILL"
+    ]
+    # Older complete exact-window REST records may have been stored in the
+    # historical file. Explicit provenance still permits them as forward
+    # evidence; missing flags remain TRAIN-only.
+    live_candidates.extend(
+        row for row in historical
+        if row.get("source") == "REST_BACKFILL"
+        and row.get("historical_bootstrap") is False
+        and row.get("window_reconciliation_complete") is True
+    )
+    forward_candidates = [
+        row for row in live_candidates
+        if row.get("source") == "LIVE_WS"
+        or (
+            row.get("source") == "REST_BACKFILL"
+            and row.get("historical_bootstrap") is False
+            and row.get("window_reconciliation_complete") is True
+        )
     ]
     causal_live: list[dict] = []
+    forward_rest_valid: list[dict] = []
     unclocked_live: list[dict] = []
-    for row in live_incremental:
+    for row in forward_candidates:
         try:
             event_ms = int(row.get("ts_ms") or 0)
             received_ms = int(row.get("received_at_ms") or 0)
         except (TypeError, ValueError, OverflowError):
             event_ms = received_ms = 0
-        if event_ms > 0 and received_ms >= event_ms:
+        if event_ms > 0 and received_ms >= event_ms and row.get("source") == "LIVE_WS":
             causal_live.append(row)
+        elif (
+            event_ms > 0 and received_ms >= event_ms
+            and row.get("source") == "REST_BACKFILL"
+            and row.get("historical_bootstrap") is False
+            and row.get("window_reconciliation_complete") is True
+        ):
+            forward_rest_valid.append(row)
         else:
             unclocked_live.append(row)
     # Put causal rows first. ``dedupliquer`` applies the same hierarchy
     # independently of read order: causal WS > REST/non-live > unclocked WS.
     # Legacy unclocked WS rows remain audit history but can never displace REST.
-    merged = causal_live + historical + unclocked_live
+    merged = causal_live + forward_rest_valid + historical + unclocked_live
     deduped = VB.dedupliquer(merged)
     return deduped, {
         "historical_fill_rows": len(historical),
         "live_fill_rows": len(live_rows),
-        "live_incremental_rows": len(live_incremental),
+        "live_incremental_rows": len(live_candidates),
         "causal_live_fill_rows": len(causal_live),
+        "verified_forward_rest_fill_rows": len(forward_rest_valid),
+        "historical_bootstrap_fill_rows": sum(
+            1 for row in historical + live_rows
+            if row.get("source") == "REST_BACKFILL"
+            and row.get("historical_bootstrap") is True
+        ),
         "live_incremental_without_valid_receive_time_audit_only": len(unclocked_live),
         "live_snapshot_rows_rejected": sum(
             1 for row in live_rows if row.get("isSnapshot") is True
         ),
         "live_unprovenanced_rows_rejected": sum(
             1 for row in live_rows if row.get("source") != "LIVE_WS"
+            and not (
+                row.get("source") == "REST_BACKFILL"
+                and row.get("historical_bootstrap") is False
+                and row.get("window_reconciliation_complete") is True
+            )
         ),
         "merged_fill_rows": len(merged),
         "deduped_fill_rows": len(deduped),
         "cross_source_or_internal_duplicates_rejected": len(merged) - len(deduped),
         "causal_rows_preferred_on_duplicate": True,
-        "live_policy": "LIVE_WS_AND_NOT_SNAPSHOT_AND_VALID_LOCAL_RECEIVE_TIME",
+        "live_policy": "CAUSAL_WS_OR_EXACT_NONHISTORICAL_REST_WITH_VALID_RECEIVE_TIME",
     }
 
 

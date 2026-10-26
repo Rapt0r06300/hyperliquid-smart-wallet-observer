@@ -55,6 +55,50 @@ def test_manifest_is_derived_from_real_partitioned_shard(tmp_path) -> None:
     assert manifest["integrity"]["missing_monotonic_count"] == 0
 
 
+def test_rest_copy_vault_manifest_preserves_complete_window_and_history_scope(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="hyperliquid_info_user_fills_by_time_history",
+            channel="copy_vault_snapshot",
+            instrument="0xabc",
+            event_kind="SNAPSHOT",
+            raw_payload={
+                "request": {
+                    "type": "userFillsByTime", "user": "0xabc",
+                    "startTime": 1, "endTime": 2000,
+                },
+                "fills": [{"tid": 1}],
+            },
+            exchange_ts_ms=1_500,
+            received_ts_ms=1_510,
+            local_monotonic_ns=123,
+            connection_id="copy-vault-history-1",
+            provenance={
+                "access": "read_only",
+                "authenticated": False,
+                "transport": "https",
+                "request_type": "userFillsByTime",
+                "window_reconciliation_complete": True,
+                "history_bootstrap": True,
+            },
+            parsed_summary={"event_count": 1},
+        )
+    )
+    [shard] = writer.rotate_all()
+
+    manifest = build_manifest_from_tick_shard(
+        shard,
+        collector_version="abc123",
+        reconciliation_status="SOURCE_CONTINUITY_VERIFIED",
+    )
+
+    assert manifest["provenance"]["request_type"] == "userFillsByTime"
+    assert manifest["family"] == "copy_vault_snapshot"
+    assert manifest["provenance"]["window_reconciliation_complete"] is True
+    assert manifest["provenance"]["history_bootstrap"] is True
+
+
 def test_explicit_unchanged_cumulative_gap_baseline_is_not_a_local_gap(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
     for ts in (1000, 1010):

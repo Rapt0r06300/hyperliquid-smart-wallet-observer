@@ -118,7 +118,8 @@ def restore_published(root: Path, *, preflight: bool = False,
                       snapshot: bool = True,
                       max_download_gib: int | None = None,
                       prune_only: bool = False,
-                      unlimited_download: bool = False) -> int:
+                      unlimited_download: bool = False,
+                      selected_families: tuple[str, ...] = ()) -> int:
     """Delegate all byte-verification and SAFE gates to the ONE restore engine."""
     root = root.resolve()
     cmd = [
@@ -145,6 +146,10 @@ def restore_published(root: Path, *, preflight: bool = False,
             if type(max_download_gib) is not int or max_download_gib <= 0:
                 raise SyncError("download cap must be a positive whole number of GiB")
             cmd.extend(("--max-download-gib", str(max_download_gib)))
+    for family in selected_families:
+        if not family or family.strip().lower() != family:
+            raise SyncError("selected family identifiers must be normalized lowercase")
+        cmd.extend(("--family", family))
     # Workspace snapshots and historical recovery capsules belong to the
     # explicit full-archive profile, not the clean replay/backtest corpus.
     env = os.environ.copy()
@@ -333,12 +338,26 @@ def _read_restore_status(
         expected_bytes = classification.get("expected_usable_bytes")
         usable_bytes = classification.get("usable_bytes")
         catalog_safe = verification.get("safe_catalog_shards", expected_shards)
+        selection_families = payload.get("selection_families")
+        filtered_selection = (
+            isinstance(selection_families, list)
+            and bool(selection_families)
+            and selection_families == sorted(set(selection_families))
+            and all(
+                isinstance(family, str) and family
+                and family.strip().lower() == family
+                for family in selection_families
+            )
+            and verification.get("selection_families") == selection_families
+        )
         if (
             type(expected_shards) is not int or expected_shards < 0
             or type(usable_shards) is not int or usable_shards != expected_shards
             or type(expected_bytes) is not int or expected_bytes < 0
             or type(usable_bytes) is not int or usable_bytes != expected_bytes
-            or type(catalog_safe) is not int or catalog_safe != expected_shards
+            or type(catalog_safe) is not int
+            or (not filtered_selection and catalog_safe != expected_shards)
+            or (filtered_selection and expected_shards > catalog_safe)
             or classification.get("materialization_complete") is not True
             or classification.get("failures") not in ([], None)
         ):
@@ -357,6 +376,17 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "safe_backtestable_shards": 0,
         "registry_reused_shards": 0,
         "registry_recorded_shards": 0,
+        "restore_report_generated_at_utc": None,
+        "assets_downloaded": 0,
+        "assets_resumed_verified": 0,
+        "assets_skipped_verified": 0,
+        "assets_lfs_reused_verified": 0,
+        "source_asset_count": 0,
+        "source_asset_bytes": 0,
+        "verified_asset_count": 0,
+        "verified_asset_bytes": 0,
+        "unclaimed_dataset_release_count": 0,
+        "unclaimed_dataset_releases_sample": [],
         "l2_certification_status": "NOT_AVAILABLE",
         "l2_catalog_sha256": None,
         "l2_snapshot_backtestable_shards": 0,
@@ -393,6 +423,21 @@ def _read_safe_shard_summary(report_path: Path) -> dict[str, object]:
         "registry_recorded_shards": int(
             classification.get("registry_recorded_shards") or 0
         ),
+        "restore_report_generated_at_utc": payload.get("generated_at_utc"),
+        "assets_downloaded": int(payload.get("downloaded") or 0),
+        "assets_resumed_verified": int(payload.get("resumed_verified") or 0),
+        "assets_skipped_verified": int(payload.get("skipped_verified") or 0),
+        "assets_lfs_reused_verified": int(payload.get("lfs_reused_verified") or 0),
+        "source_asset_count": int(payload.get("asset_count") or 0),
+        "source_asset_bytes": int(payload.get("source_asset_bytes") or 0),
+        "verified_asset_count": int(payload.get("verified_asset_count") or 0),
+        "verified_asset_bytes": int(payload.get("verified_asset_bytes") or 0),
+        "unclaimed_dataset_release_count": int(
+            payload.get("unclaimed_dataset_release_count") or 0
+        ),
+        "unclaimed_dataset_releases_sample": list(
+            payload.get("unclaimed_dataset_releases_sample") or []
+        )[:50],
         "l2_certification_status": "NOT_AVAILABLE",
         "l2_catalog_sha256": None,
         "l2_snapshot_backtestable_shards": 0,
@@ -500,8 +545,19 @@ def main(argv: list[str] | None = None) -> int:
         help="offline SAFE/PARTIAL/REJECT and replay-ready byte accounting; "
              "no git fetch, GitHub API, payload download or local mutations",
     )
+    parser.add_argument(
+        "--family", action="append", default=[],
+        help="limit SAFE preflight/restoration to exact families; repeatable",
+    )
     args = parser.parse_args(argv)
     if args.catalog_budget:
+        if args.family:
+            print(
+                "ALINA_BUDGET_FAIL: --family is unsupported with --catalog-budget; "
+                "use --preflight-only to inspect exact selected families",
+                file=sys.stderr,
+            )
+            return 2
         root = Path(__file__).resolve().parents[1]
         try:
             report = calculate_catalog_budget(
@@ -521,6 +577,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.unpack_safe and not args.download_safe:
         print("ALINA_SYNC_FAIL: --unpack-safe requires --download-safe", file=sys.stderr)
+        return 2
+    if args.family and not (args.download_safe or args.preflight_only):
+        print("ALINA_SYNC_FAIL: --family requires --download-safe or --preflight-only", file=sys.stderr)
+        return 2
+    if args.family and args.unpack_safe:
+        print("ALINA_SYNC_FAIL: filtered --family restore reads certified gzip directly; do not use --unpack-safe", file=sys.stderr)
         return 2
     if args.max_download_gib <= 0:
         print("ALINA_SYNC_FAIL: --max-download-gib must be positive", file=sys.stderr)
@@ -568,6 +630,7 @@ def main(argv: list[str] | None = None) -> int:
             max_download_gib=(None if args.all_safe else args.max_download_gib) if effective_download else None,
             prune_only=args.prune_cache_only,
             unlimited_download=args.all_safe,
+            selected_families=tuple(sorted(set(args.family))),
         )
         if args.prune_cache_only:
             # The restore engine writes CACHE_PRUNE_REPORT.json; never turn a
@@ -637,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
             "source_inventory_sha256": inventory_sha,
             "report_validation_error": report_error,
             "unpack_requested": bool(args.unpack_safe),
+            "selection_families": sorted(set(args.family)) or None,
             "unpack_complete": bool(
                 unpack_report and unpack_report.get("status") == "SAFE_UNPACK_COMPLETE"
             ),

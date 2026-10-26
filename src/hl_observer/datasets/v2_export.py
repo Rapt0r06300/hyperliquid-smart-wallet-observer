@@ -34,6 +34,7 @@ _TRADE_CHANNELS = {
     "userfills",
     "user_fills",
     "copy_vault_fills",
+    "copy_vault_snapshot",
 }
 _REPLAYABLE_CHANNELS = {
     "activeAssetCtx",
@@ -112,6 +113,10 @@ def build_manifest_from_tick_shard(
     connection_ids: set[str] = set()
     transports: set[str] = set()
     timestamp_semantics: set[str] = set()
+    request_types: set[str] = set()
+    rest_window_seen = 0
+    rest_windows_complete = True
+    history_bootstrap_values: set[bool] = set()
     receive_exchange_deltas_ms: list[float] = []
     transport_rtt_ms: list[float] = []
     clock_offsets_ms: list[float] = []
@@ -145,7 +150,7 @@ def build_manifest_from_tick_shard(
             if channel in _TRADE_CHANNELS:
                 parsed = record.get("parsed_summary")
                 count = _int(parsed.get("event_count")) if isinstance(parsed, Mapping) else None
-                if count is None and channel == "copy_vault_fills" and isinstance(parsed, Mapping):
+                if count is None and channel in {"copy_vault_fills", "copy_vault_snapshot"} and isinstance(parsed, Mapping):
                     count = _int(parsed.get("fill_count"))
                 record_trade_count = max(1, int(count or 1))
                 trade_count += record_trade_count
@@ -301,6 +306,17 @@ def build_manifest_from_tick_shard(
                 ).strip().lower()
                 if semantic_value:
                     timestamp_semantics.add(semantic_value)
+                request_type = str(provenance.get("request_type") or "").strip()
+                if request_type:
+                    request_types.add(request_type)
+                if request_type == "userFillsByTime":
+                    rest_window_seen += 1
+                    rest_windows_complete = (
+                        rest_windows_complete
+                        and provenance.get("window_reconciliation_complete") is True
+                    )
+                    if isinstance(provenance.get("history_bootstrap"), bool):
+                        history_bootstrap_values.add(provenance["history_bootstrap"])
                 gap_semantics = str(provenance.get("gap_count_semantics") or "").lower()
                 if record_gap_counter is not None:
                     if gap_semantics == "cumulative":
@@ -430,6 +446,14 @@ def build_manifest_from_tick_shard(
             "real_execution": not bool(real_execution_false),
             "transports": sorted(transports),
             "timestamp_semantics": sorted(timestamp_semantics),
+            "request_type": next(iter(request_types)) if len(request_types) == 1 else None,
+            "window_reconciliation_complete": (
+                rest_window_seen > 0 and rest_windows_complete
+            ),
+            **(
+                {"history_bootstrap": next(iter(history_bootstrap_values))}
+                if len(history_bootstrap_values) == 1 else {}
+            ),
         },
         "integrity": {
             "gap_count": gap_count,

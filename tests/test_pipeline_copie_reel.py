@@ -133,6 +133,43 @@ def test_pipeline_fusionne_live_causal_exclut_snapshots_et_prefere_preuve_ws(tmp
     assert audit["causal_rows_preferred_on_duplicate"] is True
 
 
+def test_pipeline_admits_exact_nonhistorical_rest_as_forward_and_keeps_bootstrap_train_only(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    historical = {
+        "vault": "0xA", "ts_ms": 200, "coin": "BTC", "px": 100.0,
+        "sz": 1.0, "signe": 1, "dir": "Open Long", "start_position": 0.0,
+        "hash": "0xhistory", "source": "REST_BACKFILL", "isSnapshot": False,
+        "received_at_ms": 205, "historical_bootstrap": True,
+        "window_reconciliation_complete": True,
+    }
+    forward = {
+        "vault": "0xA", "ts_ms": 300, "coin": "ETH", "px": 100.0,
+        "sz": 1.0, "signe": 1, "dir": "Open Long", "start_position": 0.0,
+        "hash": "0xforward", "source": "REST_BACKFILL", "isSnapshot": False,
+        "received_at_ms": 305, "historical_bootstrap": False,
+        "window_reconciliation_complete": True,
+    }
+    (data / "vault_fills.jsonl").write_text(
+        "\n".join(map(json.dumps, [historical, forward])), encoding="utf-8"
+    )
+    (data / "vault_fills_live.jsonl").write_text("", encoding="utf-8")
+
+    entries, audit = PR.charger_entrees_alpha_notional_fixe_avec_audit(tmp_path)
+    from hl_observer.backtesting.copy_vault_causal_selection import cluster_metaorders
+    from hl_observer.backtesting.copy_vault_local_lab import _forward_only_metaorders
+
+    metaorders, _ = cluster_metaorders(entries)
+    forward_only = _forward_only_metaorders(metaorders)
+
+    assert audit["historical_bootstrap_fill_rows"] == 1
+    assert audit["verified_forward_rest_fill_rows"] == 1
+    assert len(metaorders) == 2
+    assert len(forward_only) == 1
+    assert forward_only[0]["signal_source"] == "REST_BACKFILL"
+    assert forward_only[0]["historical_bootstrap"] is False
+
+
 def test_pipeline_ne_compte_pas_un_ancien_live_sans_horloge_comme_causal(tmp_path):
     data = tmp_path / "runtime" / "data"
     data.mkdir(parents=True)

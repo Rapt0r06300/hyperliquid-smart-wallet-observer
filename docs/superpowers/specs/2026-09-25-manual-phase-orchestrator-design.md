@@ -251,6 +251,16 @@ Instead, use a two-speed design:
 4. reserve scarce user-specific WebSocket slots for the highest-priority causally selected leaders;
 5. rotate those priority slots based only on information already known at the rotation time.
 
+The hosted Copy-Vault collector must execute step 3: query each changed vault over
+the exact broad-sweep observation window, adaptively split any response that
+reaches the 2,000-fill API cap, and keep the raw request window, exact counts,
+source timestamps, and reconciliation audit with the fill shard. A bounded
+per-run queue may defer excess changed vaults only when it records their
+identities and reports the campaign as partial; incomplete windows cannot be
+admitted as SAFE. This REST reconciliation is observed historical evidence for
+that window, not a claim of WebSocket-forward continuity or evidence outside
+the recorded interval.
+
 This converts Hyperliquid's user-specific WebSocket limit from a universe cap into a low-latency priority layer.
 
 #### Lead-Lag collection contract
@@ -14073,3 +14083,87 @@ discontinue rend l'objectif `UNMEASURABLE`. Le nombre de jours actifs est
 déterminé par la présence de trades, pas par un PnL non nul. La couverture
 n'est jamais déduite des seuls trades ou snapshots, et la référence de
 5 USD/jour reste informative, sans seuil de promotion.
+
+
+### 2026-10-26 — Collecte Copy-Vault continue des fills, avec reprise durable
+
+La sélection Copy-Vault conserve l'univers public complet. Chaque campagne
+combine les dix abonnements WebSocket maximum, un balayage REST tournant de
+128 portefeuilles hors abonnement, et la réconciliation de changements d'état
+qui ne sont pas déjà couverts. Les checkpoints par adresse ne sont repris que
+depuis des manifests de campagne `COMPLETE` et portent le schéma
+`alina.copy_vault_fill_checkpoint.v1`. Une fenêtre forward n'avance son curseur
+qu'après une réponse `userFillsByTime` exacte, intégralement parsée et vérifiée.
+Les erreurs et limites de débit laissent le curseur inchangé ; un délai de
+reprise par portefeuille empêche une adresse indisponible de bloquer la rotation.
+
+Les leaders sont aussi traités par bootstrap historique tournant (deux adresses
+au plus par campagne). Chaque réponse plafonnée est subdivisée en fenêtres
+strictes, traitées des plus récentes aux plus anciennes ; les fenêtres non
+terminées sont checkpointées puis reprises. La campagne impose un budget
+commun de requêtes et de poids REST. La couverture historique est COMPLETE
+seulement si le plafond public visible est atteint ou si toutes les fenêtres
+jusqu'au plancher sont vérifiées. Une couverture partielle demeure explicitement
+PARTIAL et ne devient jamais une preuve OOS, forward-paper ou de PnL.
+
+Les fenêtres REST historiques publiées sous l'ancien nom de famille
+`copy_vault_fills` restent lisibles si et seulement si leur provenance porte
+`history_bootstrap=true` et une fenêtre exacte ; les nouveaux shards utilisent
+`copy_vault_snapshot`. Le bridge place ces deux formes dans le fichier
+historique TRAIN. Les fenêtres REST non historiques exigent explicitement
+`history_bootstrap=false`, une fenêtre exacte, et un horodatage de réception
+causal. Les validations VALIDATION/OOS/FORWARD du laboratoire local utilisent
+uniquement les entrées live causales ou ces fenêtres REST prospectives vérifiées.
+Les historiques peuvent élargir TRAIN mais ne traversent jamais ces segments.
+
+Les fills de bootstrap ont une identité de source distincte,
+`hyperliquid_info_user_fills_by_time_history`, et leur provenance
+`history_bootstrap=true` est conservée dans manifest, bridge et ligne de
+recherche. Ils restent non causaux (`REST_BACKFILL`) et sont étiquetés
+`forward_only=false`. Toute admission SAFE exige toujours la réponse source
+authentique, le hash du shard, une fenêtre exacte, l'identité native du
+portefeuille et des timestamps dans cette fenêtre. Le bridge ne transforme pas
+un historique complet en preuve économique.
+
+Le créateur de campagne doit exécuter le script de sélection depuis le checkout
+qui contient `catalog/campaigns`; le fichier gelé lie par SHA-256 l'univers et
+les checkpoints utilisés par le worker. Déterministes tests couvrent l'adaptation
+au plafond 2 000, le budget de campagne, la rotation/reprise par portefeuille,
+la sélection historique, la persistance des métadonnées d'historique dans les
+manifests V2 et le refus de promouvoir l'historique en forward.
+
+Le contrôleur COLLECT crée une nouvelle sélection et campagne Copy-Vault dès
+qu'aucune campagne active n'existe pour l'epoch courant. L'identité de cette
+sélection et du manifest est unique à chaque création ; une seule campagne
+Copy-Vault peut occuper le lane courant. Elle repart du dernier checkpoint
+durablement publié.
+
+### 2026-10-26 — Partitions vérifiées pour les preuves de taille et de comptage
+
+Les tables `sizes` de `UNCOMPRESSED_SIZE_PATCH.json` et `records` de
+`RECORD_COUNT_PATCH.json` conservent une représentation logique complète,
+indexée par `dataset_id` et liée au SHA-256 de l'asset. Les fichiers inline
+historiques restent lisibles. Tout nouvel écrit logique dépassant 8 MiB utilise
+un manifeste `alina.catalog_patch_partitioned.v1` dans le fichier racine et des
+parties JSON adjacentes sous `uncompressed-size-patch-parts/` ou
+`record-count-patch-parts/`. Chaque partie est au plus 8 MiB et son descripteur
+lie le nom ordonné, le nombre d'entrées, la taille exacte et le SHA-256 complet.
+
+Un lecteur partagé doit reconstruire et valider l'ensemble des parties avant
+d'exposer la table logique : format et table attendus, chemins gérés sans
+traversée ni lien symbolique, numérotation contiguë, ordre des identités, hash,
+taille et comptes locaux/globaux exacts. Une partie absente, dupliquée,
+corrompue, mal ordonnée ou d'un format inconnu invalide la lecture entière ;
+aucun sous-ensemble ne peut être présenté comme une couverture complète. Les
+mesures, leur fusion SHA-liée contre le `DATA_INDEX` courant, les métriques,
+l'audit de quarantaine et la matérialisation des manifests utilisent ce même
+lecteur. Le writer publie d'abord les parties immuables, remplace le manifeste
+atomiquement, puis retire uniquement ses anciennes parties gérées. Les preuves
+ne sont jamais tronquées pour respecter la limite GitHub d'un blob.
+
+La publication de mesures préserve le manifeste et toutes ses parties hors du
+checkout éphémère avant de repartir du dernier `main`, recalcule la fusion sur
+le catalogue courant et versionne les racines et parties comme une seule
+publication. Les métriques restent liées au SHA du `DATA_INDEX`; les données
+absentes ou invalides restent incomplètes et ne deviennent jamais zéro ni
+preuve exacte.

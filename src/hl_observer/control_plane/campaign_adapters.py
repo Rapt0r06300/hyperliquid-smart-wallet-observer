@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -517,6 +518,45 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         queue_drops = sum(_bounded_int(v, 0, 0, 2**63 - 1) for v in drops.values())
     else:
         queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
+    targeted = summary.get("targeted_change_reconciliation")
+    targeted = targeted if isinstance(targeted, dict) else {}
+    checkpoint_source = summary.get("vault_checkpoints")
+    vault_checkpoints: dict[str, dict[str, Any]] = {}
+    if isinstance(checkpoint_source, dict):
+        allowed = {
+            "checkpoint_schema",
+            "last_forward_attempt_ms", "last_forward_start_ms", "last_forward_end_ms",
+            "last_forward_status", "forward_pending_start_ms",
+            "forward_failure_count", "forward_retry_after_ms",
+            "history_complete", "history_status", "history_failure_count",
+            "history_fill_count", "history_coverage_end_ms", "history_pending_windows",
+            "history_last_attempt_ms", "history_retry_after_ms", "history_last_audit",
+        }
+        for raw_address, raw_checkpoint in checkpoint_source.items():
+            address = str(raw_address or "").strip().lower()
+            if not re.fullmatch(r"0x[0-9a-f]{40}", address) or not isinstance(raw_checkpoint, dict):
+                continue
+            checkpoint = {
+                key: value
+                for key, value in raw_checkpoint.items()
+                if key in allowed and isinstance(value, (str, int, float, bool, list, dict, type(None)))
+            }
+            pending = checkpoint.get("history_pending_windows")
+            if isinstance(pending, list):
+                checkpoint["history_pending_windows"] = [
+                    [int(pair[0]), int(pair[1])]
+                    for pair in pending[:512]
+                    if isinstance(pair, list)
+                    and len(pair) == 2
+                    and all(isinstance(part, int) and not isinstance(part, bool) and part >= 0 for part in pair)
+                ]
+            audit = checkpoint.get("history_last_audit")
+            if isinstance(audit, dict):
+                checkpoint["history_last_audit"] = {
+                    str(key): value for key, value in audit.items()
+                    if str(key)[:80] and isinstance(value, (str, int, float, bool, type(None)))
+                }
+            vault_checkpoints[address] = checkpoint
 
     return {
         "started_at_ms": _bounded_int(
@@ -545,6 +585,29 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         ),
         "bbo_frames": bbo_frames,
         "queue_drops": queue_drops,
+        "targeted_reconciliation_status": str(targeted.get("status") or "UNAVAILABLE"),
+        "changed_wallets": _bounded_int(targeted.get("changed_wallets"), 0, 0, 2**31 - 1),
+        "reconciled_wallets": _bounded_int(targeted.get("reconciled_wallets"), 0, 0, 2**31 - 1),
+        "deferred_wallets": _bounded_int(targeted.get("deferred_wallets"), 0, 0, 2**31 - 1),
+        "incomplete_wallets": _bounded_int(targeted.get("incomplete_wallets"), 0, 0, 2**31 - 1),
+        "missing_state_wallets": _bounded_int(targeted.get("missing_state_wallets"), 0, 0, 2**31 - 1),
+        "fills_collected": _bounded_int(targeted.get("fills_collected"), 0, 0, 2**63 - 1),
+        "vault_checkpoints": vault_checkpoints,
+        "deferred_vaults": [
+            str(value).lower()
+            for value in targeted.get("deferred_vaults", [])
+            if isinstance(value, str)
+        ][:100_000],
+        "missing_state_vaults": [
+            str(value).lower()
+            for value in targeted.get("missing_state_vaults", [])
+            if isinstance(value, str)
+        ][:100_000],
+        "incomplete_vaults": [
+            str(value).lower()
+            for value in targeted.get("incomplete_vaults", [])
+            if isinstance(value, str)
+        ][:100_000],
         "shard_count": _bounded_int(index.get("shard_count"), 0, 0, 2**63 - 1),
         "safe_count": _bounded_int(index.get("safe_count"), 0, 0, 2**63 - 1),
         "partial_count": _bounded_int(

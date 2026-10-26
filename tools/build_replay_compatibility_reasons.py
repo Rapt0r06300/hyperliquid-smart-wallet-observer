@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 OUTPUT = ROOT / "catalog" / "REPLAY_COMPATIBILITY_REASONS.json"
-TRADE_FAMILIES = {"trades", "agg_trades", "fills", "userfills", "user_fills", "copy_vault_fills"}
+TRADE_FAMILIES = {"trades", "agg_trades", "fills", "userfills", "user_fills", "copy_vault_fills", "copy_vault_snapshot"}
 
 
 def canonical(value: Any) -> str:

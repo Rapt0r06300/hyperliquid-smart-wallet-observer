@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import html
+import hashlib
 import importlib.util
 import json
 import os
@@ -49,35 +50,82 @@ INTEGRATION_TESTS = (
 )
 
 
+def _ensure_copy_vault_alinasync(root: Path) -> int:
+    """Restore the full current SAFE Copy-Vault selection, with no byte cap."""
+    command = [
+        sys.executable, "-u", str(root / "tools" / "sync_complete_clone.py"),
+        "--skip-update", "--download-safe", "--all-safe",
+        "--family", "copy_vault_fills",
+        "--family", "copy_vault_snapshot",
+        "--family", "copy_vault_l2",
+    ]
+    print(
+        "ALINASYNC_COPY_VAULT_RESTORE=" + subprocess.list2cmdline(command),
+        flush=True,
+    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            check=False,
+            env={
+                **os.environ,
+                "HL_ENABLE_MAINNET_EXECUTION": "0",
+                "HL_ENABLE_TESTNET_EXECUTION": "0",
+                "REAL_MAINNET_TRADING": "false",
+                "TESTNET_ONLY": "true",
+            },
+        )
+    except OSError as exc:
+        print(f"ALINASYNC_COPY_VAULT_NO_GO: {exc}", flush=True)
+        return 2
+    return int(completed.returncode)
+
+
 def inspect_local_safe_corpus(root: Path) -> dict[str, Any]:
-    """Read-only AlinaSync registry inspection; not economic source certification."""
+    """Read-only AlinaSync archive receipt check; not economic source certification."""
     recovery = root / "runtime" / "recovery" / "full"
-    result: dict[str, Any] = {"status": "NOT_CERTIFIED", "safe_registry_rows": None}
+    result: dict[str, Any] = {
+        "status": "NOT_CERTIFIED",
+        "safe_registry_rows": None,
+        "restore_catalog_sha256": None,
+        "active_catalog_sha256": None,
+    }
     try:
         restored = json.loads((recovery / "RESTORE_REPORT.json").read_text(encoding="utf-8"))
-        expanded = json.loads((recovery / "UNPACK_REPORT.json").read_text(encoding="utf-8"))
+        classification = restored.get("classification") or {}
         registry = recovery / "SAFE_SHARDS.sqlite3"
         catalog = (restored.get("catalog_verification") or {}).get("source_index_sha256")
         if not (
             restored.get("status") == "REPLAY_READY_COMPLETE"
-            and (restored.get("classification") or {}).get("materialization_complete") is True
-            and expanded.get("status") == "SAFE_UNPACK_COMPLETE"
-            and catalog and expanded.get("catalog_index_sha256") == catalog
+            and classification.get("materialization_complete") is True
+            and type(classification.get("usable_shards")) is int
+            and classification["usable_shards"] > 0
+            and isinstance(catalog, str) and len(catalog) == 64
             and registry.is_file() and not registry.is_symlink()
         ):
             return result
         with sqlite3.connect(registry.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0) as db:
             count = db.execute("SELECT COUNT(*) FROM current_safe_shards").fetchone()[0]
-        expected = (restored.get("classification") or {}).get("usable_shards")
-        unpack_count = expanded.get("certified_shards")
-        status = (
-            "RECEIPTS_MATCH_NOT_REHASHED"
-            if type(count) is int and count > 0
-            and type(expected) is int and expected == count
-            and type(unpack_count) is int and unpack_count == count
-            else "COUNT_MISMATCH"
-        )
-        return {"status": status, "safe_registry_rows": int(count)}
+        expected = classification["usable_shards"]
+        catalog_path = root / "catalog" / "DATA_INDEX.json"
+        digest = hashlib.sha256()
+        with catalog_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        active_catalog = digest.hexdigest()
+        if type(count) is not int or count != expected:
+            status = "REGISTRY_COUNT_MISMATCH"
+        elif active_catalog != catalog:
+            status = "STALE_CATALOG"
+        else:
+            status = "RESTORE_RECEIPTS_MATCH_NOT_REHASHED"
+        return {
+            "status": status,
+            "safe_registry_rows": int(count),
+            "restore_catalog_sha256": catalog,
+            "active_catalog_sha256": active_catalog,
+        }
     except (OSError, ValueError, TypeError, sqlite3.Error, AttributeError):
         return result
 
@@ -290,7 +338,7 @@ def _write_html_report(report_dir: Path, summary: dict[str, Any]) -> Path:
             "</article>"
         )
     target = report_dir / "RAPPORT.html"
-    target.write_text(
+    page = (
         "<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Laboratoire CopyVault</title><style>"
@@ -319,9 +367,9 @@ def _write_html_report(report_dir: Path, summary: dict[str, Any]) -> Path:
         "</ul><h2>Détail des contrôles</h2>"
         f"<section class='grid'>{''.join(cards) or '<p>Aucun test lancé.</p>'}</section>"
         f"<h2>Verdict du freeze</h2><p>{html.escape(str(summary.get('freeze_verdict') or ''))}</p>"
-        "</main></body></html>",
-        encoding="utf-8",
+        "</main></body></html>"
     )
+    _atomic_text(target, page)
     return target
 
 
@@ -330,6 +378,16 @@ def _open_report(path: Path) -> None:
         return
     with suppress(OSError):
         os.startfile(path)  # type: ignore[attr-defined]
+
+
+def _atomic_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
 
 
 def _restore_processes() -> list[str]:
@@ -484,6 +542,8 @@ def run_lab(*, preflight_only: bool = False) -> int:
     print(
         "ALINASYNC SAFE : " + str(safe["status"])
         + " | registre shards=" + str(safe["safe_registry_rows"])
+        + " | catalogue restauration=" + str(safe.get("restore_catalog_sha256"))
+        + " | catalogue actif=" + str(safe.get("active_catalog_sha256"))
         + " | liaison avec les campagnes non prouvee",
         flush=True,
     )
@@ -644,6 +704,11 @@ def _human_reason(reason: object) -> str:
     raw = str(reason or "tous les contrôles sont passés")
     return REASON_LABELS.get(raw, raw.replace("_", " ").lower())
 
+
+def _search_space_label() -> str:
+    size = 181 * 9_901 * 2_001 * 2_901 * 3_901 * 115_001 * 57 * 5 * 3 * 3 * 46
+    return f"{size:,} combinaisons"
+
 def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Path:
     """Write a plain-French dashboard from the exact machine-readable result."""
     economic = dict(summary.get("economic_result") or {})
@@ -651,14 +716,37 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     historical = dict(summary.get("historical_replay") or {})
     history = list(summary.get("improvement_history") or [])
     inputs = dict(summary.get("safe_inputs") or {})
+    continuous = dict(economic.get("continuous_progress") or {})
+    temporal_design = dict(economic.get("temporal_design") or {})
+    train_result = dict(economic.get("train") or {})
+    train_diagnostics = dict(
+        continuous.get("best_train_diagnostics")
+        or train_result.get("diagnostics")
+        or economic.get("train_diagnostics")
+        or {}
+    )
+    partial_fill_diagnostic = dict(
+        continuous.get("partial_fill_diagnostic")
+        or train_result.get("partial_fill_diagnostic")
+        or economic.get("partial_fill_diagnostic")
+        or {}
+    )
     status = str(summary.get("status") or "UNKNOWN")
-    status_class = "ok" if status == "PROVEN" else ("warn" if status in {"PROMISING", "MORE_DATA", "UNMEASURABLE", "PREFLIGHT_ONLY"} else "bad")
+    is_running = status == "RUNNING"
+    status_class = "ok" if status == "PROVEN" else ("warn" if status in {"RUNNING", "PROMISING", "MORE_DATA", "UNMEASURABLE", "PREFLIGHT_ONLY", "INTERRUPTED"} else "bad")
     def value(source: Mapping[str, Any], segment: str) -> float | None:
         row = source.get(segment) if isinstance(source.get(segment), dict) else {}
         value = row.get("daily_mean_net_pnl_usd")
         return None if value is None else float(value)
     def display(number: float | None) -> str:
         return "non mesurable" if number is None else f"{number:+.4f} USD/jour"
+    def total_display(number: object) -> str:
+        return "non mesurable" if number is None else f"{float(number):+.6f} USD total TRAIN"
+    def train_total(source: Mapping[str, Any]) -> float | None:
+        row = source.get("train") if isinstance(source.get("train"), Mapping) else {}
+        statistics_row = row.get("statistics") if isinstance(row.get("statistics"), Mapping) else {}
+        raw = statistics_row.get("net_pnl_usd")
+        return None if raw is None else float(raw)
     def latest(source: Mapping[str, Any]) -> float | None:
         for segment in ("forward", "oos", "validation", "train"):
             measured = value(source, segment)
@@ -676,6 +764,31 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         else float(approximate_daily) if approximate_daily is not None else None
     )
     candidate_daily = latest(economic)
+    current_train_total = train_total(current)
+    candidate_train_total = train_total(economic)
+    if candidate_train_total is None:
+        candidate_train_total = continuous.get("best_train_net_total_usd")
+    current_train_daily = value(current, "train")
+    candidate_train_daily = value(economic, "train")
+    if candidate_train_daily is None and continuous.get("best_train_score_metric") == "daily_mean_net_pnl_usd":
+        candidate_train_daily = continuous.get("best_train_score")
+    comparable_segment = None
+    comparable_delta = None
+    for segment in ("forward", "oos", "validation", "train"):
+        baseline_value = value(current, segment)
+        candidate_value = value(economic, segment)
+        if baseline_value is not None and candidate_value is not None:
+            comparable_segment = segment
+            comparable_delta = candidate_value - baseline_value
+            break
+    train_delta = (
+        float(candidate_train_total) - current_train_total
+        if candidate_train_total is not None and current_train_total is not None else None
+    )
+    train_daily_delta = (
+        float(candidate_train_daily) - current_train_daily
+        if candidate_train_daily is not None and current_train_daily is not None else None
+    )
     historical_best = (
         dict(historical.get("best_candidate"))
         if isinstance(historical.get("best_candidate"), Mapping) else {}
@@ -701,21 +814,52 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
             f"<td>{html.escape(str(row.get('run_id') or ''))}</td>"
             f"<td>{html.escape(str(row.get('classification') or ''))}</td>"
             f"<td>{display(row.get('baseline_daily_net_usd'))}</td>"
-            f"<td>{display(row.get('candidate_daily_net_usd'))}</td>"
-            f"<td>{display(row.get('improvement_usd_per_day'))}</td>"
+            f"<td>{display(row.get('candidate_daily_net_usd'))}"
+            f"{'' if row.get('candidate_daily_net_usd') is not None else ('<br>' + total_display(row.get('candidate_train_net_total_usd')) if row.get('candidate_train_net_total_usd') is not None else '')}</td>"
+            f"<td>{display(row.get('improvement_usd_per_day'))}"
+            f"{'' if row.get('improvement_usd_per_day') is not None else ('<br>' + (total_display(row.get('selection_score')) if row.get('selection_score_metric') == 'net_pnl_usd' else display(row.get('selection_score'))) if row.get('selection_score') is not None else '')}</td>"
+            f"<td><code>{html.escape(str(row.get('input_sha256') or ''))[:16]}</code></td>"
+            f"<td><code>{html.escape(str(row.get('engine_sha256') or ''))[:16]}</code></td>"
             f"<td>{'OUI' if row.get('economically_proven') is True else 'NON'}</td>"
             "</tr>"
         )
+    train_improvement_rows = []
+    train_improvements = list(economic.get("train_improvements") or [])
+    for row in train_improvements:
+        train = dict(row.get("train") or {})
+        statistics_row = dict(train.get("statistics") or {})
+        candidate = dict(row.get("candidate") or {})
+        freeze = dict(candidate.get("freeze") or {})
+        parameters = dict(freeze.get("parameters") or {})
+        total_net = statistics_row.get("net_pnl_usd")
+        sample_count = int(statistics_row.get("sample_count") or 0)
+        exposure = (
+            float(parameters.get("core_notional_usd") or 0.0)
+            + float(parameters.get("probe_notional_usd") or 0.0)
+        )
+        train_improvement_rows.append(
+            "<tr>"
+            f"<td>{int(row.get('trial') or 0)}</td>"
+            f"<td>{sample_count}</td>"
+            f"<td>{'non mesurable' if total_net is None else f'{float(total_net):+.6f} USD'}</td>"
+            f"<td>{float(parameters.get('horizon_ms') or 0.0) / 1000:.0f} s</td>"
+            f"<td>{exposure:.0f} USD</td>"
+            "<td>NON</td></tr>"
+        )
     proven = economic.get("economically_proven") is True
+    exploratory_freezes = int(economic.get("exploratory_freezes_created") or 0)
     frozen = (
         economic.get("freeze_created") is True
+        or exploratory_freezes > 0
         or historical.get("improvement_found") is True
     )
     target = report_dir / "RAPPORT.html"
-    target.write_text(
+    page = (
         "<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Laboratoire CopyVault</title><style>"
+        "<title>Laboratoire CopyVault</title>"
+        + ("<meta http-equiv='refresh' content='2'>" if is_running else "")
+        + "<style>"
         ":root{color-scheme:dark}body{font:16px system-ui;margin:0;background:#09111f;color:#e7edf7}"
         "main{max-width:1050px;margin:auto;padding:32px}h1{margin-bottom:6px}.muted{color:#9fb0c8}"
         ".hero,.card{background:#111d30;border:1px solid #29405f;border-radius:14px;padding:20px}"
@@ -730,15 +874,38 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"<section class='hero'><p class='status {status_class}'>VERDICT : {html.escape(status)}</p>"
         f"<p class='answer'><b>Stratégie économiquement prouvée :</b> {'OUI' if proven else 'NON'}</p>"
         f"<p><b>Candidat gelé pour comparaison suivante :</b> {'OUI' if frozen else 'NON'}</p>"
+        f"<p><b>Améliorations successives TRAIN conservées :</b> {exploratory_freezes}</p>"
         f"<p><b>Objectif :</b> {OBJECTIVE_USD_PER_DAY:.2f} USD nets/jour avec {PAPER_CAPITAL_USD:.0f} USD paper.</p>"
+        f"<p><b>Découpage temporel :</b> TRAIN → VALIDATION → OOS → FORWARD; purge de {int(temporal_design.get('purge_ms') or 0):,} ms autour des frontières; held-out non consultés pendant le réglage.</p>"
         f"<p><b>Pourquoi :</b> {html.escape(_human_reason(economic.get('reason')))}</p></section>"
-        "<h2>Comparaison avec le Copy‑Vault actuel</h2><section class='grid'>"
+        + (
+            "<section class='card'><h2>Recherche en direct</h2>"
+            f"<p class='answer'><b>Essais terminés :</b> {int(continuous.get('next_sequence_index') or 0):,} "
+            f"(compteur statistique global : {int(continuous.get('cumulative_trial_count') or 0):,})</p>"
+            f"<p><b>En cours :</b> {html.escape(str(continuous.get('phase') or 'initialisation'))}</p>"
+            f"<p><b>Dernier essai TRAIN :</b> {html.escape(str(continuous.get('last_trial_text') or 'en attente'))}</p>"
+            f"<p><b>Meilleure mesure TRAIN selon l'échantillon :</b> {html.escape(str(continuous.get('best_train_text') or 'non mesurable'))}</p>"
+            f"<p><b>Candidat en cours :</b> {html.escape(str(continuous.get('current_candidate_id') or 'préparation'))}</p>"
+            f"<p><b>Réglages du replay :</b> {html.escape(str(continuous.get('parameter_summary') or 'en préparation'))}</p>"
+            f"<p><b>Recherche :</b> {html.escape(str(continuous.get('search_method') or '4 essais globaux puis 1 raffinement local'))}; espace global borné d'environ {_search_space_label()}</p>"
+            f"<p><b>Robustesse locale du meilleur :</b> {int(continuous.get('neighbor_positive_count') or 0)}/{int(continuous.get('neighbor_count') or 0)} variantes TRAIN positives; diagnostic exploratoire.</p>"
+            f"<p><b>Risque TRAIN :</b> drawdown max {html.escape(str(train_diagnostics.get('max_drawdown_usd', 'non mesurable')))} USD; facteur de profit {html.escape(str(train_diagnostics.get('profit_factor', 'non mesurable')))}; borne basse par jour actif {html.escape(str(train_diagnostics.get('daily_mean_lcb_usd', 'non mesurable')))} USD.</p>"
+            f"<p><b>Dispersion :</b> écart-type net/trade {html.escape(str(train_diagnostics.get('trade_net_stddev_usd', 'non mesurable')))} USD; écart-type/jour actif {html.escape(str(train_diagnostics.get('active_day_net_stddev_usd', 'non mesurable')))} USD.</p>"
+            f"<p><b>Coûts du dernier replay :</b> {html.escape(str((continuous.get('last_train_diagnostics') or train_diagnostics).get('costs') or 'non mesurables'))}</p>"
+            f"<details><summary>Résultats TRAIN par vault leader, actif et régime</summary><pre>{html.escape(json.dumps(train_diagnostics.get('slices') or {}, ensure_ascii=False, indent=2))}</pre></details>"
+            f"<p><b>Fill partiel exploratoire :</b> {html.escape(str(partial_fill_diagnostic.get('partial_fill_trade_count', 'non mesurable')))} exécution(s) partielle(s) simulée(s) sur L2 observé; priorité de file inconnue, résultat non certifiant.</p>"
+            "<p class='muted'>Le score principal garde les exécutions complètes exigées par le replay V21. Un diagnostic distinct réduit la taille au volume commun visible sur les deux jambes, sans inventer de fill ni de rang de file. La recherche reste sur TRAIN. Validation, OOS et FORWARD sont affichés séparément et ne servent pas au réglage. Le classement par PnL total n'est pas un rendement journalier. Ctrl+C sauvegarde l'essai terminé.</p></section>"
+            if is_running or continuous else ""
+        )
+        + "<h2>Comparaison avec le Copy‑Vault actuel</h2><section class='grid'>"
         f"<article class='card'><h3>Copy‑Vault actuel</h3><p class='answer'>{'≈ ' if current_daily is None and current_display_daily is not None else ''}{display(current_display_daily)}</p>"
+        f"<p>Replay TRAIN sur mêmes événements : {total_display(current_train_total)}</p>"
         f"<p class='muted'>{html.escape(str(current.get('status') or 'NON MESURÉ'))} — {html.escape(_human_reason(current.get('reason')))}</p></article>"
-        f"<article class='card'><h3>Meilleur candidat</h3><p class='answer'>{display(candidate_daily)}</p>"
+        f"<article class='card'><h3>Meilleur candidat</h3><p class='answer'>{display(candidate_daily) if candidate_daily is not None else html.escape(str(continuous.get('best_train_text') or total_display(candidate_train_total)))}</p>"
+        f"<p>Replay TRAIN : {total_display(candidate_train_total)}</p>"
         f"<p class='muted'>{html.escape(str((historical.get('status') if candidate_is_historical else economic.get('status')) or 'NON MESURÉ'))}</p></article>"
-        f"<article class='card'><h3>Amélioration mesurée</h3><p class='answer'>{display(improvement)}</p>"
-        "<p class='muted'>candidat moins Copy‑Vault actuel, uniquement si les deux sont comparables</p></article></section>"
+        f"<article class='card'><h3>Écart mesuré sur un même segment</h3><p class='answer'>{display(comparable_delta) if comparable_delta is not None else (total_display(train_delta) if train_delta is not None else 'non mesurable')}</p>"
+        f"<p class='muted'>{('Segment ' + comparable_segment.upper() + ', calculé sur la même partition SAFE; indicatif et non utilisé pour régler le candidat.') if comparable_segment else ('Écart du total TRAIN sur les mêmes événements SAFE.' if train_delta is not None else 'Pas de métriques comparables sur un même segment.')}</p></article></section>"
         + (
             "<p class='muted'>Estimation actuelle fondée sur le dernier TRAIN V21 : "
             f"environ {display(current_display_daily)}, borne statistique conservatrice "
@@ -749,7 +916,7 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
             if current_approximation else ""
         )
         +
-        "<h2>Replay historique de secours</h2>"
+        "<h2>Replay historique de secours (séparé des données SAFE)</h2>"
         f"<p><b>{int(historical.get('trial_count') or 0)} scénarios</b> recalculés sur "
         f"<b>{int(historical.get('source_trade_count') or 0)} trades exécutables</b> conservés. "
         f"La recherche couvre {int(historical.get('unique_filter_count') or 0)} sous-ensembles distincts "
@@ -758,14 +925,28 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"meilleur candidat : {display(historical_best.get('daily_net_pnl_usd'))}; "
         f"écart : {display(historical.get('improvement_usd_per_day'))}. "
         "Résultat exploratoire TRAIN, conservé mais jamais présenté comme preuve OOS/forward.</p>"
-        "<h2>Résultats économiques séparés</h2><section class='grid'>"
+        "<h2>Walk-forward chronologique et résultats séparés</h2>"
+        f"<p class='muted'>VALIDATION : {html.escape(str((economic.get('validation') or {}).get('status') or 'non évaluée'))}; "
+        f"OOS : {html.escape(str((economic.get('oos') or {}).get('status') or 'non évalué'))}; "
+        f"FORWARD : {html.escape(str((economic.get('forward') or {}).get('status') or 'non évalué'))}. "
+        "L’étape suivante ne s’ouvre qu’après le passage de la précédente.</p>"
+        "<section class='grid'>"
         f"<article class='card'><h3>TRAIN candidat</h3><p>{display(value(economic, 'train'))}</p></article>"
         f"<article class='card'><h3>VALIDATION</h3><p>actuel {display(value(current, 'validation'))}<br>candidat {display(value(economic, 'validation'))}</p></article>"
         f"<article class='card'><h3>OOS</h3><p>actuel {display(value(current, 'oos'))}<br>candidat {display(value(economic, 'oos'))}</p></article>"
         f"<article class='card'><h3>FORWARD</h3><p>actuel {display(value(current, 'forward'))}<br>candidat {display(value(economic, 'forward'))}</p></article></section>"
+        "<h2>Meilleurs successifs observés sur TRAIN</h2>"
+        + (
+            "<p class='muted'>Ces lignes sont gelées pour comparaison future. Un total négatif reste une perte; "
+            "aucune ligne n'est une preuve de rentabilité.</p>"
+            "<table><thead><tr><th>Essai</th><th>Trades</th><th>Net TRAIN total</th><th>Horizon</th><th>Capital</th><th>Prouvé</th></tr></thead>"
+            f"<tbody>{''.join(train_improvement_rows)}</tbody></table>"
+            if train_improvement_rows else "<p>Aucun score TRAIN exploitable n'a été obtenu.</p>"
+        )
+        +
         "<h2>Historique conservé des améliorations</h2>"
         + (
-            "<table><thead><tr><th>Run</th><th>État</th><th>Avant</th><th>Candidat</th><th>Gain</th><th>Prouvé</th></tr></thead>"
+            "<table><thead><tr><th>Run</th><th>État</th><th>Avant</th><th>Candidat</th><th>Gain</th><th>Hash données</th><th>Hash moteur</th><th>Prouvé</th></tr></thead>"
             f"<tbody>{''.join(history_rows)}</tbody></table>"
             if history_rows else "<p>Aucun candidat amélioré n'a encore pu être mesuré et gelé.</p>"
         )
@@ -773,17 +954,68 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         "<h2>Ce que ce run a réellement fait</h2><ul>"
         f"<li>{int(inputs.get('verified_assets') or 0)} fichiers Copy‑Vault vérifiés à nouveau par taille et SHA‑256.</li>"
         f"<li>{int(inputs.get('unique_fills') or 0)} fills leader uniques et {int(inputs.get('unique_books') or 0)} carnets L2 uniques reconstruits.</li>"
+        f"<li>Dans ces fills : {int(inputs.get('historical_train_fills') or 0)} historiques réservés à TRAIN et {int(inputs.get('forward_fills', inputs.get('unique_fills') or 0))} observations prospectives vérifiables.</li>"
+        f"<li>Catalogue SAFE utilisé : {html.escape(str(inputs.get('catalog_sha256') or 'non renseigné'))}; empreinte du corpus : {html.escape(str(inputs.get('selection_digest') or 'non renseignée'))}; octets décompressés : {int(inputs.get('selected_raw_bytes') or 0):,}.</li>"
         f"<li>{int(economic.get('candidates_tested') or 0) + int(historical.get('trial_count') or 0)} configurations réellement rejouées, coûts et liquidité observée inclus.</li>"
         "<li>Recherche sur TRAIN uniquement; VALIDATION, OOS et FORWARD ne servent jamais au réglage.</li>"
+        "<li>L'historique REST peut enrichir TRAIN; seules les entrées live causales ou REST exactes non historiques alimentent les segments held-out.</li>"
         "<li>Aucune collecte réseau, aucun ordre, aucune clé et aucune transaction.</li></ul>"
         f"<h2>Verdict simple</h2><p>{html.escape(str(summary.get('freeze_verdict') or ''))}</p>"
         f"<p class='path'>Données machine : {html.escape(str(report_dir / 'resultat.json'))}</p>"
-        "</main></body></html>",
-        encoding="utf-8",
+        "</main></body></html>"
     )
+    _atomic_text(target, page)
     return target
 
-def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) -> int:
+
+def _prior_trial_pressure(root: Path) -> tuple[int, dict[str, Any]]:
+    """Conservatively account for discovery-ledger and prior local replay trials."""
+    context: dict[str, Any] = {}
+    command = [sys.executable, str(root / "tools" / "codex_research_context.py"), "--auto"]
+    try:
+        completed = subprocess.run(
+            command, cwd=root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=30, check=False,
+        )
+        if completed.returncode == 0:
+            context = json.loads(completed.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
+        context = {}
+    ledger_trials = int(
+        (context.get("trial_accounting") or {}).get("ledger_trials")
+        or (context.get("ledger") or {}).get("trial_count")
+        or 0
+    )
+    report_trials = 0
+    reports = root / "runtime" / "reports" / "copy_vault_quant_lab"
+    if reports.is_dir():
+        for result_path in reports.glob("*/resultat.json"):
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                economic = result.get("economic_result") or {}
+                historical = result.get("historical_replay") or {}
+                report_trials += int(economic.get("candidates_tested") or 0)
+                report_trials += int(historical.get("trial_count") or 0)
+            except (OSError, ValueError, TypeError):
+                continue
+    # Summing independent ledgers intentionally overcounts possible overlap rather
+    # than understating the multiple-testing burden.
+    return ledger_trials + report_trials, {
+        "hypothesis_ledger_trials": ledger_trials,
+        "prior_local_report_trials": report_trials,
+        "accounting_policy": "CONSERVATIVE_SUM_POSSIBLE_OVERLAP",
+        "research_context_available": bool(context),
+    }
+
+
+def run_economic_lab(
+    *,
+    preflight_only: bool = False,
+    tests_only: bool = False,
+    dataset_root: Path | None = None,
+    supplied_safe_inputs: Mapping[str, Any] | None = None,
+    continuous: bool = False,
+) -> int:
     # Imported only for explicit local legacy economic runs. A clean GitHub
     # clone can lack this optional Codex/Claude module: fail closed, do not
     # substitute fake fills, synthetic books or pretend to have proven profit.
@@ -820,6 +1052,10 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
     current_copy_vault: dict[str, Any] = {}
     historical_replay: dict[str, Any] = {}
     interrupted = False
+    live_opened = False
+    continuous_progress: dict[str, Any] = {}
+    last_trial: dict[str, Any] = {}
+    exploratory_freeze_count = 0
     if tests_only:
         test_groups = _test_groups()
         for index, (name, tests) in enumerate(test_groups, start=1):
@@ -840,12 +1076,38 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
         }
     else:
         recovery = ROOT / "runtime" / "recovery" / "full"
-        workspace = report_dir / "workspace"
+        workspace = Path(dataset_root).resolve() if dataset_root is not None else report_dir / "workspace"
         print("\n[1/4] Vérification SAFE : taille + SHA-256 de chaque shard Copy-Vault...", flush=True)
-        safe_inputs = materialize_safe_workspace(recovery, workspace)
+        if dataset_root is None:
+            safe_inputs = materialize_safe_workspace(recovery, workspace)
+        else:
+            supplied = dict(supplied_safe_inputs or {})
+            counts = dict(supplied.get("counts") or {})
+            safe_inputs = {
+                "status": "READY",
+                "reason": None,
+                "verified_assets": int(supplied.get("selected_shards") or 0),
+                "unique_fills": (
+                    int(counts.get("copy_vault_fills") or 0)
+                    + int(counts.get("copy_vault_snapshot") or 0)
+                ),
+                "forward_fills": int(counts.get("copy_vault_fills") or 0),
+                "historical_train_fills": int(counts.get("copy_vault_snapshot") or 0),
+                "unique_books": int(counts.get("copy_vault_l2") or 0),
+                "catalog_sha256": supplied.get("catalog_sha256"),
+                "selection_digest": supplied.get("selection_digest"),
+                "selected_raw_bytes": supplied.get("selected_raw_bytes"),
+                "workspace": str(workspace),
+                "source": "ALINASYNC_CURRENT_SAFE_CATALOG",
+                "paper_read_only": True,
+                "real_execution": False,
+            }
         print(
             f"      {safe_inputs.get('verified_assets', 0)} fichiers vérifiés; "
-            f"{safe_inputs.get('unique_fills', 0)} fills; {safe_inputs.get('unique_books', 0)} carnets L2.",
+            f"{safe_inputs.get('unique_fills', 0)} fills au total "
+            f"({safe_inputs.get('historical_train_fills', 0)} historiques TRAIN, "
+            f"{safe_inputs.get('forward_fills', safe_inputs.get('unique_fills', 0))} prospectifs); "
+            f"{safe_inputs.get('unique_books', 0)} carnets L2.",
             flush=True,
         )
         if preflight_only:
@@ -873,23 +1135,417 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
                 + _human_reason(current_copy_vault.get("reason")),
                 flush=True,
             )
-            try:
-                economic_result = run_local_campaign(
-                    workspace,
-                    progress=lambda message: print(f"[3/4] {message}", flush=True),
+            prior_trial_count = 0
+            trial_accounting: dict[str, Any] = {}
+            if continuous:
+                prior_trial_count, trial_accounting = _prior_trial_pressure(ROOT)
+                print(
+                    f"[3/4] Recherche continue TRAIN — {prior_trial_count:,} essais antérieurs "
+                    "comptabilisés pour corriger la sélection multiple.",
+                    flush=True,
                 )
-            except KeyboardInterrupt:
-                interrupted = True
-                economic_result = {
-                    "status": "INTERRUPTED", "reason": "USER_INTERRUPTION",
-                    "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
+                continuous_progress = {
+                    "phase": "préparation du replay TRAIN",
+                    "next_sequence_index": 0,
+                    "cumulative_trial_count": prior_trial_count,
+                    "best_train_text": "non mesurable",
+                    "trial_accounting": trial_accounting,
                 }
-            except Exception as exc:  # noqa: BLE001 - technical failure is reported, never promoted
                 economic_result = {
-                    "status": "TECHNICAL_FAILURE", "reason": f"{type(exc).__name__}: {exc}",
-                    "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
+                    "status": "RUNNING",
+                    "reason": "CONTINUOUS_TRAIN_SEARCH",
+                    "continuous": True,
+                    "continuous_progress": continuous_progress,
+                    "candidates_tested": 0,
+                    "freeze_created": False,
+                    "economically_proven": False,
+                    "heldout_status": "PROTECTED_NOT_USED_DURING_CONTINUOUS_TUNING",
+                    "trial_accounting": trial_accounting,
                 }
+                live_summary = {
+                    "run_id": run_id, "head": head, "status": "RUNNING",
+                    "paper_read_only": True, "network_or_collection_started": False,
+                    "safe_inputs": safe_inputs, "current_copy_vault": current_copy_vault,
+                    "historical_replay": historical_replay,
+                    "improvement_history": load_improvement_history(ROOT),
+                    "economic_result": economic_result,
+                    "freeze_verdict": "Recherche TRAIN continue en cours; aucune preuve économique n'est déclarée.",
+                }
+                html_report = _write_economic_html_report(report_dir, live_summary)
+                _atomic_text(
+                    report_dir / "resultat.json",
+                    json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                )
+                _open_report(html_report)
+                live_opened = True
+                print(f"INTERFACE EN DIRECT : {html_report}", flush=True)
+
+                # Run the existing independent historical trade replay once; its
+                # stress results remain separately classified as exploratory.
+                continuous_progress["phase"] = "replay historique exploratoire"
+                live_summary["economic_result"] = economic_result
+                _atomic_text(
+                    report_dir / "resultat.json",
+                    json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                )
+                _write_economic_html_report(report_dir, live_summary)
+                try:
+                    def historical_progress(message: str) -> None:
+                        print(f"[4/4] {message}", flush=True)
+                        continuous_progress["phase"] = "replay historique TRAIN : " + str(message)
+                        economic_result["continuous_progress"] = dict(continuous_progress)
+                        live_summary["economic_result"] = economic_result
+                        _atomic_text(
+                            report_dir / "resultat.json",
+                            json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                        )
+                        _write_economic_html_report(report_dir, live_summary)
+
+                    historical_replay = run_historical_trade_replay(
+                        ROOT,
+                        progress=historical_progress if continuous else (
+                            lambda message: print(f"[4/4] {message}", flush=True)
+                        ),
+                    )
+                except KeyboardInterrupt:
+                    interrupted = True
+                    economic_result = {
+                        "status": "INTERRUPTED",
+                        "reason": "USER_CTRL_C_DURING_HISTORICAL_REPLAY",
+                        "candidates_tested": 0,
+                        "freeze_created": False,
+                        "economically_proven": False,
+                        "continuous": True,
+                        "continuous_progress": dict(continuous_progress),
+                        "trial_accounting": trial_accounting,
+                    }
+                    historical_replay = {
+                        "status": "INTERRUPTED",
+                        "reason": "USER_CTRL_C_DURING_HISTORICAL_REPLAY",
+                        "economically_proven": False,
+                    }
+                if historical_replay.get("improvement_found") is True:
+                    best = dict(historical_replay.get("best_candidate") or {})
+                    baseline = dict(historical_replay.get("baseline") or {})
+                    historical_candidate = {
+                        "schema_version": "hypersmart.copy_vault_historical_candidate.v1",
+                        "source": historical_replay.get("source"),
+                        "configuration": {
+                            key: best.get(key) for key in (
+                                "filter", "capital_usd", "fee_multiplier",
+                                "spread_multiplier", "latency_multiplier",
+                                "slippage_multiplier", "mechanism_archetypes",
+                            )
+                        },
+                    }
+                    historical_id = "historical-" + hashlib.sha256(
+                        json.dumps(historical_candidate, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                    ).hexdigest()[:20]
+                    historical_replay["immutable_history_record"] = record_frozen_candidate(
+                        ROOT,
+                        historical_id,
+                        {
+                            "freeze_created": True,
+                            "economically_proven": False,
+                            "status": "HISTORICAL_TRAIN_CANDIDATE_FROZEN",
+                            "selected_candidate": historical_candidate,
+                            "train": {"daily_mean_net_pnl_usd": best.get("daily_net_pnl_usd")},
+                        },
+                        {"train": {"daily_mean_net_pnl_usd": baseline.get("daily_net_pnl_usd")}},
+                    )
+                historical_trials_this_run = int(historical_replay.get("trial_count") or 0)
+                prior_trial_count += historical_trials_this_run
+                trial_accounting["historical_trials_this_run"] = historical_trials_this_run
+                trial_accounting["cumulative_before_streaming_search"] = prior_trial_count
+                continuous_progress.update({
+                    "phase": "préparation de la recherche continue TRAIN",
+                    "cumulative_trial_count": prior_trial_count,
+                    "trial_accounting": trial_accounting,
+                })
+                economic_result["continuous_progress"] = dict(continuous_progress)
+                economic_result["trial_accounting"] = trial_accounting
+                live_summary["historical_replay"] = historical_replay
+                live_summary["economic_result"] = economic_result
+                _atomic_text(
+                    report_dir / "resultat.json",
+                    json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                )
+                _write_economic_html_report(report_dir, live_summary)
+
+                def persist_train_improvement(improvement: Mapping[str, Any]) -> None:
+                    nonlocal exploratory_freeze_count
+                    candidate = dict(improvement.get("candidate") or {})
+                    freeze = dict(candidate.get("freeze") or {})
+                    immutable_id = "continuous-v2-" + str(
+                        freeze.get("campaign_id") or improvement.get("trial") or "unknown"
+                    )
+                    record = record_frozen_candidate(
+                        ROOT,
+                        immutable_id,
+                        {
+                            "freeze_created": True,
+                            "economically_proven": False,
+                            "status": "TRAIN_ONLY_EXPLORATORY_IMPROVEMENT",
+                            "selected_candidate": improvement.get("candidate"),
+                            "train": improvement.get("train"),
+                            "selection_score_metric": improvement.get("selection_metric"),
+                            "selection_score": improvement.get("selection_score"),
+                            "previous_best_train_score": improvement.get("previous_best_score"),
+                            "input_sha256": improvement.get("input_sha256"),
+                            "engine_sha256": improvement.get("engine_sha256"),
+                            "train_diagnostics": improvement.get("train_diagnostics"),
+                            "parameter_neighbor_diagnostics": improvement.get("parameter_neighbor_diagnostics") or [],
+                            "partial_fill_diagnostic": improvement.get("partial_fill_diagnostic"),
+                        },
+                        current_copy_vault,
+                    )
+                    exploratory_freeze_count += int(record is not None)
+
+                last_dashboard_update = 0.0
+
+                def update_live_dashboard(update: Mapping[str, Any]) -> None:
+                    nonlocal last_dashboard_update
+                    now_mono = time.monotonic()
+                    if update.get("phase") == "TRIAL_START":
+                        candidate = dict(update.get("candidate") or {})
+                        freeze = dict(candidate.get("freeze") or {})
+                        params = dict(freeze.get("parameters") or {})
+                        gross = float(params.get("core_notional_usd") or 0) + float(params.get("probe_notional_usd") or 0)
+                        continuous_progress.update({
+                            "phase": "replay TRAIN en cours — signaux, liquidité, frais et sorties",
+                            "next_sequence_index": int(update.get("sequence_index") or 0),
+                            "cumulative_trial_count": int(update.get("cumulative_trial_count") or prior_trial_count),
+                            "current_candidate_id": str(update.get("candidate_id") or ""),
+                            "input_sha256": update.get("input_sha256"),
+                            "engine_sha256": update.get("engine_sha256"),
+                            "selection_score_metric": update.get("selection_score_metric"),
+                            "parameter_summary": (
+                                f"capital exposé {gross:.2f}/200 USD; cœur {float(params.get('core_notional_usd') or 0):.2f}; "
+                                f"sonde {float(params.get('probe_notional_usd') or 0):.2f}; seuil leader "
+                                f"{float(params.get('minimum_leader_fill_notional_usd') or 0):.2f}; déséquilibre "
+                                f"{float(params.get('signed_depth_imbalance_minimum') or 0):+.3f}; stop/take "
+                                f"{float(params.get('stop_loss_bps') or 0):.1f}/{float(params.get('take_profit_bps') or 0):.1f} bps; "
+                                f"horizon {int(params.get('horizon_ms') or 0)} ms; limite jour "
+                                f"{int(params.get('vault_daily_limit') or 0)}/{int(params.get('coin_daily_limit') or 0)}"
+                            ),
+                            "trial_accounting": trial_accounting,
+                        })
+                        if now_mono - last_dashboard_update < 1.5:
+                            return
+                        last_dashboard_update = now_mono
+                        economic_result.update({
+                            "status": "RUNNING",
+                            "reason": "CONTINUOUS_TRAIN_SEARCH",
+                            "continuous_progress": dict(continuous_progress),
+                            "candidates_tested": int(update.get("sequence_index") or 0),
+                            "cumulative_trial_count": int(update.get("cumulative_trial_count") or 0),
+                            "freeze_created": economic_result.get("freeze_created", False),
+                            "economically_proven": False,
+                            "heldout_status": "PROTECTED_NOT_USED_DURING_CONTINUOUS_TUNING",
+                            "trial_accounting": trial_accounting,
+                            "paper_read_only": True,
+                            "real_execution": False,
+                        })
+                        live_summary["economic_result"] = economic_result
+                        _atomic_text(
+                            report_dir / "resultat.json",
+                            json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                        )
+                        _write_economic_html_report(report_dir, live_summary)
+                        return
+
+                    last_trial.clear()
+                    last_trial.update(dict(update))
+                    improved = update.get("is_improvement") is True
+                    if now_mono - last_dashboard_update < 1.5 and not improved:
+                        return
+                    last_dashboard_update = now_mono
+                    score = update.get("best_train_score")
+                    score_metric = str(update.get("best_train_score_metric") or "")
+                    last_net = update.get("net_train_usd")
+                    last_daily = update.get("daily_mean_net_pnl_usd")
+                    diagnostics = dict(update.get("train_diagnostics") or {})
+                    neighbor_rows = list(update.get("best_parameter_neighbor_diagnostics") or [])
+                    neighbor_positive = sum(
+                        1 for row in neighbor_rows
+                        if isinstance(row, Mapping)
+                        and row.get("net_pnl_usd") is not None
+                        and float(row["net_pnl_usd"]) > 0.0
+                    )
+                    continuous_progress.update({
+                        "phase": "replay TRAIN / recherche de candidats",
+                        "next_sequence_index": int(update.get("next_sequence_index") or 0),
+                        "cumulative_trial_count": int(update.get("cumulative_trial_count") or prior_trial_count),
+                        "current_candidate_id": str(update.get("candidate_id") or ""),
+                        "last_trial_text": (
+                            "non mesurable" if last_net is None
+                            else (
+                                f"{float(last_net):+.6f} USD total TRAIN; "
+                                f"{'non mesurable' if last_daily is None else f'{float(last_daily):+.6f} USD/jour'}"
+                            )
+                        ),
+                        "best_train_text": (
+                            "non mesurable" if score is None
+                            else (
+                                f"{float(score):+.6f} USD/jour net TRAIN (exploratoire)"
+                                if score_metric == "daily_mean_net_pnl_usd"
+                                else f"{float(score):+.6f} USD total TRAIN (fenêtre fixe; journalier non mesurable)"
+                            )
+                        ),
+                        "search_method": update.get("search_method"),
+                        "input_sha256": update.get("input_sha256"),
+                        "engine_sha256": update.get("engine_sha256"),
+                        "last_train_diagnostics": diagnostics,
+                        "best_train_diagnostics": update.get("best_train_diagnostics") or {},
+                        "neighbor_count": len(neighbor_rows),
+                        "neighbor_positive_count": neighbor_positive,
+                        "partial_fill_diagnostic": update.get("best_partial_fill_diagnostic"),
+                        "trial_accounting": trial_accounting,
+                        "state_path": str(update.get("state_path") or ""),
+                        "journal_path": str(update.get("journal_path") or ""),
+                    })
+                    economic_result.update({
+                        "status": "RUNNING",
+                        "reason": "CONTINUOUS_TRAIN_SEARCH",
+                        "continuous_progress": dict(continuous_progress),
+                        "candidates_tested": int(update.get("next_sequence_index") or 0),
+                        "cumulative_trial_count": int(update.get("cumulative_trial_count") or 0),
+                        "best_train_score": score,
+                        "best_train_score_metric": score_metric,
+                        "best_train_daily_usd": score if score_metric == "daily_mean_net_pnl_usd" else None,
+                        "best_train_net_total_usd": update.get("best_train_net_total_usd"),
+                        "best_train_diagnostics": update.get("best_train_diagnostics") or {},
+                        "selected_candidate": update.get("candidate") if improved else economic_result.get("selected_candidate"),
+                        "exploratory_freezes_created": exploratory_freeze_count,
+                        "freeze_created": bool(score is not None),
+                        "economically_proven": False,
+                        "heldout_status": "PROTECTED_NOT_USED_DURING_CONTINUOUS_TUNING",
+                        "paper_read_only": True,
+                        "real_execution": False,
+                    })
+                    live_summary["economic_result"] = economic_result
+                    live_summary["historical_replay"] = historical_replay
+                    live_summary["improvement_history"] = load_improvement_history(ROOT)
+                    live_summary["freeze_verdict"] = (
+                        "Recherche TRAIN en cours. Les meilleurs scores sont gelés dans l'historique; "
+                        "VALIDATION/OOS/FORWARD ne sont pas consultés pendant le réglage."
+                    )
+                    _atomic_text(
+                        report_dir / "resultat.json",
+                        json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                    )
+                    _write_economic_html_report(report_dir, live_summary)
+
+            if not interrupted:
+                try:
+                    economic_result = run_local_campaign(
+                        workspace,
+                        progress=lambda message: print(f"[3/4] {message}", flush=True),
+                        continuous=continuous,
+                        prior_trial_count=prior_trial_count,
+                        on_trial=update_live_dashboard if continuous else None,
+                        on_improvement=persist_train_improvement if continuous else None,
+                    )
+                except KeyboardInterrupt:
+                    interrupted = True
+                    economic_result = {
+                        "status": "INTERRUPTED", "reason": "USER_INTERRUPTION",
+                        "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
+                    }
+                except Exception as exc:  # noqa: BLE001 - technical failure is reported, never promoted
+                    economic_result = {
+                        "status": "TECHNICAL_FAILURE", "reason": f"{type(exc).__name__}: {exc}",
+                        "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
+                    }
             overall_status = str(economic_result.get("status") or "TECHNICAL_FAILURE")
+            if continuous and not interrupted and economic_result.get("continuous") is not True:
+                waiting_reason = str(economic_result.get("reason") or "SAFE_INPUTS_NOT_REPLAYABLE")
+                print(
+                    "[3/4] Recherche suspendue faute d'un échantillon causal suffisant : "
+                    + _human_reason(waiting_reason)
+                    + ". Le tableau reste ouvert; Ctrl+C clôt proprement ce run.",
+                    flush=True,
+                )
+                continuous_progress.update({
+                    "phase": "attente : davantage de données SAFE causalement rejouables",
+                    "last_trial_text": "aucun essai lancé : données insuffisantes",
+                })
+                economic_result.update({
+                    "status": "RUNNING",
+                    "reason": waiting_reason,
+                    "continuous": True,
+                    "continuous_progress": dict(continuous_progress),
+                    "heldout_status": "PROTECTED_NOT_USED_DURING_CONTINUOUS_TUNING",
+                    "economically_proven": False,
+                })
+                live_summary.update({
+                    "status": "RUNNING",
+                    "economic_result": economic_result,
+                    "historical_replay": historical_replay,
+                    "improvement_history": load_improvement_history(ROOT),
+                })
+                _atomic_text(
+                    report_dir / "resultat.json",
+                    json.dumps(live_summary, ensure_ascii=False, indent=2) + "\n",
+                )
+                _write_economic_html_report(report_dir, live_summary)
+                try:
+                    while True:
+                        time.sleep(1.0)
+                except KeyboardInterrupt:
+                    interrupted = True
+                    economic_result["status"] = "INTERRUPTED"
+                    economic_result["reason"] = "USER_CTRL_C_WHILE_WAITING_FOR_SAFE_EVIDENCE"
+                    continuous_progress["phase"] = "arrêt propre; aucun essai n'avait assez de données"
+                    economic_result["continuous_progress"] = dict(continuous_progress)
+                    overall_status = "INTERRUPTED"
+            if continuous:
+                latest_stats = dict(last_trial)
+                economic_result["train"] = {
+                    "daily_mean_net_pnl_usd": economic_result.get("best_train_daily_usd"),
+                    "statistics": {
+                        "net_pnl_usd": economic_result.get("best_train_net_total_usd"),
+                        "sample_count": economic_result.get("best_train_sample_count"),
+                    },
+                    "selection_score_metric": economic_result.get("best_train_score_metric"),
+                    "selection_score": economic_result.get("best_train_score"),
+                    "diagnostics": economic_result.get("best_train_diagnostics"),
+                    "parameter_neighbor_diagnostics": economic_result.get("parameter_neighbor_diagnostics") or [],
+                    "partial_fill_diagnostic": economic_result.get("partial_fill_diagnostic"),
+                }
+                economic_result["continuous_progress"] = dict(continuous_progress)
+                economic_result["trial_accounting"] = trial_accounting
+                economic_result["exploratory_freezes_created"] = exploratory_freeze_count
+                economic_result["candidates_tested"] = int(
+                    economic_result.get("candidates_tested_this_run") or 0
+                )
+                continuous_progress["phase"] = (
+                    "arrêt propre et checkpoint sauvegardé"
+                    if interrupted or overall_status == "INTERRUPTED"
+                    else "fin de recherche"
+                )
+            frozen_train_records = []
+            for improvement_index, improvement in enumerate(
+                economic_result.get("train_improvements") or [], start=1
+            ):
+                exploratory = {
+                    "freeze_created": True,
+                    "economically_proven": False,
+                    "status": "TRAIN_ONLY_EXPLORATORY_IMPROVEMENT",
+                    "selected_candidate": improvement.get("candidate"),
+                    "train": improvement.get("train"),
+                }
+                record = record_frozen_candidate(
+                    ROOT,
+                    f"{run_id}-train-{improvement_index:04d}",
+                    exploratory,
+                    current_copy_vault,
+                )
+                if record is not None:
+                    frozen_train_records.append(record)
+            if not continuous:
+                economic_result["exploratory_freezes_created"] = len(frozen_train_records)
+            economic_result["exploratory_freeze_records"] = frozen_train_records
             if economic_result.get("freeze_created") is True:
                 candidate = economic_result.get("selected_candidate")
                 candidate_path = report_dir / "CANDIDAT_GELE.json"
@@ -901,11 +1557,12 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
                     "candidate": candidate,
                 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 economic_result["candidate_freeze_path"] = str(candidate_path)
-                frozen_record = record_frozen_candidate(
-                    ROOT, run_id, economic_result, current_copy_vault
-                )
-                economic_result["immutable_history_record"] = frozen_record
-            if overall_status in {"UNMEASURABLE", "MORE_DATA"}:
+                if not continuous:
+                    frozen_record = record_frozen_candidate(
+                        ROOT, run_id, economic_result, current_copy_vault
+                    )
+                    economic_result["immutable_history_record"] = frozen_record
+            if overall_status in {"UNMEASURABLE", "MORE_DATA"} and dataset_root is None:
                 print(
                     "[4/4] Données récentes non rejouables : bascule sur le corpus historique exécutable...",
                     flush=True,
@@ -945,6 +1602,21 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
         freeze_verdict = "Une amélioration a passé TRAIN, VALIDATION, OOS et FORWARD à au moins +5 USD nets/jour."
     elif economic_result.get("freeze_created") is True:
         freeze_verdict = "Un candidat TRAIN a été gelé pour comparaison, mais il n'est PAS économiquement prouvé."
+    elif int(economic_result.get("exploratory_freezes_created") or 0) > 0:
+        latest_train_improvement = (economic_result.get("train_improvements") or [])[-1]
+        latest_statistics = dict((latest_train_improvement.get("train") or {}).get("statistics") or {})
+        latest_total = latest_statistics.get("net_pnl_usd")
+        latest_samples = int(latest_statistics.get("sample_count") or 0)
+        latest_text = (
+            "non mesurable"
+            if latest_total is None
+            else f"{float(latest_total):+.6f} USD au total sur {latest_samples} trade(s) TRAIN"
+        )
+        freeze_verdict = (
+            f"{int(economic_result.get('exploratory_freezes_created') or 0)} meilleurs scores "
+            f"successifs TRAIN ont été gelés; le meilleur reste {latest_text}. Aucune stratégie "
+            "améliorée n'est prouvée faute d'un échantillon VALIDATION/OOS/FORWARD suffisant."
+        )
     elif historical_replay.get("improvement_found") is True:
         freeze_verdict = (
             "Une amélioration exploratoire du replay historique TRAIN a été gelée de façon "
@@ -993,9 +1665,12 @@ def run_economic_lab(*, preflight_only: bool = False, tests_only: bool = False) 
         "",
         f"- Shards vérifiés : **{safe_inputs.get('verified_assets', 0)}**.",
         f"- Fills / carnets uniques : **{safe_inputs.get('unique_fills', 0)} / {safe_inputs.get('unique_books', 0)}**.",
+        f"- SHA catalogue SAFE : `{safe_inputs.get('catalog_sha256') or 'non renseigné'}`.",
+        f"- Empreinte corpus consommé : `{safe_inputs.get('selection_digest') or 'non renseignée'}`; octets décompressés : **{safe_inputs.get('selected_raw_bytes') or 0}**.",
         f"- Configurations réellement rejouées : **{economic_result.get('candidates_tested', 0)}**.",
         f"- Objectif : **{OBJECTIVE_USD_PER_DAY} USD nets/jour** avec **{PAPER_CAPITAL_USD} USD paper**.",
         f"- Candidat gelé : **{'OUI' if economic_result.get('freeze_created') else 'NON'}**.",
+        f"- Améliorations TRAIN conservées : **{economic_result.get('exploratory_freezes_created', 0)}**.",
         f"- Économiquement prouvé : **{'OUI' if economic_result.get('economically_proven') else 'NON'}**.",
         "",
         "## Groupes de tests",
@@ -1060,6 +1735,11 @@ def main(argv: list[str] | None = None) -> int:
         help="convertit les shards SAFE AlinaSync certifiés en workspace et lance la campagne",
     )
     parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="enchaîne les replays Copy-Vault TRAIN jusqu'à Ctrl+C avec checkpoint et HTML live",
+    )
+    parser.add_argument(
         "--legacy-local-economic", action="store_true",
         help="laboratoire economique historique Codex/Claude, opt-in et fail-closed",
     )
@@ -1073,6 +1753,13 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--safe-research est incompatible avec les autres modes")
         from tools.copy_vault_safe_bridge import SafeBridgeError, build_safe_copy_workspace
 
+        restore_code = _ensure_copy_vault_alinasync(ROOT)
+        if restore_code != 0:
+            print(
+                f"SAFE_RESEARCH_NO_GO: restauration AlinaSync Copy-Vault incomplète (code {restore_code})",
+                flush=True,
+            )
+            return 2
         try:
             safe_result = build_safe_copy_workspace(ROOT)
         except (SafeBridgeError, OSError, ValueError, TypeError) as exc:
@@ -1080,12 +1767,28 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(
             "ALINA_SAFE_SHARDS_CONSUMED=" + str(safe_result["selected_shards"])
-            + " | FILLS=" + str(safe_result["counts"]["copy_vault_fills"])
-            + " | L2=" + str(safe_result["counts"]["copy_vault_l2"]),
+            + " | FILLS_TOTAL=" + str(
+                safe_result["counts"].get("copy_vault_fills", 0)
+                + safe_result["counts"].get("copy_vault_snapshot", 0)
+            )
+            + " | FILLS_FORWARD=" + str(
+                safe_result["counts"].get("copy_vault_fills", 0)
+            )
+            + " | FILLS_HISTORICAL_TRAIN=" + str(
+                safe_result["counts"].get("copy_vault_snapshot", 0)
+            )
+            + " | L2=" + str(safe_result["counts"].get("copy_vault_l2", 0))
+            + " | CATALOG_SHA256=" + str(safe_result["catalog_sha256"])
+            + " | RAW_BYTES=" + str(safe_result["selected_raw_bytes"]),
             flush=True,
         )
-        args.research = True
-        args.dataset_root = Path(safe_result["workspace"])
+        return run_economic_lab(
+            dataset_root=Path(safe_result["workspace"]),
+            supplied_safe_inputs=safe_result,
+            continuous=args.continuous,
+        )
+    if args.continuous:
+        parser.error("--continuous nécessite --safe-research")
     if args.research:
         if args.preflight_only:
             parser.error("--research et --preflight-only sont incompatibles")

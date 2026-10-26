@@ -299,6 +299,17 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
             "registry_reused_shards": 7,
             "registry_recorded_shards": 3,
         },
+        "generated_at_utc": "2026-10-26T12:00:00Z",
+        "downloaded": 2,
+        "resumed_verified": 1,
+        "skipped_verified": 4,
+        "lfs_reused_verified": 3,
+        "asset_count": 10,
+        "source_asset_bytes": 1000,
+        "verified_asset_count": 10,
+        "verified_asset_bytes": 1000,
+        "unclaimed_dataset_release_count": 0,
+        "unclaimed_dataset_releases_sample": [],
     }), encoding="utf-8")
     def fresh_restore(*_a, **_k):
         report = report_dir / "RESTORE_REPORT.json"
@@ -319,6 +330,12 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     assert result["safe_backtestable_shards"] == 0
     assert result["registry_reused_shards"] == 7
     assert result["registry_recorded_shards"] == 3
+    assert result["restore_report_generated_at_utc"] == "2026-10-26T12:00:00Z"
+    assert result["assets_downloaded"] == 2
+    assert result["assets_resumed_verified"] == 1
+    assert result["assets_skipped_verified"] == 4
+    assert result["assets_lfs_reused_verified"] == 3
+    assert result["source_asset_bytes"] == result["verified_asset_bytes"] == 1000
 
 
 def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path):
@@ -348,6 +365,37 @@ def test_complete_status_is_rejected_without_exact_safe_materialization(tmp_path
 
     assert status == "RESTORE_INCOMPLETE"
     assert error == "restore report has no exact SAFE materialization parity"
+
+
+def test_complete_filtered_restore_accepts_exact_selected_family_parity(tmp_path):
+    module = _module()
+    report = tmp_path / "RESTORE_REPORT.json"
+    report.write_text(json.dumps({
+        "status": "REPLAY_READY_COMPLETE",
+        "repository": module.REPOSITORY,
+        "selection_families": ["copy_vault_fills", "copy_vault_l2"],
+        "source_inventory_sha256": "d" * 64,
+        "catalog_verification": {
+            "source_index_sha256": "e" * 64,
+            "safe_catalog_shards": 1_000,
+            "selection_families": ["copy_vault_fills", "copy_vault_l2"],
+        },
+        "classification": {
+            "expected_usable_shards": 12,
+            "usable_shards": 12,
+            "expected_usable_bytes": 345,
+            "usable_bytes": 345,
+            "materialization_complete": True,
+            "failures": [],
+        },
+    }), encoding="utf-8")
+
+    status, _inventory, error = module._read_restore_status(
+        report, expected_catalog_sha256="e" * 64,
+    )
+
+    assert status == "REPLAY_READY_COMPLETE"
+    assert error is None
 
 
 def test_incomplete_restore_never_advertises_replayable_registry_rows(tmp_path):
@@ -618,6 +666,12 @@ def test_catalog_budget_cli_does_not_touch_git_or_network(monkeypatch, tmp_path,
     assert module.main(["--catalog-budget"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "CATALOG_ONLY_NOT_RESTORED"
 
+
+def test_catalog_budget_rejects_ignored_family_filters(capsys):
+    module = _module()
+    assert module.main(["--catalog-budget", "--family", "copy_vault_l2"]) == 2
+    assert "--family is unsupported with --catalog-budget" in capsys.readouterr().err
+
 def test_explicit_preflight_never_downloads_market_payload(monkeypatch, tmp_path):
     module = _module()
     monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
@@ -637,10 +691,13 @@ def test_explicit_preflight_never_downloads_market_payload(monkeypatch, tmp_path
         calls.append(kwargs)
         return 0
     monkeypatch.setattr(module, "restore_published", preview_only)
-    assert module.main(["--preflight-only"]) == 0
+    assert module.main([
+        "--preflight-only", "--family", "copy_vault_fills", "--family", "copy_vault_l2",
+    ]) == 0
     assert len(calls) == 1
     assert calls[0]["preflight"] is True
     assert calls[0]["max_download_gib"] is None
+    assert calls[0]["selected_families"] == ("copy_vault_fills", "copy_vault_l2")
     checkpoint = json.loads((report_dir / "SYNC_REPORT.json").read_text(encoding="utf-8"))
     assert checkpoint["status"] == "RESTORE_INCOMPLETE"
     assert checkpoint["market_payload_download_opt_in"] is False
@@ -660,6 +717,27 @@ def test_download_safe_forwards_hard_limit_and_rejects_invalid_limit(monkeypatch
     assert "--everything" not in commands[0]
     with pytest.raises(module.SyncError, match="download cap"):
         module.restore_published(tmp_path, max_download_gib=0)
+
+
+def test_restore_published_forwards_copy_vault_family_scope(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setenv("GH_TOKEN", "token-for-test")
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.restore_published(
+        tmp_path,
+        max_download_gib=1,
+        selected_families=("copy_vault_fills", "copy_vault_l2"),
+    ) == 0
+    command = commands[0]
+    assert command.count("--family") == 2
+    assert "copy_vault_fills" in command
+    assert "copy_vault_l2" in command
 
 def test_all_safe_delegates_unlimited_download_to_restore_engine(monkeypatch, tmp_path):
     module = _module()

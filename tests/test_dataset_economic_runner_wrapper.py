@@ -7,17 +7,18 @@ WRAPPER = ROOT / "tools" / "run_dataset_economic_campaigns.py"
 ANALYSER = ROOT / "ANALYSER_DONNEES_HYPERSMART.cmd"
 
 
-def test_wrapper_full_cold_installe_les_adaptateurs_et_la_provenance_complete() -> None:
+def test_wrapper_full_cold_reste_copy_vault_only_et_garde_la_provenance_complete() -> None:
     text = WRAPPER.read_text(encoding="utf-8", errors="replace")
     assert "install_copy_vault_adapter" in text
-    assert "install_cross_venue_adapter" in text
+    assert "install_cross_venue_adapter(" not in text
     assert "write_economic_source_coverage" in text
     # La provenance FULL/COLD doit être injectée dans une copie isolée des
     # globals du runner canonique : aucun monkeypatch global durable n'est admis.
     assert 'environment["dataset_provenance"] = provenance_builder' in text
     assert "canonical.dataset_provenance = dataset_provenance" not in text
     assert 'result["canonical_globals_mutated"] = False' in text
-    assert "load_family_source_paths(data_root, \"lead_lag\")" in text
+    assert 'copy_vault_only=True' in text
+    assert 'load_family_source_paths(data_root, "lead_lag")' not in text
     assert "start_collection=False" in text
     assert "--no-start-collection est obligatoire" in text
     assert "/exchange" not in text.casefold()

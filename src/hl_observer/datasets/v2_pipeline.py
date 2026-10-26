@@ -31,6 +31,8 @@ _MATCHED_RECONCILIATION_FAMILIES = {
     "fills",
     "userfills",
     "user_fills",
+    "copy_vault_fills",
+    "copy_vault_snapshot",
 }
 
 
@@ -171,6 +173,19 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     }
     family = str(manifest.get("family") or "").lower()
     if family in _MATCHED_RECONCILIATION_FAMILIES:
+        if family in {"copy_vault_fills", "copy_vault_snapshot"} and "https" in transports:
+            history_flag = (
+                provenance.get("history_bootstrap")
+                if isinstance(provenance, Mapping) else None
+            )
+            if not (
+                isinstance(provenance, Mapping)
+                and provenance.get("request_type") == "userFillsByTime"
+                and provenance.get("window_reconciliation_complete") is True
+                and isinstance(history_flag, bool)
+                and (family != "copy_vault_snapshot" or history_flag is True)
+            ):
+                reasons.append("COPY_VAULT_REST_WINDOW_NOT_VERIFIED")
         if reconciliation_status in {"MATCHED", "SOURCE_CONTINUITY_VERIFIED"}:
             pass
         elif reconciliation_status in {"MISMATCH", "ERROR", "REJECT"}:

@@ -15,3 +15,4 @@ def test_dataset_economic_runner_ne_monkeypatch_plus_le_module_canonique() -> No
     assert 'environment["_tool"] = tool_loader' in text
     assert 'environment["dataset_provenance"] = provenance_builder' in text
     assert 'result["canonical_globals_mutated"] = False' in text
+    assert "copy_vault_only=True" in text

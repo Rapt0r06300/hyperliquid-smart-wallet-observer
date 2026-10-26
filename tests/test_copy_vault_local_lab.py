@@ -6,12 +6,41 @@ import json
 from pathlib import Path
 
 from hl_observer.backtesting.copy_vault_local_lab import (
+    _count_temporally_aligned_signals,
+    _research_grid,
     _historical_train_proxy,
     load_improvement_history,
     materialize_safe_workspace,
     record_frozen_candidate,
     run_historical_trade_replay,
 )
+
+
+def test_temporal_alignment_uses_reconstructed_metaorders_without_action_field() -> None:
+    metaorders = [
+        {"coin": "BTC", "signal_ts_ms": 10_000},
+        {"coin": "ETH", "signal_ts_ms": 20_000},
+    ]
+    books = {
+        "BTC": [{"ts_ms": 9_000}],
+        "ETH": [{"ts_ms": 1_000}],
+    }
+
+    assert _count_temporally_aligned_signals(metaorders, books, max_lag_ms=5_000) == 1
+
+
+def test_research_grid_is_deep_capital_bounded_and_searches_real_horizons() -> None:
+    grid = _research_grid()
+
+    assert len(grid) > 10_000
+    assert len(grid) == len({json.dumps(row, sort_keys=True) for row in grid})
+    assert {row["horizon_ms"] for row in grid} == {
+        5_000, 10_000, 15_000, 30_000, 60_000, 120_000,
+    }
+    assert all(
+        row["core_notional_usd"] + row["probe_notional_usd"] <= 200.0
+        for row in grid
+    )
 
 
 def _write_gzip(path: Path, row: dict) -> tuple[int, str]:
