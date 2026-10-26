@@ -1,7 +1,6 @@
 {
   "backlog_by_kind": {
     "copy_vault_collection": 295,
-    "event_intelligence_collection": 1,
     "market_collection": 23
   },
   "by_family": {
@@ -43613,15 +43612,13 @@
     "copy_vault_collection:PENDING": 290,
     "copy_vault_collection:STUCK": 5,
     "event_intelligence_collection:COMPLETE": 47,
-    "event_intelligence_collection:FAILED": 45,
+    "event_intelligence_collection:FAILED": 46,
     "event_intelligence_collection:PARTIAL": 32,
-    "event_intelligence_collection:PENDING": 1,
     "event_intelligence_collection:UNAVAILABLE": 24,
     "forward_paper:COMPLETE": 1,
-    "market_collection:COMPLETE": 1972,
+    "market_collection:COMPLETE": 1973,
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 23,
-    "market_collection:RUNNING": 1,
     "market_collection:UNAVAILABLE": 376,
     "module_pnl_proof:COMPLETE": 1,
     "official_archive_collection:COMPLETE": 10,
@@ -63702,11 +63699,11 @@
       "campaign_id": "event-e8-2026102600-v5",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "event_intelligence_collection",
-      "last_checkpoint_id": null,
+      "last_checkpoint_id": "5d96775db95cb9822d9f8ef587e1484aa777baa592423c6bb9acaf5610242658",
       "lease": null,
       "lease_expires_at": null,
       "lease_owner": null,
@@ -63714,9 +63711,9 @@
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "PENDING",
-      "status_reason": "created",
-      "updated_at": "2026-10-26T00:11:04.893022Z"
+      "status": "FAILED",
+      "status_reason": "adapter_failed",
+      "updated_at": "2026-10-26T03:01:30.329351Z"
     },
     {
       "analysis_stage": null,
@@ -105414,26 +105411,21 @@
       "campaign_id": "market-e8-5-2026102600-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "market_collection",
-      "last_checkpoint_id": null,
-      "lease": {
-        "acquired_at": "2026-10-26T01:32:52.219094Z",
-        "expires_at": "2026-10-26T07:17:52.219094Z",
-        "lease_token_sha256": "d7425f17250c1e0f0306a415f77c89595fb25adf090a5b670f112b0429854b4f",
-        "owner_run_id": "40247840512"
-      },
-      "lease_expires_at": "2026-10-26T07:17:52.219094Z",
-      "lease_owner": "40247840512",
+      "last_checkpoint_id": "aabfe7f5bfb6446470adad59488b96461f7a00a15dbad4c0dc1ce62f7d320351",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
       "next_due_at": null,
       "no_progress_count": 0,
       "phase_epoch": 8,
       "source_collection_epoch": null,
-      "status": "RUNNING",
-      "status_reason": "worker_started",
-      "updated_at": "2026-10-26T01:32:52.219159Z"
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-26T02:47:55.926347Z"
     },
     {
       "analysis_stage": null,
@@ -116187,13 +116179,13 @@
     "unique_trade_count_exact": false,
     "valid_record_count_exact": false
   },
-  "dataset_commit": "b8cd69d9b8d200ed93a2821cb3b8fc336ead79e4",
-  "metrics_digest": "ab76ce70b9b0f0837017dcf0475e42e90f7b6d6bc616798ee404d1d348f95812",
+  "dataset_commit": "dd5945d3bb417c97466336713200d90bf4c57da9",
+  "metrics_digest": "ef1296997987b105e639b04e52c072301a27ca88d76cb0c9f34889f7aab6103a",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
   "oldest_next_due_at": "2026-10-02T18:10:03.324968Z",
   "oldest_pending_updated_at": "2026-10-01T04:38:09.193828Z",
-  "pending_campaign_count": 314,
+  "pending_campaign_count": 313,
   "phase": {
     "analysis_stage": null,
     "collection_cutoff_at_utc": null,
@@ -116210,7 +116202,7 @@
     "mismatches": [],
     "status": "CONSISTENT"
   },
-  "receipt_digest": "068fb12bb55dfa1d20c063964837448a5092ae80077c8982ef7d554c2052cff4",
+  "receipt_digest": "c0a64e4b739dec273ba750610e9f543d297bd9ad6bd8700aec8466814439efca",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "REPLAYABLE_BUT_PARTIAL": 45319,
@@ -116257,7 +116249,7 @@
   ],
   "totals": {
     "GAP_COUNT_COVERAGE_COMPLETE": false,
-    "GAP_COUNT_MISSING_SHARDS": 55392,
+    "GAP_COUNT_MISSING_SHARDS": 33559,
     "GLOBAL_UNIQUE_FAILURE_REASON_COUNT": 0,
     "GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE": false,
     "GLOBAL_UNIQUE_TRADE_IDENTITY_DIGEST": null,
@@ -116272,7 +116264,7 @@
     "TOTAL_COMPRESSED_BYTES": 165970432831,
     "TOTAL_CROSS_SHARD_OVERLAP_TRADES": 0,
     "TOTAL_DUPLICATE_RECORDS": 0,
-    "TOTAL_GAP_RECORDS": 0,
+    "TOTAL_GAP_RECORDS": 23217875,
     "TOTAL_INVALID_RECORDS": 0,
     "TOTAL_L2_RECORDS": 356536967,
     "TOTAL_QUARANTINED_RECORDS": 57380372,
