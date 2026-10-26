@@ -491,6 +491,7 @@ def test_code_ci_workflows_use_sparse_checkouts_without_market_data_payloads() -
     }
     required_code_dirs = (
         ".github",
+        "docs",
         "src",
         "tests",
         "tools",
