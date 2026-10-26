@@ -1,23 +1,40 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "archives-binance-btc-e8-20261026-v4",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "bdec024143ec37cdc4d95cdb6ec59c0891758693",
+  "code_sha": "85d4a1dc6eddcb807bcd632af96b34ac00d17fd1",
   "collection_cutoff_at_utc": null,
   "completed_units": {
     "0": {
       "result": {
-        "command": [
-          "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
-          "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_official_archive_backfill.py",
-          "--venue",
-          "binance"
-        ],
-        "failure_category": "QUALITY",
-        "phase": "unit",
+        "collection_metrics": {
+          "accepted_frames": 0,
+          "basis": "published_bundle_manifests",
+          "bbo_frames": 0,
+          "compressed_bytes": 0,
+          "duration_s": 1.0,
+          "ended_at_ms": 0,
+          "l2_frames": 0,
+          "partial_count": 0,
+          "persisted_frames": 0,
+          "queue_drops": 0,
+          "record_count_observed": 0,
+          "reject_count": 0,
+          "safe_count": 0,
+          "shard_count": 0,
+          "started_at_ms": 0,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 0,
+          "trade_shard_count": 0,
+          "trade_shards_exact": 0,
+          "uncompressed_bytes": 0,
+          "uncompressed_size_coverage_complete": true
+        },
+        "failure_category": "DATA_AVAILABILITY",
+        "output_root": "/home/runner/work/_temp/campaign-output/archives-binance-btc-e8-20261026-v4/0/bundle",
         "phases": [
           {
             "analysis_stage": null,
@@ -28,18 +45,15 @@
               "binance"
             ],
             "name": "unit",
-            "returncode": 1,
-            "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_official_archive_backfill.py\", line 149, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_official_archive_backfill.py\", line 57, in main\n    result = fetch_official_archive_stream(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/data_sources/official_archive_backfill.py\", line 137, in fetch_official_archive_stream\n    payload = _bounded_download(getter, url, max_compressed_bytes)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/data_sources/official_archive_backfill.py\", line 673, in _bounded_download\n    payload = fetch_bytes(url)\n              ^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/data_sources/official_archive_backfill.py\", line 685, in _http_get_bytes\n    response.raise_for_status()\n  File \"/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/httpx/_models.py\", line 829, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '404 Not Found' for url 'https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-10-25.zip'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\n",
-            "stdout": ""
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "{\n  \"archives\": [\n    {\n      \"checksum_verified\": true,\n      \"coin\": \"BTC\",\n      \"compressed_sha256\": \"6b27f3bb931cb794ebdf667883fa3f543bf894b4a2490fa9f2065cb12f40c7a7\",\n      \"date\": \"2026-10-25\",\n      \"event_count\": 551845,\n      \"first_exchange_ts_ms\": 1792886400003,\n      \"last_exchange_ts_ms\": 1792972799904,\n      \"source_url\": \"https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-10-25.zip\",\n      \"stream_type\": \"aggTrades\",\n      \"symbol\": \"BTCUSDT\",\n      \"timestamp_semantics\": \"historical_exchange_time_only\",\n      \"venue\": \"binance\"\n    }\n  ],\n  \"bundle_partial_count\": 0,\n  \"bundle_path\": \"/home/runner/work/_temp/campaign-output/archives-binance-btc-e8-20261026-v4/0/bundle\",\n  \"bundle_safe_count\": 0,\n  \"bundle_shard_count\": 0,\n  \"coin\": \"BTC\",\n  \"end_date\": \"2026-10-25\",\n  \"event_count\": 551845,\n  \"raw_shard_count\": 4,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.official_archive_backfill.v1\",\n  \"start_date\": \"2026-10-25\",\n  \"symbol\": \"BTCUSDT\",\n  \"venue\": \"binance\"\n}\n"
           }
         ],
-        "reason": "adapter_failed",
-        "returncode": 1,
-        "status": "FAILED",
-        "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_official_archive_backfill.py\", line 149, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_official_archive_backfill.py\", line 57, in main\n    result = fetch_official_archive_stream(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/data_sources/official_archive_backfill.py\", line 137, in fetch_official_archive_stream\n    payload = _bounded_download(getter, url, max_compressed_bytes)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/data_sources/official_archive_backfill.py\", line 673, in _bounded_download\n    payload = fetch_bytes(url)\n              ^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/src/hl_observer/data_sources/official_archive_backfill.py\", line 685, in _http_get_bytes\n    response.raise_for_status()\n  File \"/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/httpx/_models.py\", line 829, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '404 Not Found' for url 'https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-10-25.zip'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\n",
-        "stdout": ""
+        "reason": "no_durable_collection_events",
+        "status": "UNAVAILABLE"
       },
-      "sha256": "3b8b5e0a62d44b1b24cefb3e6d42d329dba9383bc2ec9f4bd1f539b97cdb8ed9"
+      "sha256": "9a5b4dd80385921d325a8abeb68b98715e06c89de328984b9bbc35cf49647011"
     }
   },
   "config_sha256": "f61897e96f46d52642f015e45007dc451557ea67cf8c362e9211bdaf761c4bc9",
@@ -47,13 +61,13 @@
   "created_at": "2026-10-26T06:04:20.097853+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "3b8b5e0a62d44b1b24cefb3e6d42d329dba9383bc2ec9f4bd1f539b97cdb8ed9",
+    "checkpoint_id": "9a5b4dd80385921d325a8abeb68b98715e06c89de328984b9bbc35cf49647011",
     "coin": "BTC",
     "end_date": "2026-10-25",
     "generation": 0,
     "handoff_generation": null,
     "handoff_phase_epoch": 8,
-    "last_run_id": "40277436552",
+    "last_run_id": "40325580351",
     "max_days": 1,
     "predecessor_run_id": null,
     "requested_handoff_at_utc": null,
@@ -81,6 +95,27 @@
       "from": "RUNNING",
       "reason": "adapter_failed",
       "to": "FAILED"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/archives-binance-btc-e8-20261026-v4.failed.bdec024143ec.598612f04b0c1e8ad19cd8f666174345bba3a3982800aeb46353a22ff2bec356.json",
+      "archived_manifest_sha256": "598612f04b0c1e8ad19cd8f666174345bba3a3982800aeb46353a22ff2bec356",
+      "at": "2026-10-26T12:52:41.719524Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "bdec024143ec37cdc4d95cdb6ec59c0891758693",
+      "prior_status": "FAILED",
+      "prior_status_reason": "adapter_failed"
+    },
+    {
+      "at": "2026-10-26T13:12:16.848663Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-26T13:13:54.167883Z",
+      "from": "RUNNING",
+      "reason": "no_durable_collection_events",
+      "to": "UNAVAILABLE"
     }
   ],
   "kind": "official_archive_collection",
@@ -102,9 +137,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "FAILED",
-  "status_reason": "adapter_failed",
-  "terminal_evidence_digest": "257f34569543c2eb1540bca373d9d4144d49b6fd40779878ffc03e231125c31a",
-  "updated_at": "2026-10-26T06:14:13.607727Z",
+  "status": "UNAVAILABLE",
+  "status_reason": "no_durable_collection_events",
+  "terminal_evidence_digest": "3781242728a53f0361b61388db58005cf9d29afc8d4d82ee2e941f1bb5fca40c",
+  "updated_at": "2026-10-26T13:13:54.167883Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
