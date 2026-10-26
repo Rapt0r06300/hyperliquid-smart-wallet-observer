@@ -50,7 +50,9 @@ def plan_de_requetes(start_ms: int, end_ms: int, *, fenetre_ms: int = 24 * MS_PA
 
 # ─────────────────────────────── parsing ───────────────────────────────
 
-def parser_fills(rep: Any, *, vault: str = "") -> list[dict]:
+def parser_fills(
+    rep: Any, *, vault: str = "", include_raw: bool = False,
+) -> list[dict]:
     """Normalise une réponse userFills(ByTime) → fills propres. Champs HL : time, coin, px, sz, side
     ('B'/'A'), dir ('Open Long'/'Close Short'/…), startPosition, oid, hash. Illisible → ignoré."""
     out: list[dict] = []
@@ -69,9 +71,12 @@ def parser_fills(rep: Any, *, vault: str = "") -> list[dict]:
             start_pos = float(f.get("startPosition"))
         except (TypeError, ValueError):
             start_pos = None
-        out.append({"vault": vault_id, "ts_ms": ts, "coin": coin, "px": px, "sz": sz, "signe": signe,
-                    "dir": str(f.get("dir") or ""), "start_position": start_pos,
-                    "tid": f.get("tid"), "oid": f.get("oid"), "hash": f.get("hash")})
+        parsed = {"vault": vault_id, "ts_ms": ts, "coin": coin, "px": px, "sz": sz, "signe": signe,
+                  "dir": str(f.get("dir") or ""), "start_position": start_pos,
+                  "tid": f.get("tid"), "oid": f.get("oid"), "hash": f.get("hash")}
+        if include_raw:
+            parsed["raw_fill"] = dict(f)
+        out.append(parsed)
     return out
 
 

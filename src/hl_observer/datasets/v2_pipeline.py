@@ -21,6 +21,7 @@ _SNAPSHOT_CHANNELS = {
     "instrument_metadata",
     "copy_vault_positions",
     "copy_vault_selection",
+    "copy_vault_snapshot",
     "open_interest",
     "funding_settlement",
     "clock_sync",
@@ -67,6 +68,13 @@ def infer_reconciliation_status(manifest: Mapping[str, Any]) -> str:
                 for value in (provenance.get("timestamp_semantics") or [])
             }
             if "receive_observation_time_only" not in semantics:
+                return "UNVERIFIED"
+        if family == "copy_vault_snapshot":
+            semantics = {
+                str(value).lower()
+                for value in (provenance.get("timestamp_semantics") or [])
+            }
+            if "causal_event_availability" not in semantics:
                 return "UNVERIFIED"
         return "SNAPSHOT_VERIFIED"
     if transports.intersection(_WS_TRANSPORTS) and connection_count == 1 and clean:

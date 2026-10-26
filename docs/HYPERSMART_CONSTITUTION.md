@@ -9,7 +9,7 @@ En cas de contradiction, appliquer cet ordre strict :
 
 1. `SECURITY.md` ;
 2. `docs/HYPERSMART_CONSTITUTION.md` ;
-3. scope et contrats machine du HEAD exact, notamment `schema/active_scope.json`, tests, gates, manifests et registres générés ;
+3. scope et contrats machine du HEAD exact, notamment `src/hl_observer/strategies/active_scope.py`, tests, gates, manifests et registres générés ;
 4. règles opératoires actives des agents : `AGENTS.md` et `docs/CODEX_GOAL_RUNBOOK.md` ;
 5. lois mesurées : `docs/LOIS_MESUREES.md` ;
 6. état descriptif courant : `docs/CURRENT_STATE.md` ;

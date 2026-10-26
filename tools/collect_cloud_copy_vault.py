@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import gzip
 import hashlib
 import json
 import shutil
@@ -22,8 +21,9 @@ import sys
 import time
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import httpx
 import websockets
@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "src"))
 
 import collecter_vaults as CV  # noqa: E402
+
 from hl_observer.collection.partitioned_tick_dataset import (  # noqa: E402
     PartitionedTickDatasetWriter,
 )
@@ -51,10 +52,10 @@ from hl_observer.datasets.v2_export import (  # noqa: E402
 from hl_observer.datasets.v2_pipeline import (  # noqa: E402
     V2_REPOSITORY,
     V2_SCHEMA,
-    infer_reconciliation_status,
-    finalize_manifest,
-    locally_replay_admissible,
     admission_rejection,
+    finalize_manifest,
+    infer_reconciliation_status,
+    locally_replay_admissible,
     summarize_admission_rejections,
 )
 from hl_observer.realtime.feed_quality import FeedEventKind  # noqa: E402
@@ -65,12 +66,54 @@ MAX_SUBSCRIPTIONS_PER_SOCKET = 5
 MAX_UNIQUE_USERS_PER_IP = 10
 MAX_RECONCILIATION_REQUESTS_PER_VAULT = 512
 RECONCILIATION_PER_VAULT_TIMEOUT_S = 90.0
-# clearinghouseState has official weight 2 under a shared 1200 weight/min/IP
-# REST budget. 0.14s/request ~= 857 weight/min, leaving safety headroom.
+# Hyperliquid shares the 1200 weight/minute REST limit across /info calls.
+# Keep this collector's coordinated budget at 1080 to leave recovery headroom.
+REST_WEIGHT_BUDGET_PER_MINUTE = 1_080
 BROAD_SWEEP_REQUEST_INTERVAL_S = 0.14
 BROAD_SWEEP_CONCURRENCY = 8
 MAX_PRIORITY_WS_VAULTS = 10
 PRIORITY_AUDIT_ROTATION_SLOTS = 2
+DEFAULT_HISTORY_LOOKBACK_HOURS = 72.0
+MAX_HISTORY_LOOKBACK_HOURS = 72.0
+MAX_PUBLIC_USERFILLS = 10_000
+MAX_USERFILLS_RESPONSE_WEIGHT = 20 + CAP_USERFILLS // 20
+
+
+class RestWeightPacer:
+    """Coordinate this collector's public /info requests under one weight budget."""
+
+    def __init__(
+        self,
+        *,
+        budget_weight_per_minute: int = REST_WEIGHT_BUDGET_PER_MINUTE,
+        monotonic_fn: Any = time.monotonic,
+        sleep_fn: Any = asyncio.sleep,
+    ) -> None:
+        budget = int(budget_weight_per_minute)
+        if not 1 <= budget <= 1_200:
+            raise ValueError("REST weight budget must be in 1..1200 per minute")
+        self.budget_weight_per_minute = budget
+        self._monotonic = monotonic_fn
+        self._sleep = sleep_fn
+        self._next_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def acquire_weight(self, weight: int) -> None:
+        requested = max(1, int(weight))
+        async with self._lock:
+            now = float(self._monotonic())
+            delay = max(0.0, self._next_at - now)
+            if delay > 0:
+                await self._sleep(delay)
+            now = float(self._monotonic())
+            self._next_at = max(now, self._next_at) + (
+                60.0 * requested / self.budget_weight_per_minute
+            )
+
+    async def before_request(self) -> None:
+        # Reserve the maximum possible weight before sending to stay safe when
+        # several large responses arrive concurrently (20 + 2000 / 20).
+        await self.acquire_weight(MAX_USERFILLS_RESPONSE_WEIGHT)
 
 
 class AsyncTickSink:
@@ -368,9 +411,14 @@ async def _dynamic_l2_collector(
                 subscribed: set[str] = set()
                 send_lock = asyncio.Lock()
 
-                async def send_json(payload: Mapping[str, Any]) -> None:
-                    async with send_lock:
-                        await socket.send(json.dumps(dict(payload)))
+                async def send_json(
+                    payload: Mapping[str, Any],
+                    *,
+                    _send_lock: asyncio.Lock = send_lock,
+                    _socket: Any = socket,
+                ) -> None:
+                    async with _send_lock:
+                        await _socket.send(json.dumps(dict(payload)))
 
                 for coin in sorted(known_coins):
                     await send_json(
@@ -382,12 +430,17 @@ async def _dynamic_l2_collector(
                     subscribed.add(coin)
                     await asyncio.sleep(0.03)
 
-                async def sender() -> None:
+                async def sender(
+                    *,
+                    _subscriptions: set[str] = subscribed,
+                    _queue: asyncio.Queue[str] = request_queue,
+                    _send: Any = send_json,
+                ) -> None:
                     while True:
-                        coin = str(await request_queue.get()).strip().upper()
+                        coin = str(await _queue.get()).strip().upper()
                         try:
-                            if coin and coin not in subscribed:
-                                await send_json(
+                            if coin and coin not in _subscriptions:
+                                await _send(
                                     {
                                         "method": "subscribe",
                                         "subscription": {
@@ -396,9 +449,9 @@ async def _dynamic_l2_collector(
                                         },
                                     }
                                 )
-                                subscribed.add(coin)
+                                _subscriptions.add(coin)
                         finally:
-                            request_queue.task_done()
+                            _queue.task_done()
 
                 async def heartbeat() -> None:
                     while True:
@@ -569,6 +622,7 @@ async def collect_broad_state(
     request_interval_s: float = BROAD_SWEEP_REQUEST_INTERVAL_S,
     concurrency: int = BROAD_SWEEP_CONCURRENCY,
     http_client: httpx.AsyncClient | None = None,
+    pacer: RestWeightPacer | None = None,
 ) -> dict[str, Any]:
     """Rate-budgeted complete-universe clearinghouseState sweep.
 
@@ -595,8 +649,11 @@ async def collect_broad_state(
         async with semaphore:
             last_error = "UNKNOWN"
             for attempt in range(2):
-                await gate.wait()
+                if pacer is None:
+                    await gate.wait()
                 try:
+                    if pacer is not None:
+                        await pacer.acquire_weight(2)
                     response = await client.post(
                         "/info",
                         json={"type": "clearinghouseState", "user": vault},
@@ -700,7 +757,7 @@ def select_priority_ws_vaults(
     remaining = [address for address in observed if address not in selected]
     remaining.sort(
         key=lambda address: hashlib.sha256(
-            f"{rotation_seed}|{address}".encode("utf-8")
+            f"{rotation_seed}|{address}".encode()
         ).hexdigest()
     )
     selected.extend(remaining[: max(0, limit - len(selected))])
@@ -735,6 +792,7 @@ async def collect_position_snapshots(
     sink: AsyncTickSink,
     *,
     phase: str,
+    pacer: RestWeightPacer | None = None,
 ) -> int:
     """Capture public clearinghouse state as a leader-position anchor."""
     semaphore = asyncio.Semaphore(8)
@@ -748,6 +806,8 @@ async def collect_position_snapshots(
             async with semaphore:
                 sent_ms = int(time.time() * 1_000)
                 try:
+                    if pacer is not None:
+                        await pacer.acquire_weight(2)
                     response = await client.post(
                         "/info",
                         json={"type": "clearinghouseState", "user": vault},
@@ -823,9 +883,14 @@ async def _socket_group(
             ) as socket:
                 send_lock = asyncio.Lock()
 
-                async def send_json(payload: Mapping[str, Any]) -> None:
-                    async with send_lock:
-                        await socket.send(json.dumps(dict(payload)))
+                async def send_json(
+                    payload: Mapping[str, Any],
+                    *,
+                    _send_lock: asyncio.Lock = send_lock,
+                    _socket: Any = socket,
+                ) -> None:
+                    async with _send_lock:
+                        await _socket.send(json.dumps(dict(payload)))
 
                 for vault in vaults:
                     await send_json(
@@ -951,6 +1016,7 @@ async def exact_window_backfill(
     end_ms: int,
     min_window_ms: int = 1_000,
     max_requests: int = MAX_RECONCILIATION_REQUESTS_PER_VAULT,
+    pacer: RestWeightPacer | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Adaptive exact-window REST reconciliation using the 2,000 response cap."""
     pending: deque[tuple[int, int]] = deque([(int(start_ms), int(end_ms))])
@@ -960,6 +1026,7 @@ async def exact_window_backfill(
     requests = 0
     splits = 0
     request_budget_exhausted = False
+    invalid_fill_count = 0
 
     while pending:
         if requests >= max(1, int(max_requests)):
@@ -968,6 +1035,8 @@ async def exact_window_backfill(
         left, right = pending.popleft()
         requests += 1
         try:
+            if pacer is not None:
+                await pacer.before_request()
             raw = await _post_userfills(client, vault, left, right)
         except Exception as exc:
             failures.append(
@@ -989,20 +1058,34 @@ async def exact_window_backfill(
                         "cap": CAP_USERFILLS,
                     }
                 )
-                accepted.extend(parser_fills(raw, vault=vault))
+                parsed = parser_fills(raw, vault=vault, include_raw=True)
+                invalid_fill_count += len(raw) - len(parsed)
+                accepted.extend(parsed)
                 continue
             middle = left + max(1, span // 2)
             pending.appendleft((middle, right))
             pending.appendleft((left, middle))
             splits += 1
             continue
-        accepted.extend(parser_fills(raw, vault=vault))
+        parsed = parser_fills(raw, vault=vault, include_raw=True)
+        invalid_fill_count += len(raw) - len(parsed)
+        accepted.extend(parsed)
 
     rows = dedupliquer(accepted)
+    retention_cap_reached = len(rows) >= MAX_PUBLIC_USERFILLS
+    fill_times = [
+        int(row["ts_ms"])
+        for row in rows
+        if type(row.get("ts_ms")) is int and int(row["ts_ms"]) > 0
+    ]
     return rows, {
         "status": (
             "COMPLETE"
-            if not failures and not capped_minimum and not request_budget_exhausted
+            if not failures
+            and not capped_minimum
+            and not request_budget_exhausted
+            and not invalid_fill_count
+            and not retention_cap_reached
             else "PARTIAL"
         ),
         "requested_start_ms": int(start_ms),
@@ -1013,8 +1096,85 @@ async def exact_window_backfill(
         "cap_blocked_windows": capped_minimum,
         "request_budget_exhausted": request_budget_exhausted,
         "pending_windows": len(pending),
+        "invalid_fill_count": invalid_fill_count,
+        "retention_cap_reached": retention_cap_reached,
+        "oldest_fill_ts_ms": min(fill_times) if fill_times else None,
+        "newest_fill_ts_ms": max(fill_times) if fill_times else None,
         "rows": len(rows),
     }
+
+
+def rest_backfill_envelopes(
+    rows: list[Mapping[str, Any]],
+    *,
+    vault: str,
+    audit: Mapping[str, Any],
+    receive_wall_ms: int,
+    receive_mono_ns: int,
+) -> list[TickEnvelope]:
+    """Preserve exact public REST fills as historical snapshots, never forward signals."""
+    vault_id = str(vault or "").strip().lower()
+    if not vault_id or int(receive_wall_ms) <= 0 or int(receive_mono_ns) <= 0:
+        raise ValueError("historical backfill requires vault and receive clocks")
+    raw_fills: list[dict[str, Any]] = []
+    for row in rows:
+        raw = row.get("raw_fill") if isinstance(row, Mapping) else None
+        if not isinstance(raw, Mapping):
+            raise ValueError("historical backfill is missing its original fill payload")
+        try:
+            event_ms = int(raw["time"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("historical fill is missing its exchange timestamp") from exc
+        if not 0 < event_ms <= int(receive_wall_ms):
+            raise ValueError("historical fill timestamp is future or invalid")
+        raw_fills.append(dict(raw))
+
+    envelopes: list[TickEnvelope] = []
+    for offset in range(0, len(raw_fills), CAP_USERFILLS):
+        batch = raw_fills[offset : offset + CAP_USERFILLS]
+        exchange_ts_ms = max(int(fill["time"]) for fill in batch)
+        envelopes.append(
+            TickEnvelope(
+                source_id="hyperliquid_public_userfills_backfill",
+                channel="copy_vault_snapshot",
+                instrument=vault_id,
+                event_kind=FeedEventKind.SNAPSHOT,
+                raw_payload={
+                    "channel": "userFills",
+                    "data": {
+                        "user": vault_id,
+                        "isSnapshot": True,
+                        "fills": batch,
+                    },
+                    "backfill_audit": dict(audit),
+                },
+                exchange_ts_ms=exchange_ts_ms,
+                received_ts_ms=int(receive_wall_ms),
+                local_monotonic_ns=int(receive_mono_ns),
+                connection_id=None,
+                sequence=None,
+                provenance={
+                    "url": INFO_URL,
+                    "network": "mainnet",
+                    "access": "read_only",
+                    "transport": "https",
+                    "authenticated": False,
+                    "request_type": "userFillsByTime",
+                    "forward_evidence_allowed": False,
+                    "historical_only": True,
+                    "timestamp_semantics": "causal_event_availability",
+                },
+                parsed_summary={
+                    "event_count": len(batch),
+                    "fill_count": len(batch),
+                    "is_snapshot": True,
+                    "historical_only": True,
+                    "backfill_status": str(audit.get("status") or "UNAVAILABLE"),
+                    "batch_index": offset // CAP_USERFILLS,
+                },
+            )
+        )
+    return envelopes
 
 
 async def reconcile_forward_window(
@@ -1023,6 +1183,7 @@ async def reconcile_forward_window(
     start_ms_by_vault: Mapping[str, int],
     end_ms: int,
     live_ids: Mapping[str, set[str]],
+    pacer: RestWeightPacer | None = None,
 ) -> dict[str, dict[str, Any]]:
     reports: dict[str, dict[str, Any]] = {}
     async with httpx.AsyncClient(
@@ -1056,6 +1217,7 @@ async def reconcile_forward_window(
                         vault,
                         start_ms=int(start_ms),
                         end_ms=end_ms,
+                        pacer=pacer,
                     ),
                     timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
                 )
@@ -1108,6 +1270,195 @@ async def reconcile_forward_window(
     return reports
 
 
+async def collect_historical_backfills(
+    vaults: list[str],
+    *,
+    selection_ts_ms: int,
+    lookback_hours: float,
+    history_checkpoints: Mapping[str, Mapping[str, Any]] | None = None,
+    pacer: RestWeightPacer | None = None,
+) -> tuple[dict[str, dict[str, Any]], list[TickEnvelope]]:
+    """Capture a bounded pre-selection research window, separate from forward receipts."""
+    lookback = float(lookback_hours)
+    if not 0 < lookback <= MAX_HISTORY_LOOKBACK_HOURS:
+        raise ValueError(
+            f"history lookback must be within (0,{MAX_HISTORY_LOOKBACK_HOURS}] hours"
+        )
+    end_ms = int(selection_ts_ms) - 1
+    default_start_ms = int(selection_ts_ms - lookback * 3_600_000)
+    if default_start_ms <= 0 or end_ms < default_start_ms:
+        raise ValueError("selection timestamp cannot support requested history window")
+
+    reports: dict[str, dict[str, Any]] = {}
+    envelopes: list[TickEnvelope] = []
+    async with httpx.AsyncClient(
+        base_url="https://api.hyperliquid.xyz",
+        timeout=15.0,
+    ) as client:
+        for vault in vaults:
+            vault_id = str(vault).lower()
+            checkpoint = (history_checkpoints or {}).get(vault_id)
+            checkpoint_end_ms = (
+                checkpoint.get("last_reconciled_end_ms")
+                if isinstance(checkpoint, Mapping)
+                else None
+            )
+            if checkpoint_end_ms is None and isinstance(checkpoint, Mapping):
+                checkpoint_end_ms = checkpoint.get("last_complete_end_ms")
+            unresolved_gaps = (
+                [dict(gap) for gap in checkpoint.get("unresolved_gaps", [])
+                 if isinstance(gap, Mapping)]
+                if isinstance(checkpoint, Mapping)
+                and isinstance(checkpoint.get("unresolved_gaps", []), list)
+                else []
+            )
+            start_ms = default_start_ms
+            checkpoint_used = False
+            checkpoint_from_future = (
+                type(checkpoint_end_ms) is int and checkpoint_end_ms > end_ms
+            )
+            if type(checkpoint_end_ms) is int and 0 < checkpoint_end_ms <= end_ms:
+                start_ms = checkpoint_end_ms
+                checkpoint_used = True
+            elif checkpoint_from_future:
+                future_gap = {
+                    "start_ms": end_ms + 1,
+                    "end_ms": checkpoint_end_ms,
+                    "reason": "CHECKPOINT_AFTER_SELECTION_CUTOFF",
+                }
+                if future_gap not in unresolved_gaps:
+                    unresolved_gaps.append(future_gap)
+            max_start_ms = end_ms - int(MAX_HISTORY_LOOKBACK_HOURS * 3_600_000)
+            if start_ms < max_start_ms:
+                gap = {
+                    "start_ms": start_ms,
+                    "end_ms": max_start_ms - 1,
+                    "reason": "HISTORY_LOOKBACK_LIMIT_72H",
+                }
+                if gap not in unresolved_gaps:
+                    unresolved_gaps.append(gap)
+                start_ms = max_start_ms
+            if start_ms <= 0 or end_ms < start_ms:
+                reports[vault_id] = {
+                    "status": "PARTIAL",
+                    "request_audit_status": "UNAVAILABLE",
+                    "reason": "INVALID_HISTORY_WINDOW",
+                    "requested_start_ms": start_ms,
+                    "requested_end_ms": end_ms,
+                    "rows": 0,
+                    "checkpoint_advance_allowed": False,
+                    "unresolved_gaps": unresolved_gaps,
+                    "forward_evidence_allowed": False,
+                }
+                continue
+            try:
+                rows, audit = await asyncio.wait_for(
+                    exact_window_backfill(
+                        client,
+                        vault,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        pacer=pacer,
+                    ),
+                    timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
+                )
+            except TimeoutError:
+                audit = {
+                    "status": "PARTIAL",
+                    "reason": "HISTORICAL_BACKFILL_TIMEOUT",
+                    "requested_start_ms": start_ms,
+                    "requested_end_ms": end_ms,
+                    "rows": 0,
+                }
+                rows = []
+            except Exception as exc:
+                audit = {
+                    "status": "PARTIAL",
+                    "reason": f"HISTORICAL_BACKFILL_{type(exc).__name__}",
+                    "requested_start_ms": start_ms,
+                    "requested_end_ms": end_ms,
+                    "rows": 0,
+                }
+                rows = []
+            request_audit_status = str(audit.get("status") or "PARTIAL").upper()
+            retention_window_reconciled = (
+                audit.get("retention_cap_reached") is True
+                and request_audit_status == "PARTIAL"
+                and type(audit.get("rows")) is int
+                and int(audit.get("rows") or 0) >= MAX_PUBLIC_USERFILLS
+                and type(audit.get("oldest_fill_ts_ms")) is int
+                and start_ms <= int(audit.get("oldest_fill_ts_ms") or 0) <= end_ms
+                and audit.get("request_budget_exhausted") is False
+                and type(audit.get("pending_windows")) is int
+                and audit.get("pending_windows") == 0
+                and type(audit.get("invalid_fill_count")) is int
+                and audit.get("invalid_fill_count") == 0
+                and audit.get("failed_windows") == []
+                and audit.get("cap_blocked_windows") == []
+            )
+            if retention_window_reconciled:
+                oldest_fill_ms = audit.get("oldest_fill_ts_ms")
+                if type(oldest_fill_ms) is int and oldest_fill_ms > start_ms:
+                    gap = {
+                        "start_ms": start_ms,
+                        "end_ms": oldest_fill_ms - 1,
+                        "reason": "PUBLIC_10000_FILL_RETENTION_LIMIT",
+                    }
+                    if gap not in unresolved_gaps:
+                        unresolved_gaps.append(gap)
+            checkpoint_advance_allowed = (
+                (
+                    request_audit_status == "COMPLETE"
+                    and audit.get("retention_cap_reached") is False
+                )
+                or retention_window_reconciled
+            ) and (
+                not checkpoint_from_future
+                and audit.get("request_budget_exhausted") is False
+                and type(audit.get("pending_windows")) is int
+                and audit.get("pending_windows") == 0
+                and type(audit.get("invalid_fill_count")) is int
+                and audit.get("invalid_fill_count") == 0
+                and audit.get("failed_windows") == []
+                and audit.get("cap_blocked_windows") == []
+            )
+            report_status = (
+                "COMPLETE"
+                if request_audit_status == "COMPLETE" and not unresolved_gaps
+                else "PARTIAL"
+            )
+            report = {
+                **dict(audit),
+                "status": report_status,
+                "request_audit_status": request_audit_status,
+                "vault": vault_id,
+                "window_kind": (
+                    "CONTINUITY_RECONCILIATION"
+                    if checkpoint_used
+                    else "PRE_SELECTION_HISTORICAL_RESEARCH_ONLY"
+                ),
+                "lookback_hours": lookback,
+                "checkpoint_start_ms": checkpoint_end_ms if checkpoint_used else None,
+                "checkpoint_advance_allowed": checkpoint_advance_allowed,
+                "unresolved_gaps": unresolved_gaps,
+                "forward_evidence_allowed": False,
+            }
+            reports[vault_id] = report
+            if rows:
+                receive_wall_ms = int(time.time() * 1_000)
+                receive_mono_ns = time.monotonic_ns()
+                envelopes.extend(
+                    rest_backfill_envelopes(
+                        rows,
+                        vault=vault,
+                        audit=report,
+                        receive_wall_ms=receive_wall_ms,
+                        receive_mono_ns=receive_mono_ns,
+                    )
+                )
+    return reports, envelopes
+
+
 def build_copy_vault_bundle(
     raw_root: Path,
     output: Path,
@@ -1117,6 +1468,7 @@ def build_copy_vault_bundle(
     queue_drops: Mapping[tuple[str, str, str], int],
     selection: Mapping[str, Any],
     collection_run_id: str,
+    historical_backfill: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     assets = output / "assets"
     manifests_dir = output / "manifests"
@@ -1142,7 +1494,30 @@ def build_copy_vault_bundle(
                 "matched_count": report.get("matched_count"),
                 "missing_from_live": report.get("missing_from_live"),
                 "live_only": report.get("live_only"),
+                "audit": dict(report.get("audit") or {}),
             }
+        elif family == "copy_vault_snapshot":
+            source_id = str(preliminary.get("source") or "")
+            history_report = (historical_backfill or {}).get(vault, {})
+            if source_id == "hyperliquid_public_userfills_backfill":
+                audit = dict(history_report)
+                status = (
+                    "SNAPSHOT_VERIFIED"
+                    if str(audit.get("status") or "").upper() == "COMPLETE"
+                    else "UNAVAILABLE"
+                )
+                preliminary["copy_vault_history"] = audit
+                preliminary["reconciliation"] = {
+                    "status": status,
+                    "method": "bounded_userFillsByTime_pre_selection_v1",
+                    "forward_evidence_allowed": False,
+                }
+            else:
+                preliminary["reconciliation"] = {
+                    "status": infer_reconciliation_status(preliminary),
+                    "method": "websocket_userFills_bootstrap_snapshot_v1",
+                    "forward_evidence_allowed": False,
+                }
         elif family in {"copy_vault_positions", "copy_vault_selection"}:
             # Immutable public HTTP observation, not an exchange-timestamped
             # trade. Verify local causality and explicit receive-only semantics.
@@ -1165,10 +1540,12 @@ def build_copy_vault_bundle(
             preliminary["integrity"] = integrity
             preliminary["collection_queue_drops"] = dropped
         preliminary["collection_run_id"] = str(collection_run_id)
+        historical_only = family == "copy_vault_snapshot"
         preliminary["copy_vault_selection"] = {
             "selected_at_ms": selection.get("selected_at_ms"),
             "observation_only": True,
-            "forward_only": True,
+            "forward_only": not historical_only,
+            "historical_only": historical_only,
         }
         manifest = finalize_manifest(preliminary)
         if not locally_replay_admissible(manifest):
@@ -1189,8 +1566,16 @@ def build_copy_vault_bundle(
         "repository": V2_REPOSITORY,
         "collector_version": collector_version,
         "collection_run_id": str(collection_run_id),
-        "collection_kind": "copy_vault_forward",
+        "collection_kind": (
+            "copy_vault_forward_plus_historical_research"
+            if historical_backfill is not None
+            else "copy_vault_forward"
+        ),
         "selection": dict(selection),
+        "historical_backfill": {
+            str(vault): dict(report)
+            for vault, report in (historical_backfill or {}).items()
+        },
         "collection_queue_drops": sum(int(v) for v in queue_drops.values()),
         "source_admission": {
             "mode": "replay_only",
@@ -1223,7 +1608,12 @@ async def collect(
     rotate_bytes: int,
     collection_run_id: str | None = None,
     frozen_selection: Mapping[str, Any] | None = None,
+    history_lookback_hours: float = DEFAULT_HISTORY_LOOKBACK_HOURS,
 ) -> dict[str, Any]:
+    if not 0 < float(history_lookback_hours) <= MAX_HISTORY_LOOKBACK_HOURS:
+        raise ValueError(
+            f"history lookback must be within (0,{MAX_HISTORY_LOOKBACK_HOURS}] hours"
+        )
     if frozen_selection is None:
         selected_rows, selection = await asyncio.to_thread(
             discover_vaults,
@@ -1242,6 +1632,12 @@ async def collect(
         if not selected_rows:
             raise ValueError("frozen selection contains no usable vaults")
 
+    history_checkpoints_by_vault = {
+        str(row.get("address") or "").lower(): row["copy_vault_history_checkpoint"]
+        for row in selected_rows
+        if isinstance(row.get("copy_vault_history_checkpoint"), Mapping)
+    }
+
     shard_count = max(1, int(vault_shard_count))
     shard_index = int(vault_shard_index)
     if not 0 <= shard_index < shard_count:
@@ -1255,6 +1651,7 @@ async def collect(
         f"copy-vault-{str(collector_version)[:12]}-{selection_ts_ms}-"
         f"s{shard_index}of{shard_count}"
     )
+    rest_pacer = RestWeightPacer()
 
     raw_root = output / "raw"
     writer = PartitionedTickDatasetWriter(
@@ -1275,6 +1672,7 @@ async def collect(
             universe_rows,
             sink,
             phase="START",
+            pacer=rest_pacer,
         )
         priority_rows = select_priority_ws_vaults(
             universe_rows,
@@ -1331,6 +1729,7 @@ async def collect(
         vaults,
         sink,
         phase="START",
+        pacer=rest_pacer,
     )
 
     collection_launch_ms = int(time.time() * 1_000)
@@ -1389,6 +1788,7 @@ async def collect(
         vaults,
         sink,
         phase="END",
+        pacer=rest_pacer,
     )
 
     if two_speed:
@@ -1396,6 +1796,7 @@ async def collect(
             universe_rows,
             sink,
             phase="END",
+            pacer=rest_pacer,
         )
         start_states = broad_start.get("states")
         end_states = broad_end.get("states")
@@ -1413,7 +1814,17 @@ async def collect(
         start_ms_by_vault=observation_start_ms,
         end_ms=end_ms,
         live_ids=live_ids,
+        pacer=rest_pacer,
     )
+    historical_reports, historical_envelopes = await collect_historical_backfills(
+        vaults,
+        selection_ts_ms=selection_ts_ms,
+        lookback_hours=history_lookback_hours,
+        history_checkpoints=history_checkpoints_by_vault,
+        pacer=rest_pacer,
+    )
+    for envelope in historical_envelopes:
+        await _emit_with_backpressure(sink, envelope)
     await sink.close()
     await writer_task
     await asyncio.to_thread(writer.rotate_all)
@@ -1427,6 +1838,7 @@ async def collect(
         queue_drops=sink.drops,
         selection=selection,
         collection_run_id=run_id,
+        historical_backfill=historical_reports,
     )
     effective_start_ms = min(
         observation_start_ms.values(),
@@ -1466,6 +1878,17 @@ async def collect(
         "live_fill_counts": dict(sorted(live_fill_counts.items())),
         "reconnect_counts": dict(sorted(reconnect_counts.items())),
         "reconciliation": reports,
+        "historical_backfill": historical_reports,
+        "historical_unique_fill_rows": sum(
+            int(report.get("rows") or 0)
+            for report in historical_reports.values()
+        ),
+        "historical_backfill_complete_vaults": sum(
+            str(report.get("status") or "").upper() == "COMPLETE"
+            for report in historical_reports.values()
+        ),
+        "history_lookback_hours": float(history_lookback_hours),
+        "rest_weight_budget_per_minute": REST_WEIGHT_BUDGET_PER_MINUTE,
         "bundle": {
             "shard_count": index["shard_count"],
             "safe_count": index["safe_count"],
@@ -1493,6 +1916,11 @@ def main() -> int:
     parser.add_argument("--vault-shard-index", type=int, default=0)
     parser.add_argument("--max-ws-vaults", type=int, default=MAX_PRIORITY_WS_VAULTS)
     parser.add_argument("--two-speed", action="store_true")
+    parser.add_argument(
+        "--history-lookback-hours",
+        type=float,
+        default=DEFAULT_HISTORY_LOOKBACK_HOURS,
+    )
     parser.add_argument("--rotate-mb", type=int, default=64)
     args = parser.parse_args()
     frozen_selection = None
@@ -1515,6 +1943,7 @@ def main() -> int:
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
             collection_run_id=args.collection_run_id,
             frozen_selection=frozen_selection,
+            history_lookback_hours=float(args.history_lookback_hours),
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))

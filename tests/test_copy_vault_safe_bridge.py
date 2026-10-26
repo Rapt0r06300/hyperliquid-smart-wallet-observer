@@ -17,21 +17,26 @@ def _sha(data: bytes) -> str:
 
 
 def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) -> dict:
-    if channel == "copy_vault_fills":
+    if channel in {"copy_vault_fills", "copy_vault_snapshot"}:
+        is_snapshot = snapshot or channel == "copy_vault_snapshot"
         message = {
             "channel": "userFills",
             "data": {
                 "user": "0xabc",
-                "isSnapshot": snapshot,
+                "isSnapshot": is_snapshot,
                 "fills": [{
                     "coin": "BTC", "px": "100", "sz": "1", "side": "B",
                     "time": 100_000, "dir": "Open Long",
-                    "tid": 321, "oid": 123, "hash": "0x123",
+                    "tid": 321, "oid": 123, "hash": "0x123", "fee": "0.01",
                 }],
             },
         }
         instrument = "0xabc"
-        source = "hyperliquid_public_userfills"
+        source = (
+            "hyperliquid_public_userfills_backfill"
+            if channel == "copy_vault_snapshot"
+            else "hyperliquid_public_userfills"
+        )
     else:
         size = 4 if shallow else 5
         message = {
@@ -60,7 +65,15 @@ def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) ->
         "real_execution": False,
         "raw_payload": raw,
         "raw_sha256": _sha(raw.encode("utf-8")),
-        "provenance": {"access": "read_only", "authenticated": False},
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "https" if channel == "copy_vault_snapshot" else "websocket",
+            **({
+                "historical_only": True,
+                "forward_evidence_allowed": False,
+                "timestamp_semantics": "causal_event_availability",
+            } if channel == "copy_vault_snapshot" else {}),
+        },
     }
 
 
@@ -152,7 +165,7 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
 
     sources = discover_family_sources(workspace)
     assert {p.name for p in sources["copy_vault"]} == {
-        "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
+        "vault_fills.jsonl", "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
     }
     books, book_audit = load_observed_books(workspace, coins={"BTC"})
     assert len(books.get("BTC", [])) == 1
@@ -172,6 +185,36 @@ def test_bridge_excludes_snapshot_fills(tmp_path: Path) -> None:
     ])
     with pytest.raises(SafeBridgeError, match="lacks both causal fills"):
         build_safe_copy_workspace(tmp_path)
+
+
+def test_bridge_keeps_historical_snapshot_fills_separate_from_forward(tmp_path: Path) -> None:
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills"),
+        _envelope("copy_vault_snapshot"),
+        _envelope("copy_vault_l2"),
+    ])
+    report = build_safe_copy_workspace(tmp_path)
+    workspace = Path(report["workspace"])
+
+    historical = json.loads(
+        (workspace / "runtime/data/vault_fills.jsonl").read_text(encoding="utf-8")
+    )
+    incremental = json.loads(
+        (workspace / "runtime/data/vault_fills_live.jsonl").read_text(encoding="utf-8")
+    )
+    provenance = json.loads(
+        (workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert historical["source"] == "REST_BACKFILL"
+    assert historical["isSnapshot"] is True
+    assert historical["causal_forward_eligible"] is False
+    assert incremental["source"] == "LIVE_WS"
+    assert incremental["isSnapshot"] is False
+    assert report["counts"]["historical_fill_observations"] == 1
+    assert provenance["snapshot_fills_train_only"] is True
+    assert provenance["snapshot_fills_excluded_from_forward"] is True
 
 
 def test_bridge_rejects_corrupted_extracted_data(tmp_path: Path) -> None:

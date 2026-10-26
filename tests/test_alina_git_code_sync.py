@@ -5,7 +5,6 @@ No real GitHub network, credentials, users' PCs, or AlinaSync shards.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -22,6 +21,28 @@ def test_status_paths_parse_spaces_and_rename_records():
     assert _status_paths(raw) == [
         "src/file with space.py", "docs/new name.md", "docs/old name.md",
     ]
+
+
+def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **_kwargs):
+        commands.append(args)
+        if args[0] == "status":
+            return subprocess.CompletedProcess(
+                args, 0, b" M src/changed.py\0", b""
+            )
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    staged, tracked, untracked = task._inventory()
+
+    assert staged == []
+    assert tracked == ["src/changed.py"]
+    assert untracked == []
+    assert any(args[:2] == ("status", "--porcelain=v1") for args in commands)
+    assert not any("--modified" in args or "--deleted" in args for args in commands)
 
 
 def git(root: Path, *args: str, allow_error: bool = False) -> str:
@@ -308,12 +329,14 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
     assert 'call :download_source "tools/install_portable_git.ps1"' in source
     assert 'call :download_source "tools/alina_git_code_sync.py"' in source
-    assert "ALINA_BOOTSTRAP_REF=a459f332bce22533ad43d23093c06c777f629c4c" in source
+    assert "ALINA_BOOTSTRAP_REF=main" in source
     assert '-File "%ALINA_INSTALLER%"' in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'findstr /C:"2026-10-25-local-change-retry-v1"' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-26-status-inventory-v2' in source
+    assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
+    assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
     assert "GIT_LFS_SKIP_SMUDGE=1" in source
     assert "restore_alina.py" not in source

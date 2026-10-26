@@ -66,6 +66,45 @@ def test_partition_read_progress_only_after_verified_parts(tmp_path):
     assert not updates
 
 
+def test_select_index_rows_does_not_reconstruct_partitioned_catalogue(
+    tmp_path, monkeypatch,
+):
+    from tools import partitioned_data_index as module
+
+    logical = _index()
+    root, files = partition_index(logical, max_partition_bytes=240)
+    path = _stage(tmp_path, root, files)
+    monkeypatch.setattr(
+        module,
+        "load_partitioned_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("full catalogue reconstruction is forbidden")
+        ),
+    )
+
+    metadata, rows = module.select_index_rows(
+        path, lambda row: row.get("dataset_id") in {"data-001", "data-007"}
+    )
+
+    assert metadata["release_repository_default"] == logical["release_repository_default"]
+    assert metadata["schema"] == logical["schema"]
+    assert [row["dataset_id"] for row in rows] == ["data-001", "data-007"]
+
+
+def test_select_index_rows_refuses_corrupt_partition_without_returning_partial_data(
+    tmp_path,
+):
+    from tools.partitioned_data_index import select_index_rows
+
+    root, files = partition_index(_index(), max_partition_bytes=240)
+    path = _stage(tmp_path, root, files)
+    first = next(iter(files))
+    (path.parent / first).write_bytes(files[first] + b" ")
+
+    with pytest.raises(ValueError, match="PARTITION_PARITY_SIZE_MISMATCH"):
+        select_index_rows(path, lambda _row: True)
+
+
 def test_partition_reader_does_not_reserialize_full_catalog_for_global_digest(
     tmp_path, monkeypatch,
 ):
@@ -215,7 +254,10 @@ def test_partition_reader_rejects_symlinked_parent_directory(tmp_path):
     folder = index_path.parent / "data-index-parts"
     moved = tmp_path / "outside-partition-payload"
     folder.rename(moved)
-    folder.symlink_to(moved, target_is_directory=True)
+    try:
+        folder.symlink_to(moved, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
     with pytest.raises(ValueError, match="PARTITION_PARITY_UNSAFE_DIRECTORY"):
         load_partitioned_index(index_path)
 
@@ -260,7 +302,10 @@ def test_save_index_refuses_symlinked_partition_destination_before_write(tmp_pat
     outside = tmp_path / "external-destination"
     outside.mkdir()
     link = index_path.parent / "data-index-parts"
-    link.symlink_to(outside, target_is_directory=True)
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
     with pytest.raises(ValueError, match="PARTITION_PARITY_SYMLINK_DIRECTORY"):
         save_index(index_path, original, max_inline_bytes=1024)
     assert index_path.read_bytes() == before

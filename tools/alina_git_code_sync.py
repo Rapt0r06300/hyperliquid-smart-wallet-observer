@@ -46,7 +46,7 @@ SENSITIVE_PARTS = {
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
-GIT_SYNC_ENGINE_BUILD = "2026-10-25-local-change-retry-v1"
+GIT_SYNC_ENGINE_BUILD = "2026-10-26-status-inventory-v2"
 
 
 class SyncBlocked(RuntimeError):
@@ -133,8 +133,8 @@ def _run_git(root: Path, git: str, args: list[str], *,
         "0" if args and args[0] in {"ls-files", "status", "diff"} else "1"
     )
     completed = subprocess.run(
-        [git, *args], cwd=root, input=input_bytes, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, env=env, timeout=timeout, check=False,
+        [git, *args], cwd=root, input=input_bytes, capture_output=True,
+        env=env, timeout=timeout, check=False,
     )
     if check and completed.returncode:
         stderr = completed.stderr.decode("utf-8", errors="replace").strip()
@@ -217,12 +217,11 @@ class Synchronizer:
         if self.text("rev-parse", "--is-shallow-repository") == "true":
             raise SyncBlocked("Clone shallow: historique insuffisant pour fusionner.")
         remote = self.text("remote", "get-url", "origin")
-        if remote not in ALLOWED_ORIGINS:
-            if not (
-                self.allow_test_remote
-                and os.environ.get("ALINA_SYNC_TEST_REMOTE_ALLOWED") == "1"
-            ):
-                raise SyncBlocked(f"origin non canonique: {remote}. Push interdit.")
+        if remote not in ALLOWED_ORIGINS and not (
+            self.allow_test_remote
+            and os.environ.get("ALINA_SYNC_TEST_REMOTE_ALLOWED") == "1"
+        ):
+            raise SyncBlocked(f"origin non canonique: {remote}. Push interdit.")
         gitdir = Path(self.text("rev-parse", "--absolute-git-dir")).resolve()
         for marker in (
             "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG",
@@ -549,12 +548,13 @@ class Synchronizer:
                     self.report["conflict_kit_error"] = str(exc)
                     self.say("Kit de conflits non ecrit: " + str(exc))
             merge_marker = Path(self.text("rev-parse", "--absolute-git-dir")) / "MERGE_HEAD"
-            if merge_marker.exists():
-                if self.command("merge", "--abort", check=False).returncode:
-                    raise SyncBlocked(
-                        "Echec de merge --abort. Conserver les fichiers et "
-                        "intervenir manuellement: " + ", ".join(conflicted[:12])
-                    )
+            if merge_marker.exists() and self.command(
+                "merge", "--abort", check=False
+            ).returncode:
+                raise SyncBlocked(
+                    "Echec de merge --abort. Conserver les fichiers et "
+                    "intervenir manuellement: " + ", ".join(conflicted[:12])
+                )
             if not conflicted:
                 raise SyncBlocked(
                     "Git merge refuse (sans conflits index detectes); "

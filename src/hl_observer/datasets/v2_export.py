@@ -98,6 +98,8 @@ def build_manifest_from_tick_shard(
     invalid_record_count = 0
     event_count = 0
     trade_count = 0
+    historical_fill_observation_count = 0
+    historical_fill_observation_count_exact = True
     uncompressed_bytes = 0
     trade_identity_digests: set[str] = set()
     trade_identity_complete = True
@@ -149,6 +151,22 @@ def build_manifest_from_tick_shard(
                     count = _int(parsed.get("fill_count"))
                 record_trade_count = max(1, int(count or 1))
                 trade_count += record_trade_count
+            if channel == "copy_vault_snapshot":
+                try:
+                    raw_payload = json.loads(record.get("raw_payload"))
+                    snapshot_data = raw_payload.get("data")
+                    snapshot_fills = snapshot_data.get("fills")
+                    if (
+                        raw_payload.get("channel") != "userFills"
+                        or not isinstance(snapshot_data, Mapping)
+                        or snapshot_data.get("isSnapshot") is not True
+                        or not isinstance(snapshot_fills, list)
+                    ):
+                        historical_fill_observation_count_exact = False
+                    else:
+                        historical_fill_observation_count += len(snapshot_fills)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    historical_fill_observation_count_exact = False
             sources.add(source)
             channels.add(channel)
             instruments.add(instrument)
@@ -401,6 +419,16 @@ def build_manifest_from_tick_shard(
         "record_count": event_count,
         "trade_count": trade_count,
         "trade_count_exact": channel in _TRADE_CHANNELS,
+        "historical_fill_observation_count": (
+            historical_fill_observation_count
+            if channel == "copy_vault_snapshot"
+            and historical_fill_observation_count_exact
+            else None
+        ),
+        "historical_fill_observation_count_exact": (
+            channel == "copy_vault_snapshot"
+            and historical_fill_observation_count_exact
+        ),
         "unique_trade_count": (
             len(trade_identity_digests)
             if channel in _TRADE_CHANNELS and trade_identity_complete

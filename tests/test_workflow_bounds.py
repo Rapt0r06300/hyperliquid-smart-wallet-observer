@@ -76,6 +76,7 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert "--preserve-running" in text
     assert '"max_vaults":int(sys.argv[1])' in text
     assert '"max_ws_vaults":10' in text
+    assert '"history_lookback_hours":72' in text
     assert '"vault_shard_count":1' in text
     assert '"vault_shard_index":0' in text
     assert '"copy_vault_mode":"two_speed_broad_rest_priority_ws"' in text
@@ -110,6 +111,8 @@ def test_resumable_creator_encodes_copy_vault_cursor_as_valid_json():
     assert '{"duration_s":3500' in text
     assert '"max_ws_vaults":10' in text
     assert '"copy_vault_mode":"two_speed_broad_rest_priority_ws"' in text
+    assert "--phase-epoch \"$PHASE_EPOCH\"" in text
+    assert "--campaign-dir catalog/campaigns" in text
 
 
 def test_controller_worker_are_bounded_hosted_and_collect_relayed():

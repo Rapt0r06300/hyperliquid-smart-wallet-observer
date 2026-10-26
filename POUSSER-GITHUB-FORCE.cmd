@@ -9,8 +9,9 @@ rem AlinaSync alone downloads/validates/unpacks SAFE shards.
 rem No forced push, reset, clean, stash or automatic deletion of data.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
-set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-a459f33"
-set "ALINA_BOOTSTRAP_REF=a459f332bce22533ad43d23093c06c777f629c4c"
+set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-main"
+set "ALINA_BOOTSTRAP_REF=main"
+set "ALINA_ENGINE_REQUIRED_BUILD=2026-10-26-status-inventory-v2"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
@@ -86,7 +87,7 @@ set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
 if not exist "%ALINA_ENGINE%" goto :get_engine
 rem Never overwrite local Codex/Claude changes to the sync engine.
 rem If it predates safe conflict kits, use pinned, isolated code in TEMP.
-findstr /C:"2026-10-25-local-change-retry-v1" "%ALINA_ENGINE%" >nul 2>nul
+findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%" >nul 2>nul
 if not errorlevel 1 goto :engine_ready
 echo [INFO] Moteur local ancien conserve. Utilisation temporaire du moteur recent.
 
@@ -97,6 +98,8 @@ if errorlevel 1 goto :missing_engine
 set "ALINA_ENGINE=%ALINA_BOOTSTRAP%\alina_git_code_sync.py"
 call :download_source "tools/alina_git_code_sync.py" "%ALINA_ENGINE%"
 if errorlevel 1 goto :missing_engine
+findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%" >nul 2>nul
+if errorlevel 1 goto :invalid_engine
 
 :engine_ready
 "%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_ENGINE%" >nul 2>nul
@@ -159,7 +162,7 @@ if not exist "%ALINA_BOOTSTRAP%\" exit /b 43
 exit /b 0
 
 :download_source
-rem The URL is anchored to a known immutable Git commit, not a mutable branch.
+rem Bootstrap only from canonical GitHub main. The caller verifies the engine build.
 rem Only tools/*.ps1 and *.py source can be requested by this CMD.
 echo [INFO] Chargement du composant de code %~1
 powershell.exe -NoLogo -NoProfile -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Rapt0r06300/hyperliquid-smart-wallet-observer/%ALINA_BOOTSTRAP_REF%/%~1' -OutFile '%~2'; if ((Get-Item -LiteralPath '%~2').Length -lt 500) { throw 'Fichier incomplet' }"

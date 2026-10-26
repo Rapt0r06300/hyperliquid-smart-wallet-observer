@@ -55,6 +55,42 @@ def test_manifest_is_derived_from_real_partitioned_shard(tmp_path) -> None:
     assert manifest["integrity"]["missing_monotonic_count"] == 0
 
 
+def test_historical_userfills_snapshots_have_separate_exact_counts(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    fills = [
+        {"time": 900, "coin": "BTC", "px": "100", "sz": "1", "side": "B"},
+        {"time": 950, "coin": "ETH", "px": "200", "sz": "2", "side": "A"},
+    ]
+    writer.append(TickEnvelope(
+        source_id="hyperliquid_public_userfills_backfill",
+        channel="copy_vault_snapshot",
+            instrument="0x1",
+        event_kind="SNAPSHOT",
+        raw_payload={
+            "channel": "userFills",
+                "data": {"user": "0x1", "isSnapshot": True, "fills": fills},
+            "backfill_audit": {"status": "COMPLETE"},
+        },
+        exchange_ts_ms=950,
+        received_ts_ms=1_000,
+        local_monotonic_ns=1_000_000,
+        provenance={
+            "access": "read_only", "transport": "https", "authenticated": False,
+            "historical_only": True, "forward_evidence_allowed": False,
+            "timestamp_semantics": "causal_event_availability",
+        },
+        parsed_summary={"event_count": 2, "fill_count": 2, "is_snapshot": True},
+    ))
+    [shard] = writer.rotate_all()
+
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+
+    assert manifest["trade_count"] == 0
+    assert manifest["trade_count_exact"] is False
+    assert manifest["historical_fill_observation_count"] == 2
+    assert manifest["historical_fill_observation_count_exact"] is True
+
+
 def test_explicit_unchanged_cumulative_gap_baseline_is_not_a_local_gap(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
     for ts in (1000, 1010):

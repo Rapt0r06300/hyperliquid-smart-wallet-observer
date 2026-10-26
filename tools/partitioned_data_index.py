@@ -9,8 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 SCHEMA = "alina.data_index_partitioned.v1"
 MAX_PARTITION_BYTES = 8 * 1024 * 1024
@@ -188,6 +189,134 @@ def load_partitioned_index(
     reconstructed["shards"] = rows
     return reconstructed
 
+
+
+def select_index_rows(
+    index_path: Path,
+    predicate: Callable[[Mapping[str, Any]], bool],
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Select rows from a verified index without reconstructing its full list.
+
+    Partitioned catalogs are parsed one bounded partition at a time. The
+    complete global digest, row count, and dataset-ID uniqueness are checked
+    before selected rows are returned.
+    """
+    index_path = Path(index_path)
+    if index_path.is_symlink() or not index_path.is_file():
+        raise ValueError("PARTITION_PARITY_UNSAFE_INDEX")
+    root = json.loads(index_path.read_text(encoding="utf-8"))
+    if not isinstance(root, dict):
+        raise ValueError("DATA_INDEX_INVALID_ROOT")
+
+    if root.get("schema") != SCHEMA:
+        if "partitions" in root or not isinstance(root.get("shards"), list):
+            raise ValueError("DATA_INDEX_UNKNOWN_OR_PARTIAL_LAYOUT")
+        selected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in root["shards"]:
+            if not isinstance(item, Mapping):
+                raise ValueError("PARTITION_PARITY_INVALID_ROW")
+            row = dict(item)
+            ident = row.get("dataset_id")
+            if not isinstance(ident, str) or not ident or ident in seen:
+                raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+            seen.add(ident)
+            if predicate(row):
+                selected.append(row)
+        return {key: value for key, value in root.items() if key != "shards"}, selected
+
+    limit = root.get("partition_max_bytes")
+    count = root.get("shard_count")
+    descriptors = root.get("partitions")
+    legacy_schema = root.get("legacy_schema")
+    expected_digest = root.get("shards_sha256")
+    if (
+        isinstance(limit, bool) or not isinstance(limit, int)
+        or not 4 <= limit <= MAX_PARTITION_BYTES
+        or isinstance(count, bool) or not isinstance(count, int) or count < 0
+        or not isinstance(descriptors, list)
+        or not isinstance(legacy_schema, str) or not legacy_schema
+        or not isinstance(expected_digest, str)
+    ):
+        raise ValueError("PARTITION_PARITY_INVALID_METADATA")
+
+    selected = []
+    seen: set[str] = set()
+    observed_count = 0
+    global_digest = hashlib.sha256()
+    global_digest.update(b"[")
+    has_global_rows = False
+    for index, descriptor in enumerate(descriptors, 1):
+        if not isinstance(descriptor, dict):
+            raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
+        relative = descriptor.get("path")
+        if not isinstance(relative, str) or not _PART_PATH.fullmatch(relative):
+            raise ValueError("PARTITION_PARITY_INVALID_PATH")
+        if relative != f"data-index-parts/part-{index:06d}.json":
+            raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
+        parts_dir = index_path.parent / "data-index-parts"
+        if parts_dir.is_symlink():
+            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
+        part_path = index_path.parent / relative
+        if (
+            not part_path.resolve().is_relative_to(index_path.parent.resolve())
+            or part_path.is_symlink() or not part_path.is_file()
+        ):
+            raise ValueError("PARTITION_PARITY_MISSING_FILE")
+        size = part_path.stat().st_size
+        if (
+            isinstance(descriptor.get("bytes"), bool)
+            or descriptor.get("bytes") != size or size > limit
+        ):
+            raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
+        data = part_path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
+            raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
+        if not data.startswith(b"[") or not data.endswith(b"]\n"):
+            raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
+        part_rows = json.loads(data)
+        if (
+            not isinstance(part_rows, list) or not part_rows
+            or isinstance(descriptor.get("row_count"), bool)
+            or len(part_rows) != descriptor.get("row_count")
+        ):
+            raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
+        for item in part_rows:
+            if not isinstance(item, Mapping):
+                raise ValueError("PARTITION_PARITY_INVALID_ROW")
+            row = dict(item)
+            ident = row.get("dataset_id")
+            if not isinstance(ident, str) or not ident or ident in seen:
+                raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+            seen.add(ident)
+            observed_count += 1
+            if predicate(row):
+                selected.append(row)
+        if has_global_rows:
+            global_digest.update(b",")
+        global_digest.update(memoryview(data)[1:-2])
+        has_global_rows = True
+        if observed_count > count:
+            raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
+        if progress_callback is not None and (
+            index == 1 or index % 10 == 0 or index == len(descriptors)
+        ):
+            progress_callback(index, len(descriptors))
+    global_digest.update(b"]\n")
+    if observed_count != count or global_digest.hexdigest() != expected_digest:
+        raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
+
+    metadata = {
+        key: value for key, value in root.items()
+        if key not in {
+            "partitions", "legacy_schema", "shard_count", "shards_sha256",
+            "partition_max_bytes", "schema",
+        }
+    }
+    metadata["schema"] = legacy_schema
+    return metadata, selected
 
 
 def read_index(

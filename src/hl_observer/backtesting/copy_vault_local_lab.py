@@ -1,6 +1,7 @@
 """Local PAPER Copy-Vault laboratory fed only by verified restored shards."""
 from __future__ import annotations
 
+import bisect
 import gzip
 import hashlib
 import importlib.util
@@ -9,13 +10,10 @@ import math
 import os
 import random
 import statistics
-import bisect
-import time
 from collections import Counter
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from statistics import NormalDist
 from typing import Any
 
@@ -25,13 +23,15 @@ from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21_segment,
 )
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
+from tools.copy_vault_continuity import load_release_history_audits
 
 OBJECTIVE_USD_PER_DAY = 5.0
 PAPER_CAPITAL_USD = 200.0
 _SAFE_AUDIT_CACHE_SCHEMA = "hypersmart.copy_vault_local_safe_hash_cache.v1"
-_SAFE_FAMILIES = {"copy_vault_fills", "copy_vault_l2"}
+_SAFE_FAMILIES = {"copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot"}
 _CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 _MATERIALIZED_TAPE_NAMES = ("vault_fills.jsonl", "copy_vault_l2_tape.jsonl")
+_MINIMUM_SIGNAL_UTC_DAYS = 6
 _HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("core_notional_usd", tuple(float(value) for value in range(20, 191, 5))),
@@ -83,6 +83,93 @@ def _number(value: object) -> float:
     if not math.isfinite(number):
         raise ValueError("non-finite number")
     return number
+
+
+def _copy_vault_catalog_audit(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Expose SAFE Copy-Vault catalog families omitted from execution replay.
+
+    Position and selection rows are receive-time HTTP snapshots. They remain
+    visible in the report, but are not silently presented as per-fill economic
+    inputs or as historical PnL evidence.
+    """
+    safe_counts = Counter(
+        str(row.get("family") or "")
+        for row in rows
+        if str(row.get("family") or "").startswith("copy_vault_")
+        and row.get("quality_status") == "SAFE"
+    )
+    unused = {
+        family: count
+        for family, count in sorted(safe_counts.items())
+        if family not in _SAFE_FAMILIES
+    }
+    reasons = {
+        family: (
+            "RECEIVE_TIME_HTTP_SNAPSHOT_NOT_PER_FILL_PNL_INPUT"
+            if family in {"copy_vault_positions", "copy_vault_selection"}
+            else "UNSUPPORTED_COPY_VAULT_FAMILY_NOT_REPLAYED"
+        )
+        for family in unused
+    }
+    return {
+        "copy_vault_safe_catalog_shards": sum(safe_counts.values()),
+        "copy_vault_safe_catalog_by_family": dict(sorted(safe_counts.items())),
+        "safe_copy_vault_shards_not_used_for_pnl": sum(unused.values()),
+        "safe_copy_vault_shards_not_used_for_pnl_by_family": unused,
+        "safe_copy_vault_shards_not_used_for_pnl_reason_by_family": reasons,
+    }
+
+
+def _copy_vault_auxiliary_inventory(
+    rows: list[Mapping[str, Any]], recovery_root: Path,
+) -> dict[str, dict[str, int]]:
+    """Count receive-time SAFE context files without claiming their hashes."""
+    counts: dict[str, Counter[str]] = {}
+    recovery = Path(recovery_root)
+    usable_root = recovery / "usable" / "shards"
+    for row in rows:
+        family = str(row.get("family") or "")
+        if (
+            not family.startswith("copy_vault_")
+            or family in _SAFE_FAMILIES
+            or row.get("quality_status") != "SAFE"
+        ):
+            continue
+        family_counts = counts.setdefault(family, Counter())
+        family_counts["catalogue_shards"] += 1
+        tag = str(row.get("release_tag") or "")
+        asset_name = str(row.get("release_asset") or "")
+        if (
+            not tag or PurePosixPath(tag).name != tag or tag in {".", ".."}
+            or "\\" in tag or ":" in tag
+            or not asset_name.endswith(".jsonl.gz")
+            or PurePosixPath(asset_name).name != asset_name
+            or "\\" in asset_name or ":" in asset_name
+        ):
+            family_counts["local_files_unsafe"] += 1
+            continue
+        path = usable_root / tag / asset_name
+        if any(part.is_symlink() for part in (
+            recovery / "usable", usable_root, usable_root / tag, path,
+        )):
+            family_counts["local_files_unsafe"] += 1
+            continue
+        try:
+            if path.is_file() and path.resolve().is_relative_to(usable_root.resolve()):
+                family_counts["local_files_present_unverified"] += 1
+            else:
+                family_counts["local_files_missing"] += 1
+        except OSError:
+            family_counts["local_files_unsafe"] += 1
+    return {
+        family: {
+            "catalogue_shards": values["catalogue_shards"],
+            "local_files_present_unverified": values["local_files_present_unverified"],
+            "local_files_missing": values["local_files_missing"],
+            "local_files_unsafe": values["local_files_unsafe"],
+        }
+        for family, values in sorted(counts.items())
+    }
 
 
 def _safe_relative_parts(
@@ -169,15 +256,16 @@ def _verified_assets(
                 )
             ) if progress is not None else None,
         )
-        from tools.partitioned_data_index import read_index
+        from tools.partitioned_data_index import select_index_rows
 
         if progress is not None:
-            progress("Validation complète des identités du DATA_INDEX actif")
-        index = read_index(
+            progress("Lecture bornée du DATA_INDEX actif, une partition à la fois")
+        index, all_rows = select_index_rows(
             catalog_path,
+            lambda row: str(row.get("family") or "").startswith("copy_vault_"),
             progress_callback=(
                 lambda done, total: progress(
-                    f"Catalogue partitionné · partition {done:,}/{total:,} validée"
+                    f"DATA_INDEX vérifié · partition {done:,}/{total:,}"
                 )
             ) if progress is not None else None,
         )
@@ -194,13 +282,19 @@ def _verified_assets(
             raise ValueError("DATA_INDEX_CHANGED_DURING_AUDIT")
         if index.get("repository") != _CANONICAL_REPOSITORY:
             raise ValueError("NON_CANONICAL_DATA_INDEX")
-        all_rows = index["shards"]
     except (ImportError, OSError, ValueError, KeyError, TypeError) as exc:
         return [], {
             "status": "UNMEASURABLE", "reason": f"ACTIVE_DATA_INDEX_INVALID:{type(exc).__name__}",
         }
 
     selected_rows = [row for row in all_rows if row.get("family") in _SAFE_FAMILIES]
+    copy_vault_release_tags = sorted({
+        str(row.get("release_tag"))
+        for row in all_rows
+        if str(row.get("family") or "").startswith("copy_vault_")
+        and row.get("quality_status") == "SAFE"
+        and isinstance(row.get("release_tag"), str)
+    })
     safe_rows = [row for row in selected_rows if row.get("quality_status") == "SAFE"]
     family_expected = Counter(str(row.get("family")) for row in safe_rows)
     expected_material = [
@@ -236,6 +330,7 @@ def _verified_assets(
     expected_ids: set[str] = set()
     recovery = Path(recovery_root).resolve()
     ordered_safe_rows = sorted(safe_rows, key=lambda item: str(item.get("dataset_id") or ""))
+    auxiliary_inventory = _copy_vault_auxiliary_inventory(all_rows, recovery)
     for row_number, row in enumerate(ordered_safe_rows, 1):
         dataset_id = str(row.get("dataset_id") or "")
         if progress is not None:
@@ -356,12 +451,15 @@ def _verified_assets(
     ) else "SAFE_PARTIAL"
     audit = {
         "schema": "hypersmart.copy_vault_local_safe_audit.v1",
+        **_copy_vault_catalog_audit(all_rows),
+        "safe_copy_vault_shards_not_used_for_pnl_inventory_by_family": auxiliary_inventory,
         "status": audit_status,
         "reason": None if audit_status == "SAFE_COMPLETE" else "LOCAL_SAFE_SHARDS_MISSING_OR_REJECTED",
         "source_index_sha256": catalog_sha,
         "expected_selection_sha256": expected_digest,
         "selection_digest": selection_digest,
         "expected_safe_shards": len(safe_rows),
+        "copy_vault_release_tags": copy_vault_release_tags,
         "verified_safe_shards": len(selected),
         "expected_by_family": dict(sorted(family_expected.items())),
         "quality_counts_by_family": dict(sorted(
@@ -424,13 +522,52 @@ def _load_wrappers(path: Path):
 
 
 def _fill_rows(
-    wrapper: Mapping[str, Any], *, audit: Counter[str] | None = None,
+    wrapper: Mapping[str, Any], *, family: str,
+    audit: Counter[str] | None = None,
 ) -> list[dict[str, Any]]:
     raw = wrapper["_raw"]
     if raw.get("channel") != "userFills" or not isinstance(raw.get("data"), Mapping):
+        if audit is not None:
+            audit["USERFILLS_SNAPSHOT_PAYLOAD_INVALID"] += 1
         return []
     data = raw["data"]
+    snapshot = data.get("isSnapshot")
+    expected_snapshot = family == "copy_vault_snapshot"
+    if type(snapshot) is not bool or snapshot is not expected_snapshot:
+        if audit is not None:
+            audit["SNAPSHOT_FAMILY_FLAG_MISMATCH"] += 1
+        return []
+    source_id = str(wrapper.get("source_id") or "")
+    provenance = wrapper.get("provenance")
+    transport = (
+        str(provenance.get("transport") or "").lower()
+        if isinstance(provenance, Mapping)
+        else ""
+    )
+    expected_sources = (
+        {"hyperliquid_public_userfills", "hyperliquid_public_userfills_backfill"}
+        if expected_snapshot
+        else {"hyperliquid_public_userfills"}
+    )
+    if (
+        source_id not in expected_sources
+        or not isinstance(provenance, Mapping)
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or transport not in {"websocket", "https"}
+        or (source_id.endswith("_backfill") and (
+            provenance.get("historical_only") is not True
+            or provenance.get("forward_evidence_allowed") is not False
+        ))
+    ):
+        if audit is not None:
+            audit["USERFILLS_PROVENANCE_INVALID"] += 1
+        return []
     vault = str(data.get("user") or wrapper.get("instrument") or "").lower()
+    if vault != str(wrapper.get("instrument") or "").lower():
+        if audit is not None:
+            audit["USERFILLS_VAULT_IDENTITY_MISMATCH"] += 1
+        return []
     rows: list[dict[str, Any]] = []
     raw_fills = data.get("fills")
     if not isinstance(raw_fills, list):
@@ -447,11 +584,14 @@ def _fill_rows(
             fee = _number(fill["fee"])
             receive_value = wrapper.get("received_ts_ms")
             receive = int(receive_value) if type(receive_value) is int and receive_value > 0 else None
+            event_ts = int(fill["time"])
+            if receive is None or not 0 < event_ts <= receive:
+                raise ValueError("fill timestamp is missing or noncausal")
             start_position = _number(fill["startPosition"]) if fill.get("startPosition") is not None else None
             closed_pnl = _number(fill["closedPnl"]) if fill.get("closedPnl") is not None else None
             rows.append({
                 "vault": vault,
-                "ts_ms": int(fill["time"]),
+                "ts_ms": event_ts,
                 "coin": str(fill["coin"]).upper(),
                 "px": _number(fill["px"]),
                 "sz": _number(fill["sz"]),
@@ -463,9 +603,18 @@ def _fill_rows(
                 "hash": fill.get("hash"),
                 "closed_pnl": closed_pnl,
                 "fee": fee,
-                "isSnapshot": bool(data.get("isSnapshot")),
-                "source": "REST_BACKFILL",
+                "isSnapshot": snapshot,
+                "is_snapshot": snapshot,
+                "source": (
+                    "REST_BACKFILL"
+                    if source_id == "hyperliquid_public_userfills_backfill"
+                    else "WS_BOOTSTRAP"
+                    if snapshot
+                    else "LIVE_WS"
+                ),
+                "source_id": source_id,
                 "received_at_ms": receive,
+                "observed_at_ms": receive if not snapshot else None,
                 "source_raw_sha256": wrapper.get("raw_sha256"),
             })
         except (KeyError, TypeError, ValueError, OverflowError):
@@ -526,6 +675,11 @@ def materialize_safe_workspace(
 ) -> dict[str, Any]:
     recovery_root, workspace = Path(recovery_root), Path(workspace)
     assets, audit = _verified_assets(recovery_root, progress=progress)
+    repository_root = Path(recovery_root).resolve().parents[2]
+    history_audit = load_release_history_audits(
+        repository_root / "catalog" / "campaigns",
+        release_tags=set(audit.get("copy_vault_release_tags") or []),
+    )
     data_dir = workspace / "runtime" / "data"
     if any(part.is_symlink() for part in (workspace, workspace / "runtime", data_dir)):
         raise OSError("refusing symlinked Copy-Vault replay workspace")
@@ -535,17 +689,36 @@ def materialize_safe_workspace(
     wrapper_rejections = 0
     payload_audit: Counter[str] = Counter()
     raw_frames = 0
+    historical_snapshot_shards = 0
+    historical_fill_observations = 0
     for asset_number, (path, asset) in enumerate(assets, 1):
         try:
+            family = str(asset.get("family") or "")
+            if family == "copy_vault_snapshot":
+                historical_snapshot_shards += 1
             for wrapper in _load_wrappers(path):
                 raw_frames += 1
-                if asset.get("family") == "copy_vault_fills":
-                    for row in _fill_rows(wrapper, audit=payload_audit):
+                if family in {"copy_vault_fills", "copy_vault_snapshot"}:
+                    if family == "copy_vault_snapshot":
+                        data = wrapper["_raw"].get("data")
+                        raw_fill_list = data.get("fills") if isinstance(data, Mapping) else None
+                        if (
+                            isinstance(data, Mapping)
+                            and data.get("isSnapshot") is True
+                            and isinstance(raw_fill_list, list)
+                        ):
+                            historical_fill_observations += len(raw_fill_list)
+                    for row in _fill_rows(wrapper, family=family, audit=payload_audit):
                         identity = (
                             row["vault"], row["coin"], row["ts_ms"], row.get("tid"),
                             row.get("hash"), row.get("oid"), row["px"], row["sz"], row["signe"],
                         )
-                        fills[identity] = row
+                        prior = fills.get(identity)
+                        if prior is None or (
+                            bool(prior.get("isSnapshot"))
+                            and not bool(row.get("isSnapshot"))
+                        ):
+                            fills[identity] = row
                 elif asset.get("family") == "copy_vault_l2":
                     row = _book_row(wrapper)
                     if row:
@@ -572,6 +745,7 @@ def materialize_safe_workspace(
             )
     fill_rows = sorted(fills.values(), key=lambda row: (row["ts_ms"], row["vault"], str(row.get("tid"))))
     book_rows = sorted(books.values(), key=lambda row: (row["received_at_ms"], row["coin"]))
+    historical_unique_fills = sum(bool(row.get("isSnapshot")) for row in fill_rows)
     materialized_tapes: dict[str, dict[str, Any]] = {}
     for name, rows in (("vault_fills.jsonl", fill_rows), ("copy_vault_l2_tape.jsonl", book_rows)):
         target = data_dir / name
@@ -589,6 +763,7 @@ def materialize_safe_workspace(
         }
     data_complete = (
         audit.get("status") == "SAFE_COMPLETE"
+        and history_audit.get("status") == "COMPLETE"
         and wrapper_rejections == 0
         and not payload_audit
     )
@@ -598,14 +773,21 @@ def materialize_safe_workspace(
         else "MORE_DATA" if replay_inputs_available
         else "UNMEASURABLE"
     )
+    if status == "READY":
+        reason = None
+    elif audit.get("status") != "SAFE_COMPLETE":
+        reason = audit.get("reason") or "LOCAL_SAFE_CORPUS_INCOMPLETE"
+    elif wrapper_rejections:
+        reason = "SAFE_WRAPPERS_REJECTED"
+    elif payload_audit:
+        reason = "SAFE_PAYLOAD_ROWS_REJECTED"
+    elif history_audit.get("status") != "COMPLETE":
+        reason = "HISTORICAL_BACKFILL_COVERAGE_PARTIAL_OR_UNKNOWN"
+    else:
+        reason = audit.get("reason") or "FILLS_OR_CAUSAL_L2_MISSING"
     result = {
         "status": status,
-        "reason": (
-            None if status == "READY"
-            else audit.get("reason") or "LOCAL_SAFE_CORPUS_INCOMPLETE"
-            if status == "MORE_DATA"
-            else audit.get("reason") or "FILLS_OR_CAUSAL_L2_MISSING"
-        ),
+        "reason": reason,
         "verified_assets": len(assets),
         "expected_safe_shards": audit.get("expected_safe_shards", 0),
         "missing_shards": audit.get("missing_count", 0),
@@ -613,8 +795,16 @@ def materialize_safe_workspace(
         "rejected_assets": audit.get("rejected_count", 0),
         "invalid_wrappers": wrapper_rejections,
         "payload_audit": dict(sorted(payload_audit.items())),
+        "payload_rejected_records": sum(payload_audit.values()),
         "raw_frames": raw_frames,
         "unique_fills": len(fill_rows),
+        "historical_snapshot_shards": historical_snapshot_shards,
+        "historical_fill_observations": historical_fill_observations,
+        "historical_unique_fills": historical_unique_fills,
+        "historical_coverage_audit": history_audit,
+        "incremental_unique_fills": len(fill_rows) - historical_unique_fills,
+        "historical_fills_train_only": True,
+        "snapshots_forward_evidence_allowed": False,
         "unique_books": len(book_rows),
         "fill_start_ms": fill_rows[0]["ts_ms"] if fill_rows else None,
         "fill_end_ms": fill_rows[-1]["ts_ms"] if fill_rows else None,
@@ -659,7 +849,7 @@ def _bounds(timestamps: list[int]) -> dict[str, int | bool | str] | None:
         + int(cv.MAX_TARGET_LAG_MS)
     )
     days = sorted({int(timestamp) // day_ms for timestamp in timestamps if int(timestamp) > 0})
-    if len(days) < 6:
+    if len(days) < _MINIMUM_SIGNAL_UTC_DAYS:
         return None
     train_cut = max(2, int(len(days) * 0.60))
     validation_cut = max(train_cut + 1, int(len(days) * 0.80))
@@ -685,6 +875,22 @@ def _bounds(timestamps: list[int]) -> dict[str, int | bool | str] | None:
     ):
         return None
     return result
+
+
+def _signal_coverage(timestamps: list[int]) -> dict[str, int | float | None]:
+    """Describe actual leader-signal coverage used by the temporal split."""
+    valid = sorted(
+        {timestamp for timestamp in timestamps if type(timestamp) is int and timestamp > 0}
+    )
+    day_ms = 86_400_000
+    distinct_days = len({timestamp // day_ms for timestamp in valid})
+    return {
+        "distinct_utc_days": distinct_days,
+        "minimum_utc_days_required": _MINIMUM_SIGNAL_UTC_DAYS,
+        "signal_start_ms": valid[0] if valid else None,
+        "signal_end_ms": valid[-1] if valid else None,
+        "signal_span_hours": round((valid[-1] - valid[0]) / 3_600_000, 3) if valid else None,
+    }
 
 
 def _radical_inverse(index: int, base: int) -> float:
@@ -901,8 +1107,8 @@ def _campaign_lock(path: Path) -> int:
                 raise RuntimeError("COPY_VAULT_CAMPAIGN_ALREADY_RUNNING")
             except ProcessLookupError:
                 path.unlink(missing_ok=True)
-            except (OSError, ValueError):
-                raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE")
+            except (OSError, ValueError) as exc:
+                raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE") from exc
     raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_BUSY")
 
 
@@ -963,6 +1169,17 @@ def run_local_campaign(
     books, books_audit = cv.load_observed_books(workspace, coins={str(row["coin"]) for row in metaorders})
     timestamps = [int(row["signal_ts_ms"]) for row in metaorders]
     bounds = _bounds(timestamps)
+    signal_coverage = _signal_coverage(timestamps)
+    aligned_adds = 0
+    if metaorders and books:
+        for row in metaorders:
+            if str(row.get("action") or "").upper() != "ADD":
+                continue
+            timestamps_for_coin = [int(book["ts_ms"]) for book in books.get(str(row["coin"]), [])]
+            signal_ms = int(row["signal_ts_ms"])
+            index = bisect.bisect_right(timestamps_for_coin, signal_ms) - 1
+            if index >= 0 and signal_ms - timestamps_for_coin[index] <= 30_000:
+                aligned_adds += 1
     base = {
         "paper_read_only": True, "real_execution": False,
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
@@ -971,33 +1188,56 @@ def run_local_campaign(
         "source_catalog_sha256": input_manifest.get("source_index_sha256"),
         "input_data_complete": input_manifest.get("data_complete") is True,
         "expected_safe_shards": input_manifest.get("expected_safe_shards"),
+        "copy_vault_safe_catalog_shards": input_manifest.get("copy_vault_safe_catalog_shards"),
+        "safe_copy_vault_shards_not_used_for_pnl": input_manifest.get(
+            "safe_copy_vault_shards_not_used_for_pnl"
+        ),
+        "safe_copy_vault_shards_not_used_for_pnl_by_family": input_manifest.get(
+            "safe_copy_vault_shards_not_used_for_pnl_by_family", {}
+        ),
+        "safe_copy_vault_shards_not_used_for_pnl_inventory_by_family": input_manifest.get(
+            "safe_copy_vault_shards_not_used_for_pnl_inventory_by_family", {}
+        ),
+        "safe_copy_vault_shards_not_used_for_pnl_reason_by_family": input_manifest.get(
+            "safe_copy_vault_shards_not_used_for_pnl_reason_by_family", {}
+        ),
         "verified_safe_shards": input_manifest.get("verified_assets"),
         "missing_safe_shards": input_manifest.get("missing_shards"),
         "entries": len(entries), "metaorders": len(metaorders),
         "book_rows": sum(len(rows) for rows in books.values()),
+        "signal_coverage": signal_coverage,
+        "temporally_aligned_add_signals": aligned_adds,
         "input_audit": {"entries": entries_audit, "metaorders": meta_audit, "books": books_audit},
     }
-    if not metaorders or not books or bounds is None:
+    if not metaorders or not books:
         return {
             **base, "status": "MORE_DATA" if metaorders or books else "UNMEASURABLE",
-            "reason": "INSUFFICIENT_CAUSAL_REPLAY_DAYS_OR_INPUTS", "candidates_tested": 0,
+            "reason": "INSUFFICIENT_REPLAY_INPUTS", "candidates_tested": 0,
             "freeze_created": False, "economically_proven": False,
         }
-    aligned_adds = 0
-    for row in metaorders:
-        if str(row.get("action") or "").upper() != "ADD":
-            continue
-        timestamps_for_coin = [int(book["ts_ms"]) for book in books.get(str(row["coin"]), [])]
-        signal_ms = int(row["signal_ts_ms"])
-        index = bisect.bisect_right(timestamps_for_coin, signal_ms) - 1
-        if index >= 0 and signal_ms - timestamps_for_coin[index] <= 30_000:
-            aligned_adds += 1
-    base["temporally_aligned_add_signals"] = aligned_adds
     if aligned_adds == 0:
         return {
             **base,
             "status": "MORE_DATA",
             "reason": "NO_CAUSAL_L2_AT_OR_BEFORE_SIGNAL_WITHIN_30_SECONDS",
+            "candidates_tested": 0,
+            "freeze_created": False,
+            "economically_proven": False,
+        }
+    if signal_coverage["distinct_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+        return {
+            **base,
+            "status": "MORE_DATA",
+            "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS",
+            "candidates_tested": 0,
+            "freeze_created": False,
+            "economically_proven": False,
+        }
+    if bounds is None:
+        return {
+            **base,
+            "status": "MORE_DATA",
+            "reason": "TEMPORAL_SPLIT_INVALID_AFTER_PURGE",
             "candidates_tested": 0,
             "freeze_created": False,
             "economically_proven": False,
@@ -1658,10 +1898,15 @@ def run_historical_trade_replay(
     for archetype, field, direction, values_key in feature_specs:
         for fraction in (0.25, 0.50, 0.75):
             threshold = quantile(numeric_features[values_key], fraction)
-            if direction == "le":
-                predicate = lambda row, field=field, threshold=threshold: float(row[field]) <= threshold
-            else:
-                predicate = lambda row, field=field, threshold=threshold: float(row[field]) >= threshold
+            def predicate(
+                row: Mapping[str, Any],
+                field: str = field,
+                threshold: float = threshold,
+                direction: str = direction,
+            ) -> bool:
+                value = float(row[field])
+                return value <= threshold if direction == "le" else value >= threshold
+
             conditions.append((f"{archetype}_{direction.upper()}_Q{int(fraction * 100)}", archetype, predicate))
 
     proposed_filters: list[tuple[str, tuple[str, ...], Callable[[Mapping[str, Any]], bool]]] = [

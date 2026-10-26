@@ -16,10 +16,11 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -636,6 +637,11 @@ REASON_LABELS = {
     ),
     "NO_TRAIN_CANDIDATE_PASSED_GATES": "aucun candidat TRAIN n'a passé les contrôles économiques",
     "INSUFFICIENT_TEMPORAL_REPLAY_INPUTS": "pas assez de données temporelles pour séparer TRAIN, validation, OOS et forward",
+    "INSUFFICIENT_DISTINCT_SIGNAL_DAYS": "les signaux leader ne couvrent pas assez de jours distincts pour séparer TRAIN, validation et OOS",
+    "INSUFFICIENT_REPLAY_INPUTS": "les cycles leader ou les carnets L2 exécutables manquent",
+    "TEMPORAL_SPLIT_INVALID_AFTER_PURGE": "la séparation TRAIN/validation/OOS reste vide après la purge temporelle anti-fuite",
+    "SAFE_PAYLOAD_ROWS_REJECTED": "des enregistrements SAFE ont été écartés car leur contenu est invalide ou non causal",
+    "SAFE_WRAPPERS_REJECTED": "des enveloppes SAFE ne passent pas la vérification de contenu",
     "FILLS_OR_L2_MISSING": "les fills leader ou les carnets L2 vérifiés manquent",
     "COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED": (
         "le réglage actuellement gelé dépasse la limite de 200 USD de capital paper"
@@ -646,6 +652,40 @@ REASON_LABELS = {
 def _human_reason(reason: object) -> str:
     raw = str(reason or "tous les contrôles sont passés")
     return REASON_LABELS.get(raw, raw.replace("_", " ").lower())
+
+
+def _safe_copy_vault_exclusion_summary(inputs: Mapping[str, Any]) -> str:
+    raw_count = inputs.get("safe_copy_vault_shards_not_used_for_pnl", 0)
+    count = raw_count if type(raw_count) is int and raw_count >= 0 else 0
+    if count == 0:
+        return "aucun shard SAFE Copy-Vault de contexte exclu du replay économique"
+    labels = {
+        "copy_vault_positions": "positions",
+        "copy_vault_selection": "sélection",
+    }
+    raw_by_family = inputs.get("safe_copy_vault_shards_not_used_for_pnl_by_family")
+    by_family = raw_by_family if isinstance(raw_by_family, Mapping) else {}
+    raw_inventory = inputs.get("safe_copy_vault_shards_not_used_for_pnl_inventory_by_family")
+    inventory = raw_inventory if isinstance(raw_inventory, Mapping) else {}
+    details = [
+        (
+            f"{int(evidence.get('local_files_present_unverified') or 0):,}/"
+            f"{int(evidence.get('catalogue_shards') or value):,} "
+            f"{labels.get(str(family), str(family))} fichiers locaux repérés "
+            f"({int(evidence.get('local_files_missing') or 0):,} absents)"
+        ).replace(",", " ")
+        if isinstance(evidence := inventory.get(family), Mapping)
+        else f"{value:,} {labels.get(str(family), str(family))} au catalogue; présence locale non vérifiée".replace(",", " ")
+        for family, value in sorted(by_family.items())
+        if type(value) is int and value > 0
+    ]
+    suffix = f" ({', '.join(details)})" if details else ""
+    return (
+        f"{count:,} shards SAFE du catalogue hors replay économique{suffix}"
+        .replace(",", " ")
+        + "; snapshots HTTP horodatés à réception, pas des événements PnL"
+    )
+
 
 def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Path:
     """Write a plain-French dashboard from the exact machine-readable result."""
@@ -755,6 +795,38 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     verified_hashes_reused = int(inputs.get("cached_hashes_reused_after_stat_match") or 0)
     catalog_status_display = str(inputs.get("safe_catalog_status") or "audit en cours")
     missing_shards_display = inputs.get("missing_shards")
+    signal_coverage = (
+        dict(economic.get("signal_coverage"))
+        if isinstance(economic.get("signal_coverage"), Mapping) else {}
+    )
+    signal_day_count = signal_coverage.get("distinct_utc_days")
+    signal_day_minimum = signal_coverage.get("minimum_utc_days_required")
+    signal_span = signal_coverage.get("signal_span_hours")
+    signal_span_text = (
+        f"{float(signal_span):,.3f}".replace(",", " ").replace(".", ",")
+        if isinstance(signal_span, (int, float)) else "non mesurable"
+    )
+    aligned_add_signals = economic.get("temporally_aligned_add_signals")
+    aligned_add_signals_text = (
+        f"{aligned_add_signals:,}"
+        if type(aligned_add_signals) is int and aligned_add_signals >= 0
+        else "non mesurable"
+    )
+    payload_audit = inputs.get("payload_audit")
+    payload_audit = payload_audit if isinstance(payload_audit, Mapping) else {}
+    safe_exclusion_summary = _safe_copy_vault_exclusion_summary(inputs)
+    payload_rejection_labels = {
+        "INVALID_OR_NONCAUSAL_L2_REJECTED": "carnets L2 invalides ou non causaux",
+        "INVALID_OR_INCOMPLETE_FILL_REJECTED": "fills invalides ou incomplets",
+        "FILL_LIST_INVALID": "listes de fills invalides",
+    }
+    payload_rejection_text = "; ".join(
+        f"{int(count):,}".replace(",", " ") + " "
+        + payload_rejection_labels.get(str(reason), str(reason).replace("_", " ").lower())
+        for reason, count in payload_audit.items()
+        if type(count) is int and count > 0
+    ) or "aucun enregistrement rejeté"
+    partial_shards_display = int(inputs.get("partial_shards_excluded") or 0)
     reason_display = (
         str(live.get("message") or "campagne active; aucun verdict final")
         if status in {"RUNNING", "SEARCH_RUNNING"} and not economic.get("reason")
@@ -792,8 +864,19 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"Fills / carnets reconstruits : {int(unique_fills_display or 0):,} / {int(unique_books_display or 0):,}</p>"
         f"<p class='small'>Catalogue : {html.escape(catalog_status_display)} · "
         f"shards locaux absents : {html.escape(str(missing_shards_display if missing_shards_display is not None else 'calcul en cours'))} · "
+        f"shards PARTIAL exclus : {partial_shards_display:,} · "
         f"corpus complet : {'oui' if inputs.get('data_complete') is True else 'non' if inputs.get('data_complete') is False else 'calcul en cours'}</p>"
-        f"<p class='small'>Dernier essai : {html.escape(str(last_trial.get('trial_number') or '—'))} · "
+        f"<p class='small'>Contenu refusé : {html.escape(payload_rejection_text)}. "
+        "Les fichiers SAFE vérifiés et la qualité de leurs événements sont affichés séparément.</p>"
+        f"<p class='small'>Contexte SAFE hors replay économique : {html.escape(safe_exclusion_summary)}.</p>"
+        + (
+            f"<p class='small'>Signaux leader : {int(signal_day_count):,} / {int(signal_day_minimum):,} jours UTC distincts · "
+            f"fenêtre observée : {signal_span_text} h · cycles reconstruits : {int(economic.get('metaorders') or 0):,} · "
+            f"signaux ADD avec L2 causal dans les 30 s : "
+            f"{aligned_add_signals_text}</p>"
+            if type(signal_day_count) is int and type(signal_day_minimum) is int else ""
+        )
+        + f"<p class='small'>Dernier essai : {html.escape(str(last_trial.get('trial_number') or '—'))} · "
         f"{html.escape(str(last_trial.get('status') or '—'))} · "
         f"score conservateur du meilleur candidat TRAIN : {display(current_candidate_score)} · "
         f"moyenne TRAIN actuelle : {display(baseline_mean)}</p>"
@@ -887,6 +970,7 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
         f"- Activité : {live.get('message', 'préparation')}",
         f"- Données SAFE : {inputs.get('verified_assets', 0)} / {inputs.get('expected_safe_shards', 0)} shards vérifiés; "
         f"{inputs.get('unique_fills', 0)} fills et {inputs.get('unique_books', 0)} carnets uniques.",
+        f"- Contexte SAFE hors PnL : {_safe_copy_vault_exclusion_summary(inputs)}.",
         f"- Essais uniques : {economic.get('candidates_tested', 0)} · candidat gelé : "
         f"{'oui' if economic.get('freeze_created') else 'non'} · preuve économique : "
         f"{'oui' if economic.get('economically_proven') else 'non'}.",
@@ -921,8 +1005,10 @@ def _run_continuous_safe_lab(
     report_dir: Path, *, run_id: str, head: str, continuous: bool,
 ) -> int:
     from hl_observer.backtesting.copy_vault_local_lab import (
-        OBJECTIVE_USD_PER_DAY, PAPER_CAPITAL_USD, evaluate_current_copy_vault,
-        _search_space_size, load_improvement_history, materialize_safe_workspace,
+        _search_space_size,
+        evaluate_current_copy_vault,
+        load_improvement_history,
+        materialize_safe_workspace,
         run_local_campaign,
     )
 
@@ -1081,8 +1167,11 @@ def _run_continuous_safe_lab(
                 / str(safe_inputs.get("selection_digest"))
             )
 
-            def dataset_changed() -> bool:
-                return _local_safe_watch_fingerprint(ROOT, watch_files) != fingerprint
+            def dataset_changed(
+                watched_files: list[str] = watch_files,
+                baseline_fingerprint: str = fingerprint,
+            ) -> bool:
+                return _local_safe_watch_fingerprint(ROOT, watched_files) != baseline_fingerprint
 
             last_dashboard = 0.0
 
@@ -1217,10 +1306,8 @@ def _run_continuous_safe_lab(
             },
             "freeze_verdict": "Échec technique; les essais déjà inscrits dans le registre append-only sont conservés. Aucun résultat économique n'est déclaré.",
         }, live={"active": False, "stage": "ERREUR TECHNIQUE", "message": f"{type(exc).__name__}: {exc}"})
-        try:
+        with suppress(OSError):
             persist()
-        except OSError:
-            pass
         print(f"[ERREUR] {type(exc).__name__}: {exc}", flush=True)
         return 1
     finally:
@@ -1236,7 +1323,11 @@ def run_economic_lab(
     try:
         from hl_observer.backtesting.copy_vault_local_lab import (
             OBJECTIVE_USD_PER_DAY as _objective,
+        )
+        from hl_observer.backtesting.copy_vault_local_lab import (
             PAPER_CAPITAL_USD as _capital,
+        )
+        from hl_observer.backtesting.copy_vault_local_lab import (
             evaluate_current_copy_vault,
             load_improvement_history,
             materialize_safe_workspace,
@@ -1533,7 +1624,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.dataset_root is None:
             parser.error("--research exige --dataset-root")
         from hl_observer.datasets.source_discovery import (
-            is_dataset_workspace, discover_family_sources,
+            discover_family_sources,
+            is_dataset_workspace,
         )
         dataset = args.dataset_root.resolve()
         if not is_dataset_workspace(dataset):

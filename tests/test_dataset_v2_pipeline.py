@@ -9,6 +9,7 @@ from hl_observer.datasets.v2_pipeline import (
     attach_reconciliation,
     build_bundle,
     finalize_manifest,
+    infer_reconciliation_status,
     verify_remote_asset,
 )
 
@@ -36,6 +37,22 @@ def _event(ts: int, *, connection: str = "ws-1", gap_count: int = 0) -> TickEnve
             "clock_offset_ms": 2.0,
         },
     )
+
+
+def test_https_historical_copy_vault_snapshot_requires_causal_availability_semantics():
+    base = {
+        "family": "copy_vault_snapshot",
+        "provenance": {"transports": ["https"]},
+    }
+    assert infer_reconciliation_status(base) == "UNVERIFIED"
+    verified = {
+        **base,
+        "provenance": {
+            "transports": ["https"],
+            "timestamp_semantics": ["causal_event_availability"],
+        },
+    }
+    assert infer_reconciliation_status(verified) == "SNAPSHOT_VERIFIED"
 
 
 def test_connection_change_seals_previous_partition_epoch(tmp_path) -> None:

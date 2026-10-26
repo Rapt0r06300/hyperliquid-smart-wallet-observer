@@ -312,12 +312,12 @@ jobs:
               COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"
               mkdir -p "$(dirname "$COPY_SELECTION")"
               if [ ! -f "$COPY_SELECTION" ]; then
-                PYTHONPATH=alina/src python alina/tools/freeze_copy_vault_selection.py --output "$COPY_SELECTION"
+                PYTHONPATH=alina/src python alina/tools/freeze_copy_vault_selection.py --output "$COPY_SELECTION" --phase-epoch "$PHASE_EPOCH" --campaign-dir catalog/campaigns
               fi
               COPY_COUNT="$(python -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["vaults"]))' "$COPY_SELECTION")"
               test "$COPY_COUNT" -gt 0
               COPY_SHA="$(sha256sum "$COPY_SELECTION" | cut -d' ' -f1)"
-              COPY_CURSOR="$(python -c 'import json,sys; print(json.dumps({"duration_s":3500,"max_vaults":int(sys.argv[1]),"max_ws_vaults":10,"vault_shard_count":1,"vault_shard_index":0,"rotate_mb":64,"copy_vault_mode":"two_speed_broad_rest_priority_ws","selection_file":sys.argv[2],"selection_sha256":sys.argv[3]}, separators=(",",":")))' "$COPY_COUNT" "$COPY_SELECTION" "$COPY_SHA")"
+              COPY_CURSOR="$(python -c 'import json,sys; print(json.dumps({"duration_s":3500,"max_vaults":int(sys.argv[1]),"max_ws_vaults":10,"vault_shard_count":1,"vault_shard_index":0,"rotate_mb":64,"history_lookback_hours":72,"copy_vault_mode":"two_speed_broad_rest_priority_ws","selection_file":sys.argv[2],"selection_sha256":sys.argv[3]}, separators=(",",":")))' "$COPY_COUNT" "$COPY_SELECTION" "$COPY_SHA")"
               make_campaign \
                 copy_vault_collection \
                 "copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8" \

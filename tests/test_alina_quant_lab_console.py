@@ -86,6 +86,66 @@ def test_dashboard_compares_current_copy_vault_with_challenger(tmp_path: Path) -
     assert "Amélioration mesurée" in dashboard
 
 
+def test_dashboard_explains_missing_signal_days_and_safe_payload_rejections(
+    tmp_path: Path,
+) -> None:
+    summary = {
+        "run_id": "coverage-blocker", "head": "abc", "status": "MORE_DATA",
+        "safe_inputs": {
+            "verified_assets": 14_647,
+            "expected_safe_shards": 14_647,
+            "copy_vault_safe_catalog_shards": 14_847,
+            "safe_copy_vault_shards_not_used_for_pnl": 200,
+            "safe_copy_vault_shards_not_used_for_pnl_by_family": {
+                "copy_vault_positions": 100,
+                "copy_vault_selection": 100,
+            },
+            "safe_copy_vault_shards_not_used_for_pnl_inventory_by_family": {
+                "copy_vault_positions": {
+                    "catalogue_shards": 100,
+                    "local_files_present_unverified": 0,
+                    "local_files_missing": 100,
+                    "local_files_unsafe": 0,
+                },
+                "copy_vault_selection": {
+                    "catalogue_shards": 100,
+                    "local_files_present_unverified": 0,
+                    "local_files_missing": 100,
+                    "local_files_unsafe": 0,
+                },
+            },
+            "missing_shards": 0,
+            "partial_shards_excluded": 10,
+            "safe_catalog_status": "SAFE_COMPLETE",
+            "data_complete": False,
+            "payload_audit": {"INVALID_OR_NONCAUSAL_L2_REJECTED": 2_319},
+        },
+        "economic_result": {
+            "status": "MORE_DATA",
+            "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS",
+            "candidates_tested": 0,
+            "signal_coverage": {
+                "distinct_utc_days": 2,
+                "minimum_utc_days_required": 6,
+                "signal_start_ms": 1_790_867_233_651,
+                "signal_end_ms": 1_790_965_255_148,
+                "signal_span_hours": 27.228,
+            },
+        },
+    }
+
+    dashboard = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
+
+    assert "2 / 6 jours UTC distincts" in dashboard
+    assert "27,228 h" in dashboard or "27.228 h" in dashboard
+    assert "2 319" in dashboard or "2,319" in dashboard
+    assert "shards PARTIAL exclus : 10" in dashboard
+    assert "200 shards SAFE du catalogue hors replay économique" in dashboard
+    assert "100 positions" in dashboard and "100 sélection" in dashboard
+    assert "0/100 positions fichiers locaux repérés (100 absents)" in dashboard
+    assert "0/100 sélection fichiers locaux repérés (100 absents)" in dashboard
+
+
 
 
 def test_lab_fails_closed_when_a_required_test_group_is_empty(tmp_path: Path) -> None:
@@ -244,36 +304,46 @@ def test_safe_inspection_rejects_unbound_unpack_report(tmp_path: Path) -> None:
 def test_safe_research_builds_workspace_then_runs_existing_campaign(
     monkeypatch, tmp_path: Path,
 ) -> None:
+    from hl_observer.backtesting import copy_vault_local_lab as local_lab
     from tools import alina_quant_lab_console as lab
-    from tools import copy_vault_safe_bridge as bridge
-
-    provenance = (
-        tmp_path / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json"
-    )
-    provenance.parent.mkdir(parents=True)
-    provenance.write_text('{"source_kind": "alina-sync-safe-unpacked"}', encoding="utf-8")
-    source = tmp_path / "runtime" / "data" / "vault_fills_live.jsonl"
-    source.parent.mkdir(parents=True)
-    source.write_text('{"source": "LIVE_WS"}\\n', encoding="utf-8")
-    book = source.parent / "copy_vault_l2_tape.jsonl"
-    book.write_text('{"source": "HYPERLIQUID_L2_WS"}\\n', encoding="utf-8")
 
     calls = []
+    materializations = []
+
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-        return type("Done", (), {"returncode": 0})()
+        return type("Done", (), {"returncode": 0, "stdout": "a" * 40 + "\n"})()
+
+    def fake_materialize(recovery, workspace):
+        materializations.append((recovery, workspace))
+        return {
+            "status": "UNMEASURABLE", "reason": "NO_SAFE_TEST_FIXTURE",
+            "verified_assets": 0, "expected_safe_shards": 0,
+            "unique_fills": 0, "unique_books": 0,
+        }
 
     monkeypatch.setattr(lab, "ROOT", tmp_path)
-    monkeypatch.setattr(bridge, "build_safe_copy_workspace", lambda root: {
-        "workspace": str(tmp_path), "selected_shards": 2,
-        "counts": {"copy_vault_fills": 1, "copy_vault_l2": 1},
-    })
+    monkeypatch.setattr(lab, "_open_report", lambda _path: None)
     monkeypatch.setattr(lab.subprocess, "run", fake_run)
-    assert lab.main(["--safe-research"]) == 0
+    monkeypatch.setattr(local_lab, "materialize_safe_workspace", fake_materialize)
+    monkeypatch.setattr(
+        local_lab,
+        "run_historical_trade_replay",
+        lambda *_args, **_kwargs: {"status": "UNMEASURABLE", "trial_count": 0},
+    )
+    monkeypatch.setattr(local_lab, "load_improvement_history", lambda _root: [])
+
+    assert lab.main(["--safe-research", "--once"]) == 0
     assert len(calls) == 1
-    command, options = calls[0]
-    assert command[-3:] == ["--root", str(tmp_path), "--no-start-collection"]
-    assert options["env"]["REAL_MAINNET_TRADING"] == "false"
+    assert calls[0][0] == ["git", "rev-parse", "HEAD"]
+    assert len(materializations) == 1
+    recovery, workspace = materializations[0]
+    assert recovery == tmp_path / "runtime" / "recovery" / "full"
+    assert workspace.name == "workspace"
+    assert workspace.parent.parent.name == "copy_vault_quant_lab"
+    assert json.loads((workspace.parent / "resultat.json").read_text(encoding="utf-8"))[
+        "network_or_collection_started"
+    ] is False
 
 
 def test_legacy_economic_dispatch_keeps_safe_research_separate(monkeypatch) -> None:

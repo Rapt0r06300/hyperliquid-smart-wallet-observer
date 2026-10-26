@@ -283,6 +283,12 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             str(shard_index),
             "--max-ws-vaults",
             str(max_ws_vaults),
+            "--history-lookback-hours",
+            str(_bounded_float(
+                ctx.partition.get("history_lookback_hours"),
+                72.0,
+                72.0,
+            )),
             *(
                 ["--two-speed"]
                 if mode == "two_speed_broad_rest_priority_ws"
@@ -472,6 +478,9 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     manifest_count = 0
     trade_shards = 0
     trade_shards_exact = 0
+    historical_snapshot_shards = 0
+    historical_fill_observations = 0
+    historical_snapshot_shards_exact = 0
     manifest_paths = index.get("manifests")
     if isinstance(manifest_paths, list):
         for rel in manifest_paths:
@@ -493,6 +502,16 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                     row.get("uncompressed_bytes"), 0, 0, 2**63 - 1
                 )
             family = str(row.get("family") or "").lower()
+            if family == "copy_vault_snapshot":
+                historical_snapshot_shards += 1
+                if row.get("historical_fill_observation_count_exact") is True:
+                    historical_snapshot_shards_exact += 1
+                    historical_fill_observations += _bounded_int(
+                        row.get("historical_fill_observation_count"),
+                        0,
+                        0,
+                        2**63 - 1,
+                    )
             if family in {"l2book", "copy_vault_l2", "native_market"}:
                 l2_manifest_frames += records
             elif family == "bbo":
@@ -532,6 +551,12 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         "trade_count_coverage_complete": trade_shards == trade_shards_exact,
         "trade_shard_count": trade_shards,
         "trade_shards_exact": trade_shards_exact,
+        "historical_fill_observations": historical_fill_observations,
+        "historical_snapshot_shards": historical_snapshot_shards,
+        "historical_snapshot_shards_exact": historical_snapshot_shards_exact,
+        "historical_fill_observation_coverage_complete": (
+            historical_snapshot_shards == historical_snapshot_shards_exact
+        ),
         "record_count_observed": record_count,
         "accepted_frames": _bounded_int(
             summary.get("accepted_frames"), 0, 0, 2**63 - 1

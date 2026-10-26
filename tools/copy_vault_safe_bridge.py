@@ -80,16 +80,20 @@ def _source_record(line: bytes) -> dict[str, Any]:
 
 
 def _raw_envelope(record: dict[str, Any], channel: str) -> tuple[dict[str, Any], int, int]:
-    expected_source = {
-        "copy_vault_fills": "hyperliquid_public_userfills",
-        "copy_vault_l2": "hyperliquid_public_copy_l2",
+    expected_sources = {
+        "copy_vault_fills": {"hyperliquid_public_userfills"},
+        "copy_vault_snapshot": {
+            "hyperliquid_public_userfills",
+            "hyperliquid_public_userfills_backfill",
+        },
+        "copy_vault_l2": {"hyperliquid_public_copy_l2"},
     }[channel]
     provenance = record.get("provenance")
     raw = record.get("raw_payload")
     if (
         record.get("schema_version") != "hypersmart.tick.v1"
         or record.get("channel") != channel
-        or record.get("source_id") != expected_source
+        or record.get("source_id") not in expected_sources
         or record.get("read_only") is not True
         or record.get("real_execution") is not False
         or not isinstance(provenance, dict)
@@ -145,6 +149,69 @@ def _fills(record: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     ):
         raise SafeBridgeError("invalid or noncausal fill event")
     return fills, 0
+
+
+def _historical_fills(record: dict[str, Any]) -> list[dict[str, Any]]:
+    message, receive, exchange = _raw_envelope(record, "copy_vault_snapshot")
+    data = message.get("data")
+    vault = str(record.get("instrument") or "").strip().lower()
+    provenance = record.get("provenance")
+    if (
+        message.get("channel") != "userFills"
+        or not isinstance(data, dict)
+        or data.get("isSnapshot") is not True
+        or not vault
+        or str(data.get("user") or "").lower() != vault
+        or not isinstance(data.get("fills"), list)
+        or not isinstance(provenance, dict)
+    ):
+        raise SafeBridgeError("invalid historical Copy-Vault snapshot envelope")
+    source_id = str(record.get("source_id") or "")
+    if source_id == "hyperliquid_public_userfills_backfill" and (
+        provenance.get("historical_only") is not True
+        or provenance.get("forward_evidence_allowed") is not False
+        or provenance.get("transport") != "https"
+    ):
+        raise SafeBridgeError("REST fills lack historical-only provenance")
+    normalized = parser_message_userfills(
+        message,
+        vault=vault,
+        received_at_ms=receive,
+        receive_mono_ns=record.get("local_monotonic_ns"),
+        connection_id=str(record.get("connection_id") or ""),
+    )
+    raw_fills = data["fills"]
+    if len(normalized) != len(raw_fills):
+        raise SafeBridgeError("historical snapshot contains invalid or incomplete fills")
+    if normalized and max(int(row["ts_ms"]) for row in normalized) != exchange:
+        raise SafeBridgeError("historical snapshot exchange timestamp mismatch")
+    if any(
+        int(row["ts_ms"]) <= 0 or int(row["ts_ms"]) > receive
+        or row.get("signe") not in (-1, 1)
+        or not math.isfinite(float(row["px"])) or float(row["px"]) <= 0
+        or not math.isfinite(float(row["sz"])) or float(row["sz"]) <= 0
+        for row in normalized
+    ):
+        raise SafeBridgeError("invalid or noncausal historical fill")
+    source = (
+        "REST_BACKFILL"
+        if source_id == "hyperliquid_public_userfills_backfill"
+        else "WS_BOOTSTRAP"
+    )
+    return [
+        {
+            **row,
+            "source": source,
+            "isSnapshot": True,
+            "is_snapshot": True,
+            "observed_at_ms": None,
+            "received_at_ms": receive,
+            "source_id": source_id,
+            "source_raw_sha256": record.get("raw_sha256"),
+            "causal_forward_eligible": False,
+        }
+        for row in normalized
+    ]
 
 
 def _levels(side: Any, *, descending: bool) -> list[list[float]]:
@@ -275,13 +342,24 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     destination.mkdir(parents=True)
     paths = {
         "copy_vault_fills": destination / "vault_fills_live.jsonl",
+        "copy_vault_snapshot": destination / "vault_fills.jsonl",
         "copy_vault_l2": destination / "copy_vault_l2_tape.jsonl",
     }
-    counts = {"copy_vault_fills": 0, "copy_vault_l2": 0, "snapshots_excluded": 0}
+    counts = {
+        "copy_vault_fills": 0,
+        "copy_vault_snapshot": 0,
+        "historical_fill_observations": 0,
+        "copy_vault_l2": 0,
+        "snapshots_excluded_from_forward": 0,
+    }
     inputs: list[dict[str, Any]] = []
     total = len(registry)
     try:
-        with paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out, paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out:
+        with (
+            paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out,
+            paths["copy_vault_snapshot"].open("w", encoding="utf-8", newline="\n") as history_out,
+            paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out,
+        ):
             for i, (relative, size, sha, stat_identity) in enumerate(registry, 1):
                 archive, plain, seal_path = _safe_paths(recovery, relative)
                 if not archive.is_file() or not plain.is_file() or not seal_path.is_file():
@@ -319,10 +397,16 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
                             raise SafeBridgeError(f"mixed channel in SAFE shard: {relative}")
                         if channel == "copy_vault_fills":
                             normalized, excluded = _fills(record)
-                            counts["snapshots_excluded"] += excluded
+                            counts["snapshots_excluded_from_forward"] += excluded
                             for fill in normalized:
                                 fill_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
                             counts[channel] += len(normalized)
+                        elif channel == "copy_vault_snapshot":
+                            normalized = _historical_fills(record)
+                            for fill in normalized:
+                                history_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
+                            counts[channel] += 1
+                            counts["historical_fill_observations"] += len(normalized)
                         else:
                             l2_out.write(json.dumps(_book(record), sort_keys=True, allow_nan=False) + "\n")
                             counts[channel] += 1
@@ -353,7 +437,8 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             "counts": counts,
             "paper_read_only": True,
             "real_execution": False,
-            "snapshot_fills_excluded": True,
+            "snapshot_fills_train_only": True,
+            "snapshot_fills_excluded_from_forward": True,
             "economic_proof": False,
         }
         proof_dir = stage / "runtime" / "reports" / "datasets"

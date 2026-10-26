@@ -15,9 +15,16 @@ sys.path.insert(0,str(ROOT/"tools"))
 sys.path.insert(0,str(ROOT/"src"))
 
 import collecter_vaults as CV  # noqa: E402
+from copy_vault_continuity import load_history_checkpoints  # noqa: E402
 
 
-def build_selection(payload: Any, *, now_ms: int | None=None) -> dict[str,Any]:
+def build_selection(
+    payload: Any,
+    *,
+    now_ms: int | None=None,
+    campaign_dir: Path | None=None,
+    phase_epoch: int | None=None,
+) -> dict[str,Any]:
     selected_at_ms=int(time.time()*1000) if now_ms is None else int(now_ms)
     raw_count=len(payload) if isinstance(payload,list) else 0
     rows=CV.parser_univers_public(
@@ -29,6 +36,19 @@ def build_selection(payload: Any, *, now_ms: int | None=None) -> dict[str,Any]:
     )
     if not rows:
         raise RuntimeError("public Copy-Vault observation universe is empty")
+    checkpoints = (
+        load_history_checkpoints(
+            campaign_dir,
+            phase_epoch=phase_epoch,
+            addresses={str(row.get("address") or "").lower() for row in rows},
+        )
+        if campaign_dir is not None and phase_epoch is not None
+        else {}
+    )
+    for row in rows:
+        checkpoint = checkpoints.get(str(row.get("address") or "").lower())
+        if checkpoint is not None:
+            row["copy_vault_history_checkpoint"] = checkpoint
     return {
         "schema":"alina.copy_vault_selection.v2",
         "selected_at_ms":selected_at_ms,
@@ -42,6 +62,7 @@ def build_selection(payload: Any, *, now_ms: int | None=None) -> dict[str,Any]:
         },
         "raw_public_rows":raw_count,
         "vault_count":len(rows),
+        "history_checkpoint_count":len(checkpoints),
         "vaults":rows,
         "observation_only":True,
         "read_only":True,
@@ -52,9 +73,15 @@ def build_selection(payload: Any, *, now_ms: int | None=None) -> dict[str,Any]:
 def main(argv: list[str] | None=None) -> int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--output",required=True)
+    parser.add_argument("--phase-epoch",type=int)
+    parser.add_argument("--campaign-dir",type=Path,default=ROOT/"catalog"/"campaigns")
     args=parser.parse_args(argv)
     payload=CV._get_vaults_public()
-    selection=build_selection(payload)
+    selection=build_selection(
+        payload,
+        campaign_dir=args.campaign_dir,
+        phase_epoch=args.phase_epoch,
+    )
     out=Path(args.output)
     out.parent.mkdir(parents=True,exist_ok=True)
     raw=(json.dumps(selection,indent=2,sort_keys=True)+"\n").encode()
@@ -62,6 +89,7 @@ def main(argv: list[str] | None=None) -> int:
     print(json.dumps({
         "path":str(out),
         "vault_count":selection["vault_count"],
+        "history_checkpoint_count":selection["history_checkpoint_count"],
         "lane_count":(int(selection["vault_count"])+CV.MAX_UNIQUE_USERS_PER_IP-1)//CV.MAX_UNIQUE_USERS_PER_IP
             if hasattr(CV,"MAX_UNIQUE_USERS_PER_IP") else (int(selection["vault_count"])+9)//10,
         "sha256":hashlib.sha256(raw).hexdigest(),

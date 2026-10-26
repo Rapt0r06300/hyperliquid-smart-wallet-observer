@@ -137,15 +137,16 @@ Interdit notamment :
 
 La cible de recherche **>= +5 USD NET/jour** par famille, sur 200 USD paper, n'a jamais priorité sur l'intégrité de la preuve.
 
-## 8. Sécurité des trois familles actives
+## 8. Scope économique effectif
 
-Familles actives :
+Famille économique active unique : **Copy-Vault**.
 
-- Copy-Vault
-- Lead-Lag
-- Cross-Venue Dislocation
-
-`Carry / Funding Carry = DISABLED_BY_SCOPE`.
+`Lead-Lag`, `Cross-Venue Dislocation`, arbitrage, `Carry / Funding Carry` et
+les familles `shadow / research-only` sont `DISABLED_BY_SCOPE` pour les
+simulations économiques, replays, backtests, OOS/forward, preuve PnL,
+certification et scoreboard. L'autorité machine est
+`src/hl_observer/strategies/active_scope.py`; aucune variable d'environnement
+ne peut élargir ce scope.
 
 ### Copy-Vault
 
@@ -159,21 +160,7 @@ Aucune fonctionnalité de “copy execution” ne doit :
 - disposer d'une clé ;
 - contourner reduce-only/fail-closed.
 
-### Lead-Lag
-
-La sécurité inclut l'ordre temporel :
-
-- no-lookahead ;
-- horloges/provenance ;
-- données stale refusées ;
-- missed fills conservés ;
-- coût réel appliqué.
-
-### Cross-Venue
-
-Deux venues observées ne donnent jamais le droit d'ordonner sur aucune.
-
-Les deux jambes restent simulées. La non-atomicité doit être modélisée, jamais résolue en ajoutant une vraie capacité d'exécution.
+Le suivi d'une adresse publique n'autorise jamais une action sur ce wallet.
 
 ## 9. Event Intelligence
 

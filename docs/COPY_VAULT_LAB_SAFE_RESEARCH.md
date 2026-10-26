@@ -27,11 +27,32 @@ The bridge checks the final catalog SHA on restore, unpack and the active
 SQLite registry; exact active shard count; registered compressed stat and
 SHA-256; extracted JSONL SHA-256 and byte length; per-frame
 `hypersmart.tick.v1` schema, raw payload SHA-256, public read-only
-provenance and causal clocks. It decodes only the Hyperliquid
-`copy_vault_fills` and `copy_vault_l2` channels.
+provenance and causal clocks. It decodes the Hyperliquid incremental
+`copy_vault_fills`, historical `copy_vault_snapshot`, and `copy_vault_l2`
+channels. Historical snapshot fill counts are reported separately from
+incremental trade counts.
 
-- WS userFills snapshots are excluded (historical acknowledgements must not
-  become future-known signals).
+- WS bootstrap and REST backfill snapshots may supply historical TRAIN research
+  rows. They retain their source and snapshot marker and are never eligible as
+  forward signals, forward fills, or PnL proof.
+- Incremental `copy_vault_fills` retain their observed receive time. Only these
+  can qualify as causal forward signals after the strategy's frozen start.
+- REST history requests share one read-only `/info` weight budget of 1,080
+  units/minute. Each `userFillsByTime` call reserves its maximum 120-unit
+  response weight before sending, so concurrent large replies cannot exceed
+  the budget. A response cap, malformed fill, timeout, or request-budget
+  exhaustion is `PARTIAL`; it is not presented as complete history.
+- Each new frozen wallet selection resumes from that wallet's last reconciled,
+  durably published same-epoch REST checkpoint. If the gap is older than the
+  72-hour repair window, the collector records the uncovered interval and
+  advances only the separately marked post-gap cursor after the requested
+  window itself is complete. A reached 10,000-fill retention ceiling also
+  advances this cursor while recording the recoverable endpoint and the
+  remaining gap. The gap stays in the campaign receipt.
+- Before lab search, SAFE release tags are matched to committed campaign
+  receipts. Missing receipts, partial REST audits, or known gaps set the local
+  corpus to incomplete; candidates may remain TRAIN-only and cannot be treated
+  as a complete history result.
 - Observed L2 must contain at least five valid ordered levels per side,
   non-crossed prices and maximum 1-second receive/exchange lag.
 - No missing levels, timestamps, network calls, filled orders or NAV values are
@@ -41,7 +62,8 @@ provenance and causal clocks. It decodes only the Hyperliquid
 
 The immutable reconstructed inputs are staged under
 `runtime/research_lab/copy_vault_safe/<selection_digest>/` as
-`vault_fills_live.jsonl` and `copy_vault_l2_tape.jsonl`; their output
+`vault_fills.jsonl` (historical snapshots), `vault_fills_live.jsonl`
+(incremental fills), and `copy_vault_l2_tape.jsonl`; their output
 SHA-256 and each selected source shard identity are recorded in
 `runtime/reports/datasets/SELECTION_PROVENANCE.json` inside that workspace.
 An identical pre-existing workspace is reused only after checking its output
@@ -67,7 +89,7 @@ LANCER_LAB_QUANT_COPY_VAULT.cmd research "D:\\verified_FULL_COLD_workspace"
 software-only inspection. `research` consumes a separately prepared
 workspace with recognized Copy-Vault files and provenance. None performs real
 trading. The SAFE bridge **does not** transform arbitrary market L2 data
-into user fills or assume historical fill snapshots are causal.
+into user fills or treat historical fill snapshots as causal or forward proof.
 
 ## Remaining evidence before economic promotion
 

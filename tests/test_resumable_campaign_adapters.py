@@ -14,6 +14,10 @@ from hl_observer.control_plane.campaign_adapters import (
 )
 
 
+def _endswith_tool(path: object, suffix: str) -> bool:
+    return str(path).replace("\\", "/").endswith(suffix)
+
+
 def context(kind: str, **partition):
     return AdapterContext(
         campaign_id="c1",
@@ -29,7 +33,7 @@ def test_market_command_uses_real_collector_cli(tmp_path):
         context("market_collection", output_root=str(tmp_path), duration_s=10, coins="BTC")
     )
     assert cmd[0] == sys.executable
-    assert cmd[1].endswith("tools/collect_cloud_window.py")
+    assert _endswith_tool(cmd[1], "tools/collect_cloud_window.py")
     assert "--output" in cmd
     assert "--duration-s" in cmd
     assert "--campaign-unit-json" not in cmd
@@ -48,7 +52,7 @@ def test_official_archive_uses_existing_backfill_tool(tmp_path):
             start_date="2026-09-24",
         )
     )
-    assert cmd[1].endswith("tools/collect_official_archive_backfill.py")
+    assert _endswith_tool(cmd[1], "tools/collect_official_archive_backfill.py")
     assert output is not None and output.name == "bundle"
 
 
@@ -86,7 +90,7 @@ def test_backtest_command_targets_economic_runner(tmp_path):
     cmd, output = build_command(
         context("backtest", workspace_root=str(tmp_path))
     )
-    assert cmd[1].endswith("tools/run_economic_objective_campaigns.py")
+    assert _endswith_tool(cmd[1], "tools/run_economic_objective_campaigns.py")
     assert "--no-start-collection" in cmd
     assert output == tmp_path
 
@@ -155,7 +159,7 @@ def test_economic_run_materializes_then_backtests_in_same_unit(tmp_path):
     assert out.progressed is True
     assert len(calls) == 2
     assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
-    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
+    assert _endswith_tool(calls[1][1], "tools/run_economic_objective_campaigns.py")
     assert out.payload["safe_workspace"] == str(tmp_path)
 
 
@@ -202,8 +206,8 @@ def test_module_pnl_proof_runs_strict_audit_after_campaign(tmp_path):
     assert out.status == "COMPLETE"
     assert len(calls) == 3
     assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
-    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
-    assert calls[2][1].endswith("tools/audit_economic_objectives.py")
+    assert _endswith_tool(calls[1][1], "tools/run_economic_objective_campaigns.py")
+    assert _endswith_tool(calls[2][1], "tools/audit_economic_objectives.py")
     assert [phase["name"] for phase in out.payload["phases"]] == [
         "materialize_safe_v2",
         "economic_campaign",
@@ -255,7 +259,7 @@ def test_module_pnl_unmeasurable_is_complete_stage_not_technical_failure(tmp_pat
 
     def runner(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+        if _endswith_tool(cmd[1], "tools/audit_economic_objectives.py"):
             _write_economic_audit(
                 tmp_path,
                 all_ledgers_valid=False,
@@ -292,7 +296,7 @@ def test_module_pnl_audit_exit_two_without_receipt_remains_technical_failure(tmp
 
     def runner(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+        if _endswith_tool(cmd[1], "tools/audit_economic_objectives.py"):
             return AuditResult()
         return Result()
 
@@ -319,7 +323,7 @@ def test_module_pnl_more_data_and_kill_are_semantic_not_crashes(tmp_path):
 
         def runner(cmd, _calls=calls, _classifications=classifications, **kwargs):
             _calls.append(list(cmd))
-            if cmd[1].endswith("tools/audit_economic_objectives.py"):
+            if _endswith_tool(cmd[1], "tools/audit_economic_objectives.py"):
                 _write_economic_audit(
                     tmp_path,
                     all_ledgers_valid=True,
@@ -460,12 +464,14 @@ def test_copy_vault_two_speed_separates_broad_universe_from_ws_limit(tmp_path):
             vault_shard_count=1,
             vault_shard_index=0,
             copy_vault_mode="two_speed_broad_rest_priority_ws",
+            history_lookback_hours=9.0,
             selection_file=str(selection),
             selection_sha256=digest,
         )
     )
     assert cmd[cmd.index("--max-vaults") + 1] == "3093"
     assert cmd[cmd.index("--max-ws-vaults") + 1] == "10"
+    assert cmd[cmd.index("--history-lookback-hours") + 1] == "9.0"
     assert "--two-speed" in cmd
 
 
