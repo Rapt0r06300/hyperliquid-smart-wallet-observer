@@ -482,6 +482,33 @@ def test_campaign_workflows_sparse_checkout_excludes_principal_dataset_tree() ->
         assert workflow.count("sparse-checkout:") == checkout_count
 
 
+def test_code_ci_workflows_use_sparse_checkouts_without_market_data_payloads() -> None:
+    expected = {
+        "labo-continu-ci.yml": 1,
+        "hyperlab-ci.yml": 1,
+        "event-intelligence-ci.yml": 1,
+        "security-quality.yml": 3,
+    }
+    required_code_dirs = (
+        ".github",
+        "src",
+        "tests",
+        "tools",
+    )
+    for name, checkout_count in expected.items():
+        workflow = _workflow(name)
+        assert workflow.count("actions/checkout@") == checkout_count, name
+        assert workflow.count("filter: blob:none") == checkout_count, name
+        sparse_blocks = workflow.split("sparse-checkout: |")[1:]
+        assert len(sparse_blocks) == checkout_count, name
+        for sparse in sparse_blocks:
+            block = sparse.split("persist-credentials:", 1)[0]
+            assert "/datasets/" not in block, name
+            assert "/catalog/" not in block, name
+            for directory in required_code_dirs:
+                assert f"\n            {directory}\n" in block, (name, directory)
+
+
 def test_terminal_cleanup_sparse_checkout_includes_python_package() -> None:
     cleanup = _workflow("cleanup-incomplete-v2-releases.yml")
     sparse = cleanup.split("sparse-checkout: |", 1)[1].split(
