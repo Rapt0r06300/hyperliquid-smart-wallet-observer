@@ -1,11 +1,11 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "market-e8-15-2026102612-v7",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "85d4a1dc6eddcb807bcd632af96b34ac00d17fd1",
+  "code_sha": "4e9f99b3b5382291668e68bd9dcedf66e65d387e",
   "collection_cutoff_at_utc": null,
   "completed_units": {},
   "config_sha256": "fa39e98ff036c4caaa88c20e59dee8d12d901d7b4271f32de312060ce0a3bc67",
@@ -33,10 +33,30 @@
     {
       "event": "operator_request",
       "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-15-2026102612-v7.pending.85d4a1dc6edd.288dd00e0de456858a069110dc674c79082eb0b5d19c76146551b494e69bd354.json",
+      "archived_manifest_sha256": "288dd00e0de456858a069110dc674c79082eb0b5d19c76146551b494e69bd354",
+      "at": "2026-10-26T17:01:33.576426Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "85d4a1dc6eddcb807bcd632af96b34ac00d17fd1",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "at": "2026-10-26T17:18:38.647494Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
     }
   ],
   "kind": "market_collection",
-  "lease": null,
+  "lease": {
+    "acquired_at": "2026-10-26T17:18:38.647443Z",
+    "expires_at": "2026-10-26T23:03:38.647443Z",
+    "lease_token_sha256": "586edcc8ea3f78a7c22d268c62128204142e105221a532005b8aa1e78d9e801b",
+    "owner_run_id": "40347046300"
+  },
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -54,9 +74,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "PENDING",
-  "status_reason": "created",
+  "status": "RUNNING",
+  "status_reason": "worker_started",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-26T12:52:39.053822Z",
+  "updated_at": "2026-10-26T17:18:38.647494Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
