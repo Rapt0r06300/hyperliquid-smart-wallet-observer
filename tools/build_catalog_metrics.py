@@ -12,6 +12,11 @@ try:
 except ModuleNotFoundError:
     from partitioned_data_index import read_index
 
+try:
+    from tools.catalog_patch_store import read_catalog_patch
+except ModuleNotFoundError:
+    from catalog_patch_store import read_catalog_patch
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 METRICS = ROOT / "catalog" / "DATA_METRICS.json"
@@ -95,7 +100,7 @@ def build() -> dict[str, Any]:
     shards = idx.get("shards") or []
     size_doc = {}
     try:
-        size_doc = json.loads(UNCOMPRESSED_PATCH.read_text(encoding="utf-8"))
+        size_doc = read_catalog_patch(UNCOMPRESSED_PATCH, expected_table="sizes")
     except (OSError, ValueError, TypeError):
         size_doc = {}
     size_rows = size_doc.get("sizes") if isinstance(size_doc, dict) else {}
@@ -103,7 +108,7 @@ def build() -> dict[str, Any]:
         size_rows = {}
     record_doc = {}
     try:
-        record_doc = json.loads(RECORD_PATCH.read_text(encoding="utf-8"))
+        record_doc = read_catalog_patch(RECORD_PATCH, expected_table="records")
     except (OSError, ValueError, TypeError):
         record_doc = {}
     record_rows = record_doc.get("records") if isinstance(record_doc, dict) else {}

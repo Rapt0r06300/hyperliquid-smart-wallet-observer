@@ -10,12 +10,14 @@ on:
       - 'catalog/TRADE_UNIQUE_COUNT_PATCH.json'
       - 'catalog/UNCOMPRESSED_SIZE_PATCH.json'
       - 'tools/build_catalog_metrics.py'
+      - 'tools/catalog_patch_store.py'
       - 'tools/build_quarantine_audit.py'
       - 'tools/rebase_disjoint_catalog_publication.py'
       - 'tools/build_collection_metrics.py'
       - 'tools/build_replay_compatibility_reasons.py'
       - 'tests/test_build_replay_compatibility_reasons.py'
       - 'tests/test_collection_metrics.py'
+      - 'tests/test_catalog_patch_store.py'
       - 'tests/test_rebase_disjoint_catalog_publication.py'
       - '.github/workflows/dataset-metrics-v2.yml'
   schedule:
@@ -51,7 +53,7 @@ jobs:
         run: |
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py tests/test_build_replay_compatibility_reasons.py
+          python -m pytest -q tests/test_catalog_patch_store.py tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py tests/test_build_replay_compatibility_reasons.py
       - name: Publish metrics
         shell: bash
         run: |

@@ -9,28 +9,24 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 try:
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
     from partitioned_data_index import read_index
 
+try:
+    from tools.catalog_patch_store import read_catalog_patch, write_catalog_patch
+except ModuleNotFoundError:
+    from catalog_patch_store import read_catalog_patch, write_catalog_patch
+
 TABLES = (
     ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", "alina.uncompressed_size_patch.v2"),
     ("RECORD_COUNT_PATCH.json", "records", "alina.record_count_patch.v1"),
 )
-
-
-def _load(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"non-object patch: {path}")
-    return value
 
 
 def _exact(value: Any, kind: str, sha: str) -> bool:
@@ -139,20 +135,14 @@ def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for file_name, kind, schema in TABLES:
         target = repo_root / "catalog" / file_name
-        measured = _load(measured_root / file_name)
+        measured = read_catalog_patch(measured_root / file_name, expected_table=kind)
         if not measured:
             raise ValueError(f"missing freshly measured patch: {file_name}")
         updated = merge_patch(
-            _load(target), measured, index_rows=rows, kind=kind, schema=schema
+            read_catalog_patch(target, expected_table=kind), measured,
+            index_rows=rows, kind=kind, schema=schema
         )
-        tmp = target.with_suffix(target.suffix + ".merge.tmp")
-        # Legacy indented JSON exceeded GitHub's 100 MB blob limit.
-        # Compact serialization preserves all exact SHA-bound measurements.
-        payload = json.dumps(updated, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
-        if len(payload.encode("utf-8")) >= 95_000_000:
-            raise ValueError(f"CATALOG_PATCH_NEEDS_PARTITION: {file_name} exceeds 95 MB")
-        tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, target)
+        write_catalog_patch(target, updated, table=kind)
         out[kind] = {
             "exact": updated["exact_assets"],
             "remaining": updated["remaining_assets"],

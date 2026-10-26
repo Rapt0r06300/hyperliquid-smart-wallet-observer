@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import gzip
 import hashlib
 import json
 import shutil
 import tempfile
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 try:
     from tools.backfill_exact_trade_counts import _download
@@ -26,6 +27,11 @@ try:
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
     from partitioned_data_index import read_index
+
+try:
+    from tools.catalog_patch_store import read_catalog_patch, write_catalog_patch
+except ModuleNotFoundError:
+    from catalog_patch_store import read_catalog_patch, write_catalog_patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
@@ -115,16 +121,8 @@ def main() -> None:
 
     index = read_index(INDEX)
     rows = hydrate_default_release_repository(index)
-    size_doc = (
-        json.loads(SIZE_PATCH.read_text(encoding="utf-8"))
-        if SIZE_PATCH.exists()
-        else {"sizes": {}}
-    )
-    record_doc = (
-        json.loads(RECORD_PATCH.read_text(encoding="utf-8"))
-        if RECORD_PATCH.exists()
-        else {"records": {}}
-    )
+    size_doc = read_catalog_patch(SIZE_PATCH, expected_table="sizes") or {"sizes": {}}
+    record_doc = read_catalog_patch(RECORD_PATCH, expected_table="records") or {"records": {}}
     sizes = size_doc.get("sizes") if isinstance(size_doc.get("sizes"), dict) else {}
     records = (
         record_doc.get("records") if isinstance(record_doc.get("records"), dict) else {}
@@ -153,17 +151,19 @@ def main() -> None:
     )[: max(1, args.limit)]
 
     failed: list[dict[str, str]] = []
-    with tempfile.TemporaryDirectory(prefix="alina-measure-") as temporary_root:
-        with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            futures = [pool.submit(_measure_candidate, row, temporary_root) for row in candidates]
-            for future in as_completed(futures):
-                dataset_id, size_result, record_result = future.result()
-                sizes[dataset_id] = size_result
-                records[dataset_id] = record_result
-                if size_result.get("status") == "UNAVAILABLE":
-                    failed.append(
-                        {"dataset_id": dataset_id, "reason": str(size_result.get("reason", ""))}
-                    )
+    with (
+        tempfile.TemporaryDirectory(prefix="alina-measure-") as temporary_root,
+        ThreadPoolExecutor(max_workers=worker_count) as pool,
+    ):
+        futures = [pool.submit(_measure_candidate, row, temporary_root) for row in candidates]
+        for future in as_completed(futures):
+            dataset_id, size_result, record_result = future.result()
+            sizes[dataset_id] = size_result
+            records[dataset_id] = record_result
+            if size_result.get("status") == "UNAVAILABLE":
+                failed.append(
+                    {"dataset_id": dataset_id, "reason": str(size_result.get("reason", ""))}
+                )
 
     remaining = sum(
         1
@@ -217,10 +217,8 @@ def main() -> None:
         "unavailable_assets": unavailable_records,
         **common,
     }
-    SIZE_PATCH.write_text(json.dumps(size_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
-    RECORD_PATCH.write_text(
-        json.dumps(record_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    write_catalog_patch(SIZE_PATCH, size_body, table="sizes")
+    write_catalog_patch(RECORD_PATCH, record_body, table="records")
     print(
         json.dumps(
             {

@@ -5,8 +5,9 @@ import argparse
 import hashlib
 import json
 import os
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 try:
     from tools.manifest_policy import classify_manifest
@@ -14,9 +15,16 @@ except ModuleNotFoundError:
     from manifest_policy import classify_manifest
 
 try:
-    from tools.partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
+    from tools.partitioned_data_index import SCHEMA as PARTITION_SCHEMA
+    from tools.partitioned_data_index import read_index, save_index
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
+    from partitioned_data_index import SCHEMA as PARTITION_SCHEMA
+    from partitioned_data_index import read_index, save_index
+
+try:
+    from tools.catalog_patch_store import read_catalog_patch
+except ModuleNotFoundError:
+    from catalog_patch_store import read_catalog_patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
@@ -199,8 +207,8 @@ def _load_size_proofs(root: Path) -> dict[str, Mapping[str, Any]]:
     if not path.is_file():
         return {}
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        doc = read_catalog_patch(path, expected_table="sizes")
+    except (OSError, ValueError, json.JSONDecodeError):
         return {}
     entries = doc.get("sizes") if isinstance(doc, Mapping) else None
     return dict(entries) if isinstance(entries, Mapping) else {}
