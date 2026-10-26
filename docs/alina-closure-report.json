@@ -3323,17 +3323,17 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "67249afcee44aa96d79818bc6915cc268258786f",
   "copy_vault_coverage_receipt": {
-    "digest": "4591f6f6dee3bf4f36b6da8997d6b94f4e1a470c8035a157b32e60a36ff10342",
+    "digest": "c6fb9c7831ad0e0328a2fa224da2a9d5185c20867a6b0798ef13cdf2ded9703d",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
-      "publication_complete": false,
+      "publication_complete": true,
       "selection_present": true,
       "selection_verified": true,
       "sharding_present": true,
       "ten_user_limit_respected": true
     },
-    "status": "MORE_DATA"
+    "status": "OBSERVED"
   },
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 0,
@@ -3375,9 +3375,9 @@
     "valid_record_count": 224819946,
     "valid_record_ratio": 0.1543307
   },
-  "dataset_health_digest": "87d9dd9a426f1f008c35761a86c25160d0a4829779e35da6e2b8258794c4c122",
+  "dataset_health_digest": "65ad9790573f53e064df78be8c0d067bc682d9bc19ef6284d54cc5727aedc1d9",
   "dataset_selection_id": null,
-  "dataset_v2_head": "c45ade98de87487ffb7a7a145fa70fe202eb8e46",
+  "dataset_v2_head": "215e85036785119826501b35a64de69e223a5d0d",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "c618471add377b556c69cf49403d3e9cce000468c4ccf8e606161472e73f9794",
@@ -3410,7 +3410,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-26T07:04:49.395127Z",
+  "generated_at_utc": "2026-10-26T08:05:27.153071Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -3442,7 +3442,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "c45ade98de87487ffb7a7a145fa70fe202eb8e46",
+  "main_alina_head": "215e85036785119826501b35a64de69e223a5d0d",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -3477,7 +3477,7 @@
   "raw_record_count": 1456741546,
   "raw_trade_count": 60261629,
   "real_execution_reachable": false,
-  "receipt_digest": "0eb54b0af8a9094fc953afa16df04beb970282ecbe09207f4a61301469314e92",
+  "receipt_digest": "7ea041021c2b01b8c5caf886b06e8d85efe44d9a13dbfb0b94528d0d2f4c989b",
   "rejected_count": 15052,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
@@ -3909,6 +3909,7 @@
     "40246713519",
     "40247840512",
     "40260940182",
-    "40277436552"
+    "40277436552",
+    "40287426790"
   ]
 }
