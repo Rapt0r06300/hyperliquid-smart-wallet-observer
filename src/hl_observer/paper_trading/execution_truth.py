@@ -97,10 +97,17 @@ class ExecutionTruth:
 
     def age_ms(self, decision_ts_ms: int) -> int:
         decision = _positive_int(decision_ts_ms, "decision_ts_ms")
-        return max(0, decision - self.received_ts_ms)
+        age = decision - self.received_ts_ms
+        if age < 0:
+            raise ValueError("execution truth received after decision")
+        return age
 
     def is_fresh(self, *, decision_ts_ms: int, max_age_ms: int) -> bool:
-        return self.age_ms(decision_ts_ms) <= max(0, int(max_age_ms))
+        try:
+            age = self.age_ms(decision_ts_ms)
+        except ValueError:
+            return False
+        return age <= max(0, int(max_age_ms))
 
     def levels_for_side(self, side: str) -> Levels:
         normalized = normalize_execution_side(side)
