@@ -51,6 +51,26 @@ def default_provider_specs() -> list[DataProviderSpec]:
             output_contract="stream events with isSnapshot handling",
         ),
         DataProviderSpec(
+            provider_name="OkxPublicCopyTradingProvider",
+            capabilities=(
+                capability("public_lead_ranks", "Read OKX public Copy Trading leader rankings."),
+                capability("public_current_positions", "Observe selected leader positions."),
+                capability("public_position_history", "Collect bounded public closed-position history."),
+            ),
+            requires_network=True,
+            requires_api_key=False,
+            enabled_by_default=False,
+            rate_limit_policy="explicit --network-read, fixed ranking snapshot, bounded pages and 0.42s minimum request spacing",
+            risk_level="medium",
+            docs_url="https://www.okx.com/docs-v5/en/",
+            output_contract="venue-scoped discovery and forward observations; never certified PnL without SAFE replay",
+            notes=(
+                "GET-only endpoints; no order/trade endpoint is allowed",
+                "public history omits complete fees, funding, account cashflows and follower execution evidence",
+                "OKX candidates cannot enter Hyperliquid backfill",
+            ),
+        ),
+        DataProviderSpec(
             provider_name="ExplorerPublicProvider",
             capabilities=(capability("manual_import", "Import explorer-visible activity supplied by user."),),
             requires_network=True,

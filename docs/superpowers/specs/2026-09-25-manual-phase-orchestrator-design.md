@@ -33,6 +33,117 @@ reactivation; stored evidence never makes a paused family active. Environment
 variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
 FAIL-CLOSED and does not stop collectors or restoration processes.
 
+### Copy-Vault multi-venue portfolio discovery (2026-10-25)
+
+Copy-Vault discovery may examine public trader portfolios across CEX and DEX
+venues. This expands the source discovery and collection universe while keeping
+Copy-Vault as the sole active economic family; it does not reactivate
+Cross-Venue, arbitrage, Lead-Lag, or any other family.
+
+Portfolio identity is venue-scoped: `(venue, network, native_account_id)`.
+Never merge identical-looking addresses across chains or venues, and never rank
+raw venue leaderboard scores as if they were comparable. Keep venue-native
+metrics and evidence alongside normalized metrics with explicit definitions.
+
+Discovery is broad and read-only. Promotion into a tracked portfolio set
+requires a stable, publicly observable identity and a source with documented,
+permitted access. Opaque CEX aliases, truncated identities, unsupported APIs,
+and scraped/private account data remain discovery-only or are rejected; they
+must not be guessed, deanonymized, or treated as trackable portfolios.
+
+After selection, collectors follow only the frozen, bounded set and record
+venue-native fills/trades, position transitions, account/NAV context and capital
+flows where publicly available, plus source/receive timestamps, raw hashes,
+coverage gaps and reconciliation receipts. Missing fields remain unknown.
+Selection timestamps, reasons, input metrics and source snapshots are immutable
+and retained across later ranking changes.
+
+Each candidate is evaluated only against market and execution evidence from its
+own venue. Cross-venue copying or using one venue's leader events to create
+economic results on another venue remains disabled unless a separate reviewed
+change activates that strategy family. A venue without complete, validated
+collection and replay support can produce a discovery/coverage report only; it
+cannot produce an economic score, PnL, or promotion. Hyperliquid remains the
+only currently certified Copy-Vault SAFE replay path until each additional
+venue passes the same evidence and replay gates.
+
+#### Current venue capability status
+
+- **Hyperliquid:** existing public wallet/vault discovery, AlinaSync SAFE
+  collection and certified Copy-Vault replay remain active.
+- **OKX CEX Copy Trading:** the explicit opt-in
+  `tools/collect_okx_copy_traders.py --network-read` path and the
+  GitHub-hosted `collect-okx-copy-traders.yml` workflow read the documented
+  public leader-ranks, current-subpositions and subpositions-history endpoints.
+  The workflow is gated by the canonical `COLLECT` phase and polls the remote
+  canonical phase JSON while collecting; it stops fail-closed when the phase
+  or epoch changes or the phase source becomes unavailable. Transient GET failures are retried; a shortlist is
+  frozen only after all requested ranking pages are present. Failed or
+  API-truncated observations retain raw responses and hashes but mark the
+  cycle incomplete, and cannot be used for economic evaluation. Each run also
+  publishes the exact JSON observations and a per-file SHA-256 manifest as a
+  separate research-only GitHub Release asset; a 90-day Actions artifact remains
+  a convenient duplicate. These releases are not SAFE dataset releases.
+  The exchange's public completed-position history covers at most the recent
+  three months; it does not provide the complete fees, funding, capital-flow or
+  follower execution evidence needed for economic proof. OKX observations are
+  therefore not admitted to the Hyperliquid SAFE bridge or Copy-Vault scorer.
+  This observer supplements, and does not replace, the Hyperliquid SAFE
+  collectors.
+- **Other CEX and DEX portfolios:** no automatic adapter is enabled until a
+  stable public identity, documented unauthenticated read path, provenance and
+  venue-native replay contract are implemented. A market-data adapter alone
+  does not establish access to trader portfolios.
+
+#### Platform API survey (2026-10-25)
+
+This is a survey of official documentation for public Copy-Trading portfolios
+and address-level trade history, not a claim that every product in every
+region was queried live. A venue is not enabled merely because its website
+shows a leaderboard. “Not verified” means no documented, unauthenticated,
+stable identity plus history contract was established in this review; it does
+not mean the platform has no private or undocumented endpoint.
+
+| Venue/product | Officially documented access found | Lab disposition |
+|---|---|---|
+| Hyperliquid | Public wallet/vault endpoints and existing AlinaSync SAFE shards | Active certified Copy-Vault path |
+| OKX Copy Trading | Public leader ranking and public position endpoints; history limited to the venue's documented recent window and missing full costs/capital flows | Research observer only; never SAFE/PnL proof |
+| Orderly Network | Official zero-auth read-only Public Info API documents address leaderboard discovery and address-scoped `trades`, `accountState`, `fundingPayments`, and `userDepositsWithdrawals`, with opaque cursors. Top-address snapshots are cached for 30 minutes; archived trades older than 24 hours refresh hourly and omit `realized_pnl` | Strongest unauthenticated adapter candidate; not enabled until collection, completeness, market mapping and replay gates are implemented. Archived PnL must be reconstructed and reconciled before any economic scoring |
+| dYdX Chain | Official Indexer docs expose public address/subaccount fills, transfers, historical PnL, positions and market data; address is an input, not a verified global copy-trader discovery feed | Adapter candidate only after discovery, pagination/retention and exact-count coverage are implemented |
+| Drift / current protocol data API | Public historical records are documented, but the located archive states it contains parsed records and is not a complete certified Copy-Vault source; public leader discovery was not established | Discovery/research candidate; disabled for proof |
+| Binance Copy Trading | Official Copy Trading REST family documents lead-status/account-oriented endpoints and key-pair authentication; no qualifying unauthenticated leader-history contract was verified | Disabled; do not use account credentials |
+| Bybit Copy Trading | Official API walkthrough covers authenticated master-trader order placement; no qualifying unauthenticated leader identity/history contract was verified | Disabled |
+| Bitget Copy Trading | Official copy-trading APIs include read-only permissions tied to a UID/account; these do not establish anonymous public leader history | Disabled |
+| Gate Copy Trading | Public leaderboards are visible on the product site; official API documentation reviewed did not establish an unauthenticated stable leader-history endpoint | Disabled |
+| BingX | Official docs list copy-trading account/leader operations, but the reviewed docs do not establish an unauthenticated third-party leader-history contract | Disabled pending endpoint-level public access verification |
+| MEXC | Public market-data docs do not establish public third-party copy-leader identity plus history | Disabled pending official endpoint and access-contract verification |
+| HTX | Public market-data docs do not establish public third-party copy-leader identity plus history | Disabled pending official endpoint and access-contract verification |
+| BloFin Copy Trading | The docs expose position, order, and position-history routes under account/trade paths. BloFin documents API-key permissions and requires signed headers for private REST requests; no public third-party leader identity/history contract was verified | Disabled; account-authenticated data cannot be used to follow third parties |
+| KuCoin Copy Trading | The documented Copy Trading fills endpoint is private and scoped to the authenticated lead-trader API account | Disabled for following third-party portfolios |
+| Toobit Copy Trading | Official leader endpoints state every request is signed and reads only the leader attached to the API key; historical orders include PnL, timestamps, quantities, and open/close fees | Disabled for third-party discovery; do not use account credentials |
+| XT Futures Copy Trading | Official docs expose public-named leader detail/history routes by numeric account ID and an IP rate limit. However, the general access contract says requests require a signature unless the endpoint explicitly says otherwise; the leader-history page does not state that exception. Discovery and anonymous access therefore remain unverified | Disabled pending explicit confirmation that these exact endpoints are unauthenticated and a documented public leader-discovery feed |
+| Limitless Exchange | Official learning docs describe HMAC-authenticated portfolio history for the caller; a separate public-by-address SDK route surfaced, but its current official API contract and completeness were not verified | Disabled pending primary-doc verification |
+
+Primary documentation reviewed: [OKX API v5](https://www.okx.com/docs-v5/en/),
+[Orderly Public Info API](https://github.com/OrderlyNetwork/documentation-public/blob/main/build-on-omnichain/public-info-api/overview.mdx),
+[Orderly top-address discovery](https://orderly.network/docs/build-on-omnichain/public-info-api/platform/top-addresses),
+[Orderly address trades](https://orderly.network/docs/build-on-omnichain/public-info-api/account/trades),
+[dYdX Indexer Client](https://docs.dydx.exchange/api_integration-clients/indexer_client),
+[Drift historical data API](https://velocity-exchange.github.io/v2-teacher/),
+[Binance Copy Trading API catalog](https://developers.binance.com/en/docs/catalog/advanced-trading-copy-trading),
+[Bybit Copy Trading API](https://bybit-exchange.github.io/docs/v5/copytrade),
+[Bitget Copy Trading APIs](https://www.bitget.com/docs/catalog/copy-trading/public-private),
+[Gate API v4](https://www.gate.com/docs/developers/apiv4/en/),
+[BingX API docs](https://bingx-api.github.io/docs/),
+[BloFin API docs](https://docs.blofin.com/index.html),
+[Toobit Copy Trading leader endpoints](https://api-docs.toobit.com/api/copy-trading-leader),
+[XT public leader history](https://doc.xt.com/docs/futures-copy/Copy%20Trading/PublicGetLeaderHistoryOrders),
+[XT public leader info](https://doc.xt.com/docs/futures-copy/Copy%20Trading/PublicGetLeaderInfo),
+[XT API access rules](https://doc.xt.com/docs/futures-copy/Access%20Description/BasicInformationOfTheInterface),
+[KuCoin Copy Trading fills](https://www.kucoin.com/docs-new/rest/copy-trading/get-futures-fills),
+[Binance API authentication](https://developers.binance.com/en/docs/products/spot/rest-api), and
+[Limitless historical data](https://academy.limitless.exchange/academies/api_academy/11_HistoricalData.html).
+
 ## Canonical-spec governance
 
 This file is the **single canonical specification** for the current Alina Smart Flow design.

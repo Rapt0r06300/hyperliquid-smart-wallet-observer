@@ -15,10 +15,15 @@ from hl_observer.utils.time import now_ms
 from hl_observer.wallets.leaderboard_validation import is_truncated_wallet_display
 
 WALLET_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+NATIVE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,95}$")
 
 
 class WalletDiscoveryCandidate(BaseModel):
     address: str | None
+    venue: str = "hyperliquid"
+    network: str = "hyperliquid"
+    identity_kind: str = "wallet_address"
     coin: str | None = None
     source_name: str
     source_type: str
@@ -34,6 +39,13 @@ class WalletDiscoveryCandidate(BaseModel):
     last_seen_ms: int = Field(default_factory=now_ms)
     raw_payload: dict[str, Any] = Field(default_factory=dict)
     confidence_score: float = 0.0
+
+    @property
+    def portfolio_identity(self) -> str:
+        native_id = (self.address or "").strip()
+        if self.identity_kind == "wallet_address" and self.network.lower() != "solana":
+            native_id = native_id.lower()
+        return ":".join((self.venue.lower(), self.network.lower(), native_id))
 
 
 class WalletDiscoverySourceResult(BaseModel):
@@ -127,6 +139,9 @@ class ConfigWalletSource(WalletDiscoverySource):
                 candidates.append(
                     WalletDiscoveryCandidate(
                         address=address,
+                        venue=_normalize_venue(payload.get("venue")),
+                        network=_normalize_network(payload.get("network"), payload.get("venue")),
+                        identity_kind=str(payload.get("identity_kind") or "wallet_address"),
                         coin=_normalize_config_coin(payload.get("coin") or payload.get("asset")),
                         source_name=self.name,
                         source_type=self.source_type,
@@ -200,6 +215,8 @@ class HyperliquidLeaderboardSource(WalletDiscoverySource):
         candidates = [
             WalletDiscoveryCandidate(
                 address=row.wallet_address,
+                venue="hyperliquid",
+                network="hyperliquid",
                 source_name=self.name,
                 source_type=self.source_type,
                 external_pnl_usdc=row.pnl_usdc,
@@ -256,6 +273,8 @@ class HyperliquidExplorerSource(WalletDiscoverySource):
         candidates = [
             WalletDiscoveryCandidate(
                 address=row.wallet_address,
+                venue="hyperliquid",
+                network="hyperliquid",
                 coin=(row.coins_json[0] if row.coins_json else None),
                 source_name=self.name,
                 source_type=self.source_type,
@@ -344,6 +363,17 @@ def _normalize_config_address(value: Any) -> str:
     return str(value)
 
 
+def _normalize_venue(value: Any) -> str:
+    normalized = str(value or "hyperliquid").strip().lower().replace(" ", "-")
+    return normalized or "hyperliquid"
+
+
+def _normalize_network(value: Any, venue: Any = None) -> str:
+    default = "hyperliquid" if _normalize_venue(venue) == "hyperliquid" else "unknown"
+    normalized = str(value or default).strip().lower().replace(" ", "-")
+    return normalized or default
+
+
 def _normalize_config_coin(value: Any) -> str | None:
     if value is None or value == "":
         return None
@@ -356,3 +386,30 @@ def is_valid_discovery_address(address: str | None) -> bool:
     if is_truncated_wallet_display(address) or "..." in address:
         return False
     return bool(WALLET_RE.fullmatch(address))
+
+
+def is_valid_portfolio_identity(candidate: WalletDiscoveryCandidate) -> bool:
+    """Validate a public native identity without conflating venues or chains."""
+    identity = str(candidate.address or "").strip()
+    if not identity or is_truncated_wallet_display(identity) or "..." in identity:
+        return False
+    venue, network = candidate.venue.lower(), candidate.network.lower()
+    if candidate.identity_kind == "wallet_address":
+        if network in {"hyperliquid", "ethereum", "arbitrum", "base", "optimism", "polygon", "bsc", "avalanche"}:
+            return bool(WALLET_RE.fullmatch(identity))
+        if network == "solana":
+            return bool(BASE58_RE.fullmatch(identity))
+        return False
+    if candidate.identity_kind == "public_leader_id":
+        return venue in {"binance", "bybit", "okx", "gate", "bitget"} and bool(NATIVE_ID_RE.fullmatch(identity))
+    return False
+
+
+def has_portfolio_tracking_adapter(candidate: WalletDiscoveryCandidate) -> bool:
+    """True only where the generic discovery-to-backfill pipeline is venue-safe."""
+    return (
+        candidate.venue.lower() == "hyperliquid"
+        and candidate.network.lower() == "hyperliquid"
+        and candidate.identity_kind == "wallet_address"
+        and is_valid_discovery_address(candidate.address)
+    )
