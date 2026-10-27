@@ -20,8 +20,9 @@ import os
 import sys
 import time
 from collections import deque
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "tools"))
@@ -87,7 +88,7 @@ def extraire_symboles_hyperliquid(meta: Any) -> list[str]:
     seen: set[str] = set()
     for item in meta["universe"]:
         name = str(item.get("name") or "").strip() if isinstance(item, dict) else ""
-        key = name.upper()
+        key = name
         if name and key not in seen:
             symbols.append(name)
             seen.add(key)
@@ -124,25 +125,45 @@ def resoudre_symboles_hyperliquid(
 ) -> tuple[list[str], list[str]]:
     """Resolve normalized local names to exact WS names; omit unknown coins."""
 
-    by_normalized = {
-        str(symbol).upper(): str(symbol)
+    exact_symbols = {
+        str(symbol).strip()
         for symbol in universe
         if str(symbol).strip()
     }
+    by_normalized: dict[str, set[str]] = {}
+    for symbol in exact_symbols:
+        by_normalized.setdefault(symbol.upper(), set()).add(symbol)
     selected: list[str] = []
     rejected: list[str] = []
     seen: set[str] = set()
     for raw_coin in coins:
-        normalized = str(raw_coin or "").strip().upper()
-        if not normalized or normalized in seen:
+        requested = str(raw_coin or "").strip()
+        if not requested or requested in seen:
             continue
-        seen.add(normalized)
-        exact = by_normalized.get(normalized)
-        if exact is None:
-            rejected.append(normalized)
+        seen.add(requested)
+        if requested in exact_symbols:
+            selected.append(requested)
+            continue
+        matches = by_normalized.get(requested.upper(), set())
+        if len(matches) == 1:
+            selected.append(next(iter(matches)))
         else:
-            selected.append(exact)
+            rejected.append(requested.upper())
     return selected, rejected
+
+
+def _planifier_abonnements_hyperliquid(coins: list[str]) -> tuple[list[str], list[dict[str, Any]]]:
+    """Prepare exact venue-native subscription names for the selected universe."""
+
+    selected = list(dict.fromkeys(
+        str(coin or "").strip() for coin in coins if str(coin or "").strip()
+    ))
+    subscriptions = [
+        {"method": "subscribe", "subscription": {"type": channel, "coin": coin}}
+        for coin in selected
+        for channel in ("bbo", "l2Book", "trades", "activeAssetCtx")
+    ]
+    return selected, subscriptions
 
 
 def coins_lead_lag_promus(root: Path | str = ".") -> list[str]:
@@ -165,7 +186,7 @@ def coins_lead_lag_promus(root: Path | str = ".") -> list[str]:
         return []
     selected: list[str] = []
     for raw in config.get("coins") or []:
-        coin = str(raw or "").strip().upper()
+        coin = str(raw or "").strip()
         if coin and coin not in selected:
             selected.append(coin)
     return selected
@@ -177,9 +198,13 @@ def coins_couverture(root: Path | str = ".", *, k: int = 16) -> list[str]:
     import collections
     coins = list(MAJORS_BBO)
     try:
-        recs = [json.loads(l) for l in (Path(root) / LIQ_CONFIRMEES_REL).open(encoding="utf-8") if l.strip()]
+        recs = [
+            json.loads(line)
+            for line in (Path(root) / LIQ_CONFIRMEES_REL).open(encoding="utf-8")
+            if line.strip()
+        ]
         for coin, _ in collections.Counter(r.get("coin") for r in recs if r.get("coin")).most_common(k):
-            cu = str(coin).upper()
+            cu = str(coin or "").strip()
             if cu and cu not in coins:
                 coins.append(cu)
     except (OSError, ValueError):
@@ -219,7 +244,7 @@ def parser_bbo_hl(msg: Any) -> dict | None:
         return None
     if b is None or a is None or a < b:
         return None
-    return {"coin": str(d.get("coin") or "").upper(), "bid": b, "ask": a,
+    return {"coin": str(d.get("coin") or "").strip(), "bid": b, "ask": a,
             "bid_sz": _f(bid.get("sz")) or 0.0, "ask_sz": _f(ask.get("sz")) or 0.0,
             "ts_ex": float(d.get("time") or 0.0)}
 
@@ -237,7 +262,7 @@ def parser_l2_hl(msg: Any) -> dict | None:
     if not bids or not asks:
         return None
     return {
-        "coin": str(data.get("coin") or "").upper(),
+        "coin": str(data.get("coin") or "").strip(),
         "bids": bids,
         "asks": asks,
         "ts_ex": int(float(data.get("time") or 0.0)),
@@ -251,7 +276,7 @@ def parser_active_asset_ctx_hl(msg: Any) -> dict | None:
     data = msg.get("data")
     if not isinstance(data, dict):
         return None
-    coin = str(data.get("coin") or "").upper()
+    coin = str(data.get("coin") or "").strip()
     ctx = data.get("ctx")
     if not coin or not isinstance(ctx, dict):
         return None
@@ -484,7 +509,8 @@ def mesurer_lead_lag(series: list[tuple[float, float, float]], *, lag_ms: float)
         j = bisect.bisect_left(ts, s[i][0] + lag_ms)
         if j <= 0 or j >= len(s):
             continue
-        dbin.append(db); dhl.append(s[j][1] - s[j - 1][1])
+        dbin.append(db)
+        dhl.append(s[j][1] - s[j - 1][1])
     if len(dbin) < 20:
         return None
     import statistics as st
@@ -506,7 +532,7 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
         return None
     dossier = root / SHARDS_DIR
     dossier.mkdir(parents=True, exist_ok=True)
-    nom = "bbo_tape_%d.jsonl.gz" % time.time_ns()
+    nom = f"bbo_tape_{time.time_ns()}.jsonl.gz"
     tmp = dossier / (nom + ".tmp")
     with src.open("rb") as fi, gzip.open(tmp, "wb") as fo:    # compresse ~10×
         while True:
@@ -570,21 +596,21 @@ async def _boucle(
     import websockets
 
     from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
-    from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
     from hl_observer.collection.binance_funding_history import (
         fetch_binance_funding_settlements,
     )
+    from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
     from hl_observer.collection.hyperliquid_funding_history import (
         fetch_hyperliquid_funding_settlements,
     )
-    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
-    from hl_observer.collection.tick_dataset import TickEnvelope
-    from hl_observer.datasets.v2_pipeline import build_bundle
     from hl_observer.collection.lead_lag_causal_checkpoints import (
         LeadLagCheckpointRequest,
         RollingShockCheckpointDetector,
         validate_l2_book_payload,
     )
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+    from hl_observer.collection.tick_dataset import TickEnvelope
+    from hl_observer.datasets.v2_pipeline import build_bundle
     from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient
     from hl_observer.normalization.market_events import (
         CanonicalEventWriter,
@@ -601,10 +627,8 @@ async def _boucle(
 
     collection_start_wall_ms = int(time.time() * 1000)
 
-    # Hyperliquid subscription names are case-sensitive (for example kPEPE),
-    # while all internal joins intentionally use normalized upper-case keys.
-    symboles_hl = {str(coin).upper(): str(coin) for coin in coins}
-    coins = list(symboles_hl)
+    # Preserve venue-native identifiers through subscriptions, joins and shard keys.
+    coins, hl_subscriptions = _planifier_abonnements_hyperliquid(coins)
     mag = MagasinBBO()
     lead_lag_runtime = LeadLagEventPaperRuntime(root)
     sym = {c: symbole_binance(c) for c in coins if symbole_binance(c)}
@@ -614,7 +638,7 @@ async def _boucle(
         for raw_meta in hl_meta["universe"]:
             if not isinstance(raw_meta, Mapping):
                 continue
-            meta_coin = str(raw_meta.get("name") or "").strip().upper()
+            meta_coin = str(raw_meta.get("name") or "").strip()
             if meta_coin in coins_set:
                 hl_instrument_meta[meta_coin] = {
                     "name": raw_meta.get("name"),
@@ -732,7 +756,7 @@ async def _boucle(
             if not isinstance(raw, Mapping):
                 continue
             exact_name = str(raw.get("name") or "").strip()
-            coin = exact_name.upper()
+            coin = exact_name
             if not exact_name or coin not in coins_set:
                 continue
             queue_raw(
@@ -875,7 +899,7 @@ async def _boucle(
         }
 
     def latest_hl_asset_ctx(coin: str, *, received_ts_ms: int) -> dict[str, Any] | None:
-        row = hl_asset_ctx.get(str(coin).upper())
+        row = hl_asset_ctx.get(str(coin).strip())
         if not row:
             return None
         observed = int(row.get("observed_receive_ts_ms") or 0)
@@ -892,10 +916,7 @@ async def _boucle(
             try:
                 async with websockets.connect(WS_HL, ping_interval=20) as ws:
                     hl_connection_serial += 1
-                    connection_id = "hl-%d-%d" % (
-                        int(time.time() * 1000),
-                        hl_connection_serial,
-                    )
+                    connection_id = f"hl-{int(time.time() * 1000)}-{hl_connection_serial}"
                     if hl_connection_serial > 1:
                         reconnect_ts = int(time.time() * 1000)
                         for gate in quality_gates.values():
@@ -921,19 +942,8 @@ async def _boucle(
                                 provenance=hl_provenance("connection"),
                             )
                         )
-                    for coin_name in coins:
-                        for subscription_type in ("bbo", "l2Book", "trades", "activeAssetCtx"):
-                            await ws.send(
-                                json.dumps(
-                                    {
-                                        "method": "subscribe",
-                                        "subscription": {
-                                            "type": subscription_type,
-                                            "coin": symboles_hl[coin_name],
-                                        },
-                                    }
-                                )
-                            )
+                    for subscription in hl_subscriptions:
+                        await ws.send(json.dumps(subscription))
                     async for raw in ws:
                         received_mono_ns = time.monotonic_ns()
                         received_ts_ms = int(time.time() * 1000)
@@ -976,9 +986,9 @@ async def _boucle(
                         data = message.get("data")
                         coin_name = ""
                         if isinstance(data, dict):
-                            coin_name = str(data.get("coin") or "").upper()
+                            coin_name = str(data.get("coin") or "").strip()
                         elif isinstance(data, list) and data and isinstance(data[0], dict):
-                            coin_name = str(data[0].get("coin") or "").upper()
+                            coin_name = str(data[0].get("coin") or "").strip()
                         exchange_ts_ms: int | None = None
                         if isinstance(data, dict) and data.get("time") is not None:
                             exchange_ts_ms = int(float(data["time"]))
@@ -1126,16 +1136,15 @@ async def _boucle(
                             stats["frames_trades_hl"] += 1
                             quality_by_coin: dict[str, dict[str, Any]] = {}
                             for trade in trades:
-                                trade_coin = str(trade.get("coin") or coin_name).upper()
+                                trade_coin = str(trade.get("coin") or coin_name).strip()
                                 gate = quality_gates.get(("trades", trade_coin))
                                 if gate is None:
                                     continue
                                 gate.mark_heartbeat(received_ts_ms=received_ts_ms)
                                 trade_ts = int(float(trade.get("time") or received_ts_ms))
-                                trade_id = "%s|%s|%s" % (
-                                    trade_ts,
-                                    trade_coin,
-                                    trade.get("tid", trade.get("hash", "")),
+                                trade_id = (
+                                    f"{trade_ts}|{trade_coin}|"
+                                    f"{trade.get('tid', trade.get('hash', ''))}"
                                 )
                                 quality = gate.ingest_event(
                                     payload=trade,
@@ -1173,7 +1182,7 @@ async def _boucle(
         nonlocal bin_bbo_connection_serial
         # bookTicker (entrée exécutable) sur SA connexion. Séparée de l'aggTrade : la très haute
         # fréquence du bookTicker ne peut plus AFFAMER l'aggTrade (cause probable des 0 trades captés).
-        streams = "/".join("%s@bookTicker" % s.lower() for s in sym.values())
+        streams = "/".join(f"{symbol.lower()}@bookTicker" for symbol in sym.values())
         endpoint_index = 0
         while True:
             endpoint = BINANCE_PUBLIC_WS_CANDIDATES[
@@ -1182,14 +1191,13 @@ async def _boucle(
             stats["binance_bbo_ws_url"] = endpoint
             try:
                 async with websockets.connect(
-                    "%s?streams=%s" % (endpoint, streams),
+                    f"{endpoint}?streams={streams}",
                     ping_interval=20,
                 ) as ws:
                     stats["binance_bbo_last_error"] = ""
                     bin_bbo_connection_serial += 1
-                    connection_id = "bin-bbo-%d-%d" % (
-                        int(time.time() * 1000),
-                        bin_bbo_connection_serial,
+                    connection_id = (
+                        f"bin-bbo-{int(time.time() * 1000)}-{bin_bbo_connection_serial}"
                     )
                     async for raw in ws:
                         r = time.monotonic_ns()
@@ -1303,7 +1311,7 @@ async def _boucle(
         # TRADES = le CHOC exécutable (jamais le mid, qui reste un simple CONTRÔLE dans lead_lag).
         # Depuis le split Binance USD-M 2026, le flux marché officiel est <symbol>@aggTrade
         # sur /market. Le parseur accepte encore "trade" pour compatibilité historique.
-        streams = "/".join("%s@aggTrade" % s.lower() for s in sym.values())
+        streams = "/".join(f"{symbol.lower()}@aggTrade" for symbol in sym.values())
         endpoint_index = 0
         while True:
             endpoint = BINANCE_MARKET_WS_CANDIDATES[
@@ -1312,14 +1320,13 @@ async def _boucle(
             stats["binance_trade_ws_url"] = endpoint
             try:
                 async with websockets.connect(
-                    "%s?streams=%s" % (endpoint, streams),
+                    f"{endpoint}?streams={streams}",
                     ping_interval=20,
                 ) as ws:
                     stats["binance_trade_last_error"] = ""
                     bin_trade_connection_serial += 1
-                    connection_id = "bin-trade-%d-%d" % (
-                        int(time.time() * 1000),
-                        bin_trade_connection_serial,
+                    connection_id = (
+                        f"bin-trade-{int(time.time() * 1000)}-{bin_trade_connection_serial}"
                     )
                     async for raw in ws:
                         r = time.monotonic_ns()
@@ -1375,10 +1382,9 @@ async def _boucle(
                                 "recv_wall_ts_ms": recv_wall_ms,
                                 "connection_id": connection_id,
                                 "sequence": sequence,
-                                "event_id": "bin-trade:%s:%s:%s" % (
-                                    t["symbol"],
-                                    t.get("ts_ex") or recv_wall_ms,
-                                    sequence,
+                                "event_id": (
+                                    f"bin-trade:{t['symbol']}:"
+                                    f"{t.get('ts_ex') or recv_wall_ms}:{sequence}"
                                 ),
                                 "ts_ex": t["ts_ex"],
                             }
@@ -1546,7 +1552,7 @@ async def _boucle(
                 )
             now_wall_ms = int(time.time() * 1000)
             feed_snapshots = {
-                "hyperliquid:%s:%s" % (channel, coin): gate.snapshot(
+                f"hyperliquid:{channel}:{coin}": gate.snapshot(
                     now_ms=now_wall_ms
                 ).as_dict()
                 for (channel, coin), gate in quality_gates.items()
@@ -1616,7 +1622,7 @@ async def _boucle(
                     n_ecrites=delta_ecrit,
                     dernier_exchange_ts=max(exchange_timestamps) if exchange_timestamps else None,
                     souscription_ack=bool(stats["raw_frames_received"]),
-                    note="%d canonical market events" % total_ecrit,
+                    note=f"{total_ecrit} canonical market events",
                     metriques={
                         "gaps_critiques": int(stats["raw_queue_drops"]),
                         "reconnects": int(stats["reconnexions_hl"]),
@@ -1651,7 +1657,7 @@ async def _boucle(
         await asyncio.gather(*taches, return_exceptions=True)
         try:
             funding_rows = await fetch_hyperliquid_funding_settlements(
-                symboles_hl.values(),
+                coins,
                 start_ms=collection_start_wall_ms,
                 end_ms=int(time.time() * 1000),
             )
@@ -1755,11 +1761,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
             return 2
         coins = coins[coin_shard_index::coin_shard_count]
     except Exception as exc:  # noqa: BLE001 - required live source must fail visibly
-        print("[bbo] /info meta indisponible ou invalide: %r" % exc, flush=True)
+        print(f"[bbo] /info meta indisponible ou invalide: {exc!r}", flush=True)
         return 2
     if rejected:
         print(
-            "[bbo] marches ignorees (absentes de /info meta): %s" % ", ".join(rejected),
+            f"[bbo] marches ignorees (absentes de /info meta): {', '.join(rejected)}",
             flush=True,
         )
     if not coins:
@@ -1771,8 +1777,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         print("[bbo] MODULE `websockets` MANQUANT -> lance:  pip install websockets  (collecteur inactif "
               "tant qu'il n'est pas installe).", flush=True)
         return 0
-    print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker+depth100ms+trades+mark/funding/OI/liquidations..."
-          % len(coins), flush=True)
+    print(
+        f"[bbo] demarrage PERSISTANT : {len(coins)} coins, WS HL bbo+l2Book+trades + "
+        "Binance bookTicker+depth100ms+trades+mark/funding/OI/liquidations...",
+        flush=True,
+    )
     try:
         asyncio.run(
             _boucle(
@@ -1788,7 +1797,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         return 0
     except Exception as exc:                                 # noqa: BLE001 — une panne DOIT etre visible
         import traceback
-        print("[bbo] ARRET sur exception: %r" % exc, flush=True)
+        print(f"[bbo] ARRET sur exception: {exc!r}", flush=True)
         traceback.print_exc()
         return 1
     print("[bbo] boucle terminee (fin de session).", flush=True)

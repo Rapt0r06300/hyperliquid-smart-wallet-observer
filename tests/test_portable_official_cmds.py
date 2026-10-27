@@ -24,13 +24,13 @@ def test_all_official_cmds_resolve_their_own_root_from_foreign_cwd(tmp_path: Pat
     cases = (
         ("LANCER_HYPERSMART.cmd", ["portable-check"], "PORTABLE_LAUNCHER_CHECK_OK", 90),
         (
-            "ANALYSER_BACKTESTS_REPLAYS.cmd",
+            "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
             ["portable-smoke"],
             '"schema": "hypersmart.portable_smoke.v1"',
             300,
         ),
         ("POUSSER-GITHUB-FORCE.cmd", ["--portable-self-check"], "PORTABLE_GITHUB_PUSH_CHECK_OK", 30),
-        ("CREER_ARCHIVE_PORTABLE.cmd", ["--portable-self-check"], "PORTABLE_ARCHIVE_CHECK_OK", 30),
+        ("tools/launchers/CREER_ARCHIVE_PORTABLE.cmd", ["--portable-self-check"], "PORTABLE_ARCHIVE_CHECK_OK", 30),
     )
     for filename, arguments, marker, timeout in cases:
         completed = subprocess.run(

@@ -3,10 +3,10 @@ from pathlib import Path
 
 
 def test_restore_alina_cmd_selects_portable_then_python_and_keeps_fail_closed():
-    script = (Path(__file__).resolve().parents[1] / "RESTORE_ALINA.cmd").read_text(
+    script = (Path(__file__).resolve().parents[1] / "tools" / "launchers" / "RESTORE_ALINA.cmd").read_text(
         encoding="utf-8"
     )
-    assert 'if exist "%~dp0tools\\python\\python.exe" (' in script
+    assert 'if exist "%ALINA_PROJECT_ROOT%\\tools\\python\\python.exe" (' in script
     assert "where py >nul 2>nul && py -3 -c" in script
     assert "&& goto :pylauncher" in script
     assert "where python >nul 2>nul && python -c" in script
@@ -24,9 +24,9 @@ def test_restore_alina_cmd_selects_portable_then_python_and_keeps_fail_closed():
 
 
 def test_alina_restore_alias_preserves_arguments_and_exit_status():
-    alias = (Path(__file__).resolve().parents[1] / "Alina-restore.cmd").read_text(
+    alias = (Path(__file__).resolve().parents[1] / "tools" / "launchers" / "Alina-restore.cmd").read_text(
         encoding="utf-8"
     )
-    assert 'call "%~dp0RESTORE_ALINA.cmd" %*' in alias
+    assert 'call "%ALINA_PROJECT_ROOT%\\tools\\launchers\\RESTORE_ALINA.cmd" %*' in alias
     assert "exit /b %ERRORLEVEL%" in alias
     assert "tools\\restore_alina.py" not in alias

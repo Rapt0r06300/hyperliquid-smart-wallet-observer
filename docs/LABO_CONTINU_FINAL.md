@@ -7,11 +7,11 @@ argent, 0 clé, 0 signature, 0 dépôt/retrait.**
 
 ## Lancer
 ```
-LANCER-RECHERCHE-CONTINUE.cmd dry-run     # sécurité + disque + ressources
-LANCER-RECHERCHE-CONTINUE.cmd start       # travaille jusqu'au Ctrl+C -> rapport final
-LANCER-RECHERCHE-CONTINUE.cmd status
-LANCER-RECHERCHE-CONTINUE.cmd snapshot    # rapport intermédiaire SANS arrêter
-LANCER-RECHERCHE-CONTINUE.cmd stop <run_id>
+tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd dry-run     # sécurité + disque + ressources
+tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd start       # travaille jusqu'au Ctrl+C -> rapport final
+tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd status
+tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd snapshot    # rapport intermédiaire SANS arrêter
+tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd stop <run_id>
 ```
 
 ## Chaîne (10 briques, toutes câblées)

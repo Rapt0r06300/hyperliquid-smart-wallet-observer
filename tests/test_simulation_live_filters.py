@@ -79,3 +79,16 @@ def test_delta_identity_dedupes_same_fill_across_poll_rows():
 
     assert delta_identity(first) == delta_identity(second)
     assert delta_identity(first).startswith("fill:")
+
+
+def test_delta_identity_does_not_merge_case_distinct_native_instruments():
+    lower = _delta(
+        coin="kPEPE",
+        raw_json={"hash": "0xabc", "tid": 7, "oid": 9, "time": 1_000},
+    )
+    upper = _delta(
+        coin="KPEPE",
+        raw_json={"hash": "0xabc", "tid": 7, "oid": 9, "time": 1_000},
+    )
+
+    assert delta_identity(lower) != delta_identity(upper)

@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
-FICHIER = RACINE / "TASKLIST.md"
+FICHIER = RACINE / "docs" / "archive" / "root-history" / "TASKLIST.md"
 
 # Le systeme de taches va de #56 a #599. #353 n'a jamais existe (trou de numerotation).
 ATTENDUS = set(range(56, 600)) - {353}

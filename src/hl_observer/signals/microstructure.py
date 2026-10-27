@@ -7,6 +7,8 @@ n'ouvrent jamais seuls (evidence-first). Pur, read-only.
 
 from __future__ import annotations
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 def order_book_imbalance(bid_depth_usdt: float, ask_depth_usdt: float) -> float:
     """OBI ∈ [-1, 1]: +1 = pression acheteuse totale, -1 = vendeuse."""
@@ -51,7 +53,7 @@ class AntiBurstGate:
         self._last: dict[tuple, int] = {}
 
     def allow(self, coin: str, side: str, now_ms: int) -> bool:
-        key = (str(coin).upper(), str(side).upper())
+        key = (preserve_native_instrument_symbol(coin), str(side).upper())
         last = self._last.get(key, -1)
         if last >= 0 and (int(now_ms) - last) < self.cooldown_ms:
             return False

@@ -48,10 +48,15 @@ def test_classer_ignore_autre_user_et_autre_canal():
     assert S.classer_message("pas un dict", VLC) is None          # tolérant
 
 
-def test_fills_rest_normalises_via_parser_ws():
-    rep = [{"coin": "sol", "px": "150.0", "sz": "2", "time": 1000, "side": "B", "hash": "h1"}]
+def test_fills_rest_preserve_native_instrument_identity():
+    rep = [
+        {"coin": "sol", "px": "150.0", "sz": "2", "time": 1000, "side": "B", "hash": "h1"},
+        {"coin": "kPEPE", "px": "0.01", "sz": "3", "time": 1001, "side": "B", "hash": "h2"},
+        {"coin": "KPEPE", "px": "0.02", "sz": "4", "time": 1002, "side": "B", "hash": "h3"},
+    ]
     fr = S.fills_rest_normalises(V, rep)
-    assert len(fr) == 1 and fr[0]["coin"] == "SOL" and fr[0]["ts_ms"] == 1000 and fr[0]["hash"] == "h1"
+    assert [fill["coin"] for fill in fr] == ["sol", "kPEPE", "KPEPE"]
+    assert fr[0]["ts_ms"] == 1000 and fr[0]["hash"] == "h1"
     assert S.fills_rest_normalises(V, "pas une liste") == []      # illisible -> [] (jamais inventé)
 
 

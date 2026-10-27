@@ -20,6 +20,7 @@ from typing import Any
 from hl_observer.edge.edge_net_v12 import EdgeNetV12Estimate, EdgeNetV12Inputs, estimate_edge_net_v12
 from hl_observer.evidence.decision_ledger import PaperDecisionEvidence, evidence_from_paper_result
 from hl_observer.gating.filter_pipeline import ContexteDecision, appliquer_filtres
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.risk.drawdown_scaling import facteur_capital
 from hl_observer.models import DataQuality, Fill, SourceMeta
 from hl_observer.normalization.fills import NormalizedFillResult, normalize_hyperliquid_fill
@@ -166,7 +167,9 @@ def run_v12_decision_pipeline(
     for delta in deltas:
         event = events_by_delta[delta.delta_id]
         mid = _mid_for(delta.coin, pipeline_input.market_mids)
-        leader_expected_edge = pipeline_input.leader_expected_edge_bps_by_coin.get(delta.coin.upper())
+        leader_expected_edge = pipeline_input.leader_expected_edge_bps_by_coin.get(
+            preserve_native_instrument_symbol(delta.coin)
+        )
         edge = _estimate_edge(delta, event, mid, leader_expected_edge, cfg)
         etat_moteur = _etat_moteur(engine)                       # capital/marge/drawdown RÉELS (X2/X3)
         edge, gardes_ctx = _appliquer_gardes(edge, delta, mid, pipeline_input, cfg, etat_moteur)
@@ -179,7 +182,9 @@ def run_v12_decision_pipeline(
         if edge.reason_codes:
             enriched_delta = replace(delta, reason_codes=tuple(dict.fromkeys((*delta.reason_codes, *edge.reason_codes))))
         market_price = float(mid or 0.0)
-        execution_truth = pipeline_input.execution_truth_by_coin.get(delta.coin.upper())
+        execution_truth = pipeline_input.execution_truth_by_coin.get(
+            preserve_native_instrument_symbol(delta.coin)
+        )
         measured_spread_bps = (
             execution_truth.spread_bps
             if execution_truth is not None
@@ -318,13 +323,13 @@ def _appliquer_gardes(
     une entrée absente laisse le garde correspondant en abstention. Retourne (edge, contexte_gardes)."""
     if delta.is_exit_or_reduce:
         return edge, {"gardes_sortie": True}
-    coin = str(delta.coin).upper()
-    univers = tuple(str(k).upper() for k in pipeline_input.market_mids.keys())
+    coin = preserve_native_instrument_symbol(delta.coin)
+    univers = tuple(preserve_native_instrument_symbol(k) for k in pipeline_input.market_mids)
     age_s: float | None = None
     if pipeline_input.source_ts_ms is not None:
         # âge = horodatage local d'observation − horodatage venue de la donnée (fraîcheur réelle).
         age_s = max(0.0, (float(pipeline_input.observed_at_ms) - float(pipeline_input.source_ts_ms)) / 1000.0)
-    ref = (pipeline_input.reference_mids or {}).get(coin, (pipeline_input.reference_mids or {}).get(str(delta.coin)))
+    ref = (pipeline_input.reference_mids or {}).get(coin)
     hist = (pipeline_input.edge_history_by_coin or {}).get(coin, {}) or {}
     ctx = ContexteDecision(
         coin=coin,
@@ -357,7 +362,7 @@ def _appliquer_gardes(
 
 
 def _mid_for(coin: str, mids: dict[str, float]) -> float | None:
-    value = mids.get(coin.upper(), mids.get(coin, None))
+    value = mids.get(preserve_native_instrument_symbol(coin))
     try:
         parsed = None if value is None else float(value)
     except (TypeError, ValueError):

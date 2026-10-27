@@ -114,9 +114,27 @@ def test_coin_side_session_stats_uses_local_replay_exits_and_fees():
         },
     ]
 
-    stats = coin_side_session_stats(events, coin="btc", side="long")
+    stats = coin_side_session_stats(events, coin="BTC", side="long")
 
     assert stats.session_pnl_usdc == 0.38
     assert stats.realized_exit_pnl_usdc == 0.4
     assert stats.win_count == 1
     assert stats.recent_win_streak == 1
+
+
+def test_session_memory_does_not_merge_case_distinct_instruments():
+    events = [
+        {
+            "status": "LOCAL_REPLAY",
+            "bot_replay_action": "PAPER_CLOSE_REPLAYED",
+            "coin": "kPEPE",
+            "leader_side": "LONG",
+            "estimated_net_pnl_usdc": -1.25,
+        }
+    ]
+
+    stats = coin_side_session_stats(events, coin="KPEPE", side="LONG")
+
+    assert stats.coin == "KPEPE"
+    assert stats.session_pnl_usdc == 0.0
+    assert stats.exit_count == 0

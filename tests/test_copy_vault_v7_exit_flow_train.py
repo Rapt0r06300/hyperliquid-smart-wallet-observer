@@ -56,6 +56,16 @@ def test_cluster_exit_flow_collapses_slices_and_follows_order_side() -> None:
     assert audit["exit_flow_signals"] == 2
 
 
+def test_exit_flow_groupe_separement_les_symboles_case_sensitive():
+    signals, audit = cluster_causal_exit_flow([
+        _exit("lower", 1_000, coin="kPEPE"),
+        _exit("upper", 1_100, coin="KPEPE"),
+    ])
+
+    assert {signal["coin"] for signal in signals} == {"kPEPE", "KPEPE"}
+    assert audit["exit_flow_signals"] == 2
+
+
 def test_cluster_exit_flow_collapses_per_key_across_interleaved_flow() -> None:
     signals, audit = cluster_causal_exit_flow(
         [

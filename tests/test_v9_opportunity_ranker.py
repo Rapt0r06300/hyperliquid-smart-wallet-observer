@@ -67,3 +67,11 @@ def test_floor_failures_dropped_from_ranking():
     cands = [_opp(coin="A", edge=20), _opp(coin="B", edge=2), _opp(coin="C", liq=0.05)]
     ranked = rank_opportunities(cands)
     assert [r.coin for r in ranked] == ["A"]
+
+
+def test_ranker_preserves_case_distinct_symbols_and_diversifies_them_separately():
+    ranked = rank_opportunities(
+        [_opp(coin="kPEPE", edge=30), _opp(coin="KPEPE", edge=20)],
+        RankerConfig(max_per_coin=1),
+    )
+    assert {row.coin for row in ranked} == {"kPEPE", "KPEPE"}

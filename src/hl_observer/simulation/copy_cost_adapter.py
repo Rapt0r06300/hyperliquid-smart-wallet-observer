@@ -13,6 +13,7 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.simulation.cross_venue_depth_adapter import DEFAULT_DEPTH_FRESHNESS_MS
 
 COPY_ROUNDTRIP_TAKER_FEES_BPS = 9.0  # 4.5 bps entry + 4.5 bps exit
@@ -87,7 +88,7 @@ def measure_copy_cost_components(
         failures[reason] = failures.get(reason, 0) + 1
 
     for event in selected:
-        coin = str(event.get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol(event.get("coin"))
         ts = _number(event.get("ts_ms"))
         rows = list(depth_snapshots.get(coin) or [])
         if ts is None:

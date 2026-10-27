@@ -13,9 +13,12 @@ def _source(root: Path) -> Path:
     source = root / "source"
     required = {
         "LANCER_HYPERSMART.cmd": "@echo off\n",
-        "ANALYSER_BACKTESTS_REPLAYS.cmd": "@echo off\n",
+        "LANCER_COLLECTEURS_COPY_VAULT.cmd": "@echo off\n",
+        "LANCER_LAB_QUANT_COPY_VAULT.cmd": "@echo off\n",
         "POUSSER-GITHUB-FORCE.cmd": "@echo off\n",
-        "CREER_ARCHIVE_PORTABLE.cmd": "@echo off\n",
+        "ALINA_SYNC_COMPLETE.cmd": "@echo off\n",
+        "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd": "@echo off\n",
+        "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd": "@echo off\n",
         "tools/portable_env.cmd": "@echo off\n",
         "tools/push_github_safe.ps1": "exit 0\n",
         "src/hl_observer/__init__.py": "",
@@ -173,7 +176,7 @@ def test_cli_dry_run_does_not_create_destination(tmp_path: Path, capsys):
 
 def test_root_cmd_defaults_to_full_clone_and_keeps_small_zip_mode():
     root = Path(__file__).resolve().parents[1]
-    text = (root / "CREER_ARCHIVE_PORTABLE.cmd").read_text(encoding="utf-8")
+    text = (root / "tools" / "launchers" / "CREER_ARCHIVE_PORTABLE.cmd").read_text(encoding="utf-8")
     assert "hl_observer.ops.portable_clone" in text
     assert "--application-seule" in text
     assert "hl_observer.ops.archive_portable" in text

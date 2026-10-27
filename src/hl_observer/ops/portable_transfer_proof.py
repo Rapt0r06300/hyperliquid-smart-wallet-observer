@@ -23,9 +23,12 @@ REPORT_RELATIVE = Path("runtime") / "reports" / "portability" / "PORTABLE_PC_A_T
 
 REQUIRED_POST_TRANSFER_FILES = (
     "LANCER_HYPERSMART.cmd",
-    "ANALYSER_BACKTESTS_REPLAYS.cmd",
+    "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd",
     "POUSSER-GITHUB-FORCE.cmd",
-    "CREER_ARCHIVE_PORTABLE.cmd",
+    "ALINA_SYNC_COMPLETE.cmd",
+    "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+    "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
     "tools/python/python.exe",
     "tools/git/cmd/git.exe",
     "tools/wheelhouse/WHEELHOUSE_LOCK.json",
@@ -302,7 +305,7 @@ def prove_transferred_clone(
 
     python = project / "tools" / "python" / "python.exe"
     launcher = project / "LANCER_HYPERSMART.cmd"
-    analyser = project / "ANALYSER_BACKTESTS_REPLAYS.cmd"
+    analyser = project / "tools" / "launchers" / "ANALYSER_BACKTESTS_REPLAYS.cmd"
     env = os.environ.copy()
     env.update({
         "HYPERSMART_NO_PAUSE": "1", "HYPERSMART_NO_OPEN_REPORT": "1",
@@ -318,7 +321,7 @@ def prove_transferred_clone(
         ("portable_check", ["cmd.exe", "/d", "/c", str(launcher), "portable-check"], 600),
         ("portable_smoke", [str(python), "-m", "hl_observer.ops.portable_smoke", "--root", str(project), "--json"], 600),
         ("github_push_self_check", ["cmd.exe", "/d", "/c", str(project / "POUSSER-GITHUB-FORCE.cmd"), "--portable-self-check"], 120),
-        ("archive_self_check", ["cmd.exe", "/d", "/c", str(project / "CREER_ARCHIVE_PORTABLE.cmd"), "--portable-self-check"], 120),
+        ("archive_self_check", ["cmd.exe", "/d", "/c", str(project / "tools" / "launchers" / "CREER_ARCHIVE_PORTABLE.cmd"), "--portable-self-check"], 120),
     ]
     steps: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="HyperSmart test espace accent é-") as foreign_cwd:

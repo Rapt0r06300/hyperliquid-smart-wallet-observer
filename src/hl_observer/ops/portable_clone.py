@@ -299,9 +299,12 @@ def verify_clone(
         verified += 1
     required = (
         "LANCER_HYPERSMART.cmd",
-        "ANALYSER_BACKTESTS_REPLAYS.cmd",
+        "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+        "LANCER_LAB_QUANT_COPY_VAULT.cmd",
         "POUSSER-GITHUB-FORCE.cmd",
-        "CREER_ARCHIVE_PORTABLE.cmd",
+        "ALINA_SYNC_COMPLETE.cmd",
+        "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+        "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
         "tools/python/python.exe",
         "tools/portable_env.cmd",
         "tools/git/cmd/git.exe",

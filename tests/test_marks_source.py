@@ -141,7 +141,7 @@ def test_le_ruban_allmids_frais_est_lu_sur_la_fenetre_demandee(tmp_path):
     ]) + "\n", encoding="utf-8")
 
     marks = ms.charger_marks(
-        tmp_path, coins={"btc"}, min_ts_s=950.0, max_ts_s=1_050.0
+        tmp_path, coins={"BTC"}, min_ts_s=950.0, max_ts_s=1_050.0
     )
 
     assert marks == {"BTC": [(1_000.0, 100.0)]}
@@ -208,3 +208,24 @@ def test_aucune_execution_reelle():
     m = {"BTC": [(1000.0, 1.0), (2800.0, 1.0)]}
     r = ms.apparier(m, coin="BTC", ts=1000.0, horizon_s=1800.0)
     assert r is not None and "mid_at_fill" in r          # lire un prix n'est pas trader
+
+
+def test_marks_et_filtre_conservent_les_symboles_natifs_distincts(tmp_path):
+    base = tmp_path / "runtime" / "replay"
+    (base / "_merged").mkdir(parents=True)
+    (base / "_merged" / "candidates.jsonl").write_text("", encoding="utf-8")
+    rows = [
+        {"coin": "kPEPE", "ts": 1000.0, "mid": 0.001},
+        {"coin": "KPEPE", "ts": 1000.0, "mid": 0.002},
+    ]
+    (base / "_merged" / "marks.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    marks = ms.charger_marks(tmp_path)
+    assert set(marks) == {"kPEPE", "KPEPE"}
+    assert ms.apparier_avec_cause(marks, coin="kPEPE", ts=1000.0,
+                                  horizon_s=0.0)["mid_at_fill"] == 0.001
+    assert ms.apparier_avec_cause(marks, coin="KPEPE", ts=1000.0,
+                                  horizon_s=0.0)["mid_at_fill"] == 0.002
+    assert ms.charger_marks(tmp_path, coins={"KPEPE"}) == {"KPEPE": [(1000.0, 0.002)]}

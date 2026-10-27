@@ -482,7 +482,7 @@ def valider_archive_portable(
         report = primary / "runtime" / "reports" / "backtest_replay" / "RAPPORT_PORTABLE_SMOKE.json"
         previous_mtime = report.stat().st_mtime_ns if report.exists() else 0
         commands.append(_run(
-            "analyser", [comspec, "/d", "/c", "ANALYSER_BACKTESTS_REPLAYS.cmd", "portable-smoke"],
+            "analyser", [comspec, "/d", "/c", "tools\\launchers\\ANALYSER_BACKTESTS_REPLAYS.cmd", "portable-smoke"],
             cwd=primary, env=env, timeout=300,
         ))
         smoke = _json(report) if report.is_file() and report.stat().st_mtime_ns > previous_mtime else {}

@@ -7,15 +7,12 @@ import os
 
 
 def _root_and_rows():
-    here = os.path.dirname(os.path.abspath(__file__))
-    root = here
-    for _ in range(6):
-        p = os.path.join(root, "CLAUDE_TASKS.jsonl")
-        if os.path.exists(p):
-            rows = [json.loads(line) for line in open(p, encoding="utf-8") if line.strip()]
-            return root, rows
-        root = os.path.dirname(root)
-    raise AssertionError("CLAUDE_TASKS.jsonl introuvable — lancer tools/claude_tasks_scan.py")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "docs", "archive", "root-history", "CLAUDE_TASKS.jsonl")
+    if not os.path.exists(p):
+        raise AssertionError("Snapshot historique CLAUDE_TASKS.jsonl introuvable")
+    rows = [json.loads(line) for line in open(p, encoding="utf-8") if line.strip()]
+    return root, rows
 
 
 ROOT, ROWS = _root_and_rows()

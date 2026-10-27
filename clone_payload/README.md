@@ -7,7 +7,7 @@ and research assets are published in GitHub Releases of the **same repository**.
 
 A regular `git clone` cannot download Release assets. After cloning,
 run `Alina-restore.cmd --recover-verifiable` on Windows or
-`bash RESTORE_ALINA.sh --recover-verifiable` on Unix. For *previously*
+`bash tools/launchers/RESTORE_ALINA.sh --recover-verifiable` on Unix. For *previously*
 published local-only files, add `--materialize-local-snapshot`.
 The restore checks each asset size and SHA-256 and returns nonzero when any
 asset is absent or unverifiable; `RESTORE_COMPLETE` is the sole success

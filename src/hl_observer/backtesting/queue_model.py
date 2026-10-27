@@ -1,4 +1,4 @@
-"""LE MODÈLE DE FILE (idée `queue_position` de moisson-fini.md).
+"""LE MODÈLE DE FILE (idée `queue_position` de docs/archive/root-history/moisson-fini.md).
 
 *On ne modélise **aucune** file. Et hftbacktest nous a montré le bug jumeau : le **double
 comptage** (le trade **ET** la baisse du carnet) → des fills **2× trop tôt**.*

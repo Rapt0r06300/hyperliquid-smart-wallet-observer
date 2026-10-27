@@ -277,8 +277,8 @@ class AdvancedRiskManager:
                         drawdown_pct=drawdown_pct, daily_pnl_pct=daily_pnl_pct)
 
         # 9. Correlation filter
-        if coin.upper() in self.open_positions_coins:
-            coin_count = self.open_positions_coins.count(coin.upper())
+        if coin in self.open_positions_coins:
+            coin_count = self.open_positions_coins.count(coin)
             if coin_count >= 2:
                 reasons.append("correlated_positions")
                 sizing_mult *= 0.5
@@ -291,13 +291,12 @@ class AdvancedRiskManager:
             total_exposure_pct=total_exposure_pct)
 
     def on_position_opened(self, coin: str, notional: float, category: str = "perpetual") -> None:
-        self.open_positions_coins.append(coin.upper())
+        self.open_positions_coins.append(coin)
         self.category_exposures[category] = self.category_exposures.get(category, 0.0) + abs(notional)
 
     def on_position_closed(self, coin: str, notional: float, pnl_usdt: float, category: str = "perpetual") -> None:
-        coin_upper = coin.upper()
-        if coin_upper in self.open_positions_coins:
-            self.open_positions_coins.remove(coin_upper)
+        if coin in self.open_positions_coins:
+            self.open_positions_coins.remove(coin)
         cat_exp = self.category_exposures.get(category, 0.0) - abs(notional)
         self.category_exposures[category] = max(0.0, cat_exp)
         self.record_daily_pnl(pnl_usdt)

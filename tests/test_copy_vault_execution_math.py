@@ -73,8 +73,8 @@ def test_base_walk_never_returns_a_fill_without_any_visible_depth() -> None:
 
 
 def test_base_walk_rejects_unrepresentable_quote_notional() -> None:
-    # Finite price and size can still overflow their product in binary float.
-    # An infinite VWAP must never enter a paper fill or PnL ledger.
+    # Finite price and size can still overflow their quote notional in binary float.
+    # An unrepresentable notional must never enter a paper fill or PnL ledger.
     assert _walk_base_quantity([(1e308, 1e308)], 1e308) is None
 
 

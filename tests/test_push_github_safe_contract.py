@@ -83,7 +83,7 @@ def test_powershell_compatibility_layer_delegates_to_single_python_engine() -> N
 def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> None:
     launcher = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8-sig")
 
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-10-26-status-inventory-v2" in launcher
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-exact-archive-relocation-v1" in launcher
     assert 'call :download_source "tools/alina_git_code_sync.py"' in launcher
     assert '"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%' in launcher
     assert 'SYNC_OPTION=--dry-run' in launcher
@@ -94,6 +94,6 @@ def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> N
 
 def test_alias_launchers_call_the_single_canonical_cmd_and_propagate_status() -> None:
     for name in ("POUSSER_TOUT_LE_TRAVAIL.cmd", "REPARER_ET_POUSSER.cmd"):
-        source = (ROOT / name).read_text(encoding="utf-8-sig")
-        assert 'call "%~dp0POUSSER-GITHUB-FORCE.cmd"' in source
+        source = (ROOT / "tools" / "launchers" / name).read_text(encoding="utf-8-sig")
+        assert 'call "%ALINA_PROJECT_ROOT%\\POUSSER-GITHUB-FORCE.cmd"' in source
         assert "endlocal & exit /b %RC%" in source

@@ -14,17 +14,19 @@ from collections.abc import Mapping
 from typing import Any
 
 from hl_observer.economics.families import build_copy_vault_contract
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
 UNBOUND_L2_SOURCE_PROTOCOL = "copy_vault_unbound_ws_l2_v1"
-CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v2"
+INSTRUMENT_IDENTITY_SCHEMA = "hyperliquid_native_instrument_identity.v1"
+CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v3"
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
 EXECUTION_PRICING_POLICY = "observed_side_specific_l2_vwap_full_size_v1"
 MIN_COMPLETE_PROOF_DAYS = 2
 POST_FREEZE_PROOF_POLICY = "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1"
 CHECKPOINT_COLLECTOR_PROTOCOL = (
-    f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
+    f"copy_vault_checkpoint_companion_v3_native_symbol_identity_for_{PROTOCOL_NAME}"
 )
 METAORDER_GAP_MS = 60_000
 COPY_DELAY_MS = 60_000
@@ -47,6 +49,12 @@ _OPEN_DIRECTION_BY_LABEL = {
 }
 
 
+def canonical_copy_vault_coin(value: Any) -> str:
+    """Preserve the venue-native, case-sensitive Hyperliquid instrument name."""
+
+    return preserve_native_instrument_symbol(value)
+
+
 def expected_open_direction(row: Mapping[str, Any]) -> int | None:
     """Retourne le sens signé uniquement pour un open leader explicite."""
 
@@ -61,7 +69,7 @@ def canonical_metaorder_id(
 
     material = {
         "vault": str(vault or "").lower(),
-        "coin": str(coin or "").upper(),
+        "coin": canonical_copy_vault_coin(coin),
         "direction": int(direction),
         "signal_ts_ms": int(signal_ts_ms),
         "first_event_id": str(first_event_id or ""),

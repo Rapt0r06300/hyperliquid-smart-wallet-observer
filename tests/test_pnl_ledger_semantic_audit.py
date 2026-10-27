@@ -8,7 +8,18 @@ import pytest
 from hl_observer.simulation.ledger_integrity import seal_chain
 from hl_observer.simulation.log_metrics import analyze_logs_streaming
 from hl_observer.simulation.paper_ledger import PaperLedger
-from hl_observer.simulation.pnl_ledger_audit import CONTAMINATED, TRUSTED, UNMEASURABLE, audit_paper_ledger
+from hl_observer.simulation.pnl_ledger_audit import (
+    CONTAMINATED,
+    TRUSTED,
+    UNMEASURABLE,
+    _position_key,
+    audit_paper_ledger,
+)
+
+
+def test_fallback_position_identity_preserves_native_symbol_case():
+    assert _position_key("kPEPE", "LONG") == "kPEPE:LONG"
+    assert _position_key("kPEPE", "LONG") != _position_key("KPEPE", "LONG")
 
 
 def _complete_lifecycle(*, funding_settlement_id: str | None = None) -> PaperLedger:

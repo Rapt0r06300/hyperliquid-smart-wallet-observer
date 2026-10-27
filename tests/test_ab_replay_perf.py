@@ -82,6 +82,26 @@ def test_net_baseline_seul_accepte_un_index_marks_deja_construit():
     assert via_index == via_brut
 
 
+def test_ab_replay_does_not_borrow_marks_from_case_distinct_symbol():
+    marks = [
+        {"coin": "KPEPE", "ts": 1060.0, "mid": 101.0},
+        {"coin": "KPEPE", "ts": 1120.0, "mid": 102.0},
+    ]
+    candidate = {
+        "coin": "kPEPE", "direction": "LONG", "current_mid": 100.0,
+        "recorded_at": 1000.0, "leader_notional_usdt": 50.0,
+    }
+
+    report = net_baseline_seul(
+        [candidate], marks, base_config=SLTPConfig(stop_loss_bps=1000.0, take_profit_bps=1000.0),
+        horizon_min=2.0,
+    )["arm_a"]
+
+    assert report["candidates_seen"] == 1
+    assert report["trades"] == 0
+    assert report["unmeasurable_excluded"] == 1
+
+
 def test_replay_peut_comparer_a_notionnel_constant():
     marks = _marks("BTC", 200)
     candidates = _cands("BTC", 4)

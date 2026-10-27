@@ -1,6 +1,6 @@
 """Registre exécutable des points HyperSmart AUD-101 -> AUD-200.
 
-La source textuelle historique est ``TACHES_HYPERSMART_V6_COMPLET.md``.
+La source textuelle historique est conservée dans ``docs/archive/root-history/``.
 La présence des fichiers vaut seulement CODE_PRESENT ; seule la CI dédiée
 sur le même SHA peut conclure VERIFIED/DONE. Aucun réseau ni ordre ici.
 """
@@ -13,9 +13,9 @@ from typing import Any
 SCHEMA_VERSION = "hypersmart.pre_run_101_200.v1"
 FIRST_ID = 101
 LAST_ID = 200
-HISTORICAL_REGISTRY = "TACHES_HYPERSMART_V6_COMPLET.md"
+HISTORICAL_REGISTRY = "docs/archive/root-history/TACHES_HYPERSMART_V6_COMPLET.md"
 
-OPS_SOURCES = ("src/hl_observer/ops/lab_rapport.py", "src/hl_observer/paper_trading/paper_engine.py", "ANALYSER_BACKTESTS_REPLAYS.cmd")
+OPS_SOURCES = ("src/hl_observer/ops/lab_rapport.py", "src/hl_observer/paper_trading/paper_engine.py", "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd")
 OPS_TESTS = ("tests/test_rapport_hierarchie_preuve.py", "tests/test_recette_windows_e2e.py", "tests/test_paper_engine_ledger_wiring.py")
 ROBUSTNESS_SOURCES = ("src/hl_observer/ops/lab_rapport.py", "src/hl_observer/runtime/protections.py", "src/hl_observer/research/scenario_rigor.py", "src/hl_observer/research/qa_rigor.py", "src/hl_observer/research/validation_stats.py")
 ROBUSTNESS_TESTS = ("tests/test_rapport_hierarchie_preuve.py", "tests/test_runtime_protections_streaming.py", "tests/test_scenario_rigor.py", "tests/test_qa_rigor.py", "tests/test_validation_stats.py")

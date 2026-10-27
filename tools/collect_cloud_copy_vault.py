@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import shutil
 import sys
 import time
@@ -59,6 +60,10 @@ from hl_observer.datasets.v2_pipeline import (  # noqa: E402
     locally_replay_admissible,
     summarize_admission_rejections,
 )
+from hl_observer.normalization.instrument_identity import (  # noqa: E402
+    preserve_native_instrument_symbol as canonical_copy_vault_coin,
+)
+from hl_observer.normalization.l2_book import validate_l2_book_sides  # noqa: E402
 from hl_observer.realtime.feed_quality import FeedEventKind  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
@@ -73,11 +78,21 @@ REST_WEIGHT_BUDGET_PER_MINUTE = 1_080
 BROAD_SWEEP_REQUEST_INTERVAL_S = 0.14
 BROAD_SWEEP_CONCURRENCY = 8
 MAX_PRIORITY_WS_VAULTS = 10
+MAX_WS_SUBSCRIPTIONS_PER_IP = 1_000
+COPY_VAULT_MARKET_CHANNEL_TYPES = ("bbo", "l2Book", "trades", "activeAssetCtx")
+# Reserve three user-specific feeds for each priority vault plus ten spare slots.
+MAX_COPY_VAULT_MARKET_INSTRUMENTS = (
+    MAX_WS_SUBSCRIPTIONS_PER_IP - (MAX_PRIORITY_WS_VAULTS * 3) - 10
+) // len(COPY_VAULT_MARKET_CHANNEL_TYPES)
 PRIORITY_AUDIT_ROTATION_SLOTS = 2
 DEFAULT_HISTORY_LOOKBACK_HOURS = 72.0
 MAX_HISTORY_LOOKBACK_HOURS = 72.0
 MAX_PUBLIC_USERFILLS = 10_000
 MAX_USERFILLS_RESPONSE_WEIGHT = 20 + CAP_USERFILLS // 20
+MAX_TIME_RANGE_RESPONSE_ROWS = 500
+MAX_TIME_RANGE_REQUESTS = 64
+MAX_TIME_RANGE_RESPONSE_WEIGHT = 20 + MAX_TIME_RANGE_RESPONSE_ROWS // 20
+MAX_ACCOUNTING_BACKFILL_REQUESTS_PER_CHANNEL = 8
 MAX_L2_DIAGNOSTIC_RECORDS = 256
 SUBSCRIPTION_ACK_TIMEOUT_S = 10.0
 SUBSCRIPTION_TIMEOUT_POLL_S = 0.1
@@ -114,10 +129,12 @@ class RestWeightPacer:
                 60.0 * requested / self.budget_weight_per_minute
             )
 
-    async def before_request(self) -> None:
+    async def before_request(self, *, weight: int | None = None) -> None:
         # Reserve the maximum possible weight before sending to stay safe when
         # several large responses arrive concurrently (20 + 2000 / 20).
-        await self.acquire_weight(MAX_USERFILLS_RESPONSE_WEIGHT)
+        await self.acquire_weight(
+            MAX_USERFILLS_RESPONSE_WEIGHT if weight is None else int(weight)
+        )
 
 
 class AsyncTickSink:
@@ -354,12 +371,15 @@ def userfills_envelope(
 def _valid_l2_levels(levels: Any) -> bool:
     if not isinstance(levels, list) or len(levels) != 2:
         return False
+    normalized_sides: list[list[list[float]]] = []
     for side in levels:
         if not isinstance(side, list):
             return False
+        normalized_side: list[list[float]] = []
         for level in side:
             if not isinstance(level, Mapping):
                 return False
+            parsed: dict[str, Decimal] = {}
             for field in ("px", "sz"):
                 value = level.get(field)
                 if isinstance(value, bool) or value is None:
@@ -370,9 +390,24 @@ def _valid_l2_levels(levels: Any) -> bool:
                     return False
                 if not number.is_finite() or number <= 0:
                     return False
+                parsed[field] = number
             if type(level.get("n")) is not int or level["n"] <= 0:
                 return False
-    return True
+            try:
+                normalized_side.append([float(parsed["px"]), float(parsed["sz"])])
+            except (OverflowError, ValueError):
+                return False
+        normalized_sides.append(normalized_side)
+    if any(not side for side in normalized_sides):
+        return False
+    bids, asks = normalized_sides
+    _, reason = validate_l2_book_sides(
+        bids,
+        asks,
+        bid=bids[0][0],
+        ask=asks[0][0],
+    )
+    return reason is None
 
 
 def _l2_message_status(message: Mapping[str, Any]) -> tuple[str | None, str | None]:
@@ -381,7 +416,7 @@ def _l2_message_status(message: Mapping[str, Any]) -> tuple[str | None, str | No
     data = message.get("data")
     if not isinstance(data, Mapping):
         return "other_schema", None
-    coin = str(data.get("coin") or "").strip().upper()
+    coin = canonical_copy_vault_coin(data.get("coin"))
     if not coin:
         return "missing_coin", None
     timestamp = data.get("time")
@@ -425,6 +460,13 @@ def new_l2_state() -> dict[str, Any]:
         "connection_events_dropped": 0,
         "unknown_market_rejections": [],
         "unknown_market_rejections_dropped": 0,
+        "market_subscription_requested": 0,
+        "market_acknowledged": 0,
+        "market_rejected_before_ack": 0,
+        "market_cap_omitted_coins": 0,
+        "market_accepted_by_channel": {},
+        "market_rejected_by_reason": {},
+        "market_subscription_rejections": {},
     }
 
 
@@ -447,8 +489,13 @@ def _l2_market_state(state: dict[str, Any], coin: str) -> dict[str, Any]:
         coin,
         {
             "received": 0,
+            "candidate_frames": 0,
             "accepted": 0,
             "rejected": 0,
+            "duplicates": 0,
+            "rejected_by_reason": {},
+            "ignored_by_reason": {},
+            "l2_gap_epoch": 0,
             "last_receive_ts_ms": None,
             "last_exchange_ts_ms": None,
             "last_connection_id": None,
@@ -468,9 +515,11 @@ def _subscription_identity(subscription: Any) -> tuple[str, str] | None:
     if not isinstance(subscription, Mapping):
         return None
     kind = str(subscription.get("type") or "").strip()
-    if kind == "l2Book":
-        identity = str(subscription.get("coin") or "").strip().upper()
-    elif kind == "userFills":
+    if kind in COPY_VAULT_MARKET_CHANNEL_TYPES:
+        identity = canonical_copy_vault_coin(subscription.get("coin"))
+    elif kind in {
+        "userFills", "userFundings", "userNonFundingLedgerUpdates",
+    }:
         identity = str(subscription.get("user") or "").strip().lower()
     else:
         return None
@@ -628,6 +677,8 @@ def _open_l2_gap(
         "recovery_connection_id": None,
         "continuity_proven": False,
     }
+    market["l2_gap_epoch"] = int(market.get("l2_gap_epoch", 0)) + 1
+    gap["l2_gap_epoch"] = market["l2_gap_epoch"]
     gaps.append(gap)
     market["open_gap_index"] = len(gaps) - 1
 
@@ -648,6 +699,8 @@ def _record_l2_rejection(
         market = _l2_market_state(state, coin)
         market["received"] += 1
         market["rejected"] += 1
+        market_reasons = market.setdefault("rejected_by_reason", {})
+        market_reasons[reason] = int(market_reasons.get(reason, 0)) + 1
         _open_l2_gap(
             state,
             coin,
@@ -726,6 +779,16 @@ def _record_l2_accepted(
     state["frames"] = int(state.get("frames", 0)) + 1
 
 
+def _record_l2_duplicate(state: dict[str, Any], envelope: TickEnvelope) -> None:
+    market = _l2_market_state(state, envelope.instrument)
+    market["received"] += 1
+    market["duplicates"] += 1
+    ignored = market.setdefault("ignored_by_reason", {})
+    ignored["duplicate_snapshot"] = int(ignored.get("duplicate_snapshot", 0)) + 1
+    state["duplicates"] = int(state.get("duplicates", 0)) + 1
+    _record_l2_ignored(state, "duplicate_snapshot")
+
+
 def _record_l2_disconnect(
     state: dict[str, Any],
     *,
@@ -776,10 +839,22 @@ def _l2_market_summary(state: Mapping[str, Any], end_ms: int) -> dict[str, Any]:
             else None
         )
         subscription_attempts = raw_market.get("subscription_attempts")
+        accepted = raw_market.get("accepted")
+        gaps_dropped = raw_market.get("gaps_dropped")
+        recorded_gaps = gaps if isinstance(gaps, list) else []
         result[str(coin)] = {
             "received": raw_market.get("received"),
+            "candidate_l2_frames": raw_market.get("candidate_frames"),
             "accepted": raw_market.get("accepted"),
             "rejected": raw_market.get("rejected"),
+            "duplicates": raw_market.get("duplicates"),
+            "l2_gap_epoch": raw_market.get("l2_gap_epoch"),
+            "rejected_by_reason": dict(raw_market.get("rejected_by_reason", {}))
+            if isinstance(raw_market.get("rejected_by_reason"), Mapping)
+            else None,
+            "ignored_by_reason": dict(raw_market.get("ignored_by_reason", {}))
+            if isinstance(raw_market.get("ignored_by_reason"), Mapping)
+            else None,
             "subscription_status": raw_market.get("subscription_status"),
             "subscription_attempts": [
                 {key: value for key, value in attempt.items() if not key.startswith("_")}
@@ -805,6 +880,15 @@ def _l2_market_summary(state: Mapping[str, Any], end_ms: int) -> dict[str, Any]:
                     and raw_market["accepted"] > 0
                     else "NO_SNAPSHOT"
                 )
+            ),
+            "proof_window_status": (
+                "UNAVAILABLE"
+                if isinstance(open_gap, Mapping)
+                or bool(recorded_gaps)
+                or (type(gaps_dropped) is int and gaps_dropped > 0)
+                or type(accepted) is not int
+                or accepted <= 0
+                else "UNPROVEN"
             ),
             "open_gap": dict(open_gap) if isinstance(open_gap, Mapping) else None,
             "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)]
@@ -834,12 +918,16 @@ def _l2_diagnostics(
         return {str(reason): count for reason, count in value.items()}
 
     markets = _l2_market_summary(state, end_ms)
-    for coin in sorted({str(item).strip().upper() for item in requested_coins}):
+    for coin in sorted({canonical_copy_vault_coin(item) for item in requested_coins}):
         if coin and coin not in markets:
             markets[coin] = {
                 "received": None,
+                "candidate_l2_frames": None,
                 "accepted": None,
                 "rejected": None,
+                "duplicates": None,
+                "rejected_by_reason": None,
+                "ignored_by_reason": None,
                 "subscription_status": "UNKNOWN",
                 "subscription_attempts": None,
                 "subscription_attempts_dropped": None,
@@ -849,6 +937,8 @@ def _l2_diagnostics(
                 "last_connection_id": None,
                 "sequence_continuity_proven": False,
                 "coverage_status": "NO_MARKET_STATE",
+                "proof_window_status": "UNAVAILABLE",
+                "l2_gap_epoch": None,
                 "open_gap": None,
                 "gaps": [],
                 "gaps_dropped": None,
@@ -861,6 +951,27 @@ def _l2_diagnostics(
     )
     connection_events = state.get("connection_events")
     unknown_rejections = state.get("unknown_market_rejections")
+    required_markets = sorted(
+        {
+            canonical_copy_vault_coin(item)
+            for item in requested_coins
+            if canonical_copy_vault_coin(item)
+        }
+    )
+    required_statuses = [
+        markets[coin].get("proof_window_status")
+        for coin in required_markets
+        if isinstance(markets.get(coin), Mapping)
+    ]
+    required_window_status = (
+        "UNMEASURABLE"
+        if not required_markets or len(required_statuses) != len(required_markets)
+        else (
+            "UNAVAILABLE"
+            if "UNAVAILABLE" in required_statuses
+            else "UNPROVEN"
+        )
+    )
     return {
         "received_frames": counter("received"),
         "candidate_l2_frames": counter("candidate_frames"),
@@ -875,9 +986,18 @@ def _l2_diagnostics(
         "heartbeats_received": counter("heartbeats_received"),
         "subscription_ack_mismatches": counter("subscription_ack_mismatches"),
         "invalid_subscription_acks": counter("invalid_subscription_acks"),
-        "requested_markets": sorted(
-            {str(item).strip().upper() for item in requested_coins if str(item).strip()}
-        ),
+        "same_connection_market_stream": {
+            "channels": list(COPY_VAULT_MARKET_CHANNEL_TYPES),
+            "instrument_cap": MAX_COPY_VAULT_MARKET_INSTRUMENTS,
+            "subscriptions_requested": counter("market_subscription_requested"),
+            "subscriptions_acknowledged": counter("market_acknowledged"),
+            "instruments_omitted_by_cap": counter("market_cap_omitted_coins"),
+            "frames_accepted_by_channel": counter_map("market_accepted_by_channel"),
+            "frames_rejected_by_reason": counter_map("market_rejected_by_reason"),
+            "subscription_rejections": counter_map("market_subscription_rejections"),
+        },
+        "requested_markets": required_markets,
+        "required_market_proof_window_status": required_window_status,
         "markets": markets,
         "connection_events": [
             dict(event)
@@ -906,7 +1026,7 @@ def _l2_payload_coin(message: Mapping[str, Any]) -> str | None:
     data = message.get("data")
     if not isinstance(data, Mapping):
         return None
-    coin = str(data.get("coin") or "").strip().upper()
+    coin = canonical_copy_vault_coin(data.get("coin"))
     return coin or None
 
 
@@ -917,6 +1037,7 @@ def l2_envelope(
     receive_mono_ns: int,
     connection_id: str,
     reconnect_count: int = 0,
+    l2_gap_epoch: int = 0,
 ) -> TickEnvelope | None:
     reason, coin = _l2_message_status(message)
     if reason is not None or coin is None:
@@ -949,9 +1070,346 @@ def l2_envelope(
         parsed_summary={
             "bid_levels": bid_levels,
             "ask_levels": ask_levels,
+            "l2_gap_epoch": l2_gap_epoch,
             "data_gate_ready": False,
         },
     )
+
+
+def _finite_market_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _unknown_market_envelope(
+    message: Mapping[str, Any], *, receive_wall_ms: int, receive_mono_ns: int,
+    connection_id: str, reconnect_count: int, reason: str,
+) -> TickEnvelope:
+    data = message.get("data")
+    coin = str(data.get("coin") or "").strip() if isinstance(data, Mapping) else "*"
+    return TickEnvelope(
+        source_id="hyperliquid_public_copy_vault_market_ws",
+        channel="copy_vault_unknown",
+        instrument=coin or "*",
+        event_kind="UNCLASSIFIED",
+        raw_payload=dict(message),
+        received_ts_ms=int(receive_wall_ms),
+        local_monotonic_ns=int(receive_mono_ns),
+        connection_id=connection_id,
+        reconnect_count=int(reconnect_count),
+        provenance={
+            "url": WS_URL, "network": "mainnet", "venue": "hyperliquid",
+            "access": "read_only", "transport": "websocket",
+            "authenticated": False,
+            "timestamp_semantics": "receive_observation_time_only",
+        },
+        parsed_summary={"unclassified_reason": reason, "data_gate_ready": False},
+    )
+
+
+def copy_vault_accounting_envelopes(
+    message: Mapping[str, Any], *, vault: str, receive_wall_ms: int,
+    receive_mono_ns: int, connection_id: str, reconnect_count: int = 0,
+) -> tuple[list[TickEnvelope], str | None]:
+    """Preserve causal public funding/ledger events without treating them as PnL."""
+    channel = str(message.get("channel") or "")
+    data = message.get("data")
+    vault_id = str(vault or "").strip().lower()
+    if channel not in {"userFundings", "userNonFundingLedgerUpdates"}:
+        return [], "UNSUPPORTED_ACCOUNTING_CHANNEL"
+    if not isinstance(data, Mapping) or str(data.get("user") or "").lower() != vault_id:
+        return [], "ACCOUNTING_USER_MISMATCH_OR_PAYLOAD_INVALID"
+    snapshot = data.get("isSnapshot")
+    if type(snapshot) is not bool:
+        return [], "ACCOUNTING_SNAPSHOT_FLAG_UNCLASSIFIED"
+    if channel == "userFundings":
+        rows_value = data.get("fundings")
+        family = "copy_vault_funding"
+        row_key = "fundings"
+    else:
+        rows_value = data.get("nonFundingLedgerUpdates")
+        family = "copy_vault_ledger"
+        row_key = "nonFundingLedgerUpdates"
+    if not isinstance(rows_value, list):
+        return [], "ACCOUNTING_EVENT_LIST_MISSING"
+
+    output: list[TickEnvelope] = []
+    invalid_rows: list[Any] = []
+    for row in rows_value:
+        if not isinstance(row, Mapping):
+            invalid_rows.append(row)
+            continue
+        event_time = row.get("time")
+        if type(event_time) is not int or event_time <= 0 or event_time > receive_wall_ms:
+            invalid_rows.append(dict(row))
+            continue
+        if channel == "userFundings":
+            coin = canonical_copy_vault_coin(row.get("coin"))
+            try:
+                values = [
+                    Decimal(str(row[key]))
+                    for key in ("usdc", "szi", "fundingRate")
+                ]
+            except (KeyError, InvalidOperation, TypeError, ValueError):
+                invalid_rows.append(dict(row))
+                continue
+            if not coin or not all(value.is_finite() for value in values):
+                invalid_rows.append(dict(row))
+                continue
+        else:
+            delta = row.get("delta")
+            if (
+                not str(row.get("hash") or "").strip()
+                or not isinstance(delta, Mapping)
+                or not str(delta.get("type") or "").strip()
+            ):
+                invalid_rows.append(dict(row))
+                continue
+        row_message = {
+            "channel": channel,
+            "data": {
+                "user": vault_id,
+                "isSnapshot": snapshot,
+                row_key: [dict(row)],
+            },
+        }
+        output.append(TickEnvelope(
+            source_id=(
+                "hl_public_account"
+                if channel == "userFundings"
+                else "hl_public_account"
+            ),
+            channel=family,
+            instrument=vault_id,
+            event_kind=FeedEventKind.SNAPSHOT if snapshot else FeedEventKind.EVENT,
+            raw_payload=row_message,
+            exchange_ts_ms=event_time,
+            received_ts_ms=int(receive_wall_ms),
+            local_monotonic_ns=int(receive_mono_ns),
+            connection_id=connection_id,
+            reconnect_count=int(reconnect_count),
+            provenance={
+                "url": WS_URL, "network": "mainnet", "access": "read_only",
+                "venue": "hyperliquid", "transport": "websocket",
+                "authenticated": False,
+                "timestamp_semantics": "causal_event_availability",
+                "snapshot_only_research": bool(snapshot),
+                "forward_evidence_allowed": False,
+            },
+            parsed_summary={
+                "event_count": 1,
+                "is_snapshot": snapshot,
+                "accounting_event_type": (
+                    "funding" if channel == "userFundings"
+                    else str(row["delta"]["type"])
+                ),
+                "data_gate_ready": False,
+                "proof_of_pnl_allowed": False,
+            },
+        ))
+    if invalid_rows:
+        return output, "ACCOUNTING_ROWS_INVALID"
+    if not rows_value:
+        # An empty initial snapshot proves only that the feed emitted no rows at
+        # that instant; it is not evidence of zero funding or zero ledger change.
+        output.append(TickEnvelope(
+            source_id=(
+                "hl_public_account"
+                if channel == "userFundings"
+                else "hl_public_account"
+            ),
+            channel=family,
+            instrument=vault_id,
+            event_kind=FeedEventKind.SNAPSHOT,
+            raw_payload=dict(message),
+            received_ts_ms=int(receive_wall_ms),
+            local_monotonic_ns=int(receive_mono_ns),
+            connection_id=connection_id,
+            reconnect_count=int(reconnect_count),
+            provenance={
+                "url": WS_URL, "network": "mainnet", "access": "read_only",
+                "venue": "hyperliquid", "transport": "websocket",
+                "authenticated": False,
+                "timestamp_semantics": "receive_observation_time_only",
+                "snapshot_only_research": True,
+                "forward_evidence_allowed": False,
+            },
+            parsed_summary={
+                "event_count": 0, "is_snapshot": True,
+                "empty_snapshot_is_zero_proof": False,
+                "data_gate_ready": False, "proof_of_pnl_allowed": False,
+            },
+        ))
+    return output, None
+
+
+def copy_vault_market_subscriptions(coin: str) -> list[dict[str, str]]:
+    native_coin = str(coin or "").strip()
+    if not native_coin:
+        return []
+    return [
+        {"type": channel_type, "coin": native_coin}
+        for channel_type in COPY_VAULT_MARKET_CHANNEL_TYPES
+    ]
+
+
+def market_subscription_ack_key(message: Mapping[str, Any]) -> tuple[str, str] | None:
+    if message.get("channel") != "subscriptionResponse":
+        return None
+    data = message.get("data")
+    if (
+        not isinstance(data, Mapping) or data.get("method") != "subscribe"
+        or data.get("error") is not None or message.get("error") is not None
+    ):
+        return None
+    subscription = data.get("subscription")
+    if not isinstance(subscription, Mapping):
+        return None
+    kind = str(subscription.get("type") or "").strip()
+    coin = str(subscription.get("coin") or "").strip()
+    return (kind, coin) if kind in COPY_VAULT_MARKET_CHANNEL_TYPES and coin else None
+
+
+def copy_vault_market_envelopes(
+    message: Mapping[str, Any], *, receive_wall_ms: int, receive_mono_ns: int,
+    connection_id: str, reconnect_count: int = 0,
+) -> list[TickEnvelope]:
+    """Keep validated Copy-Vault BBO/trades/context; quarantine invalid frames."""
+    channel = str(message.get("channel") or "")
+    if channel == "l2Book":
+        envelope = l2_envelope(
+            message, receive_wall_ms=receive_wall_ms,
+            receive_mono_ns=receive_mono_ns, connection_id=connection_id,
+            reconnect_count=reconnect_count,
+        )
+        return [envelope] if envelope is not None else [_unknown_market_envelope(
+            message, receive_wall_ms=receive_wall_ms, receive_mono_ns=receive_mono_ns,
+            connection_id=connection_id, reconnect_count=reconnect_count,
+            reason="L2_PAYLOAD_OR_CAUSAL_CLOCK_INVALID",
+        )]
+    if channel not in {"bbo", "trades", "activeAssetCtx"}:
+        return []
+    data = message.get("data")
+    if channel == "trades":
+        if not isinstance(data, list):
+            return [_unknown_market_envelope(
+                message, receive_wall_ms=receive_wall_ms, receive_mono_ns=receive_mono_ns,
+                connection_id=connection_id, reconnect_count=reconnect_count,
+                reason="TRADE_PAYLOAD_NOT_LIST",
+            )]
+        output: list[TickEnvelope] = []
+        invalid: list[Any] = []
+        for row in data:
+            if not isinstance(row, Mapping):
+                invalid.append(row)
+                continue
+            coin = str(row.get("coin") or "").strip()
+            ts = row.get("time")
+            px, sz = _finite_market_number(row.get("px")), _finite_market_number(row.get("sz"))
+            identity = bool(str(row.get("hash") or "").strip()) or type(row.get("tid")) is int
+            if (
+                not coin or type(ts) is not int or ts <= 0 or ts > receive_wall_ms
+                or receive_wall_ms - ts > 30_000 or not identity
+                or px is None or px <= 0 or sz is None or sz <= 0
+                or str(row.get("side") or "").upper() not in {"A", "B"}
+            ):
+                invalid.append(dict(row))
+                continue
+            output.append(TickEnvelope(
+                source_id="hyperliquid_public_copy_vault_market_ws",
+                channel="copy_vault_trades", instrument=coin,
+                event_kind=FeedEventKind.EVENT,
+                raw_payload={"channel": "trades", "data": [dict(row)]},
+                exchange_ts_ms=ts, received_ts_ms=int(receive_wall_ms),
+                local_monotonic_ns=int(receive_mono_ns), connection_id=connection_id,
+                reconnect_count=int(reconnect_count),
+                provenance={
+                    "url": WS_URL, "network": "mainnet", "venue": "hyperliquid",
+                    "access": "read_only", "transport": "websocket",
+                    "authenticated": False,
+                    "timestamp_semantics": "causal_event_availability",
+                    "copy_vault_same_run_market_evidence": True,
+                },
+                parsed_summary={"event_count": 1, "data_gate_ready": False},
+            ))
+        if invalid:
+            output.append(_unknown_market_envelope(
+                {"channel": "trades", "data": invalid},
+                receive_wall_ms=receive_wall_ms, receive_mono_ns=receive_mono_ns,
+                connection_id=connection_id, reconnect_count=reconnect_count,
+                reason="TRADE_ROW_MISSING_NATIVE_IDENTITY_OR_PRICE_SIZE_TIME",
+            ))
+        return output
+
+    if not isinstance(data, Mapping):
+        reason = "MARKET_DATA_NOT_OBJECT"
+        coin = ""
+    else:
+        coin = str(data.get("coin") or "").strip()
+        ts = data.get("time")
+        reason = ""
+        if not coin:
+            reason = "MARKET_INSTRUMENT_MISSING"
+        elif channel == "activeAssetCtx":
+            if not isinstance(data.get("ctx"), Mapping) or ts is not None:
+                reason = "ACTIVE_ASSET_CONTEXT_INVALID"
+        else:
+            bbo = data.get("bbo")
+            if (
+                type(ts) is not int or ts <= 0 or ts > receive_wall_ms
+                or receive_wall_ms - ts > 30_000
+                or not isinstance(bbo, list) or len(bbo) != 2
+                or not all(isinstance(level, Mapping) for level in bbo)
+            ):
+                reason = "BBO_PAYLOAD_OR_CAUSAL_CLOCK_INVALID"
+            else:
+                prices = [_finite_market_number(level.get("px")) for level in bbo]
+                sizes = [_finite_market_number(level.get("sz")) for level in bbo]
+                if (
+                    any(value is None for value in prices + sizes)
+                    or prices[0] is None or prices[1] is None
+                    or sizes[0] is None or sizes[1] is None
+                    or prices[0] <= 0 or prices[1] <= prices[0]
+                    or sizes[0] < 0 or sizes[1] < 0
+                ):
+                    reason = "BBO_PRICE_SIZE_OR_SPREAD_INVALID"
+    if reason:
+        return [_unknown_market_envelope(
+            message, receive_wall_ms=receive_wall_ms, receive_mono_ns=receive_mono_ns,
+            connection_id=connection_id, reconnect_count=reconnect_count, reason=reason,
+        )]
+    observation_only = channel == "activeAssetCtx"
+    return [TickEnvelope(
+        source_id="hyperliquid_public_copy_vault_market_ws",
+        channel={
+            "bbo": "copy_vault_bbo",
+            "activeAssetCtx": "copy_vault_active_asset_ctx",
+        }[channel],
+        instrument=coin,
+        event_kind=FeedEventKind.SNAPSHOT if channel == "bbo" else FeedEventKind.INCREMENTAL,
+        raw_payload=dict(message),
+        exchange_ts_ms=None if observation_only else ts,
+        received_ts_ms=int(receive_wall_ms), local_monotonic_ns=int(receive_mono_ns),
+        connection_id=connection_id, reconnect_count=int(reconnect_count),
+        provenance={
+            "url": WS_URL, "network": "mainnet", "venue": "hyperliquid",
+            "access": "read_only", "transport": "websocket", "authenticated": False,
+            "timestamp_semantics": (
+                "receive_observation_time_only" if observation_only
+                else "causal_event_availability"
+            ),
+            "copy_vault_same_run_market_evidence": True,
+        },
+        parsed_summary={
+            "event_count": 1, "observation_only": observation_only,
+            "data_gate_ready": False,
+        },
+    )]
 
 
 async def _dynamic_l2_collector(
@@ -966,6 +1424,10 @@ async def _dynamic_l2_collector(
         connection_id = f"copy-l2-{uuid.uuid4().hex}"
         requested: set[str] = set()
         subscribed: set[str] = set()
+        market_coin_requests: set[str] = set()
+        market_requested: set[tuple[str, str]] = set()
+        market_subscribed: set[tuple[str, str]] = set()
+        market_omitted: set[str] = set()
         attempts: list[dict[str, Any]] = []
         current_by_coin: dict[str, dict[str, Any]] = {}
         stop_watchdog = asyncio.Event()
@@ -1022,11 +1484,23 @@ async def _dynamic_l2_collector(
                     _connection_id: str = connection_id,
                     _attempts: list[dict[str, Any]] = attempts,
                     _requested: set[str] = requested,
+                    _market_coin_requests: set[str] = market_coin_requests,
+                    _market_requested: set[tuple[str, str]] = market_requested,
+                    _market_omitted: set[str] = market_omitted,
                     _send_json: Any = send_json,
                 ) -> None:
-                    normalized_coin = str(coin).strip().upper()
+                    normalized_coin = canonical_copy_vault_coin(coin)
                     if not normalized_coin:
                         return
+                    if normalized_coin not in _market_coin_requests:
+                        if len(_market_coin_requests) >= MAX_COPY_VAULT_MARKET_INSTRUMENTS:
+                            if normalized_coin not in _market_omitted:
+                                _market_omitted.add(normalized_coin)
+                                state["market_cap_omitted_coins"] = int(
+                                    state.get("market_cap_omitted_coins", 0)
+                                ) + 1
+                            return
+                        _market_coin_requests.add(normalized_coin)
                     current = _current_by_coin.get(normalized_coin)
                     if current is not None and current.get("status") in {
                         "PENDING",
@@ -1059,6 +1533,25 @@ async def _dynamic_l2_collector(
                         await _send_json(
                             {"method": "subscribe", "subscription": subscription}
                         )
+                        for market_subscription in copy_vault_market_subscriptions(
+                            normalized_coin
+                        ):
+                            if market_subscription["type"] == "l2Book":
+                                continue
+                            key = (
+                                market_subscription["type"],
+                                market_subscription["coin"],
+                            )
+                            await _send_json(
+                                {
+                                    "method": "subscribe",
+                                    "subscription": market_subscription,
+                                }
+                            )
+                            _market_requested.add(key)
+                            state["market_subscription_requested"] = int(
+                                state.get("market_subscription_requested", 0)
+                            ) + 1
                     except Exception as exc:
                         subscription_attempt["status"] = "SEND_FAILED"
                         subscription_attempt["error"] = type(exc).__name__
@@ -1094,7 +1587,7 @@ async def _dynamic_l2_collector(
                     _subscribe_coin: Any = subscribe_coin,
                 ) -> None:
                     while True:
-                        coin = str(await _request_queue.get()).strip().upper()
+                        coin = canonical_copy_vault_coin(await _request_queue.get())
                         try:
                             if coin and coin not in _requested:
                                 await _subscribe_coin(coin)
@@ -1145,13 +1638,46 @@ async def _dynamic_l2_collector(
                                     )
                                     continue
                                 ack_status, identity, ack_error = ack
-                                if identity is None or identity[0] != "l2Book":
+                                if identity is None:
                                     state["subscription_ack_mismatches"] = int(
                                         state.get("subscription_ack_mismatches", 0)
                                     ) + 1
                                     _record_l2_ignored(
                                         state, "unmatched_subscription_ack"
                                     )
+                                    continue
+                                if identity[0] != "l2Book":
+                                    key = (identity[0], identity[1])
+                                    if key not in market_requested:
+                                        state["subscription_ack_mismatches"] = int(
+                                            state.get("subscription_ack_mismatches", 0)
+                                        ) + 1
+                                        _record_l2_ignored(
+                                            state, "unmatched_market_subscription_ack"
+                                        )
+                                    elif ack_status == "REJECTED":
+                                        rejections = state.setdefault(
+                                            "market_subscription_rejections", {}
+                                        )
+                                        reason = f"{key[0]}:{ack_error or 'rejected'}"
+                                        rejections[reason] = int(
+                                            rejections.get(reason, 0)
+                                        ) + 1
+                                        _record_l2_ignored(
+                                            state, "market_subscription_rejected"
+                                        )
+                                    elif key in market_subscribed:
+                                        _record_l2_ignored(
+                                            state, "duplicate_market_subscription_ack"
+                                        )
+                                    else:
+                                        market_subscribed.add(key)
+                                        state["market_acknowledged"] = int(
+                                            state.get("market_acknowledged", 0)
+                                        ) + 1
+                                        _record_l2_ignored(
+                                            state, "market_subscription_acknowledged"
+                                        )
                                     continue
                                 coin = identity[1]
                                 subscription_attempt = current_by_coin.get(coin)
@@ -1203,11 +1729,89 @@ async def _dynamic_l2_collector(
                                     state, "subscription_acknowledged"
                                 )
                                 continue
+                            if channel in {"bbo", "trades", "activeAssetCtx"}:
+                                data = raw_message.get("data")
+                                if channel == "trades" and isinstance(data, list):
+                                    first_trade = data[0] if data else None
+                                    native_coin = (
+                                        canonical_copy_vault_coin(first_trade.get("coin"))
+                                        if isinstance(first_trade, Mapping)
+                                        else ""
+                                    )
+                                    mixed_instruments = any(
+                                        not isinstance(row, Mapping)
+                                        or canonical_copy_vault_coin(row.get("coin"))
+                                        != native_coin
+                                        for row in data
+                                    )
+                                else:
+                                    native_coin = (
+                                        canonical_copy_vault_coin(data.get("coin"))
+                                        if isinstance(data, Mapping)
+                                        else ""
+                                    )
+                                    mixed_instruments = False
+                                key = (channel, native_coin)
+                                if (
+                                    not native_coin
+                                    or native_coin not in requested
+                                    or key not in market_subscribed
+                                    or mixed_instruments
+                                ):
+                                    if mixed_instruments:
+                                        reason = "market_trade_instrument_mismatch"
+                                    elif native_coin and key in market_requested:
+                                        state["market_rejected_before_ack"] = int(
+                                            state.get("market_rejected_before_ack", 0)
+                                        ) + 1
+                                        reason = "market_data_before_connection_ack"
+                                    else:
+                                        reason = "market_data_for_unrequested_instrument"
+                                    rejected = state.setdefault(
+                                        "market_rejected_by_reason", {}
+                                    )
+                                    rejected[reason] = int(rejected.get(reason, 0)) + 1
+                                    continue
+                                envelopes = copy_vault_market_envelopes(
+                                    raw_message,
+                                    receive_wall_ms=wall,
+                                    receive_mono_ns=mono,
+                                    connection_id=connection_id,
+                                    reconnect_count=state.get("reconnects", 0),
+                                )
+                                for envelope in envelopes:
+                                    if envelope.channel == "copy_vault_unknown":
+                                        rejected = state.setdefault(
+                                            "market_rejected_by_reason", {}
+                                        )
+                                        reason = str(
+                                            envelope.parsed_summary.get(
+                                                "unclassified_reason", "invalid_market_payload"
+                                            )
+                                        )
+                                        rejected[reason] = int(rejected.get(reason, 0)) + 1
+                                    await _emit_with_backpressure(sink, envelope)
+                                    if envelope.channel != "copy_vault_unknown":
+                                        accepted = state.setdefault(
+                                            "market_accepted_by_channel", {}
+                                        )
+                                        accepted[channel] = int(
+                                            accepted.get(channel, 0)
+                                        ) + 1
+                                continue
                         message, reason, coin = classify_l2_payload(raw_text)
                         if message is not None and message.get("channel") == "l2Book":
                             state["candidate_frames"] = int(
                                 state.get("candidate_frames", 0)
                             ) + 1
+                            candidate_coin = _l2_payload_coin(message)
+                            if candidate_coin:
+                                candidate_market = _l2_market_state(
+                                    state, candidate_coin
+                                )
+                                candidate_market["candidate_frames"] = int(
+                                    candidate_market.get("candidate_frames", 0)
+                                ) + 1
                         if reason == "wrong_channel":
                             channel = str(message.get("channel") or "") if message else ""
                             coin = _l2_payload_coin(message) if message else None
@@ -1253,6 +1857,9 @@ async def _dynamic_l2_collector(
                             receive_mono_ns=mono,
                             connection_id=connection_id,
                             reconnect_count=state.get("reconnects", 0),
+                            l2_gap_epoch=int(
+                                _l2_market_state(state, coin).get("l2_gap_epoch", 0)
+                            ),
                         )
                         if envelope is None:
                             _record_l2_rejection(
@@ -1267,8 +1874,7 @@ async def _dynamic_l2_collector(
                             state, envelope
                         )
                         if snapshot_issue == "duplicate_snapshot":
-                            state["duplicates"] = int(state.get("duplicates", 0)) + 1
-                            _record_l2_ignored(state, snapshot_issue)
+                            _record_l2_duplicate(state, envelope)
                             continue
                         if snapshot_issue is not None:
                             _record_l2_rejection(
@@ -1363,7 +1969,7 @@ def _position_fingerprint(state: Mapping[str, Any]) -> str:
             continue
         rows.append(
             {
-                "coin": str(raw.get("coin") or "").upper(),
+                "coin": canonical_copy_vault_coin(raw.get("coin")),
                 "szi": raw.get("szi"),
                 "entryPx": raw.get("entryPx"),
                 "levier": raw.get("levier"),
@@ -1792,6 +2398,35 @@ async def _socket_group(
                         current["error"] = type(exc).__name__
                         raise
                     await asyncio.sleep(0.15)
+                    for accounting_kind in (
+                        "userFundings", "userNonFundingLedgerUpdates",
+                    ):
+                        accounting_subscription = {
+                            "type": accounting_kind, "user": vault,
+                        }
+                        accounting_current = _new_subscription_attempt(
+                            accounting_subscription,
+                            connection_id=connection_id,
+                            sent_at_ms=int(time.time() * 1_000),
+                            sent_monotonic=time.monotonic(),
+                        )
+                        accounting_key = (accounting_kind, vault.lower())
+                        connection_attempts[accounting_key] = accounting_current
+                        attempts_for_watchdog.append(accounting_current)
+                        try:
+                            await send_json({
+                                "method": "subscribe",
+                                "subscription": accounting_subscription,
+                            })
+                        except Exception as exc:
+                            accounting_current["status"] = "SEND_FAILED"
+                            accounting_current["error"] = type(exc).__name__
+                            raise
+                        diag_key = f"{accounting_kind}_requested"
+                        subscription_diagnostics[diag_key] = (
+                            subscription_diagnostics.get(diag_key, 0) + 1
+                        )
+                        await asyncio.sleep(0.15)
 
                 async def heartbeat() -> None:
                     while True:
@@ -1846,6 +2481,13 @@ async def _socket_group(
                                     subscription_diagnostics.get("rejected_acks", 0)
                                     + 1
                                 )
+                                if identity[0] in {
+                                    "userFundings", "userNonFundingLedgerUpdates",
+                                }:
+                                    diag_key = f"{identity[0]}_rejected_acks"
+                                    subscription_diagnostics[diag_key] = (
+                                        subscription_diagnostics.get(diag_key, 0) + 1
+                                    )
                                 continue
                             if current.get("status") not in {"PENDING", "TIMED_OUT"}:
                                 subscription_diagnostics["duplicate_acks"] = (
@@ -1856,9 +2498,82 @@ async def _socket_group(
                             current["late_ack"] = current.get("status") == "TIMED_OUT"
                             current["status"] = "ACTIVE"
                             current["acknowledged_at_ms"] = wall
-                            observation_start_ms[vault] = wall
-                            subscription_diagnostics["acknowledged"] = (
-                                subscription_diagnostics.get("acknowledged", 0) + 1
+                            if identity[0] == "userFills":
+                                observation_start_ms[vault] = wall
+                                diag_key = "acknowledged"
+                            else:
+                                diag_key = f"{identity[0]}_acknowledged"
+                            subscription_diagnostics[diag_key] = (
+                                subscription_diagnostics.get(diag_key, 0) + 1
+                            )
+                            continue
+
+                        if channel in {
+                            "userFundings", "userNonFundingLedgerUpdates",
+                        }:
+                            data = message.get("data")
+                            user = (
+                                str(data.get("user") or "").lower()
+                                if isinstance(data, Mapping)
+                                else ""
+                            )
+                            vault = known.get(user)
+                            key = (channel, user)
+                            current = connection_attempts.get(key)
+                            if vault is None or current is None or current.get("status") != "ACTIVE":
+                                diag_key = f"{channel}_messages_before_ack_dropped"
+                                subscription_diagnostics[diag_key] = (
+                                    subscription_diagnostics.get(diag_key, 0) + 1
+                                )
+                                continue
+                            envelopes, error = copy_vault_accounting_envelopes(
+                                message,
+                                vault=vault,
+                                receive_wall_ms=wall,
+                                receive_mono_ns=mono,
+                                connection_id=connection_id,
+                                reconnect_count=reconnect_counts.get(vault, 0),
+                            )
+                            if error is not None:
+                                diag_key = f"{channel}_invalid_messages"
+                                subscription_diagnostics[diag_key] = (
+                                    subscription_diagnostics.get(diag_key, 0) + 1
+                                )
+                                quarantine = TickEnvelope(
+                                    source_id="hyperliquid_public_copy_vault_accounting_ws",
+                                    channel="copy_vault_unknown",
+                                    instrument=vault,
+                                    event_kind="UNCLASSIFIED",
+                                    raw_payload=dict(message),
+                                    received_ts_ms=wall,
+                                    local_monotonic_ns=mono,
+                                    connection_id=connection_id,
+                                    reconnect_count=reconnect_counts.get(vault, 0),
+                                    provenance={
+                                        "url": WS_URL, "network": "mainnet",
+                                        "access": "read_only", "venue": "hyperliquid",
+                                        "transport": "websocket", "authenticated": False,
+                                        "timestamp_semantics": "receive_observation_time_only",
+                                    },
+                                    parsed_summary={
+                                        "unclassified_reason": error,
+                                        "data_gate_ready": False,
+                                        "proof_of_pnl_allowed": False,
+                                    },
+                                )
+                                await _emit_with_backpressure(sink, quarantine)
+                            for envelope in envelopes:
+                                await _emit_with_backpressure(sink, envelope)
+                            row_key = (
+                                "user_funding_rows" if channel == "userFundings"
+                                else "user_non_funding_ledger_rows"
+                            )
+                            subscription_diagnostics[row_key] = (
+                                subscription_diagnostics.get(row_key, 0)
+                                + sum(
+                                    int(env.parsed_summary.get("event_count") or 0)
+                                    for env in envelopes
+                                )
                             )
                             continue
 
@@ -1899,7 +2614,7 @@ async def _socket_group(
                         # including the initial snapshot. Snapshot fills never count
                         # as forward copy signals.
                         for fill in fills:
-                            coin = str(fill.get("coin") or "").strip().upper()
+                            coin = canonical_copy_vault_coin(fill.get("coin"))
                             if coin and coin not in l2_known_coins:
                                 l2_known_coins.add(coin)
                                 l2_request_queue.put_nowait(coin)
@@ -2001,6 +2716,259 @@ async def _post_userfills(
     if not isinstance(payload, list):
         raise ValueError("userFillsByTime returned non-list")
     return [row for row in payload if isinstance(row, dict)]
+
+
+async def _post_user_accounting_history(
+    client: httpx.AsyncClient,
+    vault: str,
+    *,
+    request_type: str,
+    start_ms: int,
+    end_ms: int,
+) -> list[Any]:
+    if request_type not in {"userFunding", "userNonFundingLedgerUpdates"}:
+        raise ValueError("unsupported Copy-Vault accounting history endpoint")
+    response = await client.post(
+        "/info",
+        json={
+            "type": request_type,
+            "user": vault,
+            "startTime": int(start_ms),
+            "endTime": int(end_ms),
+        },
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError(f"{request_type} returned non-list")
+    return payload
+
+
+def _accounting_history_row_valid(
+    row: Any,
+    *,
+    request_type: str,
+    start_ms: int,
+    end_ms: int,
+) -> bool:
+    if not isinstance(row, Mapping):
+        return False
+    timestamp = row.get("time")
+    if type(timestamp) is not int or not int(start_ms) <= timestamp <= int(end_ms):
+        return False
+    if request_type == "userFunding":
+        delta = row.get("delta")
+        detail = delta if isinstance(delta, Mapping) else row
+        coin = canonical_copy_vault_coin(detail.get("coin"))
+        try:
+            numbers = [
+                Decimal(str(detail[key]))
+                for key in ("usdc", "szi", "fundingRate")
+            ]
+        except (KeyError, InvalidOperation, TypeError, ValueError):
+            return False
+        return bool(coin) and all(number.is_finite() for number in numbers)
+    delta = row.get("delta")
+    return bool(
+        str(row.get("hash") or "").strip()
+        and isinstance(delta, Mapping)
+        and str(delta.get("type") or "").strip()
+    )
+
+
+async def exact_window_accounting_backfill(
+    client: httpx.AsyncClient,
+    vault: str,
+    *,
+    request_type: str,
+    start_ms: int,
+    end_ms: int,
+    min_window_ms: int = 1_000,
+    max_requests: int = MAX_ACCOUNTING_BACKFILL_REQUESTS_PER_CHANNEL,
+    pacer: RestWeightPacer | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch a bounded, exact account-event interval; capped windows stay partial."""
+    if request_type not in {"userFunding", "userNonFundingLedgerUpdates"}:
+        raise ValueError("unsupported Copy-Vault accounting history endpoint")
+    if int(start_ms) <= 0 or int(end_ms) < int(start_ms):
+        raise ValueError("invalid Copy-Vault accounting history interval")
+    pending: deque[tuple[int, int]] = deque([(int(start_ms), int(end_ms))])
+    accepted: dict[str, dict[str, Any]] = {}
+    failed_windows: list[dict[str, Any]] = []
+    cap_blocked_windows: list[dict[str, Any]] = []
+    requests = splits = raw_event_count = invalid_event_count = 0
+    request_budget_exhausted = False
+
+    while pending:
+        if requests >= max(1, int(max_requests)):
+            request_budget_exhausted = True
+            break
+        left, right = pending.popleft()
+        requests += 1
+        try:
+            if pacer is not None:
+                await pacer.acquire_weight(MAX_TIME_RANGE_RESPONSE_WEIGHT)
+            raw_rows = await _post_user_accounting_history(
+                client,
+                vault,
+                request_type=request_type,
+                start_ms=left,
+                end_ms=right,
+            )
+        except Exception as exc:
+            failed_windows.append({
+                "start_ms": left,
+                "end_ms": right,
+                "error": type(exc).__name__,
+            })
+            continue
+
+        capped = len(raw_rows) >= MAX_TIME_RANGE_RESPONSE_ROWS
+        if capped and right - left > max(1, int(min_window_ms)):
+            middle = left + (right - left) // 2
+            pending.appendleft((middle + 1, right))
+            pending.appendleft((left, middle))
+            splits += 1
+            continue
+        raw_event_count += len(raw_rows)
+        if capped:
+            cap_blocked_windows.append({
+                "start_ms": left,
+                "end_ms": right,
+                "rows": len(raw_rows),
+                "cap": MAX_TIME_RANGE_RESPONSE_ROWS,
+            })
+
+        for row in raw_rows:
+            if not _accounting_history_row_valid(
+                row,
+                request_type=request_type,
+                start_ms=left,
+                end_ms=right,
+            ):
+                invalid_event_count += 1
+                continue
+            assert isinstance(row, Mapping)
+            event_hash = str(row.get("hash") or "").strip().lower()
+            identity_material = json.dumps(
+                row, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                default=str,
+            )
+            identity = event_hash or hashlib.sha256(
+                identity_material.encode("utf-8")
+            ).hexdigest()
+            accepted[identity] = dict(row)
+
+    unique_rows = sorted(
+        accepted.values(),
+        key=lambda row: (int(row["time"]), str(row.get("hash") or "")),
+    )
+    status = (
+        "COMPLETE"
+        if not failed_windows
+        and not cap_blocked_windows
+        and not request_budget_exhausted
+        and not pending
+        and invalid_event_count == 0
+        else "PARTIAL"
+    )
+    return unique_rows, {
+        "request_type": request_type,
+        "status": status,
+        "requested_start_ms": int(start_ms),
+        "requested_end_ms": int(end_ms),
+        "requests": requests,
+        "splits": splits,
+        "raw_event_count": raw_event_count,
+        "event_count": len(unique_rows),
+        "invalid_event_count": invalid_event_count,
+        "duplicate_event_count": max(0, raw_event_count - invalid_event_count - len(unique_rows)),
+        "failed_windows": failed_windows,
+        "cap_blocked_windows": cap_blocked_windows,
+        "request_budget_exhausted": request_budget_exhausted,
+        "pending_windows": len(pending),
+        "empty_result_is_zero_pnl_proof": False,
+        "proof_of_pnl_allowed": False,
+        "forward_evidence_allowed": False,
+    }
+
+
+def rest_accounting_backfill_envelopes(
+    rows: list[Mapping[str, Any]],
+    *,
+    vault: str,
+    request_type: str,
+    audit: Mapping[str, Any],
+    receive_wall_ms: int,
+    receive_mono_ns: int,
+) -> list[TickEnvelope]:
+    """Preserve REST history in its own shard, separate from live WS ordering."""
+    channel_by_request = {
+        "userFunding": ("userFundings", "fundings", "copy_vault_funding"),
+        "userNonFundingLedgerUpdates": (
+            "userNonFundingLedgerUpdates",
+            "nonFundingLedgerUpdates",
+            "copy_vault_ledger",
+        ),
+    }
+    if request_type not in channel_by_request:
+        raise ValueError("unsupported Copy-Vault accounting history endpoint")
+    if not vault or int(receive_wall_ms) <= 0 or int(receive_mono_ns) <= 0:
+        raise ValueError("accounting history requires identity and receive clocks")
+    raw_channel, row_key, family = channel_by_request[request_type]
+    envelopes: list[TickEnvelope] = []
+    for row in rows:
+        if not _accounting_history_row_valid(
+            row,
+            request_type=request_type,
+            start_ms=int(audit["requested_start_ms"]),
+            end_ms=int(audit["requested_end_ms"]),
+        ):
+            raise ValueError("refusing to emit invalid accounting history event")
+        assert isinstance(row, Mapping)
+        event_ts_ms = int(row["time"])
+        message = {
+            "channel": raw_channel,
+            "data": {
+                "user": str(vault).lower(),
+                # REST rows have no websocket snapshot bit; false preserves
+                # that distinction while historical_only carries the real scope.
+                "isSnapshot": False,
+                row_key: [dict(row)],
+            },
+            "backfill_audit": dict(audit),
+        }
+        envelopes.append(TickEnvelope(
+            source_id="hl_public_account_backfill",
+            channel=family,
+            instrument=str(vault).lower(),
+            event_kind=FeedEventKind.EVENT,
+            raw_payload=message,
+            exchange_ts_ms=event_ts_ms,
+            received_ts_ms=int(receive_wall_ms),
+            local_monotonic_ns=int(receive_mono_ns),
+            provenance={
+                "url": INFO_URL,
+                "network": "mainnet",
+                "venue": "hyperliquid",
+                "access": "read_only",
+                "transport": "https",
+                "authenticated": False,
+                "request_type": request_type,
+                "historical_only": True,
+                "timestamp_semantics": "causal_event_availability",
+                "backfill_status": str(audit.get("status") or "PARTIAL"),
+                "forward_evidence_allowed": False,
+            },
+            parsed_summary={
+                "event_count": 1,
+                "is_snapshot": False,
+                "historical_only": True,
+                "proof_of_pnl_allowed": False,
+                "backfill_complete": str(audit.get("status") or "").upper() == "COMPLETE",
+            },
+        ))
+    return envelopes
 
 
 async def exact_window_backfill(
@@ -2438,6 +3406,66 @@ async def collect_historical_backfills(
                 "unresolved_gaps": unresolved_gaps,
                 "forward_evidence_allowed": False,
             }
+            accounting_backfills: dict[str, dict[str, Any]] = {}
+            for request_type, family in (
+                ("userFunding", "copy_vault_funding"),
+                ("userNonFundingLedgerUpdates", "copy_vault_ledger"),
+            ):
+                try:
+                    account_rows, account_audit = await asyncio.wait_for(
+                        exact_window_accounting_backfill(
+                            client,
+                            vault,
+                            request_type=request_type,
+                            start_ms=default_start_ms,
+                            end_ms=end_ms,
+                            pacer=pacer,
+                        ),
+                        timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
+                    )
+                except TimeoutError:
+                    account_rows = []
+                    account_audit = {
+                        "request_type": request_type,
+                        "status": "PARTIAL",
+                        "requested_start_ms": default_start_ms,
+                        "requested_end_ms": end_ms,
+                        "reason": "ACCOUNTING_BACKFILL_TIMEOUT",
+                        "event_count": 0,
+                        "proof_of_pnl_allowed": False,
+                        "forward_evidence_allowed": False,
+                    }
+                except Exception as exc:
+                    account_rows = []
+                    account_audit = {
+                        "request_type": request_type,
+                        "status": "PARTIAL",
+                        "requested_start_ms": default_start_ms,
+                        "requested_end_ms": end_ms,
+                        "reason": f"ACCOUNTING_BACKFILL_{type(exc).__name__}",
+                        "event_count": 0,
+                        "proof_of_pnl_allowed": False,
+                        "forward_evidence_allowed": False,
+                    }
+                account_audit = {**dict(account_audit), "vault": vault_id}
+                accounting_backfills[family] = account_audit
+                if account_rows:
+                    receive_wall_ms = int(time.time() * 1_000)
+                    receive_mono_ns = time.monotonic_ns()
+                    envelopes.extend(
+                        rest_accounting_backfill_envelopes(
+                            account_rows,
+                            vault=vault,
+                            request_type=request_type,
+                            audit=account_audit,
+                            receive_wall_ms=receive_wall_ms,
+                            receive_mono_ns=receive_mono_ns,
+                        )
+                    )
+            report["accounting_backfill"] = accounting_backfills
+            report["accounting_history_start_ms"] = default_start_ms
+            report["accounting_history_end_ms"] = end_ms
+            report["accounting_history_forward_evidence_allowed"] = False
             reports[vault_id] = report
             if rows:
                 receive_wall_ms = int(time.time() * 1_000)
@@ -2520,6 +3548,22 @@ def build_copy_vault_bundle(
                 "status": infer_reconciliation_status(preliminary),
                 "method": "observed_public_http_state_v1",
             }
+        elif family in {"copy_vault_funding", "copy_vault_ledger"}:
+            history_report = (historical_backfill or {}).get(vault, {})
+            accounting_report = (
+                history_report.get("accounting_backfill", {}).get(family, {})
+                if isinstance(history_report, Mapping)
+                and isinstance(history_report.get("accounting_backfill"), Mapping)
+                else {}
+            )
+            preliminary["copy_vault_accounting_history"] = dict(accounting_report)
+            preliminary["reconciliation"] = {
+                "status": infer_reconciliation_status(preliminary),
+                "method": "public_account_event_capture_v2",
+                "history_status": str(accounting_report.get("status") or "UNAVAILABLE"),
+                "proof_of_pnl_allowed": False,
+                "forward_evidence_allowed": False,
+            }
         else:
             preliminary["reconciliation"] = {"status": "UNVERIFIED"}
 
@@ -2535,7 +3579,11 @@ def build_copy_vault_bundle(
             preliminary["integrity"] = integrity
             preliminary["collection_queue_drops"] = dropped
         preliminary["collection_run_id"] = str(collection_run_id)
-        historical_only = family == "copy_vault_snapshot"
+        historical_only = (
+            family == "copy_vault_snapshot"
+            or str(preliminary.get("source") or "")
+            == "hl_public_account_backfill"
+        )
         preliminary["copy_vault_selection"] = {
             "selected_at_ms": selection.get("selected_at_ms"),
             "observation_only": True,

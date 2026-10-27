@@ -78,3 +78,14 @@ def test_marks_by_coin_orders_by_time():
     ]
     series = marks_by_coin(rows)
     assert [p for _, p in series["BTC"]] == [50_000.0, 50_100.0]
+
+
+def test_marks_by_coin_preserves_case_distinct_native_symbols():
+    series = marks_by_coin(
+        [
+            {"coin": "kPEPE", "ts": 1_000, "mid": 0.001},
+            {"coin": "KPEPE", "ts": 1_000, "mid": 0.002},
+        ]
+    )
+
+    assert series == {"kPEPE": [(1_000.0, 0.001)], "KPEPE": [(1_000.0, 0.002)]}

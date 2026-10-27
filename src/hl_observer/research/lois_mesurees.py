@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from hl_observer.research.empirical_memory import EmpiricalEvidence
 
 VERDICT_REFUTE = "REFUTE"          # mesuré perdant / sans edge
-VERDICT_CONFIRME = "CONFIRME"      # mesuré positif, en production
+VERDICT_CONFIRME = "CONFIRME"      # mesure positive historique; le scope runtime est séparé
 VERDICT_LIMITE = "LIMITE"          # marche, mais moins que ses coûts / trop mince pour agir
 VERDICTS = (VERDICT_REFUTE, VERDICT_CONFIRME, VERDICT_LIMITE)
 
@@ -233,8 +233,10 @@ LOIS: tuple[Loi, ...] = (
         chiffre="le SEUL chiffre positif du projet : ~2 % APR mesuré sur HYPE (13/07) ; "
                 "+0,35 $/j sur 11 positions au 21/07, coûts payés",
         date="2026-07-13",
-        condition_de_reouverture="—  c'est la stratégie en production ; à re-mesurer si le "
-                                 "funding quitte le plancher protocolaire",
+        condition_de_reouverture="preuve historique conservée; carry est actuellement "
+                                 "DISABLED_BY_SCOPE et ce registre ne l'active pas. Toute "
+                                 "réévaluation exige une réactivation explicite du scope "
+                                 "canonique et de nouvelles preuves causales",
         mots_cles=("carry", "delta neutre", "funding", "basis", "spot perp"),
         ou_verifier="funding/delta_neutral_carry.py + backtesting/carry_backtest.py"),
 
@@ -317,10 +319,12 @@ def markdown() -> str:
     l = ["# Les lois mesurées — ce que NOS chiffres ont déjà tranché", "",
          "> Généré depuis `src/hl_observer/research/lois_mesurees.py` (source unique).",
          "> Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la",
-         "> **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.", ""]
+         "> **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.",
+         "> Les verdicts de mesure sont historiques; l'autorité `active_scope` décide de l'exécution.",
+         "> Carry et les autres familles désactivées restent `DISABLED_BY_SCOPE` ici.", ""]
     for v, titre in ((VERDICT_REFUTE, "Réfuté par la mesure"),
                      (VERDICT_LIMITE, "Réel mais insuffisant en l'état"),
-                     (VERDICT_CONFIRME, "Confirmé — en production")):
+                     (VERDICT_CONFIRME, "Mesure positive historique — sans autorisation d'exécution")):
         lois = par_verdict(v)
         if not lois:
             continue

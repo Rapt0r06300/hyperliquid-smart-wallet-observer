@@ -10,7 +10,7 @@ lancement chez Flo : plantage immédiat, et deux fichiers parasites vides à la 
     (3     <- python -c "... version_info>=(3,10) ..."   donc `>=` redirige vers le token
                                                           suivant : `3.10`, puis `(3`.
 
-Le script est mort **avant** d'avoir créé `logs-audit/` : aucune trace, aucun RECAP. Les
+Le script est mort **avant** d'avoir créé `runtime/reports/legacy/tout-tester/` : aucune trace, aucun RECAP. Les
 garde-fous de traçabilité que j'avais écrits n'ont servi à rien parce qu'ils étaient en aval
 du plantage.
 
@@ -43,9 +43,21 @@ from pathlib import Path
 from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
-RECAP = RACINE / "RECAP-COMPLET.md"
-LOGDIR = RACINE / "logs-audit"
-VERROU = RACINE / ".tout-tester.lock"
+RECAP = RACINE / "runtime" / "reports" / "legacy" / "RECAP-COMPLET.md"
+LOGDIR = RACINE / "runtime" / "reports" / "legacy" / "tout-tester"
+VERROU = RACINE / "runtime" / "locks" / "tout-tester.lock"
+
+
+def _chemin_recap(racine: Path = RACINE) -> Path:
+    return racine / "runtime" / "reports" / "legacy" / RECAP.name
+
+
+def _chemin_logs(racine: Path = RACINE) -> Path:
+    return racine / "runtime" / "reports" / "legacy" / "tout-tester"
+
+
+def _chemin_verrou(racine: Path = RACINE) -> Path:
+    return racine / "runtime" / "locks" / VERROU.name
 
 #: 01/02 — le code du projet utilise la syntaxe `X | None` (PEP 604).
 VERSION_MIN = (3, 10)
@@ -125,7 +137,7 @@ def prevol(racine: Path = RACINE) -> list[str]:
 def prendre_verrou(racine: Path = RACINE, *, forcer: bool = False) -> None:
     """06 — deux audits en parallèle se marchent dessus. Un verrou périmé est ignoré : sinon
     un crash bloquerait tous les lancements suivants, ce qui serait pire que le mal."""
-    v = racine / VERROU.name
+    v = _chemin_verrou(racine)
     try:
         age = time.time() - v.stat().st_mtime
     except OSError:
@@ -134,6 +146,7 @@ def prendre_verrou(racine: Path = RACINE, *, forcer: bool = False) -> None:
         raise Echec("un audit tourne deja (verrou pose il y a %.0f min). Relance avec "
                     "--forcer si c'est faux, ou supprime %s" % (age / 60, v.name), CODE_VERROU)
     try:
+        v.parent.mkdir(parents=True, exist_ok=True)
         v.write_text("%d %s" % (os.getpid(), time.strftime("%Y-%m-%d %H:%M:%S")),
                      encoding="utf-8")
     except OSError:
@@ -142,7 +155,7 @@ def prendre_verrou(racine: Path = RACINE, *, forcer: bool = False) -> None:
 
 def liberer_verrou(racine: Path = RACINE) -> None:
     try:
-        (racine / VERROU.name).unlink()
+        _chemin_verrou(racine).unlink()
     except OSError:
         pass
 
@@ -221,10 +234,10 @@ def etat_git(racine: Path = RACINE) -> str:
 
 def archiver_recap(racine: Path = RACINE, *, session: str) -> str:
     """18 — le RECAP précédent est ARCHIVÉ, jamais écrasé."""
-    src = racine / RECAP.name
+    src = _chemin_recap(racine)
     if not src.exists():
         return ""
-    dest = racine / LOGDIR.name / "recaps"
+    dest = _chemin_logs(racine) / "recaps"
     try:
         dest.mkdir(parents=True, exist_ok=True)
         cible = dest / ("RECAP-%s.md" % session)
@@ -236,7 +249,7 @@ def archiver_recap(racine: Path = RACINE, *, session: str) -> str:
 
 def purger_logs(racine: Path = RACINE, *, garder: int = LOGS_CONSERVES) -> int:
     """24 — on garde, mais on ne noie pas le dossier."""
-    d = racine / LOGDIR.name
+    d = _chemin_logs(racine)
     try:
         logs = sorted(d.glob("tout-tester-*.log"), key=lambda p: p.stat().st_mtime,
                       reverse=True)
@@ -258,7 +271,7 @@ def verdict_recap(racine: Path = RACINE, *, debut_ts: float) -> dict[str, Any]:
     Le pire échec silencieux : le run plante, le RECAP d'hier reste en place, et on le lit en
     croyant lire celui d'aujourd'hui.
     """
-    p = racine / RECAP.name
+    p = _chemin_recap(racine)
     try:
         st = p.stat()
     except OSError:
@@ -386,7 +399,7 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
 
     # --derniers-echecs : triage INSTANTANE du dernier RECAP, sans rien relancer (~0 s).
     if "--derniers-echecs" in brut:
-        resume = resumer_echecs_du_recap(racine / RECAP.name)
+        resume = resumer_echecs_du_recap(_chemin_recap(racine))
         if not resume["present"]:
             print("  aucun RECAP-COMPLET.md — lance d'abord TOUT-TESTER.cmd.", flush=True)
         else:
@@ -399,8 +412,8 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
 
     session = time.strftime("%Y%m%d-%H%M%S")
     debut = time.time()
-    (racine / LOGDIR.name).mkdir(parents=True, exist_ok=True)
-    log = racine / LOGDIR.name / ("tout-tester-%s.log" % session)
+    _chemin_logs(racine).mkdir(parents=True, exist_ok=True)
+    log = _chemin_logs(racine) / ("tout-tester-%s.log" % session)
     trace: list[str] = []
 
     def dire(s: str = "") -> None:
@@ -505,7 +518,7 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     # d'avant. C'est CE bloc que Flo copie a Claude — plus besoin d'une capture d'ecran.
     if triage and code not in (0, 2, 130):
         try:
-            resume = resumer_echecs_du_recap(racine / RECAP.name)
+            resume = resumer_echecs_du_recap(_chemin_recap(racine))
             diff = comparer_aux_echecs_precedents(resume.get("failed") or [], racine)
             for l in lignes_de_triage(resume, diff):
                 dire(l)
@@ -543,7 +556,9 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
         dire("    (diagnostic PnL indisponible : %s)" % str(_exc)[:80])
     if _enrichissement:            # ON ENRICHIT LE .md (append best-effort, jamais fatal)
         try:
-            with (racine / RECAP.name).open("a", encoding="utf-8") as _fh:
+            recap = _chemin_recap(racine)
+            recap.parent.mkdir(parents=True, exist_ok=True)
+            with recap.open("a", encoding="utf-8") as _fh:
                 _fh.write("\n\n---\n\n" + "\n\n".join(_enrichissement) + "\n")
         except OSError:
             pass
@@ -553,7 +568,7 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     dire("    log de session : %s" % log.relative_to(racine))
     _ecrire_log(log, session, racine, trace, debut, code)                    # 17/23
     if ouvrir and v.get("present") and not v.get("vide"):                    # 31
-        _ouvrir(racine / RECAP.name)
+        _ouvrir(_chemin_recap(racine))
     if pause:                                                                # 30
         _pause()
     return code                                                              # 40
@@ -643,8 +658,8 @@ def _pause() -> None:
 def etat_json(racine: Path = RACINE) -> str:
     """Diagnostic machine-lisible, pour les tests et pour TOUT-TESTER lui-meme."""
     return json.dumps({"racine": str(racine), "python": sys.version.split()[0],
-                       "recap": (racine / RECAP.name).exists(),
-                       "verrou": (racine / VERROU.name).exists(),
+                       "recap": _chemin_recap(racine).exists(),
+                       "verrou": _chemin_verrou(racine).exists(),
                        "real_execution": False}, ensure_ascii=False)
 
 

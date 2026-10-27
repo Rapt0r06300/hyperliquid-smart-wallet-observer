@@ -12,6 +12,17 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _simulate_symlink_metadata(monkeypatch, path: Path) -> None:
+    """Exercise symlink rejection without requiring Windows Developer Mode."""
+    path_type = type(path)
+    original = path_type.is_symlink
+    monkeypatch.setattr(
+        path_type,
+        "is_symlink",
+        lambda candidate: candidate == path or original(candidate),
+    )
+
+
 def _module():
     spec = importlib.util.spec_from_file_location(
         "publish_dataset_v2_release_test",
@@ -363,8 +374,7 @@ def test_direct_publication_checks_every_local_asset_before_any_remote_write(
     elif failure == "symlink":
         destination = bundle / "linked-payload"
         destination.write_bytes(source.read_bytes())
-        source.unlink()
-        source.symlink_to(destination)
+        _simulate_symlink_metadata(monkeypatch, source)
     else:
         row = json.loads(manifest.read_text(encoding="utf-8"))
         if failure == "wrong_manifest_sha":
@@ -514,13 +524,15 @@ def test_real_v2_bundle_refuses_missing_shard_schema(tmp_path, monkeypatch) -> N
     assert result["excluded_payload_count"] == 1
 
 
-def test_compacted_payload_cannot_follow_local_symlink(tmp_path) -> None:
+def test_compacted_payload_cannot_follow_local_symlink(tmp_path, monkeypatch) -> None:
     module = _module()
     assets = tmp_path / "assets"
     assets.mkdir()
     payload = tmp_path / "outside.jsonl.gz"
     payload.write_bytes(b"trusted")
-    (assets / "linked.jsonl.gz").symlink_to(payload)
+    linked = assets / "linked.jsonl.gz"
+    linked.write_bytes(payload.read_bytes())
+    _simulate_symlink_metadata(monkeypatch, linked)
     with pytest.raises(module.PublishError, match="unsafe upload file"):
         module.build_compacted_assets(tmp_path, [{
             "dataset_id": "linked",

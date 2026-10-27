@@ -11,6 +11,9 @@ from typing import Any
 _RECEIVE_ONLY_CHANNELS = {
     "activeAssetCtx",
     "cross_venue_capacity_tape",
+    "copy_vault_active_asset_ctx",
+    "copy_vault_funding",
+    "copy_vault_ledger",
     "copy_vault_positions",
     "copy_vault_selection",
     "external_events",
@@ -29,6 +32,7 @@ MAX_EMBEDDED_TRADE_IDENTITY_DIGESTS = 256
 
 _TRADE_CHANNELS = {
     "trades",
+    "copy_vault_trades",
     "agg_trades",
     "fills",
     "userfills",
@@ -41,7 +45,12 @@ _REPLAYABLE_CHANNELS = {
     "bbo",
     "capacity_tape",
     "copy_vault_fills",
+    "copy_vault_active_asset_ctx",
+    "copy_vault_bbo",
+    "copy_vault_funding",
+    "copy_vault_ledger",
     "copy_vault_l2",
+    "copy_vault_trades",
     "copy_vault_positions",
     "copy_vault_selection",
     "copy_vault_snapshot",

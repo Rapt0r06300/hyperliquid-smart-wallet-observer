@@ -9,6 +9,7 @@ from hl_observer.copying.simulation_pipeline import run_paper_simulation_decisio
 from hl_observer.features.market import build_market_feature_vector
 from hl_observer.fees.hyperliquid_fees import nos_frais
 from hl_observer.hyperliquid.schemas import SignalCandidate
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper.paper_executor import PaperExecutor
 
 # La SOURCE UNIQUE de verite des frais (#543). Aller-retour taker : entree + sortie.
@@ -133,7 +134,7 @@ def build_signal_candidate_from_event(
     current_ms: int | None = None,
 ) -> SignalCandidate:
     now_ms = int(current_ms if current_ms is not None else time() * 1000)
-    coin = str(event.get("coin") or "").upper()
+    coin = preserve_native_instrument_symbol(event.get("coin"))
     side = _side_from_event(event)
     signal_type = _signal_type_from_event(event)
     observed_at = _int_or_none(event.get("observed_at_ms")) or now_ms
@@ -191,7 +192,7 @@ def build_market_feature_vector_from_event(
     l2_book: dict[str, Any] | None = None,
     candles: list[Any] | None = None,
 ):
-    coin = str(event.get("coin") or "").upper()
+    coin = preserve_native_instrument_symbol(event.get("coin"))
     if not coin:
         return None
     now_ms = int(current_ms if current_ms is not None else time() * 1000)

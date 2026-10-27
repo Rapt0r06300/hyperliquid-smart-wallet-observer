@@ -1,4 +1,4 @@
-r"""LA MOISSON FINALE — produit **`moisson-fini.md`** a la racine.
+r"""LA MOISSON FINALE — produit le rapport sous `runtime/reports/legacy/moisson/`.
 
 ═══════════════════════════════════════════════════════════════════════════════════════════════
 CE QU'ELLE FAIT, ET DANS QUEL ORDRE
@@ -26,7 +26,7 @@ CE QU'ELLE FAIT, ET DANS QUEL ORDRE
   6. **CLASSER** (COPY_ADAPTED / PORT_BEHAVIOR / INSPIRE_ONLY / SKIP...) et **DIRE OU CA SE
      BRANCHE** chez nous, avec le test obligatoire.
 
-  7. Ecrire **`moisson-fini.md`** -- pourquoi on garde, en quoi c'est benefique, comment
+  7. Ecrire `runtime/reports/legacy/moisson/moisson-fini.md` -- pourquoi on garde, en quoi c'est benefique, comment
      l'installer, **comment le brancher**, et **ce qu'on ne peut PAS prouver**.
 
 🔒 100 % LECTURE SEULE. Aucun clone. **Aucun code telecharge n'est execute. JAMAIS.**
@@ -65,7 +65,7 @@ from hl_observer.research.github_signals import (  # noqa: E402
     score,
 )
 
-SORTIE_MD = RACINE / "moisson-fini.md"                       # 🎯 A LA RACINE, comme demande
+SORTIE_MD = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-fini.md"
 SORTIE_JSON = RACINE / "data" / "reports" / "moisson_finale.json"
 MOISSON = RACINE / "data" / "reports" / "github_concepts.json"
 
@@ -140,7 +140,7 @@ def _fichier(repo: str, chemin: str) -> str | None:
 
 
 def main() -> int:  # noqa: C901, PLR0912, PLR0915
-    ap = argparse.ArgumentParser(description="La moisson finale -> moisson-fini.md")
+    ap = argparse.ArgumentParser(description="La moisson finale -> rapport archive runtime")
     ap.add_argument("--top", type=int, default=20, help="combien de repos on OUVRE vraiment")
     ap.add_argument("--par-requete", type=int, default=25)
     ap.add_argument("--fichiers", type=int, default=6)
@@ -149,7 +149,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     args = ap.parse_args()
 
     print("=" * 100)
-    print("  LA MOISSON FINALE -> **moisson-fini.md** (a la racine)")
+    print("  LA MOISSON FINALE -> runtime/reports/legacy/moisson/moisson-fini.md")
     print("=" * 100)
 
     if not os.environ.get("GITHUB_TOKEN", "").strip():
@@ -328,6 +328,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             sup.append("- *(+%d autres)*" % (len(non_lus) - 40))
         sup.append("")
 
+    SORTIE_MD.parent.mkdir(parents=True, exist_ok=True)
     SORTIE_MD.write_text(md + "\n".join(sup), encoding="utf-8")
     SORTIE_JSON.parent.mkdir(parents=True, exist_ok=True)
     SORTIE_JSON.write_text(json.dumps({

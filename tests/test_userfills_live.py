@@ -34,6 +34,18 @@ def test_appliquer_fill_flip_reinitialise_entree_sur_le_reliquat_oppose():
     assert pos["BTC"]["entryPx"] == 19.0
 
 
+def test_identite_instrument_native_est_preservee_dans_etat_snapshot_et_fill():
+    positions = UL.positions_depuis_snapshot({
+        "positions": [{"coin": " kPEPE ", "szi": "2", "entryPx": "0.01"}]
+    })
+    assert list(positions) == ["kPEPE"]
+
+    UL.appliquer_fill(
+        positions, {"coin": "kPEPE", "px": 0.02, "sz": 1, "signe": 1}
+    )
+    assert set(positions) == {"kPEPE"}
+
+
 def test_appliquer_fill_short_add_est_aussi_pondere():
     pos = {"ETH": {"szi": -4.0, "entryPx": 100.0}}
     UL.appliquer_fill(pos, {"coin": "ETH", "px": 90.0, "sz": 6.0, "signe": -1})
@@ -64,6 +76,16 @@ def test_parser_message_userfills_separe_exchange_et_reception_ws():
     assert fill["tid"] == 7 and fill["oid"] == 11
     assert fill["frame_sequence"] == 42
     assert fill["isSnapshot"] is None
+
+
+def test_parser_userfills_preserve_la_casse_native_de_l_instrument():
+    msg = {"channel": "userFills", "data": {"fills": [
+        {"coin": "kPEPE", "px": "0.01", "sz": "1", "side": "B", "time": 1000}
+    ]}}
+
+    [fill] = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1500)
+
+    assert fill["coin"] == "kPEPE"
 
 
 def test_parser_preserves_unknown_snapshot_classification():

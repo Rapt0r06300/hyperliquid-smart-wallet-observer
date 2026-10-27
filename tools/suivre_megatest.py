@@ -9,8 +9,8 @@ au fur et a mesure. Le fermer (Ctrl-C) n'a AUCUN effet sur le test en cours.
 
 CE QU'IL LIT
 ------------
-  MEGATEST.md            reecrit APRES CHAQUE SECTION -> quelles sections sont finies
-  resultat-audit.md      reecrit APRES CHAQUE CONTROLE -> ou en est l'audit (le plus long)
+runtime/reports/legacy/MEGATEST.md reecrit APRES CHAQUE SECTION -> quelles sections sont finies
+  runtime/reports/legacy/resultat-audit.md reecrit APRES CHAQUE CONTROLE -> ou en est l'audit
   tools/audit_timings.json  les durees des passages PRECEDENTS -> l'ETA
 
 POURQUOI IL EXISTE
@@ -29,8 +29,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MEGATEST_MD = ROOT / "MEGATEST.md"
-AUDIT_MD = ROOT / "resultat-audit.md"
+MEGATEST_MD = ROOT / "runtime" / "reports" / "legacy" / "MEGATEST.md"
+AUDIT_MD = ROOT / "runtime" / "reports" / "legacy" / "resultat-audit.md"
 TIMINGS = ROOT / "tools" / "audit_timings.json"
 
 RAFRAICHIR_S = 3.0
@@ -177,7 +177,7 @@ def main() -> int:
                     print("    L'audit en cours n'a encore RIEN ecrit. C'est normal au demarrage.")
                 print()
 
-            print("  RAPPEL : MEGATEST.md et resultat-audit.md sont reecrits au fur et a mesure.")
+            print("  RAPPEL : les rapports progressifs sont sous runtime/reports/legacy/.")
             print("           Meme si tu fais Ctrl-C dans l'autre fenetre, RIEN n'est perdu.")
             time.sleep(RAFRAICHIR_S)
     except KeyboardInterrupt:

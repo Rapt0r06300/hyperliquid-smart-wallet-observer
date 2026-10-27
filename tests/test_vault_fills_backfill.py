@@ -34,6 +34,23 @@ def test_canonical_fill_id_est_source_independant_et_reproductible():
     assert len(VB.canonical_fill_id(live)) == 64
 
 
+def test_identite_fill_et_episodes_ne_fusionnent_pas_les_symboles_de_casse_distincte():
+    raw = [
+        {"time": 1_000, "coin": "kPEPE", "px": "0.01", "sz": "1", "side": "B",
+         "dir": "Open Long", "startPosition": "0", "tid": 1},
+        {"time": 1_000, "coin": "KPEPE", "px": "0.01", "sz": "1", "side": "B",
+         "dir": "Open Long", "startPosition": "0", "tid": 2},
+    ]
+
+    fills = VB.parser_fills(raw, vault="0xA")
+    episodes = VB.reconstruire_episodes(fills)
+
+    assert [fill["coin"] for fill in fills] == ["kPEPE", "KPEPE"]
+    assert VB.fill_identity(fills[0]) != VB.fill_identity(fills[1])
+    assert VB.canonical_fill_id(fills[0]) != VB.canonical_fill_id(fills[1])
+    assert {event["coin"] for event in episodes} == {"kPEPE", "KPEPE"}
+
+
 def test_dedup_source_independent_preserve_la_preuve_live_placee_en_premier():
     common = {
         "vault": "0xA", "ts_ms": 1000, "coin": "SOL", "px": 150.0,
@@ -121,6 +138,15 @@ def test_couverture_mesuree():
     ], vault="0xA")
     cov = VB.couverture(fills)
     assert cov["n_fills"] == 2 and cov["span_h"] == 1.0 and cov["coins"] == ["BTC", "SOL"] and cov["n_vaults"] == 1
+
+
+def test_couverture_garde_distincts_les_symboles_natifs_de_casse_differente():
+    audit = VB.auditer_couverture([
+        {"vault": "0xA", "ts_ms": 1_000, "coin": "kPEPE"},
+        {"vault": "0xA", "ts_ms": 2_000, "coin": "KPEPE"},
+    ])
+
+    assert audit["n_coins_fills"] == 2
 
 
 def test_userfills_response_cap_and_retention_are_distinct():

@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
-SRC = RACINE / "TASKLIST.md"
+SRC = RACINE / "docs" / "archive" / "root-history" / "TASKLIST.md"
 DEST = RACINE / "RESTE-A-FAIRE.txt"
 
 # Taches deja FAITES mais dont la case n'a pas ete cochee dans le fichier.

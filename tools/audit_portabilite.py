@@ -15,8 +15,11 @@ def _cibles(racine: Path) -> list[Path]:
     cibles: list[Path] = []
     for rel in (
         "LANCER_HYPERSMART.cmd",
-        "ANALYSER_BACKTESTS_REPLAYS.cmd",
-        "CREER_ARCHIVE_PORTABLE.cmd",
+        "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+        "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+        "ALINA_SYNC_COMPLETE.cmd",
+        "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+        "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
         "tools/portable_env.cmd",
     ):
         p = racine / rel

@@ -9,7 +9,7 @@ from hl_observer.order_lifecycle.post_only_invariant import REJETE, verifier
 from hl_observer.security.mainnet_guard import MainnetExecutionForbidden, assert_not_mainnet_execution
 import hl_observer.testnet.testnet_executor_locked as locked_executor
 from hl_observer.testnet.testnet_safety_gates import (
-    TestnetExecutionIntent,
+    TestnetExecutionIntent as _TestnetExecutionIntent,
     TestnetLocked,
     assert_testnet_unlocked,
 )
@@ -74,7 +74,7 @@ def test_testnet_gate_rejects_mainnet_execution_flag() -> None:
         ),
     )
     risk_decision = SimpleNamespace(allowed=True)
-    intent = TestnetExecutionIntent(
+    intent = _TestnetExecutionIntent(
         cloid="paper-cloid",
         confirm_testnet_only=True,
         schedule_cancel_required=False,

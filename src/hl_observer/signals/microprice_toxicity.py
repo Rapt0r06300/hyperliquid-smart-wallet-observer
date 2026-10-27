@@ -12,6 +12,8 @@ Pur, déterministe. Aucune donnée inventée.
 
 from __future__ import annotations
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 def microprice(bid: float, ask: float, bid_size: float, ask_size: float) -> float:
     """Fair value pondérée: P = (bid·Qask + ask·Qbid)/(Qbid+Qask).
@@ -48,13 +50,13 @@ class ToxicityTracker:
     def record_markout(self, coin: str, markout_bps_value: float) -> float:
         """Nourrit la toxicité: seule la part ADVERSE (markout < 0) compte, en valeur absolue."""
         adverse = max(0.0, -float(markout_bps_value))
-        key = str(coin).upper()
+        key = preserve_native_instrument_symbol(coin)
         prev = self._tox.get(key)
         self._tox[key] = adverse if prev is None else round(self.alpha * adverse + (1 - self.alpha) * prev, 6)
         return self._tox[key]
 
     def toxicity(self, coin: str) -> float:
-        return self._tox.get(str(coin).upper(), 0.0)
+        return self._tox.get(preserve_native_instrument_symbol(coin), 0.0)
 
 
 def toxicity_adjusted_min_edge_bps(

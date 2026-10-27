@@ -28,10 +28,10 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
     assert (ROOT / "docs" / "PORTABILITE_WINDOWS.md").is_file()
     # Le checkout SOURCE contient les assembleurs, pas forcément leurs binaires générés/ignorés.
     assert (ROOT / "tools" / "preparer_python_portable.cmd").is_file()
-    assert (ROOT / "PREPARER_GIT_PORTABLE.cmd").is_file()
+    assert (ROOT / "tools/launchers/PREPARER_GIT_PORTABLE.cmd").is_file()
     assert (ROOT / "tools" / "install_portable_git.ps1").is_file()
     assert (ROOT / "POUSSER-GITHUB-FORCE.cmd").is_file()
-    assert (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").is_file()
+    assert (ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").is_file()
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
     bootstrap_index = launcher.index("portable_env.cmd")
@@ -260,9 +260,9 @@ def test_new_portability_files_have_no_user_specific_absolute_path():
         ROOT / "tools" / "create_portable_bundle.ps1",
         ROOT / "docs" / "PORTABILITE_WINDOWS.md",
         ROOT / "tools" / "install_portable_git.ps1",
-        ROOT / "PREPARER_GIT_PORTABLE.cmd",
+        ROOT / "tools/launchers/PREPARER_GIT_PORTABLE.cmd",
         ROOT / "POUSSER-GITHUB-FORCE.cmd",
-        ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd",
+        ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
     )
     for path in paths:
         text = path.read_text(encoding="utf-8")

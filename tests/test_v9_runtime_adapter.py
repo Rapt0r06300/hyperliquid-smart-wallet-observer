@@ -40,6 +40,14 @@ def test_runtime_adapter_builds_signal_candidate_from_replay_event() -> None:
     assert signal.signal_score == 92.0
 
 
+def test_runtime_adapter_preserves_native_instrument_spelling() -> None:
+    signal = build_signal_candidate_from_event(
+        _event(coin="kPEPE"), current_ms=1_700_000_000_500
+    )
+
+    assert signal.coin == "kPEPE"
+
+
 def test_runtime_adapter_exposes_data_gap_when_only_all_mids_available() -> None:
     event = attach_v9_runtime_diagnostics(
         _event(),

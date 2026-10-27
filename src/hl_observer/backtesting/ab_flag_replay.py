@@ -176,7 +176,7 @@ def marks_by_coin(mark_rows: list[dict]) -> dict[str, list[tuple[float, float]]]
         if not isinstance(r, dict):
             continue          # ROBUSTESSE (fuzzing 2026-07-11) : ligne corrompue -> on l'ignore,
                               # on ne fait pas tomber tout le replay pour une ligne pourrie.
-        coin = str(r.get("coin") or "").upper()
+        coin = str(r.get("coin") or "").strip()
         try:
             ts, mid = float(r.get("ts")), float(r.get("mid"))
         except (TypeError, ValueError):
@@ -271,7 +271,7 @@ def _evaluate_arm(
     curseur: dict[str, int] = {}
 
     for cand in candidates:
-        coin = str(cand.get("coin") or "").upper()
+        coin = str(cand.get("coin") or "").strip()
         side = str(cand.get("direction") or "").upper()
         edge = cand.get("edge_remaining_bps")
         entry = float(cand.get("current_mid") or 0.0)
@@ -409,7 +409,7 @@ def net_baseline_seul(
     # ordre chronologique (recorded_at, coin) — IDENTIQUE à _evaluate_arm, sinon le drawdown diffère
     for cand in sorted((c for c in candidates if isinstance(c, dict)),
                        key=lambda c: (float(c.get("recorded_at") or 0.0), str(c.get("coin") or ""))):
-        coin = str(cand.get("coin") or "").upper()
+        coin = str(cand.get("coin") or "").strip()
         side = str(cand.get("direction") or "").upper()
         entry = float(cand.get("current_mid") or 0.0)
         ts = float(cand.get("recorded_at") or 0.0)

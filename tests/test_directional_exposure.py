@@ -128,6 +128,22 @@ def test_concentration_counts_both_sides_of_a_market(monkeypatch):
                                new_notional_usdt=500, equity_usdt=CAPITAL) == "COIN_CONCENTRATION_TOO_HIGH"
 
 
+def test_case_distinct_symbols_have_separate_instrument_concentration():
+    book = _book(_pos("kPEPE", "LONG", 500))
+    snapshot = snapshot_exposure(book)
+
+    assert snapshot.by_coin == {"kPEPE": 500.0}
+    assert directional_refusal(
+        book,
+        coin="KPEPE",
+        side="LONG",
+        new_notional_usdt=200.0,
+        equity_usdt=CAPITAL,
+        max_net_pct=1_000.0,
+        max_coin_pct=60.0,
+    ) == ""
+
+
 # ---------------------------------------------------------------- robustesse du garde-fou
 
 def test_an_invalid_cap_falls_back_to_the_default_not_to_infinity(monkeypatch):

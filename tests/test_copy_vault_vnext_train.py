@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.copy_vault_vnext_train import (
+    _identity_vote,
+    _train_rows,
     admit_consensus_train_rows,
     explore_copy_vault_vnext_train,
 )
@@ -74,6 +76,14 @@ def test_copy_vnext_selection_ignore_totalement_oos_et_exige_consensus_prior_onl
     assert result["selected"]["statistics"]["net_pnl_usd"] == 8.0
     assert result["selected"]["largest_coin_trade_share"] == 0.5
     assert result["freeze_candidate"]["identity_claim"].startswith("ENTITY_NORMALIZED")
+
+
+def test_vnext_preserve_le_symbole_natif_dans_les_lignes_et_votes():
+    raw = _row(ts=1_800_000_000_000, vault="0xa", coin="kPEPE")
+    [normalized] = _train_rows({"trades": [raw]})
+
+    assert normalized["coin"] == "kPEPE"
+    assert _identity_vote(normalized)["coin"] == "kPEPE"
 
 
 def test_copy_vnext_refuse_de_selectionner_avant_freeze_physique_de_base() -> None:

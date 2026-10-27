@@ -20,6 +20,8 @@ import os
 import threading
 import time
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 MASTER_FLAG = "HYPERSMART_V26_MARKET_QUALITY"
 TOP_K_ENV = "HYPERSMART_V26_MQ_TOP_K"
 BUFFER_ENV = "HYPERSMART_V26_MQ_HYSTERESIS_BUFFER"
@@ -90,7 +92,7 @@ class MarketQualityBook:
     def observe(self, coin: str, *, range_bps: float | None = None,
                 liquidity_score: float | None = None, market_pnl_usd: float | None = None,
                 env: dict | None = None, now: float | None = None) -> float | None:
-        key = (coin or "").strip().upper()
+        key = preserve_native_instrument_symbol(coin)
         if not key:
             return None
         s = quality_score(range_bps=range_bps, liquidity_score=liquidity_score,
@@ -117,7 +119,7 @@ class MarketQualityBook:
 
     def allowed(self, coin: str, env: dict | None = None) -> bool | None:
         """True/False si le marché est noté ; None si jamais noté (ne bloque pas)."""
-        key = (coin or "").strip().upper()
+        key = preserve_native_instrument_symbol(coin)
         with self._lock:
             if key not in self._scores:
                 return None

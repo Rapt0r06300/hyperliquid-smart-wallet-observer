@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -193,6 +193,285 @@ def _validated_subscription_attempt_map(
     return dict(sorted(result.items()))
 
 
+def _validated_l2_diagnostic_gap(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    reason = value.get("reason")
+    reasons = value.get("reasons")
+    continuity = value.get("continuity_proven")
+    if (
+        not isinstance(reason, str)
+        or not reason
+        or not isinstance(reasons, list)
+        or any(not isinstance(item, str) or not item for item in reasons)
+        or type(continuity) is not bool
+    ):
+        return None
+    result: dict[str, Any] = {
+        "reason": reason[:128],
+        "reasons": [item[:128] for item in reasons[:64]],
+        "continuity_proven": continuity,
+    }
+    gap_epoch = value.get("l2_gap_epoch")
+    if gap_epoch is not None and _exact_nonnegative_int(gap_epoch) is None:
+        return None
+    result["l2_gap_epoch"] = gap_epoch
+    for key in (
+        "start_after_receive_ts_ms",
+        "detected_at_ms",
+        "last_detected_at_ms",
+        "recovery_at_ms",
+    ):
+        raw = value.get(key)
+        if raw is not None and _exact_nonnegative_int(raw) is None:
+            return None
+        result[key] = raw
+    for key in ("connection_id", "recovery_connection_id"):
+        raw = value.get(key)
+        if raw is not None and not isinstance(raw, str):
+            return None
+        result[key] = raw[:128] if isinstance(raw, str) else None
+    return result
+
+
+def _validated_l2_diagnostics_receipt(value: Any) -> dict[str, Any] | None:
+    """Copy bounded L2 health evidence into the durable campaign receipt."""
+    if not isinstance(value, dict):
+        return None
+
+    def optional_count(source: Mapping[str, Any], key: str) -> int | None:
+        raw = source.get(key)
+        if raw is None:
+            return None
+        count = _exact_nonnegative_int(raw)
+        if count is None:
+            raise ValueError(f"invalid L2 counter: {key}")
+        return count
+
+    def optional_count_map(
+        source: Mapping[str, Any], key: str
+    ) -> dict[str, int] | None:
+        raw = source.get(key)
+        if raw is None:
+            return None
+        result = _exact_nonnegative_int_map(raw)
+        if result is None:
+            raise ValueError(f"invalid L2 counter map: {key}")
+        return result
+
+    try:
+        result: dict[str, Any] = {
+            key: optional_count(value, key)
+            for key in (
+                "received_frames",
+                "candidate_l2_frames",
+                "accepted_frames",
+                "rejected_frames",
+                "ignored_frames",
+                "duplicate_snapshots",
+                "reconnects",
+                "heartbeats_sent",
+                "heartbeats_received",
+                "subscription_ack_mismatches",
+                "invalid_subscription_acks",
+                "connection_events_dropped",
+                "unknown_market_rejections_dropped",
+            )
+        }
+        for key in (
+            "rejected_by_reason",
+            "ignored_by_reason",
+        ):
+            result[key] = optional_count_map(value, key)
+
+        requested = value.get("requested_markets")
+        if requested is not None and (
+            not isinstance(requested, list)
+            or any(not isinstance(coin, str) or not coin for coin in requested)
+        ):
+            return None
+        result["requested_markets"] = (
+            sorted(set(requested)) if isinstance(requested, list) else None
+        )
+
+        markets = value.get("markets")
+        if not isinstance(markets, dict):
+            return None
+        market_rows: dict[str, Any] = {}
+        allowed_subscription_statuses = {
+            "UNKNOWN", "PENDING", "ACTIVE", "REJECTED", "TIMED_OUT",
+            "INVALIDATED", "SEND_FAILED",
+        }
+        allowed_coverage_statuses = {
+            "GAP_OPEN", "SNAPSHOTS_CONTINUITY_UNPROVEN", "NO_SNAPSHOT",
+            "NO_MARKET_STATE",
+        }
+        allowed_proof_window_statuses = {
+            "UNAVAILABLE", "UNPROVEN", "UNMEASURABLE",
+        }
+        for coin, row in markets.items():
+            if not isinstance(coin, str) or not coin or not isinstance(row, dict):
+                return None
+            market: dict[str, Any] = {
+                key: optional_count(row, key)
+                for key in (
+                    "received",
+                    "candidate_l2_frames",
+                    "accepted",
+                    "rejected",
+                    "duplicates",
+                    "l2_gap_epoch",
+                    "subscription_attempts_dropped",
+                    "gaps_dropped",
+                )
+            }
+            for key in ("rejected_by_reason", "ignored_by_reason"):
+                market[key] = optional_count_map(row, key)
+            for key in (
+                "last_receive_ts_ms",
+                "last_receive_age_ms",
+                "last_exchange_ts_ms",
+            ):
+                market[key] = optional_count(row, key)
+            for key in (
+                "subscription_status",
+                "coverage_status",
+                "proof_window_status",
+            ):
+                raw = row.get(key)
+                allowed = (
+                    allowed_subscription_statuses
+                    if key == "subscription_status"
+                    else (
+                        allowed_coverage_statuses
+                        if key == "coverage_status"
+                        else allowed_proof_window_statuses
+                    )
+                )
+                if raw is not None and (not isinstance(raw, str) or raw not in allowed):
+                    return None
+                market[key] = raw
+            connection_id = row.get("last_connection_id")
+            if connection_id is not None and not isinstance(connection_id, str):
+                return None
+            market["last_connection_id"] = connection_id
+            continuity = row.get("sequence_continuity_proven")
+            if continuity is not None and type(continuity) is not bool:
+                return None
+            market["sequence_continuity_proven"] = continuity
+
+            attempts_raw = row.get("subscription_attempts")
+            attempts = (
+                _validated_subscription_attempts(
+                    attempts_raw,
+                    expected_type="l2Book",
+                )
+                if attempts_raw is not None
+                else None
+            )
+            if attempts_raw is not None and (
+                attempts is None or any(item["identity"] != coin for item in attempts)
+            ):
+                return None
+            market["subscription_attempts"] = attempts
+
+            gaps_raw = row.get("gaps")
+            if gaps_raw is None:
+                market["gaps"] = None
+            else:
+                if not isinstance(gaps_raw, list) or len(gaps_raw) > 256:
+                    return None
+                gaps = [_validated_l2_diagnostic_gap(gap) for gap in gaps_raw]
+                if any(gap is None for gap in gaps):
+                    return None
+                market["gaps"] = gaps
+            open_gap_raw = row.get("open_gap")
+            open_gap = (
+                _validated_l2_diagnostic_gap(open_gap_raw)
+                if open_gap_raw is not None
+                else None
+            )
+            if open_gap_raw is not None and open_gap is None:
+                return None
+            market["open_gap"] = open_gap
+            market_rows[coin] = market
+        result["markets"] = dict(sorted(market_rows.items()))
+
+        for key in ("connection_events", "unknown_market_rejections"):
+            raw_events = value.get(key)
+            if raw_events is None:
+                result[key] = None
+                continue
+            if not isinstance(raw_events, list) or len(raw_events) > 256:
+                return None
+            events: list[dict[str, Any]] = []
+            for raw_event in raw_events:
+                if not isinstance(raw_event, dict):
+                    return None
+                event_time = _exact_nonnegative_int(raw_event.get("time_ms"))
+                connection_id = raw_event.get("connection_id")
+                if (
+                    event_time is None
+                    or not isinstance(connection_id, str)
+                    or not connection_id
+                ):
+                    return None
+                if key == "connection_events":
+                    event = raw_event.get("event")
+                    raw_coins = raw_event.get("markets")
+                    if (
+                        not isinstance(event, str)
+                        or event not in {"connected", "disconnect"}
+                        or not isinstance(raw_coins, list)
+                        or any(not isinstance(coin, str) or not coin for coin in raw_coins)
+                    ):
+                        return None
+                    item = {
+                        "event": event,
+                        "time_ms": event_time,
+                        "connection_id": connection_id[:128],
+                        "markets": sorted(set(raw_coins)),
+                    }
+                    error_class = raw_event.get("error_class")
+                    if error_class is not None and not isinstance(error_class, str):
+                        return None
+                    item["error_class"] = (
+                        error_class[:128] if isinstance(error_class, str) else None
+                    )
+                else:
+                    reason = raw_event.get("reason")
+                    if not isinstance(reason, str) or not reason:
+                        return None
+                    item = {
+                        "time_ms": event_time,
+                        "connection_id": connection_id[:128],
+                        "reason": reason[:128],
+                    }
+                events.append(item)
+            result[key] = events
+
+        coverage_claim = value.get("coverage_claim")
+        if coverage_claim is not None and coverage_claim != "NOT_PROVEN":
+            return None
+        result["coverage_claim"] = coverage_claim
+        proof_window_status = value.get("required_market_proof_window_status")
+        if proof_window_status is not None and (
+            not isinstance(proof_window_status, str)
+            or proof_window_status not in {
+                "UNAVAILABLE", "UNPROVEN", "UNMEASURABLE",
+            }
+        ):
+            return None
+        result["required_market_proof_window_status"] = proof_window_status
+        freshness_policy = value.get("freshness_policy")
+        if freshness_policy is not None and not isinstance(freshness_policy, str):
+            return None
+        result["freshness_policy"] = freshness_policy
+        return result
+    except ValueError:
+        return None
+
+
 def _copy_vault_subscription_receipt(summary: dict[str, Any]) -> dict[str, Any]:
     raw_l2 = summary.get("l2_diagnostics")
     l2_subscription: dict[str, Any] | None = None
@@ -277,6 +556,7 @@ def _copy_vault_subscription_receipt(summary: dict[str, Any]) -> dict[str, Any]:
         "subscription_diagnostics": _exact_nonnegative_int_map(
             summary.get("subscription_diagnostics")
         ),
+        "l2_diagnostics": _validated_l2_diagnostics_receipt(raw_l2),
         "l2_subscription": l2_subscription,
     }
 

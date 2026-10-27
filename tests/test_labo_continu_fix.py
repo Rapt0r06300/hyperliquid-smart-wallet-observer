@@ -554,8 +554,8 @@ def test_vue_compacte_lignes_et_attente():
 
 # ═══════════════ PF-1 — lancement automatique (double-clic) ═══════════════
 def test_cmd_auto_et_admin():
-    auto = (RACINE / "LANCER-RECHERCHE-CONTINUE.cmd").read_text(encoding="utf-8", errors="ignore")
-    admin = (RACINE / "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd").read_text(encoding="utf-8", errors="ignore")
+    auto = (RACINE / "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd").read_text(encoding="utf-8", errors="ignore")
+    admin = (RACINE / "tools/launchers/LANCER-RECHERCHE-CONTINUE-ADMIN.cmd").read_text(encoding="utf-8", errors="ignore")
     assert "peut-reprendre" in auto and "python -u" in auto and "PYTHONUNBUFFERED" in auto
     assert ":menu" not in auto                                             # plus de menu au double-clic
     assert ":menu" in admin                                                # menu déplacé en ADMIN
@@ -622,7 +622,7 @@ def test_compteurs_reels_apres_cycle(tmp_path):
 # ═══════════════ FX-10 — CI + recette Windows livrées ═══════════════
 def test_livrables_ci_et_recette_presents():
     assert (RACINE / ".github" / "workflows" / "labo-continu-ci.yml").exists()
-    assert (RACINE / "RECETTE-WINDOWS.cmd").exists()
+    assert (RACINE / "tools/launchers/RECETTE-WINDOWS.cmd").exists()
     assert (RACINE / "requirements-recherche.txt").exists()
     txt = (RACINE / "requirements-recherche.txt").read_text(encoding="utf-8")
     assert "optuna" in txt and "cmaes" in txt

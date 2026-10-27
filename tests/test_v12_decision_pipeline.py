@@ -164,3 +164,33 @@ def test_v12_decision_pipeline_refuses_missing_market_mid_without_fake_pnl(tmp_p
     assert result.paper_results[0].equity_usdt == 200.0
     assert len(engine.positions) == 0
     assert store.count("v12_decision_evidence") == 1
+
+
+def test_v12_never_uses_a_case_folded_mid_for_a_different_native_symbol(tmp_path):
+    result = run_v12_decision_pipeline(
+        V12DecisionPipelineInput(
+            wallet=WALLET,
+            observed_at_ms=1_700_000_000_200,
+            market_mids={"KPEPE": 0.002},
+            leader_expected_edge_bps_by_coin={"kPEPE": 80.0},
+            run_context=RunContext.TEST_FIXTURE,
+            raw_fills=(
+                {
+                    "coin": "kPEPE",
+                    "dir": "Open Long",
+                    "side": "B",
+                    "sz": "1000",
+                    "px": "0.001",
+                    "time": 1_700_000_000_000,
+                    "startPosition": "0",
+                    "tid": "open-case-sensitive",
+                },
+            ),
+        ),
+        config=_cfg(),
+        paper_engine=PaperEngine(config=_cfg().paper_config),
+    )
+
+    assert result.fills[0].coin == "kPEPE"
+    assert "MID_MISSING" in result.no_trade_reasons
+    assert result.paper_results[0].accepted is False

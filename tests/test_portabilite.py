@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
-MAITRES = ["LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd", "tools/portable_env.cmd"]
+MAITRES = ["LANCER_HYPERSMART.cmd", "LANCER_COLLECTEURS_COPY_VAULT.cmd", "LANCER_LAB_QUANT_COPY_VAULT.cmd", "POUSSER-GITHUB-FORCE.cmd", "ALINA_SYNC_COMPLETE.cmd", "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd", "tools/portable_env.cmd"]
 
 
 def _lignes_commandes(txt: str):
@@ -38,7 +38,7 @@ def test_aucun_chemin_utilisateur_en_dur():
 def test_aucune_lettre_de_disque_codee_en_dur_dans_les_commandes():
     # une commande ne doit jamais referencer X:\... en dur (hors %~dp0 / %HYPERSMART_*%).
     motif = re.compile(r"[^%\w]([A-Za-z]:\\)")
-    for rel in ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd"):
+    for rel in ("LANCER_HYPERSMART.cmd", "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd"):
         txt = (RACINE / rel).read_text(encoding="utf-8", errors="ignore")
         for ln in _lignes_commandes(txt):
             # tolere les exemples entre guillemets d'aide ; on vise les vraies commandes de chemin.
@@ -47,11 +47,14 @@ def test_aucune_lettre_de_disque_codee_en_dur_dans_les_commandes():
             assert not motif.search(ln), "chemin absolu machine-specifique: %r (%s)" % (ln, rel)
 
 
-def test_les_deux_maitres_ancrent_sur_dp0():
-    for rel in ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd"):
+def test_les_lanceurs_ancrent_leur_racine_independamment_du_cwd():
+    for rel in ("LANCER_HYPERSMART.cmd", "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd"):
         txt = (RACINE / rel).read_text(encoding="utf-8", errors="ignore")
-        assert 'cd /d "%~dp0"' in txt, rel                    # se place dans SON dossier, quel qu'il soit
-        assert "%~dp0" in txt, rel                            # chemins relatifs au fichier
+        if rel.startswith("tools/"):
+            assert "ALINA_PROJECT_ROOT" in txt, rel
+            assert "%~dp0" in txt, rel
+        else:
+            assert 'cd /d "%~dp0"' in txt, rel
 
 
 def test_modules_de_donnees_calculent_depuis_la_racine():

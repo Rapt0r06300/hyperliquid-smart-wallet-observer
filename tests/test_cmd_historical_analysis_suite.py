@@ -8,7 +8,7 @@ from pathlib import Path
 from hl_observer.ops import historical_analysis_suite as HAS
 
 RACINE = Path(__file__).resolve().parents[1]
-CMD = RACINE / "ANALYSE_HISTORIQUE_COMPLETE.cmd"
+CMD = RACINE / "tools/launchers/ANALYSE_HISTORIQUE_COMPLETE.cmd"
 
 
 def test_entrypoint_suite_runnable():
@@ -35,7 +35,7 @@ def test_le_cmd_propage_le_code_de_sortie():
 
 
 def test_launcher_announces_copy_vault_only_scope():
-    txt = (RACINE / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
+    txt = (RACINE / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
         encoding="utf-8", errors="ignore"
     )
     assert "COPYVAULT ONLY" in txt.upper()

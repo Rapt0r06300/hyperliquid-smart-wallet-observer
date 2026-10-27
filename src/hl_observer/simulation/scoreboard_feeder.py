@@ -26,10 +26,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 from hl_observer.simulation.pnl_ledger_audit import TRUSTED, audit_paper_ledger
 from hl_observer.simulation.scoreboard_metrics import ScoreboardRow, assembler_ligne
 
-SCHEMA_VERSION = "hypersmart.scoreboard_feeder.v1"
+SCHEMA_VERSION = "hypersmart.scoreboard_feeder.v2_native_instrument_identity"
 
 #: Événements qui RÉALISENT du PnL de round-trip (REDUCE réalise le partiel, CLOSE le solde).
 _REALISANTS = ("PAPERPOSITIONREDUCED", "PAPERPOSITIONCLOSED")
@@ -71,7 +73,7 @@ def _cle_position(row: Mapping[str, Any], refs: Mapping[str, Any]) -> str:
     pid = refs.get("position_id")
     if pid not in (None, ""):
         return str(pid)
-    return f"{str(row.get('coin') or '').upper()}:{str(row.get('side') or '').upper()}"
+    return f"{preserve_native_instrument_symbol(row.get('coin'))}:{str(row.get('side') or '').upper()}"
 
 
 def _cle_episode(row: Mapping[str, Any], refs: Mapping[str, Any]) -> str:

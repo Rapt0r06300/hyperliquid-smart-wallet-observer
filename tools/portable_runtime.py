@@ -44,9 +44,12 @@ REQUIRED_IMPORTS: tuple[str, ...] = (
 
 REQUIRED_RELOCATION_FILES: tuple[str, ...] = (
     "LANCER_HYPERSMART.cmd",
-    "ANALYSER_BACKTESTS_REPLAYS.cmd",
+    "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd",
     "POUSSER-GITHUB-FORCE.cmd",
-    "CREER_ARCHIVE_PORTABLE.cmd",
+    "ALINA_SYNC_COMPLETE.cmd",
+    "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+    "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
     "tools/portable_env.cmd",
     "tools/python/python.exe",
     "tools/python/python314._pth",

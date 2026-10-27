@@ -107,3 +107,19 @@ def test_v23_entry_cost_guard_allows_strong_signal_despite_guard_context():
     assert decision.accepted is True
     assert "FEE_DRAG_GUARD_ACTIVE" in decision.reason_codes
     assert "LOSS_STREAK_REQUIRES_HIGHER_EDGE" in decision.reason_codes
+
+
+def test_coin_loss_quarantine_matches_exact_native_symbol_only():
+    context = SessionEntryRiskContext(top_losing_coins=(("kPEPE", -1.0),))
+    config = EntryCostGuardConfig()
+    other_symbol = evaluate_entry_cost_guard(
+        coin="KPEPE", wallet="0xabc", notional_usdt=60.0, edge_net_bps=25.0,
+        context=context, config=config,
+    )
+    exact_symbol = evaluate_entry_cost_guard(
+        coin="kPEPE", wallet="0xabc", notional_usdt=60.0, edge_net_bps=25.0,
+        context=context, config=config,
+    )
+
+    assert "COIN_SIDE_LOSS_QUARANTINE_REQUIRES_HIGHER_EDGE" not in other_symbol.reason_codes
+    assert "COIN_SIDE_LOSS_QUARANTINE_REQUIRES_HIGHER_EDGE" in exact_symbol.reason_codes

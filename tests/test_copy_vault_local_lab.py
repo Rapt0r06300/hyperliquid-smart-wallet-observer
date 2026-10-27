@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,162 @@ from hl_observer.backtesting.copy_vault_local_lab import (
     record_frozen_candidate,
     run_historical_trade_replay,
 )
+
+
+def test_market_context_materializer_rechecks_clock_identity_and_read_only_source() -> None:
+    now_ms = 2_000
+    common = {
+        "source_id": "hyperliquid_public_copy_vault_market_ws",
+        "instrument": "xyz:TSLA",
+        "received_ts_ms": now_ms + 2,
+        "local_monotonic_ns": 12,
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "websocket",
+        },
+    }
+    wrappers = [
+        (
+            "copy_vault_bbo",
+            {
+                **common, "exchange_ts_ms": now_ms,
+                "_raw": {"channel": "bbo", "data": {
+                    "coin": "xyz:TSLA", "time": now_ms,
+                    "bbo": [{"px": "10", "sz": "2"}, {"px": "11", "sz": "3"}],
+                }},
+            },
+        ),
+        (
+            "copy_vault_trades",
+            {
+                **common, "exchange_ts_ms": now_ms,
+                "_raw": {"channel": "trades", "data": [{
+                    "coin": "xyz:TSLA", "time": now_ms, "px": "10.5", "sz": "1",
+                    "side": "B", "hash": "0xt", "tid": 3,
+                }]},
+            },
+        ),
+        (
+            "copy_vault_active_asset_ctx",
+            {
+                **common, "exchange_ts_ms": None,
+                "provenance": {
+                    **common["provenance"],
+                    "timestamp_semantics": "receive_observation_time_only",
+                },
+                "_raw": {"channel": "activeAssetCtx", "data": {
+                    "coin": "xyz:TSLA", "ctx": {"markPx": "10.5"},
+                }},
+            },
+        ),
+    ]
+    audit: Counter[str] = Counter()
+
+    rows = [
+        local_lab._market_context_row(wrapper, family=family, audit=audit)
+        for family, wrapper in wrappers
+    ]
+
+    assert [row["schema_version"] for row in rows if row] == [
+        "hypersmart.copy_vault_bbo.v1",
+        "hypersmart.copy_vault_market_trade.v1",
+        "hypersmart.copy_vault_active_asset_ctx.v1",
+    ]
+    assert all(row["proof_of_pnl_allowed"] is False for row in rows if row)
+    assert rows[1]["coin"] == "xyz:TSLA" and rows[1]["aggressor_side"] == "B"
+    assert not audit
+
+    malformed = {
+        **wrappers[1][1],
+        "_raw": {"channel": "trades", "data": [{
+            "coin": "OTHER", "time": now_ms, "px": "10.5", "sz": "1",
+            "side": "B", "hash": "0xt", "tid": 3,
+        }]},
+    }
+    assert local_lab._market_context_row(
+        malformed, family="copy_vault_trades", audit=audit
+    ) is None
+
+
+def test_accounting_context_tapes_are_causal_but_never_follower_pnl() -> None:
+    vault = "0x" + "c" * 40
+    common = {
+        "instrument": vault,
+        "received_ts_ms": 3_002,
+        "local_monotonic_ns": 123,
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "websocket", "forward_evidence_allowed": False,
+        },
+    }
+    funding = {
+        **common,
+        "source_id": "hl_public_account",
+        "exchange_ts_ms": 3_000,
+        "_raw": {"channel": "userFundings", "data": {
+            "user": vault, "isSnapshot": False,
+            "fundings": [{
+                "time": 3_000, "coin": "kPEPE", "usdc": "-0.2",
+                "szi": "3", "fundingRate": "0.0001",
+            }],
+        }},
+    }
+    ledger = {
+        **common,
+        "source_id": "hl_public_account",
+        "exchange_ts_ms": 3_001,
+        "_raw": {"channel": "userNonFundingLedgerUpdates", "data": {
+            "user": vault, "isSnapshot": False,
+            "nonFundingLedgerUpdates": [{
+                "time": 3_001, "hash": "0xledger",
+                "delta": {"type": "deposit", "usdc": 10},
+            }],
+        }},
+    }
+    audit: Counter[str] = Counter()
+
+    funding_row = local_lab._accounting_context_row(
+        funding, family="copy_vault_funding", audit=audit
+    )
+    ledger_row = local_lab._accounting_context_row(
+        ledger, family="copy_vault_ledger", audit=audit
+    )
+
+    assert funding_row is not None and funding_row["coin"] == "kPEPE"
+    assert ledger_row is not None and ledger_row["delta_type"] == "deposit"
+    assert funding_row["proof_of_pnl_allowed"] is False
+    assert ledger_row["forward_evidence_allowed"] is False
+    assert not audit
+
+    rest_funding = {
+        **common,
+        "source_id": "hl_public_account_backfill",
+        "exchange_ts_ms": 3_000,
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "https", "historical_only": True,
+            "request_type": "userFunding", "forward_evidence_allowed": False,
+        },
+        "_raw": {"channel": "userFundings", "data": {
+            "user": vault, "isSnapshot": False,
+            "fundings": [{
+                "time": 3_000, "hash": "0xfunding",
+                "delta": {
+                    "coin": "kPEPE", "usdc": "-0.2", "szi": "3",
+                    "fundingRate": "0.0001", "type": "funding",
+                },
+            }],
+        }},
+    }
+    rest_row = local_lab._accounting_context_row(
+        rest_funding, family="copy_vault_funding", audit=audit
+    )
+    assert rest_row is not None
+    assert rest_row["historical_only"] is True
+    assert rest_row["hash"] == "0xfunding"
+    assert rest_row["usdc"] == -0.2
+    assert rest_row["proof_of_pnl_allowed"] is False
+    assert not audit
 
 
 def _write_gzip(path: Path, row: dict) -> tuple[int, str]:
@@ -46,6 +203,43 @@ def test_materializer_rejette_les_niveaux_l2_invalides_sans_les_trier(bids, asks
     }
 
     assert local_lab._book_row(wrapper) is None
+
+
+@pytest.mark.parametrize("coin", ["kPEPE", "xyz:TSLA"])
+def test_safe_parser_preserves_case_sensitive_native_instrument_identity(coin: str) -> None:
+    levels = [[{"px": "0.0001", "sz": "1000"}], [{"px": "0.0002", "sz": "1000"}]]
+    book = local_lab._book_row({
+        "received_ts_ms": 2_010,
+        "raw_sha256": "a" * 64,
+        "_raw": {
+            "channel": "l2Book",
+            "data": {"coin": coin, "time": 2_000, "levels": levels},
+        },
+    })
+    fill_wrapper = {
+        "source_id": "hyperliquid_public_userfills",
+        "instrument": "0xabc",
+        "received_ts_ms": 1_010,
+        "provenance": {
+            "access": "read_only", "authenticated": False,
+            "transport": "websocket",
+        },
+        "_raw": {
+            "channel": "userFills",
+            "data": {
+                "user": "0xabc", "isSnapshot": False,
+                "fills": [{
+                    "time": 1_000, "coin": coin, "px": "0.00015",
+                    "sz": "1", "side": "B", "fee": "0",
+                }],
+            },
+        },
+    }
+
+    fills = local_lab._fill_rows(fill_wrapper, family="copy_vault_fills")
+
+    assert book is not None and book["coin"] == coin
+    assert fills and fills[0]["coin"] == coin
 
 
 def test_signal_coverage_reports_short_sample_without_inventing_days() -> None:
@@ -131,7 +325,7 @@ def test_local_campaign_explains_insufficient_signal_days_before_search(
     data_dir = workspace / "runtime" / "data"
     data_dir.mkdir(parents=True)
     tape_manifest = {}
-    for name in ("vault_fills.jsonl", "copy_vault_l2_tape.jsonl"):
+    for name in local_lab._MATERIALIZED_TAPE_NAMES:
         payload = b"{}\n"
         (data_dir / name).write_bytes(payload)
         tape_manifest[name] = {
@@ -189,7 +383,7 @@ def test_local_campaign_identifies_absent_live_forward_fills(tmp_path: Path, mon
     data_dir = workspace / "runtime" / "data"
     data_dir.mkdir(parents=True)
     tape_manifest = {}
-    for name in ("vault_fills.jsonl", "copy_vault_l2_tape.jsonl"):
+    for name in local_lab._MATERIALIZED_TAPE_NAMES:
         payload = b"{}\n"
         (data_dir / name).write_bytes(payload)
         tape_manifest[name] = {

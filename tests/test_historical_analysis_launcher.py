@@ -194,7 +194,7 @@ def test_root_launchers_keep_runtime_and_analysis_separate():
         encoding="utf-8",
         errors="ignore",
     )
-    analysis_launcher = (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
+    analysis_launcher = (ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
         encoding="utf-8",
         errors="ignore",
     )
@@ -203,7 +203,7 @@ def test_root_launchers_keep_runtime_and_analysis_separate():
     assert "superviseur_collecteurs demarrer-tous harvest" in main_launcher
     assert "chercher_toutes" not in main_launcher
     # L'analyse est un lanceur SEPARE, atteignable depuis le runtime (sous-commande replay).
-    assert 'call "%~dp0ANALYSER_BACKTESTS_REPLAYS.cmd"' in main_launcher
+    assert 'call "%~dp0tools\\launchers\\ANALYSER_BACKTESTS_REPLAYS.cmd"' in main_launcher
     # ANALYSER : MEME Python que le runtime (portable_env), porte d'entree de SESSION puis laboratoire,
     # paper strict (aucune execution reelle possible).
     assert "portable_env.cmd" in analysis_launcher

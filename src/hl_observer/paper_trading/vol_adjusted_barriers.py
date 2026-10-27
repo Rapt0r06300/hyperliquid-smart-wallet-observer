@@ -21,6 +21,8 @@ import os
 import threading
 import time
 from collections import deque
+
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from dataclasses import replace
 
 from hl_observer.paper_trading.sl_tp import SLTPConfig
@@ -75,7 +77,7 @@ class MidVolEstimator:
         self._series: dict[str, deque[tuple[float, float]]] = {}
 
     def record(self, coin: str, mid: float, ts: float | None = None) -> None:
-        key = (coin or "").strip().upper()
+        key = preserve_native_instrument_symbol(coin)
         try:
             m = float(mid)
         except (TypeError, ValueError):
@@ -91,7 +93,7 @@ class MidVolEstimator:
             dq.append((t, m))
 
     def range_bps(self, coin: str, *, window_s: float, min_obs: int, now: float | None = None) -> float | None:
-        key = (coin or "").strip().upper()
+        key = preserve_native_instrument_symbol(coin)
         cutoff = (float(now) if now is not None else time.time()) - float(window_s)
         with self._lock:
             dq = self._series.get(key)
@@ -222,9 +224,9 @@ def _apply_sltp_exits_vol_adjusted_impl(
     # Grouper les positions par coin pour appliquer le config ajusté du coin.
     by_coin: dict[str, dict] = {}
     for key, pos in list(positions.items()):
-        coin = str((pos or {}).get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol((pos or {}).get("coin"))
         if not coin and isinstance(key, str) and "|" in key:
-            coin = key.split("|")[1].upper() if len(key.split("|")) > 1 else ""
+            coin = key.split("|")[1] if len(key.split("|")) > 1 else ""
         by_coin.setdefault(coin or "?", {})[key] = pos
 
     for coin, group in by_coin.items():

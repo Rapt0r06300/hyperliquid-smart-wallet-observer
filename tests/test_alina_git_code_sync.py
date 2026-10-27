@@ -4,6 +4,7 @@ No real GitHub network, credentials, users' PCs, or AlinaSync shards.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -304,6 +305,68 @@ def test_main_branch_is_mandatory(repos):
     assert rc == 2 and receipt["status"] == "NO_GO"
 
 
+def test_exact_historical_jsonl_relocation_syncs_with_concurrent_cloud_change(repos):
+    local, cloud, origin = repos
+    source = "CLAUDE_TASKS.jsonl"
+    destination = "docs/archive/root-history/CLAUDE_TASKS.jsonl"
+    payload = '{"task":"historical registry"}\n'
+    cloud_commit(cloud, source, payload)
+    git(local, "pull", "--ff-only")
+    original_blob = subprocess.run(
+        ["git", "show", f"HEAD:{source}"], cwd=local,
+        capture_output=True, check=True,
+    ).stdout
+
+    archived = local / destination
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    (local / source).replace(archived)
+    cloud_commit(cloud, "docs/cloud.md", "remote change preserved\n")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert receipt["verified_historical_relocations"] == [{
+        "source": source,
+        "destination": destination,
+        "sha256": hashlib.sha256(original_blob).hexdigest(),
+        "worktree_sha256": hashlib.sha256(archived.read_bytes()).hexdigest(),
+        "proof": "INDEX_AND_WORKTREE_BLOB_EXACT",
+    }]
+    tree = set(git(origin, "ls-tree", "-r", "--name-only", "main").splitlines())
+    assert source not in tree and destination in tree
+    archived_blob = subprocess.run(
+        ["git", "show", f"main:{destination}"], cwd=origin,
+        capture_output=True, check=True,
+    ).stdout
+    assert archived_blob == original_blob
+    assert git(origin, "show", "main:docs/cloud.md") == "remote change preserved"
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+
+
+def test_modified_historical_jsonl_relocation_stays_protected(repos):
+    local, cloud, origin = repos
+    source = "CLAUDE_TASKS.jsonl"
+    destination = "docs/archive/root-history/CLAUDE_TASKS.jsonl"
+    payload = '{"task":"historical registry"}\n'
+    cloud_commit(cloud, source, payload)
+    git(local, "pull", "--ff-only")
+
+    archived = local / destination
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    (local / source).replace(archived)
+    archived.write_text(payload + '{"task":"changed"}\n', encoding="utf-8")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 2 and receipt["status"] == "NO_GO"
+    assert receipt["local_commit_created"] is False
+    assert receipt["push_attempts"] == 0
+    assert archived.read_text(encoding="utf-8") == payload + '{"task":"changed"}\n'
+    tree = set(git(origin, "ls-tree", "-r", "--name-only", "main").splitlines())
+    assert source in tree and destination not in tree
+    assert git(local, "diff", "--cached", "--name-only") == ""
+
+
 def test_tracked_modified_data_never_overwritten(repos):
     local, _, origin = repos
     data = local / "data/safe.jsonl"
@@ -377,7 +440,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-26-status-inventory-v2' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-exact-archive-relocation-v1' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source

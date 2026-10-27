@@ -68,7 +68,9 @@ def test_v12_paper_engine_opens_marks_and_closes_local_position():
     assert open_result.trade.trade_id.startswith("papertrade:")
     assert len(engine.positions) == 1
 
-    equity, unrealized, drawdown = engine.mark_to_market({"HYPE": 103.0})
+    equity, unrealized, drawdown = engine.mark_to_market(
+        {"HYPE": 103.0}, timestamp_ms=1_700_000_001_000
+    )
     assert equity > 100.0
     assert unrealized > 0
     assert drawdown == 0

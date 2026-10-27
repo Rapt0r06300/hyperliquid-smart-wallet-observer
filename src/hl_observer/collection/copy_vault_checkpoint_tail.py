@@ -25,9 +25,13 @@ from hl_observer.backtesting.copy_vault_executable import (
     classify_live_entry_action,
     expected_open_direction,
 )
-from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_WRITER_STATE_SCHEMA
+from hl_observer.backtesting.copy_vault_protocol import (
+    CHECKPOINT_WRITER_STATE_SCHEMA,
+    INSTRUMENT_IDENTITY_SCHEMA,
+)
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 from hl_observer.normalization.l2_book import normalize_l2_levels
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = CHECKPOINT_WRITER_STATE_SCHEMA
@@ -90,7 +94,7 @@ def fetch_hyperliquid_l2_book(coin: str, *, timeout_s: float = 2.0) -> dict[str,
     credential, signature or write payload exists in this module.
     """
 
-    body = json.dumps({"type": "l2Book", "coin": str(coin).upper()}).encode("utf-8")
+    body = json.dumps({"type": "l2Book", "coin": preserve_native_instrument_symbol(coin)}).encode("utf-8")
     request = urllib.request.Request(
         INFO_URL,
         data=body,
@@ -110,6 +114,7 @@ def fetch_hyperliquid_l2_book(coin: str, *, timeout_s: float = 2.0) -> dict[str,
 def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
+        "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
         "paper_read_only": True,
         "real_execution": False,
         "protocol": COMPANION_PROTOCOL,
@@ -139,6 +144,7 @@ def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str,
             "fetch_retries": 0,
             "input_rotations": 0,
             "pending_overflow_rejected": 0,
+            "identity_migration_resets": 0,
         },
     }
 
@@ -225,6 +231,7 @@ class CopyVaultCheckpointTail:
         if (
             isinstance(loaded, dict)
             and loaded.get("schema_version") == SCHEMA_VERSION
+            and loaded.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
             and loaded.get("paper_read_only") is True
             and loaded.get("real_execution") is False
             and loaded.get("protocol") == COMPANION_PROTOCOL
@@ -255,6 +262,20 @@ class CopyVaultCheckpointTail:
         state = _default_state(
             offset=offset, output_offset=output_offset, now_ms=self.clock_ms()
         )
+        if isinstance(loaded, dict):
+            archived_state_path = self.state_path.with_name(
+                f"{self.state_path.name}.identity-migration-{time.time_ns()}.json"
+            )
+            _atomic_write(archived_state_path, loaded)
+            state["identity_migration_reset"] = {
+                "reason": "INSTRUMENT_IDENTITY_SCHEMA_CHANGED_OR_UNVERIFIED",
+                "previous_schema_version": loaded.get("schema_version"),
+                "previous_instrument_identity_schema": loaded.get(
+                    "instrument_identity_schema"
+                ),
+                "preserved_state_path": str(archived_state_path.relative_to(self.root)),
+            }
+            state["counters"]["identity_migration_resets"] = 1
         try:
             state["input_file_identity"] = _file_identity(self.input_path.stat())
         except OSError:
@@ -323,7 +344,7 @@ class CopyVaultCheckpointTail:
     def _schedule_fill(self, fill: Mapping[str, Any], *, now_ms: int) -> None:
         try:
             vault = str(fill["vault"]).lower()
-            coin = str(fill["coin"]).upper().strip()
+            coin = preserve_native_instrument_symbol(fill["coin"])
             direction = int(fill.get("signe") or fill.get("sens") or 0)
             fill_ts_ms = int(fill["ts_ms"])
             received_at_ms = int(fill["received_at_ms"])
@@ -515,7 +536,7 @@ class CopyVaultCheckpointTail:
             if now_ms - target_ms > MAX_TARGET_LAG_MS:
                 expired_now += 1
                 continue
-            coin = str(checkpoint["coin"]).upper()
+            coin = preserve_native_instrument_symbol(checkpoint["coin"])
             cached = fetch_cache.get(coin)
             if cached is None:
                 try:
@@ -538,7 +559,8 @@ class CopyVaultCheckpointTail:
                 continue
             row = {
                 "schema_version": "hypersmart.copy_vault_l2.v1",
-                "coin": str(checkpoint["coin"]).upper(),
+                "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
+                "coin": preserve_native_instrument_symbol(checkpoint["coin"]),
                 **{
                     key: checkpoint[key]
                     for key in (
@@ -600,6 +622,7 @@ class CopyVaultCheckpointTail:
         )
         return {
             "protocol": COMPANION_PROTOCOL,
+            "identity_migration_reset": self.state.get("identity_migration_reset"),
             "lines": len(rows),
             "captured": captured,
             "expired": expired,

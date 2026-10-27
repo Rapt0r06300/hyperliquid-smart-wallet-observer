@@ -1,4 +1,4 @@
-"""LE MODÈLE DE REJET D'ORDRE (idée `modele_de_rejet_d_ordre` de moisson-fini.md).
+"""LE MODÈLE DE REJET D'ORDRE (idée `modele_de_rejet_d_ordre` de docs/archive/root-history/moisson-fini.md).
 
 *L'exchange rejette les ordres quand il est **surchargé** — c'est-à-dire **QUAND ÇA BOUGE**. Or
 c'est exactement là que nos **stops** doivent passer.* Un stop qui se fait rejeter en pleine

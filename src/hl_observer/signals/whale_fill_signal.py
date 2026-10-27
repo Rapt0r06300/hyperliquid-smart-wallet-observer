@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import log10
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
 
@@ -97,7 +98,7 @@ def build_whale_fill_signal(
         reasons.append("PRIMARY")
 
     return WhaleFillSignal(
-        coin=str(coin or "").upper(),
+        coin=preserve_native_instrument_symbol(coin),
         side=str(side or "").upper(),
         action_type=action,
         notional_usdc=round(notional, 2),

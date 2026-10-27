@@ -210,7 +210,7 @@ runtime/reports/datasets/experiment_plans/CURRENT_EXPERIMENT_PLAN.md
 Bouton Windows pour un workspace déjà reconstruit :
 
 ```bat
-PREPARER_EXPERIENCE_FULL_COLD.cmd SUITE [FAMILLE] [COIN] [METRIQUE] [START_MS] [END_MS] [WALLET]
+tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd SUITE [FAMILLE] [COIN] [METRIQUE] [START_MS] [END_MS] [WALLET]
 ```
 
 Le guide détaillé est `docs/DATASET_EXPERIMENT_PLANS.md`.
@@ -258,7 +258,7 @@ Le mode `--deep` ajoute la recherche de scénarios reprenable.
 
 ## Depuis le bouton des ~180 Go
 
-`LANCER_LABO_180GO.cmd` fait :
+`tools/launchers/LANCER_LABO_180GO.cmd` fait :
 
 ```text
 plan de suite
@@ -280,7 +280,7 @@ sqlite-all-safe
 full-archive
 ```
 
-Pour préparer ensuite une expérience précise sans déclencher un nouveau téléchargement ou un nouveau replay, utiliser `PREPARER_EXPERIENCE_FULL_COLD.cmd`.
+Pour préparer ensuite une expérience précise sans déclencher un nouveau téléchargement ou un nouveau replay, utiliser `tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd`.
 
 Les launchers gardent :
 

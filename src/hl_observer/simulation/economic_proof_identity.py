@@ -16,8 +16,10 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 PROOF_SEGMENTS = frozenset({"oos", "forward"})
-SCHEMA = "hypersmart.cross_family_proof_identity.v2"
+SCHEMA = "hypersmart.cross_family_proof_identity.v3_native_instrument_identity"
 _EXECUTION_ID_KEYS = ("execution_id", "trade_id", "paper_trade_id", "fill_id", "episode_id")
 _LINEAGE_ID_KEYS = ("source_lineage_id", "source_event_id", "source_trade_id", "opportunity_id", "event_id", "checkpoint_id")
 
@@ -82,7 +84,9 @@ def _sha256(payload: Mapping[str, Any]) -> str:
 
 def canonical_trade_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
     """Return exact and lineage identities, or None if proof is incomplete."""
-    coin = str(row.get("coin") or row.get("symbol") or row.get("instrument") or "").strip().upper()
+    coin = preserve_native_instrument_symbol(
+        row.get("coin") or row.get("symbol") or row.get("instrument")
+    )
     direction = _direction(row)
     entry_ms = _timestamp_ms(row, role="entry")
     exit_ms = _timestamp_ms(row, role="exit")

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.freshness.signal_decay import freshness_factor_calibrated
 
 
@@ -109,7 +110,7 @@ def rank_opportunities(
         s = power_score(c, cfg)
         if s <= 0.0:
             continue
-        scored.append(RankedOpportunity(coin=str(c.coin or "").upper(), side=str(c.side or "").upper(),
+        scored.append(RankedOpportunity(coin=preserve_native_instrument_symbol(c.coin), side=str(c.side or "").upper(),
                                         power_score=s, net_edge_bps=round(c.net_edge_bps, 4)))
     scored.sort(key=lambda r: -r.power_score)
 

@@ -8,11 +8,11 @@ import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CMD = (ROOT / "CREER_ARCHIVE_PORTABLE.cmd").read_text(encoding="utf-8", errors="replace")
+CMD = (ROOT / "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd").read_text(encoding="utf-8", errors="replace")
 
 
 def test_embedded_python_is_the_only_runtime():
-    assert 'call "%~dp0tools\\portable_env.cmd"' in CMD
+    assert 'call "%ALINA_PROJECT_ROOT%\\tools\\portable_env.cmd"' in CMD
     assert '"%HYPERSMART_PYTHON%" -m hl_observer.ops.archive_portable' in CMD
     assert '"%HYPERSMART_PYTHON%" -m hl_observer.ops.portable_release' in CMD
     assert "--mode-developpement" in CMD
@@ -24,7 +24,7 @@ def test_embedded_python_is_the_only_runtime():
 def test_master_cmd_no_longer_mutates_or_checkpoints_source_session():
     assert "session_harvest" not in CMD
     assert "checkpoint" not in CMD.casefold()
-    assert 'cd /d "%~dp0"' in CMD
+    assert 'cd /d "%ALINA_PROJECT_ROOT%\\"' in CMD
 
 
 def test_ok_can_only_be_printed_after_orchestrator_return_code():
@@ -59,7 +59,7 @@ def test_sortie_dir_is_an_explicit_strict_release_contract():
 @pytest.mark.skipif(os.name != "nt", reason="execute le .cmd via cmd.exe (Windows uniquement)")
 def test_unknown_argument_fails_without_success_banner():
     completed = subprocess.run(
-        ["cmd.exe", "/d", "/c", str(ROOT / "CREER_ARCHIVE_PORTABLE.cmd"), "--unknown-option"],
+        ["cmd.exe", "/d", "/c", str(ROOT / "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd"), "--unknown-option"],
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
         env={**__import__("os").environ, "CI": "true"}, check=False, timeout=60,
     )

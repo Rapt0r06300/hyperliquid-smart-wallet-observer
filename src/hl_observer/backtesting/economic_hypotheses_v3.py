@@ -17,6 +17,7 @@ from typing import Any
 from hl_observer.backtesting.cross_venue_certified import SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE
 
 from hl_observer.backtesting.queue_model import rejouer
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.economic_hypotheses_v3.v1"
 COPY_MECHANISM = "copy_vault_v3_train_leader_quality"
@@ -119,7 +120,7 @@ def qualify_copy_vault_train_only(
         net_values = [_number(row.get("net_pnl_usd")) or 0.0 for row in group]
         coin_counts: dict[str, int] = defaultdict(int)
         for row in group:
-            coin_counts[str(row.get("coin") or "UNKNOWN").upper()] += 1
+            coin_counts[preserve_native_instrument_symbol(row.get("coin")) or "UNKNOWN"] += 1
         largest_coin_share = max(coin_counts.values(), default=0) / max(1, len(group))
         pf = _profit_factor(net_values)
         top_win_share = _top_positive_share(net_values)

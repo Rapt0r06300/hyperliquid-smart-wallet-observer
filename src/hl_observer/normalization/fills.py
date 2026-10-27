@@ -5,6 +5,7 @@ from hashlib import sha256
 from typing import Any
 
 from hl_observer.models import Fill, SourceMeta
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +74,7 @@ def normalize_hyperliquid_fill(
         time_ms=time_ms,
         size=size,
         price=price,
+        direction=direction or side,
         oid=oid,
         tid=tid,
         fill_hash=fill_hash,
@@ -119,6 +121,7 @@ def fill_dedupe_key(fill: Fill) -> str:
         time_ms=fill.time_ms,
         size=fill.size,
         price=fill.price,
+        direction=fill.direction or fill.side,
         oid=fill.oid,
         tid=fill.tid,
         fill_hash=fill.fill_hash,
@@ -148,29 +151,32 @@ def _dedupe_key(
     time_ms: int | None,
     size: float | None,
     price: float | None,
+    direction: str | None,
     oid: str | None,
     tid: str | None,
     fill_hash: str | None,
 ) -> str:
-    if fill_hash:
-        return f"hash:{fill_hash}"
+    # A transaction hash may contain several fills; bind it to the fill-level
+    # identity fields instead of treating the transaction as one fill.
     material = "|".join(
         str(part or "")
         for part in (
             wallet.lower(),
-            (coin or "").upper(),
+            preserve_native_instrument_symbol(coin),
+            fill_hash,
             tid,
             oid,
             time_ms,
             size,
             price,
+            (direction or "").strip().lower(),
         )
     )
-    return "fill:" + sha256(material.encode("utf-8")).hexdigest()
+    return "fill:v2:" + sha256(material.encode("utf-8")).hexdigest()
 
 
 def _raw_ref(wallet: str, coin: str, raw: dict[str, Any]) -> str:
-    material = f"{wallet.lower()}|{coin.upper()}|{raw!r}"
+    material = f"{wallet.lower()}|{preserve_native_instrument_symbol(coin)}|{raw!r}"
     return "rawfill:" + sha256(material.encode("utf-8")).hexdigest()[:24]
 
 

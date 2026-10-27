@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 from hl_observer.markets.universe import is_exotic_market
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 
 ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
@@ -85,7 +86,7 @@ def fill_identity(
     raw = "|".join(
         [
             str(wallet_address or "").lower(),
-            str(coin or "").upper(),
+            preserve_native_instrument_symbol(coin),
             str(side or "").upper(),
             str(action_type or "").upper(),
             f"{float(price or 0):.8f}",

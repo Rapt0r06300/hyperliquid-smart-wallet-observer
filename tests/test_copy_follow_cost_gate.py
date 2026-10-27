@@ -75,6 +75,20 @@ def test_une_whitelist_vide_reste_un_verrou_honnete(tmp_path):
     assert r["predisent_brut"] == 1, "il predit (brut>0) mais ne survit pas -> compte a part"
 
 
+def test_independent_fill_episodes_keep_case_distinct_native_symbols():
+    from tools.ecrire_copy_whitelist import regrouper_fills_independants
+
+    episodes, invalides = regrouper_fills_independants(
+        [
+            {"coin": "kPEPE", "side": "B", "ts_ms": 1_700_000_000_000},
+            {"coin": "KPEPE", "side": "B", "ts_ms": 1_700_000_000_001},
+        ]
+    )
+
+    assert invalides == 0
+    assert {episode["coin"] for episode in episodes} == {"kPEPE", "KPEPE"}
+
+
 def test_aucune_execution_reelle(tmp_path):
     from tools.ecrire_copy_whitelist import construire_whitelist
     assert construire_whitelist(tmp_path, fills=[])["real_execution"] is False

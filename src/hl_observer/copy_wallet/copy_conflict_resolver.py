@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Iterable
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 LONG_WORDS = ("LONG", "BUY", "OPEN_LONG")
 SHORT_WORDS = ("SHORT", "SELL", "OPEN_SHORT")
@@ -110,7 +112,7 @@ def _normalise_votes(votes: Iterable[LeaderVote | dict[str, object]]) -> list[Le
             rows.append(
                 LeaderVote(
                     wallet=str(vote.wallet or ""),
-                    coin=str(vote.coin or "").upper(),
+                    coin=preserve_native_instrument_symbol(vote.coin),
                     side=str(vote.side or ""),
                     score=float(vote.score or 0.0),
                     observed_at_ms=int(vote.observed_at_ms or 0),
@@ -120,7 +122,7 @@ def _normalise_votes(votes: Iterable[LeaderVote | dict[str, object]]) -> list[Le
         rows.append(
             LeaderVote(
                 wallet=str(vote.get("wallet") or ""),
-                coin=str(vote.get("coin") or "").upper(),
+                coin=preserve_native_instrument_symbol(vote.get("coin")),
                 side=str(vote.get("side") or vote.get("action") or ""),
                 score=float(vote.get("score") or 1.0),
                 observed_at_ms=int(vote.get("observed_at_ms") or 0),

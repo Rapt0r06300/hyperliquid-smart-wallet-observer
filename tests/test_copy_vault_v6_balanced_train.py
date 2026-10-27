@@ -55,6 +55,20 @@ def test_daily_risk_budget_is_independent_of_trade_outcome() -> None:
     ]
 
 
+def test_daily_coin_budget_keeps_case_sensitive_instruments_separate():
+    rows = [
+        _trade("lower", 1_000, "A", "kPEPE", 1.0),
+        _trade("upper", 2_000, "A", "KPEPE", 1.0),
+    ]
+
+    selected, audit = apply_causal_daily_risk_budget(
+        rows, max_entries_per_vault_day=2, max_entries_per_coin_day=1
+    )
+
+    assert [row["trade_id"] for row in selected] == ["lower", "upper"]
+    assert audit["COIN_DAILY_BUDGET_REJECTED"] == 0
+
+
 def test_v6_empty_input_is_train_only_and_counts_parent_selection() -> None:
     result = explore_copy_vault_v6_balanced_train([], {}, [])
 

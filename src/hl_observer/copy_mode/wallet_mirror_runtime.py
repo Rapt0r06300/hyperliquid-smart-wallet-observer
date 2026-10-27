@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from typing import Iterable
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.leader_delta import LeaderDelta
 from hl_observer.strategies.models import IntentAction, IntentSide, PaperIntent, StrategyKind
@@ -111,7 +112,7 @@ def mirror_candidate_from_delta(
     return MirrorCandidate(
         candidate_id=_candidate_id(delta, leader_price, observed_time_ms, wallet_score, copyability_score, fill_refs),
         leader_wallet=delta.wallet.lower(),
-        coin=delta.coin.upper(),
+        coin=preserve_native_instrument_symbol(delta.coin),
         leader_action=delta.action.value,
         side=side,
         leader_size=abs(float(delta.delta_size or delta.current_size or 0.0)),
@@ -195,7 +196,7 @@ def _candidate_id(
         for part in (
             delta.delta_id,
             delta.wallet.lower(),
-            delta.coin.upper(),
+            preserve_native_instrument_symbol(delta.coin),
             delta.action.value,
             delta.delta_size,
             leader_price,

@@ -78,7 +78,8 @@ def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monk
 def test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2(tmp_path: Path, monkeypatch):
     USERFILLS._HEARTBEAT_WS.update({
         "messages": 2, "fills": 3, "acks": 1, "reconnects": 0,
-        "drops": 2, "tape_drops": 3, "dernier_exchange_ts": 123456,
+        "drops": 2, "tape_drops": 3, "l2_validation_rejections": 4,
+        "dernier_exchange_ts": 123456,
     })
     monkeypatch.setattr(USERFILLS.os, "getppid", lambda: 5252)
     monkeypatch.setattr(USERFILLS.VI, "heartbeat", lambda *_args, **_kwargs: None)
@@ -94,6 +95,7 @@ def test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2(tmp_path: Path, mon
     assert heartbeat["metriques"]["gaps_critiques"] == 5
     assert heartbeat["metriques"]["source_queue_drops"] == 2
     assert heartbeat["metriques"]["l2_tape_queue_drops"] == 3
+    assert heartbeat["metriques"]["l2_validation_rejections"] == 4
 
 
 def test_checkpoint_companion_publie_ses_pertes_dans_le_heartbeat(

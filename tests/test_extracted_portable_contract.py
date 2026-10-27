@@ -48,8 +48,8 @@ def test_archive_extraite_possede_le_runtime_embarque_et_les_lanceurs() -> None:
     assert (ROOT / "PORTABLE_MANIFEST.json").is_file()
     for name in (
         "LANCER_HYPERSMART.cmd",
-        "ANALYSER_BACKTESTS_REPLAYS.cmd",
-        "CREER_ARCHIVE_PORTABLE.cmd",
+        "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+        "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
     ):
         assert (ROOT / name).is_file(), name
 

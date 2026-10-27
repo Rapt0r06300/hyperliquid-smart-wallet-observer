@@ -21,7 +21,7 @@ Le but n'est pas de réduire cette archive au seul lot `economic-core`. Les ~180
 Double-cliquer sur :
 
 ```text
-LANCER_LABO_180GO.cmd
+tools/launchers/LANCER_LABO_180GO.cmd
 ```
 
 Il permet de travailler avec les suites suivantes :
@@ -67,7 +67,7 @@ Même dans `full-archive`, où le fichier peut être présent pour conserver la 
 Commande :
 
 ```bat
-LANCER_LABO_180GO.cmd plans
+tools/launchers/LANCER_LABO_180GO.cmd plans
 ```
 
 ou directement :
@@ -326,7 +326,7 @@ docs/research/datasets/DERNIER_REPLAY_DATASETS.json
 
 `PREPARER_DONNEES_HYPERSMART.cmd` et `LANCER_REPLAY_176GO.cmd` restent disponibles pour compatibilité.
 
-Les nouvelles expériences reproductibles doivent privilégier `LANCER_LABO_180GO.cmd` et `--suite`, car les anciens modes ad hoc reconstruisent encore dans :
+Les nouvelles expériences reproductibles doivent privilégier `tools/launchers/LANCER_LABO_180GO.cmd` et `--suite`, car les anciens modes ad hoc reconstruisent encore dans :
 
 ```text
 data/hypersmart_datasets/materialized/

@@ -229,7 +229,7 @@ def construire(rundir, ident, *, final: bool = True, partial: bool = False, reto
     L.append("- Un run de recherche ne PROUVE rien seul : les prometteuses doivent tenir en forward paper OOS. "
              "Renforcer les survivants (familles × horizons × régimes), compléter les DATA_MISSING.\n")
     L.append("## 44. Reproduction")
-    L.append("```\nLANCER-RECHERCHE-CONTINUE.cmd start   # meme code_sha %s\n```\n" % ident.get("code_sha"))
+    L.append("```\ntools/launchers/LANCER-RECHERCHE-CONTINUE.cmd start   # meme code_sha %s\n```\n" % ident.get("code_sha"))
     L.append("## 45. Manifeste\n- SHA256_MANIFEST_FINAL.json (écrit en DERNIER, contient ce rapport + tous les results)\n")
     L.append(detail_md)
     if partial:

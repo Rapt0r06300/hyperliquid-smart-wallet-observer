@@ -42,6 +42,26 @@ def test_paper_ledger_open_mark_close_reconciles():
     assert ledger.reconciliation().ok
 
 
+def test_paper_ledger_ne_fusionne_pas_les_positions_case_sensitive():
+    ledger = PaperLedger(starting_balance_usdc=500.0)
+    for coin in ("kPEPE", "KPEPE"):
+        ledger.open_position(
+            coin=coin, side="LONG", notional_usdc=100.0, fill_price=1.0,
+            timestamp_ms=1, fee_bps=0.0,
+        )
+
+    assert set(ledger.positions) == {"kPEPE:LONG", "KPEPE:LONG"}
+    assert {position.coin for position in ledger.positions.values()} == {"kPEPE", "KPEPE"}
+
+    closed = ledger.reduce_or_close(
+        coin="kPEPE", side="LONG", quantity=100.0, fill_price=1.0,
+        timestamp_ms=2, fee_bps=0.0,
+    )
+
+    assert closed.event_type == PaperEventType.POSITION_CLOSED
+    assert set(ledger.positions) == {"KPEPE:LONG"}
+
+
 def test_paper_ledger_short_funding_and_no_trade():
     ledger = PaperLedger(starting_balance_usdc=1000.0)
     ledger.open_position(coin="BTC", side="SHORT", notional_usdc=200.0, fill_price=100.0, timestamp_ms=1)

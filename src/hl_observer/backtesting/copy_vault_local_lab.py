@@ -19,6 +19,7 @@ from typing import Any
 
 from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
+from hl_observer.backtesting.copy_vault_protocol import canonical_copy_vault_coin
 from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21,
     evaluate_frozen_v21_segment,
@@ -30,9 +31,18 @@ from tools.copy_vault_continuity import load_release_history_audits
 OBJECTIVE_USD_PER_DAY = 5.0
 PAPER_CAPITAL_USD = 200.0
 _SAFE_AUDIT_CACHE_SCHEMA = "hypersmart.copy_vault_local_safe_hash_cache.v1"
-_SAFE_FAMILIES = {"copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot"}
+_SAFE_FAMILIES = {
+    "copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot",
+    "copy_vault_bbo", "copy_vault_trades", "copy_vault_active_asset_ctx",
+    "copy_vault_funding", "copy_vault_ledger",
+}
 _CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
-_MATERIALIZED_TAPE_NAMES = ("vault_fills.jsonl", "copy_vault_l2_tape.jsonl")
+_MATERIALIZED_TAPE_NAMES = (
+    "vault_fills.jsonl", "copy_vault_l2_tape.jsonl",
+    "copy_vault_bbo_tape.jsonl", "copy_vault_trades_tape.jsonl",
+    "copy_vault_active_asset_ctx_tape.jsonl",
+    "copy_vault_funding_tape.jsonl", "copy_vault_ledger_tape.jsonl",
+)
 _MINIMUM_SIGNAL_UTC_DAYS = 6
 _HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
@@ -594,7 +604,7 @@ def _fill_rows(
             rows.append({
                 "vault": vault,
                 "ts_ms": event_ts,
-                "coin": str(fill["coin"]).upper(),
+                "coin": canonical_copy_vault_coin(fill["coin"]),
                 "px": _number(fill["px"]),
                 "sz": _number(fill["sz"]),
                 "signe": 1 if side == "B" else -1,
@@ -655,7 +665,9 @@ def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
             return None
         return {
             "schema_version": "hypersmart.copy_vault_l2.v1",
-            "coin": str(data.get("coin") or wrapper.get("instrument") or "").upper(),
+            "coin": canonical_copy_vault_coin(
+                data.get("coin") or wrapper.get("instrument")
+            ),
             "received_at_ms": received,
             "exchange_ts_ms": exchange,
             "bid": bid,
@@ -670,6 +682,263 @@ def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
         }
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
+
+
+def _market_context_row(
+    wrapper: Mapping[str, Any], *, family: str, audit: Counter[str],
+) -> dict[str, Any] | None:
+    """Revalidate SAFE market-context rows; never turn them into leader fills."""
+    raw = wrapper.get("_raw")
+    provenance = wrapper.get("provenance")
+    expected_channel = {
+        "copy_vault_bbo": "bbo",
+        "copy_vault_trades": "trades",
+        "copy_vault_active_asset_ctx": "activeAssetCtx",
+    }.get(family)
+    if (
+        not isinstance(raw, Mapping)
+        or raw.get("channel") != expected_channel
+        or wrapper.get("source_id") != "hyperliquid_public_copy_vault_market_ws"
+        or not isinstance(provenance, Mapping)
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or provenance.get("transport") != "websocket"
+    ):
+        audit["COPY_VAULT_MARKET_SOURCE_OR_CHANNEL_INVALID"] += 1
+        return None
+    data = raw.get("data")
+    receive = wrapper.get("received_ts_ms")
+    exchange = wrapper.get("exchange_ts_ms")
+    mono = wrapper.get("local_monotonic_ns")
+    instrument = canonical_copy_vault_coin(wrapper.get("instrument"))
+    trade_rows = data if family == "copy_vault_trades" and isinstance(data, list) else None
+    trade_first = (
+        trade_rows[0]
+        if trade_rows is not None and len(trade_rows) == 1
+        and isinstance(trade_rows[0], Mapping)
+        else None
+    )
+    data_coin = (
+        trade_first.get("coin") if isinstance(trade_first, Mapping)
+        else data.get("coin") if isinstance(data, Mapping)
+        else None
+    )
+    if (
+        (not isinstance(data, Mapping) and family != "copy_vault_trades")
+        or (family == "copy_vault_trades" and trade_first is None)
+        or not instrument
+        or canonical_copy_vault_coin(data_coin) != instrument
+        or type(receive) is not int or receive <= 0
+        or type(mono) is not int or mono <= 0
+    ):
+        audit["COPY_VAULT_MARKET_IDENTITY_OR_CLOCK_INVALID"] += 1
+        return None
+    common = {
+        "coin": instrument,
+        "received_at_ms": receive,
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+        "data_origin": "REAL_OBSERVED_SAFE_CONTEXT",
+        "paper_read_only": True,
+        "proof_of_pnl_allowed": False,
+    }
+    if family == "copy_vault_bbo":
+        timestamp, levels = data.get("time"), data.get("bbo")
+        if (
+            type(timestamp) is not int or timestamp <= 0 or timestamp != exchange
+            or receive < timestamp or receive - timestamp > 30_000
+            or not isinstance(levels, list) or len(levels) != 2
+            or not all(isinstance(level, Mapping) for level in levels)
+        ):
+            audit["COPY_VAULT_BBO_CLOCK_OR_SHAPE_INVALID"] += 1
+            return None
+        try:
+            bid_px, bid_sz = _number(levels[0]["px"]), _number(levels[0]["sz"])
+            ask_px, ask_sz = _number(levels[1]["px"]), _number(levels[1]["sz"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            audit["COPY_VAULT_BBO_NUMERIC_INVALID"] += 1
+            return None
+        if bid_px <= 0 or ask_px <= bid_px or bid_sz < 0 or ask_sz < 0:
+            audit["COPY_VAULT_BBO_MARKET_INVALID"] += 1
+            return None
+        return {
+            "schema_version": "hypersmart.copy_vault_bbo.v1",
+            **common,
+            "exchange_ts_ms": timestamp,
+            "bid_px": bid_px,
+            "bid_sz": bid_sz,
+            "ask_px": ask_px,
+            "ask_sz": ask_sz,
+        }
+    if family == "copy_vault_trades":
+        row = trade_first
+        timestamp = row.get("time")
+        try:
+            price, size = _number(row.get("px")), _number(row.get("sz"))
+        except (TypeError, ValueError, OverflowError):
+            audit["COPY_VAULT_TRADE_NUMERIC_INVALID"] += 1
+            return None
+        identity = str(row.get("hash") or "").strip()
+        tid = row.get("tid")
+        side = str(row.get("side") or "").upper()
+        if (
+            canonical_copy_vault_coin(row.get("coin")) != instrument
+            or type(timestamp) is not int or timestamp <= 0 or timestamp != exchange
+            or receive < timestamp or receive - timestamp > 30_000
+            or (not identity and type(tid) is not int)
+            or price <= 0 or size <= 0 or side not in {"A", "B"}
+        ):
+            audit["COPY_VAULT_TRADE_IDENTITY_OR_CLOCK_INVALID"] += 1
+            return None
+        return {
+            "schema_version": "hypersmart.copy_vault_market_trade.v1",
+            **common,
+            "exchange_ts_ms": timestamp,
+            "price": price,
+            "size": size,
+            "aggressor_side": side,
+            "hash": identity or None,
+            "tid": tid if type(tid) is int else None,
+        }
+    if (
+        exchange is not None
+        or provenance.get("timestamp_semantics") != "receive_observation_time_only"
+        or not isinstance(data.get("ctx"), Mapping)
+    ):
+        audit["COPY_VAULT_ACTIVE_CONTEXT_INVALID"] += 1
+        return None
+    return {
+        "schema_version": "hypersmart.copy_vault_active_asset_ctx.v1",
+        **common,
+        "timestamp_semantics": "receive_observation_time_only",
+        "context": dict(data["ctx"]),
+    }
+
+
+def _accounting_context_row(
+    wrapper: Mapping[str, Any], *, family: str, audit: Counter[str],
+) -> dict[str, Any] | None:
+    """Preserve SAFE leader accounting events separately from follower PnL."""
+    raw = wrapper.get("_raw")
+    provenance = wrapper.get("provenance")
+    expected = {
+        "copy_vault_funding": ("userFundings", "fundings"),
+        "copy_vault_ledger": (
+            "userNonFundingLedgerUpdates", "nonFundingLedgerUpdates",
+        ),
+    }.get(family)
+    transport = str(provenance.get("transport") or "").lower() if isinstance(provenance, Mapping) else ""
+    request_type = str(provenance.get("request_type") or "") if isinstance(provenance, Mapping) else ""
+    historical_rest = (
+        transport == "https"
+        and provenance.get("historical_only") is True
+        and request_type == ("userFunding" if family == "copy_vault_funding" else "userNonFundingLedgerUpdates")
+        and wrapper.get("source_id") == "hl_public_account_backfill"
+    ) if isinstance(provenance, Mapping) else False
+    live_websocket = (
+        transport == "websocket"
+        and wrapper.get("source_id") == "hl_public_account"
+    )
+    if (
+        not isinstance(raw, Mapping) or expected is None
+        or raw.get("channel") != expected[0]
+        or not isinstance(provenance, Mapping)
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or not (live_websocket or historical_rest)
+    ):
+        audit["COPY_VAULT_ACCOUNTING_SOURCE_OR_CHANNEL_INVALID"] += 1
+        return None
+    data = raw.get("data")
+    instrument = str(wrapper.get("instrument") or "").strip().lower()
+    receive = wrapper.get("received_ts_ms")
+    mono = wrapper.get("local_monotonic_ns")
+    if (
+        not isinstance(data, Mapping)
+        or str(data.get("user") or "").strip().lower() != instrument
+        or type(data.get("isSnapshot")) is not bool
+        or type(receive) is not int or receive <= 0
+        or type(mono) is not int or mono <= 0
+    ):
+        audit["COPY_VAULT_ACCOUNTING_IDENTITY_OR_CLOCK_INVALID"] += 1
+        return None
+    rows = data.get(expected[1])
+    if not isinstance(rows, list):
+        audit["COPY_VAULT_ACCOUNTING_ROWS_MISSING"] += 1
+        return None
+    common = {
+        "vault": instrument,
+        "received_at_ms": receive,
+        "is_snapshot": data["isSnapshot"],
+        "snapshot_only_research": data["isSnapshot"] is True,
+        "historical_only": provenance.get("historical_only") is True,
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+        "data_origin": "REAL_OBSERVED_SAFE_CONTEXT",
+        "paper_read_only": True,
+        "proof_of_pnl_allowed": False,
+        "forward_evidence_allowed": False,
+    }
+    if not rows:
+        if (
+            wrapper.get("exchange_ts_ms") is not None
+            or data["isSnapshot"] is not True
+            or provenance.get("timestamp_semantics")
+            != "receive_observation_time_only"
+        ):
+            audit["COPY_VAULT_ACCOUNTING_EMPTY_FRAME_INVALID"] += 1
+            return None
+        return {
+            "schema_version": f"hypersmart.{family}.empty_snapshot.v1",
+            **common,
+            "empty_snapshot_is_zero_proof": False,
+        }
+    if len(rows) != 1 or not isinstance(rows[0], Mapping):
+        audit["COPY_VAULT_ACCOUNTING_FRAME_NOT_SINGLE_EVENT"] += 1
+        return None
+    row = rows[0]
+    timestamp = row.get("time")
+    if (
+        type(timestamp) is not int or timestamp <= 0
+        or timestamp != wrapper.get("exchange_ts_ms") or receive < timestamp
+    ):
+        audit["COPY_VAULT_ACCOUNTING_EVENT_CLOCK_INVALID"] += 1
+        return None
+    if family == "copy_vault_funding":
+        detail = row.get("delta") if isinstance(row.get("delta"), Mapping) else row
+        coin = canonical_copy_vault_coin(detail.get("coin"))
+        try:
+            usdc = _number(detail.get("usdc"))
+            size = _number(detail.get("szi"))
+            rate = _number(detail.get("fundingRate"))
+        except (TypeError, ValueError, OverflowError):
+            audit["COPY_VAULT_FUNDING_NUMERIC_INVALID"] += 1
+            return None
+        if not coin:
+            audit["COPY_VAULT_FUNDING_INSTRUMENT_INVALID"] += 1
+            return None
+        return {
+            "schema_version": "hypersmart.copy_vault_funding.v1",
+            **common,
+            "coin": coin,
+            "exchange_ts_ms": timestamp,
+            "usdc": usdc,
+            "size": size,
+            "funding_rate": rate,
+            "hash": str(row.get("hash") or "").strip() or None,
+            "event_raw": dict(row),
+        }
+    delta = row.get("delta")
+    identity = str(row.get("hash") or "").strip()
+    if not identity or not isinstance(delta, Mapping) or not str(delta.get("type") or "").strip():
+        audit["COPY_VAULT_LEDGER_IDENTITY_OR_DELTA_INVALID"] += 1
+        return None
+    return {
+        "schema_version": "hypersmart.copy_vault_ledger.v1",
+        **common,
+        "exchange_ts_ms": timestamp,
+        "hash": identity,
+        "delta_type": str(delta["type"]),
+        "event_raw": dict(row),
+    }
 
 
 def materialize_safe_workspace(
@@ -691,6 +960,11 @@ def materialize_safe_workspace(
     data_dir.mkdir(parents=True, exist_ok=True)
     fills: dict[tuple[Any, ...], dict[str, Any]] = {}
     books: dict[tuple[Any, ...], dict[str, Any]] = {}
+    bbo_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    market_trade_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    active_context_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    funding_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    ledger_rows: dict[tuple[Any, ...], dict[str, Any]] = {}
     wrapper_rejections = 0
     payload_audit: Counter[str] = Counter()
     raw_frames = 0
@@ -736,6 +1010,50 @@ def materialize_safe_workspace(
                         books[identity] = row
                     else:
                         payload_audit["INVALID_OR_NONCAUSAL_L2_REJECTED"] += 1
+                elif family in {
+                    "copy_vault_bbo", "copy_vault_trades",
+                    "copy_vault_active_asset_ctx",
+                }:
+                    row = _market_context_row(
+                        wrapper, family=family, audit=payload_audit
+                    )
+                    if row is not None:
+                        if family == "copy_vault_bbo":
+                            identity = (
+                                row["coin"], row["received_at_ms"],
+                                row["exchange_ts_ms"], row["bid_px"], row["ask_px"],
+                            )
+                            bbo_rows[identity] = row
+                        elif family == "copy_vault_trades":
+                            identity = (
+                                row["coin"], row["exchange_ts_ms"],
+                                row.get("hash"), row.get("tid"),
+                                row["price"], row["size"], row["aggressor_side"],
+                            )
+                            market_trade_rows[identity] = row
+                        else:
+                            identity = (
+                                row["coin"], row["received_at_ms"],
+                                row["source_raw_sha256"],
+                            )
+                            active_context_rows[identity] = row
+                elif family in {"copy_vault_funding", "copy_vault_ledger"}:
+                    row = _accounting_context_row(
+                        wrapper, family=family, audit=payload_audit
+                    )
+                    if row is not None:
+                        if family == "copy_vault_funding":
+                            identity = (
+                                row["vault"], row.get("hash") or row.get("exchange_ts_ms"),
+                                row.get("coin"), row.get("usdc"), row.get("size"),
+                                row.get("funding_rate"),
+                            )
+                            funding_rows[identity] = row
+                        else:
+                            identity = (
+                                row["vault"], row.get("exchange_ts_ms"), row.get("hash"),
+                            )
+                            ledger_rows[identity] = row
                 if progress is not None and raw_frames % 2_000 == 0:
                     progress(
                         f"Reconstruction SAFE {asset_number:,}/{len(assets):,} · "
@@ -750,9 +1068,36 @@ def materialize_safe_workspace(
             )
     fill_rows = sorted(fills.values(), key=lambda row: (row["ts_ms"], row["vault"], str(row.get("tid"))))
     book_rows = sorted(books.values(), key=lambda row: (row["received_at_ms"], row["coin"]))
+    bbo_tape_rows = sorted(
+        bbo_rows.values(), key=lambda row: (row["received_at_ms"], row["coin"])
+    )
+    market_trade_tape_rows = sorted(
+        market_trade_rows.values(),
+        key=lambda row: (row["exchange_ts_ms"], row["coin"], str(row.get("tid"))),
+    )
+    active_context_tape_rows = sorted(
+        active_context_rows.values(),
+        key=lambda row: (row["received_at_ms"], row["coin"]),
+    )
+    funding_tape_rows = sorted(
+        funding_rows.values(),
+        key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
+    )
+    ledger_tape_rows = sorted(
+        ledger_rows.values(),
+        key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
+    )
     historical_unique_fills = sum(bool(row.get("isSnapshot")) for row in fill_rows)
     materialized_tapes: dict[str, dict[str, Any]] = {}
-    for name, rows in (("vault_fills.jsonl", fill_rows), ("copy_vault_l2_tape.jsonl", book_rows)):
+    for name, rows in (
+        ("vault_fills.jsonl", fill_rows),
+        ("copy_vault_l2_tape.jsonl", book_rows),
+        ("copy_vault_bbo_tape.jsonl", bbo_tape_rows),
+        ("copy_vault_trades_tape.jsonl", market_trade_tape_rows),
+        ("copy_vault_active_asset_ctx_tape.jsonl", active_context_tape_rows),
+        ("copy_vault_funding_tape.jsonl", funding_tape_rows),
+        ("copy_vault_ledger_tape.jsonl", ledger_tape_rows),
+    ):
         target = data_dir / name
         temporary = target.with_suffix(target.suffix + ".partial")
         if target.is_symlink() or temporary.is_symlink():
@@ -811,6 +1156,13 @@ def materialize_safe_workspace(
         "historical_fills_train_only": True,
         "snapshots_forward_evidence_allowed": False,
         "unique_books": len(book_rows),
+        "unique_bbo_observations": len(bbo_tape_rows),
+        "unique_market_trades": len(market_trade_tape_rows),
+        "unique_active_asset_contexts": len(active_context_tape_rows),
+        "unique_leader_funding_events": len(funding_tape_rows),
+        "unique_leader_ledger_events": len(ledger_tape_rows),
+        "leader_accounting_tapes_are_follower_pnl_inputs": False,
+        "market_context_tapes_are_pnl_inputs": False,
         "fill_start_ms": fill_rows[0]["ts_ms"] if fill_rows else None,
         "fill_end_ms": fill_rows[-1]["ts_ms"] if fill_rows else None,
         "book_start_ms": book_rows[0]["received_at_ms"] if book_rows else None,

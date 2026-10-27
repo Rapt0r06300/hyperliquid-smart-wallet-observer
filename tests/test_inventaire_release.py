@@ -32,8 +32,15 @@ def _mini_projet(root: Path):
     (root / "LANCER_HYPERSMART.cmd").write_text(
         'cd /d "%~dp0"\n"%HYPERSMART_PYTHON%" -m hl_observer.ops.moteur\n'
         '"%HYPERSMART_PYTHON%" tools\\outil.py\n', encoding="utf-8")
-    (root / "ANALYSER_BACKTESTS_REPLAYS.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
-    (root / "CREER_ARCHIVE_PORTABLE.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
+    launchers = root / "tools" / "launchers"
+    launchers.mkdir(parents=True, exist_ok=True)
+    (launchers / "ANALYSER_BACKTESTS_REPLAYS.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
+    (launchers / "CREER_ARCHIVE_PORTABLE.cmd").write_text('cd /d "%~dp0"\n', encoding="utf-8")
+    for relative in IR.MAITRES:
+        master = root / relative
+        if not master.exists():
+            master.parent.mkdir(parents=True, exist_ok=True)
+            master.write_text("@echo off\n", encoding="utf-8")
 
 
 def _tous_les_fichiers(root: Path):

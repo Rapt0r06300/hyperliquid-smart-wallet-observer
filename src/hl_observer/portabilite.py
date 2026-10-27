@@ -18,7 +18,11 @@ from pathlib import Path
 # PC, le disque ou le chemin. pyproject.toml est présent dans le dépôt ; les deux .cmd maîtres sont la
 # signature du projet même dans une archive dépourvue de pyproject.
 _MARQUEURS_FICHIER = ("pyproject.toml",)
-_MARQUEURS_MAITRES = ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd")
+_MARQUEURS_MAITRES = (
+    "LANCER_HYPERSMART.cmd",
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+    "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+)
 
 
 def _est_racine(dossier: Path) -> bool:

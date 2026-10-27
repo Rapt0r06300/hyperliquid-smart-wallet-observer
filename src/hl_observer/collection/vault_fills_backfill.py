@@ -18,6 +18,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 MS_PAR_HEURE = 3_600_000
 
 
@@ -59,7 +61,7 @@ def parser_fills(
     vault_id = str(vault or "").strip()
     for f in (rep or []):
         try:
-            coin = str(f["coin"]).upper()
+            coin = preserve_native_instrument_symbol(f["coin"])
             px = float(f["px"])
             sz = abs(float(f["sz"]))
             ts = int(f["time"])
@@ -93,7 +95,7 @@ def fill_identity(fill: dict) -> tuple:
     return (
         normaliser_vault(fill.get("vault")),
         int(fill.get("ts_ms") or 0),
-        str(fill.get("coin") or "").upper(),
+        preserve_native_instrument_symbol(fill.get("coin")),
         float(fill.get("px") or 0.0),
         float(fill.get("sz") or 0.0),
         str(fill.get("dir") or ""),
@@ -112,7 +114,7 @@ def canonical_fill_id(fill: Mapping[str, Any]) -> str:
     identity = {
         "vault": str(fill.get("vault") or "").lower(),
         "ts_ms": int(fill.get("ts_ms") or 0),
-        "coin": str(fill.get("coin") or "").upper(),
+        "coin": preserve_native_instrument_symbol(fill.get("coin")),
         "px": float(fill.get("px") or 0.0),
         "sz": float(fill.get("sz") or 0.0),
         "dir": str(fill.get("dir") or ""),
@@ -203,7 +205,7 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
     par: dict[tuple[str, str], list[dict]] = {}
     for f in fills:
         vault = normaliser_vault(f.get("vault"))
-        coin = str(f["coin"]).upper()
+        coin = preserve_native_instrument_symbol(f["coin"])
         copie = dict(f)
         copie["vault"] = vault
         copie["coin"] = coin
@@ -385,7 +387,7 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
     coins_fills: set[str] = set()
     for f in fills:
         par.setdefault(normaliser_vault(f.get("vault")), []).append(int(f["ts_ms"]))
-        coins_fills.add(str(f.get("coin") or "").upper())
+        coins_fills.add(preserve_native_instrument_symbol(f.get("coin")))
     vaults = []
     for v, ts in par.items():
         ts.sort()

@@ -124,6 +124,7 @@ CLES_METRIQUES = (
     "hors_ordre",           # événements reçus hors ordre (horodatage régressif)
     "source_queue_drops",   # userFills perdus avant persistence/reconciliation
     "l2_tape_queue_drops",  # fills persistés mais non remis à la tape L2 dérivée
+    "l2_validation_rejections",  # snapshots L2 rejetés fail-closed avant admission au tape Copy-Vault
     "checkpoint_expirations",
     "checkpoint_queue_rejections",
     "input_rotations",
@@ -132,6 +133,7 @@ CLES_METRIQUES = (
 _CLES_METRIQUES_ENTIERES = frozenset({
     "gaps_critiques", "reconnects", "hors_ordre",
     "source_queue_drops", "l2_tape_queue_drops",
+    "l2_validation_rejections",
     "checkpoint_expirations", "checkpoint_queue_rejections",
     "input_rotations",
 })

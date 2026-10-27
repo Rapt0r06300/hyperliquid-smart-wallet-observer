@@ -100,6 +100,27 @@ def test_trend_ignores_nan_inf_and_keys_by_coin_side():
     assert rec.trend("BTC", "SHORT") is None  # side différent = série différente
 
 
+def test_edge_trend_keys_preserve_case_distinct_native_symbols():
+    rec = EdgeTrendRecorder()
+    for value in (30, 28, 26, 18, 15, 12):
+        rec.record("kPEPE", "LONG", value)
+    assert rec.trend("KPEPE", "LONG") is None
+    assert rec.trend("kPEPE", "LONG") == "decreasing"
+
+
+def test_market_quality_book_keeps_case_distinct_instrument_scores():
+    from hl_observer.signals.market_quality_score import MarketQualityBook
+
+    book = MarketQualityBook()
+    book.observe("kPEPE", liquidity_score=0.1, now=100.0)
+    book.observe("KPEPE", liquidity_score=0.9, now=100.0)
+
+    assert book.status()["scored_markets"] == 2
+    assert book.allowed("kPEPE") is True
+    assert book.allowed("KPEPE") is True
+    assert book.allowed("Kpepe") is None
+
+
 # ---------------------------------------------------------------- apply_v26_entry_vetos
 
 def _feed_decreasing(coin="BTC", side="LONG"):

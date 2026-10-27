@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
-CMD = (RACINE / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(encoding="utf-8", errors="ignore")
+CMD = (RACINE / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(encoding="utf-8", errors="ignore")
 
 
 def test_python_portable_exclusif_sans_repli_py3():
@@ -17,7 +17,7 @@ def test_python_portable_exclusif_sans_repli_py3():
 
 
 def test_errorlevel_de_portable_env_verifie_immediatement():
-    i_call = CMD.index('call "%~dp0tools\\portable_env.cmd"')
+    i_call = CMD.index('call "%ALINA_PROJECT_ROOT%\\tools\\portable_env.cmd"')
     i_check = CMD.index("if errorlevel 1", i_call)
     # le check suit immediatement l'appel (pas d'autre commande critique entre les deux).
     entre = CMD[i_call:i_check]
@@ -30,7 +30,7 @@ def test_analyse_scopee_a_la_session_selectionnee():
     i_sel = CMD.index("analyser_session")
     i_lab = CMD.index("lab_alpha", i_sel)
     assert i_sel < i_lab                                      # selection AVANT analyse
-    assert "SESSION_DIR=%~dp0runtime\\data\\sessions\\%RUN_ID%" in CMD
+    assert "SESSION_DIR=%ALINA_PROJECT_ROOT%\\runtime\\data\\sessions\\%RUN_ID%" in CMD
 
 
 def test_fenetre_ram_bornable():

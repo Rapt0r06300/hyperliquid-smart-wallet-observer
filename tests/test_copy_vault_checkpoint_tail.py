@@ -11,6 +11,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     load_observed_books,
     select_observed_continuations,
 )
+from hl_observer.backtesting.copy_vault_protocol import INSTRUMENT_IDENTITY_SCHEMA
 from hl_observer.collection.copy_vault_checkpoint_tail import (
     COMPANION_PROTOCOL,
     CONTINUATION_SIGNAL_FILL_COUNT,
@@ -34,10 +35,11 @@ def _fill(
     direction: int = 1,
     dir_label: str | None = None,
     start_position: float = 0.0,
+    coin: str = "BTC",
 ) -> dict:
     return {
         "vault": VAULT,
-        "coin": "BTC",
+        "coin": coin,
         "px": 60_000.0,
         "sz": 0.01,
         "signe": direction,
@@ -177,6 +179,7 @@ def test_forward_fill_captures_reference_entry_and_real_exit_without_lookahead(
     assert len({row["checkpoint_id"] for row in rows}) == 3
     assert all(row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT" for row in rows)
     assert all(row["collector_protocol"] == COMPANION_PROTOCOL for row in rows)
+    assert all(row["instrument_identity_schema"] == INSTRUMENT_IDENTITY_SCHEMA for row in rows)
     assert all(row["writer_run_id"] == engine.state["writer_run_id"] for row in rows)
     assert all(row["clean_epoch_ms"] == engine.state["clean_epoch_ms"] for row in rows)
     assert all(row["vault"] == VAULT for row in rows)
@@ -361,6 +364,75 @@ def test_checkpoints_simultanes_du_meme_coin_partagent_une_observation_l2(
     assert len(rows) == 2
     assert len({row["checkpoint_id"] for row in rows}) == 2
     assert len({row["received_at_ms"] for row in rows}) == 1
+
+
+def test_checkpoint_conserve_et_rejoue_le_symbole_native_case_sensitive(tmp_path: Path):
+    now = [8_000_000]
+    fetched: list[str] = []
+
+    def fetch(coin: str) -> dict:
+        fetched.append(coin)
+        return _book(now[0])
+
+    engine = CopyVaultCheckpointTail(
+        tmp_path, fetch_book=fetch, clock_ms=lambda: now[0]
+    )
+    fill = _fill(now[0], event="kpepe", coin="kPEPE")
+    _append(tmp_path / INPUT_RELPATH, fill)
+
+    result = engine.poll_once()
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()
+    ]
+    books, audit = load_observed_books(tmp_path, coins={"kPEPE"})
+
+    assert result["captured"] == 1
+    assert fetched == ["kPEPE"]
+    assert rows[0]["coin"] == "kPEPE"
+    assert books["kPEPE"][0]["coin"] == "kPEPE"
+    assert audit["causal_forward_rows"] == 1
+
+
+def test_ancienne_identite_de_checkpoint_est_reinitialisee_sans_rejouer_historique(
+    tmp_path: Path,
+):
+    input_path = tmp_path / INPUT_RELPATH
+    _append(input_path, _fill(1_000_000, event="legacy", coin="KPEPE"))
+    output_path = tmp_path / OUTPUT_RELPATH
+    _append(output_path, {"coin": "KPEPE", "checkpoint_id": "legacy:ENTRY"})
+    (tmp_path / STATE_RELPATH).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / STATE_RELPATH).write_text(
+        json.dumps({
+            "schema_version": "hypersmart.copy_vault_checkpoint_tail.v2",
+            "protocol": (
+                "copy_vault_checkpoint_companion_v2_for_"
+                "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+            ),
+            "paper_read_only": True,
+            "real_execution": False,
+            "input_offset": 0,
+            "output_start_offset": 0,
+            "pending": [{"coin": "KPEPE", "checkpoint_id": "old:ENTRY"}],
+        }),
+        encoding="utf-8",
+    )
+
+    engine = CopyVaultCheckpointTail(tmp_path, clock_ms=lambda: 2_000_000)
+    result = engine.poll_once()
+
+    assert result["lines"] == 0
+    assert result["pending"] == 0
+    assert result["counters"]["identity_migration_resets"] == 1
+    assert result["identity_migration_reset"]["reason"] == (
+        "INSTRUMENT_IDENTITY_SCHEMA_CHANGED_OR_UNVERIFIED"
+    )
+    archived_state = tmp_path / result["identity_migration_reset"]["preserved_state_path"]
+    assert json.loads(archived_state.read_text(encoding="utf-8"))["pending"] == [
+        {"coin": "KPEPE", "checkpoint_id": "old:ENTRY"}
+    ]
+    assert engine.state["input_offset"] == input_path.stat().st_size
+    assert engine.state["output_start_offset"] == output_path.stat().st_size
 
 
 def test_file_replacement_is_recovered_but_invalidates_clean_epoch(tmp_path: Path) -> None:

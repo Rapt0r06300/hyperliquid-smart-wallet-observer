@@ -51,17 +51,17 @@ Une période inversée est refusée.
 Pour un workspace déjà reconstruit :
 
 ```bat
-PREPARER_EXPERIENCE_FULL_COLD.cmd SUITE [FAMILLE] [COIN] [METRIQUE] [START_MS] [END_MS] [WALLET]
+tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd SUITE [FAMILLE] [COIN] [METRIQUE] [START_MS] [END_MS] [WALLET]
 ```
 
 Exemples :
 
 ```bat
-PREPARER_EXPERIENCE_FULL_COLD.cmd economic-full copy_vault BTC net_pnl_usd
-PREPARER_EXPERIENCE_FULL_COLD.cmd sqlite-core copy_vault BTC "" 1780000000000 1780100000000 0xabc
+tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd economic-full copy_vault BTC net_pnl_usd
+tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd sqlite-core copy_vault BTC "" 1780000000000 1780100000000 0xabc
 ```
 
-Le bouton retrouve uniquement le workspace courant de la suite avec `dataset_bridge locate`. Il n'appelle jamais `prepare --download` et ne lance pas `ANALYSER_DONNEES_HYPERSMART.cmd`.
+Le bouton retrouve uniquement le workspace courant de la suite avec `dataset_bridge locate`. Il n'appelle jamais `prepare --download` et ne lance pas `tools/launchers/ANALYSER_DONNEES_HYPERSMART.cmd`.
 
 Lorsque le plan est `READY`, le bouton génère ensuite automatiquement le contrat de replay avec :
 

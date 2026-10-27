@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import sha256
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction, LifecycleEvent
 
 
@@ -94,7 +95,7 @@ def _delta_id(
         str(part)
         for part in (
             wallet.lower(),
-            coin.upper(),
+            preserve_native_instrument_symbol(coin),
             action,
             previous_size,
             current_size,

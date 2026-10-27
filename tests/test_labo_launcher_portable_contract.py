@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "LANCER-RECHERCHE-CONTINUE.cmd"
+LAUNCHER = ROOT / "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd"
 
 
 def _active_lines(text: str) -> list[str]:
@@ -18,7 +18,7 @@ def test_continuous_research_launcher_uses_portable_python_and_real_preflight() 
     text = LAUNCHER.read_text(encoding="utf-8", errors="ignore")
     active = _active_lines(text)
 
-    assert 'call "%~dp0tools\\portable_env.cmd"' in text
+    assert 'call "%ALINA_PROJECT_ROOT%\\tools\\portable_env.cmd"' in text
     assert 'if not defined HYPERSMART_PYTHON' in text
     assert 'set "PYTHONUNBUFFERED=1"' in text
     assert '"%HYPERSMART_PYTHON%" -u tools\\recherche_continue.py dry-run' in active

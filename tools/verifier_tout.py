@@ -347,8 +347,10 @@ def executer(sections_demandees: list[str] | None = None) -> int:
     texte = "\n".join(lignes)
     print(texte)
     try:
-        (RACINE / "resultat-verification.txt").write_text(texte, encoding="utf-8")
-        print("\n  Rapport ecrit : resultat-verification.txt")
+        rapport = RACINE / "runtime" / "reports" / "legacy" / "resultat-verification.txt"
+        rapport.parent.mkdir(parents=True, exist_ok=True)
+        rapport.write_text(texte, encoding="utf-8")
+        print(f"\n  Rapport ecrit : {rapport.relative_to(RACINE)}")
     except OSError:
         pass
     return 1 if echecs else 0

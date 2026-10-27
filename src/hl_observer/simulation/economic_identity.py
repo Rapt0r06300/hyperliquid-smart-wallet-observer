@@ -18,7 +18,9 @@ from dataclasses import dataclass, fields
 from hashlib import sha256
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "hypersmart.economic_identity.v1"
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
+SCHEMA_VERSION = "hypersmart.economic_identity.v2_native_instrument_identity"
 
 #: Champs d'identité, dans l'ordre causal (décision → exécution → comptabilité).
 _CHAMPS = (
@@ -70,7 +72,8 @@ class EconomicIdentity:
         if self.position_id:
             return str(self.position_id)
         if self.coin and self.side:
-            return f"{str(self.coin).upper()}:{str(self.side).upper()}"
+            coin = preserve_native_instrument_symbol(self.coin)
+            return f"{coin}:{str(self.side).upper()}" if coin else None
         return None
 
     def episode_key(self) -> str | None:

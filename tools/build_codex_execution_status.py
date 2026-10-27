@@ -396,8 +396,16 @@ def render_status(*, units: list[WorkUnit], roadmap_sha256: str, head: str) -> s
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--roadmap", type=Path, default=Path("HYPERSMART_MASTER_ROADMAP.md"))
-    parser.add_argument("--output", type=Path, default=Path("CODEX_EXECUTION_STATUS.md"))
+    parser.add_argument(
+        "--roadmap",
+        type=Path,
+        default=Path("docs/archive/root-history/HYPERSMART_MASTER_ROADMAP.md"),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("runtime/reports/legacy/CODEX_EXECUTION_STATUS.md"),
+    )
     parser.add_argument("--expected-count", type=int, default=720)
     args = parser.parse_args(argv)
 
@@ -417,6 +425,7 @@ def main(argv: list[str] | None = None) -> int:
         roadmap_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
         head=_head(root),
     )
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(payload, encoding="utf-8")
     print(f"CODEX_EXECUTION_STATUS_READY rows={len(units)} output={output}")
     return 0

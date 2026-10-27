@@ -32,6 +32,13 @@ def test_anti_burst_gate_blocks_rafale():
     assert g.allow("BTC", "LONG", 1500) is True      # autre coin, indépendant
 
 
+def test_anti_burst_gate_does_not_merge_case_distinct_symbols():
+    gate = AntiBurstGate(cooldown_sec=2.0)
+    assert gate.allow("kPEPE", "LONG", 1000) is True
+    assert gate.allow("KPEPE", "LONG", 1001) is True
+    assert gate.allow("kPEPE", "LONG", 1002) is False
+
+
 def test_liquidation_clusters_and_proximity_gate():
     buckets = [
         {"liq_price": 99.0, "notional_usd": 5_000_000, "side": "LONG"},

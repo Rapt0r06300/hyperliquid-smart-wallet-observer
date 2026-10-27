@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.signals.opportunity_ranker import (
     OpportunityInput,
     RankerConfig,
@@ -57,7 +58,7 @@ def build_opportunity_board(
         if s <= 0.0:
             continue                      # plancher échoué -> éliminé (par le scorer réutilisé)
         scored.append(BoardEntry(
-            coin=str(c.coin or "").upper(), side=str(c.side or "").upper(),
+            coin=preserve_native_instrument_symbol(c.coin), side=str(c.side or "").upper(),
             strategy=str(strat or "?").upper(), power_score=s, net_edge_bps=round(c.net_edge_bps, 4),
         ))
     scored.sort(key=lambda r: -r.power_score)

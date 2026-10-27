@@ -17,6 +17,7 @@ import math
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper_trading.exec_model import ExecModelConfig, ExecResult, simulate_execution
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.liquidity_consumption import (
@@ -42,7 +43,7 @@ class PaperExecutionIntent:
     def __post_init__(self) -> None:
         side = str(self.position_side or "").strip().upper()
         action = str(self.action or "").strip().upper()
-        coin = str(self.coin or "").strip().upper()
+        coin = preserve_native_instrument_symbol(self.coin)
         strategy = str(self.strategy_id or "").strip()
         if self.simulation_only is not True:
             raise ValueError("canonical intent is paper-only")
@@ -76,7 +77,7 @@ class CausalMarketSnapshot:
     source: str
 
     def __post_init__(self) -> None:
-        coin = str(self.coin or "").strip().upper()
+        coin = preserve_native_instrument_symbol(self.coin)
         source = str(self.source or "").strip()
         mid = float(self.reference_mid)
         decision_ts = int(self.decision_ts_ms)
@@ -235,7 +236,7 @@ def build_execution_plan(
     requested = float(intent.target_notional_usdc)
     if not math.isfinite(requested) or requested <= 0:
         raise ValueError("target_notional_usdc must be finite and positive")
-    if str(intent.coin or "").strip().upper() != market.coin:
+    if preserve_native_instrument_symbol(intent.coin) != market.coin:
         raise ValueError("paper intent coin does not match market snapshot")
     execution_side = execution_side_for(intent.position_side, intent.action)
     intent_id = _intent_id(intent)
@@ -406,7 +407,7 @@ def _intent_id(intent: PaperExecutionIntent) -> str:
     material = repr(
         (
             intent.strategy_id,
-            str(intent.coin).upper(),
+            preserve_native_instrument_symbol(intent.coin),
             intent.position_side,
             intent.action,
             float(intent.target_notional_usdc),

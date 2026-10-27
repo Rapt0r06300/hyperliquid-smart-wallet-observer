@@ -49,7 +49,7 @@ def test_old_entries_drop_out_of_window():
 def test_signal_shape_status_ok():
     s = describe_signal(coin="btc", action="add", edge_bps=20, spread_bps=3, age_sec=5)
     assert s.status == STATUS_OK and s.is_actionable
-    assert s.coin == "BTC" and s.action == "ADD"
+    assert s.coin == "btc" and s.action == "ADD"
 
 
 def test_signal_shape_stale_wins_first():
@@ -85,3 +85,14 @@ def test_tracker_no_execution_surface():
     public = {n for n in dir(t) if not n.startswith("_")}
     for forbidden in ("submit", "place", "order", "sign", "send"):
         assert not any(forbidden in n.lower() for n in public)
+
+
+def test_entry_cooldown_tracker_keeps_native_symbol_case_distinct():
+    tracker = EntryCooldownTracker(EligibilityConfig(cooldown_sec=60.0))
+    tracker.register_entry("kPEPE", 1000.0)
+
+    assert tracker.check("kPEPE", 1010.0).blocked
+    assert tracker.check("KPEPE", 1010.0).eligible
+    assert describe_signal(
+        coin="kPEPE", action="open", edge_bps=20, spread_bps=1, age_sec=1
+    ).coin == "kPEPE"

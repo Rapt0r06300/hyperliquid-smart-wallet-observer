@@ -73,7 +73,7 @@ def test_salad_detection_accepts_windows_process_variants():
 
 
 def test_launchers_declare_below_normal_without_idle_priority():
-    cmd = (ROOT / "LANCER-RECHERCHE-CONTINUE.cmd").read_text(
+    cmd = (ROOT / "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd").read_text(
         encoding="utf-8",
         errors="ignore",
     )

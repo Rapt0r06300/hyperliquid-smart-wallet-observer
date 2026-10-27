@@ -20,7 +20,7 @@ def _engine_avec_position(side="LONG", entry=100.0, mid=110.0):
 
 def test_sans_bbo_lequity_autoritaire_reste_unmeasurable():
     eng, pos = _engine_avec_position()
-    eng.mark_to_market({"BTC": 110.0})                     # mid seul, aucun liquidatable
+    eng.mark_to_market({"BTC": 110.0}, timestamp_ms=1_000)  # mid seul, aucun liquidatable
     assert pos.last_liquidatable_price is None
     snap = eng.ledger.snapshot()
     assert snap["authoritative_equity_usdc"] is None       # UNMEASURABLE_NO_EXECUTABLE_EXIT
@@ -30,7 +30,9 @@ def test_sans_bbo_lequity_autoritaire_reste_unmeasurable():
 def test_mark_depuis_bbo_rend_lequity_autoritaire_mesurable_et_liquidable():
     eng, pos = _engine_avec_position(side="LONG", entry=100.0, mid=110.0)
     # BBO causal : LONG marqué au BID exécutable 101 (mid favorable 110 mais sortie réelle à 101).
-    eng.mark_to_market_depuis_bbo({"BTC": 110.0}, {"BTC": {"bid": 101.0, "ask": 112.0}})
+    eng.mark_to_market_depuis_bbo(
+        {"BTC": 110.0}, {"BTC": {"bid": 101.0, "ask": 112.0}}, timestamp_ms=1_000
+    )
     assert pos.last_liquidatable_price == 101.0
     snap = eng.ledger.snapshot()
     assert snap["authoritative_equity_usdc"] is not None    # devient mesurable
@@ -41,7 +43,9 @@ def test_mark_depuis_bbo_rend_lequity_autoritaire_mesurable_et_liquidable():
 
 def test_short_marque_a_lask():
     eng, pos = _engine_avec_position(side="SHORT", entry=100.0, mid=90.0)
-    eng.mark_to_market_depuis_bbo({"BTC": 90.0}, {"BTC": {"bid": 88.0, "ask": 99.0}})
+    eng.mark_to_market_depuis_bbo(
+        {"BTC": 90.0}, {"BTC": {"bid": 88.0, "ask": 99.0}}, timestamp_ms=1_000
+    )
     assert pos.last_liquidatable_price == 99.0              # SHORT sort à l'ask
     snap = eng.ledger.snapshot()
     assert snap["authoritative_equity_usdc"] is not None
@@ -50,7 +54,9 @@ def test_short_marque_a_lask():
 
 def test_position_sans_bbo_reste_unmeasurable_pas_de_repli_mid():
     eng, pos = _engine_avec_position()
-    eng.mark_to_market_depuis_bbo({"BTC": 110.0}, {"ETH": {"bid": 1.0, "ask": 2.0}})   # pas de BBO BTC
+    eng.mark_to_market_depuis_bbo(
+        {"BTC": 110.0}, {"ETH": {"bid": 1.0, "ask": 2.0}}, timestamp_ms=1_000
+    )   # pas de BBO BTC
     assert pos.last_liquidatable_price is None
     assert eng.ledger.snapshot()["authoritative_equity_usdc"] is None
 

@@ -67,6 +67,16 @@ def test_correlated_exposure_short_positions_use_negative_beta():
     assert verdict.cluster_notional_usd == 150.0
     assert verdict.net_beta == -350.0
 
+
+def test_correlated_exposure_does_not_merge_native_symbols_by_case():
+    verdict = correlated_exposure_check(
+        [Position("kPEPE", "LONG", 80.0)],
+        Position("KPEPE", "LONG", 80.0),
+        max_cluster_notional_usd=100.0,
+    )
+    assert verdict.ok is True
+    assert verdict.cluster_notional_usd == 80.0
+
 # #204
 from hl_observer.copy_fidelity.slippage_model import slippage_bps
 

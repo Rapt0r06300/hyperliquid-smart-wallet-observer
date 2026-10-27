@@ -22,6 +22,8 @@ _SNAPSHOT_CHANNELS = {
     "copy_vault_positions",
     "copy_vault_selection",
     "copy_vault_snapshot",
+    "copy_vault_funding",
+    "copy_vault_ledger",
     "open_interest",
     "funding_settlement",
     "clock_sync",

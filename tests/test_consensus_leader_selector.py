@@ -111,3 +111,25 @@ def test_consensus_leader_selector_strict_mode_penalizes_unmeasured_independence
     )
     assert report.selected_wallets == []
     assert report.rejected_reasons["entity_consensus_below_minimum"] >= 1
+
+
+def test_consensus_groups_do_not_merge_case_distinct_symbols():
+    wallets = [f"0x{index:040x}" for index in range(4)]
+    rows = [
+        _delta(wallets[0], coin="kPEPE", ms=10_000),
+        _delta(wallets[1], coin="kPEPE", ms=10_100),
+        _delta(wallets[2], coin="KPEPE", ms=10_200),
+        _delta(wallets[3], coin="KPEPE", ms=10_300),
+    ]
+    report = select_consensus_leaders_from_deltas(
+        rows,
+        [_leader(wallet, 90.0) for wallet in wallets],
+        now_timestamp_ms=11_000,
+        max_leaders=4,
+        active_window_ms=60_000,
+        consensus_window_ms=4_000,
+        min_wallets=2,
+    )
+
+    assert {group.coin for group in report.groups} == {"kPEPE", "KPEPE"}
+    assert all(group.wallet_count == 2 for group in report.groups)

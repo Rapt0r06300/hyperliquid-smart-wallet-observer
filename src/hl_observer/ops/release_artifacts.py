@@ -94,9 +94,7 @@ def construire_sbom_cyclonedx(manifeste: dict) -> dict:
 
 def _raison_exclusion(rel: str) -> str:
     low = rel.lower()
-    if low.startswith("outils de test/rapports/") or low in {
-        "moisson_console.txt", "moisson-termine.flag", "moisson-en-cours.txt", "moisson-fini.md",
-    }:
+    if low.startswith(("outils de test/rapports/", "runtime/reports/legacy/")):
         return "sortie_runtime_machine"
     if ".git" in low:
         return "controle_version_source"

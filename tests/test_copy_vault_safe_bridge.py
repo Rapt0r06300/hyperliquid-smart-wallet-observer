@@ -16,7 +16,10 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) -> dict:
+def _envelope(
+    channel: str, *, snapshot: bool = False, shallow: bool = False,
+    coin: str = "BTC",
+) -> dict:
     if channel in {"copy_vault_fills", "copy_vault_snapshot"}:
         is_snapshot = snapshot or channel == "copy_vault_snapshot"
         message = {
@@ -42,14 +45,14 @@ def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) ->
         message = {
             "channel": "l2Book",
             "data": {
-                "coin": "BTC", "time": 100_000,
+                "coin": coin, "time": 100_000,
                 "levels": [
                     [{"px": str(100 - n), "sz": "1", "n": 1} for n in range(size)],
                     [{"px": str(101 + n), "sz": "1", "n": 1} for n in range(size)],
                 ],
             },
         }
-        instrument = "BTC"
+        instrument = coin
         source = "hyperliquid_public_copy_l2"
     raw = json.dumps(message, sort_keys=True, separators=(",", ":"))
     return {
@@ -61,6 +64,7 @@ def _envelope(channel: str, *, snapshot: bool = False, shallow: bool = False) ->
         "received_ts_ms": 100_050,
         "local_monotonic_ns": 12345678,
         "connection_id": "live-test-1",
+        "parsed_summary": {"l2_gap_epoch": 3} if channel == "copy_vault_l2" else {},
         "read_only": True,
         "real_execution": False,
         "raw_payload": raw,
@@ -160,8 +164,8 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert len(book["bids5"]) == len(book["asks5"]) == 5
     # Prove downstream canonical source discovery and causal book loader consume
     # the generated payload, not just that its files exist.
-    from hl_observer.datasets.source_discovery import discover_family_sources
     from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
+    from hl_observer.datasets.source_discovery import discover_family_sources
 
     sources = discover_family_sources(workspace)
     assert {p.name for p in sources["copy_vault"]} == {
@@ -171,12 +175,36 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert len(books.get("BTC", [])) == 1
     assert book_audit["valid_rows"] == 1
     assert books["BTC"][0]["causal_observation"] is True
+    assert books["BTC"][0]["connection_id"] == "live-test-1"
+    assert books["BTC"][0]["l2_gap_epoch"] == 3
     proof = json.loads((
         workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
     ).read_text())
     assert proof["economic_proof"] is False
     assert proof["selected_files"] == 2
     assert build_safe_copy_workspace(tmp_path)["workspace"] == str(workspace)
+
+
+def test_bridge_preserves_native_market_case_and_l2_gap_identity(tmp_path: Path) -> None:
+    from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
+
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills"),
+        _envelope("copy_vault_l2", coin="kPEPE"),
+    ])
+
+    report = build_safe_copy_workspace(tmp_path)
+    workspace = Path(report["workspace"])
+    book = json.loads(
+        (workspace / "runtime/data/copy_vault_l2_tape.jsonl").read_text()
+    )
+    books, audit = load_observed_books(workspace, coins={"kPEPE"})
+
+    assert book["coin"] == "kPEPE"
+    assert book["connection_id"] == "live-test-1"
+    assert book["l2_gap_epoch"] == 3
+    assert len(books["kPEPE"]) == 1
+    assert audit["valid_rows"] == 1
 
 
 def test_bridge_excludes_snapshot_fills(tmp_path: Path) -> None:

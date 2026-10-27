@@ -14,7 +14,7 @@ REM
 REM   Un marche qui repond "non" n'est PAS une raison de bloquer un commit.
 REM   MEGATEST le distingue maintenant : ECHEC (code casse) vs VERDICT (marche defavorable).
 REM
-REM   Sortie unique : MEGATEST.md a la racine.
+REM   Sortie unique : runtime\reports\legacy\MEGATEST.md.
 REM
 REM   100%% LECTURE SEULE. 0 ordre reel - 0 argent reel - 0 cle privee - 0 signature.
 REM ==================================================================================

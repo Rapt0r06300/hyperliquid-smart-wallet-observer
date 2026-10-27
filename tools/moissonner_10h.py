@@ -161,8 +161,9 @@ from hl_observer.research.lecture_profonde import (  # noqa: E402
 
 CACHE = CacheBrut(RACINE / "data" / "cache_moisson")
 ETAT = RACINE / "data" / "reports" / "moisson_10h_etat.json"
-BATTEMENT = RACINE / "moisson-en-cours.txt"          # 🔑 pour que Flo puisse REGARDER
-SORTIE_MD = RACINE / "moisson-fini.md"
+BATTEMENT = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-en-cours.txt"
+SORTIE_MD = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-fini.md"
+FLAG_TERMINE = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-termine.flag"
 SORTIE_JSON = RACINE / "data" / "reports" / "moisson_10h.json"
 
 # 🔴 LE DEADLINE DU RUN — *une attente de quota ne doit JAMAIS dépasser le temps restant.*
@@ -276,7 +277,7 @@ class Progres:
     """🔑 **LE TABLEAU DE BORD.** *Un run de 10 h qu'on ne peut pas observer est un run qu'on
     interrompt par angoisse.*
 
-    Écrit `moisson-en-cours.txt` — Flo l'ouvre quand il veut, **sans rien interrompre**.
+    Écrit `runtime/reports/legacy/moisson/moisson-en-cours.txt` — lecture possible sans interrompre le run.
     Et il dit **la vérité** : y compris ce qui a échoué, et ce qui reste.
     """
 
@@ -564,7 +565,7 @@ def _rapport_partiel(
 ) -> None:
     """🔴 Flo (15/07) : *« je ne veux plus que ça plante, sinon je n'aurais jamais les données. »*
 
-    On (ré)écrit une version SIMPLE mais utile de `moisson-fini.md` à CHAQUE checkpoint des étapes
+    On (ré)écrit `runtime/reports/legacy/moisson/moisson-fini.md` à chaque checkpoint des étapes
     2-4. Ainsi, même si le process est tué ou qu'une étape casse, on a TOUJOURS sur le disque les
     données déjà trouvées. La version complète (à la fin) l'écrase. **Ne lève JAMAIS d'exception.**
     """
@@ -640,6 +641,9 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                          "scan deja fait sans attendre 8 h de plus")
     args = ap.parse_args()
 
+    BATTEMENT.parent.mkdir(parents=True, exist_ok=True)
+    SORTIE_MD.parent.mkdir(parents=True, exist_ok=True)
+
     t0 = time.time()
     limite = args.heures * 3600.0
     global _DEADLINE
@@ -652,7 +656,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     #    alors qu'on est en plein travail — le bug que Flo a vu). Le flag n'est ré-écrit qu'à la
     #    FIN, par le .cmd, une fois python sorti pour de bon.
     try:
-        (RACINE / "moisson-termine.flag").unlink()
+        FLAG_TERMINE.unlink()
     except OSError:
         pass
 
@@ -1045,7 +1049,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
 
     _phase("PHASE B — LIRE LES README · le GRAPHE · le score DIFFÉRENTIEL", _lire, bless)
     _chk()
-    _rapport_partiel([], notes, repos)   # 🔴 dès la fin du tri, un moisson-fini.md existe déjà.
+    _rapport_partiel([], notes, repos)   # 🔴 le rapport runtime existe dès la fin du tri.
 
     # #10 / #11 — l'autorité (être **cité**) et les autres repos des bons auteurs
     inv = citations_inverses(qui_cite)
@@ -1677,7 +1681,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         "lecture_seule": True, "aucun_code_execute": True, "real_execution": False,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     _chk()
-    prog.phase = "✅ TERMINÉ — voir `moisson-fini.md` à la racine"
+    prog.phase = "✅ TERMINÉ — voir runtime/reports/legacy/moisson/moisson-fini.md"
     prog.detail = ""
     prog.jumeaux = len(jumeaux.groupes) if jumeaux else 0
     prog.retenus = sum(1 for e in entrees if e["verdict"] != "SKIP_WITH_REASON")

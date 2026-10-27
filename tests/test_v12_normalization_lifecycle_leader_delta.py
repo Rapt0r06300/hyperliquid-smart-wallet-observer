@@ -46,11 +46,41 @@ def test_v12_normalizes_hyperliquid_fill_with_dedupe_key():
 
     assert result.usable
     assert result.fill is not None
-    assert result.fill.coin == "HYPE"
+    assert result.fill.coin == "hype"
     assert result.signed_size_delta == 1.25
     assert result.resulting_position == 1.25
-    assert result.dedupe_key == "hash:0xf00d"
-    assert fill_dedupe_key(result.fill) == "hash:0xf00d"
+    assert result.dedupe_key == fill_dedupe_key(result.fill)
+    assert result.dedupe_key.startswith("fill:v2:")
+
+
+def test_hyperliquid_fill_identity_keeps_native_symbol_and_fill_level_ids():
+    base = {
+        "coin": "kPEPE",
+        "dir": "Open Long",
+        "side": "B",
+        "sz": "1",
+        "px": "0.00001",
+        "time": 1_700_000_000_000,
+        "oid": "101",
+        "hash": "0xtransaction",
+    }
+    first = normalize_hyperliquid_fill(
+        {**base, "tid": "fill-1"}, wallet=WALLET, meta=_meta()
+    )
+    repeat = normalize_hyperliquid_fill(
+        {**base, "tid": "fill-1"}, wallet=WALLET, meta=_meta()
+    )
+    second = normalize_hyperliquid_fill(
+        {**base, "tid": "fill-2"}, wallet=WALLET, meta=_meta()
+    )
+    other_case = normalize_hyperliquid_fill(
+        {**base, "coin": "KPEPE", "tid": "fill-1"}, wallet=WALLET, meta=_meta()
+    )
+
+    assert first.fill is not None and first.fill.coin == "kPEPE"
+    assert first.dedupe_key == repeat.dedupe_key
+    assert first.dedupe_key != second.dedupe_key
+    assert first.dedupe_key != other_case.dedupe_key
 
 
 def test_v12_normalization_refuses_missing_real_fill_fields():
@@ -77,7 +107,7 @@ def test_v12_normalizes_clearinghouse_position_shape():
 
     assert result.usable
     assert result.position is not None
-    assert result.position.coin == "ETH"
+    assert result.position.coin == "eth"
     assert result.position.signed_size == -2.5
     assert result.position.entry_px == 3500
 

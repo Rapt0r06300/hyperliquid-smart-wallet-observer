@@ -36,6 +36,43 @@ def test_resolution_hyperliquid_preserve_case_and_reject_unknown():
     assert rejected == ["DELISTED"]
 
 
+def test_resolution_uses_exact_name_then_rejects_ambiguous_case_fallback():
+    m = _mod()
+    selected, rejected = m.resoudre_symboles_hyperliquid(
+        ["KPEPE", "kPEPE", "Kpepe"], ["kPEPE", "KPEPE"]
+    )
+
+    assert selected == ["KPEPE", "kPEPE"]
+    assert rejected == ["KPEPE"]
+
+
+def test_hyperliquid_collection_plan_uses_native_symbols_for_subscriptions_and_backfill():
+    m = _mod()
+    coins, subscriptions = m._planifier_abonnements_hyperliquid(
+        ["BTC", " kPEPE ", "BTC", "", "KPEPE"]
+    )
+
+    assert coins == ["BTC", "kPEPE", "KPEPE"]
+    assert len(subscriptions) == 12
+    assert subscriptions[:4] == [
+        {"method": "subscribe", "subscription": {"type": channel, "coin": "BTC"}}
+        for channel in ("bbo", "l2Book", "trades", "activeAssetCtx")
+    ]
+    assert [item["subscription"]["coin"] for item in subscriptions[4:8]] == [
+        "kPEPE", "kPEPE", "kPEPE", "kPEPE"
+    ]
+    # The returned native coin list is also passed to the funding history loader.
+    assert coins[1:] == ["kPEPE", "KPEPE"]
+
+
+def test_hyperliquid_metadata_keeps_case_distinct_symbols():
+    m = _mod()
+
+    assert m.extraire_symboles_hyperliquid(
+        {"universe": [{"name": "kPEPE"}, {"name": "KPEPE"}, {"name": "kPEPE"}]}
+    ) == ["kPEPE", "KPEPE"]
+
+
 def test_meta_hyperliquid_uses_read_only_post(monkeypatch):
     m = _mod()
     captured = {}
@@ -70,11 +107,27 @@ def test_meta_hyperliquid_uses_read_only_post(monkeypatch):
 
 def test_parser_bbo_hl():
     m = _mod()
-    msg = {"channel": "bbo", "data": {"coin": "ETH", "time": 111,
+    msg = {"channel": "bbo", "data": {"coin": "kPEPE", "time": 111,
            "bbo": [{"px": "3000.0", "sz": "5"}, {"px": "3000.5", "sz": "4"}]}}
     r = m.parser_bbo_hl(msg)
-    assert r["coin"] == "ETH" and r["bid"] == 3000.0 and r["ask"] == 3000.5 and r["ts_ex"] == 111
+    assert r["coin"] == "kPEPE" and r["bid"] == 3000.0 and r["ask"] == 3000.5 and r["ts_ex"] == 111
     assert m.parser_bbo_hl({"channel": "trades"}) is None     # autre canal -> None
+
+
+def test_parser_l2_hl_keeps_native_symbol_case():
+    m = _mod()
+    parsed = m.parser_l2_hl(
+        {
+            "channel": "l2Book",
+            "data": {
+                "coin": "kPEPE",
+                "time": 111,
+                "levels": [[{"px": "0.00001", "sz": "10"}], [{"px": "0.00002", "sz": "10"}]],
+            },
+        }
+    )
+
+    assert parsed is not None and parsed["coin"] == "kPEPE"
 
 
 def test_binance_ws_candidates_include_documented_mainnet_failover():
@@ -89,8 +142,8 @@ def test_binance_ws_candidates_include_documented_mainnet_failover():
         *m.BINANCE_PUBLIC_WS_CANDIDATES,
         *m.BINANCE_MARKET_WS_CANDIDATES,
     ))
-    assert m.WS_BINANCE_PUBLIC == m.BINANCE_PUBLIC_WS_CANDIDATES[0]
-    assert m.WS_BINANCE_MARKET == m.BINANCE_MARKET_WS_CANDIDATES[0]
+    assert m.BINANCE_PUBLIC_WS_CANDIDATES[0] == m.WS_BINANCE_PUBLIC
+    assert m.BINANCE_MARKET_WS_CANDIDATES[0] == m.WS_BINANCE_MARKET
 
 
 def test_parser_bookticker_binance():

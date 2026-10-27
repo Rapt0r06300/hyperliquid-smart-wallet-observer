@@ -142,7 +142,12 @@ def test_est_exclu_regles():
     assert AP.est_exclu(".portable-preflight-abc/test/cert.pem")
     assert AP.est_exclu("_validation_workspace/pytest/test.db")
     for sortie in (
-        "moisson_console.txt", "moisson-termine.flag", "moisson-en-cours.txt", "moisson-fini.md",
+        "runtime/reports/legacy/RECAP-COMPLET.md",
+        "runtime/reports/legacy/tout-tester/derniers_echecs.json",
+        "runtime/reports/legacy/moisson/moisson_console.txt",
+        "runtime/reports/legacy/moisson/moisson-termine.flag",
+        "runtime/reports/legacy/moisson/moisson-en-cours.txt",
+        "runtime/reports/legacy/moisson/moisson-fini.md",
         "outils de test/rapports/analyse_599.txt",
     ):
         assert AP.est_exclu(sortie), sortie

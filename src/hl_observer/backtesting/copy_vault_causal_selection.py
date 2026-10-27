@@ -8,6 +8,7 @@ from typing import Any
 from hl_observer.backtesting.copy_vault_protocol import (
     COPYABLE_ENTRY_ACTIONS,
     METAORDER_GAP_MS,
+    canonical_copy_vault_coin,
     canonical_metaorder_id,
     expected_open_direction,
 )
@@ -21,7 +22,7 @@ def _event_identity(row: Mapping[str, Any]) -> str:
     material = (
         str(row.get("vault") or ""),
         int(row.get("ts_ms") or 0),
-        str(row.get("coin") or "").upper(),
+        canonical_copy_vault_coin(row.get("coin")),
         int(row.get("direction") or 0),
         str(row.get("oid") or ""),
         str(row.get("hash") or ""),
@@ -46,7 +47,7 @@ def cluster_metaorders(
         try:
             ts_ms = int(raw.get("ts_ms") or 0)
             direction = int(raw.get("direction") or 0)
-            coin = str(raw.get("coin") or "").upper()
+            coin = canonical_copy_vault_coin(raw.get("coin"))
             vault = str(raw.get("vault") or "")
         except (TypeError, ValueError, OverflowError):
             invalid_events += 1
@@ -259,12 +260,14 @@ def select_causal_protocol_inputs(
     causal_metaorders.sort(
         key=lambda row: (int(row.get("signal_ts_ms") or 0), str(row.get("metaorder_id") or ""))
     )
-    wanted_coins = {str(row.get("coin") or "").upper() for row in causal_metaorders}
+    wanted_coins = {
+        canonical_copy_vault_coin(row.get("coin")) for row in causal_metaorders
+    }
     total_book_rows = 0
     causal_book_rows = 0
     causal_books: dict[str, list[dict[str, Any]]] = {}
     for raw_coin, raw_rows in books_by_coin.items():
-        coin = str(raw_coin or "").upper()
+        coin = canonical_copy_vault_coin(raw_coin)
         rows = [dict(row) for row in raw_rows]
         total_book_rows += len(rows)
         if coin not in wanted_coins:

@@ -54,6 +54,7 @@ PREFIXES_DOSSIERS_TRANSITOIRES = (".portable-",)
 PREFIXES_EXCLUS = (
     "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
     "outils de test/rapports/",
+    "runtime/reports/legacy/",
     # Historical orchestration evidence can contain absolute paths from old
     # GitHub-hosted runners. It is not executable runtime state and must not
     # make an otherwise relocatable Windows release non-portable.
@@ -75,10 +76,6 @@ FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),
                    "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json",
                    "runtime/data/lanceur_session_marqueur.txt",
                    "runtime/data/COURANTE.json",
-                   "moisson_console.txt",
-                   "moisson-termine.flag",
-                   "moisson-en-cours.txt",
-                   "moisson-fini.md",
                    ".analyse.lock", NOM_MANIFESTE)
 _ABSOLU = re.compile(
     r"(?:[A-Za-z]:\\|\\\\[^\\\s\"]+\\[^\\\s\"]+|/(?:home|Users)/)"
@@ -679,8 +676,15 @@ def _sbom(root: Path, fichiers: dict, binaires: dict) -> dict:
         "wheels": len(wheels), "dll": len(dll), "exe": len(exe),
         "deps_verrouillees": _deps_verrouillees(root),
         "licences": _licences(root),
-        "cmd_maitres": [n for n in ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd",
-                                    "CREER_ARCHIVE_PORTABLE.cmd") if (root / n).is_file()],
+        "cmd_maitres": [n for n in (
+            "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+            "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+            "LANCER_HYPERSMART.cmd",
+            "POUSSER-GITHUB-FORCE.cmd",
+            "ALINA_SYNC_COMPLETE.cmd",
+            "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+            "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
+        ) if (root / n).is_file()],
     }
 
 

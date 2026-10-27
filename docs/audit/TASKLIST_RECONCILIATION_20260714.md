@@ -15,7 +15,7 @@ au `.gitignore` (données régénérables, pas du code).
 
 ## 1. Les compteurs du fichier, recomptés
 
-| ce que dit TASKLIST.md | mesuré (grep) | verdict |
+| ce que dit `docs/archive/root-history/TASKLIST.md` | mesuré (grep) | verdict |
 |---|---|---|
 | « TOTAL 544, terminées 260, en attente 284 » | 251 cochées `[x]`, 264 non cochées `[ ]` | compteurs périmés |
 | « EN ATTENTE — 293 taches » | 264 | périmé |
@@ -24,7 +24,7 @@ au `.gitignore` (données régénérables, pas du code).
 | §6 « quoi faire : #597, #588, #599 » | les 3 sont FAITES (4e, 8e→#588 le 13/07, 6e passes) | strate périmée |
 | §3 « #588 liquidation non modélisée » | `funding/carry_liquidation_risk.py` + `docs/audit/T2b_CARRY_LIQUIDATION.md` + `MESURER-588.cmd`, datés 13/07 | FAIT — verdict 2,0 % APR |
 
-Corrections appliquées le 14/07 dans TASKLIST.md (strates mises à jour, doublons cochés).
+Corrections appliquées le 14/07 dans `docs/archive/root-history/TASKLIST.md` (strates mises à jour, doublons cochés).
 
 ## 2. Pourquoi « non coché » ≠ « à faire » — la structure du fichier
 

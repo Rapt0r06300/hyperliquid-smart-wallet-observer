@@ -147,11 +147,12 @@ def main(root="."):
 
 
 def write_outputs(root, rows, tally, meta):
-    os.makedirs(os.path.join(root, "EVIDENCE"), exist_ok=True)
-    with open(os.path.join(root, "CLAUDE_TASKS.jsonl"), "w", encoding="utf-8") as f:
+    report_root = os.path.join(root, "runtime", "reports", "legacy", "task-registry")
+    os.makedirs(report_root, exist_ok=True)
+    with open(os.path.join(report_root, "CLAUDE_TASKS.jsonl"), "w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
-    with open(os.path.join(root, "EVIDENCE", "scan_summary.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(report_root, "scan_summary.json"), "w", encoding="utf-8") as f:
         json.dump({"tally": tally, "meta": meta, "total": len(rows)}, f, indent=2, sort_keys=True)
     lines = ["# CLAUDE_TASKS_LATEST — registre machine (scan structurel)", "",
              "Scan REEL de src/ + tests/. `done_wired` = module + test + appelant reel (branche).",
@@ -161,7 +162,7 @@ def write_outputs(root, rows, tally, meta):
     for k in ("done_wired", "coded_unwired", "coded_untested", "untraced"):
         lines.append("| %s | %d |" % (k, tally[k]))
     lines += ["", "meta : %d modules, %d tests, %d edges d'import." % (meta["src"], meta["tests"], meta["edges"]), ""]
-    with open(os.path.join(root, "CLAUDE_TASKS_LATEST.md"), "w", encoding="utf-8") as f:
+    with open(os.path.join(report_root, "CLAUDE_TASKS_LATEST.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
 

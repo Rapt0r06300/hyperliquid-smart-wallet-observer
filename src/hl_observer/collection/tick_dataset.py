@@ -27,6 +27,22 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 SCHEMA_VERSION = "hypersmart.tick.v1"
 
 
+def _windows_io_path(path: Path) -> Path:
+    """Use Win32 extended paths before nested shard names approach MAX_PATH."""
+    path = Path(path)
+    if os.name != "nt":
+        return path
+    absolute = str(path.absolute())
+    # Rotation appends a long timestamped filename and a sidecar suffix.
+    # Prefix the directory early enough that the complete leaf stays below
+    # the legacy 260-character Win32 limit.
+    if absolute.startswith("\\\\?\\") or len(absolute) < 160:
+        return path
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
+
+
 def _raw_text(raw_payload: str | bytes | Mapping[str, Any] | list[Any]) -> str:
     if isinstance(raw_payload, bytes):
         return raw_payload.decode("utf-8", errors="replace")
@@ -186,7 +202,7 @@ class TickDatasetWriter:
         rotate_bytes: int = 128 * 1024 * 1024,
         flush_every: int = 1,
     ) -> None:
-        self.directory = Path(directory)
+        self.directory = _windows_io_path(Path(directory))
         self.directory.mkdir(parents=True, exist_ok=True)
         self.shards_directory = self.directory / "shards"
         self.shards_directory.mkdir(parents=True, exist_ok=True)

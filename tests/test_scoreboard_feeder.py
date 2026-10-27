@@ -43,6 +43,15 @@ def _par_strat(res):
     return {row.strategy: row for row in res.rows}
 
 
+def test_position_fallback_key_preserve_la_casse_native_du_coin():
+    lower = F._cle_position({"coin": "kPEPE", "side": "LONG"}, {})
+    upper = F._cle_position({"coin": "KPEPE", "side": "LONG"}, {})
+
+    assert lower == "kPEPE:LONG"
+    assert upper == "KPEPE:LONG"
+    assert lower != upper
+
+
 # --- cœur : ledger TRUSTED, PnL par stratégie, N = épisodes clos -------------
 def test_ledger_trusted_regroupe_pnl_par_strategie_et_compte_les_episodes():
     raw = (
@@ -77,15 +86,15 @@ def test_edge_couts_oos_forward_absents_du_ledger_restent_unmeasurable():
         assert champ in r.manques_globaux
 
 
-def test_familles_actives_sans_episode_sont_listees_more_data():
+def test_scoreboard_ne_materialise_pas_les_familles_economiques_inactives():
     raw = _episode("p1", "BTC", "LONG", "o1", "c1", 10.0, "copy_vault")
     r = F.lignes_depuis_ledger(_seal(raw))
     by = _par_strat(r)
-    # Les 3 familles ACTIVES apparaissent, même celles sans donnée (absence rendue explicite).
-    assert {"copy_vault", "lead_lag", "cross_venue_dislocation"} <= set(by)
-    assert by["cross_venue_dislocation"].pnl_usd is None
-    assert by["cross_venue_dislocation"].n_independent is None
-    assert by["cross_venue_dislocation"].verdict == "MORE_DATA"
+    # La constitution active uniquement Copy-Vault; les familles historiques restent inactives.
+    assert set(by) == {"copy_vault"}
+    assert by["copy_vault"].pnl_usd == 10.0
+    assert by["copy_vault"].n_independent == 1
+    assert by["copy_vault"].verdict == "MORE_DATA"
 
 
 # --- deny-by-default : un ledger contaminé ne fabrique aucun PnL ------------
@@ -97,7 +106,7 @@ def test_ledger_contamine_ne_produit_aucun_pnl():
     assert r.status != "TRUSTED" and r.n_episodes_clos == 0
     assert all(row.pnl_usd is None and row.net_bps is None for row in r.rows)
     assert all(row.verdict == "MORE_DATA" for row in r.rows)
-    assert {"copy_vault", "lead_lag", "cross_venue_dislocation"} <= set(_par_strat(r))
+    assert set(_par_strat(r)) == {"copy_vault"}
     assert "deny-by-default" in (r.raison or "")
 
 

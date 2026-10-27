@@ -1,56 +1,19 @@
-# Topologie officielle des entrypoints Windows
+# Topologie des lanceurs Alina Smart Flow
 
-Autorité de classification P0-115 pour les `.cmd` racine du HEAD courant. Le registre machine correspondant est `hl_observer.ops.entrypoint_topology`.
+Le registre exécutable est `src/hl_observer/ops/entrypoint_topology.py`. À la racine du dépôt, les seuls fichiers `.cmd` destinés à l'opérateur sont :
 
-## Entry points canoniques
+| Lanceur | Rôle |
+|---|---|
+| `LANCER_COLLECTEURS_COPY_VAULT.cmd` | Collecteurs Copy-Vault |
+| `LANCER_LAB_QUANT_COPY_VAULT.cmd` | Laboratoire principal : backtests et replays Copy-Vault |
+| `LANCER_HYPERSMART.cmd` | Moteur paper avec affichage de simulation |
+| `POUSSER-GITHUB-FORCE.cmd` | Réconciliation prudente du code avec GitHub |
+| `ALINA_SYNC_COMPLETE.cmd` | AlinaSync pour les shards SAFE |
 
-| Fichier | Classe | Rôle canonique |
-|---|---|---|
-| `LANCER_HYPERSMART.cmd` | `OFFICIAL_RUNTIME` | runtime principal, single-instance, collecteurs read-only et sous-commandes explicites |
-| `ANALYSER_BACKTESTS_REPLAYS.cmd` | `OFFICIAL_ANALYSIS` | analyse/replay hors hot path sur session complète vérifiée |
-| `LANCER-RECHERCHE-CONTINUE.cmd` | `OFFICIAL_RESEARCH` | worker autonome de recherche, reprenable, sans serveur dupliqué |
+`ALINA_SYNC_COMPLETE.sh` reste également à la racine pour les clones utilisés sous Linux/macOS. La portabilité signifie ici qu'un clone fonctionne quel que soit son chemin local ; elle ne dépend pas de la création d'une archive portable.
 
-Un rôle officiel n'a qu'un seul entrypoint canonique. Les autres `.cmd` sont classés `MAINTENANCE`, `COMPAT`, `LEGACY` ou `ARCHIVE` et ne créent pas un quatrième rôle opérationnel.
+Les autres `.cmd` et le script de restauration Unix sont rangés dans `tools/launchers/`. Ils y restent disponibles pour les workflows, diagnostics, compatibilité et restauration. Ils déterminent la racine du dépôt depuis leur propre emplacement et ne supposent aucun chemin machine fixe. `tools/launchers/README.md` en donne l'inventaire.
 
-## Contrats communs des trois entrypoints officiels
+`tools/ranger_racine.py` est un audit en lecture seule : il signale les écarts à cette liste et ne déplace ni ne supprime de fichier.
 
-- Python portable via `tools\portable_env.cmd` et `%HYPERSMART_PYTHON%` ;
-- `HL_ENABLE_MAINNET_EXECUTION=0` ;
-- `HL_ENABLE_TESTNET_EXECUTION=0` ;
-- aucune activation d'exécution réelle ;
-- le runtime ne lance pas le worker `recherche_continue.py` ;
-- le worker recherche ne lance pas le runtime serveur ;
-- l'analyse reste hors hot path.
-
-`CREER_ARCHIVE_PORTABLE.cmd` est `MAINTENANCE` mais conserve lui aussi le contrat Python portable et paper-only.
-
-## Inventaire non canonique
-
-- `ANALYSER_DONNEES_HYPERSMART.cmd` — MAINTENANCE
-- `ANALYSE_HISTORIQUE_COMPLETE.cmd` — COMPAT
-- `CREER_ARCHIVE_PORTABLE.cmd` — MAINTENANCE
-- `DIAGNOSTIC_LANCEUR.cmd` — MAINTENANCE
-- `INSTALLER_ALINA_RUNNER_FINAL_V1.cmd` — MAINTENANCE
-- `INSTALLER_ALINA_RUNNER_WINDOWS.cmd` — COMPAT
-- `LANCER-RECHERCHE-14H.cmd` — COMPAT
-- `LANCER-RECHERCHE-18H.cmd` — COMPAT
-- `LANCER-RECHERCHE-CONTINUE-ADMIN.cmd` — COMPAT
-- `LANCER_COCKPIT_ALINA.cmd` — COMPAT
-- `LANCER_HYPERLAB.cmd` — COMPAT
-- `LANCER_LABO.cmd` — COMPAT
-- `LANCER_LABO_180GO.cmd` — COMPAT
-- `LANCER_MICRO.cmd` — COMPAT
-- `LANCER_OBJECTIF_4USD.cmd` — COMPAT
-- `LANCER_REPLAY_176GO.cmd` — COMPAT
-- `POUSSER-GITHUB-FORCE.cmd` — LEGACY
-- `POUSSER_TOUT_LE_TRAVAIL.cmd` — LEGACY
-- `PREPARER_DONNEES_HYPERSMART.cmd` — MAINTENANCE
-- `PREPARER_EXPERIENCE_FULL_COLD.cmd` — MAINTENANCE
-- `PREPARER_GIT_PORTABLE.cmd` — MAINTENANCE
-- `PREPARER_PC_ALINA.cmd` — MAINTENANCE
-- `RECETTE-LANCEUR.cmd` — MAINTENANCE
-- `RECETTE-WINDOWS.cmd` — MAINTENANCE
-- `REPARER_ET_POUSSER.cmd` — LEGACY
-- `VERIFIER_LAB_AUTONOME_ALINA.cmd` — MAINTENANCE
-
-La gate échoue fermée si un nouveau `.cmd` racine apparaît sans classification, si un fichier enregistré disparaît sans mise à jour du registre, ou si un entrypoint officiel perd son contrat portable/paper-only.
+Tous les lanceurs économiques restent `PAPER / READ-ONLY / FAIL-CLOSED`. La racine n'active qu'une seule famille économique : Copy-Vault.

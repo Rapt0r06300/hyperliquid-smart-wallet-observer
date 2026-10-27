@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+from decimal import Decimal, InvalidOperation
 import json
 import math
 import os
@@ -35,8 +36,13 @@ from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
     classify_live_entry_action,
 )
 from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
+    INSTRUMENT_IDENTITY_SCHEMA,
     UNBOUND_L2_SOURCE_PROTOCOL,
 )
+from hl_observer.normalization.instrument_identity import (  # noqa: E402
+    preserve_native_instrument_symbol as canonical_copy_vault_coin,
+)
+from hl_observer.normalization.l2_book import validate_l2_book_sides  # noqa: E402
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
 from hl_observer.market_data.live_l2_service import (  # noqa: E402
@@ -78,9 +84,43 @@ WS_KEYS_CAP = 6000                          # borne par vault (couvre très larg
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
                  "drops": 0, "tape_drops": 0, "unclassified_snapshot_frames": 0,
+                 "l2_validation_rejections": 0, "l2_reject_reasons": {},
                  "dernier_exchange_ts": None}
 _CURRENT_ROTATION_VAULTS: tuple[str, ...] = ()
 _METAORDER_RUN_LOCK = threading.Lock()
+
+
+def _record_l2_validation_rejection(reason: str) -> None:
+    """Expose stable L2 reject codes in stdout and the collector heartbeat."""
+    code = str(reason or "L2_INVALID_UNKNOWN")[:80]
+    reasons = _HEARTBEAT_WS.setdefault("l2_reject_reasons", {})
+    count = int(reasons.get(code, 0)) + 1
+    reasons[code] = count
+    _HEARTBEAT_WS["l2_validation_rejections"] = int(
+        _HEARTBEAT_WS.get("l2_validation_rejections") or 0
+    ) + 1
+    if count == 1 or count % 100 == 0:
+        print(
+            f"[userfills] COPY_VAULT_L2_REJECT code={code} count={count} "
+            f"total={_HEARTBEAT_WS['l2_validation_rejections']}",
+            flush=True,
+        )
+
+
+def _strict_positive_timestamp_ms(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    try:
+        numeric = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        return None
+    if not numeric.is_finite() or numeric <= 0 or numeric != numeric.to_integral_value():
+        return None
+    if isinstance(value, float) and numeric > 2**53:
+        return None
+    return int(numeric)
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -525,18 +565,27 @@ def _depth_executable(rep: dict, mid: float, *, n: int = 5) -> float:
 
 
 def _full_levels(rep: dict) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
-    """Return every valid observed level; never extend the visible book."""
+    """Return every observed L2 level only when both source sides validate."""
 
     try:
-        raw_bids, raw_asks = rep["levels"][0], rep["levels"][1]
-        bids = [(float(row["px"]), float(row["sz"])) for row in raw_bids]
-        asks = [(float(row["px"]), float(row["sz"])) for row in raw_asks]
+        levels = rep["levels"]
+        if not isinstance(levels, list) or len(levels) != 2:
+            return [], []
+        raw_bids, raw_asks = levels
+        bid_pairs = [[row["px"], row["sz"]] for row in raw_bids]
+        ask_pairs = [[row["px"], row["sz"]] for row in raw_asks]
+        normalized, _reason = validate_l2_book_sides(
+            bid_pairs,
+            ask_pairs,
+            bid=bid_pairs[0][0] if bid_pairs else None,
+            ask=ask_pairs[0][0] if ask_pairs else None,
+        )
     except (KeyError, IndexError, TypeError, ValueError):
         return [], []
-    return (
-        [(px, sz) for px, sz in bids if px > 0 and sz > 0],
-        [(px, sz) for px, sz in asks if px > 0 and sz > 0],
-    )
+    if normalized is None:
+        return [], []
+    bids, asks = normalized
+    return [tuple(level) for level in bids], [tuple(level) for level in asks]
 
 
 def _append_copy_vault_book(
@@ -555,33 +604,74 @@ def _append_copy_vault_book(
 ) -> bool:
     """Persist one causal observed L2 sample for executable forward replay."""
 
-    symbol = str(coin or "").upper().strip()
-    try:
-        received = int(received_at_ms)
-        bid = float(resume["bid"])
-        ask = float(resume["ask"])
-        exchange_ts = int(resume["book_exchange_time"])
-        bids = [[float(row[0]), float(row[1])] for row in resume["bids5"][:5]]
-        asks = [[float(row[0]), float(row[1])] for row in resume["asks5"][:5]]
-    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
-        return False
-    allowed_sources = {
+    symbol = canonical_copy_vault_coin(coin)
+    if not symbol or source not in {
         "HYPERLIQUID_L2_WS",
         "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
-    }
-    if (
-        not symbol
-        or source not in allowed_sources
-        or received <= 0
-        or exchange_ts <= 0
-        or received < exchange_ts
-        or received - exchange_ts > COPY_VAULT_MAX_TARGET_LAG_MS
-        or bid <= 0
-        or ask <= bid
-        or not bids
-        or not asks
-        or any(px <= 0 or size <= 0 for px, size in bids + asks)
-    ):
+    }:
+        return False
+    try:
+        received = _strict_positive_timestamp_ms(received_at_ms)
+        exchange_ts = _strict_positive_timestamp_ms(resume["book_exchange_time"])
+        raw_bids, raw_asks = resume["bids5"], resume["asks5"]
+        bid, ask = resume["bid"], resume["ask"]
+    except (KeyError, IndexError, TypeError):
+        _record_l2_validation_rejection("L2_FIELDS_MISSING")
+        return False
+    if received is None or exchange_ts is None:
+        _record_l2_validation_rejection("L2_TIMESTAMP_INVALID")
+        return False
+    if received < exchange_ts or received - exchange_ts > COPY_VAULT_MAX_TARGET_LAG_MS:
+        _record_l2_validation_rejection("L2_TIMESTAMP_CAUSALITY_INVALID")
+        return False
+
+    def extract_levels(raw_side):
+        if not isinstance(raw_side, list) or not raw_side:
+            return None
+        pairs = []
+        row_width = None
+        for row in raw_side:
+            if not isinstance(row, (list, tuple)) or len(row) not in {2, 3}:
+                return None
+            if row_width is not None and len(row) != row_width:
+                return None
+            row_width = len(row)
+            if row_width == 3 and _strict_positive_timestamp_ms(row[2]) is None:
+                return None
+            pairs.append([row[0], row[1]])
+        return pairs
+
+    bid_pairs = extract_levels(raw_bids)
+    ask_pairs = extract_levels(raw_asks)
+    if bid_pairs is None or ask_pairs is None:
+        _record_l2_validation_rejection("L2_ORDER_COUNT_OR_LEVEL_INVALID")
+        return False
+    normalized, reason = validate_l2_book_sides(
+        bid_pairs, ask_pairs, bid=bid, ask=ask,
+    )
+    if normalized is None:
+        _record_l2_validation_rejection(reason or "L2_BOOK_INVALID")
+        return False
+    normalized_bids, normalized_asks = normalized
+    try:
+        bid, ask = float(bid), float(ask)
+        bids = [
+            [px, size]
+            for px, size in normalized_bids[:5]
+        ]
+        asks = [
+            [px, size]
+            for px, size in normalized_asks[:5]
+        ]
+        capacity_usd = min(
+            math.fsum(px * size for px, size in bids),
+            math.fsum(px * size for px, size in asks),
+        )
+    except (TypeError, ValueError, OverflowError):
+        _record_l2_validation_rejection("L2_CAPACITY_NONFINITE")
+        return False
+    if not math.isfinite(capacity_usd) or capacity_usd <= 0:
+        _record_l2_validation_rejection("L2_CAPACITY_NONFINITE")
         return False
     checkpoint_bound = any(
         value is not None
@@ -602,14 +692,9 @@ def _append_copy_vault_book(
         and received - previous < max(0, int(sample_interval_ms))
     ):
         return False
-    capacity_usd = min(
-        sum(px * size for px, size in bids),
-        sum(px * size for px, size in asks),
-    )
-    if capacity_usd <= 0:
-        return False
     row = {
         "schema_version": "hypersmart.copy_vault_l2.v1",
+        "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
         "coin": symbol,
         "received_at_ms": received,
         "exchange_ts_ms": exchange_ts,
@@ -635,7 +720,7 @@ def _append_copy_vault_book(
     path = Path(root) / COPY_VAULT_L2_TAPE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
     _COPY_VAULT_LAST_SAMPLE_MS[symbol] = max(int(previous or 0), received)
     return True
 
@@ -667,10 +752,16 @@ def _lecteur_l2_ondemand(coin: str, *, force_refresh: bool = False) -> dict | No
     if not p:
         _L2_CACHE[coin] = (now, None)
         return None
-    bid, ask, bsz, asz = p
+    bid, ask = p[:2]
     mid = 0.5 * (bid + ask)
-    depth = _depth_executable(rep, mid) or (min(bsz, asz) * mid)   # top-5 niveaux (secours : top tick)
     bids, asks = _full_levels(rep)
+    if not bids or not asks or not math.isfinite(mid) or mid <= 0:
+        _L2_CACHE[coin] = (now, None)
+        return None
+    depth = _depth_executable(rep, mid)
+    if not math.isfinite(depth) or depth <= 0:
+        _L2_CACHE[coin] = (now, None)
+        return None
     received_ts_ms = int(time.time() * 1_000)
     d = {
         "hl_bid": bid,
@@ -694,14 +785,14 @@ def _resume_from_info_checkpoint(info: dict | None) -> dict | None:
     if not info:
         return None
     try:
-        bid = float(info["hl_bid"])
-        ask = float(info["hl_ask"])
-        exchange_ts = int(info["exchange_ts_ms"])
-        bids = [[float(px), float(size), 1] for px, size in info["bids"][:5]]
-        asks = [[float(px), float(size), 1] for px, size in info["asks"][:5]]
+        bid = info["hl_bid"]
+        ask = info["hl_ask"]
+        exchange_ts = _strict_positive_timestamp_ms(info["exchange_ts_ms"])
+        bids = [[px, size] for px, size in info["bids"][:5]]
+        asks = [[px, size] for px, size in info["asks"][:5]]
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    if bid <= 0 or ask <= bid or not bids or not asks:
+    if exchange_ts is None or not bids or not asks:
         return None
     return {
         "bid": bid,
@@ -773,7 +864,7 @@ def _ecrire_book_live(
     received = int(received_ts_ms or time.time() * 1_000)
     try:
         snapshot = LiveL2Snapshot(
-            coin=str(coin).upper(),
+            coin=canonical_copy_vault_coin(coin),
             best_bid=float(bid),
             best_ask=float(ask),
             depth_usd=float(depth),
@@ -859,6 +950,9 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
                         coin, b = d.get("coin"), _parse_l2_ws(d)
                         if coin and b:
                             bids, asks = _full_levels(d)
+                            if not bids or not asks:
+                                _record_l2_validation_rejection("L2_BOOK_INVALID")
+                                continue
                             received_ts_ms = int(time.time() * 1_000)
                             raw_exchange_ts = d.get("time")
                             try:
@@ -1189,6 +1283,9 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
                 "l2_tape_queue_drops": int(
                     _HEARTBEAT_WS.get("tape_drops") or 0
                 ),
+                "l2_validation_rejections": int(
+                    _HEARTBEAT_WS.get("l2_validation_rejections") or 0
+                ),
                 "reconnects": int(_HEARTBEAT_WS["reconnects"]),
                 "stale": False,
             },
@@ -1276,7 +1373,6 @@ async def _metaorder_shadow_periodique(root: Path, *, intervalle_s: float = 600.
     userTwapSliceFills, métaordres cachés agrégés, stades FIRST/CONTINUATION/LATE/REVERSAL, PnL forward net
     après coûts, placebo, taille rel, maker/taker, âges). N'OUVRE AUCUNE POSITION ; ledger SÉPARÉ, jamais
     mélangé au PnL live. REST hors event-loop ; poids journalisé. 0 ordre, 0 clé, 0 signature."""
-    import sonde_confirmation_vaults as SD
     await asyncio.sleep(30.0)                                     # démarrage doux (laisse le live s'installer)
     while True:
         try:
@@ -1388,7 +1484,7 @@ _TAPE_FILLS = None                           # asyncio.Queue((fill, fill_recv_mo
 _TAPE_COINS_ACTIFS: dict = {}                # coin -> dernier fill_recv (ms wall) : fenêtre d'abonnement l2Book
 _TAPE_PREWARM_COINS: set[str] = set()        # coins réels récents suivis avant le prochain fill live
 _TAPE_ACTIVE_L2_SYMBOLS: set[str] = set()     # univers allMids reellement negociable au dernier refresh
-_TAPE_L2_CANONICAL: dict[str, str] = {}        # symbole normalise -> casse exacte exigee par le WS
+_TAPE_L2_CANONICAL: dict[str, str] = {}        # identité native exacte -> symbole exigé par le WS
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
@@ -1468,7 +1564,7 @@ def _copy_vault_prewarm_coins(
             try:
                 row = json.loads(line)
                 vault = str(row.get("vault") or "").lower()
-                coin = str(row.get("coin") or "").upper().strip()
+                coin = canonical_copy_vault_coin(row.get("coin"))
                 ts_ms = int(row.get("received_at_ms") or row.get("ts_ms") or 0)
             except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
                 continue
@@ -1517,15 +1613,15 @@ def _refresh_copy_vault_prewarm_once(
     if active_symbols is not None:
         if isinstance(active_symbols, dict):
             canonical = {
-                str(coin).upper().strip(): str(exact).strip()
+                canonical_copy_vault_coin(coin): canonical_copy_vault_coin(exact)
                 for coin, exact in active_symbols.items()
-                if str(coin).strip() and str(exact).strip()
+                if canonical_copy_vault_coin(coin) and canonical_copy_vault_coin(exact)
             }
         else:
             canonical = {
-                str(coin).upper().strip(): str(coin).strip()
+                canonical_copy_vault_coin(coin): canonical_copy_vault_coin(coin)
                 for coin in active_symbols
-                if str(coin).strip()
+                if canonical_copy_vault_coin(coin)
             }
         active = set(canonical)
         filtered_inactive = selected - active
@@ -1618,7 +1714,7 @@ def _new_metaorder_checkpoints(fill: dict, *, recv_mono_ms: float, metaorder_id:
     """Build reference/entry checkpoints from one live first slice."""
 
     try:
-        coin = str(fill["coin"]).upper().strip()
+        coin = canonical_copy_vault_coin(fill["coin"])
         recv_wall_ms = int(fill["received_at_ms"])
     except (KeyError, TypeError, ValueError, OverflowError):
         return []
@@ -1698,7 +1794,7 @@ def _active_l2_symbols(
     if not isinstance(mids, dict):
         return {}
     return {
-        str(coin).upper().strip(): str(coin).strip()
+        canonical_copy_vault_coin(coin): canonical_copy_vault_coin(coin)
         for coin, mid in mids.items()
         if str(coin).strip() and _positive_float(mid) is not None
     }
@@ -1729,7 +1825,7 @@ def _copy_vault_checkpoint_metaorder(
         return None, "REJECTED"
     try:
         vault = str(fill["vault"]).lower()
-        coin = str(fill["coin"]).upper()
+        coin = canonical_copy_vault_coin(fill["coin"])
         direction = int(fill.get("signe") or fill.get("sens") or 0)
         fill_ts_ms = int(fill["ts_ms"])
         signal_ts_ms = int(fill["received_at_ms"])
@@ -1795,7 +1891,7 @@ async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
         return {"status": "NOT_DUE"}
     if now_mono - target_mono > COPY_VAULT_MAX_TARGET_LAG_MS:
         return {"status": "EXPIRED"}
-    coin = str(checkpoint["coin"]).upper()
+    coin = canonical_copy_vault_coin(checkpoint["coin"])
     ws_event = _first_ws_checkpoint(
         _TAPE_BUFFER.get(coin, []),
         target_mono_ms=target_mono,
@@ -1886,10 +1982,21 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                     except ValueError:
                         continue
                     if isinstance(msg, dict) and msg.get("channel") == "l2Book":
-                        d = msg.get("data") or {}
-                        coin = str(d.get("coin") or "").upper()
-                        r = T.resume_book(d)
-                        if coin and r:
+                        d = msg.get("data")
+                        if not isinstance(d, dict):
+                            _record_l2_validation_rejection("L2_PAYLOAD_INVALID")
+                            continue
+                        coin = canonical_copy_vault_coin(d.get("coin"))
+                        r, reject_reason = T.resume_book_checked(d)
+                        if r is None:
+                            _record_l2_validation_rejection(
+                                reject_reason or "L2_BOOK_INVALID"
+                            )
+                            continue
+                        if not coin:
+                            _record_l2_validation_rejection("L2_COIN_IDENTITY_INVALID")
+                            continue
+                        if coin:
                             recv_wall_ms = int(time.time() * 1000)
                             buf = _TAPE_BUFFER.setdefault(coin, [])
                             buf.append({
@@ -1925,7 +2032,7 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
         try:
             while _TAPE_FILLS is not None and not _TAPE_FILLS.empty():
                 f, frm = _TAPE_FILLS.get_nowait()
-                _TAPE_COINS_ACTIFS[str(f.get("coin") or "").upper()] = time.time() * 1000   # abonne dès ce fill
+                _TAPE_COINS_ACTIFS[canonical_copy_vault_coin(f.get("coin"))] = time.time() * 1000   # abonne dès ce fill
                 en_attente.append({"fill": f, "frm": float(frm), "due": time.monotonic() * 1000 + post_window_ms})
             mono = time.monotonic() * 1000
             lignes: list = []
@@ -1934,7 +2041,7 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 if mono < it["due"]:
                     reste.append(it)
                     continue
-                buf = _TAPE_BUFFER.get(str(it["fill"].get("coin") or "").upper(), [])
+                buf = _TAPE_BUFFER.get(canonical_copy_vault_coin(it["fill"].get("coin")), [])
                 pre = T.etat_pre(buf, it["frm"])
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
@@ -1950,7 +2057,7 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 if mono < ex["due"]:
                     reste_ex.append(ex)
                     continue
-                buf = _TAPE_BUFFER.get(str(ex["fill"].get("coin") or "").upper(), [])
+                buf = _TAPE_BUFFER.get(canonical_copy_vault_coin(ex["fill"].get("coin")), [])
                 sortie = T.etat_entree(buf, ex["frm"] + horizon_ms, None)   # 1er carnet ≥ +horizon
                 if sortie:
                     lignes.append(T.ligne_sortie(ex["fill"], sortie=sortie, capture_recv_mono=sortie["recv_mono"],
@@ -1987,6 +2094,7 @@ async def _boucle(root: Path) -> None:
     _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
     _HEARTBEAT_WS.update({"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
                           "drops": 0, "tape_drops": 0,
+                          "l2_validation_rejections": 0, "l2_reject_reasons": {},
                           "dernier_exchange_ts": None})
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)

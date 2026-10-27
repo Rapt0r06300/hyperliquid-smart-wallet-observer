@@ -176,7 +176,7 @@ class PaperSimConnector:
         fill = PaperSimFill(
             fill_id=_fill_id(intent.strategy_id, intent.coin, intent.action.value, observed_at_ms, exec_result),
             strategy_id=intent.strategy_id,
-            coin=str(intent.coin).upper(),
+            coin=str(intent.coin).strip(),
             side=side,
             action=intent.action.value,
             notional_usdt=round(float(exec_result.notional_usdc), 8),

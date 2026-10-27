@@ -125,3 +125,15 @@ def test_empty_session_is_no_data():
     r = run_v9_paper_session([], now_ms=NOW)
     assert r.entries_opened == 0 and r.equity_usdt == r.starting_equity_usdt == 200.0
     assert r.supply_report.bottleneck == "NO_DATA"
+
+
+def test_v9_keeps_case_distinct_instruments_in_separate_positions():
+    fills = [
+        _fill(coin="kPEPE", action_type="OPEN_LONG", fill_ts_ms=NOW - 2_000),
+        _fill(coin="KPEPE", action_type="OPEN_LONG", fill_ts_ms=NOW - 1_000),
+    ]
+
+    result = run_v9_paper_session(fills, now_ms=NOW)
+
+    assert result.entries_opened == 2
+    assert {position.coin for position in result.open_positions.values()} == {"kPEPE", "KPEPE"}

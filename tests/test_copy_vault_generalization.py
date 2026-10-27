@@ -5,7 +5,9 @@ from hl_observer.backtesting.copy_vault_generalization import (
 )
 
 
-def _trade(vault: str, ts: int, net: float, suffix: str) -> dict:
+def _trade(
+    vault: str, ts: int, net: float, suffix: str, *, coin: str = "BTC", direction: int = 1
+) -> dict:
     return {
         "vault": vault,
         "signal_ts_ms": ts,
@@ -13,6 +15,8 @@ def _trade(vault: str, ts: int, net: float, suffix: str) -> dict:
         "notional_usd": 100.0,
         "trade_id": suffix * 64,
         "liquidatable_net": True,
+        "coin": coin,
+        "direction": direction,
     }
 
 
@@ -57,3 +61,16 @@ def test_generalisation_agrege_economie_nette_par_vault_et_ids() -> None:
 
 def test_generalisation_refuse_frontiere_oos_absente() -> None:
     assert derive_heldout_vault_generalization([], oos_start_ms=None) is None
+
+
+def test_generalisation_ne_confond_pas_les_symboles_native_case_sensitive():
+    proof = derive_heldout_vault_generalization(
+        [
+            _trade("A", 300, 1.0, "a", coin="kPEPE", direction=1),
+            _trade("B", 301, 1.0, "b", coin="KPEPE", direction=-1),
+        ],
+        oos_start_ms=200,
+    )
+
+    assert proof is not None
+    assert proof["vault_conflict_pairs"] == 0

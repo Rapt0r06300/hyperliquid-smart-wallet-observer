@@ -19,7 +19,15 @@ import os
 from pathlib import Path
 
 PAQUET = "hl_observer"
-MAITRES = ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd", "CREER_ARCHIVE_PORTABLE.cmd")
+MAITRES = (
+    "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+    "LANCER_HYPERSMART.cmd",
+    "POUSSER-GITHUB-FORCE.cmd",
+    "ALINA_SYNC_COMPLETE.cmd",
+    "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd",
+    "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd",
+)
 # Fichiers/dossiers socle qui DOIVENT etre dans toute release (au-dela des .py importes).
 SOCLE = ("pyproject.toml", "requirements-portable.txt")
 EXT_CONFIG = (".yaml", ".yml", ".json", ".toml", ".ini", ".cfg")

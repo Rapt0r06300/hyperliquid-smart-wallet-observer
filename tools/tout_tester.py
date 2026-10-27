@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
-RECAP = RACINE / "RECAP-COMPLET.md"
+RECAP = RACINE / "runtime" / "reports" / "legacy" / "RECAP-COMPLET.md"
 
 #: budgets par étape (s) — un test qui pend ne doit jamais manger la soirée
 BUDGETS = {"securite": 300, "tests": 3600, "invariants": 900, "cablage": 900, "donnees": 900,

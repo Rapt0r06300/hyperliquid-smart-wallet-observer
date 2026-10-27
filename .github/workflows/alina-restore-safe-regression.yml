@@ -533,8 +533,8 @@ jobs:
             tools
             tests
             POUSSER-GITHUB-FORCE.cmd
-            POUSSER_TOUT_LE_TRAVAIL.cmd
-            REPARER_ET_POUSSER.cmd
+            tools/launchers/POUSSER_TOUT_LE_TRAVAIL.cmd
+            tools/launchers/REPARER_ET_POUSSER.cmd
             ALINA_SYNC_COMPLETE.cmd
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -595,8 +595,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $root = Join-Path $env:RUNNER_TEMP "Alina restore path with spaces"
-          New-Item -ItemType Directory -Force (Join-Path $root "tools") | Out-Null
-          foreach ($name in @("Alina-restore.cmd", "RESTORE_ALINA.cmd")) {
+          New-Item -ItemType Directory -Force (Join-Path $root "tools/launchers") | Out-Null
+          foreach ($name in @("tools/launchers/Alina-restore.cmd", "tools/launchers/RESTORE_ALINA.cmd")) {
             Copy-Item -LiteralPath $name -Destination (Join-Path $root $name)
           }
           foreach ($name in @("restore_alina.py", "partitioned_data_index.py")) {
@@ -608,12 +608,12 @@ jobs:
             # exit into a terminating exception before we can inspect it.
             $PSNativeCommandUseErrorActionPreference = $false
             $ErrorActionPreference = "Continue"
-            & .\Alina-restore.cmd --help
+            & .\tools\launchers\Alina-restore.cmd --help
             $helpCode = $LASTEXITCODE
             Write-Host "RESTORE_WINDOWS_HELP_EXIT=$helpCode"
             if ($helpCode -ne 0) { throw "CMD alias help failed with $helpCode" }
             # Parse rejection runs before any GitHub API call or data modification.
-            & .\Alina-restore.cmd --definitely-invalid-restore-option 2>&1
+            & .\tools\launchers\Alina-restore.cmd --definitely-invalid-restore-option 2>&1
             $exitCode = $LASTEXITCODE
             Write-Host "RESTORE_WINDOWS_INVALID_ARG_EXIT=$exitCode"
             if ($exitCode -ne 2) { throw "CMD alias did not propagate Python exit 2: $exitCode" }

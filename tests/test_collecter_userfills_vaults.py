@@ -8,6 +8,8 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -237,9 +239,156 @@ def test_tape_copy_vault_persiste_un_l2_causal_et_echantillonne(tmp_path, monkey
         for line in (tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8").splitlines()
     ]
     assert len(rows) == 2
+    assert rows[0]["coin"] == "btc"
     assert rows[0]["source"] == "HYPERLIQUID_L2_WS"
     assert rows[0]["causal_observation"] is True
     assert rows[0]["capacity_usd"] == min(99 * 2 + 98, 101 * 3 + 102)
+
+
+def test_resume_l2_valide_puis_append_copy_vault_end_to_end(tmp_path, monkeypatch):
+    from hl_observer.experimental import metaorder_l2_tape as l2_tape
+
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    monkeypatch.setattr(
+        C,
+        "_HEARTBEAT_WS",
+        {"l2_validation_rejections": 0, "l2_reject_reasons": {}},
+    )
+    raw = {
+        "time": 1_000,
+        "levels": [
+            [{"px": "99", "sz": "2", "n": 1}, {"px": "98", "sz": "1", "n": 2}],
+            [{"px": "101", "sz": "3", "n": 1}, {"px": "102", "sz": "1", "n": 2}],
+        ],
+    }
+    resume, reason = l2_tape.resume_book_checked(raw)
+    assert reason is None and resume is not None
+    assert C._append_copy_vault_book(
+        tmp_path, "BTC", resume, received_at_ms=1_010,
+    ) is True
+    saved = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert saved["bids5"] == [[99.0, 2.0], [98.0, 1.0]]
+    assert saved["capacity_usd"] == 296.0
+
+    raw["levels"][0][0]["px"] = "NaN"
+    invalid_resume, reject_reason = l2_tape.resume_book_checked(raw)
+    assert invalid_resume is None and reject_reason == "L2_BBO_INVALID"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda resume: resume["bids5"][0].__setitem__(0, float("nan")),
+        lambda resume: resume["asks5"][0].__setitem__(1, float("inf")),
+        lambda resume: resume["bids5"].reverse(),
+        lambda resume: resume["asks5"].insert(1, list(resume["asks5"][0])),
+        lambda resume: resume.update(book_exchange_time=float("inf")),
+        lambda resume: resume["bids5"][0].__setitem__(2, -1),
+    ],
+)
+def test_tape_copy_vault_refuse_un_l2_invalide_sans_ecriture(tmp_path, monkeypatch, mutate):
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    monkeypatch.setattr(
+        C,
+        "_HEARTBEAT_WS",
+        {"l2_validation_rejections": 0, "l2_reject_reasons": {}},
+    )
+    resume = {
+        "bid": 99.0,
+        "ask": 101.0,
+        "book_exchange_time": 1_000,
+        "bids5": [[99.0, 2.0, 1], [98.0, 1.0, 1]],
+        "asks5": [[101.0, 3.0, 1], [102.0, 1.0, 1]],
+    }
+    mutate(resume)
+
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=1_010,
+    ) is False
+    assert not (tmp_path / C.COPY_VAULT_L2_TAPE).exists()
+    assert C._HEARTBEAT_WS["l2_validation_rejections"] == 1
+    assert len(C._HEARTBEAT_WS["l2_reject_reasons"]) == 1
+
+
+def test_tape_copy_vault_refuse_bbo_non_lie_au_meilleur_l2(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    resume = {
+        "bid": 98.9,
+        "ask": 101.0,
+        "book_exchange_time": 1_000,
+        "bids5": [[99.0, 2.0, 1], [98.0, 1.0, 1]],
+        "asks5": [[101.0, 3.0, 1], [102.0, 1.0, 1]],
+    }
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=1_010,
+    ) is False
+    assert not (tmp_path / C.COPY_VAULT_L2_TAPE).exists()
+
+
+def test_tape_copy_vault_refuse_overflow_capacite(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    resume = {
+        "bid": 1e308,
+        "ask": 1.0000000000000002e308,
+        "book_exchange_time": 1_000,
+        "bids5": [[1e308, 1e308, 1]],
+        "asks5": [[1.0000000000000002e308, 1e308, 1]],
+    }
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=1_010,
+    ) is False
+    assert not (tmp_path / C.COPY_VAULT_L2_TAPE).exists()
+
+
+def test_fallback_info_conserve_labsence_du_nombre_ordres_sans_linventer(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    info = {
+        "hl_bid": 99.0,
+        "hl_ask": 101.0,
+        "exchange_ts_ms": 1_000,
+        "bids": [(99.0, 2.0), (98.0, 1.0)],
+        "asks": [(101.0, 3.0), (102.0, 1.0)],
+    }
+    resume = C._resume_from_info_checkpoint(info)
+
+    assert resume["bids5"] == [[99.0, 2.0], [98.0, 1.0]]
+    assert C._append_copy_vault_book(
+        tmp_path, "btc", resume, received_at_ms=1_010,
+        source="HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+    ) is True
+
+
+def test_full_levels_rejette_le_book_entier_si_un_niveau_est_invalide():
+    valid = {
+        "levels": [
+            [{"px": "99", "sz": "2"}, {"px": "98", "sz": "1"}],
+            [{"px": "101", "sz": "3"}, {"px": "102", "sz": "1"}],
+        ],
+    }
+    invalid = {
+        "levels": [
+            [{"px": "99", "sz": "2"}, {"px": "99.5", "sz": "1"}],
+            [{"px": "101", "sz": "3"}],
+        ],
+    }
+
+    assert C._full_levels(valid) == ([(99.0, 2.0), (98.0, 1.0)], [(101.0, 3.0), (102.0, 1.0)])
+    assert C._full_levels(invalid) == ([], [])
+
+
+def test_lecteur_l2_ondemand_refuse_un_book_invalide_sans_secours_top_tick(monkeypatch):
+    response = {
+        "time": 1_000,
+        "levels": [
+            [{"px": "99", "sz": "2"}, {"px": "99.5", "sz": "1"}],
+            [{"px": "101", "sz": "3"}],
+        ],
+    }
+    monkeypatch.setattr(C, "_L2_CACHE", {})
+    monkeypatch.setattr(C, "_L2_POST", lambda *_args, **_kwargs: response)
+    monkeypatch.setattr(C, "_L2_PARSE", lambda _rep: (99.0, 101.0, 2.0, 3.0))
+
+    assert C._lecteur_l2_ondemand("BTC", force_refresh=True) is None
 
 
 def test_copy_vault_prewarm_restreint_aux_wallets_suivis_et_aux_coins_recents(tmp_path):
@@ -379,7 +528,7 @@ def test_univers_l2_preserve_la_casse_canonique_allmids(tmp_path):
         },
     )
 
-    assert symbols == {"BTC": "BTC", "KBONK": "kBONK"}
+    assert symbols == {"BTC": "BTC", "kBONK": "kBONK"}
     assert calls == [True]
 
 
@@ -399,7 +548,7 @@ def test_prewarm_l2_exclut_un_symbole_historique_retire(tmp_path, monkeypatch):
     (data / "vault_fills_live.jsonl").write_text(
         "\n".join(
             json.dumps({"vault": "0xFOLLOW", "coin": coin, "ts_ms": now_ms})
-            for coin in ("BTC", "KBONK")
+            for coin in ("BTC", "kBONK")
         ) + "\n",
         encoding="utf-8",
     )
@@ -416,21 +565,46 @@ def test_prewarm_l2_exclut_un_symbole_historique_retire(tmp_path, monkeypatch):
     )
 
     assert C._TAPE_PREWARM_COINS == {"BTC"}
-    assert result["filtered_inactive"] == ["KBONK"]
+    assert result["filtered_inactive"] == ["kBONK"]
 
 
 def test_cibles_l2_intersectent_toujours_lunivers_actif(monkeypatch):
     now_ms = 40_000_000
-    monkeypatch.setattr(C, "_TAPE_PREWARM_COINS", {"BTC", "KBONK", "DELISTED"})
+    monkeypatch.setattr(C, "_TAPE_PREWARM_COINS", {"BTC", "kBONK", "DELISTED"})
     monkeypatch.setattr(C, "_TAPE_COINS_ACTIFS", {"SOL": now_ms - 1_000})
-    monkeypatch.setattr(C, "_TAPE_ACTIVE_L2_SYMBOLS", {"BTC", "SOL", "KBONK"})
+    monkeypatch.setattr(C, "_TAPE_ACTIVE_L2_SYMBOLS", {"BTC", "SOL", "kBONK"})
     monkeypatch.setattr(
         C,
         "_TAPE_L2_CANONICAL",
-        {"BTC": "BTC", "SOL": "SOL", "KBONK": "kBONK"},
+        {"BTC": "BTC", "SOL": "SOL", "kBONK": "kBONK"},
     )
 
     assert C._tape_l2_targets(now_ms) == {"BTC", "SOL", "kBONK"}
+
+
+def test_checkpoint_metaorder_preserves_native_coin_identity() -> None:
+    live_fill = _live_open_fill(
+        received_at_ms=10_100,
+        ts_ms=10_000,
+        start_position=0.0,
+    )
+    live_fill["coin"] = "kPEPE"
+
+    live_id, stage = C._copy_vault_checkpoint_metaorder({}, live_fill)
+    event_id = C.canonical_fill_id(live_fill)
+    replay_metaorders = cluster_metaorders([{
+        **live_fill,
+        "event_id": event_id,
+        "direction": 1,
+        "action": "OPEN",
+        "observed_at_ms": 10_100,
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+    }])[0]
+
+    assert stage == "FIRST_SLICE"
+    assert replay_metaorders[0]["coin"] == "kPEPE"
+    assert live_id == replay_metaorders[0]["metaorder_id"]
 
 
 def test_collecteur_lance_le_refresh_periodique_du_prewarm():
@@ -535,6 +709,7 @@ def test_checkpoint_prefere_un_book_ws_reel_sans_appel_rest(tmp_path, monkeypatc
     assert row["checkpoint_id"] == "mo-ws:REFERENCE"
     assert row["metaorder_id"] == "mo-ws"
     assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
+    assert row["instrument_identity_schema"] == C.INSTRUMENT_IDENTITY_SCHEMA
 
 
 def test_checkpoint_ws_refuse_retombe_sur_info_public(tmp_path, monkeypatch):
@@ -570,6 +745,7 @@ def test_checkpoint_ws_refuse_retombe_sur_info_public(tmp_path, monkeypatch):
     assert row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
     assert row["metaorder_id"] == "mo-fallback"
     assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
+    assert row["instrument_identity_schema"] == C.INSTRUMENT_IDENTITY_SCHEMA
 
 
 def test_checkpoint_info_public_persiste_provenance_causale(tmp_path, monkeypatch):
@@ -597,6 +773,7 @@ def test_checkpoint_info_public_persiste_provenance_causale(tmp_path, monkeypatc
     assert row["checkpoint_target_ms"] == now_wall - 100
     assert row["metaorder_id"] == "mo-info"
     assert row["collector_protocol"] == C.CHECKPOINT_COLLECTOR_PROTOCOL
+    assert row["instrument_identity_schema"] == C.INSTRUMENT_IDENTITY_SCHEMA
     assert row["data_origin"] == "REAL_OBSERVED"
 
 

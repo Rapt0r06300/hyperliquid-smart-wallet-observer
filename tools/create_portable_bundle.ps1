@@ -163,19 +163,14 @@ $includeFiles = @(
     "AGENTS.md",
     "CLAUDE.md",
     "LANCER_HYPERSMART.cmd",
-    "MEGATEST.md",
     "OBJECTIF.md",
-    "PORTFOLIO.md",
-    "PORTFOLIO_EN.md",
     "pyproject.toml",
     "README.md",
-    "RECAP-COMPLET.md",
     "requirements.txt",
     "requirements-portable.txt",
     "requirements-recherche.txt",
     "ruff.toml",
-    "mypy.ini",
-    "TASKLIST.md"
+    "mypy.ini"
 )
 
 try {

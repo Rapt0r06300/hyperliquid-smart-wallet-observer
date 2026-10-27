@@ -28,7 +28,7 @@ class EdgeNetInputs:
     latency_decay_bps: float = 0.0
     copy_degradation_bps: float = 0.0
     funding_cost_bps: float = 0.0
-    # 🔴 L'IMPACT DE MARCHE (idee `impact` de moisson-fini.md) : notre propre ordre bouge le prix
+    # 🔴 L'IMPACT DE MARCHE (idee `impact` de docs/archive/root-history/moisson-fini.md) : notre propre ordre bouge le prix
     #    contre nous. C'est un COUT -> il se SOUSTRAIT, exactement comme les frais. Calcule par
     #    hl_observer.market.market_impact.impact_bps(taille, profondeur). Defaut 0.0 = retro-compat.
     impact_cost_bps: float = 0.0

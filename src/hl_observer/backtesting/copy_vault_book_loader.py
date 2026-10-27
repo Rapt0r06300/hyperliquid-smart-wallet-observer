@@ -13,17 +13,18 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import (
+    CHECKPOINT_COLLECTOR_PROTOCOL,
+    CHECKPOINT_WRITER_STATE_SCHEMA,
+    INSTRUMENT_IDENTITY_SCHEMA,
+    canonical_copy_vault_coin,
+)
 from hl_observer.normalization.l2_book import validate_l2_book_sides
 
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
 # Regression tests assert equality with the canonical protocol constants.
 MAX_TARGET_LAG_MS = 30_000
-CHECKPOINT_COLLECTOR_PROTOCOL = (
-    "copy_vault_checkpoint_companion_v2_for_"
-    "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
-)
-CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v2"
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
 
@@ -90,6 +91,7 @@ def load_observed_books(
         isinstance(checkpoint_state, dict)
         and checkpoint_state.get("schema_version") == CHECKPOINT_WRITER_STATE_SCHEMA
         and checkpoint_state.get("protocol") == CHECKPOINT_COLLECTOR_PROTOCOL
+        and checkpoint_state.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
         and checkpoint_state.get("paper_read_only") is True
         and checkpoint_state.get("real_execution") is False
         and writer_run_id
@@ -97,7 +99,7 @@ def load_observed_books(
         and output_start_offset >= 0
         and collector_gap_count == 0
     )
-    wanted = {str(coin).upper() for coin in coins} if coins is not None else None
+    wanted = {canonical_copy_vault_coin(coin) for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
     invalid = 0
     rows_read = 0
@@ -123,6 +125,8 @@ def load_observed_books(
         source: str, source_line: int, causal_observation: bool,
         bids5: list[list[float]] | None = None,
         asks5: list[list[float]] | None = None,
+        connection_id: str | None = None,
+        l2_gap_epoch: int | None = None,
         metaorder_id: str | None = None,
         checkpoint_stage: str | None = None,
         checkpoint_id: str | None = None,
@@ -164,6 +168,10 @@ def load_observed_books(
         if bids5 is not None and asks5 is not None:
             row["bids5"] = bids5
             row["asks5"] = asks5
+        if connection_id is not None:
+            row["connection_id"] = connection_id
+        if l2_gap_epoch is not None:
+            row["l2_gap_epoch"] = l2_gap_epoch
         if checkpoint_id:
             row.update({
                 "metaorder_id": metaorder_id,
@@ -188,7 +196,7 @@ def load_observed_books(
                 rows_read += 1
                 try:
                     raw = json.loads(line)
-                    coin = str(raw.get("coin") or "").upper()
+                    coin = canonical_copy_vault_coin(raw.get("coin"))
                     if wanted is not None and coin not in wanted:
                         continue
                     if any(
@@ -217,7 +225,7 @@ def load_observed_books(
             for line in handle:
                 try:
                     raw = json.loads(line)
-                    coin = str(raw.get("coin") or "").upper()
+                    coin = canonical_copy_vault_coin(raw.get("coin"))
                     if wanted is not None and coin not in wanted:
                         continue
                     checkpoint_id = str(raw.get("checkpoint_id") or "").strip()
@@ -244,6 +252,7 @@ def load_observed_books(
                     )
                     if not (
                         collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
+                        and raw.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
                         and metaorder_id
                         and checkpoint_stage
                         and checkpoint_target_ms > 0
@@ -313,7 +322,7 @@ def load_observed_books(
                 rows_read += 1
                 try:
                     raw = json.loads(line)
-                    coin = str(raw.get("coin") or "").upper()
+                    coin = canonical_copy_vault_coin(raw.get("coin"))
                     if wanted is not None and coin not in wanted:
                         continue
                     received = int(raw["received_at_ms"])
@@ -337,6 +346,8 @@ def load_observed_books(
                     checkpoint_target_ms = (
                         int(raw["checkpoint_target_ms"]) if is_checkpoint else None
                     )
+                    connection_id = raw.get("connection_id")
+                    l2_gap_epoch = raw.get("l2_gap_epoch")
                     if any(
                         isinstance(raw.get(name), bool)
                         for name in (
@@ -346,10 +357,21 @@ def load_observed_books(
                     ):
                         invalid += 1
                         continue
+                    if connection_id is not None and (
+                        not isinstance(connection_id, str) or not connection_id.strip()
+                    ):
+                        invalid += 1
+                        continue
+                    if l2_gap_epoch is not None and (
+                        type(l2_gap_epoch) is not int or l2_gap_epoch < 0
+                    ):
+                        invalid += 1
+                        continue
                     checkpoint_binding_valid = (
                         not is_checkpoint
                         or (
                             collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
+                            and raw.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
                             and bool(metaorder_id)
                             and bool(checkpoint_stage)
                             and bool(checkpoint_id)
@@ -395,6 +417,8 @@ def load_observed_books(
                         causal_observation=True,
                         bids5=bids5,
                         asks5=asks5,
+                        connection_id=connection_id,
+                        l2_gap_epoch=l2_gap_epoch,
                         metaorder_id=metaorder_id,
                         checkpoint_stage=checkpoint_stage,
                         checkpoint_id=checkpoint_id,

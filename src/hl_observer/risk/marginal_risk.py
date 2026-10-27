@@ -4,6 +4,8 @@ existent déjà : ici on ajoute le NETTING et la CAPACITÉ, qui manquaient.)
 """
 from __future__ import annotations
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 def exposition_nette(positions_par_strategie: dict) -> dict:
     """#34 : exposition NETTE par coin en sommant les stratégies (carry long HYPE + liquidation
@@ -12,7 +14,8 @@ def exposition_nette(positions_par_strategie: dict) -> dict:
     for _strat, positions in (positions_par_strategie or {}).items():
         for coin, notl in (positions or {}).items():
             if isinstance(notl, (int, float)):
-                net[str(coin).upper()] = round(net.get(str(coin).upper(), 0.0) + float(notl), 6)
+                key = preserve_native_instrument_symbol(coin)
+                net[key] = round(net.get(key, 0.0) + float(notl), 6)
     return net
 
 

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 # explicit statuses for the signal shape
 STATUS_OK = "OK"
 STATUS_STALE = "STALE"
@@ -81,7 +83,7 @@ def describe_signal(
     else:
         status = STATUS_OK
     return SignalShape(
-        coin=str(coin or "").upper(),
+        coin=preserve_native_instrument_symbol(coin),
         action=str(action or "").upper(),
         edge_bps=round(float(edge_bps), 6),
         spread_bps=round(float(spread_bps), 6),
@@ -127,14 +129,14 @@ class EntryCooldownTracker:
         self._by_coin: dict[str, list[float]] = {}
 
     def register_entry(self, coin: str, now_sec: float) -> None:
-        key = str(coin or "").upper()
+        key = preserve_native_instrument_symbol(coin)
         self._by_coin.setdefault(key, []).append(float(now_sec))
         # keep only the window to bound memory
         cutoff = now_sec - self._cfg.window_sec
         self._by_coin[key] = [t for t in self._by_coin[key] if t >= cutoff]
 
     def check(self, coin: str, now_sec: float) -> EligibilityResult:
-        key = str(coin or "").upper()
+        key = preserve_native_instrument_symbol(coin)
         return check_entry_eligibility(
             coin=key,
             now_sec=now_sec,

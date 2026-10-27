@@ -1,4 +1,4 @@
-"""AUDIT MAXIMAL DU PROJET -> genere `resultat-audit.md` a la racine.
+"""AUDIT MAXIMAL DU PROJET -> genere un rapport sous `runtime/reports/legacy/`.
 
 Lance par `ci_local.cmd` (racine). 100% LECTURE SEULE / PAPER : aucun ordre reel possible.
 Le rapport est fait pour etre COLLE TEL QUEL a Claude.
@@ -36,7 +36,7 @@ SRC = ROOT / "src"
 for _p in (str(SRC), str(ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
-REPORT = ROOT / "resultat-audit.md"
+REPORT = ROOT / "runtime" / "reports" / "legacy" / "resultat-audit.md"
 MAX_TB_LINES = 500
 MAX_ITEMS = 60
 FAST = "--fast" in sys.argv          # saute la 2e passe (tests flaky)
@@ -1606,7 +1606,7 @@ def c_gitignore():
     c = Check("Le .gitignore protege-t-il les donnees lourdes ?", blocking=False)
     gi = (ROOT / ".gitignore")
     txt = gi.read_text(encoding="utf-8", errors="replace") if gi.is_file() else ""
-    need = ["runtime/", "logs/", ".coverage", "resultat-audit.md", "__pycache__"]
+    need = ["runtime/", "logs/", ".coverage", "runtime/reports/legacy/resultat-audit.md", "__pycache__"]
     missing = [n for n in need if n not in txt]
     return c.finish(f"{len(missing)} motif(s) manquant(s)", [],
                     [f"{m} : absent du .gitignore (risque de versionner du lourd)" for m in missing])
@@ -2855,7 +2855,7 @@ def build_report() -> str:
 
     L += ["## Securite", "",
           "0 ordre reel - 0 argent reel - 0 cle privee - 0 signature - 0 depot/retrait.",
-          "Cet audit est en LECTURE SEULE : le seul fichier ecrit est `resultat-audit.md`.", ""]
+          "Cet audit est en LECTURE SEULE : son rapport est sous `runtime/reports/legacy/`.", ""]
     return "\n".join(L) + "\n"
 
 
@@ -2863,6 +2863,7 @@ def write_report():
     """Ecrit le rapport. Appele APRES CHAQUE CONTROLE -> le fichier existe toujours,
     meme si tu fermes la fenetre ou si ca crashe."""
     try:
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
         tmp = str(REPORT) + ".tmp"
         io.open(tmp, "w", encoding="utf-8").write(build_report())
         os.replace(tmp, REPORT)                       # ecriture atomique : jamais de fichier tronque
@@ -3276,7 +3277,7 @@ def main():
     print(_cadre(f"{len(plan)} controles.   Duree estimee : ~{_fmt_duree(total_est)}"))
     print(_cadre(sep="-"))
     print(_cadre("Le rapport est REECRIT APRES CHAQUE CONTROLE."))
-    print(_cadre("Meme si tu fermes la fenetre, resultat-audit.md sera la."))
+    print(_cadre("Meme si tu fermes la fenetre, le rapport runtime reste disponible."))
     print(_cadre(sep="="))
     print(flush=True)
 
@@ -3358,11 +3359,11 @@ def main():
         for c in blocking_ko[:8]:
             print(_cadre(f"   - {c.title}"))
     print(_cadre(sep="-"))
-    print(_cadre("RAPPORT : resultat-audit.md  (a la racine du projet)"))
+    print(_cadre("RAPPORT : runtime/reports/legacy/resultat-audit.md"))
     print(_cadre(sep="="))
     print()
     if blocking_ko or nonblock_ko or warns:
-        print("   >>> Envoie `resultat-audit.md` a Claude : il contient TOUT le detail.")
+        print("   >>> Rapport complet : runtime/reports/legacy/resultat-audit.md")
     else:
         print("   >>> TOUT EST VERT.")
     print(flush=True)

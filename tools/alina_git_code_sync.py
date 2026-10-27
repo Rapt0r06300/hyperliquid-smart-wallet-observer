@@ -48,7 +48,12 @@ SENSITIVE_PARTS = {
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
-GIT_SYNC_ENGINE_BUILD = "2026-10-26-status-inventory-v2"
+GIT_SYNC_ENGINE_BUILD = "2026-10-27-exact-archive-relocation-v1"
+# A single historical registry was moved out of the repository root. It is
+# publishable only as an exact byte-for-byte relocation of its current HEAD blob.
+SAFE_HISTORICAL_RELOCATIONS = {
+    "CLAUDE_TASKS.jsonl": "docs/archive/root-history/CLAUDE_TASKS.jsonl",
+}
 
 
 class SyncBlocked(RuntimeError):
@@ -256,6 +261,7 @@ class Synchronizer:
             "merge_commits_created": 0,
             "push_attempts": 0,
             "local_syntax_check": "NOT_RUN",
+            "verified_historical_relocations": [],
             "git_commands": [],
         }
 
@@ -396,6 +402,137 @@ class Synchronizer:
         )
         return staged, tracked, untracked
 
+    def _historical_head_blob(self, source: str) -> bytes:
+        result = self.command("show", f"HEAD:{source}", check=False)
+        if result.returncode:
+            raise SyncBlocked(
+                f"Blob historique absent de HEAD; deplacement refuse: {source}"
+            )
+        return result.stdout
+
+    def _clean_blob_oid(self, path: str, payload: bytes) -> str:
+        result = self.command(
+            "hash-object", f"--path={path}", "--stdin", input_bytes=payload,
+        )
+        return result.stdout.decode("ascii", errors="strict").strip()
+
+    def _verify_historical_archive_payload(
+        self, source: str, destination: str, archive_path: Path,
+    ) -> tuple[bytes, bytes]:
+        head_blob = self._historical_head_blob(source)
+        expected_oid = self.text("rev-parse", f"HEAD:{source}")
+        payload = archive_path.read_bytes()
+        source_oid = self._clean_blob_oid(source, payload)
+        destination_oid = self._clean_blob_oid(destination, payload)
+        if source_oid != expected_oid or destination_oid != expected_oid:
+            raise SyncBlocked(
+                f"Archive differente du blob HEAD apres normalisation Git: {destination}"
+            )
+        return head_blob, payload
+
+    def _historical_archive_file(self, destination: str) -> Path:
+        relative = PurePosixPath(destination)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise SyncBlocked("Destination d'archive hors depot; deplacement refuse.")
+        current = self.root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise SyncBlocked(
+                    f"Lien symbolique dans le chemin d'archive: {destination}"
+                )
+        if not current.is_file():
+            raise SyncBlocked(
+                f"Copie d'archive absente ou non reguliere: {destination}"
+            )
+        return current
+
+    def _record_historical_relocation(
+        self, source: str, destination: str, head_blob: bytes,
+        worktree_payload: bytes, proof: str,
+    ) -> None:
+        entry = {
+            "source": source,
+            "destination": destination,
+            "sha256": hashlib.sha256(head_blob).hexdigest(),
+            "worktree_sha256": hashlib.sha256(worktree_payload).hexdigest(),
+            "proof": proof,
+        }
+        records = self.report["verified_historical_relocations"]
+        if isinstance(records, list):
+            for item in records:
+                if (
+                    isinstance(item, dict)
+                    and item.get("source") == source
+                    and item.get("destination") == destination
+                ):
+                    item.update(entry)
+                    break
+            else:
+                records.append(entry)
+        self.say(
+            f"[ARCHIVE MOVE {proof}] {source} -> {destination} "
+            f"| SHA-256={entry['sha256']}"
+        )
+
+    def _verified_unstaged_historical_moves(
+        self, tracked: list[str], untracked: list[str]
+    ) -> set[str]:
+        allowed: set[str] = set()
+        for source, destination in SAFE_HISTORICAL_RELOCATIONS.items():
+            if source not in tracked or destination not in untracked:
+                continue
+            old_path = self.root / source
+            if old_path.exists() or old_path.is_symlink():
+                raise SyncBlocked(
+                    f"Le fichier source existe encore; deplacement archive non prouve: {source}"
+                )
+            archive_path = self._historical_archive_file(destination)
+            head_blob, payload = self._verify_historical_archive_payload(
+                source, destination, archive_path
+            )
+            self._check_file_payload(destination, archive_path)
+            self._record_historical_relocation(
+                source, destination, head_blob, payload, "WORKTREE_BLOB_EXACT"
+            )
+            allowed.update((source, destination))
+        return allowed
+
+    def _verified_staged_historical_moves(self, staged: list[str]) -> set[str]:
+        allowed: set[str] = set()
+        staged_paths = set(staged)
+        for source, destination in SAFE_HISTORICAL_RELOCATIONS.items():
+            pair = {source, destination}
+            if not pair.intersection(staged_paths) or not pair.issubset(staged_paths):
+                continue
+            old_path = self.root / source
+            if old_path.exists() or old_path.is_symlink():
+                raise SyncBlocked(
+                    f"Le fichier source existe encore dans le depot: {source}"
+                )
+            archive_path = self._historical_archive_file(destination)
+            head_blob, payload = self._verify_historical_archive_payload(
+                source, destination, archive_path
+            )
+            staged_blob = self.command("show", f":{destination}", check=False)
+            source_index = self.command("ls-files", "--stage", "--", source)
+            if (
+                staged_blob.returncode
+                or staged_blob.stdout != head_blob
+                or source_index.stdout
+            ):
+                raise SyncBlocked(
+                    "Le deplacement archive ne correspond plus exactement au blob "
+                    "HEAD dans l'index et le disque; synchronisation arretee."
+                )
+            self._check_file_payload(destination, archive_path)
+            self._record_historical_relocation(
+                source, destination, head_blob, payload,
+                "INDEX_AND_WORKTREE_BLOB_EXACT",
+            )
+            allowed.update(pair)
+        return allowed
+
     def _check_candidates(
         self, staged: list[str], tracked: list[str], untracked: list[str]
     ) -> list[str]:
@@ -404,7 +541,10 @@ class Synchronizer:
             raise SyncBlocked(
                 "Fichiers sensibles deja stages : " + ", ".join(staged_protected[:8])
             )
-        tracked_protected = [p for p in tracked if _protected(p)]
+        safe_moves = self._verified_unstaged_historical_moves(tracked, untracked)
+        tracked_protected = [
+            p for p in tracked if _protected(p) and p not in safe_moves
+        ]
         if tracked_protected:
             raise SyncBlocked(
                 "Donnees Git suivies mais modifiees localement : "
@@ -412,7 +552,8 @@ class Synchronizer:
                 + ". Les proteger avant toute fusion."
             )
         eligible = sorted(
-            p for p in set(staged + tracked + untracked) if not _protected(p)
+            p for p in set(staged + tracked + untracked)
+            if not _protected(p) or p in safe_moves
         )
         for path in eligible:
             absolute = self.root / path
@@ -448,9 +589,12 @@ class Synchronizer:
 
     def _verify_stage(self) -> None:
         staged = _paths(
-            self.command("diff", "--cached", "--name-only", "-z").stdout
+            self.command(
+                "diff", "--cached", "--name-only", "--no-renames", "-z"
+            ).stdout
         )
-        if any(_protected(path) for path in staged):
+        safe_moves = self._verified_staged_historical_moves(staged)
+        if any(_protected(path) and path not in safe_moves for path in staged):
             raise SyncBlocked("L'index contient une archive, des donnees ou un secret.")
         for path in staged:
             self._check_file_payload(path, self.root / path)

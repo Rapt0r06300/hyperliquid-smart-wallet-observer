@@ -19,7 +19,7 @@ REM     TEST-AUDIT-complet.cmd   POURQUOI-ZERO-POSITION.cmd   MESURER_SEUIL_FUND
 REM     MESURER-SPREAD-CARNET.cmd   MESURER-FLUX-MM.cmd   MESURER-CARRY-NEUTRE.cmd
 REM     CONSULTER-MEMOIRE.cmd
 REM
-REM   SORTIE UNIQUE :  MEGATEST.md  (a la racine)
+REM   SORTIE UNIQUE : runtime\reports\legacy\MEGATEST.md
 REM   Reecrit APRES CHAQUE SECTION, donc il existe meme si tu fais Ctrl-C.
 REM
 REM   USAGE
@@ -44,15 +44,16 @@ REM ============================================================================
 REM Outils qui rendent l'audit robuste (best effort : sans reseau, ca passe quand meme).
 python -m pip install -q pytest-timeout coverage 2>nul
 
+if not exist "runtime\reports\legacy" mkdir "runtime\reports\legacy" >nul 2>&1
 python tools\megatest.py %*
 set "CODE=%ERRORLEVEL%"
 
 echo.
-if exist "MEGATEST.md" (
-  echo   Rapport unique : %~dp0MEGATEST.md
+if exist "runtime\reports\legacy\MEGATEST.md" (
+  echo   Rapport unique : %~dp0runtime\reports\legacy\MEGATEST.md
   echo   Envoie CE fichier a Claude : il contient les 7 controles.
 ) else (
-  echo   ATTENTION : MEGATEST.md n'a pas ete ecrit. Copie l'erreur ci-dessus.
+  echo   ATTENTION : runtime\reports\legacy\MEGATEST.md n'a pas ete ecrit. Copie l'erreur ci-dessus.
 )
 
 echo.

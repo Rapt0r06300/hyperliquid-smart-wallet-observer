@@ -16,6 +16,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 Levels = tuple[tuple[float, float], ...]
 
 
@@ -45,7 +47,7 @@ class ExecutionTruth:
     ) -> ExecutionTruth:
         clean_bids = _clean_levels(bids, reverse=True)
         clean_asks = _clean_levels(asks, reverse=False)
-        normalized_coin = str(coin or "").strip().upper()
+        normalized_coin = preserve_native_instrument_symbol(coin)
         normalized_origin = str(data_origin or "").strip().upper()
         normalized_source = str(source or "").strip()
         if not normalized_coin:
@@ -97,10 +99,17 @@ class ExecutionTruth:
 
     def age_ms(self, decision_ts_ms: int) -> int:
         decision = _positive_int(decision_ts_ms, "decision_ts_ms")
-        return max(0, decision - self.received_ts_ms)
+        age = decision - self.received_ts_ms
+        if age < 0:
+            raise ValueError("execution truth received after decision")
+        return age
 
     def is_fresh(self, *, decision_ts_ms: int, max_age_ms: int) -> bool:
-        return self.age_ms(decision_ts_ms) <= max(0, int(max_age_ms))
+        try:
+            age = self.age_ms(decision_ts_ms)
+        except ValueError:
+            return False
+        return age <= max(0, int(max_age_ms))
 
     def levels_for_side(self, side: str) -> Levels:
         normalized = normalize_execution_side(side)

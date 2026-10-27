@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 @dataclass(frozen=True, slots=True)
 class Position:
@@ -35,12 +36,14 @@ def correlated_exposure_check(
     max_net_beta_usd: float = 600.0,
 ) -> ExposureVerdict:
     """Block a new position that over-concentrates a correlated cluster or net beta."""
-    groups = {k.upper(): v for k, v in (correlation_groups or {}).items()}
-    new_group = groups.get(new_position.coin.upper(), new_position.coin.upper())
+    groups = {preserve_native_instrument_symbol(k): v for k, v in (correlation_groups or {}).items()}
+    new_coin = preserve_native_instrument_symbol(new_position.coin)
+    new_group = groups.get(new_coin, new_coin)
     # same-direction cluster notional (correlated stacking)
     cluster = float(new_position.notional_usd)
     for p in positions:
-        g = groups.get(p.coin.upper(), p.coin.upper())
+        coin = preserve_native_instrument_symbol(p.coin)
+        g = groups.get(coin, coin)
         if g == new_group and str(p.side).upper() == str(new_position.side).upper():
             cluster += float(p.notional_usd)
     # net beta across the book (signed by side, weighted by beta)

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import sha256
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
 from hl_observer.signals.leader_delta import LeaderDelta
 
@@ -60,7 +61,7 @@ def detect_signal_clusters(
 
     cfg = config or ClusterConfig()
     usable = [d for d in deltas if d.action in ENTRY_ACTIONS and d.leader_event_time_ms is not None]
-    usable.sort(key=lambda d: (d.coin.upper(), _side_of(d), d.leader_event_time_ms or 0, d.wallet.lower()))
+    usable.sort(key=lambda d: (preserve_native_instrument_symbol(d.coin), _side_of(d), d.leader_event_time_ms or 0, d.wallet.lower()))
 
     clusters: list[SignalCluster] = []
     for idx, seed in enumerate(usable):
@@ -70,7 +71,7 @@ def detect_signal_clusters(
         start = int(seed.leader_event_time_ms or seed.observed_at_ms)
         group: list[LeaderDelta] = []
         for d in usable[idx:]:
-            if d.coin.upper() != seed.coin.upper() or _side_of(d) != side:
+            if preserve_native_instrument_symbol(d.coin) != preserve_native_instrument_symbol(seed.coin) or _side_of(d) != side:
                 continue
             event_ts = int(d.leader_event_time_ms or d.observed_at_ms)
             if event_ts < start:
@@ -113,7 +114,7 @@ def _build_cluster(group: list[LeaderDelta], *, observed_at_ms: int, config: Clu
     cluster_id = _cluster_id(group, observed_at_ms)
     return SignalCluster(
         cluster_id=cluster_id,
-        coin=group[0].coin.upper(),
+        coin=preserve_native_instrument_symbol(group[0].coin),
         side=side,
         action_family="ENTRY",
         first_event_ms=first_ms,
@@ -160,7 +161,7 @@ def _cluster_id(group: list[LeaderDelta], observed_at_ms: int) -> str:
     material = "|".join(
         [
             str(observed_at_ms),
-            group[0].coin.upper(),
+            preserve_native_instrument_symbol(group[0].coin),
             _side_of(group[0]),
             *sorted(d.delta_id for d in group),
         ]

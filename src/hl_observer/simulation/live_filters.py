@@ -5,6 +5,7 @@ from hashlib import sha256
 from typing import Any
 
 from hl_observer.markets.universe import is_exotic_market
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.storage.models import PositionDeltaModel
 
 
@@ -115,7 +116,7 @@ def fill_identity(row: PositionDeltaModel) -> str | None:
     if fill_hash or tid or oid:
         payload = {
             "wallet": str(row.wallet_address or "").lower(),
-            "coin": str(row.coin or "").upper(),
+            "coin": preserve_native_instrument_symbol(row.coin),
             "hash": fill_hash,
             "tid": tid,
             "oid": oid,
@@ -138,7 +139,7 @@ def delta_identity(row: PositionDeltaModel) -> str:
         return f"id:{row.id}"
     payload = {
         "wallet": str(row.wallet_address or "").lower(),
-        "coin": str(row.coin or "").upper(),
+        "coin": preserve_native_instrument_symbol(row.coin),
         "exchange_ts": row.exchange_ts,
         "detected_at_ms": row.detected_at_ms,
         "delta_type": row.delta_type,

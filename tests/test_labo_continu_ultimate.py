@@ -107,8 +107,8 @@ def test_reconciliation_globale_un_seul_capital(tmp_path):
 # ─────────── UF-5 : CMD menu + vérif finalisation ───────────
 def test_cmd_menu_et_verifier_finalisation(tmp_path):
     # PF-1 : le double-clic est AUTO (dry-run -> resume sinon start) ; le MENU est déplacé en -ADMIN.cmd
-    cmd = (RACINE / "LANCER-RECHERCHE-CONTINUE.cmd").read_text(encoding="utf-8", errors="ignore")
-    admin = (RACINE / "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd").read_text(encoding="utf-8", errors="ignore")
+    cmd = (RACINE / "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd").read_text(encoding="utf-8", errors="ignore")
+    admin = (RACINE / "tools/launchers/LANCER-RECHERCHE-CONTINUE-ADMIN.cmd").read_text(encoding="utf-8", errors="ignore")
     for item in ("1 - Demarrer", "2 - Reprendre", "5 - Arreter et creer le rapport", "6 - Verifier"):
         assert item in admin
     assert "peut-reprendre" in cmd and "verifier-finalisation" in cmd and "errorlevel" in cmd.lower()
@@ -124,5 +124,5 @@ def test_cmd_menu_et_verifier_finalisation(tmp_path):
 
 # ─────────── 14h/18h intacts ───────────
 def test_14h_18h_intacts_ultimate():
-    assert (RACINE / "LANCER-RECHERCHE-14H.cmd").exists() and (RACINE / "LANCER-RECHERCHE-18H.cmd").exists()
+    assert (RACINE / "tools/launchers/LANCER-RECHERCHE-14H.cmd").exists() and (RACINE / "tools/launchers/LANCER-RECHERCHE-18H.cmd").exists()
     import recherche_18h  # noqa: F401

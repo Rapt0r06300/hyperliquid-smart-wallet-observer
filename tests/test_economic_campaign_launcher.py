@@ -7,14 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _text() -> str:
-    return (ROOT / "LANCER_OBJECTIF_4USD.cmd").read_text(encoding="utf-8", errors="ignore")
+    return (ROOT / "tools/launchers/LANCER_OBJECTIF_4USD.cmd").read_text(encoding="utf-8", errors="ignore")
 
 
 def test_launcher_uses_portable_python_and_canonical_runner():
     text = _text()
     assert "tools\\portable_env.cmd" in text
-    assert '"%HYPERSMART_PYTHON%" "%~dp0tools\\run_economic_objective_campaigns.py"' in text
-    assert "--root \"%~dp0.\"" in text
+    assert '"%HYPERSMART_PYTHON%" "%ALINA_PROJECT_ROOT%\\tools\\run_economic_objective_campaigns.py"' in text
+    assert "--root \"%ALINA_PROJECT_ROOT%\\.\"" in text
 
 
 def test_launcher_forces_execution_off():

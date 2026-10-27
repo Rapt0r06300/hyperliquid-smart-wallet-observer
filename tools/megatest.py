@@ -6,7 +6,7 @@ REMPLACE :
     MESURER-SPREAD-CARNET.cmd · MESURER-FLUX-MM.cmd · MESURER-CARRY-NEUTRE.cmd
     CONSULTER-MEMOIRE.cmd
 
-SORTIE UNIQUE : MEGATEST.md (racine). Reecrit APRES CHAQUE SECTION -> il existe meme si tu
+SORTIE UNIQUE : runtime/reports/legacy/MEGATEST.md. Reecrit APRES CHAQUE SECTION -> il existe meme si tu
 fais Ctrl-C ou si une section plante. Jamais de rapport vide.
 
 CE QUI A ETE AMELIORE (et pourquoi)
@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RAPPORT = ROOT / "MEGATEST.md"
+RAPPORT = ROOT / "runtime" / "reports" / "legacy" / "MEGATEST.md"
 API = "https://api.hyperliquid.xyz/info"
 
 # --- mots-cles de verdict cherches dans la sortie de chaque outil (ordre = priorite) ---
@@ -241,6 +241,7 @@ def _ecrire(sections: list[Section], reseau_ok: bool, reseau_note: str, mode: st
     w("- Les mesures reseau sont des **instantanes** : le funding, les spreads et la liquidite "
       "varient dans le temps. Un instantane ne tranche pas une question de regime.\n")
 
+    RAPPORT.parent.mkdir(parents=True, exist_ok=True)
     RAPPORT.write_text(out.getvalue(), encoding="utf-8")
 
 
@@ -266,7 +267,7 @@ def main() -> int:
         mode = "rapide"
 
     print("\n" + "=" * 78)
-    print("  MEGATEST HYPERSMART — 7 controles, 1 seul rapport : MEGATEST.md")
+    print("  MEGATEST HYPERSMART — rapport : runtime/reports/legacy/MEGATEST.md")
     print("  Mode : %s" % mode)
     print("  100 %% lecture seule. Aucun ordre reel, jamais.")
     print("=" * 78 + "\n")
@@ -395,5 +396,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print("\n\n  Interrompu. MEGATEST.md contient tout ce qui a ete mesure jusqu'ici.\n")
+        print("\n\n  Interrompu. Le rapport partiel reste sous runtime/reports/legacy/MEGATEST.md.\n")
         sys.exit(130)

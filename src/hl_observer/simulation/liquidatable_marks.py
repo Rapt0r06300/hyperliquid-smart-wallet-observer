@@ -19,6 +19,8 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 SCHEMA_VERSION = "hypersmart.liquidatable_marks.v1"
 
 #: Côté de SORTIE d'une position : une LONG vend (bid), une SHORT achète (ask).
@@ -63,7 +65,7 @@ def mark_liquidatable(side: object, *, best_bid: object = None, best_ask: object
 def _cle_sortie(coin: str, side: str, position_id: object) -> str:
     if position_id not in (None, ""):
         return str(position_id)
-    return f"{str(coin).upper()}:{str(side).upper()}"
+    return f"{preserve_native_instrument_symbol(coin)}:{str(side).upper()}"
 
 
 def marks_depuis_bbo(positions: Iterable[Any], bbo: Mapping[str, Any]) -> dict[str, float]:
@@ -78,9 +80,7 @@ def marks_depuis_bbo(positions: Iterable[Any], bbo: Mapping[str, Any]) -> dict[s
         coin, side = _attr(p, "coin"), _attr(p, "side")
         if not coin or not side:
             continue
-        entry = bbo.get(str(coin).upper()) if isinstance(bbo, Mapping) else None
-        if entry is None and isinstance(bbo, Mapping):
-            entry = bbo.get(str(coin))
+        entry = bbo.get(preserve_native_instrument_symbol(coin)) if isinstance(bbo, Mapping) else None
         bid, ask = _bbo(entry or {})
         mk = mark_liquidatable(side, best_bid=bid, best_ask=ask)
         if mk is None:
@@ -93,7 +93,7 @@ def marks_depuis_execution_truths(positions: Iterable[Any], truths: Mapping[str,
     """Variante câblage : `truths` = mapping `coin -> objet portant best_bid/best_ask` (ex. `ExecutionTruth`)."""
     bbo: dict[str, Any] = {}
     for coin, t in (truths or {}).items():
-        bbo[str(coin).upper()] = {
+        bbo[preserve_native_instrument_symbol(coin)] = {
             "bid": _attr(t, "best_bid"),
             "ask": _attr(t, "best_ask"),
         }
@@ -109,8 +109,8 @@ def couverture(positions: Iterable[Any], marks: Mapping[str, float]) -> dict[str
     for p in pos:
         coin, side = _attr(p, "coin"), _attr(p, "side")
         cle = _cle_sortie(str(coin), str(side), _attr(p, "position_id"))
-        alt = f"{str(coin).upper()}:{str(side).upper()}"
-        if cle in marks or alt in marks or str(coin).upper() in marks:
+        alt = f"{preserve_native_instrument_symbol(coin)}:{str(side).upper()}"
+        if cle in marks or alt in marks or preserve_native_instrument_symbol(coin) in marks:
             mesurees += 1
         else:
             manquantes.append(cle)

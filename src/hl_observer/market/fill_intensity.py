@@ -1,4 +1,4 @@
-"""κ — L'INTENSITÉ DE FILL (idée `kappa_fill` de moisson-fini.md).
+"""κ — L'INTENSITÉ DE FILL (idée `kappa_fill` de docs/archive/root-history/moisson-fini.md).
 
 *Notre simulateur suppose un fill maker à « 10 % du flux » — **un chiffre INVENTÉ**, jamais
 mesuré. Toute conclusion sur le market making en dépend.* Ici on le **mesure** : la probabilité

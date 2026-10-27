@@ -6,14 +6,11 @@ import os
 
 
 def _codes():
-    here = os.path.dirname(os.path.abspath(__file__))
-    root = here
-    for _ in range(6):
-        p = os.path.join(root, "CLAUDE_TASKS.jsonl")
-        if os.path.exists(p):
-            return {json.loads(line)["code"] for line in open(p, encoding="utf-8") if line.strip()}
-        root = os.path.dirname(root)
-    raise AssertionError("CLAUDE_TASKS.jsonl introuvable — lancer tools/claude_tasks_scan.py")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "docs", "archive", "root-history", "CLAUDE_TASKS.jsonl")
+    if not os.path.exists(p):
+        raise AssertionError("Snapshot historique CLAUDE_TASKS.jsonl introuvable")
+    return {json.loads(line)["code"] for line in open(p, encoding="utf-8") if line.strip()}
 
 
 CODES = _codes()

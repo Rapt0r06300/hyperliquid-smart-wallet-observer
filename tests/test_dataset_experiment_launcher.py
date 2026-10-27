@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _text() -> str:
-    return (ROOT / "PREPARER_EXPERIENCE_FULL_COLD.cmd").read_text(
+    return (ROOT / "tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd").read_text(
         encoding="utf-8", errors="replace"
     )
 

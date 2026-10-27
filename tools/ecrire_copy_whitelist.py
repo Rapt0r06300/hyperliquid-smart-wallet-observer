@@ -27,6 +27,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.copy_wallet.leader_markout import selectionner_leaders  # noqa: E402
+from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
 
 FILLS_DEFAUT = Path("runtime") / "data" / "leader_fills_forward.jsonl"
 SORTIE = Path("runtime") / "data" / "copy_whitelist.json"
@@ -69,7 +70,7 @@ def regrouper_fills_independants(
             ts_ms = int(float(fill.get("ts_ms") or 0))
         except (TypeError, ValueError, OverflowError):
             ts_ms = 0
-        coin = str(fill.get("coin") or "").strip().upper()
+        coin = preserve_native_instrument_symbol(fill.get("coin"))
         side = _bucket_side(fill.get("side"))
         if ts_ms <= 0 or not coin or not side:
             invalides += 1
@@ -147,7 +148,8 @@ def construire_fills_forward(root: str | Path = RACINE, *, horizon_min: float = 
     for l in bruts[-max_bruts:]:
         try:
             f = json.loads(l)
-            coin, ts = str(f.get("coin") or "").upper(), float(f.get("ts_ms") or 0) / 1000.0
+            coin = preserve_native_instrument_symbol(f.get("coin"))
+            ts = float(f.get("ts_ms") or 0) / 1000.0
         except (ValueError, TypeError):
             continue
         # 🔴 21/07 — DES FIXTURES DE TEST DANS LA DONNEE LIVE. L'audit de fraicheur annoncait

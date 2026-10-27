@@ -24,7 +24,22 @@ from hl_observer.ops import paper_canonique as PC  # noqa: E402
 def test_une_strategie_active_peut_emettre_un_intent():
     i = PC.PaperIntent(strategy="copy_vault", coin="btc", side=1,
                        notional_usd=50.0, signal_observable_at_ms=1)
-    assert i.as_dict()["coin"] == "BTC" and i.as_dict()["real_execution"] is False
+    assert i.as_dict()["coin"] == "btc" and i.as_dict()["real_execution"] is False
+
+
+def test_copy_vault_intent_preserve_le_symbole_native_case_sensitive():
+    lower = PC.PaperIntent(
+        strategy="copy_vault", coin="kPEPE", side=1,
+        notional_usd=50.0, signal_observable_at_ms=1,
+    )
+    upper = PC.PaperIntent(
+        strategy="copy_vault", coin="KPEPE", side=1,
+        notional_usd=50.0, signal_observable_at_ms=1,
+    )
+
+    assert lower.coin == "kPEPE"
+    assert upper.coin == "KPEPE"
+    assert lower.as_dict()["coin"] != upper.as_dict()["coin"]
 
 
 @pytest.mark.parametrize("legacy", ["carry", "funding", "triangular", "market_making"])
@@ -83,8 +98,20 @@ def test_lintent_normalise_les_valeurs_numeriques_validees():
                             notional_usd="50", signal_observable_at_ms=1,
                             venue=" hl ")
     assert intent.notional_usd == 50.0
-    assert intent.as_dict()["coin"] == "BTC"
+    assert intent.as_dict()["coin"] == "btc"
     assert intent.as_dict()["venue"] == "HL"
+
+
+def test_liquidity_consumption_separe_les_symboles_case_sensitive():
+    ledger = PC.LiquidityConsumptionLedger()
+    for coin in ("kPEPE", "KPEPE"):
+        result = ledger.consommer(
+            venue="HL", coin=coin, side=1, price_level=1.0,
+            snapshot_version="same-book-id", quantite=1.0,
+            profondeur_affichee=1.0,
+        )
+        assert result["consomme"] == 1.0
+    assert len(ledger._consomme) == 2
 
 
 # ═══════════════ §6.2 — consommation de liquidité ═══════════════

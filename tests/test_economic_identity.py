@@ -30,7 +30,16 @@ def test_position_key_prefere_lidentite_reelle():
 
 def test_position_key_repli_coin_side_sans_id():
     sans = EI.EconomicIdentity(coin="btc", side="long")
-    assert sans.position_key() == "BTC:LONG"
+    assert sans.position_key() == "btc:LONG"
+
+
+def test_position_key_ne_fusionne_pas_les_symboles_native_case_sensitive():
+    lower = EI.EconomicIdentity(coin="kPEPE", side="long")
+    upper = EI.EconomicIdentity(coin="KPEPE", side="long")
+
+    assert lower.position_key() == "kPEPE:LONG"
+    assert upper.position_key() == "KPEPE:LONG"
+    assert lower.position_key() != upper.position_key()
 
 
 def test_position_key_none_si_meme_le_repli_manque():

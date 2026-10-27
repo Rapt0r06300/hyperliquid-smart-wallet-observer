@@ -161,8 +161,8 @@ Aucune protection serveur ne doit conduire à recréer une forêt de branches de
 
 Les documents suivants sont **historiques** s'ils contredisent ce fichier ou les contrats exécutables actuels :
 
-- `TASKLIST.md` ;
-- `TASKLIST.md.avant_cloture` ;
+- `docs/archive/root-history/TASKLIST.md` ;
+- `docs/archive/root-history/TASKLIST.md.avant_cloture` ;
 - `docs/TASKLIST_ACTIVE.md` ;
 - `docs/ETAT_ET_FEUILLE_DE_ROUTE.md` ;
 - `runtime/research/ALPHA_PROGRESS.md` ;

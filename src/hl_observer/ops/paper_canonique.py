@@ -28,6 +28,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 from hl_observer.strategies.active_scope import (
     active_strategy_families as _active_strategy_families,
 )
@@ -99,7 +101,7 @@ class PaperIntent:
                 "strategie hors scope actif: %r (actives: %s)" % (self.strategy, ", ".join(STRATEGIES_ACTIVES)))
         if isinstance(self.side, bool) or self.side not in (1, -1):
             raise ValueError("side doit valoir +1 ou -1")
-        coin = _non_empty(self.coin, name="coin").upper()
+        coin = preserve_native_instrument_symbol(_non_empty(self.coin, name="coin"))
         venue = _non_empty(self.venue, name="venue").upper()
         notional = _finite_number(self.notional_usd, name="notional_usd")
         if notional <= 0.0:
@@ -115,7 +117,7 @@ class PaperIntent:
         object.__setattr__(self, "notional_usd", notional)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"strategy": self.strategy, "coin": self.coin.upper(), "side": self.side,
+        return {"strategy": self.strategy, "coin": preserve_native_instrument_symbol(self.coin), "side": self.side,
                 "notional_usd": self.notional_usd, "venue": self.venue,
                 "signal_observable_at_ms": self.signal_observable_at_ms,
                 "intent_id": self.intent_id, "cohort": self.cohort,
@@ -142,7 +144,7 @@ class LiquidityConsumptionLedger:
     def _cle_validee(*, venue: str, coin: str, side: int, price_level: float,
                      snapshot_version: Any, profondeur_affichee: float) -> tuple[tuple, float]:
         venue_normalisee = _non_empty(venue, name="venue").upper()
-        coin_normalise = _non_empty(coin, name="coin").upper()
+        coin_normalise = preserve_native_instrument_symbol(_non_empty(coin, name="coin"))
         if isinstance(side, bool) or side not in (1, -1):
             raise ValueError("side doit valoir +1 ou -1")
         prix = _finite_number(price_level, name="price_level")

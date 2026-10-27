@@ -7,6 +7,7 @@ except ImportError:
     class StrEnum(str, Enum): pass
 from typing import Literal
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -149,9 +150,10 @@ class SignalCandidate(BaseModel):
     @field_validator("coin")
     @classmethod
     def coin_must_not_be_empty(cls, value: str) -> str:
-        if not value.strip():
+        native = preserve_native_instrument_symbol(value)
+        if not native:
             raise ValueError("coin is required")
-        return value.upper()
+        return native
 
 
 class SignalScore(BaseModel):

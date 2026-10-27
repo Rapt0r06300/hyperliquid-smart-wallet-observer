@@ -18,6 +18,7 @@ from hl_observer.backtesting.copy_vault_executable import execute_metaorder, tem
 from hl_observer.backtesting.copy_vault_protocol import MAX_OPEN_POSITIONS, MAX_TARGET_LAG_MS
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v7_exit_flow_train.v1"
 MECHANISM = "copy_vault_v7_causal_leader_exit_flow"
@@ -39,7 +40,7 @@ def _causal_exit(row: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     action = str(row.get("action") or "").upper()
     vault = str(row.get("vault") or "").strip()
-    coin = str(row.get("coin") or "").upper().strip()
+    coin = preserve_native_instrument_symbol(row.get("coin"))
     if not (
         action in EXIT_ACTIONS
         and str(row.get("source") or "") == "LIVE_WS"
@@ -170,7 +171,7 @@ def replay_exit_flow_train(
             },
         }
     continuous = {
-        str(coin).upper(): sorted(
+        preserve_native_instrument_symbol(coin): sorted(
             [
                 dict(row)
                 for row in rows
@@ -191,7 +192,7 @@ def replay_exit_flow_train(
         counters["signals_considered"] += 1
         trade, reason = execute_metaorder(
             signal,
-            continuous.get(str(signal["coin"]).upper(), []),
+            continuous.get(preserve_native_instrument_symbol(signal["coin"]), []),
             horizon_ms=int(horizon_ms),
             direction_multiplier=int(direction_multiplier),
             copy_delay_ms=int(copy_delay_ms),

@@ -16,7 +16,8 @@ from hl_observer import portabilite as P            # noqa: E402
 def test_racine_trouvee_depuis_le_fichier_du_module():
     r = P.racine_projet()
     assert (r / "pyproject.toml").exists() or all(
-        (r / m).exists() for m in ("LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd"))
+        (r / m).exists() for m in ("LANCER_HYPERSMART.cmd", "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+                                   "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd"))
 
 
 def test_racine_independante_du_cwd(tmp_path, monkeypatch):
@@ -29,9 +30,12 @@ def test_racine_independante_du_cwd(tmp_path, monkeypatch):
 
 
 def test_racine_par_marqueur_maitres(tmp_path):
-    # un dossier avec seulement les deux .cmd maîtres (archive sans pyproject) est reconnu.
+    # un dossier avec les marqueurs .cmd maîtres (archive sans pyproject) est reconnu.
     (tmp_path / "LANCER_HYPERSMART.cmd").write_text("x", encoding="utf-8")
-    (tmp_path / "ANALYSER_BACKTESTS_REPLAYS.cmd").write_text("x", encoding="utf-8")
+    (tmp_path / "LANCER_LAB_QUANT_COPY_VAULT.cmd").write_text("x", encoding="utf-8")
+    analyser = tmp_path / "tools" / "launchers" / "ANALYSER_BACKTESTS_REPLAYS.cmd"
+    analyser.parent.mkdir(parents=True)
+    analyser.write_text("x", encoding="utf-8")
     sous = tmp_path / "src" / "hl_observer"
     sous.mkdir(parents=True)
     depart = sous / "un_module.py"

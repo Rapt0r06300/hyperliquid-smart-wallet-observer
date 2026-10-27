@@ -45,6 +45,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 #: au-delà, le mark n'est plus « le prix au moment du fill ». Choisi égal à la fenêtre
 #: historique (300 s) pour que le correctif n'assouplisse RIEN : il corrige l'asymétrie
 #: (avant OU après) sans élargir la tolérance.
@@ -120,7 +122,11 @@ def charger_marks(
     from hl_observer.backtesting.recherche_scenario import repertoire_replay_consolide
 
     racine = Path(root)
-    coins_cibles = {str(coin).strip().upper() for coin in (coins or set()) if str(coin).strip()}
+    coins_cibles = {
+        preserve_native_instrument_symbol(coin)
+        for coin in (coins or set())
+        if preserve_native_instrument_symbol(coin)
+    }
     base = racine / "runtime" / "replay"
     rows: list[dict] = []
     consolide = repertoire_replay_consolide(racine) / "marks.jsonl"
@@ -241,7 +247,7 @@ def apparier_avec_cause(marks: dict[str, list[tuple[float, float]]], *, coin: st
     t = _f(ts)
     if t is None or t <= 0:
         return {"ok": False, "cause": "HORODATAGE_ABSENT"}
-    pts = marks.get(str(coin or "").upper())
+    pts = marks.get(preserve_native_instrument_symbol(coin))
     if not pts:
         return {"ok": False, "cause": "COIN_SANS_MARK"}
     a = mark_le_plus_proche(pts, t, tolerance_fill_s)

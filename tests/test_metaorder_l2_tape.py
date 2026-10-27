@@ -8,6 +8,9 @@ ligne_sortie (retard), et le round-trip écriture→chargement (schéma v3, v1/v
 from __future__ import annotations
 
 import importlib
+import json
+
+import pytest
 
 T = importlib.import_module("hl_observer.experimental.metaorder_l2_tape")
 
@@ -22,6 +25,29 @@ def test_resume_conserve_px_sz_n_et_exchange_time():
     assert r["book_exchange_time"] == 42 and r["bids5"][0] == [99.9, 1500.0, 5] and r["asks5"][0][2] == 7
     assert T.book_imbalance_top5(r) == (1500 + 500) - (900 + 500)
     assert T.profondeur_top5(r) == (1500 + 500) + (900 + 500)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda book: book["levels"][0][0].update(px="NaN"),
+        lambda book: book["levels"][1][0].update(sz="Infinity"),
+        lambda book: book["levels"][0][0].update(px="1e9999"),
+        lambda book: book["levels"][1][0].update(sz="0"),
+        lambda book: book["levels"][0][0].update(sz="-1"),
+        lambda book: book["levels"][0].reverse(),
+        lambda book: book["levels"][0].insert(1, dict(book["levels"][0][0])),
+        lambda book: book["levels"][1][0].update(px="99.9"),
+        lambda book: book.pop("time"),
+        lambda book: book.update(time=float("inf")),
+        lambda book: book.update(time=5000.5),
+        lambda book: book["levels"][0][0].pop("n"),
+    ],
+)
+def test_resume_rejette_carnets_non_finis_incoherents_ou_sans_provenance(mutate):
+    book = _book()
+    mutate(book)
+    assert T.resume_book(book) is None
 
 
 def test_ofi_par_niveau_agrege_et_normalise():
@@ -184,3 +210,14 @@ def test_ligne_sortie_et_charger_tape_v3_ignore_anciens(tmp_path):
     tape = T.charger_tape(tmp_path)
     assert T.cle_fill("SOL", "h1", 1000) in tape and ("SOL", "old", 1) not in tape   # v2 ignoré
     assert set(tape[T.cle_fill("SOL", "h1", 1000)]) == {"fill", "sortie"}
+
+
+def test_ecrire_lignes_refuse_nan_inf_sans_perdre_ligne_valide(tmp_path, capsys):
+    valid = {"schema_version": T.SCHEMA_VERSION, "phase": "fill", "value": 1.25}
+    invalid = {"schema_version": T.SCHEMA_VERSION, "phase": "fill", "value": float("nan")}
+    T.ecrire_lignes(tmp_path, [invalid, valid])
+
+    stored = (tmp_path / T.TAPE_RELPATH).read_text(encoding="utf-8").splitlines()
+    assert len(stored) == 1
+    assert json.loads(stored[0]) == valid
+    assert "WRITE_REJECT reason=NONFINITE_OR_NON_JSON" in capsys.readouterr().out

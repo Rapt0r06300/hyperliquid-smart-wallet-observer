@@ -27,6 +27,8 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 from hl_observer.funding.spike_detector import detect_funding_spike
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
@@ -66,7 +68,7 @@ class EdgeTrendRecorder:
 
     @staticmethod
     def key(coin: str, side: str) -> str:
-        return f"{(coin or '').strip().upper()}|{(side or '').strip().upper()}"
+        return f"{preserve_native_instrument_symbol(coin)}|{(side or '').strip().upper()}"
 
     def record(self, coin: str, side: str, edge_bps: float, ts: float | None = None) -> None:
         if not (coin or "").strip():

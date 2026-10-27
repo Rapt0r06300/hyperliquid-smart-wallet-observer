@@ -39,6 +39,8 @@ DEFAULT_NAMES = (
     "userfills-live",
     "copy-vault-checkpoints",
 )
+_WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
+_WATCHDOG_LOG_BACKUPS = 3
 
 
 def _idle_priority() -> None:
@@ -60,8 +62,36 @@ def _requested_names(root: Path) -> list[str]:
 def _append_log(root: Path, payload: dict[str, Any]) -> None:
     path = root / "runtime" / "logs" / "economic-collector-watchdog.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
+    line_bytes = len(line.encode("utf-8"))
+    if path.exists() and path.stat().st_size + line_bytes > _WATCHDOG_LOG_MAX_BYTES:
+        try:
+            for index in range(_WATCHDOG_LOG_BACKUPS, 0, -1):
+                source = path if index == 1 else path.with_name(f"{path.name}.{index - 1}")
+                target = path.with_name(f"{path.name}.{index}")
+                if source.exists():
+                    source.replace(target)
+        except OSError:
+            # The next pass retries rotation; transient Windows file locks must
+            # not terminate the lease-renewing collector supervisor.
+            pass
     with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.write(line)
+
+
+def _last_collector_log_line(root: Path, name: str, *, max_bytes: int = 8_192) -> str:
+    path = root / "runtime" / "logs" / f"economic-{name}.log"
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - max_bytes))
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return "journal absent ou illisible"
+    if not lines:
+        return "journal vide"
+    return lines[-1].strip()[-240:] or "dernière ligne vide"
 
 
 def run_watchdog(
@@ -127,9 +157,16 @@ def run_watchdog(
                 or checkpoint_protocol not in {"", CHECKPOINT_COLLECTOR_PROTOCOL}
                 else "EN COURS"
             )
+            workers_ready = (
+                not missing and len(active) == len(names) and renewal.get("renewed")
+            )
             status = (
-                "ACTIVE"
-                if not missing and len(active) == len(names) and renewal.get("renewed")
+                "DEGRADED"
+                if not workers_ready or protocol_status == "À CORRIGER"
+                else "ACTIVE"
+                if protocol_status == "OK"
+                else "STARTING"
+                if protocol_status in {"ATTENTE HEARTBEATS", "EN COURS"}
                 else "DEGRADED"
             )
             record = {
@@ -160,6 +197,14 @@ def run_watchdog(
                 ),
                 flush=True,
             )
+            for name in names:
+                pid = active_map.get(name)
+                worker_status = f"PID {pid}" if pid is not None else "ABSENT"
+                print(
+                    "  [WORKER] %s — %s — %s"
+                    % (name, worker_status, _last_collector_log_line(root, name)),
+                    flush=True,
+                )
             if protocol_status == "À CORRIGER":
                 print(
                     "[PROTOCOLE] userfills=%s; checkpoints=%s; aucune preuve causale ne doit être admise tant que les deux protocoles attendus ne sont pas actifs"

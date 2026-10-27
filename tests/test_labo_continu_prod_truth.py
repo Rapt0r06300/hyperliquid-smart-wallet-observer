@@ -244,5 +244,5 @@ def test_paper_only_prod_truth_chain():
 
 # ─────────── 15) 14h/18h intacts ───────────
 def test_14h_18h_intacts_prod_truth():
-    assert (RACINE / "LANCER-RECHERCHE-14H.cmd").exists() and (RACINE / "LANCER-RECHERCHE-18H.cmd").exists()
+    assert (RACINE / "tools/launchers/LANCER-RECHERCHE-14H.cmd").exists() and (RACINE / "tools/launchers/LANCER-RECHERCHE-18H.cmd").exists()
     import recherche_18h  # noqa: F401

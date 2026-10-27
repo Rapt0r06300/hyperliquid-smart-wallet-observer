@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from hl_observer.models import DataQuality, Position, PositionAction, SourceMeta, Wallet
+from hl_observer.models import Coin, DataQuality, Fill, Position, PositionAction, SourceMeta, Wallet
 from hl_observer.normalization import (
     classify_fill_action,
     classify_position_delta,
@@ -20,6 +20,21 @@ def _meta(**overrides):
     }
     data.update(overrides)
     return SourceMeta(**data)
+
+
+def test_canonical_models_preserve_case_sensitive_instrument_identity():
+    assert Coin(symbol=" kPEPE ").symbol == "kPEPE"
+    fill = Fill(
+        wallet="0x" + "a" * 40,
+        coin="kPEPE",
+        direction="Open Long",
+        side="B",
+        size=1.0,
+        price=0.00001,
+        time_ms=1,
+        meta=_meta(),
+    )
+    assert fill.coin == "kPEPE"
 
 
 def test_wallet_model_rejects_truncated_and_invalid_addresses():

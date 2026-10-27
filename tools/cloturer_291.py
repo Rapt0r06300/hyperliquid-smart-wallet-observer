@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
-TASKLIST = RACINE / "TASKLIST.md"
+TASKLIST = RACINE / "docs" / "archive" / "root-history" / "TASKLIST.md"
 TASKTXT = RACINE / "task_291.txt"          # copie locale de la liste de Flo (si presente)
 
 FAIT, DOMINE, REFUS, CONFIRME, ACTE, REFUS_SEC, OUVERT = (

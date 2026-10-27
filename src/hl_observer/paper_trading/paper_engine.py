@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import math
-import time
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.schemas import RiskDecision
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper_trading.canonical_execution import (
     CausalMarketSnapshot,
     PaperExecutionIntent,
@@ -196,6 +196,7 @@ class PaperEngine:
         traded_through_usdt: float | None = None,
         adverse_selection_bps: float | None = None,
     ) -> PaperDecisionResult:
+        observed_at_ms = _require_timestamp_ms(observed_at_ms)
         reasons: list[str] = list(delta.reason_codes)
         signal_age_ms = max(0, observed_at_ms - (delta.leader_event_time_ms or observed_at_ms))
         context = dict(decision_context or {})
@@ -230,7 +231,7 @@ class PaperEngine:
         ):
             if not _finite_or_false(value):
                 reasons.append(name)
-        if execution_truth is not None and execution_truth.coin != str(delta.coin).upper():
+        if execution_truth is not None and execution_truth.coin != preserve_native_instrument_symbol(delta.coin):
             reasons.append("EXECUTION_BOOK_COIN_MISMATCH")
         if self.config.strict_execution_truth and execution_truth is None:
             reasons.append("NO_LIVE_EXECUTABLE_BOOK")
@@ -261,10 +262,13 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, reasons, decision_context=context),
+                trade=self._no_trade(
+                    delta, reasons, timestamp_ms=observed_at_ms, decision_context=context
+                ),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=context,
             )
 
@@ -285,10 +289,13 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, reasons, decision_context=context),
+                trade=self._no_trade(
+                    delta, reasons, timestamp_ms=observed_at_ms, decision_context=context
+                ),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=context,
             )
         if len(self._positions) >= self.config.max_open_positions:
@@ -300,10 +307,13 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, reasons, decision_context=context),
+                trade=self._no_trade(
+                    delta, reasons, timestamp_ms=observed_at_ms, decision_context=context
+                ),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=context,
             )
 
@@ -366,10 +376,16 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, execution_reasons, decision_context=context),
+                trade=self._no_trade(
+                    delta,
+                    execution_reasons,
+                    timestamp_ms=observed_at_ms,
+                    decision_context=context,
+                ),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=execution_reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=context,
             )
         assert exec_result.fill_price is not None
@@ -388,10 +404,16 @@ class PaperEngine:
             return self._result(
                 accepted=False,
                 risk_decision=risk_decision,
-                trade=self._no_trade(delta, execution_reasons, decision_context=context),
+                trade=self._no_trade(
+                    delta,
+                    execution_reasons,
+                    timestamp_ms=observed_at_ms,
+                    decision_context=context,
+                ),
                 position=None,
                 marks=marks or {delta.coin: market_price},
                 reasons=execution_reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=context,
             )
         if existing is not None:
@@ -419,7 +441,7 @@ class PaperEngine:
             position_id = _id(
                 "paperpos",
                 delta.wallet.lower(),
-                delta.coin.upper(),
+                preserve_native_instrument_symbol(delta.coin),
                 side,
                 observed_at_ms,
             )
@@ -485,12 +507,18 @@ class PaperEngine:
             position=position,
             marks=marks or {delta.coin: market_price},
             reasons=(),
+            timestamp_ms=observed_at_ms,
             decision_context=context,
         )
 
     def mark_to_market(
-        self, marks: dict[str, float], *, liquidatable_marks: dict[str, float] | None = None
+        self,
+        marks: dict[str, float],
+        *,
+        timestamp_ms: int,
+        liquidatable_marks: dict[str, float] | None = None,
     ) -> tuple[float, float, float]:
+        timestamp_ms = _require_timestamp_ms(timestamp_ms)
         clean_marks = _clean_marks_for_ledger(marks)
         unrealized = sum(
             _position_unrealized(
@@ -503,12 +531,16 @@ class PaperEngine:
         self._high_water_equity = max(self._high_water_equity, equity)
         drawdown = max(0.0, self._high_water_equity - equity)
         self.ledger.mark_to_market(
-            clean_marks, timestamp_ms=int(time.time() * 1000), liquidatable_marks=liquidatable_marks
+            clean_marks, timestamp_ms=timestamp_ms, liquidatable_marks=liquidatable_marks
         )
         return round(equity, 8), round(unrealized, 8), round(drawdown, 8)
 
     def mark_to_market_depuis_bbo(
-        self, marks: dict[str, float], bbo: dict[str, object]
+        self,
+        marks: dict[str, float],
+        bbo: dict[str, object],
+        *,
+        timestamp_ms: int,
     ) -> tuple[float, float, float]:
         """P1A câblage : construit les marks LIQUIDABLES (LONG@bid, SHORT@ask) depuis le BBO CAUSAL et
         marque le ledger avec — l'equity AUTORITAIRE (`authoritative_equity_usdc`) devient alors mesurable
@@ -517,7 +549,9 @@ class PaperEngine:
         from hl_observer.simulation.liquidatable_marks import marks_depuis_bbo
 
         liq = marks_depuis_bbo(self.ledger.positions.values(), bbo)
-        return self.mark_to_market(marks, liquidatable_marks=liq)
+        return self.mark_to_market(
+            marks, timestamp_ms=timestamp_ms, liquidatable_marks=liq
+        )
 
     def _apply_exit_delta(
         self,
@@ -537,10 +571,16 @@ class PaperEngine:
             return self._result(
                 False,
                 risk_decision,
-                self._no_trade(delta, reasons, decision_context=decision_context),
+                self._no_trade(
+                    delta,
+                    reasons,
+                    timestamp_ms=observed_at_ms,
+                    decision_context=decision_context,
+                ),
                 None,
                 marks or {delta.coin: market_price},
                 reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=decision_context,
             )
 
@@ -596,10 +636,16 @@ class PaperEngine:
             return self._result(
                 False,
                 risk_decision,
-                self._no_trade(delta, reasons, decision_context=decision_context),
+                self._no_trade(
+                    delta,
+                    reasons,
+                    timestamp_ms=observed_at_ms,
+                    decision_context=decision_context,
+                ),
                 position,
                 marks or {delta.coin: market_price},
                 reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=decision_context,
             )
         assert exit_exec.fill_price is not None
@@ -610,10 +656,16 @@ class PaperEngine:
             return self._result(
                 False,
                 risk_decision,
-                self._no_trade(delta, reasons, decision_context=decision_context),
+                self._no_trade(
+                    delta,
+                    reasons,
+                    timestamp_ms=observed_at_ms,
+                    decision_context=decision_context,
+                ),
                 position,
                 marks or {delta.coin: market_price},
                 reasons,
+                timestamp_ms=observed_at_ms,
                 decision_context=decision_context,
             )
         close_notional = close_quantity * exit_exec.fill_price
@@ -683,6 +735,7 @@ class PaperEngine:
             self._positions.get(position.position_id),
             marks or {delta.coin: market_price},
             (),
+            timestamp_ms=observed_at_ms,
             decision_context=decision_context,
         )
 
@@ -754,8 +807,10 @@ class PaperEngine:
         delta: LeaderDelta,
         reasons: list[str] | tuple[str, ...],
         *,
+        timestamp_ms: int,
         decision_context: dict[str, object] | None = None,
     ) -> PaperTrade:
+        timestamp_ms = _require_timestamp_ms(timestamp_ms)
         deduped_reasons = tuple(dict.fromkeys(reasons))
         refs = {
             "leader_delta_id": delta.delta_id,
@@ -769,7 +824,7 @@ class PaperEngine:
         self.ledger.no_trade(
             coin=delta.coin,
             reason="|".join(deduped_reasons) if deduped_reasons else "NO_TRADE",
-            timestamp_ms=int(delta.observed_at_ms or time.time() * 1000),
+            timestamp_ms=timestamp_ms,
             refs=refs,
         )
         return PaperTrade(
@@ -795,9 +850,13 @@ class PaperEngine:
         marks: dict[str, float],
         reasons: list[str] | tuple[str, ...],
         *,
+        timestamp_ms: int,
         decision_context: dict[str, object] | None = None,
     ) -> PaperDecisionResult:
-        equity, unrealized, drawdown = self.mark_to_market(marks)
+        timestamp_ms = _require_timestamp_ms(timestamp_ms)
+        equity, unrealized, drawdown = self.mark_to_market(
+            marks, timestamp_ms=timestamp_ms
+        )
         payload = (
             accepted,
             getattr(risk_decision.decision, "value", str(risk_decision.decision)),
@@ -872,7 +931,7 @@ def _paper_intent_for_delta(
             or decision_context.get("strategy_family")
             or "leader_delta_copy_follow"
         ),
-        coin=str(delta.coin).upper(),
+        coin=preserve_native_instrument_symbol(delta.coin),
         position_side=str(side).upper(),
         action=str(action).upper(),
         target_notional_usdc=float(notional_usdt),
@@ -954,7 +1013,7 @@ def _clean_marks_for_ledger(marks: dict[str, float]) -> dict[str, float]:
         except (TypeError, ValueError):
             continue
         if math.isfinite(price) and price > 0:
-            clean[str(coin).upper()] = price
+            clean[preserve_native_instrument_symbol(coin)] = price
     return clean
 
 
@@ -1054,3 +1113,9 @@ def _maker_execution_style_enabled() -> bool:
     import os
 
     return str(os.environ.get("HYPERSMART_EXECUTION_STYLE", "taker")).strip().lower() == "maker"
+
+
+def _require_timestamp_ms(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("timestamp_ms must be an explicit positive causal timestamp")
+    return value

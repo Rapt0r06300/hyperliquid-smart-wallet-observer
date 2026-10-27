@@ -52,8 +52,8 @@ def test_leverage_scales_pnl_and_keeps_margin_exposure():
     assert abs(q5 / q1 - 5.0) < 0.05
 
     # +1% move: unrealized PnL is meaningful (NOT cents) and ~5x bigger at 5x
-    _, u1, _ = e1.mark_to_market({"HYPE": 101.0})
-    _, u5, _ = e5.mark_to_market({"HYPE": 101.0})
+    _, u1, _ = e1.mark_to_market({"HYPE": 101.0}, timestamp_ms=1_700_000_001_000)
+    _, u5, _ = e5.mark_to_market({"HYPE": 101.0}, timestamp_ms=1_700_000_001_000)
     assert u1 > 0 and u5 > 0
     assert u5 >= 3.0                       # ~5$ on 100$ @5x for +1% (minus fees) -> euros, not cents
     assert 4.0 < (u5 / u1) < 6.0           # scales ~linearly with leverage

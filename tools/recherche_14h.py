@@ -275,7 +275,7 @@ def _sha256(p: Path) -> str:
 
 
 def finaliser(root: Path) -> dict:
-    """Scelle : manifest SHA256 de tous les résultats + rapport racine RAPPORT-RECHERCHE-14H.md."""
+    """Scelle les résultats puis écrit le rapport sous runtime/reports/legacy/."""
     ident = _identite_active(Path(root)) or {}
     rundir = Path(ident.get("rundir") or (_run_root(Path(root)) / "dernier"))
     manifeste = {}
@@ -286,12 +286,13 @@ def finaliser(root: Path) -> dict:
     (rundir / "manifeste" / "SHA256_MANIFEST.json").parent.mkdir(parents=True, exist_ok=True)
     (rundir / "manifeste" / "SHA256_MANIFEST.json").write_text(
         json.dumps(manifeste, ensure_ascii=False, indent=1), encoding="utf-8")
-    rapport = Path(root) / "RAPPORT-RECHERCHE-14H.md"
+    rapport = Path(root) / "runtime" / "reports" / "legacy" / "RAPPORT-RECHERCHE-14H.md"
     try:                                                       # 🔴 VRAI rapport détaillé (plus de stub vide)
         from rapport_14h import construire_rapport
         contenu = construire_rapport(rundir, manifeste=manifeste)
     except Exception:  # noqa: BLE001 — repli sûr : jamais de finalisation qui plante faute de rapport
         contenu = _rapport_md(ident, manifeste)
+    rapport.parent.mkdir(parents=True, exist_ok=True)
     rapport.write_text(contenu, encoding="utf-8")
     try:
         (_run_root(Path(root)) / "ACTIVE.json").unlink()

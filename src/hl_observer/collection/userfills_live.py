@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.realtime.event_identity import canonicalize_frame
 
 _EPS = 1e-12
@@ -20,7 +21,7 @@ def positions_depuis_snapshot(snap: dict) -> dict[str, dict]:
     """{coin: {szi, entryPx}} depuis un snapshot vault (seed de l'état live)."""
     out: dict[str, dict] = {}
     for p in (snap.get("positions") or []):
-        c = str(p.get("coin") or "").upper()
+        c = preserve_native_instrument_symbol(p.get("coin"))
         if c:
             out[c] = {"szi": float(p.get("szi") or 0.0), "entryPx": float(p.get("entryPx") or 0.0)}
     return out
@@ -36,7 +37,7 @@ def appliquer_fill(positions: dict[str, dict], fill: dict) -> dict[str, dict]:
 
     Le calcul reste en place et n'invente aucun prix intermédiaire.
     """
-    c = str(fill.get("coin") or "").upper()
+    c = preserve_native_instrument_symbol(fill.get("coin"))
     if not c:
         return positions
     try:
@@ -134,7 +135,7 @@ def parser_message_userfills(
     for frame_event in frame_events:
         f = frame_event.payload
         try:
-            coin = str(f["coin"]).upper()
+            coin = preserve_native_instrument_symbol(f["coin"])
             px = float(f["px"])
             sz = abs(float(f["sz"]))
             ts = int(f["time"])

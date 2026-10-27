@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from hl_observer.following.entity_consensus import entity_consensus_gate
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.storage.models import PositionDeltaModel, TopWallet
 from hl_observer.wallets.delta_utils import copy_delta_action, copy_delta_direction, delta_event_time_ms
 
@@ -90,7 +91,7 @@ def select_consensus_leaders_from_deltas(
             [
                 row
                 for row in entries
-                if str(row.coin or "").upper() == coin
+                if preserve_native_instrument_symbol(row.coin) == coin
                 and copy_delta_direction(row, copy_delta_action(row)) == direction
             ],
             key=delta_event_time_ms,
@@ -215,14 +216,14 @@ def format_consensus_leader_report(report: ConsensusLeaderSelectionReport) -> st
 
 
 def _coin_direction(row: PositionDeltaModel) -> tuple[str, str]:
-    return str(row.coin or "").upper(), str(copy_delta_direction(row, copy_delta_action(row)) or "UNKNOWN")
+    return preserve_native_instrument_symbol(row.coin), str(copy_delta_direction(row, copy_delta_action(row)) or "UNKNOWN")
 
 
 def _entity_vote(row: PositionDeltaModel) -> dict:
     raw = row.raw_json if isinstance(getattr(row, "raw_json", None), dict) else {}
     return {
         "wallet": str(row.wallet_address or "").lower(),
-        "coin": str(row.coin or "").upper(),
+        "coin": preserve_native_instrument_symbol(row.coin),
         "side": copy_delta_direction(row, copy_delta_action(row)),
         "ts_ms": delta_event_time_ms(row),
         "size": abs(float(row.delta_notional_usdc or row.delta_size or 0.0)),

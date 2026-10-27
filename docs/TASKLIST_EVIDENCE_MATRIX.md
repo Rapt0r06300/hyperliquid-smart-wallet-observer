@@ -34,7 +34,7 @@
 | P6-1 décision Liquidations | `TODO_ACTIVE` | `liquidation_map.sqlite3` | 231 grappes / 31,6 h |
 | P7-1 Grinder/Sniper | `DONE_VERIFIED` | `docs/research/GRINDER_SNIPER_REAL_STATUS.md` | ledger : 0 ligne, 7 termes `NOT_FOUND` |
 | P8-3 superviseur | `DONE_VERIFIED` | compteurs au rapport du jour | relances tracées |
-| P9-1..5 rapports | `DONE_VERIFIED` | `RECAP-COMPLET.md`, `RAPPORT_DU_JOUR.md` | 8 étapes, 12 sections |
+| P9-1..5 rapports | `DONE_VERIFIED` | `docs/archive/root-history/RECAP-COMPLET.md`, `RAPPORT_DU_JOUR.md` | 8 étapes, 12 sections |
 
 ## Tâches ROUVERTES (l'état contredit un ancien rapport)
 

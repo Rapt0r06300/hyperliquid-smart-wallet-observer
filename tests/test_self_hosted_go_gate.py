@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PREPARER = ROOT / "PREPARER_PC_ALINA.cmd"
-INSTALLER_CMD = ROOT / "INSTALLER_ALINA_RUNNER_WINDOWS.cmd"
+PREPARER = ROOT / "tools/launchers/PREPARER_PC_ALINA.cmd"
+INSTALLER_CMD = ROOT / "tools/launchers/INSTALLER_ALINA_RUNNER_WINDOWS.cmd"
 INSTALLER_PS1 = ROOT / "tools" / "INSTALLER_ALINA_RUNNER_WINDOWS.ps1"
 COCKPIT = ROOT / "tools" / "ALINA_RESEARCH_COCKPIT.ps1"
 

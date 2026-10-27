@@ -251,7 +251,7 @@ def _verrous_testnet(racine: Path) -> bool | None:
     return bool(real_off and testnet_only)
 
 
-def depuis_le_recap(racine: str | Path, *, nom_recap: str = "RECAP-COMPLET.md"
+def depuis_le_recap(racine: str | Path, *, nom_recap: str = "runtime/reports/legacy/RECAP-COMPLET.md"
                     ) -> RapportReadiness:
     """Le score dérivé du dernier RECAP. Deny-by-default : pas de RECAP -> sécurité non prouvée
     -> gate dur (F/N0). Les invariants gardés par des tests nommés (vérité du PnL, portes de

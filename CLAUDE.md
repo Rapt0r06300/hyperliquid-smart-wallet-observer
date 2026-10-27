@@ -1,6 +1,6 @@
 # CLAUDE.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-10-23**.
+Dernière mise à jour : **2026-10-27**.
 
 Ce fichier est volontairement **court**. Claude Code le charge à chaque session ; les détails permanents communs à tous les agents vivent dans `AGENTS.md` et la spec canonique.
 
@@ -51,9 +51,17 @@ Objectif de recherche : **>= +5.00 USD NET/jour PROUVÉS pour Copy-Vault, sur 20
 
 Les statuts honnêtes restent :
 
-`PROVEN / MORE_DATA / UNMEASURABLE / KILL`.
+`PROVEN / PROMISING / MORE_DATA / UNMEASURABLE / REJECTED`.
 
 Ne jamais modifier les coûts, les gates ou la méthodologie pour fabriquer un résultat positif.
+
+## Repères opérateur à retenir
+
+- Travail local directement dans `C:\Users\flo\Desktop\Projet invest` ; aucun worktree.
+- `LANCER_COLLECTEURS_COPY_VAULT.cmd` collecte ; `LANCER_LAB_QUANT_COPY_VAULT.cmd` cherche et archive les améliorations par replay/backtest ; `LANCER_HYPERSMART.cmd` est le moteur avec affichage de simulation.
+- `POUSSER-GITHUB-FORCE.cmd` réconcilie/pousse le code sans force ; AlinaSync (`ALINA_SYNC_COMPLETE.cmd`) gère les shards SAFE.
+- À la racine, garder ces quatre lanceurs principaux et AlinaSync (`ALINA_SYNC_COMPLETE.cmd` et `.sh`). Les commandes de support sont sous `tools/launchers/`; la portabilité signifie qu'un clone fonctionne depuis son propre chemin.
+- Le labo ne doit jamais fabriquer de PnL. Les candidats restent distincts d'une preuve ; la chaîne canonique OOS/forward/PNL_PROOF décide.
 
 ## Sécurité non négociable
 

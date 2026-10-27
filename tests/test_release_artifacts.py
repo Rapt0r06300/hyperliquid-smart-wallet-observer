@@ -30,7 +30,7 @@ def _archive(tmp_path: Path) -> Path:
         },
         "sbom": {"licences": ["LICENSE"]},
         "donnees_exclues": [
-            ".git/", "dist/", ".env", "moisson_console.txt",
+            ".git/", "dist/", ".env", "runtime/reports/legacy/moisson/moisson_console.txt",
             "outils de test/rapports/analyse_599.txt",
         ],
     }

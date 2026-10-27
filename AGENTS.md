@@ -1,6 +1,6 @@
 # AGENTS.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-10-23**.
+Dernière mise à jour : **2026-10-27**.
 
 Contrat compact pour tout agent intervenant dans ce dépôt. Les exigences détaillées ne sont pas dupliquées ici : elles vivent dans les documents d’autorité ci-dessous.
 
@@ -41,6 +41,16 @@ Famille active unique : **Copy-Vault**.
 Lead-Lag, Cross-Venue Dislocation, arbitrage, Carry/Funding Carry, shadow/research-only et toute famille économique non attribuée : **DISABLED_BY_SCOPE**. Ce verrou couvre simulation UI/moteur principal, labo, replays/backtests, OOS/forward, preuve PnL, certification et scoreboard. Conserver leur code et leurs preuves historiques sans les exécuter ni les promouvoir; aucune variable d'environnement ne peut élargir le scope.
 
 Cible de recherche : au moins +5 USD net/jour pour Copy-Vault, avec 200 USD de capital paper. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
+
+## Repères opérateur permanents
+
+- Pour le travail local de l'opérateur, utiliser directement `C:\Users\flo\Desktop\Projet invest`. Ne jamais créer, attacher ou utiliser un worktree.
+- Rôles retenus : `LANCER_COLLECTEURS_COPY_VAULT.cmd` = collecte ; `LANCER_LAB_QUANT_COPY_VAULT.cmd` = cerveau replay/backtest et registre durable des améliorations ; `LANCER_HYPERSMART.cmd` = moteur avec simulation visible ; `POUSSER-GITHUB-FORCE.cmd` = synchronisation prudente du code Git.
+- AlinaSync, appelé localement via `ALINA_SYNC_COMPLETE.cmd`, gère les shards SAFE. Le lanceur Git ne les transfère pas.
+- À la racine ne restent que ces quatre lanceurs principaux et `ALINA_SYNC_COMPLETE.cmd`; `ALINA_SYNC_COMPLETE.sh` y reste pour les clones Unix. Les commandes de support sont dans `tools/launchers/` et leur index est `tools/launchers/README.md`.
+- « Portable » signifie qu'un clone du dépôt fonctionne depuis son chemin local ; ne pas confondre cela avec la création d'une archive autonome.
+- Le labo conserve chaque candidat/mesure, même exploratoire ; aucune amélioration n'autorise un PnL inventé. Seule la preuve OOS/forward et comptable canonique peut établir un résultat économique.
+- Le rôle attendu d'un lanceur ne certifie pas son implémentation actuelle : contrôler le HEAD et corriger tout écart au scope Copy-Vault/PAPER avant de le déclarer conforme.
 
 ## Control plane et données
 

@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 def _safe_float(value: Any) -> float | None:
     if value is None:
@@ -110,7 +112,9 @@ def reconstruct_position_deltas_from_fills(
     cumulative_by_coin: dict[str, float] = {}
 
     for fill in sorted(fills, key=_fill_time):
-        coin = str(fill.get("coin") or fill.get("coinName") or "UNKNOWN").upper()
+        coin = preserve_native_instrument_symbol(
+            fill.get("coin") or fill.get("coinName") or "UNKNOWN"
+        )
         signed_size = signed_fill_size(fill)
         if signed_size is None:
             continue

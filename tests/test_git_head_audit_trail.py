@@ -17,4 +17,4 @@ def test_nomme_le_sha_de_reprise():
 
 def test_pointe_le_journal_des_commits():
     t = DOC.read_text(encoding="utf-8")
-    assert "TACHES_HYPERSMART_V6_COMPLET.md" in t and "git log" in t
+    assert "docs/archive/root-history/TACHES_HYPERSMART_V6_COMPLET.md" in t and "git log" in t

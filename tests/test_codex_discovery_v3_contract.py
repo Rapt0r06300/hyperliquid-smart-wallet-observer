@@ -104,7 +104,7 @@ def test_v32_workflow_does_not_persist_checkout_credentials() -> None:
 
 
 def test_windows_research_launcher_forwards_only_arguments_after_mode() -> None:
-    text = _text("LANCER-CODEX-RESEARCH.cmd")
+    text = _text("tools/launchers/LANCER-CODEX-RESEARCH.cmd")
     assert "shift" not in text
     assert "codex_forward_args=%*" in text
     assert "codex_forward_args=%codex_forward_args:* =%" in text
@@ -115,4 +115,4 @@ def test_windows_research_launcher_forwards_only_arguments_after_mode() -> None:
 
 def test_windows_research_launcher_is_registered_as_maintenance() -> None:
     text = _text("src/hl_observer/ops/entrypoint_topology.py")
-    assert '"lancer-codex-research.cmd": entrypointrole.maintenance' in text
+    assert '"tools/launchers/lancer-codex-research.cmd": entrypointrole.maintenance' in text

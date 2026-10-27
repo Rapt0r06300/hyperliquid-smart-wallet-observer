@@ -23,6 +23,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     temporal_bounds,
     temporal_evidence,
 )
+from hl_observer.backtesting.copy_vault_protocol import INSTRUMENT_IDENTITY_SCHEMA
 from hl_observer.economics.assumptions import EconomicConfigError, EconomicRunMode
 
 
@@ -113,6 +114,46 @@ def test_metaorders_collapse_slices_even_when_other_coin_is_interleaved() -> Non
     assert [row["fill_count"] for row in btc] == [2, 1]
     assert audit["duplicate_events_rejected"] == 1
     assert audit["sliced_fills_collapsed"] == 1
+
+
+def test_metaorder_and_book_selection_preserve_native_coin_case() -> None:
+    signal = {
+        **_entry("native-kpepe", 2_000, coin="kPEPE", action="OPEN"),
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+        "observed_at_ms": 2_025,
+    }
+    metaorder = cluster_metaorders([signal])[0][0]
+    book = {**_book(2_025, 0.0001, 0.0002, causal=True), "coin": "kPEPE"}
+
+    selected, books, _audit = select_causal_protocol_inputs(
+        [metaorder], {"kPEPE": [book], "KPEPE": [_book(2_025, 1.0, 2.0, causal=True)]}
+    )
+
+    assert metaorder["coin"] == "kPEPE"
+    assert metaorder["metaorder_id"] == cluster_metaorders([signal])[0][0]["metaorder_id"]
+    assert [row["coin"] for row in selected] == ["kPEPE"]
+    assert list(books) == ["kPEPE"]
+
+
+def test_observed_book_loader_does_not_case_fold_native_coin(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "kPEPE", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 0.0001, "ask": 0.0002, "capacity_usd": 10.0,
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, _audit = load_observed_books(tmp_path, coins={"kPEPE"})
+
+    assert list(books) == ["kPEPE"]
+    assert load_observed_books(tmp_path, coins={"KPEPE"})[0] == {}
 
 
 def test_metaorder_id_ne_change_pas_quand_une_slice_future_arrive() -> None:
@@ -464,6 +505,7 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
         "checkpoint_stage": "ENTRY", "checkpoint_target_ms": 2_005,
         "checkpoint_id": "mo-1:ENTRY", "metaorder_id": "mo-1",
         "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
     }
     (data / "copy_vault_l2_tape.jsonl").write_text(
         json.dumps(row) + "\n", encoding="utf-8"
@@ -520,6 +562,7 @@ def test_loader_quarantaine_tout_metaordre_avec_checkpoint_duplique(tmp_path) ->
             "checkpoint_id": checkpoint_id,
             "metaorder_id": metaorder_id,
             "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+            "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
         }
 
     rows = [
@@ -563,6 +606,7 @@ def test_loader_quarantaine_chaque_metaordre_partageant_un_checkpoint_id(tmp_pat
             "checkpoint_id": checkpoint_id,
             "metaorder_id": metaorder_id,
             "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+            "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
         }
 
     rows = [
@@ -693,6 +737,42 @@ def test_stale_reference_is_refused_instead_of_using_future_price() -> None:
     assert reason == "STALE_OR_MISSING_REFERENCE_BOOK"
 
 
+@pytest.mark.parametrize(
+    ("connection_ids", "gap_epochs", "expected_reason"),
+    [
+        (["ws-a", "ws-b", "ws-b"], [0, 1, 1], "L2_CONNECTION_GAP_CROSSED"),
+        (["ws-a", "ws-a", "ws-a"], [0, 1, 1], "L2_GAP_EPOCH_CROSSED"),
+        (["ws-a", "ws-a", "ws-a"], [0, None, 1], "L2_GAP_EPOCH_IDENTITY_INCOMPLETE"),
+    ],
+)
+def test_replay_refuses_book_triplets_crossing_observed_l2_gaps(
+    connection_ids: list[str],
+    gap_epochs: list[int | None],
+    expected_reason: str,
+) -> None:
+    metaorder = cluster_metaorders([_entry("gap-crossing", 1_000)])[0][0]
+    books = [
+        {
+            **_book(ts_ms, bid, ask),
+            "connection_id": connection_id,
+            "l2_gap_epoch": gap_epoch,
+        }
+        for ts_ms, bid, ask, connection_id, gap_epoch in zip(
+            (1_000, 61_000, 361_000),
+            (99.0, 100.0, 109.0),
+            (101.0, 102.0, 111.0),
+            connection_ids,
+            gap_epochs,
+            strict=True,
+        )
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == expected_reason
+
+
 def test_unsorted_continuous_books_are_rejected_before_replay() -> None:
     metaorder = cluster_metaorders([_entry("unsorted", 1_000)])[0][0]
     books = [
@@ -777,6 +857,7 @@ def _checkpoint_book(
         "checkpoint_id": f"{metaorder_id}:{checkpoint_suffix}",
         "checkpoint_target_ms": target_ms,
         "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        "instrument_identity_schema": INSTRUMENT_IDENTITY_SCHEMA,
         "writer_run_id": "copy-writer-clean",
         "clean_epoch_ms": 500,
     }

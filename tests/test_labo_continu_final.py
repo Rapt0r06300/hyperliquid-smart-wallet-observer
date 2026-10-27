@@ -276,8 +276,8 @@ def test_rapport_complet_et_securite(tmp_path):
 
 # ─────────────── 16) 14h/18h intacts ───────────────
 def test_14h_18h_intacts():
-    assert (RACINE / "LANCER-RECHERCHE-14H.cmd").exists()
-    assert (RACINE / "LANCER-RECHERCHE-18H.cmd").exists()
+    assert (RACINE / "tools/launchers/LANCER-RECHERCHE-14H.cmd").exists()
+    assert (RACINE / "tools/launchers/LANCER-RECHERCHE-18H.cmd").exists()
     import recherche_18h  # noqa: F401  (le module 18h s'importe toujours)
     import rapport_14h    # noqa: F401
 

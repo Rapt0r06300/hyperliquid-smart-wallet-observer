@@ -40,6 +40,8 @@ echo   Les observations locales restent brutes jusqu'a validation/admission SAFE
 echo   Duree : campagnes de 6 jours, renouvelees automatiquement
 echo   Arret : Ctrl+C; workers crees sous bail arretes sous 120 s max
 echo   Les collecteurs deja geres par LANCER_HYPERSMART restent sous son controle
+echo   Affichage toutes les 30 s : etat, PID et derniere ligne de chaque worker
+echo   Journaux worker bornes : 4 MiB chacun, 3 rotations conservees
 echo   Moteur principal / paper experimental : non demarres
 echo   Ordres : aucun ^| execution mainnet/testnet : desactivee
 echo   Journal : runtime\logs\economic-collector-watchdog.jsonl

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from math import log10
 from typing import Iterable, Sequence
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
@@ -83,10 +84,10 @@ def build_liquidation_signal(
 ) -> LiquidationSignal | None:
     """Qualify a fresh, significant liquidation cascade for ``coin``, else ``None``."""
     cfg = config or LiquidationConfig()
-    coin_u = str(coin or "").upper()
+    coin_u = preserve_native_instrument_symbol(coin)
     window: list[LiquidationEvent] = []
     for ev in events:
-        if str(ev.coin or "").upper() != coin_u:
+        if preserve_native_instrument_symbol(ev.coin) != coin_u:
             continue
         age = int(now_ms) - int(ev.ts_ms)
         if age < 0 or age > cfg.window_ms:

@@ -399,6 +399,19 @@ def test_position_delta_reconstruction_without_start_position_is_medium_confiden
     assert {delta.confidence for delta in deltas} == {"medium"}
 
 
+def test_position_delta_reconstruction_keeps_case_distinct_native_symbols():
+    deltas = reconstruct_position_deltas_from_fills(
+        VALID_WALLET,
+        [
+            {"coin": "kPEPE", "time": 1, "side": "B", "sz": "10"},
+            {"coin": "KPEPE", "time": 2, "side": "B", "sz": "20"},
+        ],
+    )
+
+    assert {delta.coin for delta in deltas} == {"kPEPE", "KPEPE"}
+    assert [delta.current_size for delta in deltas] == [10.0, 20.0]
+
+
 def test_wallet_backfill_keeps_all_fill_coins(tmp_path):
     settings = _settings_for_db(tmp_path)
     session_factory = _session_factory(settings.database_url)

@@ -126,7 +126,10 @@ def run_copy_votes_through_paper_engine(
     min_consensus_wallets = _env_int("HYPERSMART_FUSION_COPY_MIN_WALLETS", 2)
     if conflict.decision == "FOLLOW" and conflict.winning_side in {"LONG", "SHORT"}:
         if distinct_wallets < min_consensus_wallets or signal_age_ms > max_signal_age_ms:
-            equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
+            equity, _, drawdown = engine.mark_to_market(
+                {conflict.coin: float(market_price)} if conflict.coin else {},
+                timestamp_ms=int(observed_at_ms),
+            )
             _motifs: list[str] = []
             if distinct_wallets < min_consensus_wallets:
                 _motifs.append("CONSENSUS_TOO_WEAK")
@@ -180,7 +183,10 @@ def run_copy_votes_through_paper_engine(
             _refus_edge = "NON_EMPIRICAL_EDGE_EXPERIMENTAL_ONLY"
         _trace.stamp("gates")
         if _refus_edge:
-            equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
+            equity, _, drawdown = engine.mark_to_market(
+                {conflict.coin: float(market_price)} if conflict.coin else {},
+                timestamp_ms=int(observed_at_ms),
+            )
             return FusionPaperEngineSummary(
                 decisions=(), accepted_count=0, equity_usdt=equity, drawdown_usdt=drawdown,
                 refusal_reasons=(_refus_edge,),
@@ -195,7 +201,10 @@ def run_copy_votes_through_paper_engine(
                                   net_edge_bps=edge_remaining_bps, signal_age_ms=signal_age_ms,
                                   consensus_wallets=distinct_wallets)
             if not is_admitted(_cp, admission_floor_power):
-                equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
+                equity, _, drawdown = engine.mark_to_market(
+                    {conflict.coin: float(market_price)} if conflict.coin else {},
+                    timestamp_ms=int(observed_at_ms),
+                )
                 return FusionPaperEngineSummary(
                     decisions=(), accepted_count=0, equity_usdt=equity, drawdown_usdt=drawdown,
                     refusal_reasons=("BOARD_ADMISSION_FLOOR_NOT_CLEARED",),
@@ -288,7 +297,10 @@ def run_copy_votes_through_paper_engine(
     except Exception:
         _noter_echec("hl_observer/paper_trading/fusion_paper_engine_adapter.py:271")
 
-    equity, _, drawdown = engine.mark_to_market({conflict.coin or "UNKNOWN": float(market_price)})
+    equity, _, drawdown = engine.mark_to_market(
+        {conflict.coin: float(market_price)} if conflict.coin else {},
+        timestamp_ms=int(observed_at_ms),
+    )
     _accepted_n = sum(1 for item in decisions if item.accepted)
     # 06/08 — REGLE DURE (test_a_refusal_is_NEVER_silent) : un refus du NOYAU (RiskEngine /
     # PaperEngine) remontait un resume MUET — accepted_count=0 sans le moindre motif. On agrege
@@ -426,7 +438,9 @@ def run_distilled_opportunities_through_paper_engine(
                 },
             )
         )
-    equity, _, drawdown = engine.mark_to_market(market_prices or {"UNKNOWN": 0.0})
+    equity, _, drawdown = engine.mark_to_market(
+        market_prices, timestamp_ms=int(observed_at_ms)
+    )
     return FusionPaperEngineSummary(
         decisions=tuple(decisions),
         accepted_count=sum(1 for item in decisions if item.accepted),

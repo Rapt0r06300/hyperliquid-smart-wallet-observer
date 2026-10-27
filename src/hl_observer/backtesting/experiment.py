@@ -79,7 +79,10 @@ def run_paper_replay_experiment(
         tick = _first_tick_at_or_after(ticks_by_coin.get(delta.coin.upper(), []), decision_time)
         if tick is None:
             skipped_no_future_price += 1
-            equity, unrealized, drawdown = engine.mark_to_market(_latest_marks_before(ticks_by_coin, decision_time))
+            equity, unrealized, drawdown = engine.mark_to_market(
+                _latest_marks_before(ticks_by_coin, decision_time),
+                timestamp_ms=decision_time,
+            )
             decisions.append(
                 BacktestReplayDecision(
                     delta_id=delta.delta_id,
@@ -132,7 +135,21 @@ def run_paper_replay_experiment(
         )
 
     final_marks = _latest_marks_before(ticks_by_coin, 2**63 - 1)
-    final_equity, _, max_drawdown = engine.mark_to_market(final_marks)
+    if final_marks:
+        final_timestamp_ms = max(
+            tick.timestamp_ms
+            for ticks in ticks_by_coin.values()
+            for tick in ticks
+            if tick.coin.upper() in final_marks
+        )
+        final_equity, _, max_drawdown = engine.mark_to_market(
+            final_marks, timestamp_ms=final_timestamp_ms
+        )
+    else:
+        # There is no market observation from which to create a ledger mark.
+        # With no executable tick, no position can have been opened in this replay.
+        final_equity = round(engine.cash_usdt + engine.realized_pnl_usdt, 8)
+        max_drawdown = 0.0
     return BacktestExperimentResult(
         decisions=tuple(decisions),
         evidence=tuple(evidences),

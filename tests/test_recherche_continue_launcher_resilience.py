@@ -438,11 +438,11 @@ def test_concurrent_heartbeats_remain_valid_and_leave_no_shared_tmp(tmp_path):
 
 
 def test_cmd_preserves_run_pointer_and_exposes_diagnostics():
-    content = (ROOT / "LANCER-RECHERCHE-CONTINUE.cmd").read_text(
+    content = (ROOT / "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd").read_text(
         encoding="utf-8",
         errors="ignore",
     ).lower()
-    assert 'cd /d "%~dp0"' in content
+    assert 'cd /d "%alina_project_root%"' in content
     assert "python -u tools\\recherche_continue.py dry-run" in content
     assert "verifier-finalisation" in content
     assert "dernier-run-lance" in content

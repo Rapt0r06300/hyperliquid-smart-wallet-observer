@@ -93,8 +93,21 @@ def test_fill_identity_is_stable_and_distinct():
     a = fill_identity(wallet_address="0xABC", coin="BTC", side="LONG", action_type="ADD", price=100.0, size=1.0, ts_ms=NOW)
     b = fill_identity(wallet_address="0xabc", coin="btc", side="long", action_type="add", price=100.0, size=1.0, ts_ms=NOW)
     c = fill_identity(wallet_address="0xABC", coin="BTC", side="LONG", action_type="ADD", price=100.0, size=2.0, ts_ms=NOW)
-    assert a == b  # normalisation casse/charset
+    assert a != b  # le symbole natif est sensible à la casse
     assert a != c  # taille différente -> identité différente
+
+
+def test_fill_identity_ne_fusionne_pas_les_symboles_native_case_distincts():
+    lower = fill_identity(
+        wallet_address="w", coin="kPEPE", side="LONG", action_type="OPEN_LONG",
+        price=0.00001, size=1.0, ts_ms=NOW,
+    )
+    upper = fill_identity(
+        wallet_address="w", coin="KPEPE", side="LONG", action_type="OPEN_LONG",
+        price=0.00001, size=1.0, ts_ms=NOW,
+    )
+
+    assert lower != upper
 
 
 def test_replay_on_realistic_mix_drops_the_noise():

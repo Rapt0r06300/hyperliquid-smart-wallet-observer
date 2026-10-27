@@ -1,6 +1,6 @@
 # Session 2026-07-16 — Mesures manquantes, branchements, et catalogue
 
-**Cap :** « il faut tout faire ». On a comblé les **chaînons manquants** repérés dans `moisson-fini.md`
+**Cap :** « il faut tout faire ». On a comblé les **chaînons manquants** repérés dans `docs/archive/root-history/moisson-fini.md`
 (la maladie du projet : *une capacité présente, un chaînon manquant, personne qui se plaint*),
 chaque brique **codée + testée + vérifiée**, sans jamais toucher au no-real-trade.
 
@@ -58,7 +58,7 @@ chaque brique **codée + testée + vérifiée**, sans jamais toucher au no-real-
 
 ## 4. #12 — Catalogue de la moisson (pour ne rien oublier)
 
-Source brute conservée : `moisson-fini.md` (1,82 Mo) · différés : `data/reports/moisson_10h.json` (36 Mo).
+Source brute conservée : `docs/archive/root-history/moisson-fini.md` (1,82 Mo) · différés : `data/reports/moisson_10h.json` (36 Mo).
 
 - **181 250** dépôts scannés · **20 206** à substance positive · **1 053** analysés en profondeur ·
   **19 153** différés (tracés dans le JSON, jamais perdus).

@@ -24,6 +24,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
 )
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
 from hl_observer.following.entity_consensus import entity_consensus_gate
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.copy_vault_vnext_train.v1"
 MECHANISM = "copy_vault_vnext_causal_multiwallet_consensus"
@@ -120,7 +121,7 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             continue
         trade_id = str(raw.get("trade_id") or "")
         vault = str(raw.get("vault") or "").strip().lower()
-        coin = str(raw.get("coin") or "").strip().upper()
+        coin = preserve_native_instrument_symbol(raw.get("coin"))
         try:
             direction = int(raw.get("direction") or 0)
             signal_ts_ms = int(raw.get("signal_ts_ms") or 0)
@@ -155,7 +156,7 @@ def _identity_vote(row: Mapping[str, Any]) -> dict[str, Any]:
     direction = int(row.get("direction") or 0)
     return {
         "wallet": str(row.get("vault") or "").strip().lower(),
-        "coin": str(row.get("coin") or "").strip().upper(),
+        "coin": preserve_native_instrument_symbol(row.get("coin")),
         "side": "long" if direction == 1 else "short",
         "ts_ms": int(row.get("signal_ts_ms") or 0),
         "size": _number(row.get("notional_usd")),
@@ -213,7 +214,7 @@ def admit_consensus_train_rows(
     reasons = Counter()
     for index, row in enumerate(ordered):
         timestamp = int(row.get("signal_ts_ms") or 0)
-        coin = str(row.get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol(row.get("coin"))
         direction = int(row.get("direction") or 0)
         current_vault = str(row.get("vault") or "").lower()
         supporting_rows: list[dict[str, Any]] = []
@@ -226,7 +227,7 @@ def admit_consensus_train_rows(
             if age <= 0:
                 continue
             if (
-                str(previous.get("coin") or "").upper() == coin
+                preserve_native_instrument_symbol(previous.get("coin")) == coin
                 and int(previous.get("direction") or 0) == direction
             ):
                 vault = str(previous.get("vault") or "").lower()

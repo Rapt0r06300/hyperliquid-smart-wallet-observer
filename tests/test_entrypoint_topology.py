@@ -38,7 +38,7 @@ def _seed_registered_launchers(root: Path) -> None:
         root / OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_RESEARCH],
         _official_content("tools\\recherche_continue.py"),
     )
-    _write(root / "CREER_ARCHIVE_PORTABLE.cmd", _official_content("portable archive"))
+    _write(root / "tools" / "launchers" / "CREER_ARCHIVE_PORTABLE.cmd", _official_content("portable archive"))
 
 
 def test_current_repository_entrypoint_topology_is_clean() -> None:

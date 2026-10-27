@@ -949,7 +949,7 @@ goto :fin
 REM -------- REPLAY / BACKTESTS (outil separe du runtime principal) --------
 :cmd_replay
 echo.
-call "%~dp0ANALYSER_BACKTESTS_REPLAYS.cmd" %2 %3 %4 %5 %6 %7 %8 %9
+call "%~dp0tools\launchers\ANALYSER_BACKTESTS_REPLAYS.cmd" %2 %3 %4 %5 %6 %7 %8 %9
 exit /b %ERRORLEVEL%
 
 REM -------- MOISSON (absorbe LANCER-MOISSON-12H / MOISSONNER-GITHUB / RELIRE / VOIR / FERMER + workers) --------
@@ -961,16 +961,18 @@ if /I "%~2"=="relire" goto :moisson_relire
 if not "%GITHUB_TOKEN%"=="" ( echo   Cle GitHub deja presente : on l'utilise. & goto :moisson_go )
 set /p GITHUB_TOKEN=  Ta cle GitHub ^(vide = 60 req/h, sans recherche code^) :
 :moisson_go
-if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
-if exist "%~dp0moisson-en-cours.txt" del "%~dp0moisson-en-cours.txt" >nul 2>&1
-start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 12 > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+if not exist "%~dp0runtime\reports\legacy\moisson" mkdir "%~dp0runtime\reports\legacy\moisson" >nul 2>&1
+if exist "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" del "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" >nul 2>&1
+if exist "%~dp0runtime\reports\legacy\moisson\moisson-en-cours.txt" del "%~dp0runtime\reports\legacy\moisson\moisson-en-cours.txt" >nul 2>&1
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 12 > "%~dp0runtime\reports\legacy\moisson\moisson_console.txt" 2>&1& echo done> "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
-echo   Moisson terminee. Resultat : moisson-fini.md
+echo   Moisson terminee. Resultat : runtime\reports\legacy\moisson\moisson-fini.md
 goto :fin
 :moisson_relire
+if not exist "%~dp0runtime\reports\legacy\moisson" mkdir "%~dp0runtime\reports\legacy\moisson" >nul 2>&1
 if not exist "%~dp0data\reports\moisson_10h_etat.json" ( echo   Aucun etat sauvegarde -- lance d'abord `moisson`. & goto :fin )
-if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
-start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 3 --relire > "%~dp0moisson_console.txt" 2>&1& echo done> "%~dp0moisson-termine.flag""
+if exist "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" del "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" >nul 2>&1
+start "MOISSON 12h - travail (NE PAS FERMER)" /min cmd /c "set PYTHONPATH=%~dp0src;%~dp0& set PYTHONIOENCODING=utf-8& set PYTHONUTF8=1& "%HYPERSMART_PYTHON%" tools\moissonner_10h.py --heures 3 --relire > "%~dp0runtime\reports\legacy\moisson\moisson_console.txt" 2>&1& echo done> "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag""
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 goto :fin
 :moisson_github
@@ -985,7 +987,7 @@ goto :fin
 :moisson_stop
 taskkill /FI "WINDOWTITLE eq MOISSON 12h*" /T /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq Tableau de bord*" /T /F >nul 2>&1
-if exist "%~dp0moisson-termine.flag" del "%~dp0moisson-termine.flag" >nul 2>&1
+if exist "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" del "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" >nul 2>&1
 echo   Moisson fermee. Rien n'est perdu : relancer reprend ou on s'etait arrete.
 goto :fin
 
@@ -1051,8 +1053,9 @@ goto :fin
 
 REM -------- AVANCES (conservation totale) --------
 :cmd_auditmoiss
-"%HYPERSMART_PYTHON%" tools\audit_moissonneur.py > audit_moissonneur.txt 2>&1
-echo   Rapport : audit_moissonneur.txt
+if not exist "%~dp0runtime\reports\legacy" mkdir "%~dp0runtime\reports\legacy" >nul 2>&1
+"%HYPERSMART_PYTHON%" tools\audit_moissonneur.py > "%~dp0runtime\reports\legacy\audit_moissonneur.txt" 2>&1
+echo   Rapport : runtime\reports\legacy\audit_moissonneur.txt
 goto :fin
 :cmd_premierraw
 "%HYPERSMART_PYTHON%" -c "from hl_observer.experimental import rapport_raw as R; p=R.ecrire_rapport('.'); print('Rapport ecrit :', p) if p else print('Aucun OPEN RAW pour l instant.')"

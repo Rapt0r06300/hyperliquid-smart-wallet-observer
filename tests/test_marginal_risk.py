@@ -13,3 +13,8 @@ def test_capacite():
     assert capacite_max_usd(None) is None                       # sans profondeur -> pas de devinette
     assert capacite_max_usd(100_000.0, impact_max_bps=20.0, pente_impact_bps_par_usd=0.001) == 20000.0
     assert capacite_max_usd(100_000.0) is not None              # repli prudent
+
+
+def test_net_exposure_preserves_case_distinct_instruments():
+    net = exposition_nette({"copy": {"kPEPE": 50.0, "KPEPE": -20.0}})
+    assert net == {"kPEPE": 50.0, "KPEPE": -20.0}

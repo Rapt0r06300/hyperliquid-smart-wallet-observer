@@ -635,10 +635,54 @@ def test_copy_vault_subscription_diagnostics_reach_collection_receipt(tmp_path):
         "vault_subscription_attempts_dropped": {address: 0},
         "subscription_diagnostics": {"acknowledged": 1, "unmatched_acks": 2},
         "l2_diagnostics": {
+            "received_frames": 3,
+            "candidate_l2_frames": 2,
+            "accepted_frames": 1,
+            "rejected_frames": 1,
+            "rejected_by_reason": {"invalid_levels": 1},
+            "ignored_frames": 1,
+            "ignored_by_reason": {"duplicate_snapshot": 1},
+            "duplicate_snapshots": 1,
+            "reconnects": 1,
             "subscription_ack_mismatches": 1,
             "invalid_subscription_acks": 0,
+            "requested_markets": ["BTC"],
+            "connection_events": [
+                {
+                    "event": "connected",
+                    "time_ms": 9_700,
+                    "connection_id": "copy-l2-test",
+                    "markets": ["BTC"],
+                },
+                {
+                    "event": "disconnect",
+                    "time_ms": 10_200,
+                    "connection_id": "copy-l2-test",
+                    "markets": ["BTC"],
+                    "error_class": "ConnectionClosedError",
+                },
+            ],
+            "connection_events_dropped": 0,
+            "unknown_market_rejections": [
+                {
+                    "time_ms": 10_150,
+                    "connection_id": "copy-l2-test",
+                    "reason": "invalid_json",
+                }
+            ],
+            "unknown_market_rejections_dropped": 0,
+            "coverage_claim": "NOT_PROVEN",
+            "required_market_proof_window_status": "UNAVAILABLE",
+            "freshness_policy": "AGE_REPORTED_NO_THRESHOLD_ASSUMED",
             "markets": {
                 "BTC": {
+                    "received": 2,
+                    "candidate_l2_frames": 2,
+                    "accepted": 1,
+                    "rejected": 1,
+                    "duplicates": 0,
+                    "rejected_by_reason": {"invalid_levels": 1},
+                    "ignored_by_reason": {},
                     "subscription_status": "REJECTED",
                     "subscription_attempts": [
                         {
@@ -655,6 +699,38 @@ def test_copy_vault_subscription_diagnostics_reach_collection_receipt(tmp_path):
                         }
                     ],
                     "subscription_attempts_dropped": 0,
+                    "last_receive_ts_ms": 10_100,
+                    "last_receive_age_ms": 100,
+                    "last_exchange_ts_ms": 10_000,
+                    "last_connection_id": "copy-l2-test",
+                    "sequence_continuity_proven": False,
+                    "coverage_status": "GAP_OPEN",
+                    "proof_window_status": "UNAVAILABLE",
+                    "open_gap": {
+                        "start_after_receive_ts_ms": 10_000,
+                        "detected_at_ms": 10_200,
+                        "last_detected_at_ms": 10_200,
+                        "reason": "websocket_disconnect",
+                        "reasons": ["websocket_disconnect"],
+                        "connection_id": "copy-l2-test",
+                        "recovery_at_ms": None,
+                        "recovery_connection_id": None,
+                        "continuity_proven": False,
+                    },
+                    "gaps": [
+                        {
+                            "start_after_receive_ts_ms": 10_000,
+                            "detected_at_ms": 10_200,
+                            "last_detected_at_ms": 10_200,
+                            "reason": "websocket_disconnect",
+                            "reasons": ["websocket_disconnect"],
+                            "connection_id": "copy-l2-test",
+                            "recovery_at_ms": None,
+                            "recovery_connection_id": None,
+                            "continuity_proven": False,
+                        }
+                    ],
+                    "gaps_dropped": 0,
                 }
             },
         },
@@ -687,6 +763,15 @@ def test_copy_vault_subscription_diagnostics_reach_collection_receipt(tmp_path):
     assert receipt["l2_subscription"]["markets"]["BTC"][
         "subscription_status"
     ] == "REJECTED"
+    l2_receipt = receipt["l2_diagnostics"]
+    assert l2_receipt["rejected_by_reason"] == {"invalid_levels": 1}
+    assert l2_receipt["connection_events"][1]["error_class"] == "ConnectionClosedError"
+    assert l2_receipt["unknown_market_rejections"][0]["reason"] == "invalid_json"
+    assert l2_receipt["markets"]["BTC"]["last_receive_age_ms"] == 100
+    assert l2_receipt["markets"]["BTC"]["coverage_status"] == "GAP_OPEN"
+    assert l2_receipt["required_market_proof_window_status"] == "UNAVAILABLE"
+    assert l2_receipt["markets"]["BTC"]["proof_window_status"] == "UNAVAILABLE"
+    assert l2_receipt["markets"]["BTC"]["open_gap"]["recovery_at_ms"] is None
 
 
 def test_invalid_copy_vault_subscription_receipt_values_remain_unknown(tmp_path):
@@ -736,6 +821,7 @@ def test_invalid_copy_vault_subscription_receipt_values_remain_unknown(tmp_path)
     assert receipt["vault_subscription_attempts"] is None
     assert receipt["subscription_diagnostics"] is None
     assert receipt["l2_subscription"] is None
+    assert receipt["l2_diagnostics"] is None
 
 
 def test_collection_checkpoint_metrics_certify_complete_frame_sources(tmp_path):

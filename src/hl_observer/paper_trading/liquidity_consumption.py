@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Generic, TypeVar
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper_trading.execution_truth import (
     ExecutionTruth,
     normalize_execution_side,
@@ -243,7 +244,7 @@ class LiquidityConsumptionLedger:
         return (
             str(venue).strip().lower(),
             str(snapshot_id),
-            str(coin).upper(),
+            preserve_native_instrument_symbol(coin),
             normalize_execution_side(execution_side),
             round(float(price), 12),
         )

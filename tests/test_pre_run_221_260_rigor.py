@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_aud_221_222_223_226_point_entree_full_est_etendu_et_paper():
-    cmd = (ROOT / 'ANALYSER_BACKTESTS_REPLAYS.cmd').read_text(encoding='utf-8')
+    cmd = (ROOT / 'tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd').read_text(encoding='utf-8')
     r = audit_point_entree_officiel(cmd)
     assert r['ok'] is True
     assert r['orchestrateur_canonique'] and r['suite_historique'] and r['full_etendu']

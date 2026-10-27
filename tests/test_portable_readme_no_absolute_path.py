@@ -6,14 +6,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_portable_readme_is_machine_agnostic_and_points_to_official_builder() -> None:
-    text = (ROOT / "PORTABLE_README.txt").read_text(encoding="utf-8-sig")
+def test_portable_readme_is_machine_agnostic_and_describes_a_clone() -> None:
+    text = (ROOT / "docs" / "portfolio" / "PORTABLE_README.txt").read_text(encoding="utf-8-sig")
     lower = text.lower()
 
-    assert "creer_archive_portable.cmd" in lower
-    assert "release_ready" in lower
+    assert "clone fonctionne depuis son propre chemin local" in lower
+    assert "lancer_hypersmart.cmd" in lower
+    assert "alina_sync_complete.cmd" in lower
+    assert "aucune archive portable séparée" in lower
     assert "c:\\" not in lower
     assert "c:/" not in lower
     assert "\\users\\" not in lower
-    assert "winrar" in lower
-    assert "ne jamais fabriquer" in lower

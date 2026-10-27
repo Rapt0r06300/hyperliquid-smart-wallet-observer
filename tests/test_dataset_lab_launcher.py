@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_labo_180go_est_paper_only_demande_confirmation_expose_sqlite_et_audite() -> None:
-    text = (ROOT / "LANCER_LABO_180GO.cmd").read_text(
+    text = (ROOT / "tools/launchers/LANCER_LABO_180GO.cmd").read_text(
         encoding="utf-8", errors="replace"
     )
     assert "HL_ENABLE_MAINNET_EXECUTION=0" in text
@@ -28,7 +28,7 @@ def test_labo_180go_est_paper_only_demande_confirmation_expose_sqlite_et_audite(
 
 
 def test_analyse_peut_cibler_un_workspace_de_suite_et_audite_le_raccordement() -> None:
-    text = (ROOT / "ANALYSER_DONNEES_HYPERSMART.cmd").read_text(
+    text = (ROOT / "tools/launchers/ANALYSER_DONNEES_HYPERSMART.cmd").read_text(
         encoding="utf-8", errors="replace"
     )
     assert "dataset_bridge locate" in text

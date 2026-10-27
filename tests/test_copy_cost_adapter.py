@@ -164,3 +164,26 @@ def test_every_selected_replayed_event_requires_depth_evidence() -> None:
     assert result["complete"] is False
     assert result["components_bps"] is None
     assert result["failure_counts"]["ENTRY_DEPTH_STALE_OR_FUTURE_ONLY"] == 1
+
+
+def test_copy_cost_does_not_match_depth_for_case_distinct_instrument() -> None:
+    event = _event()
+    event["coin"] = "kPEPE"
+    delay_ms = 60_000
+    horizon_ms = 300_000
+    entry = event["ts_ms"] + delay_ms
+    exit_ = entry + horizon_ms
+
+    result = measure_copy_cost_components(
+        [event],
+        {"KPEPE": [_depth(entry - 100), _depth(exit_ - 100)]},
+        notional_usd=150.0,
+        copy_delay_ms=delay_ms,
+        horizon_ms=horizon_ms,
+        threshold=0.05,
+        freshness_ms=3_000.0,
+    )
+
+    assert result["complete"] is False
+    assert result["components_bps"] is None
+    assert result["failure_counts"]["DEPTH_MISSING"] == 1

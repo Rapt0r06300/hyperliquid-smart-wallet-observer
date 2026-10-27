@@ -21,6 +21,7 @@ import threading
 import time
 
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 
 CONSUME_FLAG = "HYPERSMART_V26_LIVE_BOOK_COSTS"
@@ -124,7 +125,7 @@ def compute_book_costs(
 
 
 def push_costs(coin: str, spread_bps: float, slip_bps: float, ts: float | None = None) -> None:
-    key = (coin or "").strip().upper()
+    key = preserve_native_instrument_symbol(coin)
     if not key:
         return
     with _lock:
@@ -159,7 +160,7 @@ def live_costs_for(coin: str, env: dict | None = None, now: float | None = None)
     """(spread_bps, slip_bps) si flag consommation actif ET entrée fraîche, sinon None."""
     if not _on(CONSUME_FLAG, env):
         return None
-    key = (coin or "").strip().upper()
+    key = preserve_native_instrument_symbol(coin)
     with _lock:
         entry = _cache.get(key)
     if entry is None:
@@ -182,7 +183,7 @@ def live_execution_truth_for(
 
     if require_consume_flag and not _on(CONSUME_FLAG, env):
         return None
-    key = str(coin or "").strip().upper()
+    key = preserve_native_instrument_symbol(coin)
     with _lock:
         truth = _book_cache.get(key)
     if truth is None:
@@ -282,7 +283,7 @@ def _tous_les_marches() -> list[str]:
 
         coins = getattr(_frc, "known_coins", None)
         if callable(coins):
-            return sorted({str(c).upper() for c in (coins() or []) if c})
+            return sorted({preserve_native_instrument_symbol(c) for c in (coins() or []) if c})
     except Exception:
         _noter_echec("hl_observer/collection/l2_snapshot_cache.py:223")
     return []

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from hl_observer.position_lifecycle.reconstructor import LifecycleAction
+from hl_observer.signals.cluster_detector import ClusterConfig, detect_signal_clusters
+from hl_observer.signals.leader_delta import LeaderDelta
 from hyper_smart_observer.consensus.wallet_cluster_detector import detect_wallet_clusters
 
 
@@ -29,3 +32,42 @@ def test_wallet_cluster_detector_warns_on_low_quality_cluster() -> None:
 
     assert "NO_HIGH_QUALITY_WALLET" in clusters[0].risk_flags
     assert "WEAK_CLUSTER" in clusters[0].risk_flags
+
+
+def test_copy_signal_clusters_do_not_merge_case_distinct_symbols() -> None:
+    deltas = []
+    for wallet, coin, timestamp in (
+        ("w1", "kPEPE", 1_000),
+        ("w2", "kPEPE", 1_100),
+        ("w3", "KPEPE", 1_200),
+        ("w4", "KPEPE", 1_300),
+    ):
+        deltas.append(
+            LeaderDelta(
+                delta_id=f"{wallet}:{coin}",
+                wallet=wallet,
+                coin=coin,
+                action=LifecycleAction.OPEN_LONG,
+                previous_size=0.0,
+                current_size=1.0,
+                delta_size=1.0,
+                observed_at_ms=timestamp,
+                leader_event_time_ms=timestamp,
+                source="test",
+                confidence=0.9,
+                evidence_ref=f"fill:{wallet}:{coin}",
+            )
+        )
+
+    clusters = detect_signal_clusters(
+        deltas,
+        observed_at_ms=1_400,
+        config=ClusterConfig(min_unique_wallets=2),
+    )
+
+    assert {cluster.coin for cluster in clusters} == {"kPEPE", "KPEPE"}
+    assert all(len(cluster.unique_wallets) <= 2 for cluster in clusters)
+    assert all(
+        any(c.coin == coin and len(c.unique_wallets) == 2 for c in clusters)
+        for coin in ("kPEPE", "KPEPE")
+    )

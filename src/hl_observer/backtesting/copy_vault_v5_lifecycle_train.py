@@ -36,6 +36,7 @@ from hl_observer.backtesting.copy_vault_v4_train import (
     assess_train_variant,
 )
 from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v5_lifecycle_train.v1"
 MECHANISM = "copy_vault_v5_causal_leader_reduce_or_time_stop"
@@ -86,7 +87,7 @@ def index_causal_leader_exits(
             continue
         row = dict(raw)
         row["action"] = str(row["action"]).upper()
-        row["coin"] = str(row["coin"]).upper()
+        row["coin"] = preserve_native_instrument_symbol(row["coin"])
         row["vault"] = str(row["vault"])
         row["direction"] = int(row["direction"])
         row["observed_at_ms"] = int(row["observed_at_ms"])
@@ -124,7 +125,7 @@ def _continuous_causal_books(
         ]
         rows.sort(key=lambda row: int(row.get("ts_ms") or 0))
         if rows:
-            selected[str(raw_coin).upper()] = rows
+            selected[preserve_native_instrument_symbol(raw_coin)] = rows
     return selected
 
 
@@ -175,7 +176,7 @@ def _replay_selected(
         if signal_ms < int(train_start_ms) or signal_ms > int(train_end_ms):
             continue
         counters["metaorders_considered"] += 1
-        coin = str(metaorder.get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol(metaorder.get("coin"))
         books = continuous_books.get(coin, [])
         entry = _first_book_at_or_after(books, signal_ms + COPY_DELAY_MS)
         if entry is None:

@@ -38,6 +38,14 @@ def test_toxicity_ewma_accumulates_adverse():
     assert t.toxicity("BTC") == 0.0
 
 
+def test_toxicity_is_not_shared_between_case_distinct_symbols():
+    tracker = ToxicityTracker(alpha=0.5)
+    tracker.record_markout("kPEPE", -20.0)
+
+    assert tracker.toxicity("kPEPE") == 20.0
+    assert tracker.toxicity("KPEPE") == 0.0
+
+
 def test_toxicity_raises_required_edge():
     base = toxicity_adjusted_min_edge_bps(28.0)
     tox = toxicity_adjusted_min_edge_bps(28.0, volatility_bps=10, toxicity_bps=15, c_vol=0.5, c_tox=1.0)

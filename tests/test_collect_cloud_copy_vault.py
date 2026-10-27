@@ -42,6 +42,377 @@ def test_l2_payload_classifier_reports_stable_rejection_reasons() -> None:
     assert parsed == valid
 
 
+def test_l2_classifier_rejects_unsorted_duplicate_crossed_and_empty_books() -> None:
+    valid_levels = [
+        [
+            {"px": "100", "sz": "2", "n": 1},
+            {"px": "99", "sz": "3", "n": 1},
+        ],
+        [
+            {"px": "101", "sz": "2", "n": 1},
+            {"px": "102", "sz": "3", "n": 1},
+        ],
+    ]
+    cases = []
+    unsorted = json.loads(json.dumps(valid_levels))
+    unsorted[0].reverse()
+    cases.append(unsorted)
+    duplicate = json.loads(json.dumps(valid_levels))
+    duplicate[1][1]["px"] = duplicate[1][0]["px"]
+    cases.append(duplicate)
+    crossed = json.loads(json.dumps(valid_levels))
+    crossed[1][0]["px"] = "99.5"
+    cases.append(crossed)
+    cases.append([[], valid_levels[1]])
+
+    for levels in cases:
+        _, reason, coin = C.classify_l2_payload(
+            json.dumps(
+                {
+                    "channel": "l2Book",
+                    "data": {
+                        "coin": "BTC",
+                        "time": 1_700_000_000_000,
+                        "levels": levels,
+                    },
+                }
+            )
+        )
+        assert reason == "invalid_levels"
+        assert coin == "BTC"
+
+
+def test_cloud_l2_path_preserves_case_sensitive_native_coin() -> None:
+    message = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "kPEPE", "time": 1_700_000_000_000,
+            "levels": [
+                [{"px": "0.0001", "sz": "100", "n": 1}],
+                [{"px": "0.0002", "sz": "100", "n": 1}],
+            ],
+        },
+    }
+
+    parsed, reason, coin = C.classify_l2_payload(json.dumps(message))
+    envelope = C.l2_envelope(
+        message,
+        receive_wall_ms=1_700_000_000_001,
+        receive_mono_ns=42,
+        connection_id="case-sensitive-test",
+    )
+
+    assert reason is None and parsed == message and coin == "kPEPE"
+    assert envelope is not None and envelope.instrument == "kPEPE"
+    assert C._subscription_identity({"type": "l2Book", "coin": "kPEPE"}) == (
+        "l2Book", "kPEPE",
+    )
+
+
+def test_copy_vault_market_envelopes_preserve_causal_feeds_and_native_instrument() -> None:
+    trade = {
+        "coin": "xyz:TSLA", "time": 2_002, "px": "100.5", "sz": "1",
+        "side": "B", "hash": "0xtrade", "tid": 7,
+    }
+    envelopes = C.copy_vault_market_envelopes(
+        {"channel": "trades", "data": [trade]},
+        receive_wall_ms=2_010,
+        receive_mono_ns=123,
+        connection_id="market-test",
+    )
+
+    assert len(envelopes) == 1
+    assert envelopes[0].instrument == "xyz:TSLA"
+    assert envelopes[0].exchange_ts_ms == 2_002
+    assert envelopes[0].provenance["timestamp_semantics"] == "causal_event_availability"
+    assert envelopes[0].parsed_summary["data_gate_ready"] is False
+
+
+def test_copy_vault_market_subscription_plan_keeps_native_symbol() -> None:
+    subscriptions = C.copy_vault_market_subscriptions("xyz:TSLA")
+
+    assert {row["type"] for row in subscriptions} == {
+        "bbo", "l2Book", "trades", "activeAssetCtx",
+    }
+    assert {row["coin"] for row in subscriptions} == {"xyz:TSLA"}
+
+
+def test_market_stream_data_is_admitted_only_after_connection_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now_ms = int(C.time.time() * 1_000)
+    subscriptions = [
+        {"type": kind, "coin": "BTC"}
+        for kind in C.COPY_VAULT_MARKET_CHANNEL_TYPES
+    ]
+    messages: list[dict[str, object]] = [
+        {
+            "channel": "bbo",
+            "data": {
+                "coin": "BTC", "time": now_ms,
+                "bbo": [{"px": "100", "sz": "1"}, {"px": "101", "sz": "2"}],
+            },
+        },  # rejected: no ACK on this connection yet
+    ]
+    messages.extend(
+        {
+            "channel": "subscriptionResponse",
+            "data": {"method": "subscribe", "subscription": subscription},
+        }
+        for subscription in subscriptions
+    )
+    messages.extend([
+        {
+            "channel": "bbo",
+            "data": {
+                "coin": "BTC", "time": now_ms,
+                "bbo": [{"px": "100", "sz": "1"}, {"px": "101", "sz": "2"}],
+            },
+        },
+        {
+            "channel": "trades",
+            "data": [{
+                "coin": "BTC", "time": now_ms, "px": "100.5", "sz": "0.2",
+                "side": "B", "hash": "0xabc", "tid": 1,
+            }],
+        },
+        {"channel": "activeAssetCtx", "data": {"coin": "BTC", "ctx": {"markPx": "100.5"}}},
+        {
+            "channel": "l2Book",
+            "data": {
+                "coin": "BTC", "time": now_ms,
+                "levels": [[{"px": "100", "sz": "1", "n": 1}],
+                           [{"px": "101", "sz": "1", "n": 1}]],
+            },
+        },
+    ])
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                for message in messages:
+                    yield json.dumps(message)
+                await self.release.wait()
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    socket = FakeSocket()
+    monkeypatch.setattr(
+        C.websockets, "connect", lambda *_args, **_kwargs: FakeConnection(socket)
+    )
+
+    class Sink:
+        def __init__(self) -> None:
+            self.envelopes: list[C.TickEnvelope] = []
+
+        async def emit_async(self, envelope: C.TickEnvelope) -> None:
+            self.envelopes.append(envelope)
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        sink = Sink()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(sink, asyncio.Queue(), {"BTC"}, state)
+        )
+        try:
+            for _ in range(300):
+                if len(sink.envelopes) >= 4:
+                    break
+                await asyncio.sleep(0.01)
+            assert {row.channel for row in sink.envelopes} == {
+                "copy_vault_l2", "copy_vault_bbo", "copy_vault_trades",
+                "copy_vault_active_asset_ctx",
+            }
+            assert state["market_rejected_before_ack"] == 1
+            assert state["market_acknowledged"] == 3
+            assert state["market_accepted_by_channel"] == {
+                "activeAssetCtx": 1, "bbo": 1, "trades": 1,
+            }
+        finally:
+            socket.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_copy_vault_accounting_streams_preserve_funding_and_ledger_events() -> None:
+    vault = "0x" + "a" * 40
+    funding, funding_error = C.copy_vault_accounting_envelopes(
+        {
+            "channel": "userFundings",
+            "data": {
+                "user": vault, "isSnapshot": False,
+                "fundings": [{
+                    "time": 2_000, "coin": "kPEPE", "usdc": "-0.25",
+                    "szi": "100", "fundingRate": "0.0001",
+                }],
+            },
+        },
+        vault=vault,
+        receive_wall_ms=2_002,
+        receive_mono_ns=10,
+        connection_id="accounting-test",
+    )
+    ledger, ledger_error = C.copy_vault_accounting_envelopes(
+        {
+            "channel": "userNonFundingLedgerUpdates",
+            "data": {
+                "user": vault, "isSnapshot": False,
+                "nonFundingLedgerUpdates": [{
+                    "time": 2_001, "hash": "0xledger",
+                    "delta": {"type": "deposit", "usdc": 10.0},
+                }],
+            },
+        },
+        vault=vault,
+        receive_wall_ms=2_002,
+        receive_mono_ns=11,
+        connection_id="accounting-test",
+    )
+
+    assert funding_error is None and ledger_error is None
+    assert len(funding) == len(ledger) == 1
+    assert funding[0].channel == "copy_vault_funding"
+    assert funding[0].instrument == vault and funding[0].exchange_ts_ms == 2_000
+    assert ledger[0].channel == "copy_vault_ledger"
+    assert ledger[0].exchange_ts_ms == 2_001
+    assert funding[0].parsed_summary["proof_of_pnl_allowed"] is False
+    assert ledger[0].provenance["forward_evidence_allowed"] is False
+
+
+def test_user_accounting_websocket_streams_are_ack_gated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = "0x" + "b" * 40
+    messages = [
+        {
+            "channel": "userFundings",
+            "data": {"user": vault, "isSnapshot": False, "fundings": []},
+        },
+        {
+            "channel": "subscriptionResponse",
+            "data": {
+                "method": "subscribe",
+                "subscription": {"type": "userFundings", "user": vault},
+            },
+        },
+        {
+            "channel": "subscriptionResponse",
+            "data": {
+                "method": "subscribe",
+                "subscription": {
+                    "type": "userNonFundingLedgerUpdates", "user": vault,
+                },
+            },
+        },
+        {
+            "channel": "userFundings",
+            "data": {
+                "user": vault, "isSnapshot": False,
+                "fundings": [{
+                    "time": int(C.time.time() * 1_000), "coin": "BTC",
+                    "usdc": "-0.1", "szi": "1", "fundingRate": "0.0001",
+                }],
+            },
+        },
+        {
+            "channel": "userNonFundingLedgerUpdates",
+            "data": {
+                "user": vault, "isSnapshot": False,
+                "nonFundingLedgerUpdates": [{
+                    "time": int(C.time.time() * 1_000), "hash": "0xledger",
+                    "delta": {"type": "deposit", "usdc": 1.0},
+                }],
+            },
+        },
+    ]
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                for message in messages:
+                    yield json.dumps(message)
+                await self.release.wait()
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    socket = FakeSocket()
+    monkeypatch.setattr(
+        C.websockets, "connect", lambda *_args, **_kwargs: FakeConnection(socket)
+    )
+
+    class Sink:
+        def __init__(self) -> None:
+            self.envelopes: list[C.TickEnvelope] = []
+
+        async def emit_async(self, envelope: C.TickEnvelope) -> None:
+            self.envelopes.append(envelope)
+
+    async def scenario() -> None:
+        sink = Sink()
+        diagnostics: dict[str, int] = {}
+        task = asyncio.create_task(C._socket_group(
+            [vault], sink, observation_start_ms={}, live_ids={vault: set()},
+            live_fill_counts={vault: 0}, unclassified_fill_counts={vault: 0},
+            reconnect_counts={vault: 0},
+            l2_request_queue=asyncio.Queue(), l2_known_coins=set(),
+            subscription_attempts={}, subscription_attempts_dropped={},
+            subscription_diagnostics=diagnostics,
+        ))
+        try:
+            for _ in range(300):
+                if diagnostics.get("user_funding_rows") and diagnostics.get(
+                    "user_non_funding_ledger_rows"
+                ):
+                    break
+                await asyncio.sleep(0.01)
+            assert diagnostics["userFundings_messages_before_ack_dropped"] == 1
+            assert diagnostics["userFundings_acknowledged"] == 1
+            assert diagnostics["userNonFundingLedgerUpdates_acknowledged"] == 1
+            assert diagnostics["user_funding_rows"] == 1
+            assert diagnostics["user_non_funding_ledger_rows"] == 1
+            assert {row.channel for row in sink.envelopes} == {
+                "copy_vault_funding", "copy_vault_ledger",
+            }
+        finally:
+            socket.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 def test_l2_envelope_rejects_invalid_levels_and_timestamp() -> None:
     base = {
         "channel": "l2Book",
@@ -87,12 +458,151 @@ def test_l2_diagnostics_expose_unknown_coverage_without_claiming_full_capture() 
     assert diagnostics["rejected_by_reason"] == {"invalid_levels": 1}
     assert diagnostics["requested_markets"] == ["BTC", "ETH"]
     assert diagnostics["coverage_claim"] == "NOT_PROVEN"
+    assert diagnostics["required_market_proof_window_status"] == "UNAVAILABLE"
     assert diagnostics["markets"]["BTC"]["coverage_status"] == "GAP_OPEN"
+    assert diagnostics["markets"]["BTC"]["proof_window_status"] == "UNAVAILABLE"
     assert diagnostics["markets"]["BTC"]["last_receive_age_ms"] is None
+    assert diagnostics["markets"]["BTC"]["received"] == 1
+    assert diagnostics["markets"]["BTC"]["rejected"] == 1
+    assert diagnostics["markets"]["BTC"]["rejected_by_reason"] == {
+        "invalid_levels": 1
+    }
     assert diagnostics["markets"]["ETH"]["coverage_status"] == "NO_MARKET_STATE"
+    assert diagnostics["markets"]["ETH"]["proof_window_status"] == "UNAVAILABLE"
     assert diagnostics["markets"]["ETH"]["accepted"] is None
+    assert diagnostics["markets"]["ETH"]["rejected_by_reason"] is None
     assert diagnostics["markets"]["ETH"]["coverage_status"] == "NO_MARKET_STATE"
     json.dumps(diagnostics)
+
+    clean_state = C.new_l2_state()
+    clean_envelope = C.l2_envelope(
+        {
+            "channel": "l2Book",
+            "data": {
+                "coin": "BTC",
+                "time": 1_700_000_000_000,
+                "levels": [
+                    [{"px": "100", "sz": "2", "n": 1}],
+                    [{"px": "101", "sz": "3", "n": 1}],
+                ],
+            },
+        },
+        receive_wall_ms=1_001,
+        receive_mono_ns=1,
+        connection_id="clean-connection",
+    )
+    assert clean_envelope is not None
+    C._record_l2_accepted(clean_state, clean_envelope, receive_wall_ms=1_001)
+    clean_diagnostics = C._l2_diagnostics(
+        clean_state, end_ms=2_000, requested_coins={"BTC"}
+    )
+    assert clean_diagnostics["markets"]["BTC"]["proof_window_status"] == "UNPROVEN"
+    assert clean_diagnostics["required_market_proof_window_status"] == "UNPROVEN"
+
+
+def test_every_l2_rejection_reason_has_global_and_attributable_market_counts() -> None:
+    malformed_levels = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC",
+            "time": 1_700_000_000_000,
+            "levels": [[{"px": "NaN", "sz": "1", "n": 1}], []],
+        },
+    }
+    malformed_timestamp = {
+        "channel": "l2Book",
+        "data": {"coin": "BTC", "time": "bad", "levels": [[], []]},
+    }
+    cases = [
+        ("{bad-json", "invalid_json"),
+        (json.dumps({"channel": "unexpected", "data": {"coin": "BTC"}}), "wrong_channel"),
+        (json.dumps({"channel": "l2Book", "data": {"time": 1, "levels": [[], []]}}), "missing_coin"),
+        (json.dumps(malformed_levels), "invalid_levels"),
+        (json.dumps(malformed_timestamp), "invalid_timestamp"),
+        (json.dumps(["not", "an", "object"]), "other_schema"),
+    ]
+    state = C.new_l2_state()
+    for raw, expected_reason in cases:
+        state["received"] += 1
+        message, reason, coin = C.classify_l2_payload(raw)
+        assert reason == expected_reason
+        attributed_coin = coin or (
+            C._l2_payload_coin(message) if message is not None else None
+        )
+        C._record_l2_rejection(
+            state,
+            reason,
+            coin=attributed_coin,
+            at_ms=2_000,
+            connection_id="conn-rejects",
+            affected_coins={"BTC"} if attributed_coin is None else None,
+        )
+
+    diagnostics = C._l2_diagnostics(
+        state, end_ms=3_000, requested_coins={"BTC"}
+    )
+    assert diagnostics["rejected_by_reason"] == {
+        "invalid_json": 1,
+        "wrong_channel": 1,
+        "missing_coin": 1,
+        "invalid_levels": 1,
+        "invalid_timestamp": 1,
+        "other_schema": 1,
+    }
+    market = diagnostics["markets"]["BTC"]
+    assert market["received"] == market["rejected"] == 3
+    assert market["rejected_by_reason"] == {
+        "wrong_channel": 1,
+        "invalid_levels": 1,
+        "invalid_timestamp": 1,
+    }
+    assert market["last_receive_age_ms"] is None
+    assert market["coverage_status"] == "GAP_OPEN"
+    assert market["proof_window_status"] == "UNAVAILABLE"
+    assert diagnostics["required_market_proof_window_status"] == "UNAVAILABLE"
+    assert len(diagnostics["unknown_market_rejections"]) == 3
+    assert diagnostics["coverage_claim"] == "NOT_PROVEN"
+
+
+def test_l2_per_market_counters_separate_rejections_duplicates_and_accepts() -> None:
+    state = C.new_l2_state()
+    C._record_l2_rejection(
+        state,
+        "invalid_levels",
+        coin="BTC",
+        at_ms=1_000,
+        connection_id="conn-1",
+    )
+    envelope = C.l2_envelope(
+        {
+            "channel": "l2Book",
+            "data": {
+                "coin": "BTC",
+                "time": 1_700_000_000_000,
+                "levels": [
+                    [{"px": "100", "sz": "2", "n": 1}],
+                    [{"px": "101", "sz": "3", "n": 1}],
+                ],
+            },
+        },
+        receive_wall_ms=1_100,
+        receive_mono_ns=10,
+        connection_id="conn-1",
+    )
+    assert envelope is not None
+    C._record_l2_accepted(state, envelope, receive_wall_ms=1_100)
+    C._record_l2_duplicate(state, envelope)
+
+    market = C._l2_diagnostics(
+        state, end_ms=2_000, requested_coins={"BTC"}
+    )["markets"]["BTC"]
+
+    assert market["received"] == 3
+    assert market["accepted"] == 1
+    assert market["rejected"] == 1
+    assert market["duplicates"] == 1
+    assert market["rejected_by_reason"] == {"invalid_levels": 1}
+    assert market["ignored_by_reason"] == {"duplicate_snapshot": 1}
 
 
 def test_l2_history_is_bounded_and_counts_discarded_diagnostics() -> None:
@@ -111,7 +621,10 @@ def test_l2_history_is_bounded_and_counts_discarded_diagnostics() -> None:
                 "data": {
                     "coin": "BTC",
                     "time": 1_700_000_000_000 + index,
-                    "levels": [[], []],
+                    "levels": [
+                        [{"px": "100", "sz": "2", "n": 1}],
+                        [{"px": "101", "sz": "3", "n": 1}],
+                    ],
                 },
             },
             receive_wall_ms=1_001 + index * 2,
@@ -248,10 +761,22 @@ def test_l2_collector_rejects_unknown_channels_and_recovers_after_disconnect(
                 requested_coins={"BTC"},
             )
             market = diagnostics["markets"]["BTC"]
+            assert market["received"] == 5
+            assert market["accepted"] == 2
+            assert market["rejected"] == 2
+            assert market["duplicates"] == 1
+            assert market["rejected_by_reason"] == {
+                "wrong_channel": 1,
+                "subscription_not_active": 1,
+            }
+            assert market["ignored_by_reason"] == {"duplicate_snapshot": 1}
+            assert market["candidate_l2_frames"] == 4
             assert len(market["gaps"]) == 2
             assert all(gap["recovery_at_ms"] is not None for gap in market["gaps"])
             assert all(not gap["continuity_proven"] for gap in market["gaps"])
             assert market["coverage_status"] == "SNAPSHOTS_CONTINUITY_UNPROVEN"
+            assert market["proof_window_status"] == "UNAVAILABLE"
+            assert diagnostics["required_market_proof_window_status"] == "UNAVAILABLE"
             json.dumps(diagnostics)
         finally:
             second.release.set()
@@ -566,6 +1091,13 @@ def test_historical_backfill_resumes_durable_cursor_and_keeps_known_gaps(monkeyp
         }
 
     monkeypatch.setattr(C, "exact_window_backfill", fake_backfill)
+
+    async def fake_accounting_backfill(client, address, **kwargs):
+        return [], {"status": "COMPLETE", "event_count": 0}
+
+    monkeypatch.setattr(
+        C, "exact_window_accounting_backfill", fake_accounting_backfill
+    )
     known_gap = {"start_ms": checkpoint_ms - 100, "end_ms": checkpoint_ms - 1, "reason": "KNOWN"}
     reports, envelopes = asyncio.run(
         C.collect_historical_backfills(
@@ -614,6 +1146,13 @@ def test_historical_backfill_advances_past_public_retention_cap_with_gap(monkeyp
         }
 
     monkeypatch.setattr(C, "exact_window_backfill", fake_backfill)
+
+    async def fake_accounting_backfill(client, address, **kwargs):
+        return [], {"status": "COMPLETE", "event_count": 0}
+
+    monkeypatch.setattr(
+        C, "exact_window_accounting_backfill", fake_accounting_backfill
+    )
     reports, _envelopes = asyncio.run(
         C.collect_historical_backfills(
             [vault],
@@ -759,6 +1298,118 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
     assert manifest["copy_vault_selection"]["forward_only"] is True
 
 
+def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    output = tmp_path / "bundle"
+    writer = C.PartitionedTickDatasetWriter(
+        raw, rotate_bytes=10_000_000, flush_every=1
+    )
+    received = int(C.time.time() * 1_000)
+    common = {
+        "url": C.WS_URL,
+        "network": "mainnet",
+        "venue": "hyperliquid",
+        "access": "read_only",
+        "transport": "websocket",
+        "authenticated": False,
+        "copy_vault_same_run_market_evidence": True,
+    }
+    envelopes = C.copy_vault_market_envelopes(
+        {
+            "channel": "bbo",
+            "data": {
+                "coin": "kPEPE", "time": received - 1,
+                "bbo": [{"px": "0.01", "sz": "10"}, {"px": "0.011", "sz": "20"}],
+            },
+        },
+        receive_wall_ms=received,
+        receive_mono_ns=100,
+        connection_id="market-bundle-test",
+    )
+    envelopes += C.copy_vault_market_envelopes(
+        {
+            "channel": "trades",
+            "data": [{
+                "coin": "kPEPE", "time": received - 1, "px": "0.0105",
+                "sz": "2", "side": "B", "hash": "0xtrade", "tid": 10,
+            }],
+        },
+        receive_wall_ms=received,
+        receive_mono_ns=101,
+        connection_id="market-bundle-test",
+    )
+    envelopes += C.copy_vault_market_envelopes(
+        {"channel": "activeAssetCtx", "data": {"coin": "kPEPE", "ctx": {"markPx": "0.0105"}}},
+        receive_wall_ms=received,
+        receive_mono_ns=102,
+        connection_id="market-bundle-test",
+    )
+    vault = "0x" + "c" * 40
+    funding_rows, funding_error = C.copy_vault_accounting_envelopes(
+        {
+            "channel": "userFundings",
+            "data": {
+                "user": vault, "isSnapshot": False,
+                "fundings": [{
+                    "time": received - 1, "coin": "kPEPE", "usdc": "-0.1",
+                    "szi": "1", "fundingRate": "0.0001",
+                }],
+            },
+        },
+        vault=vault,
+        receive_wall_ms=received,
+        receive_mono_ns=103,
+        connection_id="market-bundle-test",
+    )
+    ledger_rows, ledger_error = C.copy_vault_accounting_envelopes(
+        {
+            "channel": "userNonFundingLedgerUpdates",
+            "data": {
+                "user": vault, "isSnapshot": False,
+                "nonFundingLedgerUpdates": [{
+                    "time": received - 1, "hash": "0xledger",
+                    "delta": {"type": "deposit", "usdc": 1.0},
+                }],
+            },
+        },
+        vault=vault,
+        receive_wall_ms=received,
+        receive_mono_ns=104,
+        connection_id="market-bundle-test",
+    )
+    assert funding_error is None and ledger_error is None
+    envelopes.extend(funding_rows)
+    envelopes.extend(ledger_rows)
+    for envelope in envelopes:
+        envelope.provenance.update(common)
+        writer.append(envelope)
+    writer.rotate_all()
+
+    index = C.build_copy_vault_bundle(
+        raw,
+        output,
+        collector_version="a" * 40,
+        reconciliation={},
+        queue_drops={},
+        selection={"selected_at_ms": received},
+        collection_run_id="market-context-test",
+    )
+
+    assert index["shard_count"] == 5
+    assert index["partial_count"] == 5  # remote release SHA is not verified here
+    manifests = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (output / "manifests").glob("*.json")
+    ]
+    assert {row["family"] for row in manifests} == {
+        "copy_vault_bbo", "copy_vault_trades", "copy_vault_active_asset_ctx",
+        "copy_vault_funding", "copy_vault_ledger",
+    }
+    assert all(row["quality_status"] == "PARTIAL" for row in manifests)
+    assert all(row["replay_compatible"] is True for row in manifests)
+    assert all(row["proof_of_pnl_allowed"] is False for row in manifests)
+
+
 def test_bundle_labels_rest_backfill_historical_and_not_forward(tmp_path: Path) -> None:
     raw = tmp_path / "raw"
     output = tmp_path / "bundle"
@@ -892,7 +1543,10 @@ def test_l2_collector_requires_matching_ack_before_accepting_book(
         "data": {
             "coin": "BTC",
             "time": 1_700_000_000_000,
-            "levels": [[{"px": "100", "sz": "2", "n": 1}], []],
+            "levels": [
+                [{"px": "100", "sz": "2", "n": 1}],
+                [{"px": "101", "sz": "2", "n": 1}],
+            ],
         },
     }
 
@@ -983,7 +1637,10 @@ def test_l2_rejected_subscription_never_accepts_book(
         "data": {
             "coin": "BTC",
             "time": 1_700_000_000_000,
-            "levels": [[{"px": "100", "sz": "1", "n": 1}], []],
+            "levels": [
+                [{"px": "100", "sz": "1", "n": 1}],
+                [{"px": "101", "sz": "1", "n": 1}],
+            ],
         },
     }
     rejected = {
@@ -1622,3 +2279,247 @@ def test_copy_vault_async_sink_waits_for_writer_instead_of_dropping():
         assert writer.rows == [a, b]
 
     asyncio.run(verify())
+
+
+def test_accounting_history_backfill_preserves_official_nested_rest_shape() -> None:
+    vault = "0x" + "4" * 40
+    event = {
+        "time": 2_000,
+        "hash": "0xfunding-event",
+        "delta": {
+            "coin": "BTC",
+            "fundingRate": "0.0001",
+            "szi": "0.25",
+            "usdc": "-0.75",
+            "type": "funding",
+        },
+    }
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, object]]:
+            return [event]
+
+    class Client:
+        calls: list[dict[str, object]] = []
+
+        async def post(self, path: str, *, json: dict[str, object]) -> Response:
+            assert path == "/info"
+            self.calls.append(json)
+            return Response()
+
+    client = Client()
+    rows, audit = asyncio.run(C.exact_window_accounting_backfill(
+        client,
+        vault,
+        request_type="userFunding",
+        start_ms=1_000,
+        end_ms=3_000,
+    ))
+
+    assert rows == [event]
+    assert audit["status"] == "COMPLETE"
+    assert audit["event_count"] == 1
+    assert audit["proof_of_pnl_allowed"] is False
+    assert audit["empty_result_is_zero_pnl_proof"] is False
+    assert client.calls == [{
+        "type": "userFunding",
+        "user": vault,
+        "startTime": 1_000,
+        "endTime": 3_000,
+    }]
+
+    [envelope] = C.rest_accounting_backfill_envelopes(
+        rows,
+        vault=vault,
+        request_type="userFunding",
+        audit=audit,
+        receive_wall_ms=4_000,
+        receive_mono_ns=10,
+    )
+    assert envelope.source_id == "hl_public_account_backfill"
+    assert envelope.channel == "copy_vault_funding"
+    assert envelope.exchange_ts_ms == 2_000
+    assert envelope.provenance["transport"] == "https"
+    assert envelope.provenance["historical_only"] is True
+    assert envelope.parsed_summary["proof_of_pnl_allowed"] is False
+    assert envelope.raw_payload["data"]["fundings"] == [event]
+
+
+def test_accounting_history_full_page_at_minimum_window_remains_partial() -> None:
+    vault = "0x" + "5" * 40
+    rows = [
+        {
+            "time": 2_000,
+            "hash": f"0xledger-{index}",
+            "delta": {"type": "deposit", "usdc": "1"},
+        }
+        for index in range(C.MAX_TIME_RANGE_RESPONSE_ROWS)
+    ]
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, object]]:
+            return rows
+
+    class Client:
+        async def post(self, path: str, *, json: dict[str, object]) -> Response:
+            assert json["type"] == "userNonFundingLedgerUpdates"
+            return Response()
+
+    events, audit = asyncio.run(C.exact_window_accounting_backfill(
+        Client(),
+        vault,
+        request_type="userNonFundingLedgerUpdates",
+        start_ms=1_000,
+        end_ms=2_000,
+        min_window_ms=1_000,
+    ))
+    assert len(events) == C.MAX_TIME_RANGE_RESPONSE_ROWS
+    assert audit["status"] == "PARTIAL"
+    assert audit["cap_blocked_windows"] == [{
+        "start_ms": 1_000,
+        "end_ms": 2_000,
+        "rows": C.MAX_TIME_RANGE_RESPONSE_ROWS,
+        "cap": C.MAX_TIME_RANGE_RESPONSE_ROWS,
+    }]
+    assert audit["empty_result_is_zero_pnl_proof"] is False
+
+
+def test_historical_accounting_backfills_are_wired_into_campaign_report(monkeypatch) -> None:
+    vault = "0x" + "6" * 40
+    selection_ms = 2_000_000_000_000
+
+    class Response:
+        def __init__(self, payload: object) -> None:
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> object:
+            return self.payload
+
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            self.options = kwargs
+            clients.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, path: str, *, json: dict[str, object]) -> Response:
+            assert path == "/info"
+            if json["type"] == "userFunding":
+                return Response([{
+                    "time": selection_ms - 1,
+                    "hash": "0xfunding",
+                    "delta": {
+                        "coin": "BTC", "usdc": "0.1", "szi": "1",
+                        "fundingRate": "0.0001",
+                    },
+                }])
+            assert json["type"] == "userNonFundingLedgerUpdates"
+            return Response([{
+                "time": selection_ms - 1,
+                "hash": "0xledger",
+                "delta": {"type": "deposit", "usdc": "1"},
+            }])
+
+    async def no_fill_backfill(client, address, **kwargs):
+        return [], {
+            "status": "COMPLETE",
+            "requested_start_ms": kwargs["start_ms"],
+            "requested_end_ms": kwargs["end_ms"],
+            "rows": 0,
+            "requests": 1,
+            "pending_windows": 0,
+            "request_budget_exhausted": False,
+            "invalid_fill_count": 0,
+            "failed_windows": [],
+            "cap_blocked_windows": [],
+            "retention_cap_reached": False,
+        }
+
+    clients = []
+    monkeypatch.setattr(C.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(C, "exact_window_backfill", no_fill_backfill)
+    reports, envelopes = asyncio.run(C.collect_historical_backfills(
+        [vault], selection_ts_ms=selection_ms, lookback_hours=1,
+    ))
+
+    report = reports[vault]
+    accounting = report["accounting_backfill"]
+    assert accounting["copy_vault_funding"]["status"] == "COMPLETE"
+    assert accounting["copy_vault_ledger"]["status"] == "COMPLETE"
+    assert {event.channel for event in envelopes} == {
+        "copy_vault_funding", "copy_vault_ledger",
+    }
+    assert all(event.source_id == "hl_public_account_backfill" for event in envelopes)
+    assert all(event.provenance["historical_only"] is True for event in envelopes)
+    assert all(event.parsed_summary["proof_of_pnl_allowed"] is False for event in envelopes)
+    assert clients[0].options == {
+        "base_url": "https://api.hyperliquid.xyz",
+        "timeout": 15.0,
+    }
+
+
+def test_historical_accounting_shard_is_replay_safe_but_not_pnl_proof(tmp_path: Path) -> None:
+    vault = "0x" + "7" * 40
+    raw_root = tmp_path / "raw"
+    output = tmp_path / "bundle"
+    writer = C.PartitionedTickDatasetWriter(
+        raw_root, rotate_bytes=10_000_000, flush_every=1,
+    )
+    audit = {
+        "request_type": "userFunding",
+        "status": "COMPLETE",
+        "requested_start_ms": 1_000,
+        "requested_end_ms": 2_000,
+        "event_count": 1,
+        "proof_of_pnl_allowed": False,
+        "forward_evidence_allowed": False,
+    }
+    [envelope] = C.rest_accounting_backfill_envelopes(
+        [{
+            "time": 2_000,
+            "hash": "0xfunding",
+            "delta": {
+                "coin": "BTC", "usdc": "0.1", "szi": "1",
+                "fundingRate": "0.0001",
+            },
+        }],
+        vault=vault,
+        request_type="userFunding",
+        audit=audit,
+        receive_wall_ms=3_000,
+        receive_mono_ns=123,
+    )
+    writer.append(envelope)
+    writer.rotate_all()
+    index = C.build_copy_vault_bundle(
+        raw_root,
+        output,
+        collector_version="a" * 40,
+        reconciliation={},
+        queue_drops={},
+        selection={"selected_at_ms": 3_000},
+        collection_run_id="accounting-history-test",
+        historical_backfill={vault: {
+            "accounting_backfill": {"copy_vault_funding": audit},
+        }},
+    )
+    assert index["shard_count"] == 1
+    [manifest_path] = (output / "manifests").glob("*.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["reconciliation"]["status"] == "SNAPSHOT_VERIFIED"
+    assert manifest["copy_vault_selection"]["historical_only"] is True
+    assert manifest["proof_of_pnl_allowed"] is False
+    assert manifest["reconciliation"]["forward_evidence_allowed"] is False

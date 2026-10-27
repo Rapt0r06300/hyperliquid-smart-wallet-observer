@@ -16,7 +16,7 @@ The user controls phase changes manually through ChatGPT/GitHub. Autonomous runt
 
 The design must preserve strict paper/read-only behavior and must never enable real orders.
 
-## Temporary CopyVault-only operating scope
+## Current CopyVault-only operating scope
 
 Until a reviewed change to the central strategy authority explicitly reactivates
 another family, `copy_vault` is the only economic family allowed to materialize
@@ -32,6 +32,38 @@ code for paused families remain preserved for audit and reversible future
 reactivation; stored evidence never makes a paused family active. Environment
 variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
 FAIL-CLOSED and does not stop collectors or restoration processes.
+
+The only current economic target is **at least +5 USD net/day for Copy-Vault
+with 200 USD paper capital**. Evaluate it only at the terminal economic gate,
+after technical corrections and OOS/forward-paper evidence. This target is not
+a prerequisite for earlier work to report completion, cannot be forced by
+changing costs or evidence gates, and is never a profit guarantee. Use only the
+honest verdicts `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, and
+`REJECTED`.
+
+### Operator launchers and durable research history
+
+The operator-selected repository-root entrypoints have these intended roles:
+
+- `LANCER_COLLECTEURS_COPY_VAULT.cmd`: collect Copy-Vault observations and preserve source identity, timestamps, gaps, recovery, and SAFE-admission evidence.
+- `LANCER_LAB_QUANT_COPY_VAULT.cmd`: the local Copy-Vault research laboratory. It consumes imported, verified SAFE shards for replay/backtesting, searches for small as well as large improvements, and preserves each candidate and measurement with its configuration, data identity, windows, seed, costs, and report. Later winners never overwrite earlier records. Exploratory or TRAIN-only improvement is not economic proof.
+- `LANCER_HYPERSMART.cmd`: the operator-designated runtime engine with visible PAPER simulation. Its actual wiring must enforce the Copy-Vault-only active scope and the read-only safety contract; a launcher name or screen display is not proof of compliance.
+- `POUSSER-GITHUB-FORCE.cmd`: guarded bidirectional code reconciliation and push. It must not force-push, reset, clean, or transfer market shards.
+- AlinaSync, exposed to the operator by `ALINA_SYNC_COMPLETE.cmd`: download/restore and verify SAFE shard assets from the canonical repository's GitHub Releases. Code synchronization and shard synchronization remain distinct responsibilities.
+
+The current proof path remains the canonical phase/control-plane chain below; these launchers do not replace it. The historical `LANCER_OBJECTIF_4USD.cmd` is not an authority for the current target or active strategy scope. Any mismatch between a designated launcher and the current code must be treated as an implementation gap, never hidden by documentation or a positive report.
+
+Every retained candidate must use honest costs and causal, source-backed observations. Missing, stale, contradictory, or unproven values remain unknown and cannot be converted to a zero, fill, or PnL. Only the frozen OOS/forward and canonical ledger/proof gates can establish economic status; each prior candidate and its evidence remains auditable.
+
+### Superseding precedence for retained historical sections
+
+The scope above is the only current economic scope. Older multi-family designs,
+family-specific targets, module portfolios, and promotion language retained
+below are **historical and inactive** unless explicitly re-adopted here through
+the canonical strategy authority. They cannot authorize collection for
+economic research, simulation, replay, backtesting, OOS/forward, certification,
+or scoreboard output. Historical measurements remain unchanged and are not
+evidence of current execution scope or profitability.
 
 ## Canonical-spec governance
 
@@ -96,8 +128,9 @@ claim a restored or profitable corpus from metadata-only checks. Ordinary replay
 Only an explicit `--prune-cache-only` operation may delete unselected local
 copies after proving they match still-published GitHub assets by size and
 SHA-256; unknown, modified, corrupt, symlinked, repairable-only cloud data
-and the published inventory remain untouched. The default CLI also sets a 64 GiB ceiling on **new**
-Release payload bytes (configurable with `--max-download-gib`): budget checks
+and the published inventory remain untouched. The default CLI also sets an
+8 GiB ceiling on **new** Release payload bytes (configurable with
+`--max-download-gib`): budget checks
 run before transfers and before local pruning; preflight reports
 `PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED` and does not transfer payloads. Never
 interpret a bounded incomplete restore as a completed replay/backtest or
@@ -215,7 +248,7 @@ The architecture does **not** claim that GitHub-hosted runners can guarantee phy
 
 ### Module-complete collection contracts
 
-Collector quality is evaluated against the needs of **all three active strategy families**, not against a generic market-data checklist.
+Collector quality is evaluated against the evidence requirements of the current active scope, not against a generic market-data checklist. Under the Copy-Vault-only scope at the start of this specification, only the Copy-Vault contract below can feed economic results; the other family contracts remain reference material and cannot reactivate those families.
 
 The existing minimal dependency declaration (`userFills/allMids/BBO/L2`) is not sufficient for economic proof. Collection V4 therefore defines a richer evidence contract for each family.
 
@@ -241,6 +274,21 @@ Required evidence includes:
 - post-fill markout checkpoints (100/250/500 ms, 1 s, 5 s or the current execution model horizons);
 - immutable selection reason, score inputs and causal timestamps.
 
+Instrument identity remains venue-native and case-sensitive through every
+Copy-Vault edge: live fills, REST backfills, position state, fill IDs,
+metaorders, L2 subscription/fetch keys, checkpoints, TRAIN selection and replay
+joins. Trimming surrounding whitespace is permitted; case-folding is not. In
+particular, `kPEPE` must never be merged with or fetched as `KPEPE`.
+
+The forward checkpoint writer versions this identity contract in both its
+state schema and collector protocol and stamps each checkpoint with
+`instrument_identity_schema`. A state written before that contract, or without
+its identity version, is incompatible: preserve its state file for inspection,
+discard its ambiguous pending work, and baseline input/output offsets at their
+current ends so old data is neither replayed as fresh nor silently admitted as
+new evidence. Report this reset visibly. The replay loader admits only current
+protocol checkpoints carrying the matching identity schema.
+
 The broad vault universe must **not** be implemented as thousands of permanent user-specific WebSocket subscriptions.
 
 Instead, use a two-speed design:
@@ -253,7 +301,7 @@ Instead, use a two-speed design:
 
 This converts Hyperliquid's user-specific WebSocket limit from a universe cap into a low-latency priority layer.
 
-#### Lead-Lag collection contract
+#### Lead-Lag collection contract — historical and inactive
 
 Lead-Lag needs evidence capable of distinguishing a genuine market lead from exchange-clock error, network-path asymmetry, stale quotes, or a single runner's routing artifact.
 
@@ -275,7 +323,7 @@ Required evidence includes:
 
 For latency-sensitive comparisons, a measured lag is not admissible merely because one exchange timestamp is numerically earlier. The observed lag must exceed the recorded timing uncertainty or be corroborated by same-runner receive ordering.
 
-#### Cross-Venue Dislocation collection contract
+#### Cross-Venue Dislocation collection contract — historical and inactive
 
 Cross-Venue must capture all evidence required for a simultaneous two-leg executable decision rather than a midpoint difference.
 
@@ -299,7 +347,7 @@ Required evidence includes:
 
 The collector must generate direct depth/VWAP evidence for the notionals actually tested by the economic engine. A top-level quantity or midpoint cannot stand in for full executable capacity.
 
-### Same-runner cross-venue clock domain
+### Same-runner cross-venue clock domain — historical and inactive
 
 For Lead-Lag and Cross-Venue, primary market shards are organized **by coin group across venues**, not as isolated one-venue jobs whenever runner capacity permits.
 
@@ -1227,15 +1275,17 @@ The collection epoch is attached to each frozen selection and campaign so stale 
 
 REST reconciliation and frozen-selection rules remain causal. No pre-selection future information may be admitted as forward proof.
 
-## Strategy / PnL Acceleration VNext
+## Strategy / PnL Acceleration VNext — historical and inactive
 
-The collection architecture is necessary but not sufficient. The three active research families must also be redesigned to maximize **provable after-cost daily net PnL** rather than waiting passively for rare legacy signals.
+**Archived multi-family proposal:** its collection architecture was paired with
+separate research for three families. That design is superseded by the current
+Copy-Vault-only scope above and does not authorize those families to run.
 
-The long-term economic milestone is standardized across all three modules:
+The historical milestone in that retired proposal was:
 
 > **at least +5 USD net per UTC day per module on 200 USD paper capital**, measured after fees, spread, slippage, latency, impact, capacity, funding where applicable, and realistic fill assumptions.
 
-This is a research target, not a guarantee, and it is **not an ANALYZE stage-completion gate**. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The operational calibration rule is monotone per module: every measurable new replay/backtest result is compared with the retained reference under the same proof semantics, and it replaces that reference only when its comparable after-cost net PnL is strictly better. Improvement may therefore be negative-to-less-negative — for example -4 USD to -2 USD — while the module remains economically unproven. Non-measurable runs are recorded but never promoted; missing, stale, duplicated or corrupt evidence never counts as improvement.
+This was a research target, not a guarantee or an ANALYZE stage-completion gate. It is not the current economic target: only Copy-Vault has the active +5 USD net/day objective, evaluated at the terminal economic gate after technical and OOS/forward evidence. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The archived monotone-calibration proposal compared measurable replay/backtest results with retained references under consistent proof semantics. Non-measurable runs were never promotion evidence; missing, stale, duplicated or corrupt evidence never counted as improvement.
 
 Promotion of an actual economic strategy remains fail-closed. Thresholds, costs, OOS/forward separation or validation rules may not be weakened merely to obtain a higher number.
 
@@ -1243,7 +1293,10 @@ Copy-Vault capacity diagnostics may replay the unchanged frozen policy over the 
 
 Before a forward-eligible V21 candidate is considered robust, run the fixed diagnostic stress grid through the same execution path: doubled taker fees, 2x/3x observed spread, 50%/25% L2 depth, and additional copy delays of 100 ms, 500 ms, 1 s, 5 s, 30 s, 60 s, and 300 s. Stress outputs never retune or replace the frozen policy and are not themselves economic proof. Funding adversity remains UNMEASURABLE until measured funding rows are wired; regime splits require proven regime labels; leader-data outages require measured observation gaps; partial fills are not claimed by the all-or-none executor; missing-venue stress is not applicable to this single-venue family. Report these limitations explicitly rather than treating omitted stresses as passed.
 
-For the three active families, **carry/funding is not an alpha source**. Funding may be measured and deducted when a held position crosses a settlement, but Copy-Vault, Lead-Lag and Cross-Venue may not claim the +5 USD/day target from carry.
+**Historical rule from the retired multi-family proposal:** carry/funding was
+not an alpha source for those families. Under the current scope, Copy-Vault is
+the only executable family; measured funding costs must still be included when
+the evidence contract requires them, and missing costs remain unmeasurable.
 
 Current implementation contract for the economic-acceleration path:
 
@@ -1809,9 +1862,11 @@ For each route evaluate a capacity ladder and choose conservative size from:
 
 Do not keep a universal 15 USD production notional.
 
-### Cross-module opportunity allocator
+### Cross-module opportunity allocator — historical and inactive
 
-The three families remain independently provable, but the paper system also evaluates a portfolio allocator to avoid wasting capital on low-edge opportunities while high-edge opportunities are available.
+**Historical and inactive portfolio-allocation proposal:** the earlier design
+kept family proofs separate and added a shared allocator. It is not part of the
+current Copy-Vault-only runtime.
 
 At every decision point, eligible paper opportunities are ranked by a conservative score such as:
 
@@ -2458,9 +2513,14 @@ The research program explicitly incorporates ideas from high-signal teaching/res
 
 External curriculum never overrides Alina's own OOS/forward results.
 
-## Module Optimization Architecture V3 — edge portfolios, challengers, and faster proof
+## Module Optimization Architecture V3 — historical and inactive
 
-The three active modules are not implemented as single monolithic strategies.
+The edge-portfolio, challenger, and multi-family optimization material in this
+section is retained as historical design only.
+
+**Historical and inactive design statement:** the earlier multi-family plan
+described each module as an edge portfolio. The current active family remains
+Copy-Vault only.
 
 Each module is an **edge portfolio** containing multiple independently testable mechanisms that share certified evidence and execution infrastructure but retain separate attribution, validation, lifecycle, and failure scope.
 
@@ -4058,7 +4118,11 @@ The preferred resolution to conflict is:
 4. reduce optional breadth/complexity before weakening quality;
 5. use narrower scopes/tiers/cascades rather than global blocking.
 
-### Profitability Convergence V6 — friction-first path to +5 USD net/day
+### Profitability Convergence V6 — historical and inactive
+
+The earlier V6 multi-family convergence proposal is retained as historical
+design. Its module targets and expansion plan do not override the current
+Copy-Vault-only scope at the top of this specification.
 
 The next architecture layer treats the current economic milestone — **+5 USD net/day per module on 200 USD paper capital, proven under Alina's paper/replay evidence contract** — as a research-allocation target, not as a promise and not as a reason to weaken gates.
 
@@ -4397,13 +4461,13 @@ A new feature may still be reused as:
 
 without pretending the killed standalone strategy became profitable.
 
-### Module portfolio after V6
+### Historical module portfolio after V6 — inactive
 
-V6 does **not** instantly activate seven production modules.
+This archived proposal did **not** itself activate seven production modules.
 
 The economic architecture becomes:
 
-**Current core modules**
+**Core modules in the archived proposal**
 - Copy-Vault;
 - Lead-Lag;
 - Cross-Venue.
@@ -11450,6 +11514,7 @@ Every normalized instrument key includes enough point-in-time namespace informat
 Rules:
 
 - same ticker across different DEXs/deployers is not automatically the same instrument;
+- preserve the exact venue-native symbol text, including case and namespace; case-folding is display/search-only and never an identity join or subscription key;
 - spot, standard perp, HIP-3, Hyperp, formula/index perp, AMM-oracle perp and HIP-4 outcome remain distinct identity classes;
 - asset-index mappings are resolved from point-in-time metadata rather than hard-coded forever;
 - identifier reuse after delisting/migration cannot silently join two economically different histories.
@@ -13672,14 +13737,14 @@ They preserve raw source truth, use bounded backpressure/reconnect/rebootstrap,
 and never fabricate, interpolate or relabel defective data merely to raise the
 SAFE rate.
 
-The resulting replay-grade corpus feeds deterministic replay, backtest, OOS,
-forward-paper and net-PnL proof for Copy-Vault, Lead-Lag and Cross-Venue. The
-research target remains at least **+5 USD net/day per active family** under the
-canonical paper-capital and cost assumptions. More viable data improves the
-ability to test that target but does not prove it: each family retains an
-independent honest verdict (`PROVEN`, `MORE_DATA`, `UNMEASURABLE` or `KILL`),
-and no collector, quality threshold, fee, slippage or scoreboard rule may be
-tuned after observing outcomes to manufacture a positive result.
+**Historical and inactive multi-family research statement:** the earlier
+proposal described replay and economic proof for Copy-Vault, Lead-Lag and
+Cross-Venue. It is superseded by the current scope at the top of this
+specification. The active verdict vocabulary and target are defined by current
+repository policy; this archived passage does not authorize another family or
+set a target per family. No collector, quality threshold, fee, slippage or
+scoreboard rule may be tuned after observing outcomes to manufacture a
+positive result.
 
 ## 2026-10-13 — verified recovery checkpoint and preservation hold
 
@@ -14073,3 +14138,23 @@ discontinue rend l'objectif `UNMEASURABLE`. Le nombre de jours actifs est
 déterminé par la présence de trades, pas par un PnL non nul. La couverture
 n'est jamais déduite des seuls trades ou snapshots, et la référence de
 5 USD/jour reste informative, sans seuil de promotion.
+
+### 2026-10-27 — Historique comptable Copy-Vault borné et causal
+
+Pour chaque compte leader retenu dans une campagne Copy-Vault, la collecte
+récupère aussi, sur la fenêtre historique déclarée, `userFunding` et
+`userNonFundingLedgerUpdates` par `/info`. Les bornes API sont inclusives. Une
+réponse de 500 lignes est considérée plafonnée : la fenêtre est divisée en
+sous-fenêtres disjointes ; si la limite ou le budget de requêtes empêche de
+prouver la couverture, le rapport reste `PARTIAL` et expose les intervalles
+non résolus. Une réponse vide documente seulement l'absence d'événement retourné
+dans cette fenêtre ; elle ne prouve ni un solde nul ni un PnL nul.
+
+Les lignes REST gardent leur enveloppe source, leur identité, leur hash et leur
+horodatage d'événement. Elles sont publiées dans des shards historiques séparés
+des flux WebSocket afin que l'ordre de réception ancien n'introduise pas une
+fausse régression temporelle. Le labo accepte la forme REST officielle du
+financement (`delta.coin/usdc/szi/fundingRate`) et la forme WebSocket aplatie,
+mais conserve les deux payloads bruts. Ces observations de compte leader restent
+des données de contexte : elles ne sont jamais additionnées au PnL du follower,
+ne prouvent pas de résultat forward et ne peuvent autoriser une promotion.

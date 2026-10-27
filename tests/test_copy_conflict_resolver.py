@@ -53,3 +53,15 @@ def test_grouped_conflicts_keep_wallets_scoped_to_each_coin():
     assert set(by_coin) == {"BTC", "ETH"}
     assert {vote.wallet for vote in by_coin["BTC"][1]} == {"0x1", "0x2"}
     assert {vote.wallet for vote in by_coin["ETH"][1]} == {"0x3"}
+
+
+def test_native_symbols_that_differ_by_case_are_never_merged():
+    grouped = resolve_copy_conflicts_by_coin(
+        [
+            LeaderVote(wallet="0x1", coin="kPEPE", side="LONG"),
+            LeaderVote(wallet="0x2", coin="KPEPE", side="SHORT"),
+        ]
+    )
+
+    assert {decision.coin for decision, _ in grouped} == {"kPEPE", "KPEPE"}
+    assert all(decision.decision == "FOLLOW" for decision, _ in grouped)

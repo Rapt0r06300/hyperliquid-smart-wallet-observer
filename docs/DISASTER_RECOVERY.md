@@ -180,7 +180,7 @@ un artifact Actions expiré ou une donnée uniquement présente sur un PC
 perdu est irrécupérable rétrospectivement : il faut le signaler.
 
 Pour préparer une sauvegarde locale depuis un poste **sur demande explicite**,
-utiliser `BACKUP_LOCAL_ALINA.cmd`. Cela ne déclenche aucune utilisation du PC
+utiliser `tools/launchers/BACKUP_LOCAL_ALINA.cmd`. Cela ne déclenche aucune utilisation du PC
 depuis GitHub et exclut les credentials, clés privées, `.env`, seeds et
 artefacts dangereux.
 

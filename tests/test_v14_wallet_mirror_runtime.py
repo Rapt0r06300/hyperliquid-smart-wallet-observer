@@ -59,6 +59,22 @@ def test_mirror_detects_leader_open():
     assert "fill:leader:1" in candidate.source_fill_refs
 
 
+def test_mirror_candidate_and_deterministic_id_preserve_native_symbol_case():
+    lower = mirror_candidate_from_delta(
+        _delta(coin="kPEPE"), leader_price=0.001, observed_time_ms=1_500,
+        wallet_score=0.8, copyability_score=0.75,
+    )
+    upper = mirror_candidate_from_delta(
+        _delta(coin="KPEPE"), leader_price=0.002, observed_time_ms=1_500,
+        wallet_score=0.8, copyability_score=0.75,
+    )
+
+    assert lower.coin == "kPEPE"
+    assert upper.coin == "KPEPE"
+    assert lower.candidate_id != upper.candidate_id
+    assert candidate_to_paper_intent(lower, target_notional_usdt=5.0).coin == "kPEPE"
+
+
 def test_mirror_proportional_sizing_caps_notional():
     sizing = size_proportional_paper_notional(
         leader_size=100.0,

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 @dataclass(frozen=True, slots=True)
 class AggregatedFill:
@@ -23,7 +25,7 @@ def aggregate_fills_by_oid(fills: Iterable[dict[str, object]]) -> tuple[Aggregat
     groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
     for fill in fills:
         wallet = str(fill.get("wallet") or fill.get("user") or "").lower()
-        coin = str(fill.get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol(fill.get("coin"))
         direction = str(fill.get("dir") or fill.get("direction") or fill.get("side") or "").strip()
         oid = str(fill.get("oid") or fill.get("hash") or fill.get("tid") or "")
         if not wallet or not coin or not oid:

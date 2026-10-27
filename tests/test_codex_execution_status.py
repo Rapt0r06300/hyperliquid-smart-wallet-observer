@@ -14,7 +14,7 @@ from tools.build_codex_execution_status import (
 def test_parse_toutes_les_work_units_uniques_de_la_roadmap() -> None:
     root = Path(__file__).resolve().parents[1]
     units = parse_work_units(
-        (root / "HYPERSMART_MASTER_ROADMAP.md").read_text(encoding="utf-8")
+        (root / "docs/archive/root-history/HYPERSMART_MASTER_ROADMAP.md").read_text(encoding="utf-8")
     )
 
     assert len(units) == 720

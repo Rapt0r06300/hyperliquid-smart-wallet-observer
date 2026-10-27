@@ -8,7 +8,7 @@ deux fichiers parasites créés à la racine :
     (3     <-  python -c "... sys.version_info>=(3,10) ..."
 
 Dans cmd, `=` est un **délimiteur de token** : un `>=` est lu comme une redirection vers le
-token suivant. Le script est mort avant d'avoir créé `logs-audit/` — les garde-fous de
+token suivant. Le script est mort avant d'avoir créé `runtime/reports/legacy/tout-tester/` — les garde-fous de
 traçabilité étaient en aval du plantage, donc inutiles.
 
 Ces tests portent sur la version Python, qui, elle, s'exécute.
@@ -135,7 +135,7 @@ def test_un_verrou_PERIME_ne_bloque_pas_pour_toujours(tmp_path):
     le remède serait pire que le mal."""
     import os
     L.prendre_verrou(tmp_path)
-    v = tmp_path / L.VERROU.name
+    v = L._chemin_verrou(tmp_path)
     vieux = time.time() - (L.VERROU_PERIME_S + 60)
     os.utime(v, (vieux, vieux))
     L.prendre_verrou(tmp_path)          # ne doit pas lever
@@ -145,7 +145,7 @@ def test_forcer_passe_outre_un_verrou_vivant(tmp_path):
     L.prendre_verrou(tmp_path)
     L.prendre_verrou(tmp_path, forcer=True)
     L.liberer_verrou(tmp_path)
-    assert not (tmp_path / L.VERROU.name).exists()
+    assert not L._chemin_verrou(tmp_path).exists()
 
 
 # ═══════════════ SÉCURITÉ (11-15) ═══════════════
@@ -185,19 +185,25 @@ def test_l_environnement_du_fils_impose_la_lecture_seule():
 def test_un_recap_perime_est_DETECTE(tmp_path):
     """LE PIRE ÉCHEC SILENCIEUX : le run plante, le RECAP d'hier reste, et on le lit en
     croyant lire celui d'aujourd'hui."""
-    (tmp_path / "RECAP-COMPLET.md").write_text("vieux", encoding="utf-8")
+    p = L._chemin_recap(tmp_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("vieux", encoding="utf-8")
     v = L.verdict_recap(tmp_path, debut_ts=time.time() + 10)
     assert v["perime"] is True and "PRECEDENT" in v["message"]
 
 
 def test_un_recap_frais_est_accepte(tmp_path):
-    (tmp_path / "RECAP-COMPLET.md").write_text("frais", encoding="utf-8")
+    p = L._chemin_recap(tmp_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("frais", encoding="utf-8")
     v = L.verdict_recap(tmp_path, debut_ts=time.time() - 10)
     assert v["perime"] is False and v["vide"] is False
 
 
 def test_un_recap_VIDE_est_un_echec_pas_un_succes(tmp_path):
-    (tmp_path / "RECAP-COMPLET.md").write_text("", encoding="utf-8")
+    p = L._chemin_recap(tmp_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("", encoding="utf-8")
     v = L.verdict_recap(tmp_path, debut_ts=time.time() - 10)
     assert v["vide"] is True and "VIDE" in v["message"]
 
@@ -208,7 +214,9 @@ def test_un_recap_absent_est_dit(tmp_path):
 
 
 def test_le_recap_precedent_est_ARCHIVE_jamais_ecrase(tmp_path):
-    (tmp_path / "RECAP-COMPLET.md").write_text("run precedent", encoding="utf-8")
+    p = L._chemin_recap(tmp_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("run precedent", encoding="utf-8")
     rel = L.archiver_recap(tmp_path, session="20260721-235959")
     assert rel and (tmp_path / rel).read_text(encoding="utf-8") == "run precedent"
 
@@ -218,7 +226,7 @@ def test_archiver_sans_recap_ne_leve_pas(tmp_path):
 
 
 def test_les_logs_sont_conserves_mais_bornes(tmp_path):
-    d = tmp_path / "logs-audit"
+    d = L._chemin_logs(tmp_path)
     d.mkdir()
     for i in range(40):
         p = d / ("tout-tester-2026072%02d.log" % (i % 10))

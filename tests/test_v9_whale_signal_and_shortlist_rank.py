@@ -21,6 +21,14 @@ def test_whale_fresh_large_open_is_primary():
     assert sig.execution == "forbidden"
 
 
+def test_whale_signal_preserves_native_symbol_case():
+    sig = build_whale_fill_signal(
+        action_type="OPEN_LONG", coin="kPEPE", side="LONG",
+        leader_notional_usdc=80_000, fill_age_ms=2_000, leader_score=90,
+    )
+    assert sig is not None and sig.coin == "kPEPE"
+
+
 def test_whale_exit_returns_none():
     assert build_whale_fill_signal(
         action_type="REDUCE", coin="BTC", side="LONG",

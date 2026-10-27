@@ -18,6 +18,7 @@ from hl_observer.simulation.ledger_integrity import GENESIS_HASH, seal_event, ve
 from hl_observer.simulation.paper_event import PaperEvent, PaperEventType
 from hl_observer.simulation.pnl_ledger_audit import audit_paper_ledger
 from hl_observer.simulation.pnl_reconciliation import PnlReconciliation, reconcile_pnl
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 
 @dataclass(slots=True)
@@ -306,7 +307,7 @@ class PaperLedger:
         else:
             candidate_position = LedgerPosition(
                 position_id=key,
-                coin=str(coin).upper(),
+                coin=preserve_native_instrument_symbol(coin),
                 side=normalized_side,
                 quantity=qty,
                 average_entry_price=float(fill_price),
@@ -334,7 +335,7 @@ class PaperLedger:
             fee_event_probe = PaperEvent.create(
                 PaperEventType.FEE_CHARGED,
                 timestamp_ms=timestamp_ms,
-                coin=str(coin).upper(),
+                coin=preserve_native_instrument_symbol(coin),
                 side=normalized_side,
                 fee_usdc=fee,
                 refs={"position_id": key, "accounting_component": "FEE"},
@@ -350,7 +351,7 @@ class PaperLedger:
             event_probe = PaperEvent.create(
                 event_type,
                 timestamp_ms=timestamp_ms,
-                coin=str(coin).upper(),
+                coin=preserve_native_instrument_symbol(coin),
                 side=normalized_side,
                 quantity=qty,
                 price=float(fill_price),
@@ -409,7 +410,7 @@ class PaperLedger:
         event = PaperEvent.create(
             event_type,
             timestamp_ms=timestamp_ms,
-            coin=str(coin).upper(),
+            coin=preserve_native_instrument_symbol(coin),
             side=normalized_side,
             quantity=qty,
             price=float(fill_price),
@@ -559,7 +560,7 @@ class PaperLedger:
             event = PaperEvent.create(
                 PaperEventType.POSITION_CLOSED if fully_closed else PaperEventType.POSITION_REDUCED,
                 timestamp_ms=timestamp_ms,
-                coin=str(coin).upper(),
+                coin=preserve_native_instrument_symbol(coin),
                 side=normalized_side,
                 quantity=close_qty,
                 price=float(fill_price),
@@ -571,7 +572,7 @@ class PaperLedger:
             )
             appended_event = staged._append(event)
             staged_mark = staged.mark_to_market(
-                {str(coin).upper(): float(fill_price)},
+                {preserve_native_instrument_symbol(coin): float(fill_price)},
                 timestamp_ms=timestamp_ms,
             )
         except (OverflowError, TypeError, ValueError):
@@ -865,7 +866,7 @@ class PaperLedger:
             event = PaperEvent.create(
                 event_type,
                 timestamp_ms=event_timestamp_ms,
-                coin=str(coin).upper(),
+                coin=preserve_native_instrument_symbol(coin),
                 side=str(side).upper(),
                 funding_usdc=funding_amount,
                 refs=funding_refs,
@@ -901,7 +902,7 @@ class PaperLedger:
             PaperEvent.create(
                 PaperEventType.NO_TRADE,
                 timestamp_ms=timestamp_ms,
-                coin=None if coin is None else str(coin).upper(),
+                coin=None if coin is None else preserve_native_instrument_symbol(coin),
                 reason=reason,
                 refs=refs or {},
             )
@@ -1032,7 +1033,7 @@ class PaperLedger:
             PaperEvent.create(
                 PaperEventType.FEE_CHARGED,
                 timestamp_ms=timestamp_ms,
-                coin=str(coin).upper(),
+                coin=preserve_native_instrument_symbol(coin),
                 side=str(side).upper(),
                 fee_usdc=fee,
                 refs={"position_id": position_id, "accounting_component": "FEE"},
@@ -1071,7 +1072,7 @@ class PaperLedger:
 
     @staticmethod
     def _key(coin: str, side: str) -> str:
-        return f"{str(coin).upper()}:{str(side).upper()}"
+        return f"{preserve_native_instrument_symbol(coin)}:{str(side).upper()}"
 
     @classmethod
     def _position_key(

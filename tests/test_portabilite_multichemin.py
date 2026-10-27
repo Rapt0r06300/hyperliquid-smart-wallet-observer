@@ -68,11 +68,14 @@ def _copier_projet(dest: Path) -> Path:
         src = RACINE / "tools" / nom
         if src.is_file():
             shutil.copy2(src, dest / "tools" / nom)
-    for nom in ("pyproject.toml", "LANCER_HYPERSMART.cmd", "ANALYSER_BACKTESTS_REPLAYS.cmd",
-                "CREER_ARCHIVE_PORTABLE.cmd"):
+    for nom in ("pyproject.toml", "LANCER_HYPERSMART.cmd", "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+                "LANCER_LAB_QUANT_COPY_VAULT.cmd", "POUSSER-GITHUB-FORCE.cmd", "ALINA_SYNC_COMPLETE.cmd",
+                "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd", "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd"):
         src = RACINE / nom
         if src.is_file():
-            shutil.copy2(src, dest / nom)
+            cible = dest / nom
+            cible.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, cible)
     return dest
 
 

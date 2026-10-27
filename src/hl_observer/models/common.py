@@ -12,6 +12,8 @@ except ImportError:
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 
 _WALLET_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
@@ -77,7 +79,7 @@ class Coin(BaseModel):
     @field_validator("symbol")
     @classmethod
     def normalize_coin(cls, value: str) -> str:
-        clean = str(value or "").strip().upper()
+        clean = preserve_native_instrument_symbol(value)
         if not clean or clean.startswith(("@", "#")):
             raise ValueError("coin symbol is required")
         return clean

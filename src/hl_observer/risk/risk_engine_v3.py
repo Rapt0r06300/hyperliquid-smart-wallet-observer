@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 @dataclass(frozen=True, slots=True)
 class V19RiskGate:
@@ -300,7 +301,7 @@ def evaluate_entry_cost_guard(
         required_min_edge = max(required_min_edge, float(cfg.loss_streak_min_edge_bps))
         reasons.append("LOSS_STREAK_REQUIRES_HIGHER_EDGE")
 
-    normalized_coin = str(coin or "").upper()
+    normalized_coin = preserve_native_instrument_symbol(coin)
     normalized_wallet = str(wallet or "").lower()
     worst_coin_pnl = _bucket_pnl(ctx.top_losing_coins, normalized_coin, upper_keys=True)
     worst_wallet_pnl = _bucket_pnl(ctx.top_losing_wallets, normalized_wallet, upper_keys=False)
@@ -422,9 +423,9 @@ def _bucket_pnl(
     *,
     upper_keys: bool,
 ) -> float | None:
-    lookup = str(key or "").upper() if upper_keys else str(key or "").lower()
+    lookup = preserve_native_instrument_symbol(key) if upper_keys else str(key or "").lower()
     for bucket_key, pnl in buckets:
-        normalized = str(bucket_key or "").upper() if upper_keys else str(bucket_key or "").lower()
+        normalized = preserve_native_instrument_symbol(bucket_key) if upper_keys else str(bucket_key or "").lower()
         if normalized == lookup:
             return float(pnl)
     return None

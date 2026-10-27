@@ -14,7 +14,7 @@ from hl_observer.ops import lab_recherche as R
 from hl_observer.ops.session_catalog import CatalogueSession, EntreeSource
 
 RACINE = Path(__file__).resolve().parents[1]
-CMD = RACINE / "ANALYSER_BACKTESTS_REPLAYS.cmd"
+CMD = RACINE / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd"
 
 
 def _session_complete(root, run_id, *, rel="hl/a.jsonl", contenu=b"a\nb\n"):

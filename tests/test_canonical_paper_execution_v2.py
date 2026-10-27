@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from hl_observer.paper_trading.canonical_execution import (
     CausalMarketSnapshot,
     PaperExecutionIntent,
@@ -24,16 +26,72 @@ BIDS = ((99.99, 100.0), (99.98, 100.0))
 ASKS = ((100.01, 0.5), (100.02, 100.0))
 
 
-def _truth(source: str = "recorded_hyperliquid_l2") -> ExecutionTruth:
+def _truth(
+    source: str = "recorded_hyperliquid_l2",
+    *,
+    received_ts_ms: int = OBSERVED_AT_MS - 1,
+) -> ExecutionTruth:
     return ExecutionTruth.from_levels(
         coin="HYPE",
         bids=BIDS,
         asks=ASKS,
-        received_ts_ms=OBSERVED_AT_MS - 1,
+        received_ts_ms=received_ts_ms,
         exchange_ts_ms=OBSERVED_AT_MS - 2,
         source=source,
         data_origin="RECORDED_REAL",
     )
+
+
+def test_execution_truth_received_after_decision_is_not_fresh() -> None:
+    truth = _truth(received_ts_ms=OBSERVED_AT_MS + 1)
+
+    assert truth.is_fresh(
+        decision_ts_ms=OBSERVED_AT_MS,
+        max_age_ms=5_000,
+    ) is False
+    with pytest.raises(ValueError, match="received after decision"):
+        truth.age_ms(OBSERVED_AT_MS)
+
+
+def test_future_execution_book_cannot_create_a_fill_or_position_mutation() -> None:
+    truth = _truth(received_ts_ms=OBSERVED_AT_MS + 1)
+    market = CausalMarketSnapshot.from_truth(
+        truth,
+        decision_ts_ms=OBSERVED_AT_MS,
+    )
+
+    result = execute_paper_intent(_execution_intent(), market)
+
+    assert result.execution.reason == "STALE_EXECUTION_BOOK"
+    assert result.execution.fill_price is None
+    assert result.execution.filled_notional_usdc == 0.0
+    assert result.position_mutation.status == "NO_MUTATION"
+
+
+def test_l2_cache_rejects_a_book_received_after_the_decision() -> None:
+    from hl_observer.collection import l2_snapshot_cache
+
+    env = {
+        l2_snapshot_cache.CONSUME_FLAG: "1",
+        l2_snapshot_cache.FRESH_ENV: "90",
+    }
+    l2_snapshot_cache.clear()
+    try:
+        l2_snapshot_cache.push_book(
+            "HYPE",
+            BIDS,
+            ASKS,
+            received_ts_ms=OBSERVED_AT_MS + 1,
+            exchange_ts_ms=OBSERVED_AT_MS,
+        )
+
+        assert l2_snapshot_cache.live_execution_truth_for(
+            "HYPE",
+            decision_ts_ms=OBSERVED_AT_MS,
+            env=env,
+        ) is None
+    finally:
+        l2_snapshot_cache.clear()
 
 
 def _execution_intent(*, action: str = "OPEN") -> PaperExecutionIntent:
@@ -147,6 +205,56 @@ def test_main_engine_connector_and_direct_core_share_fill_truth() -> None:
     assert evidence["execution"]["fill_price"] == direct.execution.fill_price
     assert evidence["execution"]["filled_notional_usdc"] == direct.execution.filled_notional_usdc
     assert evidence["execution"]["net_cost_bps"] == direct.execution.net_cost_bps
+
+
+def test_canonical_intent_and_execution_truth_preserve_symbol_case() -> None:
+    truth = ExecutionTruth.from_levels(
+        coin="kPEPE",
+        bids=[(0.00001, 100_000_000.0)],
+        asks=[(0.00002, 100_000_000.0)],
+        received_ts_ms=OBSERVED_AT_MS - 1,
+        exchange_ts_ms=OBSERVED_AT_MS - 2,
+        source="recorded_hyperliquid_l2",
+        data_origin="RECORDED_REAL",
+    )
+    intent = PaperExecutionIntent(
+        strategy_id="copy_vault",
+        coin="kPEPE",
+        position_side="LONG",
+        action="OPEN",
+        target_notional_usdc=100.0,
+        created_at_ms=OBSERVED_AT_MS,
+    )
+
+    market = CausalMarketSnapshot.from_truth(truth, decision_ts_ms=OBSERVED_AT_MS)
+    result = execute_paper_intent(intent, market)
+
+    assert truth.coin == market.coin == intent.coin == "kPEPE"
+    assert result.accepted is True
+
+
+def test_canonical_execution_refuses_a_case_mismatched_instrument() -> None:
+    truth = ExecutionTruth.from_levels(
+        coin="kPEPE",
+        bids=[(0.00001, 100_000_000.0)],
+        asks=[(0.00002, 100_000_000.0)],
+        received_ts_ms=OBSERVED_AT_MS - 1,
+        exchange_ts_ms=OBSERVED_AT_MS - 2,
+        source="recorded_hyperliquid_l2",
+        data_origin="RECORDED_REAL",
+    )
+    intent = PaperExecutionIntent(
+        strategy_id="copy_vault",
+        coin="KPEPE",
+        position_side="LONG",
+        action="OPEN",
+        target_notional_usdc=100.0,
+        created_at_ms=OBSERVED_AT_MS,
+    )
+    market = CausalMarketSnapshot.from_truth(truth, decision_ts_ms=OBSERVED_AT_MS)
+
+    with pytest.raises(ValueError, match="does not match"):
+        execute_paper_intent(intent, market)
 
 
 def test_canonical_execution_maps_close_long_to_sell() -> None:

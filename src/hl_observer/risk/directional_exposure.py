@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 NET_EXPOSURE_PCT_ENV = "HYPERSMART_MAX_NET_DIRECTIONAL_PCT"
 COIN_CONCENTRATION_PCT_ENV = "HYPERSMART_MAX_COIN_NOTIONAL_PCT"
 DEFAULT_NET_EXPOSURE_PCT = 100.0
@@ -80,7 +82,7 @@ def snapshot_exposure(positions: Mapping[Any, Any] | Iterable[Any]) -> ExposureS
             longs += notional
         else:
             shorts += notional
-        coin = str(get("coin") or "?").upper()
+        coin = preserve_native_instrument_symbol(get("coin")) or "?"
         by_coin[coin] = by_coin.get(coin, 0.0) + notional
     return ExposureSnapshot(round(gross, 8), round(net, 8), round(longs, 8), round(shorts, 8), by_coin)
 
@@ -117,7 +119,7 @@ def directional_refusal(
     net_after = snap.net_usdt + sign * notional
     if abs(net_after) > net_cap and abs(net_after) >= abs(snap.net_usdt):
         return "NET_DIRECTIONAL_EXPOSURE_TOO_HIGH"
-    coin_after = snap.by_coin.get(str(coin or "?").upper(), 0.0) + notional
+    coin_after = snap.by_coin.get(preserve_native_instrument_symbol(coin) or "?", 0.0) + notional
     if coin_after > coin_cap:
         return "COIN_CONCENTRATION_TOO_HIGH"
     return ""

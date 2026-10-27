@@ -35,10 +35,35 @@ def test_marks_depuis_bbo_clef_par_position_id():
     assert marks == {"p1": 101.0}
 
 
-def test_marks_depuis_bbo_reessaie_la_clef_coin_originale():
-    pos = {"position_id": "p1", "coin": "btc", "side": "LONG"}
-    marks = LM.marks_depuis_bbo([pos], {"btc": {"bid": 101.0, "ask": 112.0}})
-    assert marks == {"p1": 101.0}
+def test_marks_depuis_bbo_preserve_la_clef_coin_native():
+    pos = {"position_id": "p1", "coin": "kPEPE", "side": "LONG"}
+    marks = LM.marks_depuis_bbo([pos], {"kPEPE": {"bid": 0.00001, "ask": 0.00002}})
+    assert marks == {"p1": 0.00001}
+
+
+def test_marks_ne_fusionnent_pas_deux_symboles_qui_different_par_la_casse():
+    positions = [
+        {"position_id": "lower", "coin": "kPEPE", "side": "LONG"},
+        {"position_id": "upper", "coin": "KPEPE", "side": "LONG"},
+    ]
+    marks = LM.marks_depuis_bbo(
+        positions,
+        {
+            "kPEPE": {"bid": 0.00001, "ask": 0.00002},
+            "KPEPE": {"bid": 0.00003, "ask": 0.00004},
+        },
+    )
+
+    assert marks == {"lower": 0.00001, "upper": 0.00003}
+
+
+def test_marks_ne_prennent_pas_un_bbo_dun_symbole_de_casse_differente():
+    pos = {"position_id": "p1", "coin": "kPEPE", "side": "LONG"}
+    marks = LM.marks_depuis_bbo(
+        [pos], {"KPEPE": {"bid": 0.00003, "ask": 0.00004}}
+    )
+
+    assert marks == {}
 
 
 def test_marks_depuis_bbo_clef_coin_side_sans_id():

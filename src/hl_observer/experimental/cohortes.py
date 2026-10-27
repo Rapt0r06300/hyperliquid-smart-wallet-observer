@@ -1313,7 +1313,9 @@ def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=
                 if int(pos.get("sens") or 0) > 0
                 else execution_truth.best_ask
             )
-    equity, non_realise, drawdown = engine.mark_to_market(marks)
+    equity, non_realise, drawdown = engine.mark_to_market(
+        marks, timestamp_ms=int(now)
+    )
     ledger_snapshot = engine.ledger.snapshot()
     store["canonical_ledger_snapshot"] = ledger_snapshot
     st = {"cohorte": coh.nom, "real_execution": False, "ts_ms": int(now),

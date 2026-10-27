@@ -13,6 +13,8 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 ONE_BIG_WIN_SHARE = 0.50
 VAULT_CONFLICT_WINDOW_MS = 60_000
 
@@ -128,7 +130,7 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
         vault_raw = str(raw.get("vault") or "").strip()
         vault = vault_raw.casefold()
         vault_display = vault if vault.startswith("0x") else vault_raw
-        coin = str(raw.get("coin") or "").strip().upper()
+        coin = preserve_native_instrument_symbol(raw.get("coin"))
         try:
             ts_ms = int(raw.get("signal_ts_ms") or 0)
         except (TypeError, ValueError, OverflowError):

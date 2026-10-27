@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from hl_observer.simulation.ledger_integrity import verify_chain
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 TRUSTED = "TRUSTED"
 CONTAMINATED = "CONTAMINATED"
@@ -281,7 +282,7 @@ def _snapshot_number(snapshot: Mapping[str, Any] | None, field: str) -> float | 
 
 
 def _position_key(coin: object, side: object) -> str:
-    return f"{str(coin or '').upper()}:{str(side or '').upper()}"
+    return f"{preserve_native_instrument_symbol(coin)}:{str(side or '').upper()}"
 
 
 def _token(value: object) -> str:

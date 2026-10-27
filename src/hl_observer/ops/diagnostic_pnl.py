@@ -167,7 +167,11 @@ def prochaine_action(pnl: dict[str, Any], edge: list[str]) -> str:
     return "PROCHAINE ACTION : accumuler les données (liquidations, univers) puis re-juger — rien à forcer."
 
 
-def construire(racine: str | Path, *, nom_recap: str = "RECAP-COMPLET.md") -> str:
+def construire(
+    racine: str | Path,
+    *,
+    nom_recap: str = "runtime/reports/legacy/RECAP-COMPLET.md",
+) -> str:
     """La section « COMPRENDRE LE PnL & TROUVER L'EDGE » pour le RECAP. Vide honnête si pas de RECAP."""
     racine = Path(racine)
     recap = ""

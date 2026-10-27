@@ -60,13 +60,16 @@ Ces commandes ne sont jamais appelees par le double-clic normal.
 
 ## 3. Backtests, replays et comparaisons A/B
 
-Fichier :
+Lanceur opérateur principal :
 
 ```text
-ANALYSER_BACKTESTS_REPLAYS.cmd
+LANCER_LAB_QUANT_COPY_VAULT.cmd
 ```
 
-Le double-clic lance le laboratoire canonique `full`, local et borne a la
+L'analyse historique interne utilisée par les workflows et diagnostics reste rangée dans
+`tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd`.
+
+Le lanceur interne démarre le parcours `full`, local et borne a la
 derniere session `COMPLETE` dont les checksums sont valides. Il reutilise les
 moteurs d'analyse existants pour :
 
@@ -85,11 +88,11 @@ elle est plus longue et travaille sur l'inventaire historique global.
 Modes :
 
 ```bat
-ANALYSER_BACKTESTS_REPLAYS.cmd
-ANALYSER_BACKTESTS_REPLAYS.cmd quick
-ANALYSER_BACKTESTS_REPLAYS.cmd full
-ANALYSER_BACKTESTS_REPLAYS.cmd deep
-ANALYSER_BACKTESTS_REPLAYS.cmd maximum
+tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd
+tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd quick
+tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd full
+tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd deep
+tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd maximum
 ```
 
 - double-clic / `full` : grille complete sur la derniere session valide ;
@@ -149,7 +152,7 @@ inventee. Ctrl+C conserve les resultats deja obtenus et finalise le rapport.
 ## 5. Regles d'exploitation
 
 - Demarrer le bot avec `LANCER_HYPERSMART.cmd`.
-- Lancer les analyses avec `ANALYSER_BACKTESTS_REPLAYS.cmd`.
+- Lancer le laboratoire Copy-Vault avec `LANCER_LAB_QUANT_COPY_VAULT.cmd`.
 - Eviter `collectors-all` pendant une session normale.
 - Ne jamais utiliser un resultat historique comme promesse de profit futur.
 - Les deux lanceurs restent local-only, read-only cote marche et paper-only

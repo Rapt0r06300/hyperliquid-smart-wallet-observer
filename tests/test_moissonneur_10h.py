@@ -264,7 +264,7 @@ def test_le_script_annonce_qu_il_est_en_LECTURE_SEULE(source: str) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 def test_le_livrable_est_moisson_fini_md_A_LA_RACINE(source: str) -> None:
-    assert 'SORTIE_MD = RACINE / "moisson-fini.md"' in source
+    assert 'SORTIE_MD = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-fini.md"' in source
 
 
 def test_le_rapport_contient_les_15_idees(source: str) -> None:

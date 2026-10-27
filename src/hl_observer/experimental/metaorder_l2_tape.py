@@ -16,9 +16,13 @@ RAW intact. `shadow=true`, `real_execution=false`. 0 ordre, 0 clé, 0 signature.
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 from pathlib import Path
+
+from hl_observer.normalization.l2_book import validate_l2_book_sides
 
 TAPE_RELPATH = Path("runtime") / "data" / "metaorder_l2_tape.jsonl"
 SCHEMA_VERSION = "shadow_l2_v3"
@@ -33,20 +37,93 @@ def metaorder_id(vault, coin, sens, t0) -> str:
     return "mo-" + hashlib.sha1(brut.encode("utf-8")).hexdigest()[:12]
 
 
-def resume_book(book_brut: dict) -> dict | None:
-    """Résumé d'un l2Book BRUT : bid/ask/mid, spread bps, et top-5 [px, sz, **n**] (nombre d'ordres) de chaque
-    côté — niveaux BRUTS conservés. `book_exchange_time` = champ `time` HL. None si illisible."""
-    try:
-        bids, asks = book_brut["levels"][0], book_brut["levels"][1]
-        bid, ask = float(bids[0]["px"]), float(asks[0]["px"])
-        if bid <= 0 or ask <= 0:
-            return None
-        mid = 0.5 * (bid + ask)
-        top = lambda cote: [[float(x["px"]), float(x["sz"]), int(x.get("n") or 0)] for x in cote[:5]]  # noqa: E731
-        return {"bid": bid, "ask": ask, "mid": round(mid, 8), "spread_bps": round((ask - bid) / mid * 1e4, 3),
-                "bids5": top(bids), "asks5": top(asks), "book_exchange_time": book_brut.get("time")}
-    except (KeyError, IndexError, TypeError, ValueError):
+def _timestamp_ms(value) -> int | None:
+    return _positive_exact_int(value)
+
+
+def _positive_exact_int(value) -> int | None:
+    if isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    try:
+        numeric = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        return None
+    if not numeric.is_finite() or numeric <= 0 or numeric != numeric.to_integral_value():
+        return None
+    if isinstance(value, float) and numeric > 2**53:
+        return None
+    return int(numeric)
+
+
+def _order_count(value) -> int | None:
+    return _positive_exact_int(value)
+
+
+def resume_book_checked(book_brut: dict) -> tuple[dict | None, str | None]:
+    """Valide un snapshot source L2; retourne un code stable en cas de rejet."""
+    if not isinstance(book_brut, dict):
+        return None, "L2_BOOK_INVALID"
+    timestamp = _timestamp_ms(book_brut.get("time"))
+    if timestamp is None:
+        return None, "L2_TIMESTAMP_INVALID"
+    levels = book_brut.get("levels")
+    if not isinstance(levels, list) or len(levels) != 2:
+        return None, "L2_LEVELS_INVALID"
+    raw_bids, raw_asks = levels
+    if not isinstance(raw_bids, list) or not isinstance(raw_asks, list):
+        return None, "L2_LEVELS_INVALID"
+
+    def side_pairs(raw_side):
+        pairs, counts = [], []
+        for level in raw_side:
+            if not isinstance(level, dict) or "px" not in level or "sz" not in level:
+                return None, None
+            pairs.append([level["px"], level["sz"]])
+            count = _order_count(level.get("n"))
+            if count is None:
+                return None, None
+            counts.append(count)
+        return pairs, counts
+
+    bid_pairs, bid_counts = side_pairs(raw_bids)
+    ask_pairs, ask_counts = side_pairs(raw_asks)
+    if bid_pairs is None or ask_pairs is None:
+        return None, "L2_ORDER_COUNT_OR_LEVEL_INVALID"
+    normalized, reason = validate_l2_book_sides(
+        bid_pairs, ask_pairs,
+        bid=bid_pairs[0][0] if bid_pairs else None,
+        ask=ask_pairs[0][0] if ask_pairs else None,
+    )
+    if normalized is None:
+        return None, reason or "L2_BOOK_INVALID"
+    bids, asks = normalized
+    bid, ask = bids[0][0], asks[0][0]
+    mid = bid + (ask - bid) / 2.0
+    spread_bps = (ask - bid) / mid * 1e4
+    if not math.isfinite(mid) or mid <= 0 or not math.isfinite(spread_bps):
+        return None, "L2_DERIVED_VALUE_NONFINITE"
+    return {
+        "bid": bid,
+        "ask": ask,
+        "mid": round(mid, 8),
+        "spread_bps": round(spread_bps, 3),
+        "bids5": [
+            [px, size, count]
+            for (px, size), count in zip(bids[:5], bid_counts[:5], strict=True)
+        ],
+        "asks5": [
+            [px, size, count]
+            for (px, size), count in zip(asks[:5], ask_counts[:5], strict=True)
+        ],
+        "book_exchange_time": timestamp,
+    }, None
+
+
+def resume_book(book_brut: dict) -> dict | None:
+    """Résumé fail-closed d'un snapshot L2; None si une donnée est invalide."""
+    return resume_book_checked(book_brut)[0]
 
 
 def book_imbalance_top5(resume: dict | None) -> float | None:
@@ -530,7 +607,12 @@ def ecrire_lignes(root, lignes: list) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as fh:
         for line in lignes:
-            fh.write(json.dumps(line, ensure_ascii=False) + "\n")
+            try:
+                encoded = json.dumps(line, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError, OverflowError):
+                print("[metaorder_l2_tape] WRITE_REJECT reason=NONFINITE_OR_NON_JSON", flush=True)
+                continue
+            fh.write(encoded + "\n")
 
 
 def charger_tape(root) -> dict:
@@ -556,7 +638,7 @@ def charger_tape(root) -> dict:
 
 
 __all__ = ["TAPE_RELPATH", "SCHEMA_VERSION", "LATENCE_PLAFOND_ELIGIBLE_MS", "cle_fill", "metaorder_id",
-           "resume_book", "book_imbalance_top5", "profondeur_top5", "ofi_par_niveau", "ofi_top5",
+           "resume_book", "resume_book_checked", "book_imbalance_top5", "profondeur_top5", "ofi_par_niveau", "ofi_top5",
            "ofi_normalise_profondeur", "ofi_multi_niveaux", "microprice", "microprice_deviation_bps",
            "queue_depletion", "depth_shape", "aggressive_trade_imbalance", "add_cancel_imbalance",
            "spread_regime", "microstructure_features", "microstructure_timing_gate",

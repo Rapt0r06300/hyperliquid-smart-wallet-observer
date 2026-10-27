@@ -22,6 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.collection.userfills_live import parser_message_userfills  # noqa: E402
+from hl_observer.normalization.instrument_identity import (  # noqa: E402
+    preserve_native_instrument_symbol as canonical_copy_vault_coin,
+)
 
 
 class SafeBridgeError(RuntimeError):
@@ -241,9 +244,9 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
     data = message.get("data")
     if message.get("channel") != "l2Book" or not isinstance(data, dict):
         raise SafeBridgeError("invalid L2 websocket envelope")
-    coin = str(record.get("instrument") or "").upper()
+    coin = canonical_copy_vault_coin(record.get("instrument"))
     if (
-        not coin or str(data.get("coin") or "").upper() != coin
+        not coin or canonical_copy_vault_coin(data.get("coin")) != coin
         or data.get("time") != exchange
         or receive - exchange > 1_000
     ):
@@ -258,7 +261,20 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
         sum(px * size for px, size in bids),
         sum(px * size for px, size in asks),
     )
-    return {
+    connection_id = record.get("connection_id")
+    if connection_id is not None and (
+        not isinstance(connection_id, str) or not connection_id.strip()
+    ):
+        raise SafeBridgeError("invalid L2 connection identity")
+    parsed_summary = record.get("parsed_summary")
+    gap_epoch = (
+        parsed_summary.get("l2_gap_epoch")
+        if isinstance(parsed_summary, dict)
+        else None
+    )
+    if gap_epoch is not None and (type(gap_epoch) is not int or gap_epoch < 0):
+        raise SafeBridgeError("invalid L2 gap epoch")
+    result = {
         "schema_version": "hypersmart.copy_vault_l2.v1",
         "coin": coin,
         "bid": bids[0][0],
@@ -272,6 +288,11 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
         "data_origin": "REAL_OBSERVED",
         "causal_observation": True,
     }
+    if connection_id is not None:
+        result["connection_id"] = connection_id
+    if gap_epoch is not None:
+        result["l2_gap_epoch"] = gap_epoch
+    return result
 
 
 def _safe_registry_rows(

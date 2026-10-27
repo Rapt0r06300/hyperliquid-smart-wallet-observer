@@ -8,6 +8,9 @@ from pathlib import Path
 class EntrypointRole(StrEnum):
     OFFICIAL_RUNTIME = "OFFICIAL_RUNTIME"
     OFFICIAL_ANALYSIS = "OFFICIAL_ANALYSIS"
+    OFFICIAL_COLLECTION = "OFFICIAL_COLLECTION"
+    OFFICIAL_GIT_SYNC = "OFFICIAL_GIT_SYNC"
+    OFFICIAL_DATA_SYNC = "OFFICIAL_DATA_SYNC"
     OFFICIAL_RESEARCH = "OFFICIAL_RESEARCH"
     MAINTENANCE = "MAINTENANCE"
     COMPAT = "COMPAT"
@@ -16,50 +19,64 @@ class EntrypointRole(StrEnum):
 
 
 ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
-    # Explicit local restore/backup tools; never cloud-run or live trading.
-    "ALINA_SYNC_COMPLETE.cmd": EntrypointRole.MAINTENANCE,
-    "Alina-restore.cmd": EntrypointRole.COMPAT,
-    "BACKUP_LOCAL_ALINA.cmd": EntrypointRole.MAINTENANCE,
-    "RESTORE_ALINA.cmd": EntrypointRole.MAINTENANCE,
-    "ANALYSER_BACKTESTS_REPLAYS.cmd": EntrypointRole.OFFICIAL_ANALYSIS,
-    "ANALYSER_DONNEES_HYPERSMART.cmd": EntrypointRole.MAINTENANCE,
-    "ANALYSE_HISTORIQUE_COMPLETE.cmd": EntrypointRole.COMPAT,
-    "CREER_ARCHIVE_PORTABLE.cmd": EntrypointRole.MAINTENANCE,
-    "CREER_RELEASE_COMPLETE.cmd": EntrypointRole.MAINTENANCE,
-    "DIAGNOSTIC_LANCEUR.cmd": EntrypointRole.MAINTENANCE,
-    "INSTALLER_ALINA_RUNNER_FINAL_V1.cmd": EntrypointRole.MAINTENANCE,
-    "INSTALLER_ALINA_RUNNER_WINDOWS.cmd": EntrypointRole.COMPAT,
-    "LANCER-CODEX-RESEARCH.cmd": EntrypointRole.MAINTENANCE,
-    "LANCER-RECHERCHE-14H.cmd": EntrypointRole.COMPAT,
-    "LANCER-RECHERCHE-18H.cmd": EntrypointRole.COMPAT,
-    "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd": EntrypointRole.COMPAT,
-    "LANCER-RECHERCHE-CONTINUE.cmd": EntrypointRole.OFFICIAL_RESEARCH,
-    "LANCER_COCKPIT_ALINA.cmd": EntrypointRole.COMPAT,
-    "LANCER_HYPERLAB.cmd": EntrypointRole.COMPAT,
+    # The five human-facing entrypoints stay at the repository root.
+    "ALINA_SYNC_COMPLETE.cmd": EntrypointRole.OFFICIAL_DATA_SYNC,
+    "LANCER_COLLECTEURS_COPY_VAULT.cmd": EntrypointRole.OFFICIAL_COLLECTION,
     "LANCER_HYPERSMART.cmd": EntrypointRole.OFFICIAL_RUNTIME,
-    "LANCER_LAB_QUANT_COPY_VAULT.cmd": EntrypointRole.MAINTENANCE,
-    "LANCER_LABO.cmd": EntrypointRole.COMPAT,
-    "LANCER_LABO_180GO.cmd": EntrypointRole.COMPAT,
-    "LANCER_MICRO.cmd": EntrypointRole.COMPAT,
-    "LANCER_OBJECTIF_4USD.cmd": EntrypointRole.COMPAT,
-    "LANCER_REPLAY_176GO.cmd": EntrypointRole.COMPAT,
-    "POUSSER-GITHUB-FORCE.cmd": EntrypointRole.LEGACY,
-    "POUSSER_TOUT_LE_TRAVAIL.cmd": EntrypointRole.LEGACY,
-    "PREPARER_DONNEES_HYPERSMART.cmd": EntrypointRole.MAINTENANCE,
-    "PREPARER_EXPERIENCE_FULL_COLD.cmd": EntrypointRole.MAINTENANCE,
-    "PREPARER_GIT_PORTABLE.cmd": EntrypointRole.MAINTENANCE,
-    "PREPARER_PC_ALINA.cmd": EntrypointRole.MAINTENANCE,
-    "RECETTE-LANCEUR.cmd": EntrypointRole.MAINTENANCE,
-    "RECETTE-WINDOWS.cmd": EntrypointRole.MAINTENANCE,
-    "REPARER_ET_POUSSER.cmd": EntrypointRole.LEGACY,
-    "VERIFIER_LAB_AUTONOME_ALINA.cmd": EntrypointRole.MAINTENANCE,
-    "VERIFIER_REPARER_L2_LOCAL.cmd": EntrypointRole.MAINTENANCE,
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd": EntrypointRole.OFFICIAL_ANALYSIS,
+    "POUSSER-GITHUB-FORCE.cmd": EntrypointRole.OFFICIAL_GIT_SYNC,
+    # AlinaSync is also a supported root entrypoint, separate from the four main CMD roles.
+    # Remaining commands are support/compatibility tools kept under tools/launchers/.
+    "tools/launchers/Alina-restore.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/ANALYSE_HISTORIQUE_COMPLETE.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/ANALYSER_DONNEES_HYPERSMART.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/BACKUP_LOCAL_ALINA.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/CREER_RELEASE_COMPLETE.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/DIAGNOSTIC_LANCEUR.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/INSTALLER_ALINA_RUNNER_FINAL_V1.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/INSTALLER_ALINA_RUNNER_WINDOWS.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER-CODEX-RESEARCH.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/LANCER-RECHERCHE-14H.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER-RECHERCHE-18H.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER-RECHERCHE-CONTINUE-ADMIN.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd": EntrypointRole.OFFICIAL_RESEARCH,
+    "tools/launchers/LANCER_COCKPIT_ALINA.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER_HYPERLAB.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER_LABO.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER_LABO_180GO.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER_MICRO.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER_OBJECTIF_4USD.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/LANCER_REPLAY_176GO.cmd": EntrypointRole.COMPAT,
+    "tools/launchers/POUSSER_TOUT_LE_TRAVAIL.cmd": EntrypointRole.LEGACY,
+    "tools/launchers/PREPARER_DONNEES_HYPERSMART.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/PREPARER_GIT_PORTABLE.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/PREPARER_PC_ALINA.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/RECETTE-LANCEUR.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/RECETTE-WINDOWS.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/REPARER_ET_POUSSER.cmd": EntrypointRole.LEGACY,
+    "tools/launchers/RESTORE_ALINA.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/VERIFIER_LAB_AUTONOME_ALINA.cmd": EntrypointRole.MAINTENANCE,
+    "tools/launchers/VERIFIER_REPARER_L2_LOCAL.cmd": EntrypointRole.MAINTENANCE,
+}
+
+ROOT_ENTRYPOINTS = {
+    "ALINA_SYNC_COMPLETE.cmd",
+    "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+    "LANCER_HYPERSMART.cmd",
+    "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+    "POUSSER-GITHUB-FORCE.cmd",
 }
 
 OFFICIAL_ENTRYPOINTS = {
     EntrypointRole.OFFICIAL_RUNTIME: "LANCER_HYPERSMART.cmd",
-    EntrypointRole.OFFICIAL_ANALYSIS: "ANALYSER_BACKTESTS_REPLAYS.cmd",
-    EntrypointRole.OFFICIAL_RESEARCH: "LANCER-RECHERCHE-CONTINUE.cmd",
+    EntrypointRole.OFFICIAL_ANALYSIS: "LANCER_LAB_QUANT_COPY_VAULT.cmd",
+    EntrypointRole.OFFICIAL_COLLECTION: "LANCER_COLLECTEURS_COPY_VAULT.cmd",
+    EntrypointRole.OFFICIAL_GIT_SYNC: "POUSSER-GITHUB-FORCE.cmd",
+    EntrypointRole.OFFICIAL_DATA_SYNC: "ALINA_SYNC_COMPLETE.cmd",
+    EntrypointRole.OFFICIAL_RESEARCH: "tools/launchers/LANCER-RECHERCHE-CONTINUE.cmd",
 }
 
 
@@ -83,12 +100,24 @@ def audit_entrypoint_topology(repo_root: str | Path) -> list[EntrypointTopologyI
     root = Path(repo_root)
     issues: list[EntrypointTopologyIssue] = []
     discovered = {path.name for path in root.glob("*.cmd") if path.is_file()}
+    for path in sorted(discovered - ROOT_ENTRYPOINTS):
+        issues.append(EntrypointTopologyIssue("UNEXPECTED_ROOT_ENTRYPOINT", path, "support .cmd must live under tools/launchers/"))
+    for path in sorted(ROOT_ENTRYPOINTS - discovered):
+        issues.append(EntrypointTopologyIssue("MISSING_ROOT_ENTRYPOINT", path, "required root launcher is missing"))
     registered = set(ENTRYPOINT_ROLES)
-
-    for path in sorted(discovered - registered):
-        issues.append(EntrypointTopologyIssue("UNCLASSIFIED_ENTRYPOINT", path, "root .cmd is not classified"))
-    for path in sorted(registered - discovered):
-        issues.append(EntrypointTopologyIssue("STALE_ENTRYPOINT_REGISTRY", path, "registered .cmd is missing"))
+    for path in sorted(registered):
+        if not (root / Path(path)).is_file():
+            issues.append(EntrypointTopologyIssue("STALE_ENTRYPOINT_REGISTRY", path, "registered .cmd is missing"))
+    nested = {
+        path.relative_to(root).as_posix()
+        for path in (root / "tools" / "launchers").glob("*.cmd")
+        if path.is_file()
+    }
+    nested_registered = {path for path in registered if path.startswith("tools/launchers/")}
+    for path in sorted(nested - nested_registered):
+        issues.append(EntrypointTopologyIssue("UNCLASSIFIED_SUPPORT_ENTRYPOINT", path, "support .cmd is not classified"))
+    for path in sorted(nested_registered - nested):
+        issues.append(EntrypointTopologyIssue("STALE_SUPPORT_ENTRYPOINT", path, "registered support .cmd is missing"))
 
     for role, expected in OFFICIAL_ENTRYPOINTS.items():
         actual = sorted(path for path, candidate_role in ENTRYPOINT_ROLES.items() if candidate_role == role)
@@ -107,17 +136,28 @@ def audit_entrypoint_topology(repo_root: str | Path) -> list[EntrypointTopologyI
         "hl_enable_mainnet_execution=0",
         "hl_enable_testnet_execution=0",
     )
-    for path in OFFICIAL_ENTRYPOINTS.values():
-        candidate = root / path
-        if not candidate.is_file():
-            continue
-        content = _normalized(candidate)
+    runtime_contract = OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_RUNTIME]
+    runtime_candidate = root / runtime_contract
+    if runtime_candidate.is_file():
+        content = _normalized(runtime_candidate)
         for token in common:
-            _require(content, path, token, "OFFICIAL_CONTRACT_DRIFT", issues)
-        if "hl_enable_mainnet_execution=1" in content or "hl_enable_testnet_execution=1" in content:
-            issues.append(EntrypointTopologyIssue("REAL_EXECUTION_DIRECTIVE", path, "official entrypoint enables execution"))
+            _require(content, runtime_contract, token, "OFFICIAL_CONTRACT_DRIFT", issues)
+    for role in (EntrypointRole.OFFICIAL_ANALYSIS, EntrypointRole.OFFICIAL_COLLECTION):
+        path = OFFICIAL_ENTRYPOINTS[role]
+        candidate = root / path
+        if candidate.is_file():
+            content = _normalized(candidate)
+            for token in ("hl_enable_mainnet_execution=0", "hl_enable_testnet_execution=0"):
+                _require(content, path, token, "OFFICIAL_CONTRACT_DRIFT", issues)
+    for path in (runtime_contract, OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_ANALYSIS],
+                 OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_COLLECTION]):
+        candidate = root / path
+        if candidate.is_file():
+            content = _normalized(candidate)
+            if "hl_enable_mainnet_execution=1" in content or "hl_enable_testnet_execution=1" in content:
+                issues.append(EntrypointTopologyIssue("REAL_EXECUTION_DIRECTIVE", path, "official entrypoint enables execution"))
 
-    runtime_path = root / OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_RUNTIME]
+    runtime_path = runtime_candidate
     if runtime_path.is_file():
         content = _normalized(runtime_path)
         _require(content, runtime_path.name, "port_owner", "RUNTIME_SINGLE_INSTANCE_MISSING", issues)
@@ -133,7 +173,7 @@ def audit_entrypoint_topology(repo_root: str | Path) -> list[EntrypointTopologyI
         if "\npython " in content or "\npython.exe " in content:
             issues.append(EntrypointTopologyIssue("SYSTEM_PYTHON_FALLBACK", research_path.name, "official research launcher must use portable Python"))
 
-    archive_path = root / "CREER_ARCHIVE_PORTABLE.cmd"
+    archive_path = root / "tools/launchers/CREER_ARCHIVE_PORTABLE.cmd"
     if archive_path.is_file():
         content = _normalized(archive_path)
         for token in common:

@@ -26,7 +26,7 @@ futur replay ciblé
 python -m hl_observer.ops.dataset_experiment_contract_verify --root "<workspace>"
 ```
 
-Le bouton Windows `PREPARER_EXPERIENCE_FULL_COLD.cmd` lance cette vérification automatiquement après la création du contrat.
+Le bouton Windows `tools/launchers/PREPARER_EXPERIENCE_FULL_COLD.cmd` lance cette vérification automatiquement après la création du contrat.
 
 ## Ce qui est vérifié
 

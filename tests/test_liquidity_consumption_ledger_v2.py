@@ -18,9 +18,10 @@ def _truth(
     *,
     snapshot_id: str = "book:one",
     source: str = "hyperliquid",
+    coin: str = "HYPE",
 ) -> ExecutionTruth:
     return ExecutionTruth.from_levels(
-        coin="HYPE",
+        coin=coin,
         bids=((99.0, 1.0),),
         asks=((100.0, 1.0),),
         received_ts_ms=NOW_MS,
@@ -34,13 +35,14 @@ def _truth(
 def _intent(
     name: str,
     *,
+    coin: str = "HYPE",
     side: str = "LONG",
     action: str = "OPEN",
     notional: float = 60.0,
 ) -> PaperExecutionIntent:
     return PaperExecutionIntent(
         strategy_id=name,
-        coin="HYPE",
+        coin=coin,
         position_side=side,
         action=action,
         target_notional_usdc=notional,
@@ -139,3 +141,21 @@ def test_buy_and_sell_consumption_are_independent() -> None:
     assert buy.execution.filled_quantity == 0.6
     assert abs(sell.execution.filled_quantity - (60.0 / 99.0)) < 1e-12
     assert {row.execution_side for row in ledger.snapshot()} == {"BUY", "SELL"}
+
+
+def test_case_distinct_instruments_have_independent_book_consumption():
+    ledger = LiquidityConsumptionLedger()
+    lower = _execute(
+        _intent("lower", coin="kPEPE"),
+        _truth(snapshot_id="same-book", coin="kPEPE"),
+        ledger,
+    )
+    upper = _execute(
+        _intent("upper", coin="KPEPE"),
+        _truth(snapshot_id="same-book", coin="KPEPE"),
+        ledger,
+    )
+
+    assert lower.execution.filled_notional_usdc == 60.0
+    assert upper.execution.filled_notional_usdc == 60.0
+    assert {row.coin for row in ledger.snapshot()} == {"kPEPE", "KPEPE"}

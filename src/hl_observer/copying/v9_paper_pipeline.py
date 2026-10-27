@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 from hashlib import sha256
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.signals.fill_admission import (
     FillAdmissionConfig,
     admit_live_fill,
@@ -82,7 +83,7 @@ class V9SessionResult:
 
 
 def _position_key(wallet: str, coin: str, side: str) -> str:
-    return f"{str(wallet).lower()}|{str(coin).upper()}|{str(side).upper()}"
+    return f"{str(wallet).lower()}|{preserve_native_instrument_symbol(coin)}|{str(side).upper()}"
 
 
 def _paper_ref(prefix: str, *parts: object) -> str:
@@ -165,7 +166,7 @@ def run_v9_paper_session(
     decisions: list[dict] = []
 
     for f in fills:
-        coin = str(f.get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol(f.get("coin"))
         side = str(f.get("side") or "").upper()
         action = str(f.get("action_type") or "").upper()
         wallet = str(f.get("wallet") or "")

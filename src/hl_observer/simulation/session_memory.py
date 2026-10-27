@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 EXIT_ACTION_MARKERS = ("CLOSE", "REDUCE", "STOP", "TAKE_PROFIT", "TRAILING")
 
@@ -64,7 +65,7 @@ def _is_local_replay(row: dict[str, Any]) -> bool:
 
 
 def _event_coin(row: dict[str, Any]) -> str:
-    return str(row.get("coin") or "").upper()
+    return preserve_native_instrument_symbol(row.get("coin"))
 
 
 def _event_side(row: dict[str, Any]) -> str:
@@ -99,14 +100,14 @@ def coin_side_session_stats(
 ) -> SessionMemoryStats:
     """Summarize local paper outcomes for one coin+side pair."""
 
-    coin_upper = str(coin or "").upper()
+    coin_native = preserve_native_instrument_symbol(coin)
     side_upper = str(side or "").upper()
     session_pnl = 0.0
     exit_pnls: list[float] = []
     for row in events:
         if not isinstance(row, dict) or not _is_local_replay(row):
             continue
-        if _event_coin(row) != coin_upper or _event_side(row) != side_upper:
+        if _event_coin(row) != coin_native or _event_side(row) != side_upper:
             continue
         pnl = _as_float(row.get("estimated_net_pnl_usdc"), 0.0)
         session_pnl += pnl
@@ -116,7 +117,7 @@ def coin_side_session_stats(
     wins = sum(1 for value in exit_pnls if value > 0)
     loss_streak, win_streak = _outcome_streaks(exit_pnls)
     return SessionMemoryStats(
-        coin=coin_upper,
+        coin=coin_native,
         side=side_upper,
         session_pnl_usdc=round(session_pnl, 6),
         realized_exit_pnl_usdc=round(sum(exit_pnls), 6),

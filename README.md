@@ -12,11 +12,31 @@ Alina Smart Flow — nom historique : **HyperSmart** — collecte et normalise d
 
 ---
 
+## Repère opérateur permanent — Copy-Vault
+
+Le fonctionnement attendu est organisé autour de trois blocs et de la synchronisation des données/code :
+
+| Rôle | Lanceur de référence | Responsabilité attendue |
+|---|---|---|
+| Collecteurs | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | Collecter les observations utiles à Copy-Vault, en préserver la provenance et les rendre admissibles SAFE avant leur usage économique. |
+| Laboratoire | `LANCER_LAB_QUANT_COPY_VAULT.cmd` | Exploiter les shards SAFE importés par AlinaSync, chercher des améliorations par replay/backtest et conserver chaque essai/candidat de façon traçable et non écrasable. |
+| Moteur simulé | `LANCER_HYPERSMART.cmd` | Afficher la simulation paper du bot ; son scope économique doit rester Copy-Vault seul. |
+| Synchronisation du code | `POUSSER-GITHUB-FORCE.cmd` | Réconcilier le code local et `main` puis pousser sans force, reset ni effacement. Ce lanceur ne transfère pas les shards. |
+| Shards SAFE | AlinaSync / `ALINA_SYNC_COMPLETE.cmd` | Récupérer/restaurer les assets SAFE publiés sur GitHub, puis vérifier tailles, SHA-256 et reçus. |
+
+À la racine, seuls ces quatre lanceurs principaux et AlinaSync restent visibles. Les outils de support et de restauration sont rangés dans [`tools/launchers/README.md`](tools/launchers/README.md). « Portable » signifie qu'un clone fonctionne depuis son propre chemin local ; aucune archive séparée n'est requise pour utiliser le dépôt.
+
+Le labo est le cerveau de recherche : chaque amélioration, même petite ou provisoire, reste inscrite avec son identité, ses données, ses paramètres et ses résultats ; les versions précédentes ne sont pas effacées lorsqu'un candidat ultérieur fait mieux. Un candidat TRAIN ou un score exploratoire n'est pas une preuve économique. **Aucun PnL, fill, coût, prix ou timestamp ne doit être inventé** ; une donnée manquante reste inconnue et peut rendre le résultat `UNMEASURABLE`.
+
+La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. La cible de **+5 USD nets/jour sur 200 USD paper** s'évalue au terme des réparations et preuves requises ; ce n'est ni une promesse ni une raison d'assouplir les contrôles. Copy-Vault est la seule famille économique active ; 3x4 et les autres familles restent hors périmètre.
+
+Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel est déjà conforme : toute divergence entre un lanceur et ce contrat doit être réparée avant d'annoncer une simulation ou une preuve valide. Les rapports et candidats historiques restent conservés.
+
+---
+
 ## Travail sur PC avec Codex : sauvegarder puis resynchroniser
 
-Depuis le dossier de travail local, lancer **`POUSSER-GITHUB-FORCE.cmd`**
-(ou **`POUSSER_TOUT_LE_TRAVAIL.cmd`**) lorsque les changements Codex
-doivent être publiés. Le nom historique FORCE est trompeur : le bouton
+Depuis le dépôt local, utiliser **`POUSSER-GITHUB-FORCE.cmd`** lorsque les changements de code doivent être réconciliés avec GitHub et publiés. Ce lanceur ne télécharge ni ne pousse les shards : leur récupération reste réservée à AlinaSync. Le nom historique FORCE est trompeur : le bouton
 contrôle que `origin` désigne le dépôt Alina principal, ajoute les fichiers
 de code/docs/config admissibles, crée un commit non vide si nécessaire,
 intègre les nouveaux commits distants et exécute un `git push origin
@@ -26,7 +46,7 @@ sur GitHub. En cas de conflit, fichier secret ou fichier trop gros, il
 est admise quand le Git portable n'est pas installé.
 
 **Pour les preuves ignorées/locales produites par Codex**, lancer
-`BACKUP_LOCAL_ALINA.cmd` lorsque leur conservation sur GitHub est souhaitée.
+`tools/launchers/BACKUP_LOCAL_ALINA.cmd` lorsque leur conservation sur GitHub est souhaitée.
 Ce bouton crée une sauvegarde en GitHub Releases du **même dépôt** avec
 chunks et SHA-256 ; les secrets sont exclus. Le bouton de push Git ne
 téléverse PAS implicitement des centaines de Go de runtime vers l'historique
@@ -109,7 +129,7 @@ Le rapport détaillé est `runtime/recovery/full/RESTORE_REPORT.json`.
 
 Pour connaître la place nécessaire sans télécharger de données :
 `Alina-restore.cmd --preflight-only --recover-verifiable` sous Windows
-(équivalent `RESTORE_ALINA.sh` sous Linux/macOS).
+(équivalent `tools/launchers/RESTORE_ALINA.sh` sous Linux/macOS).
 
 La collecte cloud continue indépendamment du PC et de cette restauration.
 Les nouveaux fichiers publiés après l'inventaire initial nécessitent une
@@ -148,7 +168,7 @@ Un ancien rapport, une ancienne conversation ou un ancien `DONE` ne l'emporte ja
 
 Alina ne cherche pas à maximiser un PnL brut. Elle cherche à démontrer un résultat **net, causal, exécutable et reproductible**.
 
-Le périmètre opérationnel temporaire est **Copy-Vault uniquement**. Une seule famille peut
+Le périmètre opérationnel actuel est **Copy-Vault uniquement**. Une seule famille peut
 actuellement créer des effets paper canoniques dans AlinaSmartFlow, le laboratoire, les
 simulations, les replays et les backtests :
 

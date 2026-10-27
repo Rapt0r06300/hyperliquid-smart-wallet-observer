@@ -6,11 +6,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_analysis_launcher_has_noninteractive_portable_smoke():
-    text = (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
+    text = (ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
         encoding="utf-8", errors="replace"
     )
     lowered = text.casefold()
-    assert 'call "%~dp0tools\\portable_env.cmd"' in lowered
+    assert 'call "%alina_project_root%\\tools\\portable_env.cmd"' in lowered
     assert '"%analysis_mode%"=="portable-smoke"' in lowered
     assert '"%analysis_mode%"=="portable-check"' in lowered
     assert "hl_observer.ops.portable_smoke" in lowered
@@ -21,7 +21,7 @@ def test_analysis_launcher_has_noninteractive_portable_smoke():
 
 
 def test_analysis_launcher_routes_all_documented_profiles():
-    text = (ROOT / "ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
+    text = (ROOT / "tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd").read_text(
         encoding="utf-8", errors="replace"
     ).casefold()
     for profile in ("quick", "full", "deep", "maximum"):
@@ -32,7 +32,7 @@ def test_analysis_launcher_routes_all_documented_profiles():
 def test_main_launcher_portable_check_resolves_embedded_python_first():
     text = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8", errors="replace")
     lowered = text.casefold()
-    assert 'call "%~dp0tools\\portable_env.cmd"' in lowered
+    assert 'call "%alina_project_root%\\tools\\portable_env.cmd"' in lowered
     assert "portable-check" in lowered
     assert "tools\\portable_runtime.py" in lowered
     assert lowered.index("portable_env.cmd") < lowered.index("portable-check")

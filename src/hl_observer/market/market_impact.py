@@ -1,4 +1,4 @@
-"""L'IMPACT DE MARCHÉ (idée `impact` de moisson-fini.md).
+"""L'IMPACT DE MARCHÉ (idée `impact` de docs/archive/root-history/moisson-fini.md).
 
 *Notre propre ordre bouge le prix **contre** nous.* C'est **l'hypothèse qui expliquerait nos
 −7,97 bps de copy-trading** : on paie l'impact du leader **après** lui. On ne l'a **jamais** chiffré.

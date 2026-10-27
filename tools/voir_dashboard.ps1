@@ -4,7 +4,7 @@
 # coin (0,0). Comme on ne depasse jamais le bas de la fenetre, elle ne peut PAS defiler
 # -> plus de "saut", plus de "quand je descends ca remonte".
 #
-# Il ne fait que LIRE moisson-en-cours.txt. Aucun reseau, aucune action.
+# Il ne fait que LIRE le battement sous runtime/reports/legacy/moisson/. Aucun reseau, aucune action.
 
 param([string]$Root = "")
 
@@ -22,8 +22,9 @@ try { [Console]::CursorVisible = $false } catch {}
 #    On le capture comme une simple touche (ignoree) : pour arreter, on ferme la fenetre.
 try { [Console]::TreatControlCAsInput = $true } catch {}
 
-$fichier = Join-Path $Root 'moisson-en-cours.txt'
-$flag    = Join-Path $Root 'moisson-termine.flag'
+$moissonRoot = Join-Path $Root 'runtime\reports\legacy\moisson'
+$fichier = Join-Path $moissonRoot 'moisson-en-cours.txt'
+$flag    = Join-Path $moissonRoot 'moisson-termine.flag'
 
 Clear-Host
 
@@ -58,5 +59,5 @@ Clear-Host
 if (Test-Path $fichier) { Get-Content $fichier -Encoding UTF8 | Write-Host }
 Write-Host ''
 Write-Host '   ================================================================'
-Write-Host '     MOISSON TERMINEE.  Resultat : moisson-fini.md  (a la racine)'
+Write-Host '     MOISSON TERMINEE.  Resultat : runtime\reports\legacy\moisson\moisson-fini.md'
 Write-Host '   ================================================================'

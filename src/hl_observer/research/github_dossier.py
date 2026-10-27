@@ -365,7 +365,7 @@ def classer(repo: str, *, licence: str | None, signaux: Mapping[str, Any],
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 # 📋 LE PLAN D'ACTION — *le .md n'est pas un résumé : c'est un ORDRE DE MISSION.*
 #
-# Flo : *« il faut que le moisson-fini.md soit ultra détaillé pour que TOI tu puisses comprendre
+# Flo : *« il faut que le docs/archive/root-history/moisson-fini.md soit ultra détaillé pour que TOI tu puisses comprendre
 #         absolument tout : quoi faire, quoi brancher, où brancher. »*
 #
 # -> chaque fiche porte une **suite d'étapes numérotées, exécutables**, avec la **commande** et

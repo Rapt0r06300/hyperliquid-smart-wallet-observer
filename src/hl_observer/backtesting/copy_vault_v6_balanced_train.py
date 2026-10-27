@@ -22,6 +22,7 @@ from hl_observer.backtesting.copy_vault_protocol import COPY_DELAY_MS, MAX_TARGE
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.backtesting.copy_vault_v5_lifecycle_train import replay_lifecycle_train
 from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v6_balanced_train.v1"
 MECHANISM = "copy_vault_v6_causal_daily_risk_budget"
@@ -64,7 +65,7 @@ def apply_causal_daily_risk_budget(
     ):
         day = int(raw.get("entry_ts_ms") or 0) // UTC_DAY_MS
         vault_key = (day, str(raw.get("vault") or "UNKNOWN"))
-        coin_key = (day, str(raw.get("coin") or "UNKNOWN").upper())
+        coin_key = (day, preserve_native_instrument_symbol(raw.get("coin")) or "UNKNOWN")
         if vault_counts[vault_key] >= int(max_entries_per_vault_day):
             audit["VAULT_DAILY_BUDGET_REJECTED"] += 1
             continue

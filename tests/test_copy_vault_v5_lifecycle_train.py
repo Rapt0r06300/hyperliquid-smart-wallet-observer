@@ -9,12 +9,12 @@ from hl_observer.backtesting.copy_vault_v5_lifecycle_train import (
 )
 
 
-def _live_fill(event_id: str, ts_ms: int, *, action: str) -> dict:
+def _live_fill(event_id: str, ts_ms: int, *, action: str, coin: str = "BTC") -> dict:
     return {
         "event_id": event_id,
         "ts_ms": ts_ms,
         "observed_at_ms": ts_ms + 25,
-        "coin": "BTC",
+        "coin": coin,
         "direction": 1,
         "action": action,
         "dir": "Open Long",
@@ -25,9 +25,9 @@ def _live_fill(event_id: str, ts_ms: int, *, action: str) -> dict:
     }
 
 
-def _book(ts_ms: int, bid: float, ask: float, line: int) -> dict:
+def _book(ts_ms: int, bid: float, ask: float, line: int, *, coin: str = "BTC") -> dict:
     return {
-        "coin": "BTC",
+        "coin": coin,
         "ts_ms": ts_ms,
         "bid": bid,
         "ask": ask,
@@ -37,13 +37,13 @@ def _book(ts_ms: int, bid: float, ask: float, line: int) -> dict:
     }
 
 
-def _leader_exit(observed_at_ms: int, *, causal: bool = True) -> dict:
+def _leader_exit(observed_at_ms: int, *, causal: bool = True, coin: str = "BTC") -> dict:
     return {
         "event_id": "leader-reduce",
         "fill_id": "fill-reduce",
         "ts_ms": observed_at_ms - 25,
         "observed_at_ms": observed_at_ms,
-        "coin": "BTC",
+        "coin": coin,
         "direction": 1,
         "action": "REDUCE",
         "vault": "0xA",
@@ -52,13 +52,44 @@ def _leader_exit(observed_at_ms: int, *, causal: bool = True) -> dict:
     }
 
 
-def _metaorders() -> tuple[list[dict], int]:
+def _metaorders(coin: str = "BTC") -> tuple[list[dict], int]:
     entries = [
-        _live_fill("first", 1_000, action="OPEN"),
-        _live_fill("second", 2_000, action="ADD"),
+        _live_fill("first", 1_000, action="OPEN", coin=coin),
+        _live_fill("second", 2_000, action="ADD", coin=coin),
     ]
     rows, _ = cluster_metaorders(entries)
     return rows, 2_025
+
+
+def test_index_leader_exit_preserve_la_casse_native_du_marche():
+    indexed, audit = index_causal_leader_exits([_leader_exit(3_000, coin="kPEPE")])
+
+    assert ("0xA", "kPEPE", 1) in indexed
+    assert audit["indexed_leader_market_directions"] == 1
+
+
+def test_replay_lifecycle_joint_leader_et_l2_sur_le_symbole_native():
+    metaorders, signal_ms = _metaorders("kPEPE")
+    entry_ms = signal_ms + 60_000
+    exit_ms = entry_ms + 60_000
+    books = {"kPEPE": [
+        _book(signal_ms, 99.0, 101.0, 1, coin="kPEPE"),
+        _book(entry_ms, 100.0, 102.0, 2, coin="kPEPE"),
+        _book(exit_ms, 109.0, 111.0, 3, coin="kPEPE"),
+    ]}
+
+    trades, _ = replay_lifecycle_train(
+        metaorders,
+        books,
+        [_leader_exit(exit_ms, coin="kPEPE")],
+        required_observed_fills=2,
+        horizon_ms=300_000,
+        train_start_ms=1_000,
+        train_end_ms=10_000,
+    )
+
+    assert len(trades) == 1
+    assert trades[0]["coin"] == "kPEPE"
 
 
 def test_replay_sort_au_premier_reduce_causal_avant_le_time_stop() -> None:

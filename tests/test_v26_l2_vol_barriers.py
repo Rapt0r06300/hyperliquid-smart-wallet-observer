@@ -55,6 +55,19 @@ def test_estimator_needs_min_obs():
     assert vol_factor_for_coin("BTC", estimator=est, env={}, now=1010.0) == 1.0  # inconnu => neutre
 
 
+def test_estimator_never_merges_case_distinct_native_symbols():
+    est = MidVolEstimator()
+    for i in range(5):
+        est.record("kPEPE", 0.001, ts=1000.0 + i)
+        est.record("KPEPE", 0.001 + i * 0.0001, ts=1000.0 + i)
+
+    lower = est.range_bps("kPEPE", window_s=60.0, min_obs=5, now=1010.0)
+    upper = est.range_bps("KPEPE", window_s=60.0, min_obs=5, now=1010.0)
+
+    assert lower == 0.0
+    assert upper is not None and upper > 0.0
+
+
 def test_estimator_range_and_factor_clamps():
     est = MidVolEstimator()
     # range 100.0 -> 101.0 sur dernier 100.5 => ~99.5 bps ; ref 40 => facteur ~2.49

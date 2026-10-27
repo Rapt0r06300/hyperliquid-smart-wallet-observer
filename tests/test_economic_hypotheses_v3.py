@@ -77,6 +77,19 @@ def test_copy_v3_rejects_concentration_and_negative_sufficient_sample() -> None:
     assert result["physical_freeze_allowed"] is False
 
 
+def test_copy_v3_concentration_uses_case_sensitive_native_instrument_identity():
+    trades = [
+        _copy_trade(coin="kPEPE" if index % 2 == 0 else "KPEPE", net=0.20)
+        for index in range(8)
+    ]
+
+    result = qualify_copy_vault_train_only(trades)
+
+    assert result["candidates"][0]["distinct_coins"] == 2
+    assert result["candidates"][0]["largest_coin_trade_share"] == 0.5
+    assert result["selection_eligible"] is True
+
+
 def _maker_candidate(*, net: float, segment: str = "train", queue: bool = True) -> dict:
     fees = 0.01
     row = {

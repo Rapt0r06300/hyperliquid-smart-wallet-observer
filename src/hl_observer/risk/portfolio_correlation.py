@@ -10,6 +10,8 @@ ici — pas de matrice inventée. Sans groupe connu, un coin est son propre grou
 
 from __future__ import annotations
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 # Groupes de corrélation par défaut (extensible via env/config plus tard).
 DEFAULT_GROUPS = {
     "BTC": "majors", "ETH": "majors",
@@ -20,7 +22,8 @@ DEFAULT_GROUPS = {
 
 
 def _group(coin: str, groups: dict[str, str]) -> str:
-    return groups.get(str(coin).upper(), f"solo:{str(coin).upper()}")
+    native = preserve_native_instrument_symbol(coin)
+    return groups.get(native, f"solo:{native}")
 
 
 def net_group_exposure(positions: list[dict], *, groups: dict[str, str] | None = None) -> dict[str, float]:
@@ -31,7 +34,7 @@ def net_group_exposure(positions: list[dict], *, groups: dict[str, str] | None =
     for p in positions or []:
         if not isinstance(p, dict):
             continue
-        coin = str(p.get("coin") or "").upper()
+        coin = preserve_native_instrument_symbol(p.get("coin"))
         if not coin:
             continue
         side = str(p.get("side") or p.get("direction") or "").upper()
