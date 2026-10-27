@@ -1,0 +1,106 @@
+{
+  "analysis_stage": null,
+  "attempts": 1,
+  "campaign_id": "market-e8-9-2026102619-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "52b2809fc6002bcaf200adca3a7b2677c89fc87c",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "4ff63226e1dc17ff89da478fc53bb6dd758bf981bd816a5a691adbfd045b1503",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-26T19:16:29.766993+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "duration_s": 3500,
+    "hot_handoff_dispatch_at_utc": "2026-10-26T21:49:22.577848Z",
+    "hot_handoff_generation": 1,
+    "hot_handoff_predecessor_run_id": "40393878022",
+    "hot_handoff_predecessor_universe_digest": "e7527c6511a9901c83d85d13ab5a2084ab6278d9095c1b18de7ffeec993895b5",
+    "hot_handoff_successor_campaign_id": "market-e8-9-2026102620-v7",
+    "hot_handoff_successor_universe_digest": "7bc8f9a6c46a83da81e928badcab17bd1d0ad40752ce36a7b48aea495a154c8d",
+    "market_shard_count": 16,
+    "market_shard_index": 9,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e8/2026102619/shard-09.json",
+    "plan_sha256": "9321f87ed8c6f1bb80568e294afc28964fbd2e4c9abbcb674600d8bc29a61abe",
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 55,
+    "universe_digest": "e7527c6511a9901c83d85d13ab5a2084ab6278d9095c1b18de7ffeec993895b5",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-11-02T19:16:29.766993+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-9-2026102619-v7.pending.3961cc145fb5.bc29d362ad9d9c31e0b6304ce3d79f6c78cb409deb66ef899a9932eb791b494a.json",
+      "archived_manifest_sha256": "bc29d362ad9d9c31e0b6304ce3d79f6c78cb409deb66ef899a9932eb791b494a",
+      "at": "2026-10-26T20:25:41.650806Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "3961cc145fb5a149a4a379ccca94c4e048ebef3d",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "at": "2026-10-26T20:46:39.638584Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-26T21:49:22.577848Z",
+      "event": "HOT_HANDOFF_SUCCESSOR_DISPATCHED",
+      "generation": 1,
+      "predecessor_run_id": "40393878022",
+      "successor_campaign_id": "market-e8-9-2026102620-v7"
+    },
+    {
+      "at_utc": "2026-10-27T01:00:25.735441Z",
+      "event": "WATCHDOG_OWNER_RUN_TERMINATED",
+      "owner_run_conclusion": "failure",
+      "owner_run_id": "40393878022",
+      "owner_run_status": "completed",
+      "previous_lease": {
+        "acquired_at": "2026-10-26T20:46:39.638535Z",
+        "expires_at": "2026-10-27T02:31:39.638535Z",
+        "lease_token_sha256": "e40b9b38bcea3ef496c4efcd86765f2c670818be71d370a992df01c8e6c5b7cf",
+        "owner_run_id": "40393878022"
+      },
+      "previous_status": "RUNNING",
+      "reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 8,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "STUCK",
+  "status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+  "stuck_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-27T01:00:25.735441Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}
