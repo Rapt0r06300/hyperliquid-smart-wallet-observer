@@ -3464,17 +3464,17 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "67249afcee44aa96d79818bc6915cc268258786f",
   "copy_vault_coverage_receipt": {
-    "digest": "d0e89546e724b4c324ed9d4814a0cc2658189a42e5fc3b47eceea106331a2adb",
+    "digest": "1d4ca957e5f06cb0f2b8951d8612e1ec32f089f0376ffddd3203739852fd868d",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
-      "publication_complete": false,
+      "publication_complete": true,
       "selection_present": true,
       "selection_verified": true,
       "sharding_present": true,
       "ten_user_limit_respected": true
     },
-    "status": "MORE_DATA"
+    "status": "OBSERVED"
   },
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 0,
@@ -3516,9 +3516,9 @@
     "valid_record_count": 224819946,
     "valid_record_ratio": 0.15352283
   },
-  "dataset_health_digest": "eaa2e0a5f2c76d1a1e82e21b24b4373573893a3fe6e82ca5774869a86883b6fa",
+  "dataset_health_digest": "3bdb1b71bfab8e8787b01aa5979540dfa79ad52d06bb59ffd2a42aec650539ed",
   "dataset_selection_id": null,
-  "dataset_v2_head": "65e6cd2bf6a108296e9d5b5e03aded56311383cc",
+  "dataset_v2_head": "2a9834fbad38dc41cd656fe791fa312964a33bef",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "b8c5799ed5fd0fcd2f2fa3ce42935be88113498dd89a668cf0fe7b6d4aaf3024",
@@ -3551,7 +3551,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-27T13:11:37.659234Z",
+  "generated_at_utc": "2026-10-27T14:48:14.871528Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -3588,7 +3588,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "65e6cd2bf6a108296e9d5b5e03aded56311383cc",
+  "main_alina_head": "2a9834fbad38dc41cd656fe791fa312964a33bef",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -3623,7 +3623,7 @@
   "raw_record_count": 1464407246,
   "raw_trade_count": 60511832,
   "real_execution_reachable": false,
-  "receipt_digest": "eae8286c81814211c1ed96fbf88743636cf2accd61c4fa3710eb9f4b17857d98",
+  "receipt_digest": "ff9a198a3d93383aee16f2b53073ab0f6faa1696a09206672ebc37c835d4ba13",
   "rejected_count": 15052,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
@@ -4030,6 +4030,21 @@
     "40432508756",
     "40441347880",
     "40474304278",
-    "40490729091"
+    "40487555913",
+    "40490729091",
+    "40501409134",
+    "40501413530",
+    "40501417799",
+    "40501422206",
+    "40501427275",
+    "40501430856",
+    "40501435092",
+    "40501438943",
+    "40501443914",
+    "40501448092",
+    "40501452315",
+    "40501456512",
+    "40501460650",
+    "40501464524"
   ]
 }
