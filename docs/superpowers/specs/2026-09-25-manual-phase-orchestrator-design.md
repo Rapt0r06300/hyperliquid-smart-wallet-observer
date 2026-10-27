@@ -16,7 +16,7 @@ The user controls phase changes manually through ChatGPT/GitHub. Autonomous runt
 
 The design must preserve strict paper/read-only behavior and must never enable real orders.
 
-## Temporary CopyVault-only operating scope
+## Current CopyVault-only operating scope
 
 Until a reviewed change to the central strategy authority explicitly reactivates
 another family, `copy_vault` is the only economic family allowed to materialize
@@ -32,6 +32,19 @@ code for paused families remain preserved for audit and reversible future
 reactivation; stored evidence never makes a paused family active. Environment
 variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
 FAIL-CLOSED and does not stop collectors or restoration processes.
+
+### Superseding precedence for retained historical sections
+
+The scope above is the only current economic scope. Older multi-family designs,
+family-specific targets, module portfolios, and promotion language retained
+below are **historical and inactive** unless they are explicitly re-adopted in
+this section through the canonical strategy authority. They cannot authorize
+collection for economic research, simulation, replay, backtesting, OOS/forward,
+certification, or scoreboard output. This includes the earlier Collector V4,
+Strategy / PnL Acceleration VNext, cross-module allocator, Module Optimization
+V3, V6 portfolio, and September 25 profitability-convergence proposals.
+Historical measurements remain unchanged and are not evidence of current
+execution scope or profitability.
 
 ## Canonical-spec governance
 
@@ -96,10 +109,11 @@ claim a restored or profitable corpus from metadata-only checks. Ordinary replay
 Only an explicit `--prune-cache-only` operation may delete unselected local
 copies after proving they match still-published GitHub assets by size and
 SHA-256; unknown, modified, corrupt, symlinked, repairable-only cloud data
-and the published inventory remain untouched. The default CLI also sets a 64 GiB ceiling on **new**
-Release payload bytes (configurable with `--max-download-gib`): budget checks
-run before transfers and before local pruning; preflight reports
-`PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED` and does not transfer payloads. Never
+and the published inventory remain untouched. The default CLI also sets an
+8 GiB ceiling on **new** Release payload bytes (configurable with
+`--max-download-gib`): budget checks run before transfers and before local
+pruning; preflight reports `PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED` and does not
+transfer payloads. Never
 interpret a bounded incomplete restore as a completed replay/backtest or
 permit cloud Release deletion merely from an index quality label.
 
@@ -215,9 +229,11 @@ The architecture does **not** claim that GitHub-hosted runners can guarantee phy
 
 ### Module-complete collection contracts
 
-Collector quality is evaluated against the needs of **all three active strategy families**, not against a generic market-data checklist.
+**Historical and inactive design note:** an earlier draft evaluated collector
+quality against three research families. The current collector contract is the
+Copy-Vault contract in this section; this archived wording does not widen it.
 
-The existing minimal dependency declaration (`userFills/allMids/BBO/L2`) is not sufficient for economic proof. Collection V4 therefore defines a richer evidence contract for each family.
+The existing minimal dependency declaration (`userFills/allMids/BBO/L2`) is not sufficient for economic proof. Collection V4 therefore defines the richer evidence contract required by the active Copy-Vault family. Other-family contracts retained in historical sections are inactive.
 
 #### Copy-Vault collection contract
 
@@ -1227,15 +1243,17 @@ The collection epoch is attached to each frozen selection and campaign so stale 
 
 REST reconciliation and frozen-selection rules remain causal. No pre-selection future information may be admitted as forward proof.
 
-## Strategy / PnL Acceleration VNext
+## Strategy / PnL Acceleration VNext — historical and inactive
 
-The collection architecture is necessary but not sufficient. The three active research families must also be redesigned to maximize **provable after-cost daily net PnL** rather than waiting passively for rare legacy signals.
+**Archived multi-family proposal:** its collection architecture was paired with
+separate research for three families. That design is superseded by the current
+Copy-Vault-only scope above and does not authorize those families to run.
 
-The long-term economic milestone is standardized across all three modules:
+The historical milestone in that retired proposal was:
 
 > **at least +5 USD net per UTC day per module on 200 USD paper capital**, measured after fees, spread, slippage, latency, impact, capacity, funding where applicable, and realistic fill assumptions.
 
-This is a research target, not a guarantee, and it is **not an ANALYZE stage-completion gate**. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The operational calibration rule is monotone per module: every measurable new replay/backtest result is compared with the retained reference under the same proof semantics, and it replaces that reference only when its comparable after-cost net PnL is strictly better. Improvement may therefore be negative-to-less-negative — for example -4 USD to -2 USD — while the module remains economically unproven. Non-measurable runs are recorded but never promoted; missing, stale, duplicated or corrupt evidence never counts as improvement.
+This was a research target, not a guarantee or an ANALYZE stage-completion gate. It is not the current economic target: only Copy-Vault has the active +5 USD net/day objective, evaluated at the terminal economic gate after technical and OOS/forward evidence. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The archived monotone-calibration proposal compared measurable replay/backtest results with retained references under consistent proof semantics. Non-measurable runs were never promotion evidence; missing, stale, duplicated or corrupt evidence never counted as improvement.
 
 Promotion of an actual economic strategy remains fail-closed. Thresholds, costs, OOS/forward separation or validation rules may not be weakened merely to obtain a higher number.
 
@@ -1243,7 +1261,10 @@ Copy-Vault capacity diagnostics may replay the unchanged frozen policy over the 
 
 Before a forward-eligible V21 candidate is considered robust, run the fixed diagnostic stress grid through the same execution path: doubled taker fees, 2x/3x observed spread, 50%/25% L2 depth, and additional copy delays of 100 ms, 500 ms, 1 s, 5 s, 30 s, 60 s, and 300 s. Stress outputs never retune or replace the frozen policy and are not themselves economic proof. Funding adversity remains UNMEASURABLE until measured funding rows are wired; regime splits require proven regime labels; leader-data outages require measured observation gaps; partial fills are not claimed by the all-or-none executor; missing-venue stress is not applicable to this single-venue family. Report these limitations explicitly rather than treating omitted stresses as passed.
 
-For the three active families, **carry/funding is not an alpha source**. Funding may be measured and deducted when a held position crosses a settlement, but Copy-Vault, Lead-Lag and Cross-Venue may not claim the +5 USD/day target from carry.
+**Historical rule from the retired multi-family proposal:** carry/funding was
+not an alpha source for those families. Under the current scope, Copy-Vault is
+the only executable family; measured funding costs must still be included when
+the evidence contract requires them, and missing costs remain unmeasurable.
 
 Current implementation contract for the economic-acceleration path:
 
@@ -1811,7 +1832,9 @@ Do not keep a universal 15 USD production notional.
 
 ### Cross-module opportunity allocator
 
-The three families remain independently provable, but the paper system also evaluates a portfolio allocator to avoid wasting capital on low-edge opportunities while high-edge opportunities are available.
+**Historical and inactive portfolio-allocation proposal:** the earlier design
+kept family proofs separate and added a shared allocator. It is not part of the
+current Copy-Vault-only runtime.
 
 At every decision point, eligible paper opportunities are ranked by a conservative score such as:
 
@@ -2460,7 +2483,9 @@ External curriculum never overrides Alina's own OOS/forward results.
 
 ## Module Optimization Architecture V3 — edge portfolios, challengers, and faster proof
 
-The three active modules are not implemented as single monolithic strategies.
+**Historical and inactive design statement:** the earlier multi-family plan
+described each module as an edge portfolio. The current active family remains
+Copy-Vault only.
 
 Each module is an **edge portfolio** containing multiple independently testable mechanisms that share certified evidence and execution infrastructure but retain separate attribution, validation, lifecycle, and failure scope.
 
@@ -4397,13 +4422,13 @@ A new feature may still be reused as:
 
 without pretending the killed standalone strategy became profitable.
 
-### Module portfolio after V6
+### Historical module portfolio after V6 — inactive
 
-V6 does **not** instantly activate seven production modules.
+This archived proposal did **not** itself activate seven production modules.
 
 The economic architecture becomes:
 
-**Current core modules**
+**Core modules in the archived proposal**
 - Copy-Vault;
 - Lead-Lag;
 - Cross-Venue.
@@ -13672,14 +13697,14 @@ They preserve raw source truth, use bounded backpressure/reconnect/rebootstrap,
 and never fabricate, interpolate or relabel defective data merely to raise the
 SAFE rate.
 
-The resulting replay-grade corpus feeds deterministic replay, backtest, OOS,
-forward-paper and net-PnL proof for Copy-Vault, Lead-Lag and Cross-Venue. The
-research target remains at least **+5 USD net/day per active family** under the
-canonical paper-capital and cost assumptions. More viable data improves the
-ability to test that target but does not prove it: each family retains an
-independent honest verdict (`PROVEN`, `MORE_DATA`, `UNMEASURABLE` or `KILL`),
-and no collector, quality threshold, fee, slippage or scoreboard rule may be
-tuned after observing outcomes to manufacture a positive result.
+**Historical and inactive multi-family research statement:** the earlier
+proposal described replay and economic proof for Copy-Vault, Lead-Lag and
+Cross-Venue. It is superseded by the current scope at the top of this
+specification. The active verdict vocabulary and target are defined by current
+repository policy; this archived passage does not authorize another family or
+set a target per family. No collector, quality threshold, fee, slippage or
+scoreboard rule may be tuned after observing outcomes to manufacture a
+positive result.
 
 ## 2026-10-13 — verified recovery checkpoint and preservation hold
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-10-23**.
+Dernière mise à jour : **2026-10-27**.
 
 Ce fichier est volontairement **court**. Claude Code le charge à chaque session ; les détails permanents communs à tous les agents vivent dans `AGENTS.md` et la spec canonique.
 
@@ -51,7 +51,7 @@ Objectif de recherche : **>= +5.00 USD NET/jour PROUVÉS pour Copy-Vault, sur 20
 
 Les statuts honnêtes restent :
 
-`PROVEN / MORE_DATA / UNMEASURABLE / KILL`.
+`PROVEN / PROMISING / MORE_DATA / UNMEASURABLE / REJECTED`.
 
 Ne jamais modifier les coûts, les gates ou la méthodologie pour fabriquer un résultat positif.
 

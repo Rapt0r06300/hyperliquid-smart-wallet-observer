@@ -3,6 +3,8 @@
 > Généré depuis `src/hl_observer/research/lois_mesurees.py` (source unique).
 > Une loi n'est pas un interdit de penser : c'est un **chiffre à battre**, avec la
 > **donnée** qui justifierait de rouvrir le dossier. Un argument neuf ne suffit pas.
+> Les verdicts de mesure sont historiques; l'autorité `active_scope` décide de l'exécution.
+> Carry et les autres familles désactivées restent `DISABLED_BY_SCOPE` ici.
 
 ## 🔴 Réfuté par la mesure (14)
 
@@ -120,13 +122,13 @@
 - **pour rouvrir** : RESTE OUVERTE : accumuler plus de trades GATÉS (pas la population) et vérifier que le profit factor tient au-dessus de 1 sur ≥ 50 trades. Le sous-ensemble filtré est ce qui compte, jamais la population brute que le moteur refuse
 - **où vérifier** : `ledger arbitrage (13/15 gagnants) + backtesting/arb_backtest.py`
 
-## 🟢 Confirmé — en production (1)
+## 🟢 Mesure positive historique — sans autorisation d'exécution (1)
 
 ### Carry delta-neutre (long spot + short perp) sur Hyperliquid — `carry_delta_neutre`
 
 - **le chiffre** : le SEUL chiffre positif du projet : ~2 % APR mesuré sur HYPE (13/07) ; +0,35 $/j sur 11 positions au 21/07, coûts payés
 - **mesuré le** : 2026-07-13
-- **pour rouvrir** : —  c'est la stratégie en production ; à re-mesurer si le funding quitte le plancher protocolaire
+- **pour rouvrir** : preuve historique conservée; carry est actuellement DISABLED_BY_SCOPE et ce registre ne l'active pas. Toute réévaluation exige une réactivation explicite du scope canonique et de nouvelles preuves causales
 - **où vérifier** : `funding/delta_neutral_carry.py + backtesting/carry_backtest.py`
 
 ---
