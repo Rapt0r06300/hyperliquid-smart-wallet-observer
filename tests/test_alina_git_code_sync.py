@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,84 @@ def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> Non
     assert untracked == []
     assert any(args[:2] == ("status", "--porcelain=v1") for args in commands)
     assert not any("--modified" in args or "--deleted" in args for args in commands)
+
+
+def test_sync_receipt_records_exact_preflight_inventory_and_remote_divergence(repos):
+    local, cloud, origin = repos
+    local_head = git(local, "rev-parse", "HEAD")
+    cloud_commit(cloud, "docs/cloud.md", "cloud\n")
+    remote_head = git(origin, "rev-parse", "main")
+    (local / "src" / "base.py").write_text("base = 2\n", encoding="utf-8")
+    (local / "tools").mkdir()
+    (local / "tools" / "local.py").write_text("local = 1\n", encoding="utf-8")
+    protected = local / "runtime" / "recovery" / "full" / "usable" / "shard.jsonl"
+    protected.parent.mkdir(parents=True)
+    protected.write_bytes(b"fixture only\n")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0
+    preflight = receipt["preflight"]
+    inventory = preflight["inventory"]
+    assert preflight["local_head"] == local_head
+    assert preflight["remote_head_observed"] == remote_head
+    assert preflight["remote_head_fetched"] == remote_head
+    assert preflight["ahead_commits"] == 0
+    assert preflight["behind_commits"] == 1
+    assert inventory["staged"]["count"] == 0
+    assert inventory["tracked_changes"]["paths"] == ["src/base.py"]
+    assert inventory["untracked"]["paths"] == ["tools/local.py"]
+    assert "/runtime/**" in inventory["excluded_untracked_patterns"]
+    assert all("shard.jsonl" not in path for path in inventory["untracked"]["paths"])
+    assert protected.read_bytes() == b"fixture only\n"
+
+
+def test_timed_out_inventory_is_explicitly_logged_and_keeps_wip(
+    repos, monkeypatch, capsys,
+) -> None:
+    local, _, origin = repos
+    local_head = git(local, "rev-parse", "HEAD")
+    wip = local / "src" / "base.py"
+    wip.write_text("base = 9\n", encoding="utf-8")
+    real_run_git = sync_module._run_git
+
+    def timeout_status(root, git_executable, args, **kwargs):
+        if args and args[0] == "status":
+            return real_run_git(
+                root,
+                sys.executable,
+                ["-c", "import time; time.sleep(5)"],
+                timeout=0.02,
+                on_progress=kwargs.get("on_progress"),
+            )
+        return real_run_git(root, git_executable, args, **kwargs)
+
+    monkeypatch.setattr(sync_module, "_run_git", timeout_status)
+    task = Synchronizer(local, allow_test_remote=True)
+
+    rc = task.run()
+    receipt = json.loads(
+        (local / "runtime/reports/git-sync/LAST_SYNC.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert rc == 2
+    assert receipt["status"] == "NO_GO"
+    timeout = next(
+        row for row in receipt["git_commands"]
+        if row["operation"] == "Inventaire des modifications locales"
+    )
+    assert timeout["timed_out"] is True
+    assert timeout["exit_code"] == -1
+    assert task.report["push_attempts"] == 0
+    assert task.report["local_commit_created"] is False
+    assert git(local, "rev-parse", "HEAD") == local_head
+    assert git(origin, "rev-parse", "main") == local_head
+    assert wip.read_text(encoding="utf-8") == "base = 9\n"
+    output = capsys.readouterr().out
+    assert "[TIMEOUT] Inventaire des modifications locales" in output
+    assert "[NO_GO]" in output
 
 
 def test_git_command_prints_named_step_duration_and_exit_code(
@@ -452,7 +531,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-linear-safe-relocation-v2' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-linear-safe-relocation-v3' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
@@ -470,10 +549,13 @@ def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
 
     class LateEdit(Synchronizer):
         wrote = False
+        fetch_count = 0
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "fetch" and not self.wrote:
+            if args and args[0] == "fetch":
+                self.fetch_count += 1
+            if self.fetch_count == 2 and not self.wrote:
                 self.wrote = True
                 (local / "src" / "added_during_fetch.py").write_text(
                     "late = True\n", encoding="utf-8"
@@ -498,10 +580,13 @@ def test_late_invalid_python_saved_locally_never_pushed(repos):
 
     class LateInvalid(Synchronizer):
         wrote = False
+        fetch_count = 0
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "fetch" and not self.wrote:
+            if args and args[0] == "fetch":
+                self.fetch_count += 1
+            if self.fetch_count == 2 and not self.wrote:
                 self.wrote = True
                 (local / "src" / "incomplete.py").write_text(
                     "def broken(:\n", encoding="utf-8"
@@ -523,11 +608,14 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
 
     class AlwaysChanging(Synchronizer):
         n = 0
+        fetch_count = 0
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
             if args and args[0] == "fetch":
-                self.n += 1
+                self.fetch_count += 1
+                if self.fetch_count >= 2:
+                    self.n += 1
                 (local / "src" / f"concurrent_{self.n}.py").write_text(
                     f"value = {self.n}\n", encoding="utf-8"
                 )

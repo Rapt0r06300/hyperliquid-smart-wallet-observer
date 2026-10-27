@@ -48,7 +48,7 @@ SENSITIVE_PARTS = {
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
-GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v2"
+GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v3"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -296,7 +296,9 @@ class Synchronizer:
             )
         except subprocess.TimeoutExpired:
             elapsed_ms = int((time.monotonic() - started) * 1000)
-            self._record_git_command(command_number, label, -1, elapsed_ms)
+            self._record_git_command(
+                command_number, label, -1, elapsed_ms, timed_out=True,
+            )
             self.say(
                 f"[TIMEOUT] {label} apres {elapsed_ms / 1000:.1f} s; "
                 "le processus Git a ete arrete."
@@ -330,6 +332,7 @@ class Synchronizer:
 
     def _record_git_command(
         self, number: int, label: str, exit_code: int, elapsed_ms: int,
+        *, timed_out: bool = False,
     ) -> None:
         commands = self.report.setdefault("git_commands", [])
         if isinstance(commands, list):
@@ -338,6 +341,7 @@ class Synchronizer:
                 "operation": label,
                 "exit_code": exit_code,
                 "duration_ms": elapsed_ms,
+                "timed_out": timed_out,
             })
 
     def text(self, *args: str) -> str:
@@ -399,15 +403,95 @@ class Synchronizer:
         )
         # Git prunes excluded directories; never descend into SAFE shards.
         args = ["ls-files", "--others", "--exclude-standard", "-z"]
-        for directory in sorted(PROTECTED_DIRS):
-            args.extend(["-x", f"/{directory}/", "-x", f"/{directory}/**"])
-        args.extend(["-x", "/tools/git/", "-x", "/tools/python/"])
+        for pattern in self._excluded_untracked_patterns():
+            args.extend(["-x", pattern])
         untracked = _paths(self.command(*args).stdout)
         self.say(
             f"[INVENTAIRE] deja stages={len(staged)} | suivis modifies="
             f"{len(tracked)} | nouveaux={len(untracked)}."
         )
         return staged, tracked, untracked
+
+    @staticmethod
+    def _excluded_untracked_patterns() -> list[str]:
+        patterns = [
+            pattern
+            for directory in sorted(PROTECTED_DIRS)
+            for pattern in (f"/{directory}/", f"/{directory}/**")
+        ]
+        patterns.extend(["/tools/git/", "/tools/python/"])
+        return patterns
+
+    def capture_preflight(self, *, fetch_remote: bool) -> None:
+        """Persist exact local inventory before checkpointing or reconciling."""
+        staged, tracked, untracked = self._inventory()
+        local_head = str(self.report.get("head_before") or self.text("rev-parse", "HEAD"))
+        inventory = {
+            "staged": {"count": len(staged), "paths": sorted(set(staged))},
+            "tracked_changes": {
+                "count": len(tracked), "paths": sorted(set(tracked)),
+            },
+            "untracked": {"count": len(untracked), "paths": sorted(set(untracked))},
+            "protected_observed_paths": sorted({
+                path for path in staged + tracked + untracked if _protected(path)
+            }),
+            "excluded_untracked_patterns": self._excluded_untracked_patterns(),
+        }
+        snapshot: dict[str, object] = {
+            "captured_at_utc": datetime.now(UTC).isoformat(),
+            "local_head": local_head,
+            "remote_head_observed": None,
+            "remote_head_fetched": None,
+            "ahead_commits": None,
+            "behind_commits": None,
+            "comparison_status": "NOT_REQUESTED",
+            "inventory": inventory,
+            "publishable_paths": [],
+        }
+        self.report["preflight"] = snapshot
+
+        if fetch_remote:
+            observed_remote = self.remote_sha()
+            snapshot["remote_head_observed"] = observed_remote
+
+        eligible = self._check_candidates(staged, tracked, untracked)
+        snapshot["publishable_paths"] = eligible
+        snapshot["inventory_status"] = "VALIDATED"
+
+        if not fetch_remote:
+            snapshot["comparison_status"] = (
+                "NOT_FETCHED_DRY_RUN" if self.dry_run else "NOT_REQUESTED_LOCAL_ONLY"
+            )
+            self.say(
+                "[PREFLIGHT RECEIPT] Inventaire local conserve; aucune mutation "
+                "ni comparaison de commits distante dans ce mode."
+            )
+            return
+
+        self.command(
+            "fetch", "--progress", "--no-tags", "origin",
+            "refs/heads/main:refs/remotes/origin/main",
+        )
+        fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
+        counts = self.text(
+            "rev-list", "--left-right", "--count",
+            f"{local_head}...{fetched_remote}",
+        ).split()
+        if len(counts) != 2 or any(not value.isdecimal() for value in counts):
+            raise SyncBlocked("Comptage ahead/behind invalide; aucun changement publié.")
+        ahead, behind = (int(value) for value in counts)
+        snapshot.update({
+            "remote_head_fetched": fetched_remote,
+            "ahead_commits": ahead,
+            "behind_commits": behind,
+            "comparison_status": "EXACT_FOR_FETCHED_REMOTE_HEAD",
+        })
+        self.say(
+            f"[PREFLIGHT RECEIPT] local={local_head[:12]} | "
+            f"GitHub snapshot={fetched_remote[:12]} | ahead={ahead} | "
+            f"behind={behind} | staged={len(staged)} | suivis={len(tracked)} | "
+            f"nouveaux={len(untracked)} | chemins proteges={len(inventory['protected_observed_paths'])}."
+        )
 
     def _historical_head_blob(self, source: str) -> bytes:
         result = self.command("show", f"HEAD:{source}", check=False)
@@ -1037,9 +1121,22 @@ class Synchronizer:
         try:
             gitdir = self.preflight()
             with _mutex(gitdir):
+                self.capture_preflight(
+                    fetch_remote=not self.dry_run and not wip_only,
+                )
                 self.checkpoint()
                 if self.dry_run:
-                    self.report["remote_sha_observed"] = self.remote_sha()
+                    remote_sha = self.remote_sha()
+                    self.report["remote_sha_observed"] = remote_sha
+                    snapshot = self.report.get("preflight")
+                    if isinstance(snapshot, dict):
+                        snapshot["remote_head_observed"] = remote_sha
+                        if remote_sha == snapshot.get("local_head"):
+                            snapshot["ahead_commits"] = 0
+                            snapshot["behind_commits"] = 0
+                            snapshot["comparison_status"] = "EXACT_REMOTE_SHA_EQUALS_LOCAL"
+                        else:
+                            snapshot["comparison_status"] = "NOT_COMPUTED_DRY_RUN_NO_FETCH"
                     self.report["status"] = "DRY_RUN_ONLY"
                     self.say(
                         "[DRY-RUN TERMINE] HEAD local="
