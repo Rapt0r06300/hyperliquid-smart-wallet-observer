@@ -69,12 +69,7 @@ jobs:
           git add control/alina-phase.json control/phase-receipts catalog/campaigns
           git diff --cached --quiet && exit 0
           git commit -m "analysis: persist bounded drain and verified stage"
-          for attempt in 1 2 3 4 5; do
-            if git push origin HEAD:main; then exit 0; fi
-            git fetch origin main
-            git rebase origin/main
-          done
-          exit 1
+          python tools/publish_main_commit.py --remote origin --branch main
       - name: Materialize next-stage work
         if: steps.advance.outputs.status == 'ADVANCED'
         env:

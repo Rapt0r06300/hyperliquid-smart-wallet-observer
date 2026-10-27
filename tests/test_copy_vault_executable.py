@@ -403,6 +403,53 @@ def test_loader_refuse_un_carnet_causal_avec_un_seul_cote_l2(tmp_path) -> None:
     assert audit["invalid_rows"] == 1
 
 
+@pytest.mark.parametrize(
+    ("bid", "ask", "bids", "asks", "reason"),
+    [
+        (100.0, 102.0, [[99.0, 1.0], [100.0, 2.0]], [[102.0, 1.0]],
+         "L2_BIDS_INVALID_ORDER_OR_VALUE"),
+        (100.0, 103.0, [[100.0, 1.0]], [[103.0, 1.0], [102.0, 2.0]],
+         "L2_ASKS_INVALID_ORDER_OR_VALUE"),
+        (100.0, 102.0, [[100.0, 1.0], [100.0, 2.0]], [[102.0, 1.0]],
+         "L2_BIDS_INVALID_ORDER_OR_VALUE"),
+        (100.0, 102.0, [[100.0, 1.0]], [[102.0, 1.0], [102.0, 2.0]],
+         "L2_ASKS_INVALID_ORDER_OR_VALUE"),
+        (99.0, 102.0, [[100.0, 1.0]], [[102.0, 1.0]], "L2_BBO_MISMATCH"),
+        (100.0, 103.0, [[100.0, 1.0]], [[102.0, 1.0]], "L2_BBO_MISMATCH"),
+        (100.0, 102.0, [[100.0, 1.0]], [[99.0, 1.0]], "L2_BOOK_CROSSED"),
+    ],
+)
+def test_loader_quarantaine_un_carnet_causal_l2_incoherent(
+    tmp_path, bid, ask, bids, asks, reason
+) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": bid, "ask": ask, "capacity_usd": 700.0,
+        "bids5": bids, "asks5": asks,
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
+    assert audit["invalid_l2_structure_rows"] == 1
+    assert audit["l2_rejection_reasons"] == {reason: 1}
+    metaorder = cluster_metaorders([_entry("invalid-l2", 2_010)])[0][0]
+    trades, replay_audit = replay_metaorders(
+        [metaorder], books, horizon_ms=300_000
+    )
+    assert trades == []
+    assert replay_audit["NO_OBSERVED_BOOK_FOR_COIN"] == 1
+
+
 def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     data = tmp_path / "runtime" / "data"
     data.mkdir(parents=True)
@@ -429,6 +476,22 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     assert books["BTC"][0]["asks5"] == [[102.0, 2.0], [103.0, 5.0]]
     assert audit["source_counts"]["causal_info_checkpoint"] == 1
     assert audit["causal_forward_rows"] == 1
+
+
+def test_execution_refuse_un_l2_invalide_au_lieu_du_repli_bbo() -> None:
+    signal_ms = 1_000
+    metaorder = cluster_metaorders([_entry("bad-depth", signal_ms)])[0][0]
+    books = [
+        _book(signal_ms - 100, 99.0, 101.0),
+        _book(signal_ms + COPY_DELAY_MS, 100.0, 102.0, line=2),
+        _book(signal_ms + COPY_DELAY_MS + 300_000, 101.0, 103.0, line=3),
+    ]
+    books[1]["bids5"] = [[99.0, 2.0], [100.0, 1.0]]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "INVALID_OBSERVED_BOOK_L2"
 
 
 def test_loader_quarantaine_tout_metaordre_avec_checkpoint_duplique(tmp_path) -> None:
@@ -670,6 +733,23 @@ def test_executeur_refuse_un_top_selectionne_non_economique(
 def test_execution_refuse_une_position_traversant_un_funding_non_mesure() -> None:
     signal_ms = 3_500_000
     metaorder = cluster_metaorders([_entry("funding-gap", signal_ms)])[0][0]
+    books = [
+        _book(signal_ms - 10, 99.0, 101.0, line=1),
+        _book(signal_ms + COPY_DELAY_MS, 100.0, 102.0, line=2),
+        _book(signal_ms + COPY_DELAY_MS + 300_000, 109.0, 111.0, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "FUNDING_BOUNDARY_UNPRICED"
+
+
+def test_execution_refuse_entree_exactement_a_la_frontiere_de_funding() -> None:
+    # La position entre au timestamp de règlement; l'ordre relatif fill/règlement
+    # n'est pas prouvé par les timestamps seuls, donc le replay doit refuser.
+    signal_ms = 3_540_000
+    metaorder = cluster_metaorders([_entry("funding-boundary", signal_ms)])[0][0]
     books = [
         _book(signal_ms - 10, 99.0, 101.0, line=1),
         _book(signal_ms + COPY_DELAY_MS, 100.0, 102.0, line=2),

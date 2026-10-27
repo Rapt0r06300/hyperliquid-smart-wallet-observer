@@ -5,7 +5,7 @@ from hl_observer.ops.paper_canonique import ScopeViolation
 
 
 def test_chaque_famille_active_traverse_la_chaine_canonique():
-    assert len(STRATEGIES_ACTIVES) == 3
+    assert STRATEGIES_ACTIVES == ("copy_vault",)
     for fam in STRATEGIES_ACTIVES:
         c = chaine_famille(fam)
         assert c["intent"]["strategy"] == fam
@@ -26,8 +26,9 @@ def test_chaque_famille_active_traverse_la_chaine_canonique():
 
 
 def test_une_famille_disabled_ne_peut_pas_entrer_dans_la_chaine():
-    with pytest.raises(ScopeViolation):
-        chaine_famille("carry")
+    for family in ("lead_lag", "cross_venue_dislocation", "carry"):
+        with pytest.raises(ScopeViolation):
+            chaine_famille(family)
 
 
 def test_le_side_et_le_notional_sont_preserves_de_bout_en_bout():

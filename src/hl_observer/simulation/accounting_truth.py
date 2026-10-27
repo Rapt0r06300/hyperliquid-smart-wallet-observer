@@ -100,7 +100,8 @@ def round_trip_net_pnl_usdc(
     assert funding is not None
     if entry < 0 or exit_cost < 0:
         return None
-    return gross - entry - exit_cost - funding
+    net = gross - entry - exit_cost - funding
+    return net if math.isfinite(net) else None
 
 
 @dataclass(frozen=True, slots=True)

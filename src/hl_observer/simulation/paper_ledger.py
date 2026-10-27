@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from copy import copy
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from hashlib import sha256
@@ -188,6 +189,32 @@ class PaperLedger:
                 timestamp_ms=timestamp_ms,
                 refs=refs,
             )
+        try:
+            fee = compute_fee_usdc(filled_notional, fee_bps)
+        except ValueError:
+            return self.no_trade(
+                coin=coin,
+                reason="OPEN_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
+        cash = first_not_none(self.cash_balance_usdc, 0.0)
+        cash_after_fee = round(float(cash) - fee, 10)
+        fees_after = round(self.fees_paid_usdc + fee, 10)
+        turnover_after = round(
+            self.turnover_usdc + sum(new_leg_notional),
+            10,
+        )
+        if not all(
+            math.isfinite(value)
+            for value in (fee, cash_after_fee, fees_after, turnover_after)
+        ):
+            return self.no_trade(
+                coin=coin,
+                reason="OPEN_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
         key = self._position_key(
             coin,
             normalized_side,
@@ -211,32 +238,73 @@ class PaperLedger:
                     timestamp_ms=timestamp_ms,
                     refs=refs,
                 )
-            new_qty = existing.quantity + qty
-            avg = ((existing.quantity * existing.average_entry_price) + (qty * fill_price)) / new_qty
-            combined_legs = _combine_leg_notionals(
-                existing_notionals,
-                new_leg_notional,
-            )
-            existing_margin = sum(existing_notionals) / max(
-                1.0,
-                existing.leverage_effective,
-            )
-            added_margin = sum(new_leg_notional) / leverage
-            existing.quantity = new_qty
-            existing.average_entry_price = avg
-            existing.last_mark_price = fill_price
-            existing.leverage_effective = sum(combined_legs) / (
-                existing_margin + added_margin
-            )
-            existing.leg_notional_usd = combined_legs
-            existing.leg_direction = new_leg_direction
-            existing.liquidation_buffer_bps = _minimum_optional(
-                existing.liquidation_buffer_bps,
-                liquidation_buffer_bps,
+            try:
+                new_qty = math.fsum((existing.quantity, qty))
+                weighted_entry = math.fsum(
+                    (
+                        existing.quantity * existing.average_entry_price,
+                        qty * float(fill_price),
+                    )
+                )
+                avg = weighted_entry / new_qty
+                combined_legs = _combine_leg_notionals(
+                    existing_notionals,
+                    new_leg_notional,
+                )
+                existing_margin = math.fsum(existing_notionals) / max(
+                    1.0,
+                    existing.leverage_effective,
+                )
+                added_margin = math.fsum(new_leg_notional) / leverage
+                combined_margin = math.fsum((existing_margin, added_margin))
+                combined_gross = math.fsum(combined_legs)
+                combined_leverage = combined_gross / combined_margin
+            except (OverflowError, ValueError, ZeroDivisionError):
+                return self.no_trade(
+                    coin=coin,
+                    reason="OPEN_ACCOUNTING_NON_FINITE",
+                    timestamp_ms=timestamp_ms,
+                    refs={"accounting_component": "POSITION_INCREASE"},
+                )
+            if not all(
+                _finite_positive(value)
+                for value in (
+                    existing.quantity,
+                    existing.average_entry_price,
+                    existing.leverage_effective,
+                    new_qty,
+                    weighted_entry,
+                    avg,
+                    existing_margin,
+                    added_margin,
+                    combined_margin,
+                    combined_gross,
+                    combined_leverage,
+                    *combined_legs,
+                )
+            ):
+                return self.no_trade(
+                    coin=coin,
+                    reason="OPEN_ACCOUNTING_NON_FINITE",
+                    timestamp_ms=timestamp_ms,
+                    refs={"accounting_component": "POSITION_INCREASE"},
+                )
+            candidate_position = replace(
+                existing,
+                quantity=new_qty,
+                average_entry_price=avg,
+                last_mark_price=float(fill_price),
+                leverage_effective=combined_leverage,
+                leg_notional_usd=combined_legs,
+                leg_direction=new_leg_direction,
+                liquidation_buffer_bps=_minimum_optional(
+                    existing.liquidation_buffer_bps,
+                    liquidation_buffer_bps,
+                ),
             )
             event_type = PaperEventType.POSITION_INCREASED
         else:
-            self.positions[key] = LedgerPosition(
+            candidate_position = LedgerPosition(
                 position_id=key,
                 coin=str(coin).upper(),
                 side=normalized_side,
@@ -250,11 +318,68 @@ class PaperLedger:
                 liquidation_buffer_bps=liquidation_buffer_bps,
             )
             event_type = PaperEventType.POSITION_OPENED
-        self.turnover_usdc = round(
-            self.turnover_usdc + sum(new_leg_notional),
-            10,
-        )
-        fee = compute_fee_usdc(filled_notional, fee_bps)
+        candidate_positions = dict(self.positions)
+        candidate_positions[key] = candidate_position
+        candidate_tracker = copy(self.capital_tracker)
+        try:
+            candidate_tracker.observe(
+                collateral_cash_usd=cash_after_fee,
+                positions=tuple(
+                    position.capital_input()
+                    for position in candidate_positions.values()
+                ),
+                realized_pnl_usd=cash_after_fee - self.starting_balance_usdc,
+                turnover_usd=turnover_after,
+            )
+            fee_event_probe = PaperEvent.create(
+                PaperEventType.FEE_CHARGED,
+                timestamp_ms=timestamp_ms,
+                coin=str(coin).upper(),
+                side=normalized_side,
+                fee_usdc=fee,
+                refs={"position_id": key, "accounting_component": "FEE"},
+            )
+            event_refs_probe = dict(refs or {})
+            event_refs_probe.update(
+                {
+                    "position_id": key,
+                    "fee_event_id": fee_event_probe.event_id,
+                    "fee_accounting": "SEPARATE_EVENT",
+                }
+            )
+            event_probe = PaperEvent.create(
+                event_type,
+                timestamp_ms=timestamp_ms,
+                coin=str(coin).upper(),
+                side=normalized_side,
+                quantity=qty,
+                price=float(fill_price),
+                notional_usdc=filled_notional,
+                fee_usdc=fee,
+                refs=event_refs_probe,
+            )
+            previous_hash = self.events[-1].event_hash if self.events else GENESIS_HASH
+            fee_row = seal_event(
+                fee_event_probe.to_dict(),
+                event_seq=len(self.events) + 1,
+                session_id=self.session_id,
+                prev_hash=str(previous_hash),
+            )
+            seal_event(
+                event_probe.to_dict(),
+                event_seq=len(self.events) + 2,
+                session_id=self.session_id,
+                prev_hash=str(fee_row["event_hash"]),
+            )
+        except (OverflowError, TypeError, ValueError):
+            return self.no_trade(
+                coin=coin,
+                reason="OPEN_EVENT_OR_CAPITAL_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={"accounting_component": "OPEN_PREVALIDATION"},
+            )
+
+        self.turnover_usdc = turnover_after
         fee_event = self._charge_fee(
             fee,
             coin=coin,
@@ -262,6 +387,17 @@ class PaperLedger:
             timestamp_ms=timestamp_ms,
             position_id=key,
         )
+        if existing:
+            existing.quantity = candidate_position.quantity
+            existing.average_entry_price = candidate_position.average_entry_price
+            existing.last_mark_price = candidate_position.last_mark_price
+            existing.leverage_effective = candidate_position.leverage_effective
+            existing.leg_notional_usd = candidate_position.leg_notional_usd
+            existing.leg_direction = candidate_position.leg_direction
+            existing.liquidation_buffer_bps = candidate_position.liquidation_buffer_bps
+        else:
+            self.positions[key] = candidate_position
+        self.capital_tracker = candidate_tracker
         event_refs = dict(refs or {})
         event_refs.update(
             {
@@ -281,9 +417,7 @@ class PaperLedger:
             fee_usdc=fee,
             refs=event_refs,
         )
-        appended = self._append(event)
-        self._observe_capital()
-        return appended
+        return self._append(event)
 
     def reduce_or_close(
         self,
@@ -316,6 +450,13 @@ class PaperLedger:
             )
         if not _finite_positive(quantity) or not _finite_positive(fill_price):
             return self.no_trade(coin=coin, reason="EXIT_FILL_INVALID", timestamp_ms=timestamp_ms, refs=refs)
+        if not _finite_positive(pos.quantity) or not _finite_positive(pos.average_entry_price):
+            return self.no_trade(
+                coin=coin,
+                reason="POSITION_STATE_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
         close_qty = min(float(quantity), pos.quantity)
         if close_qty <= 0:
             return self.no_trade(coin=coin, reason="EXIT_FILL_INVALID", timestamp_ms=timestamp_ms, refs=refs)
@@ -324,63 +465,159 @@ class PaperLedger:
         else:
             gross = (pos.average_entry_price - float(fill_price)) * close_qty
         notional = close_qty * float(fill_price)
-        fee = compute_fee_usdc(notional, fee_bps)
-        self.realized_pnl_usdc = round(self.realized_pnl_usdc + gross, 10)
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        self.cash_balance_usdc = round(float(cash) + gross, 10)
-        fee_event = self._charge_fee(
-            fee,
-            coin=coin,
-            side=normalized_side,
-            timestamp_ms=timestamp_ms,
-            position_id=key,
-        )
-        pos.quantity -= close_qty
-        pos.last_mark_price = float(fill_price)
-        close_fraction = min(1.0, close_qty / max(close_qty + pos.quantity, 1e-12))
-        closed_leg_notional = tuple(
-            value * close_fraction
-            for value in (pos.leg_notional_usd or (notional,))
-        )
-        self.turnover_usdc = round(
-            self.turnover_usdc + sum(closed_leg_notional),
-            10,
-        )
-        pos.leg_notional_usd = tuple(
-            max(0.0, value - closed)
-            for value, closed in zip(
-                pos.leg_notional_usd or (notional,),
-                closed_leg_notional,
-                strict=True,
+        if not math.isfinite(gross) or not math.isfinite(notional):
+            return self.no_trade(
+                coin=coin,
+                reason="EXIT_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
             )
+        try:
+            fee = compute_fee_usdc(notional, fee_bps)
+        except ValueError:
+            return self.no_trade(
+                coin=coin,
+                reason="EXIT_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
+        if not math.isfinite(fee):
+            return self.no_trade(
+                coin=coin,
+                reason="EXIT_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
+        cash = first_not_none(self.cash_balance_usdc, 0.0)
+        realized_after = round(self.realized_pnl_usdc + gross, 10)
+        cash_before_fee = round(float(cash) + gross, 10)
+        cash_after_fee = round(cash_before_fee - fee, 10)
+        fees_after = round(self.fees_paid_usdc + fee, 10)
+        original_quantity = pos.quantity
+        remaining_quantity = original_quantity - close_qty
+        close_fraction = min(1.0, close_qty / max(original_quantity, 1e-12))
+        current_legs = pos.leg_notional_usd or (notional,)
+        closed_leg_notional = tuple(value * close_fraction for value in current_legs)
+        remaining_legs = tuple(
+            max(0.0, value - closed)
+            for value, closed in zip(current_legs, closed_leg_notional, strict=True)
         )
-        fully_closed = pos.quantity <= 1e-12
+        turnover_after = round(self.turnover_usdc + sum(closed_leg_notional), 10)
+        if not all(
+            math.isfinite(value)
+            for value in (
+                realized_after,
+                cash_before_fee,
+                cash_after_fee,
+                fees_after,
+                remaining_quantity,
+                close_fraction,
+                turnover_after,
+                *closed_leg_notional,
+                *remaining_legs,
+            )
+        ):
+            return self.no_trade(
+                coin=coin,
+                reason="EXIT_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs=refs,
+            )
+        fully_closed = remaining_quantity <= 1e-12
+        staged = copy(self)
+        staged.events = list(self.events)
+        staged.positions = {
+            current_key: replace(current)
+            for current_key, current in self.positions.items()
+        }
+        staged.capital_tracker = copy(self.capital_tracker)
+        staged.realized_pnl_usdc = realized_after
+        staged.cash_balance_usdc = cash_before_fee
+        staged.turnover_usdc = turnover_after
+        staged_position = staged.positions[key]
+        staged_position.quantity = remaining_quantity
+        staged_position.last_mark_price = float(fill_price)
+        staged_position.leg_notional_usd = remaining_legs
         if fully_closed:
-            del self.positions[key]
-        event_refs = dict(refs or {})
-        event_refs.update(
-            {
-                "position_id": key,
-                "fee_event_id": fee_event.event_id,
-                "fee_accounting": "SEPARATE_EVENT",
-            }
-        )
-        event = PaperEvent.create(
-            PaperEventType.POSITION_CLOSED if fully_closed else PaperEventType.POSITION_REDUCED,
-            timestamp_ms=timestamp_ms,
-            coin=str(coin).upper(),
-            side=normalized_side,
-            quantity=close_qty,
-            price=float(fill_price),
-            notional_usdc=notional,
-            fee_usdc=fee,
-            realized_pnl_usdc=gross,
-            reason=reason,
-            refs=event_refs,
-        )
-        self._append(event)
-        self.mark_to_market({str(coin).upper(): float(fill_price)}, timestamp_ms=timestamp_ms)
-        return event
+            del staged.positions[key]
+        try:
+            fee_event = staged._charge_fee(
+                fee,
+                coin=coin,
+                side=normalized_side,
+                timestamp_ms=timestamp_ms,
+                position_id=key,
+            )
+            event_refs = dict(refs or {})
+            event_refs.update(
+                {
+                    "position_id": key,
+                    "fee_event_id": fee_event.event_id,
+                    "fee_accounting": "SEPARATE_EVENT",
+                }
+            )
+            event = PaperEvent.create(
+                PaperEventType.POSITION_CLOSED if fully_closed else PaperEventType.POSITION_REDUCED,
+                timestamp_ms=timestamp_ms,
+                coin=str(coin).upper(),
+                side=normalized_side,
+                quantity=close_qty,
+                price=float(fill_price),
+                notional_usdc=notional,
+                fee_usdc=fee,
+                realized_pnl_usdc=gross,
+                reason=reason,
+                refs=event_refs,
+            )
+            appended_event = staged._append(event)
+            staged_mark = staged.mark_to_market(
+                {str(coin).upper(): float(fill_price)},
+                timestamp_ms=timestamp_ms,
+            )
+        except (OverflowError, TypeError, ValueError):
+            return self.no_trade(
+                coin=coin,
+                reason="EXIT_EVENT_OR_CAPITAL_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={"accounting_component": "CLOSE_PREVALIDATION"},
+            )
+        if staged_mark.event_type == PaperEventType.NO_TRADE:
+            return self.no_trade(
+                coin=coin,
+                reason="EXIT_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={"staged_mark_reason": staged_mark.reason},
+            )
+
+        self.realized_pnl_usdc = staged.realized_pnl_usdc
+        self.unrealized_pnl_usdc = staged.unrealized_pnl_usdc
+        self.cash_balance_usdc = staged.cash_balance_usdc
+        self.fees_paid_usdc = staged.fees_paid_usdc
+        self.turnover_usdc = staged.turnover_usdc
+        for current_key in tuple(self.positions):
+            if current_key not in staged.positions:
+                del self.positions[current_key]
+        for current_key, candidate in staged.positions.items():
+            current = self.positions.get(current_key)
+            if current is None:
+                self.positions[current_key] = candidate
+            else:
+                current.quantity = candidate.quantity
+                current.average_entry_price = candidate.average_entry_price
+                current.last_mark_price = candidate.last_mark_price
+                current.leverage_effective = candidate.leverage_effective
+                current.leg_notional_usd = candidate.leg_notional_usd
+                current.leg_direction = candidate.leg_direction
+                current.liquidation_buffer_bps = candidate.liquidation_buffer_bps
+                current.last_liquidatable_price = candidate.last_liquidatable_price
+        self.high_water_equity_usdc = staged.high_water_equity_usdc
+        self.drawdown_usdc = staged.drawdown_usdc
+        self.mark_evidence_complete = staged.mark_evidence_complete
+        self.mark_evidence_gap_count = staged.mark_evidence_gap_count
+        self.last_missing_mark_position_ids = staged.last_missing_mark_position_ids
+        self.capital_tracker = staged.capital_tracker
+        self.events.extend(staged.events[len(self.events) :])
+        return appended_event
 
     def mark_to_market(
         self,
@@ -389,45 +626,167 @@ class PaperLedger:
         timestamp_ms: int,
         liquidatable_marks: dict[str, float] | None = None,
     ) -> PaperEvent:
-        total = 0.0
+        active_mark_keys = {position.coin for position in self.positions.values()}
+        active_liquidatable_keys = {
+            key
+            for position in self.positions.values()
+            for key in (
+                position.position_id,
+                f"{position.coin}:{position.side}",
+                position.coin,
+            )
+        }
+        clean_marks: dict[str, float] = {}
+        invalid_mark_keys: list[str] = []
+        for raw_key, raw_value in marks.items():
+            key = str(raw_key)
+            if _finite_positive(raw_value):
+                clean_marks[key] = float(raw_value)
+            elif key in active_mark_keys:
+                invalid_mark_keys.append(key)
+
+        clean_liquidatable_marks: dict[str, float] = {}
+        invalid_liquidatable_keys: list[str] = []
+        for raw_key, raw_value in (liquidatable_marks or {}).items():
+            key = str(raw_key)
+            if _finite_positive(raw_value):
+                clean_liquidatable_marks[key] = float(raw_value)
+            elif key in active_liquidatable_keys:
+                invalid_liquidatable_keys.append(key)
+
+        if invalid_mark_keys or invalid_liquidatable_keys:
+            return self.no_trade(
+                coin=None,
+                reason="MARK_INPUT_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={
+                    "invalid_mark_keys": sorted(set(invalid_mark_keys)),
+                    "invalid_liquidatable_mark_keys": sorted(
+                        set(invalid_liquidatable_keys)
+                    ),
+                },
+            )
+
+        candidate_positions: dict[str, LedgerPosition] = {}
+        unrealized_values: list[float] = []
         missing_mark_ids: list[str] = []
-        for pos in self.positions.values():
-            supplied_mark = marks.get(pos.coin)
-            if _finite_positive(supplied_mark):
-                pos.last_mark_price = float(supplied_mark)
+        for key, pos in self.positions.items():
+            supplied_mark = clean_marks.get(pos.coin)
+            if supplied_mark is not None:
+                mark_price = supplied_mark
             else:
                 # Continuity diagnostics may carry the last observed mark, but
                 # the proof interval is no longer eligible for strict PnL.
                 missing_mark_ids.append(pos.position_id)
-            pos.last_liquidatable_price = _position_mark(
+                mark_price = pos.last_mark_price
+            candidate = replace(
                 pos,
-                liquidatable_marks or {},
+                last_mark_price=mark_price,
+                last_liquidatable_price=_position_mark(
+                    pos,
+                    clean_liquidatable_marks,
+                ),
             )
-            total += pos.unrealized()
-        self.last_missing_mark_position_ids = tuple(sorted(missing_mark_ids))
-        if missing_mark_ids:
-            self.mark_evidence_complete = False
-            self.mark_evidence_gap_count += len(missing_mark_ids)
-        self.unrealized_pnl_usdc = round(total, 10)
-        equity = self.equity_usdc
+            unrealized = candidate.unrealized()
+            liquidatable_unrealized = candidate.liquidatable_unrealized()
+            if not math.isfinite(unrealized) or (
+                liquidatable_unrealized is not None
+                and not math.isfinite(liquidatable_unrealized)
+            ):
+                return self.no_trade(
+                    coin=None,
+                    reason="MARK_ACCOUNTING_NON_FINITE",
+                    timestamp_ms=timestamp_ms,
+                    refs={"mark_input_status": "REJECTED_NON_FINITE_PNL"},
+                )
+            candidate_positions[key] = candidate
+            unrealized_values.append(unrealized)
+
+        try:
+            total = math.fsum(unrealized_values)
+        except OverflowError:
+            total = math.inf
+        unrealized_total = round(total, 10) if math.isfinite(total) else total
+        cash = float(first_not_none(self.cash_balance_usdc, 0.0))
+        equity = cash + unrealized_total
         high_water = first_not_none(self.high_water_equity_usdc, equity)
-        self.high_water_equity_usdc = max(float(high_water), equity)
-        self.drawdown_usdc = round(max(0.0, float(self.high_water_equity_usdc) - equity), 10)
+        candidate_high_water = max(float(high_water), equity)
+        drawdown = max(0.0, candidate_high_water - equity)
+        if not all(
+            math.isfinite(value)
+            for value in (total, unrealized_total, equity, candidate_high_water, drawdown)
+        ):
+            return self.no_trade(
+                coin=None,
+                reason="MARK_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={"mark_input_status": "REJECTED_NON_FINITE_EQUITY"},
+            )
+        drawdown_total = round(drawdown, 10)
+        candidate_tracker = copy(self.capital_tracker)
+        try:
+            candidate_tracker.observe(
+                collateral_cash_usd=cash,
+                positions=tuple(
+                    position.capital_input()
+                    for position in candidate_positions.values()
+                ),
+                realized_pnl_usd=cash - self.starting_balance_usdc,
+                turnover_usd=self.turnover_usdc,
+            )
+        except (OverflowError, ValueError):
+            return self.no_trade(
+                coin=None,
+                reason="MARK_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={"mark_input_status": "REJECTED_CAPITAL_SNAPSHOT"},
+            )
+
+        sorted_missing_ids = sorted(missing_mark_ids)
         event = PaperEvent.create(
             PaperEventType.EQUITY_UPDATED,
             timestamp_ms=timestamp_ms,
-            unrealized_pnl_usdc=self.unrealized_pnl_usdc,
+            unrealized_pnl_usdc=unrealized_total,
             equity_usdc=equity,
-            drawdown_usdc=self.drawdown_usdc,
+            drawdown_usdc=drawdown_total,
             refs={
-                "marks": dict(marks),
+                "marks": clean_marks,
                 "mark_evidence_complete": not missing_mark_ids,
-                "missing_mark_position_ids": list(sorted(missing_mark_ids)),
+                "missing_mark_position_ids": sorted_missing_ids,
                 "diagnostic_last_mark_fallback_used": bool(missing_mark_ids),
             },
         )
+        previous_hash = self.events[-1].event_hash if self.events else GENESIS_HASH
+        try:
+            seal_event(
+                event.to_dict(),
+                event_seq=len(self.events) + 1,
+                session_id=self.session_id,
+                prev_hash=str(previous_hash),
+            )
+        except (TypeError, ValueError, OverflowError):
+            return self.no_trade(
+                coin=None,
+                reason="MARK_EVENT_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={"mark_input_status": "REJECTED_UNSERIALIZABLE_EVENT"},
+            )
+
+        # Publish the fully validated state only after both the capital
+        # observation and canonical event serialization have succeeded.
+        for key, candidate in candidate_positions.items():
+            current = self.positions[key]
+            current.last_mark_price = candidate.last_mark_price
+            current.last_liquidatable_price = candidate.last_liquidatable_price
+        self.last_missing_mark_position_ids = tuple(sorted_missing_ids)
+        if missing_mark_ids:
+            self.mark_evidence_complete = False
+            self.mark_evidence_gap_count += len(missing_mark_ids)
+        self.unrealized_pnl_usdc = unrealized_total
+        self.high_water_equity_usdc = candidate_high_water
+        self.drawdown_usdc = drawdown_total
+        self.capital_tracker = candidate_tracker
         appended = self._append(event)
-        self._observe_capital()
         return appended
 
     def apply_funding(
@@ -440,48 +799,94 @@ class PaperLedger:
         refs: dict | None = None,
     ) -> PaperEvent:
         try:
+            event_timestamp_ms = int(timestamp_ms)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("FUNDING_TIMESTAMP_INVALID") from exc
+
+        def reject(reason: str, *, settlement_id: str | None = None) -> PaperEvent:
+            safe_refs: dict[str, str] = {"accounting_component": "FUNDING"}
+            if settlement_id is not None:
+                safe_refs["funding_settlement_id"] = settlement_id
+            return self.no_trade(
+                coin=coin,
+                reason=reason,
+                timestamp_ms=event_timestamp_ms,
+                refs=safe_refs,
+            )
+
+        try:
             funding_amount = float(amount_usdc)
         except (TypeError, ValueError, OverflowError):
-            return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
+            return reject("FUNDING_INVALID")
         if not math.isfinite(funding_amount):
-            return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
-        funding_refs = dict(refs or {})
-        settlement_id = _funding_settlement_id(funding_refs)
+            return reject("FUNDING_INVALID")
+        try:
+            funding_refs = dict(refs or {})
+            settlement_id = _funding_settlement_id(funding_refs)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("FUNDING_EVIDENCE_INVALID") from exc
+        if settlement_id is not None and settlement_id in self.funding_settlement_ids:
+            return reject(
+                "DUPLICATE_FUNDING_SETTLEMENT",
+                settlement_id=settlement_id,
+            )
+        try:
+            cash = float(first_not_none(self.cash_balance_usdc, 0.0))
+            funding_after = self.funding_net_usdc + funding_amount
+            cash_after = cash + funding_amount
+        except (TypeError, ValueError, OverflowError):
+            return reject(
+                "FUNDING_ACCOUNTING_NON_FINITE",
+                settlement_id=settlement_id,
+            )
+        if not math.isfinite(funding_after) or not math.isfinite(cash_after):
+            return reject(
+                "FUNDING_ACCOUNTING_NON_FINITE",
+                settlement_id=settlement_id,
+            )
+
+        staged = copy(self)
+        staged.events = list(self.events)
+        staged.funding_settlement_ids = set(self.funding_settlement_ids)
+        staged.capital_tracker = copy(self.capital_tracker)
+        staged.funding_net_usdc = funding_after
+        staged.cash_balance_usdc = cash_after
         if settlement_id is None:
             # Retain the amount for legacy/diagnostic continuity, but never let
             # an unidentified cash flow certify economic PnL.
-            self.funding_evidence_complete = False
+            staged.funding_evidence_complete = False
             funding_refs["funding_identity_status"] = "UNIDENTIFIED_DIAGNOSTIC_ONLY"
         else:
-            if settlement_id in self.funding_settlement_ids:
-                return self.no_trade(
-                    coin=coin,
-                    reason="DUPLICATE_FUNDING_SETTLEMENT",
-                    timestamp_ms=timestamp_ms,
-                    refs={
-                        **funding_refs,
-                        "funding_settlement_id": settlement_id,
-                        "funding_identity_status": "DUPLICATE_REJECTED",
-                    },
-                )
-            self.funding_settlement_ids.add(settlement_id)
+            staged.funding_settlement_ids.add(settlement_id)
             funding_refs["funding_settlement_id"] = settlement_id
             funding_refs["funding_identity_status"] = "EXACTLY_ONCE_IDENTIFIED"
-        self.funding_net_usdc += funding_amount
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        self.cash_balance_usdc = float(cash) + funding_amount
         event_type = PaperEventType.FUNDING_RECEIVED if funding_amount >= 0 else PaperEventType.FUNDING_CHARGED
-        appended = self._append(
-            PaperEvent.create(
+        try:
+            event = PaperEvent.create(
                 event_type,
-                timestamp_ms=timestamp_ms,
+                timestamp_ms=event_timestamp_ms,
                 coin=str(coin).upper(),
                 side=str(side).upper(),
                 funding_usdc=funding_amount,
                 refs=funding_refs,
             )
-        )
-        self._observe_capital()
+            appended = staged._append(event)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("FUNDING_EVENT_INVALID") from exc
+        try:
+            staged._observe_capital()
+        except (OverflowError, TypeError, ValueError):
+            return reject(
+                "FUNDING_EVENT_OR_CAPITAL_INVALID",
+                settlement_id=settlement_id,
+            )
+
+        self.funding_net_usdc = staged.funding_net_usdc
+        self.cash_balance_usdc = staged.cash_balance_usdc
+        self.funding_evidence_complete = staged.funding_evidence_complete
+        self.funding_settlement_ids.update(staged.funding_settlement_ids)
+        self.capital_tracker = staged.capital_tracker
+        self.events.append(appended)
         return appended
 
     def no_trade(

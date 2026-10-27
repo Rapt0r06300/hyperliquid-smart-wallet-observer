@@ -185,7 +185,13 @@ Les conclusions honnêtes sont :
 - `UNMEASURABLE`
 - `REJECTED`
 
-La cible de +5 USD n'est jamais obtenue en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.
+L'objectif économique final est de démontrer **au moins +5.00 USD nets/jour** pour
+Copy-Vault sur **200 USD paper**, après la fin des réparations techniques, la
+validation des données SAFE et les preuves replay/OOS/forward. Ce montant est un
+objectif à mesurer, pas une estimation actuelle ni un critère permettant de
+réduire les exigences de preuve.
+
+La cible de +5.00 USD n'est jamais obtenue en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.
 
 ---
 

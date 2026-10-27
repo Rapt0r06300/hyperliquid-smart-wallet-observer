@@ -13,6 +13,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from hl_observer.normalization.l2_book import validate_l2_book_sides
+
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
 # Regression tests assert equality with the canonical protocol constants.
@@ -26,27 +28,17 @@ CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
 
 
-def _observed_levels(value: Any) -> list[list[float]] | None:
-    """Normalize a recorded L2 side without inventing missing liquidity."""
-
-    if not isinstance(value, list) or not value:
-        return None
-    levels: list[list[float]] = []
-    try:
-        for raw_level in value:
-            if not isinstance(raw_level, (list, tuple)) or len(raw_level) != 2:
-                return None
-            if isinstance(raw_level[0], bool) or isinstance(raw_level[1], bool):
-                return None
-            price, quantity = float(raw_level[0]), float(raw_level[1])
-            if not math.isfinite(price) or not math.isfinite(quantity):
-                return None
-            if price <= 0.0 or quantity <= 0.0:
-                return None
-            levels.append([price, quantity])
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return levels
+def _validated_recorded_levels(
+    raw: dict[str, Any], *, bid: float, ask: float
+) -> tuple[tuple[list[list[float]] | None, list[list[float]] | None] | None, str | None]:
+    has_bids, has_asks = "bids5" in raw, "asks5" in raw
+    if not has_bids and not has_asks:
+        return (None, None), None
+    if has_bids != has_asks:
+        return None, "L2_SIDE_MISSING"
+    return validate_l2_book_sides(
+        raw.get("bids5"), raw.get("asks5"), bid=bid, ask=ask
+    )
 
 
 def load_observed_books(
@@ -113,6 +105,7 @@ def load_observed_books(
     checkpoint_protocol_mismatches = 0
     duplicate_checkpoint_ids = 0
     duplicate_checkpoint_rows = 0
+    l2_rejection_reasons: Counter[str] = Counter()
     quarantined_checkpoint_rows = 0
     quarantined_checkpoint_metaorders: set[str] = set()
     clean_checkpoint_counts: Counter[str] = Counter()
@@ -246,10 +239,9 @@ def load_observed_books(
                             "bid", "ask", "capacity_usd",
                         )
                     )
-                    optional_levels_valid = all(
-                        name not in raw or _observed_levels(raw.get(name)) is not None
-                        for name in ("bids5", "asks5")
-                    ) and (("bids5" in raw) == ("asks5" in raw))
+                    _, l2_rejection = _validated_recorded_levels(
+                        raw, bid=bid, ask=ask
+                    )
                     if not (
                         collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
                         and metaorder_id
@@ -270,7 +262,7 @@ def load_observed_books(
                         and bid > 0
                         and ask > bid
                         and capacity_usd > 0
-                        and optional_levels_valid
+                        and l2_rejection is None
                     ):
                         continue
                     checkpoint_counts[checkpoint_id] += 1
@@ -383,15 +375,15 @@ def load_observed_books(
                     if is_checkpoint and metaorder_id in quarantined_checkpoint_metaorders:
                         quarantined_checkpoint_rows += 1
                         continue
-                    bids5 = _observed_levels(raw.get("bids5"))
-                    asks5 = _observed_levels(raw.get("asks5"))
-                    if (
-                        ("bids5" in raw and bids5 is None)
-                        or ("asks5" in raw and asks5 is None)
-                        or (("bids5" in raw) != ("asks5" in raw))
-                    ):
+                    validated_levels, l2_rejection = _validated_recorded_levels(
+                        raw, bid=float(raw["bid"]), ask=float(raw["ask"])
+                    )
+                    if l2_rejection is not None or validated_levels is None:
                         invalid += 1
+                        if l2_rejection is not None:
+                            l2_rejection_reasons[l2_rejection] += 1
                         continue
+                    bids5, asks5 = validated_levels
                     add_row(
                         coin=coin,
                         ts_ms=received,
@@ -426,6 +418,8 @@ def load_observed_books(
         "rows_read": rows_read,
         "valid_rows": valid,
         "invalid_rows": invalid,
+        "invalid_l2_structure_rows": sum(l2_rejection_reasons.values()),
+        "l2_rejection_reasons": dict(sorted(l2_rejection_reasons.items())),
         "duplicate_rows_rejected": duplicate_rows,
         "duplicate_checkpoint_ids": duplicate_checkpoint_ids,
         "duplicate_checkpoint_rows": duplicate_checkpoint_rows,

@@ -20,10 +20,10 @@ import re
 import shutil
 import sys
 import zipfile
-from urllib.parse import quote
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 try:
     from tools.restore_alina import (
@@ -31,10 +31,10 @@ try:
         RestoreError,
         _download_to_path,
         _expected_digest,
-        _load_replay_ready_plan,
-        _select_replay_ready_releases,
         _json,
         _list_release_assets,
+        _load_replay_ready_plan,
+        _select_replay_ready_releases,
         iter_releases,
     )
 except ModuleNotFoundError:  # pragma: no cover - direct tools/ execution
@@ -43,10 +43,10 @@ except ModuleNotFoundError:  # pragma: no cover - direct tools/ execution
         RestoreError,
         _download_to_path,
         _expected_digest,
-        _load_replay_ready_plan,
-        _select_replay_ready_releases,
         _json,
         _list_release_assets,
+        _load_replay_ready_plan,
+        _select_replay_ready_releases,
         iter_releases,
     )
 
@@ -215,7 +215,7 @@ def _verify_file(path: Path, spec: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _load_specs(index: Path, metrics: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    _safe, proof, rows, required = _load_replay_ready_plan(index, metrics)
+    proof, rows, required = _load_replay_ready_plan(index, metrics)
     return proof, build_outer_specs(rows, required)
 
 

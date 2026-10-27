@@ -53,10 +53,11 @@ jobs:
               exit 0
             fi
             git commit -m "watchdog: persist campaign health receipt"
-            if git push origin HEAD:main; then
+            if python tools/publish_main_commit.py --remote origin --branch main; then
               exit 0
             fi
-            git rebase --abort >/dev/null 2>&1 || true
+            # A conflicted watchdog snapshot must be recomputed from current
+            # campaign state before another publication attempt.
             git fetch origin main
             git reset --hard origin/main
             python tools/campaign_watchdog.py --dispatch

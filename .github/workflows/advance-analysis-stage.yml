@@ -63,13 +63,7 @@ jobs:
           git add control/alina-phase.json control/phase-receipts
           git diff --cached --quiet && exit 0
           git commit -m "phase: advance analysis stage to ${{ inputs.stage }}"
-          for i in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((i*2))
-          done
-          exit 1
+          python tools/publish_main_commit.py --remote origin --branch main
       - name: Materialize next stage campaigns
         env:
           GH_TOKEN: "${{ github.token }}"

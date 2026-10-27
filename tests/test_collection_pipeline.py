@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
 from hl_observer.cli import app
 from hl_observer.collection.collector import CollectionPlan, run_collection_once
 from hl_observer.config.loader import load_settings
-from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient
+from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient, HyperliquidInfoError
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import (
     ApiHealth,
@@ -157,7 +158,7 @@ def test_collect_once_fetch_user_fills_stores_raw_event(tmp_path):
     assert fill.coin == "BTC"
 
 
-def test_user_fills_by_time_pagination_stops_on_empty():
+def test_user_fills_by_time_pagination_continues_after_empty_windows():
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -174,14 +175,14 @@ def test_user_fills_by_time_pagination_stops_on_empty():
             1,
             10_000,
             page_window_ms=1000,
-            max_pages=5,
+            max_pages=20,
         ):
             pages.append(page)
         await client._client.aclose()  # type: ignore[union-attr]
         return pages
 
     assert asyncio.run(run()) == []
-    assert calls == 1
+    assert calls == 10
 
 
 def test_user_fills_by_time_pagination_respects_max_pages():
@@ -192,24 +193,75 @@ def test_user_fills_by_time_pagination_respects_max_pages():
         calls += 1
         return httpx.Response(200, json=[{"time": calls * 1000, "coin": "BTC"}])
 
+    pages = []
+
     async def run():
         client = _mock_client(handler)
-        pages = []
-        async for page in client.iter_user_fills_by_time(
-            VALID_WALLET,
-            1,
-            10_000,
-            page_window_ms=1000,
-            max_pages=2,
-        ):
-            pages.append(page)
+        try:
+            async for page in client.iter_user_fills_by_time(
+                VALID_WALLET,
+                1,
+                10_000,
+                page_window_ms=1000,
+                max_pages=2,
+            ):
+                pages.append(page)
+        finally:
+            await client._client.aclose()  # type: ignore[union-attr]
         await client._client.aclose()  # type: ignore[union-attr]
-        return pages
 
-    pages = asyncio.run(run())
+    with pytest.raises(HyperliquidInfoError, match="max_pages.*incomplete"):
+        asyncio.run(run())
 
     assert len(pages) == 2
     assert calls == 2
+
+
+def test_collect_once_records_incomplete_fill_window_as_failed_run(tmp_path):
+    settings = _settings_for_db(tmp_path)
+    session_factory = _session_factory(settings.database_url)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = _request_json(request)
+        assert payload["type"] == "userFillsByTime"
+        return httpx.Response(
+            200,
+            json=[{"time": 1, "coin": "BTC", "side": "B", "px": "10", "sz": "1"}],
+        )
+
+    result = asyncio.run(
+        run_collection_once(
+            CollectionPlan(
+                fetch=True,
+                wallets=[VALID_WALLET],
+                user_fills_by_time=True,
+                start_ms=1,
+                end_ms=3,
+                page_window_ms=1,
+                limit_pages=1,
+            ),
+            settings,
+            client=_mock_client(handler),
+            session_factory=session_factory,
+        )
+    )
+
+    with session_factory() as session:
+        run = session.query(CollectionRun).one()
+        errors = session.query(CollectionRun).filter_by(success=False).count()
+        raw_events = session.query(RawEvent).order_by(RawEvent.id).all()
+
+    assert result.errors_count == 1
+    assert run.success is False
+    assert run.errors_count == 1
+    assert errors == 1
+    assert len(raw_events) == 2
+    assert raw_events[0].request_payload_json["startTime"] == 1
+    assert raw_events[0].request_payload_json["endTime"] == 2
+    assert raw_events[0].success is True
+    assert raw_events[1].request_payload_json["startTime"] == 1
+    assert raw_events[1].request_payload_json["endTime"] == 3
+    assert raw_events[1].success is False
 
 
 def test_collect_once_rejects_invalid_wallet_address():

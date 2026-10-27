@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from hl_observer.simulation.capital_accounting import (
@@ -73,6 +75,48 @@ def test_roi_is_unmeasurable_without_executable_exit_marks() -> None:
     assert snapshot.roi_status == "UNMEASURABLE_NO_EXECUTABLE_EXIT"
 
 
+def test_capital_tracker_rejects_overflowing_aggregate_without_mutation() -> None:
+    tracker = CapitalAccountingTracker(starting_equity_usd=1_000.0)
+    position = _position(
+        notionals=(1e308, 1e308),
+        mid_pnl=0.0,
+        liquidatable_pnl=0.0,
+    )
+
+    with pytest.raises(ValueError, match="gross_exposure_usd"):
+        tracker.observe(
+            collateral_cash_usd=1_000.0,
+            positions=(position,),
+            realized_pnl_usd=0.0,
+            turnover_usd=0.0,
+        )
+
+    assert tracker.latest is None
+    assert tracker._margin_observations == 0
+
+
+def test_capital_tracker_rejects_overflowing_equity_without_mutation() -> None:
+    tracker = CapitalAccountingTracker(starting_equity_usd=1_000.0)
+    position = _position(
+        notionals=(1.0,),
+        directions=(1,),
+        leverage=1.0,
+        mid_pnl=1e308,
+        liquidatable_pnl=0.0,
+    )
+
+    with pytest.raises(ValueError, match="mid_equity_usd"):
+        tracker.observe(
+            collateral_cash_usd=1e308,
+            positions=(position,),
+            realized_pnl_usd=0.0,
+            turnover_usd=0.0,
+        )
+
+    assert tracker.latest is None
+    assert tracker._margin_observations == 0
+
+
 def test_paper_ledger_exposes_authoritative_liquidatable_pnl() -> None:
     ledger = PaperLedger(starting_balance_usdc=1_000.0, session_id="capital:test")
     opened = ledger.open_position(
@@ -127,6 +171,318 @@ def test_ledger_integrity_does_not_invent_strict_roi_without_exit_mark() -> None
     assert snapshot["strict_pnl_allowed"] is True
     assert snapshot["strict_roi_allowed"] is False
     assert snapshot["authoritative_equity_usdc"] is None
+
+
+def test_overflowing_close_is_refused_before_ledger_mutation() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1.0,
+        quantity=1e308,
+        fill_price=1e-308,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        leverage_effective=1.0,
+        position_id="overflow:close",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+
+    result = ledger.reduce_or_close(
+        coin="HYPE",
+        side="LONG",
+        quantity=1e308,
+        fill_price=1e308,
+        timestamp_ms=2_000,
+        fee_bps=0.0,
+        position_id="overflow:close",
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "EXIT_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    for key in (
+        "realized_pnl_usdc",
+        "cash_balance_usdc",
+        "fees_paid_usdc",
+        "turnover_usdc",
+    ):
+        assert after[key] == before[key], key
+    assert after["positions"] == before["positions"]
+
+
+def test_overflowing_funding_is_refused_without_consuming_settlement_id() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    accepted = ledger.apply_funding(
+        coin="HYPE",
+        side="LONG",
+        amount_usdc=1e308,
+        timestamp_ms=1_000,
+        refs={"funding_settlement_id": "funding-1"},
+    )
+    assert accepted.event_type == PaperEventType.FUNDING_RECEIVED
+    before = ledger.snapshot()
+
+    result = ledger.apply_funding(
+        coin="HYPE",
+        side="LONG",
+        amount_usdc=1e308,
+        timestamp_ms=2_000,
+        refs={"funding_settlement_id": "funding-2"},
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "FUNDING_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    assert after["funding_net_usdc"] == before["funding_net_usdc"]
+    assert after["cash_balance_usdc"] == before["cash_balance_usdc"]
+    assert ledger.funding_settlement_ids == {"funding-1"}
+
+
+def test_invalid_funding_timestamp_does_not_mutate_ledger() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    before = ledger.snapshot()
+    before_events = tuple(ledger.events)
+
+    with pytest.raises((TypeError, ValueError)):
+        ledger.apply_funding(
+            coin="HYPE",
+            side="LONG",
+            amount_usdc=1.25,
+            timestamp_ms=None,  # type: ignore[arg-type]
+            refs={"funding_settlement_id": "funding-invalid-time"},
+        )
+
+    assert ledger.snapshot() == before
+    assert tuple(ledger.events) == before_events
+    assert ledger.funding_settlement_ids == set()
+    assert ledger.verify_event_chain()
+
+
+def test_unserializable_funding_evidence_does_not_mutate_accounting() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    before = ledger.snapshot()
+
+    with pytest.raises(ValueError, match="FUNDING_EVENT_INVALID"):
+        ledger.apply_funding(
+            coin="HYPE",
+            side="LONG",
+            amount_usdc=1.25,
+            timestamp_ms=1_000,
+            refs={
+                "funding_settlement_id": "funding-invalid-evidence",
+                "unsupported_value": object(),
+            },
+        )
+
+    assert ledger.snapshot() == before
+    assert tuple(ledger.events) == ()
+    assert ledger.funding_settlement_ids == set()
+    assert ledger.verify_event_chain()
+
+
+def test_overflowing_open_fee_is_refused_before_ledger_mutation() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    before = ledger.snapshot()
+
+    result = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1e308,
+        quantity=1.0,
+        fill_price=1e308,
+        timestamp_ms=1_000,
+        fee_bps=1e308,
+        leverage_effective=1.0,
+        position_id="overflow:fee",
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "OPEN_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    assert after["cash_balance_usdc"] == before["cash_balance_usdc"]
+    assert after["fees_paid_usdc"] == before["fees_paid_usdc"]
+    assert after["turnover_usdc"] == before["turnover_usdc"]
+    assert after["positions"] == before["positions"]
+
+
+def test_overflowing_mark_to_market_is_refused_without_state_mutation() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1.0,
+        quantity=1e308,
+        fill_price=1e-308,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        leverage_effective=1.0,
+        position_id="overflow:mark",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+    capital_before = ledger.capital_snapshot()
+    high_water_before = ledger.high_water_equity_usdc
+    event_count_before = len(ledger.events)
+
+    result = ledger.mark_to_market({"HYPE": 1e308}, timestamp_ms=2_000)
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "MARK_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    for key in (
+        "unrealized_pnl_usdc",
+        "equity_usdc",
+        "drawdown_usdc",
+    ):
+        assert after[key] == before[key]
+    assert ledger.high_water_equity_usdc == high_water_before
+    assert after["economic_evidence"] == before["economic_evidence"]
+    assert after["positions"] == before["positions"]
+    assert ledger.capital_snapshot() == capital_before
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.events[-1].event_type == PaperEventType.NO_TRADE
+    assert ledger.verify_event_chain()
+
+
+@pytest.mark.parametrize(
+    "marks, liquidatable_marks",
+    [
+        ({"HYPE": float("nan")}, None),
+        ({"HYPE": 1.0}, {"HYPE": float("inf")}),
+    ],
+)
+def test_non_finite_marks_are_rejected_and_not_serialized(
+    marks: dict[str, float],
+    liquidatable_marks: dict[str, float] | None,
+) -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=100.0,
+        quantity=1.0,
+        fill_price=100.0,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        leverage_effective=1.0,
+        position_id="invalid:mark",
+    )
+    before = ledger.snapshot()
+    event_count_before = len(ledger.events)
+
+    result = ledger.mark_to_market(
+        marks,
+        timestamp_ms=2_000,
+        liquidatable_marks=liquidatable_marks,
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "MARK_INPUT_NON_FINITE"
+    assert ledger.snapshot()["positions"] == before["positions"]
+    assert ledger.snapshot()["economic_evidence"] == before["economic_evidence"]
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.verify_event_chain()
+    json.dumps(result.to_dict(), allow_nan=False)
+
+
+def test_overflowing_position_increase_is_refused_without_partial_commit() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1.0,
+        quantity=1e308,
+        fill_price=1e-308,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        leverage_effective=1.0,
+        position_id="overflow:add",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+    capital_before = ledger.capital_snapshot()
+    event_count_before = len(ledger.events)
+
+    result = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1.0,
+        quantity=1e308,
+        fill_price=1e-308,
+        timestamp_ms=2_000,
+        fee_bps=0.0,
+        leverage_effective=1.0,
+        position_id="overflow:add",
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "OPEN_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    for key in (
+        "cash_balance_usdc",
+        "realized_pnl_usdc",
+        "unrealized_pnl_usdc",
+        "fees_paid_usdc",
+        "equity_usdc",
+        "drawdown_usdc",
+        "turnover_usdc",
+        "positions",
+    ):
+        assert after[key] == before[key]
+    assert ledger.capital_snapshot() == capital_before
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.events[-1].event_type == PaperEventType.NO_TRADE
+    assert ledger.verify_event_chain()
+
+
+def test_partial_close_rejects_unrepresentable_residual_mark_before_commit() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1.0,
+        quantity=1e308,
+        fill_price=1e-308,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        leverage_effective=1.0,
+        position_id="overflow:partial-close",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+    capital_before = ledger.capital_snapshot()
+    event_count_before = len(ledger.events)
+
+    result = ledger.reduce_or_close(
+        coin="HYPE",
+        side="LONG",
+        quantity=1.0,
+        fill_price=1e308,
+        timestamp_ms=2_000,
+        fee_bps=0.0,
+        position_id="overflow:partial-close",
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "EXIT_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    for key in (
+        "cash_balance_usdc",
+        "realized_pnl_usdc",
+        "unrealized_pnl_usdc",
+        "fees_paid_usdc",
+        "equity_usdc",
+        "drawdown_usdc",
+        "turnover_usdc",
+        "positions",
+    ):
+        assert after[key] == before[key]
+    assert ledger.capital_snapshot() == capital_before
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.events[-1].event_type == PaperEventType.NO_TRADE
+    assert ledger.verify_event_chain()
 
 
 def test_cross_venue_ledger_and_partial_close_preserve_capital_semantics() -> None:

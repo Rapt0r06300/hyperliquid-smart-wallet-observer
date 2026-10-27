@@ -29,6 +29,93 @@ def digest(value):
     ).hexdigest()
 
 
+def _summarize_operator_status(row: dict) -> dict:
+    return {
+        "request_id": row.get("request_id"),
+        "intent": row.get("intent"),
+        "state": row.get("state"),
+        "terminal": row.get("terminal") is True,
+        "workflow_run_id": row.get("workflow_run_id"),
+        "updated_at_utc": row.get("updated_at_utc"),
+        "status_reason": row.get("status_reason"),
+        "superseded_by_request_id": row.get("superseded_by_request_id"),
+    }
+
+
+def _operator_supersession_is_valid(row: dict, intent_path: Path | None = None) -> bool:
+    reason = row.get("status_reason")
+    replacement_id = row.get("superseded_by_request_id")
+    if reason != "SUPERSEDED_BY_NEWER_CONTROL_INTENT":
+        return replacement_id is None
+    structurally_valid = bool(
+        row.get("intent") in {"pause", "resume", "retry"}
+        and row.get("state") == "BLOCKED"
+        and row.get("terminal") is True
+        and isinstance(replacement_id, str)
+        and re.fullmatch(r"[0-9a-f]{64}", replacement_id)
+        and replacement_id != row.get("request_id")
+    )
+    if not structurally_valid or intent_path is None:
+        return False
+    intent = load(intent_path, None)
+    replacement = load(intent_path.parent / f"{replacement_id}.json", None)
+    if not isinstance(intent, dict) or not isinstance(replacement, dict):
+        return False
+    current_order = (
+        str(intent.get("requested_at_utc") or ""),
+        str(intent.get("request_id") or ""),
+    )
+    replacement_order = (
+        str(replacement.get("requested_at_utc") or ""),
+        str(replacement.get("request_id") or ""),
+    )
+    return bool(
+        intent.get("request_id") == row.get("request_id")
+        and intent.get("intent") == row.get("intent")
+        and replacement.get("schema_version")
+        in {"alina.operator_intent.v1", "alina.operator_intent.v2"}
+        and replacement.get("request_id") == replacement_id
+        and replacement.get("intent") in {"pause", "resume", "retry"}
+        and replacement.get("paper_only") is True
+        and replacement.get("read_only") is True
+        and replacement.get("real_execution") is False
+        and replacement_order > current_order
+    )
+
+
+def _valid_completed_control_receipt(status, intent_path: Path) -> bool:
+    intent = load(intent_path, None)
+    receipt = status.get("control_receipt")
+    if not isinstance(intent, dict) or not isinstance(receipt, dict):
+        return False
+    expected_intent_digest = hashlib.sha256(
+        json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    receipt_digest = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    return bool(
+        intent.get("schema_version") == "alina.operator_intent.v2"
+        and intent.get("intent") in {"pause", "resume", "retry"}
+        and status.get("request_id") == intent.get("request_id")
+        and status.get("intent") == intent.get("intent")
+        and status.get("intent_digest") == expected_intent_digest
+        and status.get("state") == "COMPLETE"
+        and status.get("terminal") is True
+        and receipt.get("schema_version") == "alina.operator_control_receipt.v1"
+        and receipt.get("request_id") == intent.get("request_id")
+        and receipt.get("intent") == intent.get("intent")
+        and receipt.get("intent_digest") == expected_intent_digest
+        and bool(receipt.get("target_identity"))
+        and re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("evidence_digest") or ""))
+        and receipt.get("applied") is True
+        and receipt.get("paper_only") is True
+        and receipt.get("read_only") is True
+        and receipt.get("real_execution") is False
+        and status.get("control_receipt_sha256") == receipt_digest
+    )
+
+
 def _current_dataset_coverage(totals):
     """Derive live Dataset V2 exactness from canonical DATA_METRICS totals."""
     totals = totals if isinstance(totals, dict) else {}
@@ -189,17 +276,25 @@ def main() -> int:
             or not row.get("request_id")
             or row.get("state") not in valid_states
             or row.get("terminal") is not (row.get("state") in {"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
+            or not _operator_supersession_is_valid(
+                row,
+                Path("control/operator-intents") / f"{row.get('request_id')}.json",
+            )
         ):
             operator_status_invalid.append(status_path.name)
             continue
-        operator_status_rows.append({
-            "request_id": row.get("request_id"),
-            "intent": row.get("intent"),
-            "state": row.get("state"),
-            "terminal": row.get("terminal") is True,
-            "workflow_run_id": row.get("workflow_run_id"),
-            "updated_at_utc": row.get("updated_at_utc"),
-        })
+        if (
+            row.get("schema_version") == "alina.operator_status.v2"
+            and row.get("intent") in {"pause", "resume", "retry"}
+            and row.get("state") == "COMPLETE"
+            and not _valid_completed_control_receipt(
+                row,
+                Path("control/operator-intents") / f"{row['request_id']}.json",
+            )
+        ):
+            operator_status_invalid.append(status_path.name)
+            continue
+        operator_status_rows.append(_summarize_operator_status(row))
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
     metrics = load(root / "catalog/DATA_METRICS.json", {})
     global_closure = load(root / "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json", {})
@@ -293,11 +388,6 @@ def main() -> int:
     frozen_coverage_provenance = (
         global_closure.get("coverage_provenance", {})
         if global_closure_valid
-        else {}
-    )
-    frozen_coverage = (
-        frozen_coverage_provenance.get("coverage", {})
-        if isinstance(frozen_coverage_provenance, dict)
         else {}
     )
     current_dataset_coverage = _current_dataset_coverage(totals)

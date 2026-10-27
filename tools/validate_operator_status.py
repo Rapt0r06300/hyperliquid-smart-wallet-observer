@@ -7,8 +7,11 @@ import hashlib
 import json
 from pathlib import Path
 
+from operator_family_contract import normalize_operator_family
+
 TERMINAL = {"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"}
 NON_TERMINAL = {"DISPATCHED", "RUNNING"}
+CONTROL_INTENTS = {"pause", "resume", "retry"}
 
 
 def main() -> int:
@@ -41,8 +44,20 @@ def main() -> int:
         for key in ("phase", "phase_epoch", "source_collection_epoch", "collection_cutoff_at_utc", "strategy_family"):
             if status.get(key) != intent.get(key):
                 raise SystemExit(f"OPERATOR_STATUS_{key.upper()}_MISMATCH")
-    if intent.get("strategy_family", "all") not in {"all", "copy_vault", "lead_lag", "cross_venue_dislocation"}:
-        raise SystemExit("OPERATOR_INTENT_FAMILY_INVALID")
+    try:
+        family, _ = normalize_operator_family(
+            str(intent.get("intent") or ""),
+            intent.get("strategy_family"),
+            intent.get("config"),
+            scope_root=Path(__file__).resolve().parents[1],
+        )
+    except ValueError as exc:
+        raise SystemExit(f"OPERATOR_INTENT_FAMILY_INVALID:{exc}") from exc
+    if (
+        intent.get("schema_version") == "alina.operator_intent.v2"
+        and intent.get("strategy_family") != family
+    ):
+        raise SystemExit("OPERATOR_INTENT_FAMILY_MISMATCH")
     expected_digest = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     if status.get("intent_digest") != expected_digest:
         raise SystemExit("OPERATOR_STATUS_INTENT_DIGEST_MISMATCH")
@@ -50,6 +65,68 @@ def main() -> int:
         raise SystemExit("OPERATOR_STATUS_STATE_INVALID")
     if status.get("terminal") != (status["state"] in TERMINAL):
         raise SystemExit("OPERATOR_STATUS_TERMINAL_MISMATCH")
+    supersession_reason = status.get("status_reason") == "SUPERSEDED_BY_NEWER_CONTROL_INTENT"
+    superseded_by = status.get("superseded_by_request_id")
+    if supersession_reason:
+        if (
+            intent.get("intent") not in CONTROL_INTENTS
+            or status.get("state") != "BLOCKED"
+            or status.get("terminal") is not True
+            or not isinstance(superseded_by, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", superseded_by)
+            or superseded_by == request_id
+        ):
+            raise SystemExit("OPERATOR_STATUS_SUPERSESSION_INVALID")
+        replacement_path = Path(args.intent).parent / f"{superseded_by}.json"
+        try:
+            replacement = json.loads(replacement_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError) as exc:
+            raise SystemExit("OPERATOR_STATUS_SUPERSESSION_INVALID") from exc
+        replacement_order = (
+            str(replacement.get("requested_at_utc") or ""),
+            str(replacement.get("request_id") or ""),
+        )
+        current_order = (
+            str(intent.get("requested_at_utc") or ""),
+            request_id,
+        )
+        if (
+            replacement.get("schema_version")
+            not in {"alina.operator_intent.v1", "alina.operator_intent.v2"}
+            or replacement.get("request_id") != superseded_by
+            or replacement.get("intent") not in CONTROL_INTENTS
+            or replacement.get("paper_only") is not True
+            or replacement.get("read_only") is not True
+            or replacement.get("real_execution") is not False
+            or replacement_order <= current_order
+        ):
+            raise SystemExit("OPERATOR_STATUS_SUPERSESSION_INVALID")
+    elif superseded_by is not None:
+        raise SystemExit("OPERATOR_STATUS_SUPERSESSION_INVALID")
+    if (
+        intent.get("schema_version") == "alina.operator_intent.v2"
+        and intent.get("intent") in CONTROL_INTENTS
+        and status.get("state") == "COMPLETE"
+    ):
+        receipt = status.get("control_receipt")
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("schema_version") != "alina.operator_control_receipt.v1"
+            or receipt.get("request_id") != request_id
+            or receipt.get("intent") != intent.get("intent")
+            or receipt.get("intent_digest") != expected_digest
+            or receipt.get("target_identity") in (None, "")
+            or not re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("evidence_digest") or ""))
+            or receipt.get("applied") is not True
+            or receipt.get("paper_only") is not True
+            or receipt.get("read_only") is not True
+            or receipt.get("real_execution") is not False
+            or status.get("control_receipt_sha256")
+            != hashlib.sha256(
+                json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+        ):
+            raise SystemExit("OPERATOR_CONTROL_RECEIPT_INVALID")
     for key, expected in (("paper_only", True), ("read_only", True), ("real_execution", False)):
         if intent.get(key) is not expected or status.get(key) is not expected:
             raise SystemExit("OPERATOR_STATUS_SECURITY_MISMATCH")

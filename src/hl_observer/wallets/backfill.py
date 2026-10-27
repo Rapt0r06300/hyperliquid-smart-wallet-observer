@@ -10,12 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from hl_observer.collection.collector import InvalidWalletAddress, validate_wallet_address
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.endpoints import info_url_for_settings
-from hl_observer.hyperliquid.rate_weights import (
-    HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT,
-)
 from hl_observer.hyperliquid.rest_info_client import (
     HyperliquidInfoClient,
-    HyperliquidInfoError,
     build_all_mids_payload,
     build_frontend_open_orders_payload,
     build_l2_book_payload,
@@ -337,60 +333,27 @@ async def _fetch_user_fills_by_time(
     end_ms: int,
     page_window_ms: int,
     limit_pages: int,
-) -> list[tuple[Any | None, Exception | None, int]]:
+) -> list[tuple[Any | None, Exception | None, int, int | None, int | None]]:
     pages_results = []
-    page_index = 0
-    cursor = start_ms
-    seen_page_hashes = set()
-    while cursor < end_ms:
-        if limit_pages is not None and page_index >= limit_pages:
-            break
-        request_end = min(end_ms, cursor + page_window_ms) if page_window_ms else end_ms
-        if request_end <= cursor:
-            break
-        
-        started = now_ms()
-        try:
-            page = await client.user_fills_by_time(
-                wallet,
-                cursor,
-                request_end,
-                aggregate_by_time=False,
+    last_started = now_ms()
+    try:
+        async for page, page_start_ms, page_end_ms in client._iter_user_fills_by_time_windows(
+            wallet,
+            start_ms,
+            end_ms,
+            page_window_ms=page_window_ms,
+            max_pages=limit_pages,
+            aggregate_by_time=False,
+        ):
+            completed_at = now_ms()
+            pages_results.append(
+                (page, None, completed_at - last_started, page_start_ms, page_end_ms)
             )
-            latency = now_ms() - started
-            if not page:
-                break
-            page_hash = stable_payload_hash(page)
-            if page_hash in seen_page_hashes:
-                pages_results.append((None, HyperliquidInfoError("Duplicate userFillsByTime page detected"), latency))
-                break
-            seen_page_hashes.add(page_hash)
-            page_index += 1
-            pages_results.append((page, None, latency))
-            
-            if (
-                page_window_ms
-                and len(page) < HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT
-            ):
-                cursor = request_end + 1
-                continue
-            if (
-                not page_window_ms
-                and len(page) < HYPERSMART_INFO_TIME_RANGE_PAGE_LIMIT
-            ):
-                break
-            page_times = [int(fill["time"]) for fill in page if "time" in fill]
-            if not page_times:
-                break
-            next_cursor = max(page_times) + 1
-            if next_cursor <= cursor:
-                break
-            cursor = next_cursor
-        except Exception as exc:
-            latency = now_ms() - started
-            pages_results.append((None, exc, latency))
-            break
-            
+            last_started = completed_at
+    except Exception as exc:
+        completed_at = now_ms()
+        pages_results.append((None, exc, completed_at - last_started, None, None))
+
     return pages_results
 
 
@@ -520,12 +483,14 @@ def _process_fetched_user_fills_by_time(
     start_ms: int,
     end_ms: int,
     fills_for_rebuild: list[dict[str, Any]],
-    pages_results: list[tuple[Any | None, Exception | None, int]],
+    pages_results: list[tuple[Any | None, Exception | None, int, int | None, int | None]],
 ) -> None:
     if not pages_results:
         return
 
-    for page_index, (page, exc, latency) in enumerate(pages_results, start=1):
+    for page_index, (page, exc, latency, page_start_ms, page_end_ms) in enumerate(
+        pages_results, start=1
+    ):
         if exc is not None:
             error_message = str(exc)
             result.errors_count += 1
@@ -541,6 +506,18 @@ def _process_fetched_user_fills_by_time(
                 ok=False,
                 latency_ms=latency,
                 error=error_message,
+            )
+            repo.update_source_health(
+                "hyperliquid_info:userFillsByTime",
+                is_success=False,
+                observed_latency_ms=latency,
+                error_message=error_message,
+            )
+            repo.update_source_health(
+                "leader_fills",
+                is_success=False,
+                observed_latency_ms=latency,
+                error_message=error_message,
             )
             if plan.store_raw:
                 repo.store_raw_event(
@@ -567,7 +544,11 @@ def _process_fetched_user_fills_by_time(
                 source="hyperliquid",
                 endpoint="/info",
                 request_type="userFillsByTime",
-                request_payload=build_user_fills_by_time_payload(wallet, start_ms, end_ms),
+                request_payload=build_user_fills_by_time_payload(
+                    wallet,
+                    page_start_ms if page_start_ms is not None else start_ms,
+                    page_end_ms if page_end_ms is not None else end_ms,
+                ),
                 response_payload=page,
                 wallet_address=wallet,
             )

@@ -10,6 +10,257 @@ import pytest
 from tools import collect_cloud_copy_vault as C
 
 
+def test_l2_payload_classifier_reports_stable_rejection_reasons() -> None:
+    valid = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC",
+            "time": 1_700_000_000_000,
+            "levels": [
+                [{"px": "100", "sz": "2", "n": 1}],
+                [{"px": "101", "sz": "3", "n": 2}],
+            ],
+        },
+    }
+    cases = [
+        ("{not-json", "invalid_json", None),
+        (json.dumps({"channel": "pong"}), "wrong_channel", None),
+        (json.dumps({"channel": "l2Book", "data": {"time": 1, "levels": [[], []]}}), "missing_coin", None),
+        (json.dumps({"channel": "l2Book", "data": {"coin": "BTC", "time": 1, "levels": [[], {}]}}), "invalid_levels", "BTC"),
+        (json.dumps({"channel": "l2Book", "data": {"coin": "BTC", "time": "bad", "levels": [[], []]}}), "invalid_timestamp", "BTC"),
+        (json.dumps(["not", "an", "object"]), "other_schema", None),
+    ]
+
+    for raw, expected_reason, expected_coin in cases:
+        _, reason, coin = C.classify_l2_payload(raw)
+        assert reason == expected_reason
+        assert coin == expected_coin
+
+    parsed, reason, coin = C.classify_l2_payload(json.dumps(valid))
+    assert reason is None
+    assert coin == "BTC"
+    assert parsed == valid
+
+
+def test_l2_envelope_rejects_invalid_levels_and_timestamp() -> None:
+    base = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC",
+            "time": 1_700_000_000_000,
+            "levels": [[], []],
+        },
+    }
+    kwargs = {
+        "receive_wall_ms": 1_700_000_000_001,
+        "receive_mono_ns": 22,
+        "connection_id": "l2-test-1",
+    }
+    invalid_levels = json.loads(json.dumps(base))
+    invalid_levels["data"]["levels"] = [[{"px": "NaN", "sz": "1", "n": 1}], []]
+    invalid_timestamp = json.loads(json.dumps(base))
+    invalid_timestamp["data"]["time"] = True
+
+    assert C.l2_envelope(invalid_levels, **kwargs) is None
+    assert C.l2_envelope(invalid_timestamp, **kwargs) is None
+
+
+def test_l2_diagnostics_expose_unknown_coverage_without_claiming_full_capture() -> None:
+    state = C.new_l2_state()
+    state["received"] = 1
+    C._record_l2_rejection(
+        state,
+        "invalid_levels",
+        coin="BTC",
+        at_ms=1_000,
+        connection_id="conn-1",
+    )
+
+    diagnostics = C._l2_diagnostics(
+        state,
+        end_ms=2_500,
+        requested_coins={"BTC", "ETH"},
+    )
+
+    assert diagnostics["received_frames"] == 1
+    assert diagnostics["rejected_frames"] == 1
+    assert diagnostics["rejected_by_reason"] == {"invalid_levels": 1}
+    assert diagnostics["requested_markets"] == ["BTC", "ETH"]
+    assert diagnostics["coverage_claim"] == "NOT_PROVEN"
+    assert diagnostics["markets"]["BTC"]["coverage_status"] == "GAP_OPEN"
+    assert diagnostics["markets"]["BTC"]["last_receive_age_ms"] is None
+    assert diagnostics["markets"]["ETH"]["coverage_status"] == "NO_MARKET_STATE"
+    assert diagnostics["markets"]["ETH"]["accepted"] is None
+    assert diagnostics["markets"]["ETH"]["coverage_status"] == "NO_MARKET_STATE"
+    json.dumps(diagnostics)
+
+
+def test_l2_history_is_bounded_and_counts_discarded_diagnostics() -> None:
+    state = C.new_l2_state()
+    for index in range(300):
+        C._record_l2_disconnect(
+            state,
+            connection_id=f"conn-{index}",
+            markets={"BTC"},
+            at_ms=1_000 + index * 2,
+            error_class="ConnectionClosed",
+        )
+        envelope = C.l2_envelope(
+            {
+                "channel": "l2Book",
+                "data": {
+                    "coin": "BTC",
+                    "time": 1_700_000_000_000 + index,
+                    "levels": [[], []],
+                },
+            },
+            receive_wall_ms=1_001 + index * 2,
+            receive_mono_ns=index + 1,
+            connection_id=f"conn-{index}-recovered",
+        )
+        assert envelope is not None
+        C._record_l2_accepted(state, envelope, receive_wall_ms=1_001 + index * 2)
+
+    assert len(state["connection_events"]) == C.MAX_L2_DIAGNOSTIC_RECORDS
+    assert state["connection_events_dropped"] == 300 - C.MAX_L2_DIAGNOSTIC_RECORDS
+    market = state["markets"]["BTC"]
+    assert len(market["gaps"]) == C.MAX_L2_DIAGNOSTIC_RECORDS
+    assert market["gaps_dropped"] == 300 - C.MAX_L2_DIAGNOSTIC_RECORDS
+
+
+def test_l2_collector_rejects_unknown_channels_and_recovers_after_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    valid = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC",
+            "time": 1_700_000_000_000,
+            "levels": [
+                [{"px": "100", "sz": "2", "n": 1}],
+                [{"px": "101", "sz": "3", "n": 2}],
+            ],
+        },
+    }
+
+    class FakeSocket:
+        def __init__(
+            self, messages: list[dict[str, object]], *, fail_after: bool = False
+        ) -> None:
+            self.messages = messages
+            self.fail_after = fail_after
+            self.release = asyncio.Event()
+
+        async def send(self, payload: str) -> None:
+            assert json.loads(payload)["method"] in {"subscribe", "ping"}
+
+        def __aiter__(self):
+            async def iterate():
+                for message in self.messages:
+                    yield json.dumps(message)
+                if self.fail_after:
+                    raise ConnectionError("simulated disconnect")
+                await self.release.wait()
+
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    first = FakeSocket(
+        [
+            {"channel": "pong"},
+            {"channel": "unexpected", "data": {"coin": "BTC"}},
+            valid,
+            {
+                "channel": "subscriptionResponse",
+                "data": {
+                    "method": "subscribe",
+                    "subscription": {"type": "l2Book", "coin": "BTC"},
+                },
+            },
+            valid,
+            valid,
+        ],
+        fail_after=True,
+    )
+    resumed = {**valid, "data": {**valid["data"], "time": 1_700_000_000_001}}
+    second = FakeSocket(
+        [
+            {
+                "channel": "subscriptionResponse",
+                "data": {
+                    "method": "subscribe",
+                    "subscription": {"type": "l2Book", "coin": "BTC"},
+                },
+            },
+            resumed,
+        ]
+    )
+    connections = iter([first, second])
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(next(connections)),
+    )
+
+    class Sink:
+        def __init__(self) -> None:
+            self.envelopes: list[C.TickEnvelope] = []
+
+        async def emit_async(self, envelope: C.TickEnvelope) -> None:
+            self.envelopes.append(envelope)
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        sink = Sink()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(
+                sink,
+                asyncio.Queue(),
+                {"BTC"},
+                state,
+            )
+        )
+        try:
+            for _ in range(500):
+                if state.get("frames", 0) >= 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert state.get("frames") == 2
+            assert state.get("reconnects") == 1
+            assert state.get("rejected_by_reason", {}).get("wrong_channel") == 1
+            assert state.get("rejected_by_reason", {}).get("subscription_not_active") == 1
+            assert state.get("heartbeats_received") == 1
+            assert state.get("duplicates") == 1
+            assert len(sink.envelopes) == 2
+
+            diagnostics = C._l2_diagnostics(
+                state,
+                end_ms=1_700_000_010_000,
+                requested_coins={"BTC"},
+            )
+            market = diagnostics["markets"]["BTC"]
+            assert len(market["gaps"]) == 2
+            assert all(gap["recovery_at_ms"] is not None for gap in market["gaps"])
+            assert all(not gap["continuity_proven"] for gap in market["gaps"])
+            assert market["coverage_status"] == "SNAPSHOTS_CONTINUITY_UNPROVEN"
+            json.dumps(diagnostics)
+        finally:
+            second.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 def test_snapshot_and_live_userfills_are_separate_families() -> None:
     snapshot, snapshot_fills = C.userfills_envelope(
         {
@@ -77,6 +328,25 @@ def test_snapshot_and_live_userfills_are_separate_families() -> None:
     assert live_fills[0]["connection_id"] == "copy-test"
 
 
+def test_empty_userfills_snapshot_is_preserved_as_a_snapshot_event() -> None:
+    envelope, fills = C.userfills_envelope(
+        {
+            "channel": "userFills",
+            "data": {"user": "0x" + "1" * 40, "isSnapshot": True, "fills": []},
+        },
+        vault="0x" + "1" * 40,
+        receive_wall_ms=1_010,
+        receive_mono_ns=123,
+        connection_id="copy-test",
+    )
+
+    assert envelope is not None
+    assert envelope.channel == "copy_vault_snapshot"
+    assert envelope.parsed_summary["is_snapshot"] is True
+    assert envelope.parsed_summary["event_count"] == 0
+    assert fills == []
+
+
 def test_missing_snapshot_flag_is_preserved_but_never_classified_live() -> None:
     envelope, fills = C.userfills_envelope(
         {
@@ -130,10 +400,13 @@ def test_exact_window_backfill_splits_at_2000_response_cap() -> None:
     address = "0x" + "3" * 40
 
     async def scenario() -> None:
+        queried_windows: list[tuple[int, int]] = []
+
         async def handler(request: httpx.Request) -> httpx.Response:
             body = json.loads(request.content.decode())
             start = int(body["startTime"])
             end = int(body["endTime"])
+            queried_windows.append((start, end))
             if end - start > 5_000:
                 rows = [
                     {
@@ -180,6 +453,11 @@ def test_exact_window_backfill_splits_at_2000_response_cap() -> None:
         assert audit["requests"] == 3
         assert audit["splits"] == 1
         assert len(rows) == 2
+        assert queried_windows == [
+            (10_000, 20_000),
+            (10_000, 15_000),
+            (15_001, 20_000),
+        ]
 
     asyncio.run(scenario())
 
@@ -560,6 +838,601 @@ def test_reconcile_requires_per_vault_subscription_start() -> None:
         assert report["status"] == "UNAVAILABLE"
         assert report["audit"]["reason"] == "NO_LIVE_SUBSCRIPTION_START"
         assert report["audit"]["requested_start_ms"] is None
+
+    asyncio.run(scenario())
+
+
+def test_subscription_ack_parser_requires_matching_subscribe_response() -> None:
+    expected = {"type": "userFills", "user": "0x" + "a" * 40}
+    matching = {
+        "channel": "subscriptionResponse",
+        "data": {"method": "subscribe", "subscription": expected},
+    }
+    other_user = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": "0x" + "b" * 40},
+        },
+    }
+    rejected = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": expected,
+            "error": "subscription rejected",
+        },
+    }
+
+    assert C.classify_subscription_ack(matching) == (
+        "ACKNOWLEDGED",
+        ("userFills", "0x" + "a" * 40),
+        None,
+    )
+    assert C.classify_subscription_ack(other_user)[1] == (
+        "userFills",
+        "0x" + "b" * 40,
+    )
+    assert C.classify_subscription_ack(rejected) == (
+        "REJECTED",
+        ("userFills", "0x" + "a" * 40),
+        "subscription rejected",
+    )
+    assert C.classify_subscription_ack({"channel": "pong"}) is None
+    assert C.classify_subscription_ack(
+        {"channel": "subscriptionResponse", "data": {"method": "subscribe"}}
+    )[0] == "INVALID"
+
+
+def test_l2_collector_requires_matching_ack_before_accepting_book(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    valid = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC",
+            "time": 1_700_000_000_000,
+            "levels": [[{"px": "100", "sz": "2", "n": 1}], []],
+        },
+    }
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                yield json.dumps(valid)
+                yield json.dumps({
+                    "channel": "subscriptionResponse",
+                    "data": {
+                        "method": "subscribe",
+                        "subscription": {"type": "l2Book", "coin": "ETH"},
+                    },
+                })
+                yield json.dumps({
+                    "channel": "subscriptionResponse",
+                    "data": {
+                        "method": "subscribe",
+                        "subscription": {"type": "l2Book", "coin": "BTC"},
+                    },
+                })
+                yield json.dumps(valid)
+                await self.release.wait()
+
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    socket = FakeSocket()
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(socket),
+    )
+
+    class Sink:
+        def __init__(self) -> None:
+            self.envelopes: list[C.TickEnvelope] = []
+
+        async def emit_async(self, envelope: C.TickEnvelope) -> None:
+            self.envelopes.append(envelope)
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        sink = Sink()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(sink, asyncio.Queue(), {"BTC"}, state)
+        )
+        try:
+            for _ in range(100):
+                market = state.get("markets", {}).get("BTC", {})
+                if market.get("accepted") == 1:
+                    break
+                await asyncio.sleep(0.01)
+            market = state["markets"]["BTC"]
+            assert market["accepted"] == 1
+            assert market["rejected"] == 1
+            assert market["subscription_status"] == "ACTIVE"
+            assert state["subscription_ack_mismatches"] == 1
+            assert len(sink.envelopes) == 1
+        finally:
+            socket.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_l2_rejected_subscription_never_accepts_book(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    book = {
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC",
+            "time": 1_700_000_000_000,
+            "levels": [[{"px": "100", "sz": "1", "n": 1}], []],
+        },
+    }
+    rejected = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "l2Book", "coin": "BTC"},
+            "error": "subscription rejected",
+        },
+    }
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                yield json.dumps(rejected)
+                yield json.dumps(book)
+                await self.release.wait()
+
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    socket = FakeSocket()
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(socket),
+    )
+
+    class Sink:
+        async def emit_async(self, _envelope: C.TickEnvelope) -> None:
+            raise AssertionError("rejected L2 subscription must not emit a book")
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(Sink(), asyncio.Queue(), {"BTC"}, state)
+        )
+        try:
+            for _ in range(100):
+                if state.get("rejected_by_reason", {}).get("subscription_not_active"):
+                    break
+                await asyncio.sleep(0.01)
+            market = state["markets"]["BTC"]
+            assert market["subscription_status"] == "REJECTED"
+            assert market["accepted"] == 0
+            assert state["rejected_by_reason"]["subscription_rejected"] == 1
+            assert state["rejected_by_reason"]["subscription_not_active"] == 1
+        finally:
+            socket.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_userfills_forward_starts_after_ack_and_reconnect_reanchors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    address = "0x" + "c" * 40
+    clock = [1_700_000_000.0]
+
+    def fill(ts: int, tid: int) -> dict[str, object]:
+        return {
+            "coin": "BTC",
+            "px": "100",
+            "sz": "1",
+            "side": "B",
+            "time": ts,
+            "dir": "Open Long",
+            "hash": f"0x{tid:x}",
+            "tid": tid,
+            "oid": tid,
+        }
+
+    def event(*, snapshot: bool, ts: int, tid: int) -> dict[str, object]:
+        return {
+            "channel": "userFills",
+            "data": {"user": address, "isSnapshot": snapshot, "fills": [fill(ts, tid)]},
+        }
+
+    ack = {
+        "channel": "subscriptionResponse",
+        "data": {"method": "subscribe", "subscription": {"type": "userFills", "user": address}},
+    }
+
+    class FakeSocket:
+        def __init__(
+            self,
+            messages: list[dict[str, object]],
+            *,
+            disconnect: bool = False,
+            advance_clock_on_ack: bool = False,
+            delay_before_ack_s: float = 0.0,
+        ) -> None:
+            self.messages = messages
+            self.disconnect = disconnect
+            self.advance_clock_on_ack = advance_clock_on_ack
+            self.delay_before_ack_s = delay_before_ack_s
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                for message in self.messages:
+                    if message is ack and self.advance_clock_on_ack:
+                        clock[0] = 1_700_000_010.0
+                    if message is ack and self.delay_before_ack_s:
+                        await asyncio.sleep(self.delay_before_ack_s)
+                    yield json.dumps(message)
+                if self.disconnect:
+                    raise ConnectionError("simulated reconnect")
+                await self.release.wait()
+
+            return iterate()
+
+    first = FakeSocket([ack], disconnect=True)
+    second = FakeSocket(
+        [
+            event(snapshot=False, ts=1_700_000_005_000, tid=1),
+            ack,
+            event(snapshot=True, ts=1_699_999_000_000, tid=2),
+            event(snapshot=True, ts=1_700_000_010_200, tid=5),
+            event(snapshot=True, ts=1_700_000_010_200, tid=5),
+            event(snapshot=False, ts=1_700_000_010_200, tid=5),
+            event(snapshot=False, ts=1_700_000_010_000, tid=4),
+            event(snapshot=False, ts=1_700_000_010_500, tid=3),
+            event(snapshot=False, ts=1_700_000_010_500, tid=3),
+        ],
+        advance_clock_on_ack=True,
+        delay_before_ack_s=0.08,
+    )
+    connections = iter([first, second])
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(next(connections)),
+    )
+    monkeypatch.setattr(C.time, "time", lambda: clock[0])
+    monkeypatch.setattr(C, "SUBSCRIPTION_ACK_TIMEOUT_S", 0.05)
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class Sink:
+        def __init__(self) -> None:
+            self.envelopes: list[C.TickEnvelope] = []
+
+        async def emit_async(self, envelope: C.TickEnvelope) -> None:
+            self.envelopes.append(envelope)
+
+    async def scenario() -> None:
+        starts: dict[str, int] = {}
+        subscription_attempts: dict[str, list[dict[str, object]]] = {}
+        subscription_attempts_dropped: dict[str, int] = {}
+        subscription_diagnostics: dict[str, int] = {}
+        live_ids: dict[str, set[str]] = {address: set()}
+        live_fill_counts: dict[str, int] = {address: 0}
+        unclassified_fill_counts: dict[str, int] = {address: 0}
+        reconnect_counts: dict[str, int] = {address: 0}
+        snapshot_fill_ids: dict[str, set[str]] = {address: set()}
+        sink = Sink()
+        task = asyncio.create_task(
+            C._socket_group(
+                [address],
+                sink,
+                observation_start_ms=starts,
+                live_ids=live_ids,
+                live_fill_counts=live_fill_counts,
+                unclassified_fill_counts=unclassified_fill_counts,
+                reconnect_counts=reconnect_counts,
+                l2_request_queue=asyncio.Queue(),
+                l2_known_coins=set(),
+                subscription_attempts=subscription_attempts,
+                subscription_attempts_dropped=subscription_attempts_dropped,
+                subscription_diagnostics=subscription_diagnostics,
+                snapshot_fill_ids=snapshot_fill_ids,
+            )
+        )
+        try:
+            for _ in range(500):
+                attempts = subscription_attempts.get(address, [])
+                if len(attempts) >= 2 and len(sink.envelopes) >= 7:
+                    break
+                await asyncio.sleep(0.01)
+            attempts = subscription_attempts[address]
+            assert len(attempts) == 2
+            assert attempts[0]["status"] == "INVALIDATED"
+            assert attempts[1]["status"] == "ACTIVE"
+            assert attempts[1]["late_ack"] is True
+            assert attempts[1]["timed_out_at_ms"] is not None
+            assert starts[address] == 1_700_000_010_000
+            assert live_fill_counts[address] == 1
+            _, normalized_fills = C.userfills_envelope(
+                event(snapshot=False, ts=1_700_000_010_500, tid=3),
+                vault=address,
+                receive_wall_ms=1_700_000_010_501,
+                receive_mono_ns=1,
+                connection_id="expected",
+            )
+            assert len(normalized_fills) == 1
+            assert live_ids[address] == {
+                C.canonical_fill_id(normalized_fills[0])
+            }
+            assert subscription_diagnostics["messages_before_ack_dropped"] == 1
+            assert subscription_diagnostics["acknowledged"] == 2
+            assert subscription_diagnostics["duplicate_snapshot_fill_observed"] == 1
+            assert subscription_diagnostics["snapshot_stream_overlap_dropped"] == 1
+            assert subscription_diagnostics["ambiguous_ack_boundary_fill_dropped"] == 1
+            assert subscription_diagnostics["duplicate_stream_fill_dropped"] == 1
+        finally:
+            second.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_userfills_rejected_subscription_never_starts_forward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    address = "0x" + "d" * 40
+    rejected = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": address},
+            "error": "subscription rejected",
+        },
+    }
+    fill_event = {
+        "channel": "userFills",
+        "data": {
+            "user": address,
+            "isSnapshot": False,
+            "fills": [
+                {
+                    "coin": "BTC",
+                    "px": "100",
+                    "sz": "1",
+                    "side": "B",
+                    "time": 1_700_000_010_000,
+                    "dir": "Open Long",
+                    "hash": "0xrejected",
+                    "tid": 4,
+                    "oid": 4,
+                }
+            ],
+        },
+    }
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                yield json.dumps(rejected)
+                yield json.dumps(fill_event)
+                await self.release.wait()
+
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    socket = FakeSocket()
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(socket),
+    )
+
+    class Sink:
+        async def emit_async(self, _envelope: C.TickEnvelope) -> None:
+            raise AssertionError("rejected subscription must not emit userFills")
+
+    async def scenario() -> None:
+        starts: dict[str, int] = {}
+        attempts: dict[str, list[dict[str, object]]] = {}
+        attempts_dropped: dict[str, int] = {}
+        diagnostics: dict[str, int] = {}
+        live_ids: dict[str, set[str]] = {address: set()}
+        live_counts: dict[str, int] = {address: 0}
+        unclassified: dict[str, int] = {address: 0}
+        reconnects: dict[str, int] = {address: 0}
+        task = asyncio.create_task(
+            C._socket_group(
+                [address],
+                Sink(),
+                observation_start_ms=starts,
+                live_ids=live_ids,
+                live_fill_counts=live_counts,
+                unclassified_fill_counts=unclassified,
+                reconnect_counts=reconnects,
+                l2_request_queue=asyncio.Queue(),
+                l2_known_coins=set(),
+                subscription_attempts=attempts,
+                subscription_attempts_dropped=attempts_dropped,
+                subscription_diagnostics=diagnostics,
+            )
+        )
+        try:
+            for _ in range(100):
+                if diagnostics.get("rejected_acks") == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert attempts[address][0]["status"] == "REJECTED"
+            assert starts == {}
+            assert live_counts[address] == 0
+            assert live_ids[address] == set()
+            assert diagnostics["messages_before_ack_dropped"] == 1
+        finally:
+            socket.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_userfills_disconnect_before_ack_is_invalidated_on_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    address = "0x" + "e" * 40
+    ack = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": address},
+        },
+    }
+
+    class FakeSocket:
+        def __init__(self, *, disconnect: bool = False) -> None:
+            self.disconnect = disconnect
+            self.release = asyncio.Event()
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                if not self.disconnect:
+                    yield json.dumps(ack)
+                if self.disconnect:
+                    raise ConnectionError("disconnected before subscription ack")
+                await self.release.wait()
+
+            return iterate()
+
+    class FakeConnection:
+        def __init__(self, socket: FakeSocket) -> None:
+            self.socket = socket
+
+        async def __aenter__(self) -> FakeSocket:
+            return self.socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    first = FakeSocket(disconnect=True)
+    second = FakeSocket()
+    sockets = iter([first, second])
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(next(sockets)),
+    )
+
+    class Sink:
+        async def emit_async(self, _envelope: C.TickEnvelope) -> None:
+            return None
+
+    async def scenario() -> None:
+        starts: dict[str, int] = {}
+        attempts: dict[str, list[dict[str, object]]] = {}
+        dropped: dict[str, int] = {}
+        diagnostics: dict[str, int] = {}
+        live_ids: dict[str, set[str]] = {address: set()}
+        live_counts: dict[str, int] = {address: 0}
+        unclassified: dict[str, int] = {address: 0}
+        reconnects: dict[str, int] = {address: 0}
+        task = asyncio.create_task(
+            C._socket_group(
+                [address],
+                Sink(),
+                observation_start_ms=starts,
+                live_ids=live_ids,
+                live_fill_counts=live_counts,
+                unclassified_fill_counts=unclassified,
+                reconnect_counts=reconnects,
+                l2_request_queue=asyncio.Queue(),
+                l2_known_coins=set(),
+                subscription_attempts=attempts,
+                subscription_attempts_dropped=dropped,
+                subscription_diagnostics=diagnostics,
+            )
+        )
+        try:
+            for _ in range(400):
+                history = attempts.get(address, [])
+                if len(history) >= 2 and history[1].get("status") == "ACTIVE":
+                    break
+                await asyncio.sleep(0.01)
+            history = attempts[address]
+            assert len(history) == 2
+            assert history[0]["status"] == "INVALIDATED"
+            assert history[1]["status"] == "ACTIVE"
+            assert diagnostics["invalidated_on_disconnect"] == 1
+            assert diagnostics["acknowledged"] == 1
+            assert address in starts
+            assert live_counts[address] == 0
+        finally:
+            second.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())
 

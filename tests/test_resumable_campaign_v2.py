@@ -1,21 +1,20 @@
 """Unit tests for Campaign Manifest Schema V2 and Dispatch Receipts (Block 3 & 4 of spec)."""
 import json
+
 import pytest
 
+from hl_observer.control_plane.dispatch_receipt import (
+    DispatchReceipt,
+    generate_request_id,
+)
 from hl_observer.control_plane.resumable_campaign import (
-    CampaignManifest,
-    validate_manifest,
-    acquire_lease,
-    select_due_campaigns,
     SCHEMA_VERSION_V1,
     SCHEMA_VERSION_V2,
+    CampaignManifest,
+    acquire_lease,
+    select_due_campaigns,
 )
 from tools.resumable_campaign import save
-
-from hl_observer.control_plane.dispatch_receipt import (
-    generate_request_id,
-    DispatchReceipt,
-)
 
 
 def test_v1_manifest_backwards_compatibility():

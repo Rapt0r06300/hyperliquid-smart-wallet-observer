@@ -35,6 +35,24 @@ def _specs() -> list[dict]:
     )
 
 
+def test_load_specs_matches_canonical_three_value_restore_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [_row("dataset-a", "a.jsonl.gz", b"alpha")]
+    proof = {"source_index_sha256": "c" * 64}
+    required = {("release-1", "bundle.zip"): (11, "a" * 64)}
+    monkeypatch.setattr(
+        verifier,
+        "_load_replay_ready_plan",
+        lambda _index, _metrics: (proof, rows, required),
+    )
+
+    actual_proof, specs = verifier._load_specs(tmp_path / "index", tmp_path / "metrics")
+
+    assert actual_proof == proof
+    assert specs == verifier.build_outer_specs(rows, required)
+
+
 def test_partition_assignment_is_deterministic_and_byte_balanced() -> None:
     specs = [
         {"release_tag": "r", "asset_name": f"a-{index}", "asset_bytes": size}

@@ -1,13 +1,17 @@
 """Fail-closed resumable campaign protocol for GitHub-hosted workers."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-import secrets
+import logging
 import re
-from typing import Any, Mapping
+import secrets
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from hl_observer.strategies.active_scope import require_active_strategy
 
 SCHEMA_VERSION = "alina.resumable_campaign.v1"
 SCHEMA_VERSION_V1 = "alina.resumable_campaign.v1"
@@ -50,6 +54,33 @@ def sha256_json(value: Any) -> str:
 
 def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def require_campaign_economic_scope(m: CampaignManifest) -> str | None:
+    """Require an explicit canonical active family before executing ANALYZE work."""
+    if (
+        m.schema_version != SCHEMA_VERSION_V2
+        or m.creation_phase != "ANALYZE"
+        or m.kind not in ANALYZE_CAMPAIGN_KINDS
+    ):
+        return None
+    cursor = m.cursor if isinstance(m.cursor, Mapping) else {}
+    family = cursor.get("strategy_family")
+    if not isinstance(family, str) or not family.strip():
+        raise ValueError(
+            f"DISABLED_BY_SCOPE:campaign={m.campaign_id}:missing_strategy_family"
+        )
+    try:
+        canonical = require_active_strategy(family)
+    except ValueError as exc:
+        raise ValueError(
+            f"DISABLED_BY_SCOPE:campaign={m.campaign_id}:{exc}"
+        ) from exc
+    if family != canonical:
+        raise ValueError(
+            f"DISABLED_BY_SCOPE:campaign={m.campaign_id}:noncanonical_family={family}"
+        )
+    return canonical
 
 @dataclass(frozen=True)
 class StopLimits:
@@ -105,7 +136,7 @@ class CampaignManifest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "CampaignManifest":
+    def from_dict(cls, raw: Mapping[str, Any]) -> CampaignManifest:
         allowed = set(cls.__dataclass_fields__)
         unknown = set(raw) - allowed
         if unknown:
@@ -223,6 +254,8 @@ def acquire_lease(
     if m.schema_version == SCHEMA_VERSION_V1:
         raise ValueError("V1 manifest is immutable; migrate to V2 before execution")
 
+    require_campaign_economic_scope(m)
+
     # Phase/Epoch Guard for V2
     if m.schema_version == SCHEMA_VERSION_V2:
         if expected_phase is not None and m.creation_phase != expected_phase:
@@ -261,11 +294,7 @@ def release_lease(m: CampaignManifest, token: str) -> None:
 
 
 def classify_failure(category: str) -> bool:
-    if category in NON_RETRYABLE:
-        return False
-    if category in RETRYABLE:
-        return True
-    return False
+    return category in RETRYABLE
 
 
 def mark_continuation(
@@ -345,6 +374,11 @@ def select_due_campaigns(
     for m in items:
         # V1 remains readable evidence but is never executable after cutover.
         if m.schema_version != SCHEMA_VERSION_V2:
+            continue
+        try:
+            require_campaign_economic_scope(m)
+        except ValueError as exc:
+            logging.warning("campaign excluded before scheduling: %s", exc)
             continue
         if m.status not in ACTIVE_STATES:
             continue

@@ -97,9 +97,11 @@ jobs:
               exit 0
             fi
             git commit -m "closure: publish canonical single-repository status report"
-            if git push origin HEAD:main; then
+            if python tools/publish_main_commit.py --remote origin --branch main; then
               exit 0
             fi
+            git fetch origin main
+            git reset --hard origin/main
             sleep "$((attempt * 2))"
           done
           exit 1

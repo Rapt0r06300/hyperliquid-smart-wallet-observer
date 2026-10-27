@@ -40,14 +40,7 @@ jobs:
           if [ -d catalog/campaigns ]; then git add catalog/campaigns; fi
           if ! git diff --cached --quiet; then
             git commit -m "control: apply durable phase requests"
-            for attempt in 1 2 3 4 5; do
-              if git push origin HEAD:main; then
-                break
-              fi
-              git fetch origin main
-              git rebase origin/main
-              if [ "$attempt" = 5 ]; then exit 1; fi
-            done
+            python tools/publish_main_commit.py --remote origin --branch main
           fi
       - name: Materialize phase-owned campaigns
         env:

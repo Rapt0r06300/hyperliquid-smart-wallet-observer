@@ -9,6 +9,11 @@ import os
 import re
 from pathlib import Path
 
+if __package__:
+    from .set_phase import phase_lock
+else:
+    from set_phase import phase_lock
+
 
 ORDER = ("DRAIN", "QUALITY", "REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD", "DONE")
 
@@ -71,7 +76,7 @@ def _required_campaign_gate(rows, state, required_kinds):
     return missing, incomplete
 
 
-def main():
+def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("--stage", choices=ORDER, required=True)
     p.add_argument("--request-id", required=True)
@@ -80,10 +85,15 @@ def main():
     p.add_argument("--campaign-root", default="catalog/campaigns")
     p.add_argument("--receipt-dir", default="control/phase-receipts")
     p.add_argument("--gate-registry", default="control/analysis-stage-gates.json")
-    a = p.parse_args()
+    a = p.parse_args(argv)
     if not re.fullmatch(r"[0-9a-f]{64}", a.request_id):
         raise SystemExit("invalid request id")
     path = Path(a.path)
+    with phase_lock(path):
+        return _advance_stage_locked(a, path)
+
+
+def _advance_stage_locked(a, path: Path):
     state = json.loads(path.read_text(encoding="utf-8"))
     if state.get("phase") != "ANALYZE":
         raise SystemExit("analysis stage requires ANALYZE phase")

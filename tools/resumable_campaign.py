@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import json
 import os
-from pathlib import Path
-import tempfile
 import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from hl_observer.control_plane.resumable_campaign import (
-    CampaignManifest,
     ANALYSIS_STAGE_BY_KIND,
+    CampaignManifest,
     acquire_lease,
     complete_work_unit,
     mark_continuation,
     mark_terminal,
+    require_campaign_economic_scope,
     select_due_campaigns,
     sha256_json,
     transition,
@@ -148,6 +149,7 @@ def main() -> int:
                 if args.operator_request_id else []
             ),
         )
+        require_campaign_economic_scope(manifest)
         save(path, manifest)
         print(sha256_json(manifest.to_dict()))
         return 0
@@ -212,8 +214,24 @@ def main() -> int:
         save(path, manifest, args.expected_digest)
         return 0
     if args.command == "retry":
+        require_campaign_economic_scope(manifest)
         if manifest.status != "STUCK":
+            prior_retry = any(
+                item.get("from") == "STUCK"
+                and item.get("to") == "RUNNING"
+                and item.get("reason") == (args.reason or "operator_retry")
+                for item in manifest.history
+            )
+            if prior_retry:
+                print("retry_already_applied")
+                return 0
             raise SystemExit("only STUCK campaigns may be operator-retried")
+        if manifest.lease:
+            lease_expires = datetime.fromisoformat(
+                str(manifest.lease["expires_at"]).replace("Z", "+00:00")
+            )
+            if lease_expires > datetime.now(timezone.utc):
+                raise SystemExit("active campaign lease prevents operator retry")
         manifest.lease = None
         manifest.next_due_at = None
         manifest.consecutive_failures = 0

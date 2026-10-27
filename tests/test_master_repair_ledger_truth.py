@@ -201,6 +201,18 @@ def test_open_mark_and_close_share_exact_round_trip_cost_truth() -> None:
     assert marked["positions"][0]["pnl_accounting_status"] == "STRICT_ROUND_TRIP_COSTS_KNOWN"
 
 
+def test_round_trip_net_pnl_rejects_finite_inputs_with_overflowing_result() -> None:
+    assert (
+        round_trip_net_pnl_usdc(
+            gross_pnl_usdc=1e308,
+            entry_cost_usdc=0.0,
+            exit_cost_usdc=0.0,
+            funding_cost_usdc=-1e308,
+        )
+        is None
+    )
+
+
 def test_sltp_close_includes_entry_and_exit_costs_once() -> None:
     from hl_observer.paper_trading.sl_tp import SLTPConfig
     from hl_observer.paper_trading.sltp_runtime import apply_sltp_exits

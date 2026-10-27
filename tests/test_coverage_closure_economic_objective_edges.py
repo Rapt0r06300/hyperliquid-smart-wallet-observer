@@ -25,7 +25,7 @@ def _segment(*, net: float = 2.6, count: int = 2, hash_char: str = "b", **overri
 
 def _proof(**overrides):
     row = {
-        "family": "lead_lag",
+        "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
         "starting_capital_usd": 200.0,
@@ -45,6 +45,21 @@ def _proof(**overrides):
         "oos": _segment(net=2.6, hash_char="b", no_lookahead=True),
         "forward": _segment(net=2.6, hash_char="c", post_freeze=True),
         "placebos": {"beaten": True},
+        "vault_generalization": {"sample_count": 20, "net_bps": 3.0},
+        "copy_checkpoint_integrity": {
+            "schema_version": objective.CHECKPOINT_INTEGRITY_SCHEMA,
+            "receipt_valid": True,
+            "writer_role": "BOUND_WRITER",
+            "writer_run_id": "writer-clean-1",
+            "clean_epoch_ms": 1_000,
+            "duplicate_checkpoint_ids": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "proof_trade_count": 4,
+            "expected_proof_trade_count": 4,
+            "all_proof_trades_exact_checkpoint_bound": True,
+            "all_proof_trades_same_writer_run": True,
+            "all_proof_trades_post_clean_epoch": True,
+        },
     }
     row.update(overrides)
     return row
@@ -130,6 +145,15 @@ def test_top_level_contract_rejects_unknown_family_capital_positions_and_freeze(
     assert "PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION" in reasons
     assert "POSITIONS_NOT_FULLY_OPENED_AND_CLOSED" in reasons
     assert result["eligible_net_pnl_usd"] is None
+
+
+def test_historical_inactive_family_keeps_visible_but_ineligible_proof() -> None:
+    result = objective.evaluate_objective(_proof(family="lead_lag"))
+
+    assert "DISABLED_BY_SCOPE" in result["objective_reasons"]
+    assert result["proof_net_pnl_usd"] == 5.2
+    assert result["eligible_net_pnl_usd"] is None
+    assert result["objective_status"] == "NON_ATTEINT"
 
 
 def test_copy_generalisation_requires_measured_positive_heldout_net() -> None:

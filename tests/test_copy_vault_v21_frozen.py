@@ -60,6 +60,12 @@ def _segment(name: str, eligible: bool) -> dict:
         "paper_read_only": True,
         "real_execution": False,
         "carry_pnl_usd": 0.0,
+        "funding_receipt": {
+            "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+            "carry_pnl_usd": 0.0,
+            "trade_count": 0,
+            "settlement_crossing_count": 0,
+        },
     }
 
 
@@ -153,6 +159,29 @@ def test_reference_depth_rejects_stale_or_noncausal_books() -> None:
 
 
 @pytest.mark.parametrize(
+    "bids,asks",
+    [
+        ([[99.0, 1.0], [100.0, 1.0]], [[101.0, 1.0]]),
+        ([[100.0, 1.0], [100.0, 1.0]], [[101.0, 1.0]]),
+        ([[100.0, 1.0]], [[101.0, 1.0], [100.0, 1.0]]),
+    ],
+)
+def test_reference_depth_refuse_un_l2_desordonne_ou_duplique(bids, asks) -> None:
+    row = {
+        "ts_ms": 1_000,
+        "causal_observation": True,
+        "bid": 100.0,
+        "ask": 101.0,
+        "bids5": bids,
+        "asks5": asks,
+    }
+
+    assert V21._reference_depth_features(
+        {"signal_ts_ms": 1_000, "direction": 1}, [row]
+    ) is None
+
+
+@pytest.mark.parametrize(
     "book",
     [
         {
@@ -216,7 +245,15 @@ def test_frozen_v21_opens_heldouts_sequentially(monkeypatch: pytest.MonkeyPatch)
     assert report["forward"]["status"] == "BLOCKED_BY_OOS"
     assert report["forward"]["heldout_evaluated"] is False
     assert report["objective_status"] == "UNMEASURABLE"
-    assert report["carry_pnl_usd"] == 0.0
+    assert report["oos"]["carry_pnl_usd"] == 0.0
+    assert report["forward"]["carry_pnl_usd"] is None
+    assert (
+        report["oos"]["funding_receipt"]["status"]
+        == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+    )
+    assert report["forward"]["funding_receipt"]["status"] == "NOT_EVALUATED"
+    assert report["carry_pnl_usd"] is None
+    assert report["funding_receipt"]["status"] == "NOT_EVALUATED"
 
 
 def test_segment_calendar_coverage_does_not_discard_malformed_day_entries() -> None:
@@ -236,6 +273,8 @@ def test_segment_calendar_coverage_does_not_discard_malformed_day_entries() -> N
         result["calendar_day_statistics"]["reason"]
         == "INVALID_COMPLETE_UTC_DAY_COVERAGE"
     )
+    assert result["carry_pnl_usd"] == 0.0
+    assert result["funding_receipt"]["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
 
 
 def test_calendar_pnl_is_attributed_to_trade_close_utc_day(
@@ -307,6 +346,8 @@ def test_forward_eligible_evaluation_wires_capacity_and_stress_diagnostics(
     report = V21.evaluate_frozen_v21([], {}, _freeze())
 
     assert report["economically_proven"] is True
+    assert report["carry_pnl_usd"] == 0.0
+    assert report["funding_receipt"]["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
     assert report["capacity_diagnostic"]["capital_scenarios_usd"] == [
         10.0,
         50.0,
@@ -321,6 +362,49 @@ def test_forward_eligible_evaluation_wires_capacity_and_stress_diagnostics(
     assert report["capacity_diagnostic"]["promotion_eligible"] is False
     assert report["stress_diagnostic"]["scenario_count"] == 13
     assert report["stress_diagnostic"]["promotion_eligible"] is False
+
+
+@pytest.mark.parametrize(
+    ("trade", "reason"),
+    [
+        ({"exit_ts_ms": 10}, "FUNDING_TRADE_TIMESTAMPS_UNMEASURABLE"),
+        (
+            {"entry_ts_ms": 3_599_999, "exit_ts_ms": 3_600_000},
+            "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+        ),
+        (
+            {"entry_ts_ms": 3_600_000, "exit_ts_ms": 3_600_001},
+            "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+        ),
+    ],
+)
+def test_segment_blocks_funding_pnl_without_complete_no_crossing_proof(
+    monkeypatch: pytest.MonkeyPatch, trade: dict, reason: str
+) -> None:
+    day = 86_400_000
+    monkeypatch.setattr(V21, "_segment_candidates", lambda *_args, **_kwargs: ([], {}))
+    monkeypatch.setattr(V21, "_settle", lambda *_args, **_kwargs: ([trade], [], {}))
+    monkeypatch.setattr(
+        V21,
+        "assess_train_variant",
+        lambda *_args, **_kwargs: {"statistics": {"daily_net_pnl_usd": [1.0]}, "reasons": []},
+    )
+
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=day - 1,
+        params=_freeze()["freeze"]["parameters"],
+        complete_utc_day_starts_ms=[0],
+    )
+
+    assert result["eligible"] is False
+    assert "FUNDING_PNL_UNMEASURABLE" in result["reasons"]
+    assert result["carry_pnl_usd"] is None
+    assert result["funding_receipt"]["status"] == "UNMEASURABLE"
+    assert result["funding_receipt"]["reason"] == reason
 
 
 def test_frozen_v21_rejects_parameter_tampering() -> None:
@@ -645,6 +729,10 @@ def test_reference_objective_status_is_independent_from_economic_proof(
             "segment": segment,
             "eligible": True,
             "daily_mean_net_pnl_usd": 4.5,
+            "funding_receipt": {
+                "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+                "carry_pnl_usd": 0.0,
+            },
         },
     )
 

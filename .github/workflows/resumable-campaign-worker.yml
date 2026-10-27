@@ -188,18 +188,7 @@ jobs:
           gh auth setup-git
           git add "$M"
           git commit -m "campaign: claim $CAMPAIGN_ID run $GITHUB_RUN_ID"
-          STAGGER_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
-          STAGGER="$((16#$STAGGER_HEX % 23))"
-          sleep "$STAGGER"
-          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            delay="$((3 + (STAGGER % 5) + i * 3))"
-            [ "$delay" -le 30 ] || delay=30
-            sleep "$delay"
-          done
-          exit 1
+          python tools/publish_main_commit.py --remote origin --branch main
 
       - id: unit
         name: Run one bounded real unit
@@ -747,18 +736,7 @@ jobs:
             git add catalog/ECONOMIC_IMPROVEMENT_LEDGER.json
           fi
           git commit -m "campaign: checkpoint $CAMPAIGN_ID"
-          STAGGER_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
-          STAGGER="$((16#$STAGGER_HEX % 23))"
-          sleep "$STAGGER"
-          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            delay="$((3 + (STAGGER % 5) + i * 3))"
-            [ "$delay" -le 30 ] || delay=30
-            sleep "$delay"
-          done
-          exit 1
+          python tools/publish_main_commit.py --remote origin --branch main
 
 
 

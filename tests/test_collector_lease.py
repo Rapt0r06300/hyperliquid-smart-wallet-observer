@@ -316,16 +316,22 @@ def test_inspection_exposes_protocol_only_for_heartbeat_owned_by_active_pid(
     heartbeat_dir = tmp_path / "runtime/research_lab/heartbeats"
     heartbeat_dir.mkdir(parents=True, exist_ok=True)
     heartbeat = heartbeat_dir / "bbo-collector.json"
-    heartbeat.write_text(
-        json.dumps({"pid": 191, "protocol": "bbo-causal-v2"}),
-        encoding="utf-8",
-    )
     lease = json.loads(
         (tmp_path / "runtime/data/economic_collection_lease.json").read_text(
             encoding="utf-8"
         )
     )
     now = float(lease["issued_at_ms"]) / 1000.0 + 1.0
+    heartbeat.write_text(
+        json.dumps(
+            {
+                "pid": 191,
+                "protocol": "bbo-causal-v2",
+                "ts_ms": int(now * 1000) - 500,
+            }
+        ),
+        encoding="utf-8",
+    )
     def inventory(_root: Path) -> list[dict[str, object]]:
         return [
             {
@@ -340,7 +346,13 @@ def test_inspection_exposes_protocol_only_for_heartbeat_owned_by_active_pid(
     assert inspected["protocols"] == {"bbo-collector": "bbo-causal-v2"}
 
     heartbeat.write_text(
-        json.dumps({"pid": 999, "protocol": "forged-protocol"}),
+        json.dumps(
+            {
+                "pid": 999,
+                "protocol": "forged-protocol",
+                "ts_ms": int(now * 1000) - 500,
+            }
+        ),
         encoding="utf-8",
     )
     inspected = inspect_bounded_collectors(tmp_path, process_inventory=inventory, now=now)

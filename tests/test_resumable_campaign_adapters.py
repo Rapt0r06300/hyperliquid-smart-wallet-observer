@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -115,6 +116,97 @@ def test_subprocess_failure_is_honest(tmp_path):
     )
     assert out.status == "FAILED"
     assert out.payload["failure_category"] == "QUALITY"
+
+
+def test_copy_vault_subscription_diagnostics_reach_adapter_receipt(tmp_path):
+    address = "0x" + "c" * 40
+
+    class Result:
+        returncode = 0
+        stdout = "collection complete"
+        stderr = ""
+
+    def runner(cmd, **_kwargs):
+        output = Path(cmd[cmd.index("--output") + 1])
+        (output / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "family": "copy_vault_fills",
+                    "record_count": 1,
+                    "trade_count": 1,
+                    "trade_count_exact": True,
+                    "bytes": 128,
+                    "uncompressed_size_exact": True,
+                    "uncompressed_bytes": 256,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (output / "BUNDLE_INDEX.json").write_text(
+            json.dumps(
+                {
+                    "manifests": ["manifest.json"],
+                    "shard_count": 1,
+                    "safe_count": 1,
+                    "partial_count": 0,
+                    "reject_count": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (output / "collection_summary.json").write_text(
+            json.dumps(
+                {
+                    "duration_s": 10.0,
+                    "accepted_frames": 1,
+                    "persisted_frames": 1,
+                    "l2_frames": 0,
+                    "queue_drops": 0,
+                    "vault_observation_start_ts_ms": {address: 10_000},
+                    "vault_subscription_attempts": {
+                        address: [
+                            {
+                                "type": "userFills",
+                                "identity": address,
+                                "status": "ACTIVE",
+                                "connection_id": "copy-vault-receipt-test",
+                                "sent_at_ms": 9_900,
+                                "acknowledged_at_ms": 10_000,
+                                "timed_out_at_ms": None,
+                                "invalidated_at_ms": None,
+                                "late_ack": False,
+                                "error": None,
+                            }
+                        ]
+                    },
+                    "vault_subscription_attempts_dropped": {address: 0},
+                    "subscription_diagnostics": {"acknowledged": 1},
+                    "l2_diagnostics": {
+                        "subscription_ack_mismatches": 0,
+                        "invalid_subscription_acks": 0,
+                        "markets": {},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return Result()
+
+    result = run_one_unit(
+        context(
+            "copy_vault_collection",
+            output_root=str(tmp_path),
+            duration_s=10,
+            max_vaults=1,
+        ),
+        runner=runner,
+    )
+
+    assert result.status == "COMPLETE"
+    receipt = result.payload["collection_metrics"]["copy_vault_subscription"]
+    assert receipt["vault_observation_start_ts_ms"] == {address: 10_000}
+    assert receipt["vault_subscription_attempts"][address][0]["status"] == "ACTIVE"
+    assert receipt["subscription_diagnostics"] == {"acknowledged": 1}
 
 
 def test_dataset_materialization_transient_http_failure_is_retryable(tmp_path):
@@ -518,6 +610,267 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
     assert metrics["duration_s"] == 60.0
     assert metrics["accepted_frames"] == 10
     assert metrics["persisted_frames"] == 10
+
+
+def test_copy_vault_subscription_diagnostics_reach_collection_receipt(tmp_path):
+    address = "0x" + "a" * 40
+    summary = {
+        "vault_observation_start_ts_ms": {address: 10_000},
+        "vault_subscription_attempts": {
+            address: [
+                {
+                    "type": "userFills",
+                    "identity": address,
+                    "status": "ACTIVE",
+                    "connection_id": "copy-vault-test",
+                    "sent_at_ms": 9_900,
+                    "acknowledged_at_ms": 10_000,
+                    "timed_out_at_ms": None,
+                    "invalidated_at_ms": None,
+                    "late_ack": False,
+                    "error": None,
+                }
+            ]
+        },
+        "vault_subscription_attempts_dropped": {address: 0},
+        "subscription_diagnostics": {"acknowledged": 1, "unmatched_acks": 2},
+        "l2_diagnostics": {
+            "subscription_ack_mismatches": 1,
+            "invalid_subscription_acks": 0,
+            "markets": {
+                "BTC": {
+                    "subscription_status": "REJECTED",
+                    "subscription_attempts": [
+                        {
+                            "type": "l2Book",
+                            "identity": "BTC",
+                            "status": "REJECTED",
+                            "connection_id": "copy-l2-test",
+                            "sent_at_ms": 9_800,
+                            "acknowledged_at_ms": None,
+                            "timed_out_at_ms": None,
+                            "invalidated_at_ms": None,
+                            "late_ack": False,
+                            "error": "subscription rejected",
+                        }
+                    ],
+                    "subscription_attempts_dropped": 0,
+                }
+            },
+        },
+    }
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps(summary), encoding="utf-8"
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "manifests": [],
+                "shard_count": 0,
+                "safe_count": 0,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    receipt = metrics["copy_vault_subscription"]
+    assert receipt["vault_observation_start_ts_ms"] == {address: 10_000}
+    assert receipt["vault_subscription_attempts"][address][0]["status"] == "ACTIVE"
+    assert receipt["subscription_diagnostics"] == {
+        "acknowledged": 1,
+        "unmatched_acks": 2,
+    }
+    assert receipt["l2_subscription"]["markets"]["BTC"][
+        "subscription_status"
+    ] == "REJECTED"
+
+
+def test_invalid_copy_vault_subscription_receipt_values_remain_unknown(tmp_path):
+    address = "0x" + "b" * 40
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps(
+            {
+                "vault_observation_start_ts_ms": {address: True},
+                "vault_subscription_attempts": {
+                    address: [
+                        {
+                            "type": [],
+                            "identity": address,
+                            "status": "ACTIVE",
+                            "connection_id": "bad-schema",
+                            "sent_at_ms": 1,
+                            "late_ack": False,
+                        }
+                    ]
+                },
+                "subscription_diagnostics": {"acknowledged": True},
+                "l2_diagnostics": {
+                    "subscription_ack_mismatches": -1,
+                    "invalid_subscription_acks": 0,
+                    "markets": {"BTC": {"subscription_status": []}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "manifests": [],
+                "shard_count": 0,
+                "safe_count": 0,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    receipt = _collection_checkpoint_metrics(tmp_path)["copy_vault_subscription"]
+
+    assert receipt["vault_observation_start_ts_ms"] is None
+    assert receipt["vault_subscription_attempts"] is None
+    assert receipt["subscription_diagnostics"] is None
+    assert receipt["l2_subscription"] is None
+
+
+def test_collection_checkpoint_metrics_certify_complete_frame_sources(tmp_path):
+    summary = {
+        "started_at_ms": 1000,
+        "ended_at_ms": 61000,
+        "duration_s": 60.0,
+        "accepted_frames": 10,
+        "persisted_frames": 10,
+        "queue_drops": {},
+    }
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps(summary), encoding="utf-8"
+    )
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    (manifest_dir / "l2.json").write_text(
+        json.dumps(
+            {
+                "family": "l2book",
+                "record_count": 7,
+                "bytes": 128,
+                "uncompressed_size_exact": True,
+                "uncompressed_bytes": 512,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (manifest_dir / "trades.json").write_text(
+        json.dumps(
+            {
+                "family": "trades",
+                "record_count": 3,
+                "bytes": 64,
+                "trade_count_exact": True,
+                "trade_count": 3,
+                "uncompressed_size_exact": True,
+                "uncompressed_bytes": 256,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "manifests": ["manifests/l2.json", "manifests/trades.json"],
+                "shard_count": 2,
+                "safe_count": 2,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["accepted_frames"] == 10
+    assert metrics["persisted_frames"] == 10
+    assert metrics["l2_frames"] == 7
+    assert metrics["frame_metrics_complete"] is True
+
+
+def test_collection_checkpoint_metrics_keep_missing_counts_unknown(tmp_path):
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps({"schema": "alina.cloud_collection_window.v1"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "manifests": ["manifests/missing.json"],
+                "shard_count": 1,
+                "safe_count": 1,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["accepted_frames"] is None
+    assert metrics["persisted_frames"] is None
+    assert metrics["l2_frames"] is None
+    assert metrics["bbo_frames"] is None
+    assert metrics["queue_drops"] is None
+    assert metrics["manifest_inventory_complete"] is False
+    assert metrics["frame_metrics_complete"] is False
+    assert metrics["trade_count_coverage_complete"] is False
+
+
+def test_l2_summary_manifest_disagreement_is_not_hidden_by_max(tmp_path):
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps(
+            {
+                "accepted_frames": 8,
+                "persisted_frames": 8,
+                "l2_frames": 8,
+                "queue_drops": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    (manifest_dir / "l2.json").write_text(
+        json.dumps({"family": "l2book", "record_count": 7, "bytes": 128}),
+        encoding="utf-8",
+    )
+    (manifest_dir / "trades.json").write_text(
+        json.dumps({"family": "trades", "record_count": 1, "bytes": 64}),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "manifests": ["manifests/l2.json", "manifests/trades.json"],
+                "shard_count": 2,
+                "safe_count": 2,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["l2_frames"] is None
+    assert metrics["l2_frames_observed"] == 8
+    assert metrics["l2_frames_manifest_records"] == 7
+    assert metrics["l2_frames_reconciled"] is False
+    assert metrics["frame_metrics_complete"] is False
 
 
 def test_collection_checkpoint_metrics_preserve_historical_backfill_audit(tmp_path):

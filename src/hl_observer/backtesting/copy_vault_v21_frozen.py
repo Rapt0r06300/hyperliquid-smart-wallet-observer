@@ -31,6 +31,11 @@ from hl_observer.backtesting.train_statistics import (
     summarize_complete_utc_days,
 )
 from hl_observer.config.frais_venues import frais_taker_bps
+from hl_observer.funding.funding_times import next_funding_time_ms
+from hl_observer.normalization.l2_book import (
+    normalize_l2_levels,
+    validate_l2_book_sides,
+)
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v3"
@@ -64,30 +69,6 @@ def _first_fill_notional_usd(metaorder: Mapping[str, Any]) -> float | None:
     return value if math.isfinite(value) and value > 0.0 else None
 
 
-def _valid_depth_side(raw: Any) -> list[tuple[float, float]] | None:
-    if not isinstance(raw, (list, tuple)) or not raw:
-        return None
-    levels: list[tuple[float, float]] = []
-    try:
-        for level in raw:
-            if not isinstance(level, (list, tuple)) or len(level) != 2:
-                return None
-            if isinstance(level[0], bool) or isinstance(level[1], bool):
-                return None
-            price, quantity = float(level[0]), float(level[1])
-            if (
-                not math.isfinite(price)
-                or not math.isfinite(quantity)
-                or price <= 0.0
-                or quantity <= 0.0
-            ):
-                return None
-            levels.append((price, quantity))
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return levels
-
-
 def _reference_depth_features(
     metaorder: Mapping[str, Any],
     rows: Sequence[Mapping[str, Any]],
@@ -109,9 +90,15 @@ def _reference_depth_features(
     row = rows[index]
     if row.get("causal_observation") is not True:
         return None
-    bids = _valid_depth_side(row.get("bids5"))
-    asks = _valid_depth_side(row.get("asks5"))
+    bids = normalize_l2_levels(row.get("bids5"), side="bid")
+    asks = normalize_l2_levels(row.get("asks5"), side="ask")
     if bids is None or asks is None:
+        return None
+    if ("bid" in row) != ("ask" in row):
+        return None
+    if "bid" in row and validate_l2_book_sides(
+        row.get("bids5"), row.get("asks5"), bid=row.get("bid"), ask=row.get("ask")
+    )[1] is not None:
         return None
     bid_usd = sum(price * quantity for price, quantity in bids)
     ask_usd = sum(price * quantity for price, quantity in asks)
@@ -228,6 +215,13 @@ def _mean_daily(statistics: Mapping[str, Any]) -> float | None:
 
 
 def _reference_objective_status(*segments: Mapping[str, Any]) -> str:
+    if any(
+        not isinstance(segment.get("funding_receipt"), Mapping)
+        or segment["funding_receipt"].get("status")
+        not in {"MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "MEASURED"}
+        for segment in segments
+    ):
+        return "UNMEASURABLE"
     daily_means = [segment.get("daily_mean_net_pnl_usd") for segment in segments]
     if not daily_means or any(value is None for value in daily_means):
         return "UNMEASURABLE"
@@ -236,6 +230,132 @@ def _reference_objective_status(*segments: Mapping[str, Any]) -> str:
         if all(float(value) >= REFERENCE_DAILY_OBJECTIVE_USD for value in daily_means)
         else "NON_ATTEINT"
     )
+
+
+def _funding_receipt(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Prove zero realized funding only when every accepted position avoids settlement."""
+
+    trade_count = len(trades)
+    for index, trade in enumerate(trades):
+        if not isinstance(trade, Mapping):
+            return {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": trade_count,
+                "settlement_crossing_count": None,
+                "settlement_interval_hours": 1,
+                "reason": "FUNDING_TRADE_TIMESTAMPS_UNMEASURABLE",
+                "trade_index": index,
+            }
+        entry_raw = trade.get("entry_ts_ms")
+        exit_raw = trade.get("exit_ts_ms")
+        if (
+            isinstance(entry_raw, bool)
+            or not isinstance(entry_raw, int)
+            or isinstance(exit_raw, bool)
+            or not isinstance(exit_raw, int)
+            or entry_raw < 0
+            or exit_raw <= entry_raw
+        ):
+            return {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": trade_count,
+                "settlement_crossing_count": None,
+                "settlement_interval_hours": 1,
+                "reason": "FUNDING_TRADE_TIMESTAMPS_UNMEASURABLE",
+                "trade_index": index,
+            }
+        # Subtract one millisecond so an entry exactly at settlement remains
+        # ambiguous and is counted as crossing the boundary.
+        first_possible_funding_ms = next_funding_time_ms(
+            entry_raw - 1,
+            interval_hours=1,
+        )
+        if first_possible_funding_ms <= exit_raw:
+            return {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": trade_count,
+                "settlement_crossing_count": 1,
+                "settlement_interval_hours": 1,
+                "reason": "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY",
+                "trade_index": index,
+                "funding_boundary_ms": first_possible_funding_ms,
+            }
+    return {
+        "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
+        "carry_pnl_usd": 0.0,
+        "trade_count": trade_count,
+        "settlement_crossing_count": 0,
+        "settlement_interval_hours": 1,
+        "reason": "NO_EXECUTED_POSITIONS" if trade_count == 0 else "NO_SETTLEMENT_CROSSED",
+    }
+
+
+def _not_evaluated_funding_receipt(reason: str) -> dict[str, Any]:
+    return {
+        "status": "NOT_EVALUATED",
+        "carry_pnl_usd": None,
+        "trade_count": None,
+        "settlement_crossing_count": None,
+        "settlement_interval_hours": 1,
+        "reason": reason,
+    }
+
+
+def _aggregate_funding_receipt(
+    segments: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    receipts: dict[str, dict[str, Any]] = {}
+    for name, segment in segments.items():
+        raw = segment.get("funding_receipt")
+        receipts[name] = dict(raw) if isinstance(raw, Mapping) else _not_evaluated_funding_receipt(
+            "SEGMENT_FUNDING_RECEIPT_MISSING"
+        )
+    measured_receipts = all(
+        receipt.get("status")
+        in {"MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "MEASURED"}
+        and isinstance(receipt.get("carry_pnl_usd"), (int, float))
+        and not isinstance(receipt.get("carry_pnl_usd"), bool)
+        and math.isfinite(float(receipt["carry_pnl_usd"]))
+        for receipt in receipts.values()
+    )
+    if measured_receipts:
+        carry_pnl_usd = sum(
+            float(receipt["carry_pnl_usd"]) for receipt in receipts.values()
+        )
+        status = (
+            "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+            if carry_pnl_usd == 0.0
+            and all(
+                receipt.get("status") == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+                for receipt in receipts.values()
+            )
+            else "MEASURED"
+        )
+        return {
+            "status": status,
+            "carry_pnl_usd": carry_pnl_usd,
+            "segments": receipts,
+            "reason": (
+                "ALL_REQUIRED_SEGMENTS_PROVED_NO_SETTLEMENT_CROSSED"
+                if status == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+                else "ALL_REQUIRED_SEGMENTS_HAVE_MEASURED_FUNDING_PNL"
+            ),
+        }
+    if any(receipt.get("status") == "UNMEASURABLE" for receipt in receipts.values()):
+        status = "UNMEASURABLE"
+        reason = "AT_LEAST_ONE_SEGMENT_FUNDING_UNMEASURABLE"
+    else:
+        status = "NOT_EVALUATED"
+        reason = "AT_LEAST_ONE_REQUIRED_SEGMENT_NOT_EVALUATED"
+    return {
+        "status": status,
+        "carry_pnl_usd": None,
+        "segments": receipts,
+        "reason": reason,
+    }
 
 
 def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -632,7 +752,10 @@ def _evaluate_segment(
         timestamp_key="exit_ts_ms",
         complete_day_starts_ms=fully_covered_days,
     )
+    funding_receipt = _funding_receipt(trades)
     reasons = list(assessment["reasons"])
+    if funding_receipt["status"] != "MEASURED_ZERO_NO_SETTLEMENT_CROSSED":
+        reasons.append("FUNDING_PNL_UNMEASURABLE")
     return {
         **assessment,
         "segment": segment,
@@ -654,7 +777,8 @@ def _evaluate_segment(
         "retuned_on_heldout": False,
         "paper_read_only": True,
         "real_execution": False,
-        "carry_pnl_usd": 0.0,
+        "carry_pnl_usd": funding_receipt["carry_pnl_usd"],
+        "funding_receipt": funding_receipt,
         "economic_scope": "DIAGNOSTIC_ONLY" if capital_scenario_usd is not None else "FROZEN_POLICY_EVALUATION",
         "economically_proven": False if capital_scenario_usd is not None else None,
     }
@@ -954,7 +1078,8 @@ def evaluate_frozen_v21(
             "retuned_on_heldout": False,
             "paper_read_only": True,
             "real_execution": False,
-            "carry_pnl_usd": 0.0,
+            "carry_pnl_usd": None,
+            "funding_receipt": _not_evaluated_funding_receipt("BLOCKED_BY_VALIDATION"),
         }
 
     if validation["eligible"] and oos.get("eligible") is True:
@@ -976,13 +1101,19 @@ def evaluate_frozen_v21(
             "retuned_on_heldout": False,
             "paper_read_only": True,
             "real_execution": False,
-            "carry_pnl_usd": 0.0,
+            "carry_pnl_usd": None,
+            "funding_receipt": _not_evaluated_funding_receipt("BLOCKED_BY_OOS"),
         }
 
+    funding_receipt = _aggregate_funding_receipt(
+        {"validation": validation, "oos": oos, "forward": forward}
+    )
     proven = bool(
         validation.get("eligible") is True
         and oos.get("eligible") is True
         and forward.get("eligible") is True
+        and funding_receipt.get("status")
+        in {"MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "MEASURED"}
     )
     capacity_diagnostic = (
         evaluate_capacity_scenarios(
@@ -1040,7 +1171,8 @@ def evaluate_frozen_v21(
         "forward": forward,
         "capacity_diagnostic": capacity_diagnostic,
         "stress_diagnostic": stress_diagnostic,
-        "carry_pnl_usd": 0.0,
+        "carry_pnl_usd": funding_receipt["carry_pnl_usd"],
+        "funding_receipt": funding_receipt,
         "paper_read_only": True,
         "real_execution": False,
     }

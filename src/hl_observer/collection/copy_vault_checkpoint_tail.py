@@ -27,6 +27,7 @@ from hl_observer.backtesting.copy_vault_executable import (
 )
 from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_WRITER_STATE_SCHEMA
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id
+from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = CHECKPOINT_WRITER_STATE_SCHEMA
@@ -160,8 +161,16 @@ def _parse_book(raw: Mapping[str, Any], *, received_at_ms: int) -> dict[str, Any
     try:
         exchange_ts_ms = int(raw["time"])
         raw_bids, raw_asks = raw["levels"][0], raw["levels"][1]
-        bids = [[float(row["px"]), float(row["sz"])] for row in raw_bids[:5]]
-        asks = [[float(row["px"]), float(row["sz"])] for row in raw_asks[:5]]
+        bids = normalize_l2_levels(
+            [[row["px"], row["sz"]] for row in raw_bids], side="bid"
+        )
+        asks = normalize_l2_levels(
+            [[row["px"], row["sz"]] for row in raw_asks], side="ask"
+        )
+        if bids is not None:
+            bids = bids[:5]
+        if asks is not None:
+            asks = asks[:5]
     except (KeyError, IndexError, TypeError, ValueError, OverflowError):
         return None
     if (

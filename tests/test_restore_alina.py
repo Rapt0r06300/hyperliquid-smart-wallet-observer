@@ -16,6 +16,40 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_symlink_setup_skips_only_windows_privilege_error(tmp_path, monkeypatch):
+    error = OSError("symbolic-link privilege required")
+    error.winerror = 1314
+
+    def fail_symlink(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(Path, "symlink_to", fail_symlink)
+    with pytest.raises(pytest.skip.Exception, match="symlink privilege"):
+        _create_symlink_or_skip(tmp_path / "link", tmp_path / "target")
+
+
+def test_symlink_setup_does_not_hide_other_permission_errors(tmp_path, monkeypatch):
+    def fail_symlink(*_args, **_kwargs):
+        raise PermissionError(13, "unrelated filesystem permission failure")
+
+    monkeypatch.setattr(Path, "symlink_to", fail_symlink)
+    with pytest.raises(PermissionError, match="unrelated filesystem permission failure"):
+        _create_symlink_or_skip(tmp_path / "link", tmp_path / "target")
+
+
+def _create_symlink_or_skip(
+    link: Path, target: Path, *, target_is_directory: bool = False
+) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except NotImplementedError:
+        pytest.skip("symlinks are not supported by this platform")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable (WinError 1314)")
+        raise
+
+
 def _module():
     spec = importlib.util.spec_from_file_location(
         "restore_alina_test", ROOT / "tools" / "restore_alina.py"
@@ -1463,7 +1497,6 @@ def test_restore_ignores_cached_release_absent_from_current_inventory(tmp_path, 
 
 def test_restore_rejects_zip_unsafe_members_and_symlinks(tmp_path):
     import stat
-    import pytest
 
     module = _module()
     for member in (
@@ -2358,7 +2391,6 @@ def test_restore_rejects_duplicate_embedded_asset_name(monkeypatch):
 
 def test_restore_rate_limit_fails_fast_with_resume_hint(monkeypatch, tmp_path):
     import io
-    import pytest
     import urllib.error
     module = _module()
     calls = []
@@ -2534,7 +2566,6 @@ def test_streaming_download_retries_http_incomplete_read(tmp_path, monkeypatch):
 
 
 def test_recovery_rejects_symlinked_release_asset_and_partial(tmp_path):
-    import pytest
     module = _module()
     victim = tmp_path / "outside.bin"
     victim.write_bytes(b"do-not-overwrite")
@@ -2543,31 +2574,26 @@ def test_recovery_rejects_symlinked_release_asset_and_partial(tmp_path):
     asset = _asset("asset.bin", "https://example.invalid/asset", b"safe")
 
     target = directory / "asset.bin"
-    try:
-        target.symlink_to(victim)
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks unavailable")
+    _create_symlink_or_skip(target, victim)
     with pytest.raises(module.RestoreError, match="symlinked Release asset target"):
         module.download_asset(asset, directory)
     target.unlink()
 
     partial = directory / "asset.bin.partial"
-    partial.symlink_to(victim)
+    _create_symlink_or_skip(partial, victim)
     with pytest.raises(module.RestoreError, match="symlinked Release asset partial"):
         module.download_asset(asset, directory)
     assert victim.read_bytes() == b"do-not-overwrite"
 
 def test_restore_rejects_symlinked_release_storage_directory(tmp_path):
-    import pytest
     module = _module()
     external = tmp_path / "external"
     external.mkdir()
     destination = tmp_path / "restore"
     destination.mkdir()
-    try:
-        (destination / "releases").symlink_to(external, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks unavailable")
+    _create_symlink_or_skip(
+        destination / "releases", external, target_is_directory=True
+    )
     with pytest.raises(module.RestoreError, match="symlinked Release storage"):
         module.restore_everything("owner/repo", destination)
     assert list(external.iterdir()) == []
@@ -3014,9 +3040,6 @@ def test_salvage_refuses_unknown_release_state_even_with_a_sha256():
 
 
 def test_local_snapshot_cannot_overwrite_tracked_git_file(tmp_path):
-    import subprocess
-    import pytest
-
     module = _module()
     clone = tmp_path / "fresh clone"
     clone.mkdir()
@@ -3504,7 +3527,9 @@ def test_replay_ready_materialization_refuses_symlinked_usable_tree(tmp_path):
     destination.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (destination / "usable").symlink_to(outside, target_is_directory=True)
+    _create_symlink_or_skip(
+        destination / "usable", outside, target_is_directory=True
+    )
     row = {
         "dataset_id": "safe-one", "release_tag": "data-v2-safe",
         "release_asset": "safe.jsonl.gz", "bytes": len(payload),
@@ -3528,7 +3553,7 @@ def test_replay_ready_stale_cleanup_refuses_symlinked_shards(tmp_path):
     outside = tmp_path / "unrelated-data.bin"
     outside.write_bytes(b"must not follow, hash, move or delete")
     linked = stale_dir / "old.jsonl.gz"
-    linked.symlink_to(outside)
+    _create_symlink_or_skip(linked, outside)
 
     report = module._materialize_catalog_safe_shards(
         [], tmp_path / "releases", destination,
@@ -3549,7 +3574,9 @@ def test_replay_ready_stale_cleanup_refuses_symlinked_root(tmp_path):
     outside.mkdir()
     (outside / "old-release").mkdir()
     (outside / "old-release" / "old.jsonl.gz").write_bytes(b"non-catalog")
-    (destination / "usable" / "shards").symlink_to(outside, target_is_directory=True)
+    _create_symlink_or_skip(
+        destination / "usable" / "shards", outside, target_is_directory=True
+    )
 
     report = module._materialize_catalog_safe_shards(
         [], tmp_path / "releases", destination,
@@ -3572,7 +3599,7 @@ def test_replay_ready_prune_preserves_unknown_corrupt_and_symlinked_files(tmp_pa
     outside = tmp_path / "outside.bin"
     outside.write_bytes(expected)
     linked = release_dir / "linked.bin"
-    linked.symlink_to(outside)
+    _create_symlink_or_skip(linked, outside)
     releases = [{"tag_name": "old-release", "assets": [
         _asset("asset.bin", "https://example.invalid/asset", expected),
         _asset("linked.bin", "https://example.invalid/linked", expected),
@@ -3661,7 +3688,9 @@ def test_prune_never_follows_symlinked_release_directory(tmp_path):
     (outside / "asset.bin").write_bytes(payload)
     releases_root = tmp_path / "releases"
     releases_root.mkdir()
-    (releases_root / "old-release").symlink_to(outside, target_is_directory=True)
+    _create_symlink_or_skip(
+        releases_root / "old-release", outside, target_is_directory=True
+    )
     release = {"tag_name": "old-release", "assets": [
         _asset("asset.bin", "https://example.invalid/asset", payload),
     ]}
@@ -3674,8 +3703,7 @@ def test_prune_never_follows_symlinked_release_directory(tmp_path):
 
 
 def test_release_asset_download_passes_exact_sha_bound_network_limit(monkeypatch, tmp_path):
-    import hashlib
-    from tools import restore_alina as module
+    module = _module()
 
     checked = []
     def fake_download(url, target, *, token=None, max_bytes=None, **kwargs):
@@ -3704,7 +3732,7 @@ def test_default_verification_workers_respect_half_cpu_budget():
     logical_processors = os.cpu_count() or 1
     assert module.VERIFY_WORKERS >= 1
     if logical_processors >= 2:
-        assert module.VERIFY_WORKERS * 2 <= logical_processors
+        assert logical_processors >= module.VERIFY_WORKERS * 2
 
 
 def _analysis_receipt(tmp_path, *, kind="backtest", campaign_id="analysis-e7-backtest-v2"):
@@ -3850,9 +3878,12 @@ def test_materialize_analysis_evidence_keeps_valid_negative_results(tmp_path):
     module = _module()
     receipt, _receipts, _campaigns = _analysis_receipt(tmp_path)
     result = {"status": "COMPLETE", "payload": {"net_usd": -5.25}}
-    canonical = lambda value: json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode()
+
+    def canonical(value):
+        return json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+
     receipt["payload_digest"] = hashlib.sha256(canonical(result["payload"])).hexdigest()
     receipt["result_sha256"] = hashlib.sha256(canonical(result)).hexdigest()
     archive = tmp_path / "evidence.tgz"
@@ -3885,9 +3916,12 @@ def test_materialize_analysis_evidence_accepts_tar_root_and_legacy_preannotation
         "payload": {"net_usd": 1.25},
         "progressed": True,
     }
-    canonical = lambda value: json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode()
+
+    def canonical(value):
+        return json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+
     result["sha256"] = hashlib.sha256(canonical(result["payload"])).hexdigest()
     annotated = json.loads(json.dumps(result))
     annotated["payload"].update({

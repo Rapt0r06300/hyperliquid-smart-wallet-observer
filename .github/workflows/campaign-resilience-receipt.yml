@@ -37,8 +37,4 @@ jobs:
           git add catalog/CAMPAIGN_RESILIENCE_RECEIPT.json
           git diff --cached --quiet && exit 0
           git commit -m "recovery: publish campaign resilience receipt"
-          if ! git push origin HEAD:main; then
-            git fetch origin main
-            git rebase origin/main
-            git push origin HEAD:main
-          fi
+          python tools/publish_main_commit.py --remote origin --branch main

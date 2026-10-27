@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import hl_observer.collection.copy_vault_checkpoint_tail as checkpoint_module
 from hl_observer.backtesting.copy_vault_executable import (
     cluster_metaorders,
@@ -100,6 +102,21 @@ def _book(now_ms: int) -> dict:
             [{"px": "60001", "sz": "2.5"}, {"px": "60002", "sz": "4"}],
         ],
     }
+
+
+@pytest.mark.parametrize(
+    "bids,asks",
+    [
+        ([{"px": "59998", "sz": "2"}, {"px": "59999", "sz": "3"}],
+         [{"px": "60001", "sz": "2.5"}]),
+        ([{"px": "59999", "sz": "2"}],
+         [{"px": "60001", "sz": "2.5"}, {"px": "60001", "sz": "4"}]),
+    ],
+)
+def test_checkpoint_parser_refuse_les_niveaux_l2_invalides(bids, asks) -> None:
+    raw = {"time": 2_000, "levels": [bids, asks]}
+
+    assert checkpoint_module._parse_book(raw, received_at_ms=2_010) is None
 
 
 def test_first_start_baselines_existing_fills_without_replaying_history(tmp_path: Path) -> None:

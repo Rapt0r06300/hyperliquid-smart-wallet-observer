@@ -46,14 +46,7 @@ jobs:
           git add control/alina-phase.json control/phase-receipts
           git diff --cached --quiet && exit 0
           git commit -m "control: transition phase to ${{ inputs.phase }}"
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            git rebase --abort >/dev/null 2>&1 || true
-            sleep "$((2 + attempt * 2))"
-          done
-          exit 1
+          python tools/publish_main_commit.py --remote origin --branch main
       - name: Materialize phase-owned campaigns
         env:
           GH_TOKEN: "${{ github.token }}"

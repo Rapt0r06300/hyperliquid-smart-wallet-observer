@@ -9,6 +9,8 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from hl_observer.normalization.l2_book import normalize_l2_levels
+
 
 def _book_side(
     book: Mapping[str, Any],
@@ -20,29 +22,15 @@ def _book_side(
     """Validate one recorded side exactly as observed; never extend its depth."""
 
     raw_levels = book.get(field)
-    if not isinstance(raw_levels, list) or not raw_levels:
+    normalized = normalize_l2_levels(
+        raw_levels, side="bid" if descending else "ask"
+    )
+    if normalized is None:
         return None
-    levels: list[tuple[float, float]] = []
-    try:
-        for raw_level in raw_levels:
-            if not isinstance(raw_level, (list, tuple)) or len(raw_level) != 2:
-                return None
-            price, quantity = float(raw_level[0]), float(raw_level[1])
-            if not all(math.isfinite(value) for value in (price, quantity)):
-                return None
-            if price <= 0.0 or quantity <= 0.0:
-                return None
-            levels.append((price, quantity))
-    except (TypeError, ValueError, OverflowError):
-        return None
+    levels = [(price, quantity) for price, quantity in normalized]
     if not math.isclose(levels[0][0], float(expected_best), abs_tol=1e-12):
         return None
-    prices = [price for price, _ in levels]
-    ordered = all(
-        left >= right if descending else left <= right
-        for left, right in zip(prices, prices[1:])
-    )
-    return levels if ordered else None
+    return levels
 
 
 def _walk_quote_notional(
@@ -50,7 +38,15 @@ def _walk_quote_notional(
 ) -> tuple[float, float] | None:
     """Return (VWAP, base quantity) after consuming an exact quote notional."""
 
-    remaining_quote = float(target_quote_usd)
+    if isinstance(target_quote_usd, bool):
+        return None
+    try:
+        target_quote = float(target_quote_usd)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(target_quote) or target_quote <= 0.0:
+        return None
+    remaining_quote = target_quote
     filled_quantity = 0.0
     for price, available_quantity in levels:
         available_quote = price * available_quantity
@@ -59,9 +55,13 @@ def _walk_quote_notional(
         remaining_quote -= taken_quote
         if remaining_quote <= 1e-10:
             break
-    if remaining_quote > 1e-8 or filled_quantity <= 0.0:
+    roundoff = min(
+        math.ulp(target_quote) * (len(levels) + 2),
+        target_quote - math.nextafter(target_quote, 0.0),
+    )
+    if remaining_quote > roundoff or filled_quantity <= 0.0:
         return None
-    return float(target_quote_usd) / filled_quantity, filled_quantity
+    return target_quote / filled_quantity, filled_quantity
 
 
 def _walk_base_quantity(
@@ -69,17 +69,35 @@ def _walk_base_quantity(
 ) -> float | None:
     """Return VWAP for an exact base quantity, failing on visible-depth exhaustion."""
 
-    remaining_quantity = float(target_quantity)
+    if isinstance(target_quantity, bool):
+        return None
+    try:
+        target = float(target_quantity)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(target) or target <= 0.0:
+        return None
+    remaining_quantity = target
     filled_quote = 0.0
     for price, available_quantity in levels:
         taken_quantity = min(remaining_quantity, available_quantity)
-        filled_quote += price * taken_quantity
+        taken_quote = price * taken_quantity
+        if not math.isfinite(taken_quote):
+            return None
+        filled_quote += taken_quote
+        if not math.isfinite(filled_quote):
+            return None
         remaining_quantity -= taken_quantity
         if remaining_quantity <= 1e-12:
             break
-    if remaining_quantity > 1e-10 or target_quantity <= 0.0:
+    roundoff = min(
+        math.ulp(target) * (len(levels) + 2),
+        target - math.nextafter(target, 0.0),
+    )
+    if remaining_quantity > roundoff or filled_quote <= 0.0:
         return None
-    return filled_quote / float(target_quantity)
+    vwap = filled_quote / target
+    return vwap if math.isfinite(vwap) and vwap > 0.0 else None
 
 
 __all__ = ["_book_side", "_walk_base_quantity", "_walk_quote_notional"]

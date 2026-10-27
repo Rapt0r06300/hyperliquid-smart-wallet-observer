@@ -22,6 +22,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,9 @@ DEFAULT_HISTORY_LOOKBACK_HOURS = 72.0
 MAX_HISTORY_LOOKBACK_HOURS = 72.0
 MAX_PUBLIC_USERFILLS = 10_000
 MAX_USERFILLS_RESPONSE_WEIGHT = 20 + CAP_USERFILLS // 20
+MAX_L2_DIAGNOSTIC_RECORDS = 256
+SUBSCRIPTION_ACK_TIMEOUT_S = 10.0
+SUBSCRIPTION_TIMEOUT_POLL_S = 0.1
 
 
 class RestWeightPacer:
@@ -281,7 +285,7 @@ def userfills_envelope(
         receive_mono_ns=receive_mono_ns,
         connection_id=connection_id,
     )
-    if not fills:
+    if not fills and not (snapshot_flag_valid and snapshot_value is True):
         return None, []
     is_snapshot = snapshot_value if snapshot_flag_valid else None
     for fill in fills:
@@ -347,6 +351,565 @@ def userfills_envelope(
     )
 
 
+def _valid_l2_levels(levels: Any) -> bool:
+    if not isinstance(levels, list) or len(levels) != 2:
+        return False
+    for side in levels:
+        if not isinstance(side, list):
+            return False
+        for level in side:
+            if not isinstance(level, Mapping):
+                return False
+            for field in ("px", "sz"):
+                value = level.get(field)
+                if isinstance(value, bool) or value is None:
+                    return False
+                try:
+                    number = Decimal(str(value))
+                except (InvalidOperation, TypeError, ValueError):
+                    return False
+                if not number.is_finite() or number <= 0:
+                    return False
+            if type(level.get("n")) is not int or level["n"] <= 0:
+                return False
+    return True
+
+
+def _l2_message_status(message: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    if str(message.get("channel") or "") != "l2Book":
+        return "wrong_channel", None
+    data = message.get("data")
+    if not isinstance(data, Mapping):
+        return "other_schema", None
+    coin = str(data.get("coin") or "").strip().upper()
+    if not coin:
+        return "missing_coin", None
+    timestamp = data.get("time")
+    if type(timestamp) is not int or timestamp <= 0:
+        return "invalid_timestamp", coin
+    if not _valid_l2_levels(data.get("levels")):
+        return "invalid_levels", coin
+    return None, coin
+
+
+def classify_l2_payload(
+    raw_payload: Any,
+) -> tuple[Mapping[str, Any] | None, str | None, str | None]:
+    """Parse one L2 socket frame and return a stable reason when inadmissible."""
+    try:
+        message = json.loads(raw_payload)
+    except (TypeError, ValueError):
+        return None, "invalid_json", None
+    if not isinstance(message, Mapping):
+        return None, "other_schema", None
+    reason, coin = _l2_message_status(message)
+    return message, reason, coin
+
+
+def new_l2_state() -> dict[str, Any]:
+    return {
+        "frames": 0,
+        "reconnects": 0,
+        "heartbeats": 0,
+        "heartbeats_received": 0,
+        "subscription_ack_mismatches": 0,
+        "invalid_subscription_acks": 0,
+        "received": 0,
+        "candidate_frames": 0,
+        "rejected": 0,
+        "duplicates": 0,
+        "rejected_by_reason": {},
+        "ignored_by_reason": {},
+        "markets": {},
+        "connection_events": [],
+        "connection_events_dropped": 0,
+        "unknown_market_rejections": [],
+        "unknown_market_rejections_dropped": 0,
+    }
+
+
+def _append_l2_history(
+    state: dict[str, Any], key: str, record: Mapping[str, Any]
+) -> None:
+    records = state.setdefault(key, [])
+    if not isinstance(records, list):
+        return
+    records.append(dict(record))
+    overflow = max(0, len(records) - MAX_L2_DIAGNOSTIC_RECORDS)
+    if overflow:
+        del records[:overflow]
+        state[f"{key}_dropped"] = int(state.get(f"{key}_dropped", 0)) + overflow
+
+
+def _l2_market_state(state: dict[str, Any], coin: str) -> dict[str, Any]:
+    markets = state.setdefault("markets", {})
+    market = markets.setdefault(
+        coin,
+        {
+            "received": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "last_receive_ts_ms": None,
+            "last_exchange_ts_ms": None,
+            "last_connection_id": None,
+            "last_snapshot_sha256": None,
+            "subscription_status": "UNKNOWN",
+            "subscription_attempts": [],
+            "subscription_attempts_dropped": 0,
+            "open_gap_index": None,
+            "gaps": [],
+            "gaps_dropped": 0,
+        },
+    )
+    return market
+
+
+def _subscription_identity(subscription: Any) -> tuple[str, str] | None:
+    if not isinstance(subscription, Mapping):
+        return None
+    kind = str(subscription.get("type") or "").strip()
+    if kind == "l2Book":
+        identity = str(subscription.get("coin") or "").strip().upper()
+    elif kind == "userFills":
+        identity = str(subscription.get("user") or "").strip().lower()
+    else:
+        return None
+    if not kind or not identity:
+        return None
+    return kind, identity
+
+
+def classify_subscription_ack(
+    message: Any,
+) -> tuple[str, tuple[str, str] | None, str | None] | None:
+    """Parse only a correlated successful/explicitly rejected subscribe ack."""
+    if not isinstance(message, Mapping):
+        return None
+    if str(message.get("channel") or "") != "subscriptionResponse":
+        return None
+    data = message.get("data")
+    if not isinstance(data, Mapping) or data.get("method") != "subscribe":
+        return "INVALID", None, "missing_subscribe_method_or_data"
+    identity = _subscription_identity(data.get("subscription"))
+    if identity is None:
+        return "INVALID", None, "missing_or_unsupported_subscription"
+    error = data.get("error")
+    if error is None:
+        error = message.get("error")
+    if error is not None and str(error).strip():
+        return "REJECTED", identity, str(error).strip()[:256]
+    return "ACKNOWLEDGED", identity, None
+
+
+def _new_subscription_attempt(
+    subscription: Mapping[str, Any],
+    *,
+    connection_id: str,
+    sent_at_ms: int,
+    sent_monotonic: float,
+) -> dict[str, Any]:
+    identity = _subscription_identity(subscription)
+    if identity is None:
+        raise ValueError("unsupported Copy-Vault subscription")
+    return {
+        "type": identity[0],
+        "identity": identity[1],
+        "status": "PENDING",
+        "connection_id": connection_id,
+        "sent_at_ms": sent_at_ms,
+        "acknowledged_at_ms": None,
+        "timed_out_at_ms": None,
+        "invalidated_at_ms": None,
+        "late_ack": False,
+        "error": None,
+        "_deadline_monotonic": sent_monotonic + SUBSCRIPTION_ACK_TIMEOUT_S,
+    }
+
+
+def _append_bounded_attempt(
+    attempts: list[dict[str, Any]],
+    attempt: dict[str, Any],
+    *,
+    dropped_counter: dict[str, int] | None = None,
+) -> None:
+    attempts.append(attempt)
+    overflow = max(0, len(attempts) - MAX_L2_DIAGNOSTIC_RECORDS)
+    if overflow:
+        del attempts[:overflow]
+        if dropped_counter is not None:
+            dropped_counter["value"] = dropped_counter.get("value", 0) + overflow
+
+
+async def _subscription_timeout_watchdog(
+    attempts: list[dict[str, Any]],
+    stop: asyncio.Event,
+    on_timeout: Any | None = None,
+) -> None:
+    while not stop.is_set():
+        now = time.monotonic()
+        next_delay = SUBSCRIPTION_TIMEOUT_POLL_S
+        for attempt in attempts:
+            if attempt.get("status") != "PENDING":
+                continue
+            deadline = attempt.get("_deadline_monotonic")
+            if not isinstance(deadline, (int, float)):
+                continue
+            remaining = float(deadline) - now
+            if remaining <= 0:
+                attempt["status"] = "TIMED_OUT"
+                attempt["timed_out_at_ms"] = int(time.time() * 1_000)
+                if on_timeout is not None:
+                    on_timeout(attempt)
+            else:
+                next_delay = min(next_delay, remaining)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=max(0.01, next_delay))
+        except asyncio.TimeoutError:
+            continue
+
+
+def _public_subscription_attempts(
+    attempts_by_identity: Mapping[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        str(identity): [
+            {key: value for key, value in attempt.items() if not key.startswith("_")}
+            for attempt in attempts
+        ]
+        for identity, attempts in sorted(attempts_by_identity.items())
+    }
+
+
+def _invalidate_subscription_attempt(
+    attempt: dict[str, Any], *, at_ms: int, reason: str
+) -> bool:
+    status = attempt.get("status")
+    if status not in {"PENDING", "ACTIVE", "TIMED_OUT"}:
+        return False
+    attempt["status_before_invalidation"] = status
+    attempt["status"] = "INVALIDATED"
+    attempt["invalidated_at_ms"] = at_ms
+    attempt["invalidation_reason"] = reason
+    return True
+
+
+def _open_l2_gap(
+    state: dict[str, Any],
+    coin: str,
+    *,
+    reason: str,
+    at_ms: int,
+    connection_id: str | None,
+) -> None:
+    market = _l2_market_state(state, coin)
+    index = market.get("open_gap_index")
+    gaps = market["gaps"]
+    if type(index) is int and 0 <= index < len(gaps):
+        gap = gaps[index]
+        reasons = gap.setdefault("reasons", [])
+        if reason not in reasons:
+            reasons.append(reason)
+        gap["last_detected_at_ms"] = at_ms
+        return
+    last_receive = market.get("last_receive_ts_ms")
+    if len(gaps) >= MAX_L2_DIAGNOSTIC_RECORDS:
+        del gaps[0]
+        market["gaps_dropped"] = int(market.get("gaps_dropped", 0)) + 1
+        if type(index) is int:
+            market["open_gap_index"] = max(0, index - 1)
+    gap = {
+        "start_after_receive_ts_ms": last_receive if type(last_receive) is int else at_ms,
+        "detected_at_ms": at_ms,
+        "last_detected_at_ms": at_ms,
+        "reason": reason,
+        "reasons": [reason],
+        "connection_id": connection_id,
+        "recovery_at_ms": None,
+        "recovery_connection_id": None,
+        "continuity_proven": False,
+    }
+    gaps.append(gap)
+    market["open_gap_index"] = len(gaps) - 1
+
+
+def _record_l2_rejection(
+    state: dict[str, Any],
+    reason: str,
+    *,
+    coin: str | None,
+    at_ms: int,
+    connection_id: str,
+    affected_coins: set[str] | None = None,
+) -> None:
+    state["rejected"] = int(state.get("rejected", 0)) + 1
+    reasons = state.setdefault("rejected_by_reason", {})
+    reasons[reason] = int(reasons.get(reason, 0)) + 1
+    if coin:
+        market = _l2_market_state(state, coin)
+        market["received"] += 1
+        market["rejected"] += 1
+        _open_l2_gap(
+            state,
+            coin,
+            reason=reason,
+            at_ms=at_ms,
+            connection_id=connection_id,
+        )
+        return
+    _append_l2_history(
+        state,
+        "unknown_market_rejections",
+        {"time_ms": at_ms, "connection_id": connection_id, "reason": reason},
+    )
+    for affected_coin in sorted(affected_coins or set()):
+        _open_l2_gap(
+            state,
+            affected_coin,
+            reason=reason,
+            at_ms=at_ms,
+            connection_id=connection_id,
+        )
+
+
+def _record_l2_ignored(state: dict[str, Any], reason: str) -> None:
+    reasons = state.setdefault("ignored_by_reason", {})
+    reasons[reason] = int(reasons.get(reason, 0)) + 1
+
+
+def _snapshot_identity(envelope: TickEnvelope) -> str:
+    payload = json.dumps(
+        envelope.raw_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _l2_snapshot_duplicate_or_invalid(
+    state: dict[str, Any], envelope: TickEnvelope
+) -> str | None:
+    market = _l2_market_state(state, envelope.instrument)
+    last_ts = market.get("last_exchange_ts_ms")
+    signature = _snapshot_identity(envelope)
+    if type(last_ts) is int:
+        if envelope.exchange_ts_ms is None or envelope.exchange_ts_ms < last_ts:
+            return "invalid_timestamp"
+        if envelope.exchange_ts_ms == last_ts:
+            if signature == market.get("last_snapshot_sha256"):
+                return "duplicate_snapshot"
+            return "timestamp_conflict"
+    return None
+
+
+def _record_l2_accepted(
+    state: dict[str, Any],
+    envelope: TickEnvelope,
+    *,
+    receive_wall_ms: int,
+) -> None:
+    market = _l2_market_state(state, envelope.instrument)
+    market["received"] += 1
+    market["accepted"] += 1
+    gap_index = market.get("open_gap_index")
+    gaps = market["gaps"]
+    if type(gap_index) is int and 0 <= gap_index < len(gaps):
+        gap = gaps[gap_index]
+        gap["recovery_at_ms"] = receive_wall_ms
+        gap["recovery_connection_id"] = envelope.connection_id
+        gap["continuity_proven"] = False
+        market["open_gap_index"] = None
+    market["last_receive_ts_ms"] = receive_wall_ms
+    market["last_exchange_ts_ms"] = envelope.exchange_ts_ms
+    market["last_connection_id"] = envelope.connection_id
+    market["last_snapshot_sha256"] = _snapshot_identity(envelope)
+    state["frames"] = int(state.get("frames", 0)) + 1
+
+
+def _record_l2_disconnect(
+    state: dict[str, Any],
+    *,
+    connection_id: str,
+    markets: set[str],
+    at_ms: int,
+    error_class: str,
+) -> None:
+    state["reconnects"] = int(state.get("reconnects", 0)) + 1
+    _append_l2_history(
+        state,
+        "connection_events",
+        {
+            "event": "disconnect",
+            "time_ms": at_ms,
+            "connection_id": connection_id,
+            "markets": sorted(markets),
+            "error_class": error_class,
+        },
+    )
+    for coin in sorted(markets):
+        _open_l2_gap(
+            state,
+            coin,
+            reason="websocket_disconnect",
+            at_ms=at_ms,
+            connection_id=connection_id,
+        )
+
+
+def _l2_market_summary(state: Mapping[str, Any], end_ms: int) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    markets = state.get("markets")
+    if not isinstance(markets, Mapping):
+        return result
+    for coin, raw_market in sorted(markets.items()):
+        if not isinstance(raw_market, Mapping):
+            continue
+        last_receive = raw_market.get("last_receive_ts_ms")
+        age = end_ms - last_receive if type(last_receive) is int else None
+        open_index = raw_market.get("open_gap_index")
+        gaps = raw_market.get("gaps")
+        open_gap = (
+            gaps[open_index]
+            if isinstance(gaps, list)
+            and type(open_index) is int
+            and 0 <= open_index < len(gaps)
+            else None
+        )
+        subscription_attempts = raw_market.get("subscription_attempts")
+        result[str(coin)] = {
+            "received": raw_market.get("received"),
+            "accepted": raw_market.get("accepted"),
+            "rejected": raw_market.get("rejected"),
+            "subscription_status": raw_market.get("subscription_status"),
+            "subscription_attempts": [
+                {key: value for key, value in attempt.items() if not key.startswith("_")}
+                for attempt in subscription_attempts
+                if isinstance(attempt, Mapping)
+            ]
+            if isinstance(subscription_attempts, list)
+            else None,
+            "subscription_attempts_dropped": raw_market.get(
+                "subscription_attempts_dropped"
+            ),
+            "last_receive_ts_ms": last_receive,
+            "last_receive_age_ms": age,
+            "last_exchange_ts_ms": raw_market.get("last_exchange_ts_ms"),
+            "last_connection_id": raw_market.get("last_connection_id"),
+            "sequence_continuity_proven": False,
+            "coverage_status": (
+                "GAP_OPEN"
+                if isinstance(open_gap, Mapping)
+                else (
+                    "SNAPSHOTS_CONTINUITY_UNPROVEN"
+                    if type(raw_market.get("accepted")) is int
+                    and raw_market["accepted"] > 0
+                    else "NO_SNAPSHOT"
+                )
+            ),
+            "open_gap": dict(open_gap) if isinstance(open_gap, Mapping) else None,
+            "gaps": [dict(gap) for gap in gaps if isinstance(gap, Mapping)]
+            if isinstance(gaps, list)
+            else [],
+            "gaps_dropped": raw_market.get("gaps_dropped"),
+        }
+    return result
+
+
+def _l2_diagnostics(
+    state: Mapping[str, Any],
+    *,
+    end_ms: int,
+    requested_coins: set[str],
+) -> dict[str, Any]:
+    def counter(key: str) -> int | None:
+        value = state.get(key)
+        return value if type(value) is int and value >= 0 else None
+
+    def counter_map(key: str) -> dict[str, int] | None:
+        value = state.get(key)
+        if not isinstance(value, Mapping):
+            return None
+        if any(type(count) is not int or count < 0 for count in value.values()):
+            return None
+        return {str(reason): count for reason, count in value.items()}
+
+    markets = _l2_market_summary(state, end_ms)
+    for coin in sorted({str(item).strip().upper() for item in requested_coins}):
+        if coin and coin not in markets:
+            markets[coin] = {
+                "received": None,
+                "accepted": None,
+                "rejected": None,
+                "subscription_status": "UNKNOWN",
+                "subscription_attempts": None,
+                "subscription_attempts_dropped": None,
+                "last_receive_ts_ms": None,
+                "last_receive_age_ms": None,
+                "last_exchange_ts_ms": None,
+                "last_connection_id": None,
+                "sequence_continuity_proven": False,
+                "coverage_status": "NO_MARKET_STATE",
+                "open_gap": None,
+                "gaps": [],
+                "gaps_dropped": None,
+            }
+    ignored_by_reason = counter_map("ignored_by_reason")
+    ignored_frames = (
+        sum(ignored_by_reason.values())
+        if ignored_by_reason is not None
+        else None
+    )
+    connection_events = state.get("connection_events")
+    unknown_rejections = state.get("unknown_market_rejections")
+    return {
+        "received_frames": counter("received"),
+        "candidate_l2_frames": counter("candidate_frames"),
+        "accepted_frames": counter("frames"),
+        "rejected_frames": counter("rejected"),
+        "rejected_by_reason": counter_map("rejected_by_reason"),
+        "ignored_frames": ignored_frames,
+        "ignored_by_reason": ignored_by_reason,
+        "duplicate_snapshots": counter("duplicates"),
+        "reconnects": counter("reconnects"),
+        "heartbeats_sent": counter("heartbeats"),
+        "heartbeats_received": counter("heartbeats_received"),
+        "subscription_ack_mismatches": counter("subscription_ack_mismatches"),
+        "invalid_subscription_acks": counter("invalid_subscription_acks"),
+        "requested_markets": sorted(
+            {str(item).strip().upper() for item in requested_coins if str(item).strip()}
+        ),
+        "markets": markets,
+        "connection_events": [
+            dict(event)
+            for event in connection_events
+            if isinstance(connection_events, list) and isinstance(event, Mapping)
+        ]
+        if isinstance(connection_events, list)
+        else None,
+        "connection_events_dropped": counter("connection_events_dropped"),
+        "unknown_market_rejections": [
+            dict(event)
+            for event in unknown_rejections
+            if isinstance(unknown_rejections, list) and isinstance(event, Mapping)
+        ]
+        if isinstance(unknown_rejections, list)
+        else None,
+        "unknown_market_rejections_dropped": counter(
+            "unknown_market_rejections_dropped"
+        ),
+        "coverage_claim": "NOT_PROVEN",
+        "freshness_policy": "AGE_REPORTED_NO_THRESHOLD_ASSUMED",
+    }
+
+
+def _l2_payload_coin(message: Mapping[str, Any]) -> str | None:
+    data = message.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    coin = str(data.get("coin") or "").strip().upper()
+    return coin or None
+
+
 def l2_envelope(
     message: Mapping[str, Any],
     *,
@@ -355,25 +918,15 @@ def l2_envelope(
     connection_id: str,
     reconnect_count: int = 0,
 ) -> TickEnvelope | None:
-    if str(message.get("channel") or "") != "l2Book":
+    reason, coin = _l2_message_status(message)
+    if reason is not None or coin is None:
         return None
     data = message.get("data")
-    if not isinstance(data, Mapping):
-        return None
-    coin = str(data.get("coin") or "").strip().upper()
-    if not coin:
-        return None
-    try:
-        exchange_ts_ms = int(data.get("time")) if data.get("time") is not None else None
-    except (TypeError, ValueError, OverflowError):
-        exchange_ts_ms = None
+    assert isinstance(data, Mapping)
+    exchange_ts_ms = int(data["time"])
     levels = data.get("levels")
-    bid_levels = ask_levels = 0
-    if isinstance(levels, list):
-        if len(levels) > 0 and isinstance(levels[0], list):
-            bid_levels = len(levels[0])
-        if len(levels) > 1 and isinstance(levels[1], list):
-            ask_levels = len(levels[1])
+    assert isinstance(levels, list) and len(levels) == 2
+    bid_levels, ask_levels = len(levels[0]), len(levels[1])
     return TickEnvelope(
         source_id="hyperliquid_public_copy_l2",
         channel="copy_vault_l2",
@@ -405,12 +958,33 @@ async def _dynamic_l2_collector(
     sink: AsyncTickSink,
     request_queue: asyncio.Queue[str],
     known_coins: set[str],
-    state: dict[str, int],
+    state: dict[str, Any],
 ) -> None:
     """Maintain one public HL L2 socket and dynamically subscribe leader coins."""
     attempt = 0
     while True:
         connection_id = f"copy-l2-{uuid.uuid4().hex}"
+        requested: set[str] = set()
+        subscribed: set[str] = set()
+        attempts: list[dict[str, Any]] = []
+        current_by_coin: dict[str, dict[str, Any]] = {}
+        stop_watchdog = asyncio.Event()
+        watchdog_task: asyncio.Task[Any] | None = None
+
+        def invalidate_attempts(
+            reason: str,
+            *,
+            _current_by_coin: dict[str, dict[str, Any]] = current_by_coin,
+        ) -> None:
+            at_ms = int(time.time() * 1_000)
+            for coin, current in _current_by_coin.items():
+                if _invalidate_subscription_attempt(
+                    current, at_ms=at_ms, reason=reason
+                ):
+                    _l2_market_state(state, coin)["subscription_status"] = (
+                        "INVALIDATED"
+                    )
+
         try:
             async with websockets.connect(
                 WS_URL,
@@ -419,8 +993,18 @@ async def _dynamic_l2_collector(
                 close_timeout=5,
                 max_size=2**23,
             ) as socket:
-                subscribed: set[str] = set()
                 send_lock = asyncio.Lock()
+                connection_started_ms = int(time.time() * 1_000)
+                _append_l2_history(
+                    state,
+                    "connection_events",
+                    {
+                        "event": "connected",
+                        "time_ms": connection_started_ms,
+                        "connection_id": connection_id,
+                        "markets": sorted(known_coins),
+                    },
+                )
 
                 async def send_json(
                     payload: Mapping[str, Any],
@@ -431,57 +1015,237 @@ async def _dynamic_l2_collector(
                     async with _send_lock:
                         await _socket.send(json.dumps(dict(payload)))
 
-                for coin in sorted(known_coins):
-                    await send_json(
-                        {
-                            "method": "subscribe",
-                            "subscription": {"type": "l2Book", "coin": coin},
-                        }
+                async def subscribe_coin(
+                    coin: str,
+                    *,
+                    _current_by_coin: dict[str, dict[str, Any]] = current_by_coin,
+                    _connection_id: str = connection_id,
+                    _attempts: list[dict[str, Any]] = attempts,
+                    _requested: set[str] = requested,
+                    _send_json: Any = send_json,
+                ) -> None:
+                    normalized_coin = str(coin).strip().upper()
+                    if not normalized_coin:
+                        return
+                    current = _current_by_coin.get(normalized_coin)
+                    if current is not None and current.get("status") in {
+                        "PENDING",
+                        "ACTIVE",
+                        "TIMED_OUT",
+                    }:
+                        return
+                    subscription = {"type": "l2Book", "coin": normalized_coin}
+                    sent_wall_ms = int(time.time() * 1_000)
+                    subscription_attempt = _new_subscription_attempt(
+                        subscription,
+                        connection_id=_connection_id,
+                        sent_at_ms=sent_wall_ms,
+                        sent_monotonic=time.monotonic(),
                     )
-                    subscribed.add(coin)
+                    _current_by_coin[normalized_coin] = subscription_attempt
+                    _attempts.append(subscription_attempt)
+                    _requested.add(normalized_coin)
+                    market = _l2_market_state(state, normalized_coin)
+                    history = market["subscription_attempts"]
+                    history.append(subscription_attempt)
+                    overflow = max(
+                        0, len(history) - MAX_L2_DIAGNOSTIC_RECORDS
+                    )
+                    if overflow:
+                        del history[:overflow]
+                        market["subscription_attempts_dropped"] += overflow
+                    market["subscription_status"] = "PENDING"
+                    try:
+                        await _send_json(
+                            {"method": "subscribe", "subscription": subscription}
+                        )
+                    except Exception as exc:
+                        subscription_attempt["status"] = "SEND_FAILED"
+                        subscription_attempt["error"] = type(exc).__name__
+                        market["subscription_status"] = "SEND_FAILED"
+                        raise
+
+                def on_subscription_timeout(
+                    subscription_attempt: Mapping[str, Any],
+                    *,
+                    _connection_id: str = connection_id,
+                ) -> None:
+                    coin = str(subscription_attempt.get("identity") or "")
+                    if coin:
+                        _l2_market_state(state, coin)["subscription_status"] = (
+                            "TIMED_OUT"
+                        )
+                        _open_l2_gap(
+                            state,
+                            coin,
+                            reason="subscription_ack_timeout",
+                            at_ms=int(time.time() * 1_000),
+                            connection_id=_connection_id,
+                        )
+
+                for coin in sorted(known_coins):
+                    await subscribe_coin(coin)
                     await asyncio.sleep(0.03)
 
                 async def sender(
                     *,
-                    _subscriptions: set[str] = subscribed,
-                    _queue: asyncio.Queue[str] = request_queue,
-                    _send: Any = send_json,
+                    _request_queue: asyncio.Queue[str] = request_queue,
+                    _requested: set[str] = requested,
+                    _subscribe_coin: Any = subscribe_coin,
                 ) -> None:
                     while True:
-                        coin = str(await _queue.get()).strip().upper()
+                        coin = str(await _request_queue.get()).strip().upper()
                         try:
-                            if coin and coin not in _subscriptions:
-                                await _send(
-                                    {
-                                        "method": "subscribe",
-                                        "subscription": {
-                                            "type": "l2Book",
-                                            "coin": coin,
-                                        },
-                                    }
-                                )
-                                _subscriptions.add(coin)
+                            if coin and coin not in _requested:
+                                await _subscribe_coin(coin)
                         finally:
-                            _queue.task_done()
+                            _request_queue.task_done()
 
-                async def heartbeat() -> None:
+                async def heartbeat(*, _send_json: Any = send_json) -> None:
                     while True:
                         await asyncio.sleep(30.0)
-                        await send_json({"method": "ping"})
+                        await _send_json({"method": "ping"})
                         state["heartbeats"] = state.get("heartbeats", 0) + 1
 
-                sender_task = asyncio.create_task(sender())
-                heartbeat_task = asyncio.create_task(heartbeat())
-                attempt = 0
+                sender_task: asyncio.Task[Any] | None = None
+                heartbeat_task: asyncio.Task[Any] | None = None
                 try:
+                    sender_task = asyncio.create_task(sender())
+                    heartbeat_task = asyncio.create_task(heartbeat())
+                    watchdog_task = asyncio.create_task(
+                        _subscription_timeout_watchdog(
+                            attempts, stop_watchdog, on_subscription_timeout
+                        )
+                    )
+                    attempt = 0
                     async for raw_text in socket:
                         mono = time.monotonic_ns()
                         wall = int(time.time() * 1_000)
+                        state["received"] = int(state.get("received", 0)) + 1
                         try:
-                            message = json.loads(raw_text)
+                            raw_message = json.loads(raw_text)
                         except (TypeError, ValueError):
+                            raw_message = None
+                        if isinstance(raw_message, Mapping):
+                            channel = str(raw_message.get("channel") or "")
+                            if channel == "pong":
+                                _record_l2_ignored(state, "pong")
+                                state["heartbeats_received"] = int(
+                                    state.get("heartbeats_received", 0)
+                                ) + 1
+                                continue
+                            if channel == "subscriptionResponse":
+                                ack = classify_subscription_ack(raw_message)
+                                if ack is None or ack[0] == "INVALID":
+                                    state["invalid_subscription_acks"] = int(
+                                        state.get("invalid_subscription_acks", 0)
+                                    ) + 1
+                                    _record_l2_ignored(
+                                        state, "invalid_subscription_ack"
+                                    )
+                                    continue
+                                ack_status, identity, ack_error = ack
+                                if identity is None or identity[0] != "l2Book":
+                                    state["subscription_ack_mismatches"] = int(
+                                        state.get("subscription_ack_mismatches", 0)
+                                    ) + 1
+                                    _record_l2_ignored(
+                                        state, "unmatched_subscription_ack"
+                                    )
+                                    continue
+                                coin = identity[1]
+                                subscription_attempt = current_by_coin.get(coin)
+                                if (
+                                    subscription_attempt is None
+                                    or subscription_attempt.get("connection_id")
+                                    != connection_id
+                                ):
+                                    state["subscription_ack_mismatches"] = int(
+                                        state.get("subscription_ack_mismatches", 0)
+                                    ) + 1
+                                    _record_l2_ignored(
+                                        state, "unmatched_subscription_ack"
+                                    )
+                                    continue
+                                if ack_status == "REJECTED":
+                                    subscription_attempt["status"] = "REJECTED"
+                                    subscription_attempt["error"] = ack_error
+                                    _l2_market_state(state, coin)[
+                                        "subscription_status"
+                                    ] = "REJECTED"
+                                    _record_l2_rejection(
+                                        state,
+                                        "subscription_rejected",
+                                        coin=coin,
+                                        at_ms=wall,
+                                        connection_id=connection_id,
+                                    )
+                                    continue
+                                if subscription_attempt.get("status") not in {
+                                    "PENDING",
+                                    "TIMED_OUT",
+                                }:
+                                    _record_l2_ignored(
+                                        state, "duplicate_subscription_ack"
+                                    )
+                                    continue
+                                subscription_attempt["late_ack"] = (
+                                    subscription_attempt.get("status")
+                                    == "TIMED_OUT"
+                                )
+                                subscription_attempt["status"] = "ACTIVE"
+                                subscription_attempt["acknowledged_at_ms"] = wall
+                                _l2_market_state(state, coin)[
+                                    "subscription_status"
+                                ] = "ACTIVE"
+                                subscribed.add(coin)
+                                _record_l2_ignored(
+                                    state, "subscription_acknowledged"
+                                )
+                                continue
+                        message, reason, coin = classify_l2_payload(raw_text)
+                        if message is not None and message.get("channel") == "l2Book":
+                            state["candidate_frames"] = int(
+                                state.get("candidate_frames", 0)
+                            ) + 1
+                        if reason == "wrong_channel":
+                            channel = str(message.get("channel") or "") if message else ""
+                            coin = _l2_payload_coin(message) if message else None
+                            _record_l2_rejection(
+                                state,
+                                "wrong_channel",
+                                coin=coin,
+                                at_ms=wall,
+                                connection_id=connection_id,
+                                affected_coins=(
+                                    set(requested) if coin is None else None
+                                ),
+                            )
                             continue
-                        if not isinstance(message, Mapping):
+                        if reason is not None:
+                            affected = (
+                                set(requested)
+                                if coin is None
+                                else None
+                            )
+                            _record_l2_rejection(
+                                state,
+                                reason,
+                                coin=coin,
+                                at_ms=wall,
+                                connection_id=connection_id,
+                                affected_coins=affected,
+                            )
+                            continue
+                        assert message is not None and coin is not None
+                        if coin not in subscribed:
+                            _record_l2_rejection(
+                                state,
+                                "subscription_not_active",
+                                coin=coin,
+                                at_ms=wall,
+                                connection_id=connection_id,
+                            )
                             continue
                         envelope = l2_envelope(
                             message,
@@ -490,21 +1254,69 @@ async def _dynamic_l2_collector(
                             connection_id=connection_id,
                             reconnect_count=state.get("reconnects", 0),
                         )
-                        if envelope is not None:
-                            await _emit_with_backpressure(sink, envelope)
-                            state["frames"] = state.get("frames", 0) + 1
+                        if envelope is None:
+                            _record_l2_rejection(
+                                state,
+                                "other_schema",
+                                coin=coin,
+                                at_ms=wall,
+                                connection_id=connection_id,
+                            )
+                            continue
+                        snapshot_issue = _l2_snapshot_duplicate_or_invalid(
+                            state, envelope
+                        )
+                        if snapshot_issue == "duplicate_snapshot":
+                            state["duplicates"] = int(state.get("duplicates", 0)) + 1
+                            _record_l2_ignored(state, snapshot_issue)
+                            continue
+                        if snapshot_issue is not None:
+                            _record_l2_rejection(
+                                state,
+                                snapshot_issue,
+                                coin=coin,
+                                at_ms=wall,
+                                connection_id=connection_id,
+                            )
+                            continue
+                        await _emit_with_backpressure(sink, envelope)
+                        _record_l2_accepted(
+                            state,
+                            envelope,
+                            receive_wall_ms=wall,
+                        )
                 finally:
-                    sender_task.cancel()
-                    heartbeat_task.cancel()
-                    await asyncio.gather(
-                        sender_task,
-                        heartbeat_task,
-                        return_exceptions=True,
-                    )
+                    stop_watchdog.set()
+                    pending_tasks = [
+                        task
+                        for task in (sender_task, heartbeat_task, watchdog_task)
+                        if task is not None
+                    ]
+                    for task in pending_tasks:
+                        task.cancel()
+                    await asyncio.gather(*pending_tasks, return_exceptions=True)
+                    invalidate_attempts("connection_ended")
+            _record_l2_disconnect(
+                state,
+                connection_id=connection_id,
+                markets=requested,
+                at_ms=int(time.time() * 1_000),
+                error_class="normal_close",
+            )
+            await asyncio.sleep(min(30.0, 2.0 ** min(attempt, 5)))
+            attempt += 1
         except asyncio.CancelledError:
+            invalidate_attempts("collector_stopped")
             raise
-        except Exception:
-            state["reconnects"] = state.get("reconnects", 0) + 1
+        except Exception as exc:
+            invalidate_attempts(type(exc).__name__)
+            _record_l2_disconnect(
+                state,
+                connection_id=connection_id,
+                markets=requested,
+                at_ms=int(time.time() * 1_000),
+                error_class=type(exc).__name__,
+            )
             await asyncio.sleep(min(30.0, 2.0 ** min(attempt, 5)))
             attempt += 1
 
@@ -880,11 +1692,41 @@ async def _socket_group(
     reconnect_counts: dict[str, int],
     l2_request_queue: asyncio.Queue[str],
     l2_known_coins: set[str],
+    subscription_attempts: dict[str, list[dict[str, Any]]],
+    subscription_attempts_dropped: dict[str, int],
+    subscription_diagnostics: dict[str, int],
+    snapshot_fill_ids: dict[str, set[str]] | None = None,
 ) -> None:
     attempt = 0
     known = {vault.lower(): vault.lower() for vault in vaults}
+    snapshot_fill_ids = snapshot_fill_ids if snapshot_fill_ids is not None else {}
+    for vault in vaults:
+        snapshot_fill_ids.setdefault(vault, set())
     while True:
         connection_id = f"copy-vault-{uuid.uuid4().hex}"
+        connection_attempts: dict[tuple[str, str], dict[str, Any]] = {}
+        attempts_for_watchdog: list[dict[str, Any]] = []
+        stop_watchdog = asyncio.Event()
+        watchdog_task: asyncio.Task[Any] | None = None
+        heartbeat_task: asyncio.Task[Any] | None = None
+
+        def invalidate_connection_attempts(
+            reason: str,
+            *,
+            _connection_attempts: dict[
+                tuple[str, str], dict[str, Any]
+            ] = connection_attempts,
+        ) -> None:
+            at_ms = int(time.time() * 1_000)
+            for (kind, _user), current in _connection_attempts.items():
+                if _invalidate_subscription_attempt(
+                    current, at_ms=at_ms, reason=reason
+                ) and kind == "userFills":
+                    subscription_diagnostics["invalidated_on_disconnect"] = (
+                        subscription_diagnostics.get("invalidated_on_disconnect", 0)
+                        + 1
+                    )
+
         try:
             async with websockets.connect(
                 WS_URL,
@@ -905,19 +1747,50 @@ async def _socket_group(
                         await _socket.send(json.dumps(dict(payload)))
 
                 for vault in vaults:
-                    await send_json(
-                        {
-                            "method": "subscribe",
-                            "subscription": {
-                                "type": "userFills",
-                                "user": vault,
-                            },
-                        }
+                    key = ("userFills", vault.lower())
+                    history = subscription_attempts.setdefault(vault, [])
+                    if history:
+                        previous = history[-1]
+                        if _invalidate_subscription_attempt(
+                            previous,
+                            at_ms=int(time.time() * 1_000),
+                            reason="websocket_reconnect",
+                        ):
+                            subscription_diagnostics[
+                                "invalidated_on_reconnect"
+                            ] = subscription_diagnostics.get(
+                                "invalidated_on_reconnect", 0
+                            ) + 1
+                    observation_start_ms.pop(vault, None)
+                    live_ids[vault].clear()
+                    live_fill_counts[vault] = 0
+                    snapshot_fill_ids[vault].clear()
+                    subscription = {"type": "userFills", "user": vault}
+                    current = _new_subscription_attempt(
+                        subscription,
+                        connection_id=connection_id,
+                        sent_at_ms=int(time.time() * 1_000),
+                        sent_monotonic=time.monotonic(),
                     )
-                    observation_start_ms.setdefault(
-                        vault,
-                        int(time.time() * 1_000),
+                    connection_attempts[key] = current
+                    attempts_for_watchdog.append(current)
+                    history.append(current)
+                    overflow = max(
+                        0, len(history) - MAX_L2_DIAGNOSTIC_RECORDS
                     )
+                    if overflow:
+                        del history[:overflow]
+                        subscription_attempts_dropped[vault] = (
+                            subscription_attempts_dropped.get(vault, 0) + overflow
+                        )
+                    try:
+                        await send_json(
+                            {"method": "subscribe", "subscription": subscription}
+                        )
+                    except Exception as exc:
+                        current["status"] = "SEND_FAILED"
+                        current["error"] = type(exc).__name__
+                        raise
                     await asyncio.sleep(0.15)
 
                 async def heartbeat() -> None:
@@ -925,9 +1798,14 @@ async def _socket_group(
                         await asyncio.sleep(30.0)
                         await send_json({"method": "ping"})
 
-                heartbeat_task = asyncio.create_task(heartbeat())
                 attempt = 0
                 try:
+                    watchdog_task = asyncio.create_task(
+                        _subscription_timeout_watchdog(
+                            attempts_for_watchdog, stop_watchdog
+                        )
+                    )
+                    heartbeat_task = asyncio.create_task(heartbeat())
                     async for raw_text in socket:
                         mono = time.monotonic_ns()
                         wall = int(time.time() * 1_000)
@@ -937,7 +1815,51 @@ async def _socket_group(
                             continue
                         if not isinstance(message, Mapping):
                             continue
-                        if message.get("channel") in {"subscriptionResponse", "pong"}:
+                        channel = str(message.get("channel") or "")
+                        if channel == "pong":
+                            continue
+                        if channel == "subscriptionResponse":
+                            ack = classify_subscription_ack(message)
+                            if ack is None or ack[0] == "INVALID":
+                                subscription_diagnostics["invalid_acks"] = (
+                                    subscription_diagnostics.get("invalid_acks", 0)
+                                    + 1
+                                )
+                                continue
+                            ack_status, identity, ack_error = ack
+                            current = (
+                                connection_attempts.get(identity)
+                                if identity is not None
+                                else None
+                            )
+                            if current is None or current.get("connection_id") != connection_id:
+                                subscription_diagnostics["unmatched_acks"] = (
+                                    subscription_diagnostics.get("unmatched_acks", 0)
+                                    + 1
+                                )
+                                continue
+                            vault = identity[1]
+                            if ack_status == "REJECTED":
+                                current["status"] = "REJECTED"
+                                current["error"] = ack_error
+                                subscription_diagnostics["rejected_acks"] = (
+                                    subscription_diagnostics.get("rejected_acks", 0)
+                                    + 1
+                                )
+                                continue
+                            if current.get("status") not in {"PENDING", "TIMED_OUT"}:
+                                subscription_diagnostics["duplicate_acks"] = (
+                                    subscription_diagnostics.get("duplicate_acks", 0)
+                                    + 1
+                                )
+                                continue
+                            current["late_ack"] = current.get("status") == "TIMED_OUT"
+                            current["status"] = "ACTIVE"
+                            current["acknowledged_at_ms"] = wall
+                            observation_start_ms[vault] = wall
+                            subscription_diagnostics["acknowledged"] = (
+                                subscription_diagnostics.get("acknowledged", 0) + 1
+                            )
                             continue
 
                         data = message.get("data")
@@ -948,6 +1870,15 @@ async def _socket_group(
                         )
                         vault = known.get(user)
                         if vault is None:
+                            continue
+                        current = connection_attempts.get(("userFills", vault))
+                        if current is None or current.get("status") != "ACTIVE":
+                            subscription_diagnostics["messages_before_ack_dropped"] = (
+                                subscription_diagnostics.get(
+                                    "messages_before_ack_dropped", 0
+                                )
+                                + 1
+                            )
                             continue
 
                         envelope, fills = userfills_envelope(
@@ -973,6 +1904,17 @@ async def _socket_group(
                                 l2_known_coins.add(coin)
                                 l2_request_queue.put_nowait(coin)
 
+                        if envelope.parsed_summary.get("is_snapshot") is True:
+                            for fill in fills:
+                                fill_id = canonical_fill_id(fill)
+                                if fill_id in snapshot_fill_ids[vault]:
+                                    subscription_diagnostics[
+                                        "duplicate_snapshot_fill_observed"
+                                    ] = subscription_diagnostics.get(
+                                        "duplicate_snapshot_fill_observed", 0
+                                    ) + 1
+                                snapshot_fill_ids[vault].add(fill_id)
+
                         # Selection time is only universe provenance. Forward
                         # reconciliation starts when this hosted lane can observe.
                         if (
@@ -987,16 +1929,51 @@ async def _socket_group(
                             except (TypeError, ValueError, OverflowError):
                                 continue
                             start_ms = observation_start_ms.get(vault)
-                            if start_ms is None or ts_ms < int(start_ms):
+                            if start_ms is None:
                                 continue
-                            live_ids[vault].add(canonical_fill_id(fill))
+                            fill_id = canonical_fill_id(fill)
+                            if fill_id in snapshot_fill_ids[vault]:
+                                subscription_diagnostics[
+                                    "snapshot_stream_overlap_dropped"
+                                ] = subscription_diagnostics.get(
+                                    "snapshot_stream_overlap_dropped", 0
+                                ) + 1
+                                continue
+                            if ts_ms <= int(start_ms):
+                                if ts_ms == int(start_ms):
+                                    subscription_diagnostics[
+                                        "ambiguous_ack_boundary_fill_dropped"
+                                    ] = subscription_diagnostics.get(
+                                        "ambiguous_ack_boundary_fill_dropped", 0
+                                    ) + 1
+                                continue
+                            if fill_id in live_ids[vault]:
+                                subscription_diagnostics[
+                                    "duplicate_stream_fill_dropped"
+                                ] = subscription_diagnostics.get(
+                                    "duplicate_stream_fill_dropped", 0
+                                ) + 1
+                                continue
+                            live_ids[vault].add(fill_id)
                             live_fill_counts[vault] += 1
                 finally:
-                    heartbeat_task.cancel()
-                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+                    stop_watchdog.set()
+                    active_tasks = [
+                        task
+                        for task in (watchdog_task, heartbeat_task)
+                        if task is not None
+                    ]
+                    for task in active_tasks:
+                        task.cancel()
+                    await asyncio.gather(*active_tasks, return_exceptions=True)
+                    invalidate_connection_attempts("connection_ended")
         except asyncio.CancelledError:
+            stop_watchdog.set()
+            invalidate_connection_attempts("collector_stopped")
             raise
         except Exception:
+            stop_watchdog.set()
+            invalidate_connection_attempts("connection_error")
             for vault in vaults:
                 reconnect_counts[vault] += 1
             await asyncio.sleep(min(30.0, 2.0 ** min(attempt, 5)))
@@ -1081,7 +2058,7 @@ async def exact_window_backfill(
                 accepted.extend(parsed)
                 continue
             middle = left + max(1, span // 2)
-            pending.appendleft((middle, right))
+            pending.appendleft((middle + 1, right))
             pending.appendleft((left, middle))
             splits += 1
             continue
@@ -1741,9 +2718,13 @@ async def collect(
     unclassified_fill_counts: dict[str, int] = defaultdict(int)
     observation_start_ms: dict[str, int] = {}
     reconnect_counts: dict[str, int] = defaultdict(int)
+    subscription_attempts: dict[str, list[dict[str, Any]]] = {}
+    subscription_attempts_dropped: dict[str, int] = {}
+    subscription_diagnostics: dict[str, int] = {}
+    snapshot_fill_ids: dict[str, set[str]] = defaultdict(set)
     l2_request_queue: asyncio.Queue[str] = asyncio.Queue()
     l2_known_coins: set[str] = set()
-    l2_state: dict[str, int] = {"frames": 0, "reconnects": 0}
+    l2_state = new_l2_state()
     position_snapshots_start = await collect_position_snapshots(
         vaults,
         sink,
@@ -1768,6 +2749,10 @@ async def collect(
                 reconnect_counts=reconnect_counts,
                 l2_request_queue=l2_request_queue,
                 l2_known_coins=l2_known_coins,
+                subscription_attempts=subscription_attempts,
+                subscription_attempts_dropped=subscription_attempts_dropped,
+                subscription_diagnostics=subscription_diagnostics,
+                snapshot_fill_ids=snapshot_fill_ids,
             )
         )
         for group in groups
@@ -1882,10 +2867,22 @@ async def collect(
         "copy_vault_mode": selection.get("mode"),
         "priority_ws_vaults": vaults,
         "socket_groups": len(groups),
+        "vault_subscription_attempts": _public_subscription_attempts(
+            subscription_attempts
+        ),
+        "vault_subscription_attempts_dropped": dict(
+            sorted(subscription_attempts_dropped.items())
+        ),
+        "subscription_diagnostics": dict(sorted(subscription_diagnostics.items())),
         "l2_coin_count": len(l2_known_coins),
         "l2_frames": l2_state.get("frames", 0),
         "l2_reconnects": l2_state.get("reconnects", 0),
         "l2_heartbeats": l2_state.get("heartbeats", 0),
+        "l2_diagnostics": _l2_diagnostics(
+            l2_state,
+            end_ms=end_ms,
+            requested_coins=l2_known_coins,
+        ),
         "position_snapshots_start": position_snapshots_start,
         "position_snapshots_end": position_snapshots_end,
         "broad_sweep_start": _compact_sweep_metrics(broad_start),

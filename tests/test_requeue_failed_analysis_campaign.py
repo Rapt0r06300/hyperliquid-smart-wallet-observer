@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "tools" / "requeue_failed_analysis_campaign.py"
@@ -10,6 +12,18 @@ SPEC = importlib.util.spec_from_file_location("requeue_failed_analysis_campaign"
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+def test_requeue_cli_imports_when_invoked_as_a_script() -> None:
+    result = subprocess.run(
+        [sys.executable, str(MODULE_PATH), "--help"],
+        cwd=MODULE_PATH.parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _manifest() -> dict:
@@ -96,7 +110,10 @@ def test_requeue_archives_failure_and_resets_only_runtime_state(tmp_path: Path) 
     assert updated["completed_units"] == {}
     assert updated["terminal_evidence_digest"] is None
     assert updated["lease"] is None
-    assert updated["cursor"] == {"max_shards": 128}
+    assert updated["cursor"] == {
+        "max_shards": 128,
+        "strategy_family": "copy_vault",
+    }
     assert updated["history"][-1]["event"] == "retry_after_code_fix"
 
 
@@ -259,7 +276,10 @@ def test_durable_publication_continuation_refreshes_after_code_fix(tmp_path: Pat
     assert updated["code_sha"] == "7" * 40
     assert updated["completed_units"] == {}
     assert updated["lease"] is None
-    assert updated["cursor"] == {"max_shards": 128}
+    assert updated["cursor"] == {
+        "max_shards": 128,
+        "strategy_family": "copy_vault",
+    }
     assert updated["history"][-1]["event"] == "retry_after_code_fix"
 
 
@@ -285,4 +305,35 @@ def test_non_publication_continuation_is_not_refreshable(tmp_path: Path) -> None
     assert result["requeued"] is False
     assert result["reason"] == "status_not_refreshable"
     assert result["status"] == "CONTINUATION_REQUIRED"
+
+
+def test_offscope_analysis_manifest_is_rejected_before_archive_or_mutation(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "analysis.json"
+    history_dir = tmp_path / "history"
+    row = _manifest()
+    row["cursor"]["strategy_family"] = "lead_lag"
+    raw = json.dumps(row, sort_keys=True, indent=2) + "\n"
+    manifest_path.write_text(raw, encoding="utf-8")
+
+    try:
+        MODULE.requeue(
+            manifest_path=manifest_path,
+            history_dir=history_dir,
+            code_sha="7" * 40,
+            config_sha256="8" * 64,
+            work_plan_sha256="9" * 64,
+            expected_phase_epoch=3,
+            expected_analysis_stage="PNL_PROOF",
+            expected_source_collection_epoch=2,
+            expected_dataset_selection_id="4" * 64,
+        )
+    except SystemExit as exc:
+        assert "DISABLED_BY_SCOPE" in str(exc)
+    else:
+        raise AssertionError("off-scope campaign was requeued")
+
+    assert manifest_path.read_text(encoding="utf-8") == raw
+    assert not history_dir.exists()
 

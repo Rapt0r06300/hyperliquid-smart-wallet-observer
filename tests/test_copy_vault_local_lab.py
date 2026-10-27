@@ -26,6 +26,28 @@ def _write_gzip(path: Path, row: dict) -> tuple[int, str]:
     return len(payload), hashlib.sha256(payload).hexdigest()
 
 
+@pytest.mark.parametrize(
+    "bids,asks",
+    [
+        ([{"px": "99", "sz": "1"}, {"px": "100", "sz": "2"}],
+         [{"px": "101", "sz": "1"}]),
+        ([{"px": "100", "sz": "1"}],
+         [{"px": "101", "sz": "1"}, {"px": "101", "sz": "2"}]),
+    ],
+)
+def test_materializer_rejette_les_niveaux_l2_invalides_sans_les_trier(bids, asks) -> None:
+    wrapper = {
+        "received_ts_ms": 2_010,
+        "raw_sha256": "a" * 64,
+        "_raw": {
+            "channel": "l2Book",
+            "data": {"coin": "BTC", "time": 2_000, "levels": [bids, asks]},
+        },
+    }
+
+    assert local_lab._book_row(wrapper) is None
+
+
 def test_signal_coverage_reports_short_sample_without_inventing_days() -> None:
     day_ms = 86_400_000
 
@@ -414,6 +436,45 @@ def test_materialize_distinguishes_verified_shards_from_rejected_payload_rows(
     assert result["missing_shards"] == 0
     assert result["reason"] == "SAFE_PAYLOAD_ROWS_REJECTED"
     assert result["payload_rejected_records"] == 1
+
+
+def test_materialize_quarantines_un_l2_safe_mal_ordonne(tmp_path: Path, monkeypatch) -> None:
+    recovery = tmp_path / "runtime" / "recovery" / "full"
+    shard = recovery / "usable" / "shards" / "release" / "l2.jsonl.gz"
+    raw_payload = json.dumps({
+        "channel": "l2Book",
+        "data": {
+            "coin": "BTC", "time": 2_000,
+            "levels": [
+                [{"px": "99", "sz": "1"}, {"px": "100", "sz": "2"}],
+                [{"px": "101", "sz": "1"}],
+            ],
+        },
+    }, separators=(",", ":"))
+    wrapper = {
+        "read_only": True,
+        "real_execution": False,
+        "received_ts_ms": 2_010,
+        "raw_payload": raw_payload,
+        "raw_sha256": hashlib.sha256(raw_payload.encode()).hexdigest(),
+    }
+    _write_gzip(shard, wrapper)
+    audit = {
+        "status": "SAFE_COMPLETE", "reason": None,
+        "expected_safe_shards": 1, "missing_count": 0,
+        "partial_rows_excluded": 0, "rejected_count": 0,
+    }
+    monkeypatch.setattr(
+        local_lab, "_verified_assets",
+        lambda _root, progress=None: ([(shard, {"family": "copy_vault_l2"})], audit),
+    )
+
+    result = materialize_safe_workspace(recovery, tmp_path / "workspace")
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["payload_audit"]["INVALID_OR_NONCAUSAL_L2_REJECTED"] == 1
+    assert result["unique_books"] == 0
+    assert (tmp_path / "workspace/runtime/data/copy_vault_l2_tape.jsonl").read_text() == ""
 
 
 def test_frozen_candidate_history_is_append_only_and_idempotent(tmp_path: Path) -> None:

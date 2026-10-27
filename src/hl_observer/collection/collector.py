@@ -4,13 +4,11 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-import httpx
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.endpoints import info_url_for_settings
-from hl_observer.sources.collection_recorder import CollectionRecorder
 from hl_observer.hyperliquid.rest_info_client import (
     HyperliquidInfoClient,
     build_all_mids_payload,
@@ -24,6 +22,7 @@ from hl_observer.hyperliquid.rest_info_client import (
 )
 from hl_observer.markets.market_selector import select_markets_for_scan
 from hl_observer.markets.universe import build_market_universe, fetch_market_universe
+from hl_observer.sources.collection_recorder import CollectionRecorder
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
 from hl_observer.storage.repositories import CollectionRepository
 from hl_observer.utils.time import now_ms
@@ -344,35 +343,84 @@ async def _collect_plan(
             end_ms = plan.end_ms or now_ms()
             start_ms = plan.start_ms or (end_ms - plan.page_window_ms)
             page_index = 0
-            async for page in client.iter_user_fills_by_time(
-                wallet,
-                start_ms,
-                end_ms,
-                page_window_ms=plan.page_window_ms,
-                max_pages=plan.limit_pages,
-            ):
-                page_index += 1
-                request_payload = build_user_fills_by_time_payload(wallet, start_ms, end_ms)
+            fills_started = now_ms()
+            try:
+                async for page, page_start_ms, page_end_ms in client._iter_user_fills_by_time_windows(
+                    wallet,
+                    start_ms,
+                    end_ms,
+                    page_window_ms=plan.page_window_ms,
+                    max_pages=plan.limit_pages,
+                ):
+                    page_index += 1
+                    request_payload = build_user_fills_by_time_payload(
+                        wallet, page_start_ms, page_end_ms
+                    )
+                    repo.add_collection_item(
+                        run_id=run_id,
+                        item_type=f"userFillsByTime:{page_index}",
+                        wallet_address=wallet,
+                        status="ok",
+                    )
+                    if plan.store_raw:
+                        repo.store_raw_event(
+                            source="hyperliquid",
+                            endpoint="/info",
+                            request_type="userFillsByTime",
+                            request_payload=request_payload,
+                            response_payload=page,
+                            wallet_address=wallet,
+                        )
+                        result.raw_events_stored += 1
+                    repo.store_fills(wallet, page)
+                    repo.update_source_health(
+                        "hyperliquid_info:userFillsByTime", is_success=True
+                    )
+                    repo.update_source_health("leader_fills", is_success=True)
+                    result.fetched_items += 1
+            except Exception as exc:  # noqa: BLE001 - partial history must be recorded.
+                error_message = str(exc)
+                latency_ms = now_ms() - fills_started
+                result.errors_count += 1
                 repo.add_collection_item(
                     run_id=run_id,
-                    item_type=f"userFillsByTime:{page_index}",
+                    item_type="userFillsByTime:incomplete",
                     wallet_address=wallet,
-                    status="ok",
+                    status="error",
+                    error_message=error_message,
+                )
+                repo.update_source_health(
+                    "hyperliquid_info:userFillsByTime",
+                    is_success=False,
+                    observed_latency_ms=latency_ms,
+                    error_message=error_message,
+                )
+                repo.update_source_health(
+                    "leader_fills",
+                    is_success=False,
+                    observed_latency_ms=latency_ms,
+                    error_message=error_message,
+                )
+                repo.store_api_health(
+                    service="hyperliquid_info:userFillsByTime",
+                    ok=False,
+                    latency_ms=latency_ms,
+                    error=error_message,
                 )
                 if plan.store_raw:
                     repo.store_raw_event(
                         source="hyperliquid",
                         endpoint="/info",
                         request_type="userFillsByTime",
-                        request_payload=request_payload,
-                        response_payload=page,
+                        request_payload=build_user_fills_by_time_payload(
+                            wallet, start_ms, end_ms
+                        ),
+                        response_payload={"error": error_message},
                         wallet_address=wallet,
+                        success=False,
+                        error_message=error_message,
                     )
                     result.raw_events_stored += 1
-                repo.store_fills(wallet, page)
-                repo.update_source_health("hyperliquid_info:userFillsByTime", is_success=True)
-                repo.update_source_health("leader_fills", is_success=True)
-                result.fetched_items += 1
         if plan.oid_or_cloid is not None:
             await _record_call(
                 repo,

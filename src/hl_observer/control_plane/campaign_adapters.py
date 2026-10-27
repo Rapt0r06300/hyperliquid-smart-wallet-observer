@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -70,6 +71,214 @@ def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError, OverflowError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _exact_nonnegative_int(value: Any) -> int | None:
+    if type(value) is not int or value < 0:
+        return None
+    return value
+
+
+def _exact_nonnegative_int_map(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, int] = {}
+    for key, raw_count in value.items():
+        count = _exact_nonnegative_int(raw_count)
+        if not isinstance(key, str) or not key or count is None:
+            return None
+        result[key] = count
+    return dict(sorted(result.items()))
+
+
+def _validated_subscription_attempts(
+    value: Any,
+    *,
+    expected_type: str | None = None,
+) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list) or len(value) > 256:
+        return None
+    allowed_types = {"userFills", "l2Book"}
+    allowed_statuses = {
+        "PENDING",
+        "ACTIVE",
+        "REJECTED",
+        "TIMED_OUT",
+        "INVALIDATED",
+        "SEND_FAILED",
+    }
+    time_fields = (
+        "acknowledged_at_ms",
+        "timed_out_at_ms",
+        "invalidated_at_ms",
+    )
+    result: list[dict[str, Any]] = []
+    for row in value:
+        if not isinstance(row, dict):
+            return None
+        kind = row.get("type")
+        identity = row.get("identity")
+        connection_id = row.get("connection_id")
+        status = row.get("status")
+        sent_at_ms = _exact_nonnegative_int(row.get("sent_at_ms"))
+        if (
+            not isinstance(kind, str)
+            or kind not in allowed_types
+            or (expected_type is not None and kind != expected_type)
+            or not isinstance(identity, str)
+            or not identity
+            or not isinstance(connection_id, str)
+            or not connection_id
+            or not isinstance(status, str)
+            or status not in allowed_statuses
+            or sent_at_ms is None
+            or type(row.get("late_ack")) is not bool
+        ):
+            return None
+        item: dict[str, Any] = {
+            "type": kind,
+            "identity": identity,
+            "connection_id": connection_id,
+            "status": status,
+            "sent_at_ms": sent_at_ms,
+            "late_ack": row["late_ack"],
+        }
+        for field in time_fields:
+            raw_time = row.get(field)
+            if raw_time is not None and _exact_nonnegative_int(raw_time) is None:
+                return None
+            item[field] = raw_time
+        error = row.get("error")
+        if error is not None and not isinstance(error, str):
+            return None
+        item["error"] = error[:256] if isinstance(error, str) else None
+        previous_status = row.get("status_before_invalidation")
+        if previous_status is not None:
+            if not isinstance(previous_status, str) or previous_status not in {
+                "PENDING",
+                "ACTIVE",
+                "TIMED_OUT",
+            }:
+                return None
+            item["status_before_invalidation"] = previous_status
+        invalidation_reason = row.get("invalidation_reason")
+        if invalidation_reason is not None:
+            if not isinstance(invalidation_reason, str):
+                return None
+            item["invalidation_reason"] = invalidation_reason[:128]
+        result.append(item)
+    return result
+
+
+def _validated_subscription_attempt_map(
+    value: Any,
+    *,
+    expected_type: str,
+) -> dict[str, list[dict[str, Any]]] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, list[dict[str, Any]]] = {}
+    for identity, attempts in value.items():
+        if not isinstance(identity, str) or not identity:
+            return None
+        validated = _validated_subscription_attempts(
+            attempts,
+            expected_type=expected_type,
+        )
+        if validated is None or any(
+            attempt["identity"] != identity for attempt in validated
+        ):
+            return None
+        result[identity] = validated
+    return dict(sorted(result.items()))
+
+
+def _copy_vault_subscription_receipt(summary: dict[str, Any]) -> dict[str, Any]:
+    raw_l2 = summary.get("l2_diagnostics")
+    l2_subscription: dict[str, Any] | None = None
+    if isinstance(raw_l2, dict) and isinstance(raw_l2.get("markets"), dict):
+        market_rows: dict[str, Any] = {}
+        valid = True
+        for coin, row in raw_l2["markets"].items():
+            if not isinstance(coin, str) or not coin or not isinstance(row, dict):
+                valid = False
+                break
+            status = row.get("subscription_status")
+            if status is not None and (
+                not isinstance(status, str)
+                or status
+                not in {
+                    "UNKNOWN",
+                    "PENDING",
+                    "ACTIVE",
+                    "REJECTED",
+                    "TIMED_OUT",
+                    "INVALIDATED",
+                    "SEND_FAILED",
+                }
+            ):
+                valid = False
+                break
+            attempts_raw = row.get("subscription_attempts")
+            attempts = (
+                _validated_subscription_attempts(
+                    attempts_raw,
+                    expected_type="l2Book",
+                )
+                if attempts_raw is not None
+                else None
+            )
+            dropped_raw = row.get("subscription_attempts_dropped")
+            dropped = (
+                _exact_nonnegative_int(dropped_raw)
+                if dropped_raw is not None
+                else None
+            )
+            if (
+                attempts_raw is not None
+                and (
+                    attempts is None
+                    or any(attempt["identity"] != coin for attempt in attempts)
+                )
+            ) or (
+                dropped_raw is not None and dropped is None
+            ):
+                valid = False
+                break
+            market_rows[coin] = {
+                "subscription_status": status,
+                "subscription_attempts": attempts,
+                "subscription_attempts_dropped": dropped,
+            }
+        if valid:
+            mismatch_count = _exact_nonnegative_int(
+                raw_l2.get("subscription_ack_mismatches")
+            )
+            invalid_ack_count = _exact_nonnegative_int(
+                raw_l2.get("invalid_subscription_acks")
+            )
+            l2_subscription = {
+                "subscription_ack_mismatches": mismatch_count,
+                "invalid_subscription_acks": invalid_ack_count,
+                "markets": dict(sorted(market_rows.items())),
+            }
+
+    return {
+        "vault_observation_start_ts_ms": _exact_nonnegative_int_map(
+            summary.get("vault_observation_start_ts_ms")
+        ),
+        "vault_subscription_attempts": _validated_subscription_attempt_map(
+            summary.get("vault_subscription_attempts"),
+            expected_type="userFills",
+        ),
+        "vault_subscription_attempts_dropped": _exact_nonnegative_int_map(
+            summary.get("vault_subscription_attempts_dropped")
+        ),
+        "subscription_diagnostics": _exact_nonnegative_int_map(
+            summary.get("subscription_diagnostics")
+        ),
+        "l2_subscription": l2_subscription,
+    }
 
 
 def _output_root(ctx: AdapterContext) -> Path:
@@ -457,16 +666,20 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     index_path = output_root / "BUNDLE_INDEX.json"
     summary: dict[str, Any] = {}
     index: dict[str, Any] = {}
+    summary_valid = False
+    index_valid = False
     try:
         loaded = json.loads(summary_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             summary = loaded
+            summary_valid = True
     except (OSError, ValueError, TypeError) as exc:
         _noter_echec("control_plane/campaign_adapters.py:collection_summary", exc)
     try:
         loaded = json.loads(index_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             index = loaded
+            index_valid = True
     except (OSError, ValueError, TypeError) as exc:
         _noter_echec("control_plane/campaign_adapters.py:bundle_index", exc)
 
@@ -484,18 +697,40 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     historical_fill_observations = 0
     historical_snapshot_shards_exact = 0
     manifest_paths = index.get("manifests")
+    manifest_inventory_complete = isinstance(manifest_paths, list)
+    seen_manifest_paths: set[str] = set()
     if isinstance(manifest_paths, list):
         for rel in manifest_paths:
+            if not isinstance(rel, str) or not rel:
+                manifest_inventory_complete = False
+                continue
+            if rel in seen_manifest_paths:
+                manifest_inventory_complete = False
+                continue
+            seen_manifest_paths.add(rel)
+            relative_path = Path(rel)
+            if relative_path.is_absolute() or ".." in relative_path.parts:
+                manifest_inventory_complete = False
+                continue
             try:
-                row = json.loads((output_root / str(rel)).read_text(encoding="utf-8"))
+                bundle_root = output_root.resolve(strict=True)
+                manifest_path = (output_root / relative_path).resolve(strict=True)
+                manifest_path.relative_to(bundle_root)
+                row = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, ValueError, TypeError):
+                manifest_inventory_complete = False
                 continue
             if not isinstance(row, dict):
+                manifest_inventory_complete = False
                 continue
             manifest_count += 1
-            records = _bounded_int(
-                row.get("record_count") or row.get("event_count"), 0, 0, 2**63 - 1
-            )
+            raw_records = row.get("record_count")
+            if raw_records is None:
+                raw_records = row.get("event_count")
+            records = _exact_nonnegative_int(raw_records)
+            if records is None:
+                manifest_inventory_complete = False
+                records = 0
             record_count += records
             compressed_bytes += _bounded_int(row.get("bytes"), 0, 0, 2**63 - 1)
             if row.get("uncompressed_size_exact") is True:
@@ -514,6 +749,8 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                         0,
                         2**63 - 1,
                     )
+            if not family:
+                manifest_inventory_complete = False
             if family in {"l2book", "copy_vault_l2", "native_market"}:
                 l2_manifest_frames += records
             elif family == "bbo":
@@ -533,58 +770,132 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                         row.get("trade_count"), 0, 0, 2**63 - 1
                     )
 
-    drops = summary.get("queue_drops")
-    if isinstance(drops, dict):
-        queue_drops = sum(_bounded_int(v, 0, 0, 2**63 - 1) for v in drops.values())
-    else:
-        queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
+    declared_shards = _exact_nonnegative_int(index.get("shard_count"))
+    safe_shards = _exact_nonnegative_int(index.get("safe_count"))
+    partial_shards = _exact_nonnegative_int(index.get("partial_count"))
+    rejected_shards = _exact_nonnegative_int(index.get("reject_count"))
+    category_counts_complete = all(
+        value is not None
+        for value in (declared_shards, safe_shards, partial_shards, rejected_shards)
+    ) and safe_shards + partial_shards + rejected_shards == declared_shards
+    manifest_inventory_complete = (
+        manifest_inventory_complete
+        and index_valid
+        and declared_shards == len(manifest_paths)
+        and manifest_count == len(manifest_paths)
+        and category_counts_complete
+    )
+
+    def exact_queue_drop_total(value: Any) -> int | None:
+        if type(value) is int and value >= 0:
+            return value
+        if isinstance(value, dict):
+            counts = [_exact_nonnegative_int(item) for item in value.values()]
+            if all(count is not None for count in counts):
+                return sum(counts)
+        return None
+
+    drops_source = summary.get("queue_drops")
+    if "queue_drops" not in summary and "queue_drops" in index:
+        drops_source = index.get("queue_drops")
+    queue_drops = exact_queue_drop_total(drops_source)
+    accepted_frames = _exact_nonnegative_int(summary.get("accepted_frames"))
+    persisted_frames = _exact_nonnegative_int(summary.get("persisted_frames"))
+    l2_frames_observed = _exact_nonnegative_int(summary.get("l2_frames"))
+    l2_frames_manifest = l2_manifest_frames if manifest_inventory_complete else None
+    l2_frames_reconciled = (
+        l2_frames_observed is None
+        or l2_frames_manifest is None
+        or l2_frames_observed == l2_frames_manifest
+    )
+    l2_frames = (
+        l2_frames_manifest
+        if l2_frames_observed is None
+        else l2_frames_observed
+        if l2_frames_reconciled
+        else None
+    )
+    bbo_frames_exact = bbo_frames if manifest_inventory_complete else None
+    frame_counter_consistent = (
+        manifest_inventory_complete
+        and accepted_frames is not None
+        and persisted_frames is not None
+        and accepted_frames >= persisted_frames
+        and persisted_frames == record_count
+    )
+    frame_metrics_complete = (
+        summary_valid
+        and manifest_inventory_complete
+        and frame_counter_consistent
+        and queue_drops is not None
+        and l2_frames is not None
+        and bbo_frames_exact is not None
+        and l2_frames_reconciled
+    )
+
+    duration_raw = summary.get("duration_s")
+    duration_s = (
+        float(duration_raw)
+        if type(duration_raw) in (int, float)
+        and math.isfinite(duration_raw)
+        and duration_raw >= 0
+        else None
+    )
 
     metrics = {
-        "started_at_ms": _bounded_int(
-            summary.get("started_at_ms"), 0, 0, 2**63 - 1
-        ),
-        "ended_at_ms": _bounded_int(
-            summary.get("ended_at_ms"), 0, 0, 2**63 - 1
-        ),
-        "duration_s": _bounded_float(
-            summary.get("duration_s"), 0.0, float(2**31 - 1)
-        ),
+        "started_at_ms": _exact_nonnegative_int(summary.get("started_at_ms")),
+        "ended_at_ms": _exact_nonnegative_int(summary.get("ended_at_ms")),
+        "duration_s": duration_s,
         "trade_count_observed": trade_count,
-        "trade_count_coverage_complete": trade_shards == trade_shards_exact,
+        "trade_count_coverage_complete": (
+            manifest_inventory_complete and trade_shards == trade_shards_exact
+        ),
         "trade_shard_count": trade_shards,
         "trade_shards_exact": trade_shards_exact,
         "historical_fill_observations": historical_fill_observations,
         "historical_snapshot_shards": historical_snapshot_shards,
         "historical_snapshot_shards_exact": historical_snapshot_shards_exact,
         "historical_fill_observation_coverage_complete": (
-            historical_snapshot_shards == historical_snapshot_shards_exact
+            manifest_inventory_complete
+            and historical_snapshot_shards == historical_snapshot_shards_exact
         ),
         "record_count_observed": record_count,
-        "accepted_frames": _bounded_int(
-            summary.get("accepted_frames"), 0, 0, 2**63 - 1
-        ),
-        "persisted_frames": _bounded_int(
-            summary.get("persisted_frames"), 0, 0, 2**63 - 1
-        ),
-        "l2_frames": max(
-            l2_manifest_frames,
-            _bounded_int(summary.get("l2_frames"), 0, 0, 2**63 - 1),
-        ),
-        "bbo_frames": bbo_frames,
+        "accepted_frames": accepted_frames,
+        "persisted_frames": persisted_frames,
+        "l2_frames": l2_frames,
+        "l2_frames_observed": l2_frames_observed,
+        "l2_frames_manifest_records": l2_frames_manifest,
+        "l2_frames_reconciled": l2_frames_reconciled,
+        "frame_counter_consistent": frame_counter_consistent,
+        "bbo_frames": bbo_frames_exact,
         "queue_drops": queue_drops,
-        "shard_count": _bounded_int(index.get("shard_count"), 0, 0, 2**63 - 1),
-        "safe_count": _bounded_int(index.get("safe_count"), 0, 0, 2**63 - 1),
-        "partial_count": _bounded_int(
-            index.get("partial_count"), 0, 0, 2**63 - 1
-        ),
-        "reject_count": _bounded_int(index.get("reject_count"), 0, 0, 2**63 - 1),
+        "frame_metrics_complete": frame_metrics_complete,
+        "manifest_inventory_complete": manifest_inventory_complete,
+        "shard_count": declared_shards,
+        "safe_count": safe_shards,
+        "partial_count": partial_shards,
+        "reject_count": rejected_shards,
         "compressed_bytes": compressed_bytes,
         "uncompressed_bytes": uncompressed_bytes,
         "uncompressed_size_coverage_complete": (
-            manifest_count == uncompressed_exact_shards
+            manifest_inventory_complete
+            and manifest_count == uncompressed_exact_shards
         ),
         "basis": "published_bundle_manifests",
     }
+    if any(
+        key in summary
+        for key in (
+            "vault_observation_start_ts_ms",
+            "vault_subscription_attempts",
+            "vault_subscription_attempts_dropped",
+            "subscription_diagnostics",
+            "l2_diagnostics",
+        )
+    ):
+        metrics["copy_vault_subscription"] = _copy_vault_subscription_receipt(
+            summary
+        )
     if "historical_backfill" in index:
         raw_reports = index.get("historical_backfill")
         audit: dict[str, Any] = {

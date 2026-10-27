@@ -13,7 +13,7 @@ on:
       phase:
         required: true
         type: choice
-        options: [COLLECT, ANALYZE]
+        options: [IDLE, COLLECT, ANALYZE]
       phase_epoch:
         required: true
         type: string
@@ -29,6 +29,12 @@ on:
       intent:
         required: true
         type: string
+      strategy_family:
+        description: "All active families for economics; all sources only for collection/control"
+        required: false
+        default: all
+        type: choice
+        options: [all, copy_vault]
 permissions:
   contents: write
   actions: write
@@ -57,14 +63,14 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import datetime, json, os, pathlib, re
+          import datetime, json, os, pathlib, re, sys
           request_id=os.environ["REQUEST_ID"]
           if not re.fullmatch(r"[0-9a-f]{64}", request_id):
               raise SystemExit("request_id must be exactly 64 lowercase hex characters")
           if not re.fullmatch(r"[0-9a-f]{40}", os.environ["MAIN_CODE_SHA"]):
               raise SystemExit("main_code_sha must be a commit SHA")
           phase=os.environ["PHASE"]
-          if phase not in {"COLLECT","ANALYZE"}:
+          if phase not in {"IDLE","COLLECT","ANALYZE"}:
               raise SystemExit("unsupported phase")
           try:
               epoch=int(os.environ["PHASE_EPOCH"])
@@ -96,12 +102,24 @@ jobs:
           ):
               raise SystemExit("operator dispatch metadata conflicts with canonical phase authority")
           intent=os.environ["INTENT"]
-          allowed={"start_collection"} if phase=="COLLECT" else {"analyze","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard","full_cycle","drain"}
-          if intent not in allowed:
-              raise SystemExit("intent is incompatible with phase")
-          family=os.environ["STRATEGY_FAMILY"]
-          if family not in {"all","copy_vault","lead_lag","cross_venue_dislocation"}:
-              raise SystemExit("unsupported strategy family")
+          control_intents={"pause","resume","retry"}
+          if intent in control_intents:
+              if intent=="retry" and phase!="ANALYZE":
+                  raise SystemExit("retry requires the ANALYZE phase")
+          else:
+              if phase=="IDLE":
+                  raise SystemExit("economic and collection intents require an active phase")
+              allowed={"start_collection"} if phase=="COLLECT" else {"analyze","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard","full_cycle","drain"}
+              if intent not in allowed:
+                  raise SystemExit("intent is incompatible with phase")
+          sys.path.insert(0,str(pathlib.Path.cwd()/"tools"))
+          from operator_family_contract import normalize_operator_family
+          try:
+              family,_=normalize_operator_family(
+                  intent,os.environ["STRATEGY_FAMILY"],{},scope_root=pathlib.Path.cwd()
+              )
+          except ValueError as exc:
+              raise SystemExit(f"operator family rejected: {exc}") from exc
           if phase=="ANALYZE" and not os.environ["ANALYSIS_STAGE"]:
               raise SystemExit("analysis_stage is required for ANALYZE")
           row={
@@ -140,14 +158,5 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add catalog/operator-dispatches
           git diff --cached --quiet || git commit -m "orchestration: record operator dispatch"
-          for attempt in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              break
-            fi
-            if [ "$attempt" = 5 ]; then
-              echo "Unable to publish dispatch receipt after five attempts" >&2
-              exit 1
-            fi
-          done
+          python tools/publish_main_commit.py --remote origin --branch main
           gh workflow run create-resumable-campaigns.yml --repo "$GITHUB_REPOSITORY" --ref main
-          gh workflow run resumable-campaign-controller.yml --repo "$GITHUB_REPOSITORY" --ref main

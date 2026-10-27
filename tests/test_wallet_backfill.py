@@ -152,7 +152,7 @@ def test_wallet_backfill_fetches_user_fills_by_time(tmp_path):
         seen_types.append(payload["type"])
         return httpx.Response(
             200,
-            json=[{"coin": "BTC", "time": 1000, "side": "B", "px": "100", "sz": "1"}],
+            json=[{"coin": "BTC", "time": 1, "side": "B", "px": "100", "sz": "1"}],
         )
 
     asyncio.run(
@@ -326,6 +326,13 @@ def test_wallet_backfill_user_fills_by_time_respects_max_pages(tmp_path):
     assert calls == 2
     assert result.fetched_items == 2
     assert result.position_deltas_created == 2
+    assert result.errors_count == 1
+    with session_factory() as session:
+        raw_events = session.query(RawEvent).order_by(RawEvent.id).all()
+    assert raw_events[0].request_payload_json["startTime"] == 1
+    assert raw_events[0].request_payload_json["endTime"] == 1001
+    assert raw_events[1].request_payload_json["startTime"] == 1002
+    assert raw_events[1].request_payload_json["endTime"] == 2002
 
 
 def test_wallet_backfill_deduplicates_same_fill_for_deltas(tmp_path):

@@ -82,8 +82,8 @@ def test_fix50_sizing_fixe_alimente_un_paperintent():
     fixe = SZ.sizing_apres_preuve(oos_net_bps=8.0, forward_net_bps=5.0, edge_net_bps=10.0,
                                   variance_bps2=4.0, capital_usd=1000, mode="fixe", frac_fixe=0.01)
     assert fixe["notional_usd"] == 10.0 and fixe["mode"] == "FIXE"
-    intent = PaperIntent(strategy="lead_lag", coin="BTC", side=1,
-                         notional_usd=fixe["notional_usd"], signal_observable_at_ms=0)
+    intent = PaperIntent(strategy="copy_vault", coin="BTC", side=1,
+                         notional_usd=fixe["notional_usd"], signal_observable_at_ms=1)
     assert intent.as_dict()["notional_usd"] == 10.0 and intent.as_dict()["real_execution"] is False
 
 

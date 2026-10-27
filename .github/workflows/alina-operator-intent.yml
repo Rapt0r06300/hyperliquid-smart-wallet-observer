@@ -8,11 +8,11 @@ on:
         type: choice
         options: [start_collection, analyze, replay, backtest, oos, forward_paper, module_pnl_proof, scoreboard, full_cycle, drain, pause, resume, retry]
       family:
-        description: "Strategy family or all families"
+        description: "All active families for economic intents; all data sources or Copy-Vault-specific collection"
         required: false
         default: all
         type: choice
-        options: [all, copy_vault, lead_lag, cross_venue_dislocation]
+        options: [all, copy_vault]
       request_id:
         description: "Idempotent request identity"
         required: true
@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import datetime,hashlib,json,os,pathlib,re
+          import datetime,hashlib,json,os,pathlib,re,sys
           request_id=os.environ["REQUEST_ID"]
           if not re.fullmatch(r"[0-9a-f]{64}", request_id):
             raise SystemExit("request_id must be a path-safe bounded identifier")
@@ -69,10 +69,11 @@ jobs:
             raise SystemExit("requested_by contains unsupported characters")
           config=json.loads(os.environ["CONFIG_JSON"])
           if not isinstance(config,dict): raise SystemExit("config_json must be object")
-          family=os.environ["FAMILY"]
-          if family not in {"all","copy_vault","lead_lag","cross_venue_dislocation"}:
-            raise SystemExit("unsupported strategy family")
-          if family != "all": config["strategy_family"]=family
+          sys.path.insert(0,str(pathlib.Path.cwd()/"tools"))
+          from operator_family_contract import normalize_operator_family
+          family,config=normalize_operator_family(
+            os.environ["INTENT"],os.environ["FAMILY"],config,scope_root=pathlib.Path.cwd()
+          )
           phase_path=pathlib.Path(os.environ["RUNNER_TEMP"])/"alina-phase.json"
           if not phase_path.is_file():
             raise SystemExit("canonical phase state is missing")
@@ -151,13 +152,8 @@ jobs:
           git add control/operator-intents control/operator-status
           git diff --cached --quiet && exit 0
           git commit -m "operator: persist intent ${{ inputs.request_id }}"
-          for i in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((i*2))
-          done
-          exit 1
+          gh auth setup-git
+          python tools/publish_main_commit.py --remote origin --branch main
   dispatch-alina:
     needs: persist
     runs-on: ubuntu-latest
@@ -188,16 +184,21 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY' > "$RUNNER_TEMP/dispatch.json"
-          import json, os
+          import json, os, sys
           config=json.loads(os.environ["CONFIG_JSON"])
           import pathlib
+          sys.path.insert(0,str(pathlib.Path.cwd()/"tools"))
+          from operator_family_contract import normalize_operator_family
+          family,config=normalize_operator_family(
+              os.environ["INTENT"],os.environ["FAMILY"],config,scope_root=pathlib.Path.cwd()
+          )
           phase=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"alina-phase.json").read_text(encoding="utf-8"))
           payload={
               "event_type":"alina_operator_intent",
               "client_payload":{
                   "request_id":os.environ["REQUEST_ID"],
                   "intent":os.environ["INTENT"],
-                  "strategy_family":os.environ["FAMILY"],
+                  "strategy_family":family,
                   "main_code_sha":os.environ["MAIN_CODE_SHA"],
                   "phase":phase.get("phase"),
                   "phase_epoch":phase.get("epoch"),

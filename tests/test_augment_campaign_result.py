@@ -6,8 +6,8 @@ from pathlib import Path
 
 from tools.augment_campaign_result import (
     annotate_collection,
-    annotate_rejected_collection,
     annotate_evidence,
+    annotate_rejected_collection,
     mark_durability_failure,
 )
 from tools.copy_vault_continuity import load_release_history_audits
@@ -202,3 +202,113 @@ def test_zero_viable_receipt_cannot_claim_real_execution(tmp_path):
     with pytest.raises(ValueError, match="INVALID_ZERO_VIABLE"):
         annotate_rejected_collection(result, diagnostic)
     assert json.loads(result.read_text())["status"] == "COMPLETE"
+
+
+def test_truncated_stdout_does_not_erase_structured_frame_metrics(tmp_path: Path) -> None:
+    result_path = tmp_path / "result.json"
+    run_manifest_path = tmp_path / "RUN_MANIFEST.json"
+    known_metrics = {
+        "accepted_frames": 12_345,
+        "persisted_frames": 12_340,
+        "l2_frames": 8_765,
+        "queue_drops": 5,
+        "frame_metrics_complete": True,
+        "basis": "published_bundle_manifests",
+    }
+    result_path.write_text(
+        json.dumps(
+            {
+                "status": "COMPLETE",
+                "payload": {
+                    "stdout": "{" + ("x" * 9_000),
+                    "collection_metrics": known_metrics,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_manifest_path.write_text(
+        json.dumps(
+            {
+                "manifests": [
+                    {
+                        "family": "trades",
+                        "record_count": 4,
+                        "bytes": 128,
+                        "trade_count_exact": True,
+                        "trade_count": 4,
+                    }
+                ],
+                "shard_count": 1,
+                "safe_count": 1,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    annotated = annotate_collection(
+        result_path,
+        run_manifest_path,
+        tag="fixture-release",
+        repository="owner/repository",
+    )
+
+    metrics = annotated["payload"]["collection_metrics"]
+    assert metrics["accepted_frames"] == known_metrics["accepted_frames"]
+    assert metrics["persisted_frames"] == known_metrics["persisted_frames"]
+    assert metrics["l2_frames"] == known_metrics["l2_frames"]
+    assert metrics["queue_drops"] == known_metrics["queue_drops"]
+    assert metrics["frame_metrics_complete"] is True
+
+
+def test_valid_stdout_does_not_replace_missing_structured_frame_metrics(
+    tmp_path: Path,
+) -> None:
+    result_path = tmp_path / "result.json"
+    run_manifest_path = tmp_path / "RUN_MANIFEST.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "status": "COMPLETE",
+                "payload": {
+                    "stdout": json.dumps(
+                        {
+                            "accepted_frames": 12,
+                            "persisted_frames": 12,
+                            "l2_frames": 8,
+                            "queue_drops": 0,
+                        }
+                    )
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_manifest_path.write_text(
+        json.dumps(
+            {
+                "manifests": [],
+                "shard_count": 0,
+                "safe_count": 0,
+                "partial_count": 0,
+                "reject_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    annotated = annotate_collection(
+        result_path,
+        run_manifest_path,
+        tag="fixture-empty-release",
+        repository="owner/repository",
+    )
+
+    metrics = annotated["payload"]["collection_metrics"]
+    assert metrics["frame_metrics_complete"] is False
+    assert "accepted_frames" not in metrics
+    assert "persisted_frames" not in metrics
+    assert "l2_frames" not in metrics
+    assert "queue_drops" not in metrics

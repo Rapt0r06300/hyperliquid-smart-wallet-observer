@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections import deque
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
@@ -137,8 +138,8 @@ def build_user_fills_by_time_payload(
     end_time: int,
     aggregate_by_time: bool = False,
 ) -> dict[str, Any]:
-    if start_time >= end_time:
-        raise ValueError("start_time must be strictly lower than end_time")
+    if start_time > end_time:
+        raise ValueError("start_time must not exceed end_time")
     payload: dict[str, Any] = {
         "type": "userFillsByTime",
         "user": user,
@@ -166,7 +167,9 @@ def build_historical_orders_payload(user: str) -> dict[str, Any]:
     return {"type": "historicalOrders", "user": user}
 
 
-def build_user_funding_payload(user: str, start_time: int | None = None, end_time: int | None = None) -> dict[str, Any]:
+def build_user_funding_payload(
+    user: str, start_time: int | None = None, end_time: int | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"type": "userFunding", "user": user}
     if start_time is not None:
         payload["startTime"] = int(start_time)
@@ -255,7 +258,7 @@ class HyperliquidInfoClient:
         backoff_base_seconds: float = 0.25,
         client: httpx.AsyncClient | None = None,
         rate_limiter: AsyncRateLimiter | None = None,
-        recorder: "CollectionRecorder | None" = None,
+        recorder: CollectionRecorder | None = None,
     ) -> None:
         if not base_url.endswith("/info"):
             raise HyperliquidInfoError("HyperliquidInfoClient must target the /info endpoint only")
@@ -417,13 +420,9 @@ class HyperliquidInfoClient:
     ) -> list[dict[str, Any]]:
         data = await self._post_info("userTwapSliceFills", {"user": user})
         if not isinstance(data, list):
-            raise HyperliquidInfoError(
-                "userTwapSliceFills returned a non-list payload"
-            )
+            raise HyperliquidInfoError("userTwapSliceFills returned a non-list payload")
         if len(data) > HYPERSMART_USER_TWAP_SLICE_FILLS_RECENT_LIMIT:
-            raise HyperliquidInfoError(
-                "userTwapSliceFills exceeded the documented 2000 item limit"
-            )
+            raise HyperliquidInfoError("userTwapSliceFills exceeded the documented 2000 item limit")
         return data
 
     async def iter_user_fills_by_time(
@@ -435,41 +434,95 @@ class HyperliquidInfoClient:
         max_pages: int | None = None,
         aggregate_by_time: bool = False,
     ) -> AsyncIterator[list[dict[str, Any]]]:
+        async for page, _, _ in self._iter_user_fills_by_time_windows(
+            user,
+            start_time,
+            end_time,
+            page_window_ms=page_window_ms,
+            max_pages=max_pages,
+            aggregate_by_time=aggregate_by_time,
+        ):
+            yield page
+
+    async def _iter_user_fills_by_time_windows(
+        self,
+        user: str,
+        start_time: int,
+        end_time: int,
+        page_window_ms: int | None = None,
+        max_pages: int | None = None,
+        aggregate_by_time: bool = False,
+    ) -> AsyncIterator[tuple[list[dict[str, Any]], int, int]]:
+        if end_time < start_time:
+            raise HyperliquidInfoError("userFillsByTime end_time precedes start_time")
+        if page_window_ms is not None and page_window_ms < 0:
+            raise HyperliquidInfoError("userFillsByTime pagination window did not advance")
+
+        pending: deque[tuple[int, int]] = deque()
         cursor = start_time
+        while cursor <= end_time:
+            request_end = min(end_time, cursor + page_window_ms) if page_window_ms else end_time
+            if request_end < cursor:
+                raise HyperliquidInfoError("userFillsByTime pagination window did not advance")
+            pending.append((cursor, request_end))
+            cursor = request_end + 1
+
         pages_seen = 0
         seen_page_hashes: set[str] = set()
-        while cursor < end_time:
+        while pending:
             if max_pages is not None and pages_seen >= max_pages:
-                break
-            request_end = min(end_time, cursor + page_window_ms) if page_window_ms else end_time
-            if request_end <= cursor:
-                raise HyperliquidInfoError("userFillsByTime pagination window did not advance")
-            page = await self.user_fills_by_time(
-                user,
-                cursor,
-                request_end,
-                aggregate_by_time=aggregate_by_time,
-            )
+                next_start, next_end = pending[0]
+                raise HyperliquidInfoError(
+                    "userFillsByTime max_pages exhausted before the requested range; "
+                    f"{len(pending)} window(s) remain, starting at [{next_start}, {next_end}]; "
+                    "coverage is incomplete"
+                )
+            window_start, window_end = pending.popleft()
+            try:
+                page = await self.user_fills_by_time(
+                    user,
+                    window_start,
+                    window_end,
+                    aggregate_by_time=aggregate_by_time,
+                )
+            except Exception as exc:
+                raise HyperliquidInfoError(
+                    "userFillsByTime request failed for inclusive window "
+                    f"[{window_start}, {window_end}]: {exc}"
+                ) from exc
+            pages_seen += 1
             if not page:
-                break
+                continue
+
+            try:
+                page_times = [int(fill["time"]) for fill in page]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HyperliquidInfoError(
+                    "userFillsByTime returned a fill without a valid timestamp"
+                ) from exc
+            if any(not window_start <= timestamp <= window_end for timestamp in page_times):
+                raise HyperliquidInfoError(
+                    "userFillsByTime returned a fill outside the requested inclusive window"
+                )
+
+            if len(page) == MAX_USER_FILLS_PAGE_SIZE:
+                if window_start == window_end:
+                    raise HyperliquidInfoError(
+                        "userFillsByTime reached the documented cap at the minimum 1 ms "
+                        f"window [{window_start}, {window_end}]; coverage is incomplete"
+                    )
+                midpoint = window_start + (window_end - window_start) // 2
+                # API bounds are inclusive. Split on adjacent integer milliseconds
+                # so the two child windows cover the parent without overlap.
+                pending.appendleft((midpoint + 1, window_end))
+                pending.appendleft((window_start, midpoint))
+                continue
+
             page_hash = stable_json_hash(page)
             if page_hash in seen_page_hashes:
                 raise HyperliquidInfoError("Duplicate userFillsByTime page detected")
             seen_page_hashes.add(page_hash)
-            pages_seen += 1
-            yield page
-            if page_window_ms and len(page) < MAX_USER_FILLS_PAGE_SIZE:
-                cursor = request_end + 1
-                continue
-            if not page_window_ms and len(page) < MAX_USER_FILLS_PAGE_SIZE:
-                break
-            page_times = [int(fill["time"]) for fill in page if "time" in fill]
-            if not page_times:
-                raise HyperliquidInfoError("Cannot paginate userFillsByTime without fill timestamps")
-            next_cursor = max(page_times) + 1
-            if next_cursor <= cursor:
-                raise HyperliquidInfoError("userFillsByTime pagination cursor did not advance")
-            cursor = next_cursor
+            yield page, window_start, window_end
 
     async def order_status(self, user: str, oid_or_cloid: int | str) -> OrderStatus:
         data = await self._post_info("orderStatus", {"user": user, "oid": oid_or_cloid})
@@ -517,8 +570,7 @@ class HyperliquidInfoClient:
         (X-04 avait juge le funding sur 18,9 h enregistrees en live. C'etait inutile.)
         """
         payload = build_funding_history_payload(coin, start_time, end_time)
-        data = await self._post_info("fundingHistory",
-                                     {k: v for k, v in payload.items() if k != "type"})
+        data = await self._post_info("fundingHistory", {k: v for k, v in payload.items() if k != "type"})
         if not isinstance(data, list):
             raise HyperliquidInfoError("fundingHistory returned a non-list payload")
         return data

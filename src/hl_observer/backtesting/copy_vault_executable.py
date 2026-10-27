@@ -51,6 +51,7 @@ from hl_observer.economics.assumptions import (
 )
 from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.funding.funding_times import next_funding_time_ms
+from hl_observer.normalization.l2_book import validate_l2_book_sides
 from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
@@ -292,9 +293,25 @@ def execute_metaorder(
         _valid_observed_book_top(row) for row in (reference, entry, exit_book)
     ):
         return None, "INVALID_OBSERVED_BOOK"
-    if next_funding_time_ms(int(entry["ts_ms"]), interval_hours=1) <= int(
-        exit_book["ts_ms"]
-    ):
+    for row in (reference, entry, exit_book):
+        has_bids, has_asks = "bids5" in row, "asks5" in row
+        if has_bids != has_asks:
+            return None, "INVALID_OBSERVED_BOOK_L2"
+        if has_bids:
+            _, l2_reason = validate_l2_book_sides(
+                row.get("bids5"), row.get("asks5"),
+                bid=row.get("bid"), ask=row.get("ask"),
+            )
+            if l2_reason is not None:
+                return None, "INVALID_OBSERVED_BOOK_L2"
+    entry_ts_ms = int(entry["ts_ms"])
+    # Include a funding boundary exactly equal to entry time: with timestamps
+    # alone the fill/funding event order is unknown, so that position is unsafe.
+    first_possible_funding_ms = next_funding_time_ms(
+        entry_ts_ms - 1,
+        interval_hours=1,
+    )
+    if first_possible_funding_ms <= int(exit_book["ts_ms"]):
         return None, "FUNDING_BOUNDARY_UNPRICED"
     checkpoint_writer_ids = {
         str(row.get("writer_run_id") or "").strip()

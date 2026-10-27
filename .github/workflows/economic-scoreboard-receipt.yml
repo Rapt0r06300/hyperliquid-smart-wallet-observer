@@ -41,4 +41,4 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "scoreboard: persist economic family receipt"
           gh auth setup-git
-          git push origin HEAD:main
+          python tools/publish_main_commit.py --remote origin --branch main

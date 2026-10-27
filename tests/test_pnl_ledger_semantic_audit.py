@@ -11,7 +11,7 @@ from hl_observer.simulation.paper_ledger import PaperLedger
 from hl_observer.simulation.pnl_ledger_audit import CONTAMINATED, TRUSTED, UNMEASURABLE, audit_paper_ledger
 
 
-def _complete_lifecycle() -> PaperLedger:
+def _complete_lifecycle(*, funding_settlement_id: str | None = None) -> PaperLedger:
     ledger = PaperLedger(starting_balance_usdc=1_000.0, session_id="paper:audit")
     ledger.open_position(
         coin="HYPE",
@@ -37,11 +37,17 @@ def _complete_lifecycle() -> PaperLedger:
         timestamp_ms=3,
         fee_bps=5.0,
     )
+    funding_refs = (
+        {"funding_settlement_id": funding_settlement_id}
+        if funding_settlement_id is not None
+        else None
+    )
     ledger.apply_funding(
         coin="HYPE",
         side="LONG",
         amount_usdc=0.2,
         timestamp_ms=4,
+        refs=funding_refs,
     )
     ledger.reduce_or_close(
         coin="HYPE",
@@ -70,8 +76,20 @@ def test_semantic_audit_reconciles_open_add_reduce_close_costs_and_funding():
     assert audit.funding_net_usdc == pytest.approx(0.2)
     assert audit.recalculated_net_pnl_usdc == pytest.approx(-1.954)
     assert audit.recalculated_equity_usdc == pytest.approx(998.046)
-    assert ledger.snapshot()["strict_pnl_allowed"] is True
+    snapshot = ledger.snapshot()
+    assert snapshot["strict_pnl_allowed"] is False
+    assert snapshot["economic_evidence"]["funding_evidence_complete"] is False
     assert ledger.snapshot()["pnl_audit"]["status"] == TRUSTED
+
+
+def test_identified_funding_keeps_strict_lifecycle_reconcilable() -> None:
+    ledger = _complete_lifecycle(funding_settlement_id="funding:settlement:1")
+
+    snapshot = ledger.snapshot()
+
+    assert snapshot["strict_pnl_allowed"] is True
+    assert snapshot["economic_evidence"]["funding_evidence_complete"] is True
+    assert snapshot["pnl_audit"]["status"] == TRUSTED
 
 
 def test_empty_new_ledger_is_unmeasurable_without_economic_events():

@@ -43,10 +43,20 @@ holdout n'est autorisé.
 
 ## Objectif économique et MAX DATA
 
-La cible reste **≥ 4 USD net séparément pour Copy‑Vault, Lead‑Lag et Cross‑Venue**, jamais une
-compensation entre familles. `COMPLETED_SUITES` reste fail‑closed et lié au SHA. MAX DATA sait
-escalader les suites FULL/COLD, réutiliser cache/checkpoints, conserver une réserve disque et
-continuer tant qu'une famille reste sous la cible.
+Mise à jour de périmètre du 26 octobre 2026 : l'ancienne cible multi-familles de
+4 USD/jour, présente dans cette note historique, est **supersédée** et ne doit
+plus piloter de recherche, de simulation, de replay, de backtest ou de
+certification. Copy‑Vault est l'unique famille économique active; Lead‑Lag,
+Cross‑Venue et les autres familles restent désactivées, avec leurs preuves
+historiques préservées.
+
+La cible économique finale est de démontrer **au moins 5.00 USD nets/jour pour
+Copy‑Vault sur 200 USD paper**, uniquement après les réparations techniques,
+les données SAFE et les preuves replay/OOS/forward. C'est un objectif à
+mesurer, jamais une preuve acquise ni une raison d'affaiblir un gate.
+`COMPLETED_SUITES` reste fail‑closed et lié au SHA. MAX DATA sait escalader les
+suites FULL/COLD, réutiliser cache/checkpoints et conserver une réserve disque;
+aucune autre famille ne peut être activée pour atteindre la cible.
 
 La mémoire économique est maintenant immuable et partitionnée par :
 

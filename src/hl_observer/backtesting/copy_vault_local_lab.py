@@ -17,11 +17,13 @@ from pathlib import Path, PurePosixPath
 from statistics import NormalDist
 from typing import Any
 
+from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
 from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21,
     evaluate_frozen_v21_segment,
 )
+from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.copy_vault_continuity import load_release_history_audits
 
@@ -631,12 +633,15 @@ def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
     if raw.get("channel") != "l2Book" or not isinstance(levels, list) or len(levels) != 2:
         return None
     try:
-        bids = [[_number(level["px"]), _number(level["sz"])] for level in levels[0]][:5]
-        asks = [[_number(level["px"]), _number(level["sz"])] for level in levels[1]][:5]
+        bids = normalize_l2_levels(
+            [[level["px"], level["sz"]] for level in levels[0]], side="bid"
+        )
+        asks = normalize_l2_levels(
+            [[level["px"], level["sz"]] for level in levels[1]], side="ask"
+        )
         if not bids or not asks:
             return None
-        bids.sort(key=lambda row: row[0], reverse=True)
-        asks.sort(key=lambda row: row[0])
+        bids, asks = bids[:5], asks[:5]
         bid, ask = bids[0][0], asks[0][0]
         if bid <= 0 or ask <= bid:
             return None
@@ -1092,24 +1097,15 @@ def _daily_lcb(daily_values: object, trial_count: int) -> float | None:
     return mean - z * standard_error
 
 
-def _campaign_lock(path: Path) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    for _attempt in range(2):
-        try:
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.write(descriptor, f"{os.getpid()}\n".encode("ascii"))
-            os.fsync(descriptor)
-            return descriptor
-        except FileExistsError:
-            try:
-                owner = int(path.read_text(encoding="ascii").strip())
-                os.kill(owner, 0)
-                raise RuntimeError("COPY_VAULT_CAMPAIGN_ALREADY_RUNNING")
-            except ProcessLookupError:
-                path.unlink(missing_ok=True)
-            except (OSError, ValueError) as exc:
-                raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE") from exc
-    raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_BUSY")
+def _campaign_lock(path: Path) -> SingleWriterFileLock:
+    lock = SingleWriterFileLock(path)
+    try:
+        lock.acquire()
+    except WriterBusy as exc:
+        raise RuntimeError("COPY_VAULT_CAMPAIGN_ALREADY_RUNNING") from exc
+    except OSError as exc:
+        raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE") from exc
+    return lock
 
 
 def run_local_campaign(
@@ -1264,7 +1260,7 @@ def run_local_campaign(
         / "copy_vault_continuous_lab" / ".active.lock"
     )
     try:
-        lock_descriptor = _campaign_lock(lock_path)
+        campaign_lock = _campaign_lock(lock_path)
     except RuntimeError as exc:
         return {**base, "status": "TECHNICAL_FAILURE", "reason": str(exc), "candidates_tested": 0}
     try:
@@ -1606,8 +1602,7 @@ def run_local_campaign(
             "freeze_created": bool(locals().get("best")), "economically_proven": False,
         }
     finally:
-        os.close(lock_descriptor)
-        lock_path.unlink(missing_ok=True)
+        campaign_lock.release()
 
 
 def evaluate_current_copy_vault(

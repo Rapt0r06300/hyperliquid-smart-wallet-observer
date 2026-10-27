@@ -38,20 +38,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PHASE="$(python -c 'import json; print(json.load(open("control/alina-phase.json"))["phase"])')"
-          STAGE="$(python -c 'import json; print(json.load(open("control/alina-phase.json")).get("analysis_stage") or "")')"
-          echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
-          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
-          echo "phase=$PHASE stage=$STAGE"
+          STATE_JSON="$(python tools/phase_gate.py read --state control/alina-phase.json)"
+          export STATE_JSON
+          python - <<'PY'
+          import json
+          import os
 
-      - name: Build fail-closed global closure receipt
+          state = json.loads(os.environ["STATE_JSON"])
+          fields = {
+              "phase": state["phase"],
+              "stage": state.get("analysis_stage") or "",
+              "epoch": str(state["epoch"]),
+              "source_collection_epoch": str(state.get("source_collection_epoch") or ""),
+              "cutoff": state.get("collection_cutoff_at_utc") or "",
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, value in fields.items():
+                  output.write(f"{key}={value}\n")
+          print(
+              "phase={phase} stage={stage} epoch={epoch} "
+              "source_collection_epoch={source_collection_epoch} cutoff={cutoff}".format(
+                  **fields
+              )
+          )
+          PY
+
+      - id: build_closure
+        name: Build fail-closed global closure receipt
         if: steps.phase.outputs.phase == 'ANALYZE' && steps.phase.outputs.stage != 'DRAIN' && steps.phase.outputs.stage != 'QUALITY' && steps.phase.outputs.stage != 'REPLAY'
         run: |
           set -euo pipefail
           python tools/build_analysis_frozen_coverage_receipt.py
           python tools/build_global_implementation_closure.py --alina-root .
 
-      - name: Publish closure receipt from latest canonical head
+      - id: publish_closure
+        name: Publish closure receipt from latest canonical head
         if: steps.phase.outputs.phase == 'ANALYZE' && steps.phase.outputs.stage != 'DRAIN' && steps.phase.outputs.stage != 'QUALITY' && steps.phase.outputs.stage != 'REPLAY'
         run: |
           set -euo pipefail
@@ -71,7 +92,8 @@ jobs:
           done
           exit 1
 
-      - name: Dispatch analysis stage controller after closure
+      - id: dispatch_analysis
+        name: Dispatch analysis stage controller after closure
         if: steps.phase.outputs.phase == 'ANALYZE'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,3 +122,19 @@ jobs:
             fi
             exit "$rc"
           done
+
+      - id: summarize_run
+        name: Summarize closure evidence status
+        if: always()
+        shell: bash
+        env:
+          ALINA_PHASE: ${{ steps.phase.outputs.phase }}
+          ALINA_STAGE: ${{ steps.phase.outputs.stage }}
+          ALINA_EPOCH: ${{ steps.phase.outputs.epoch }}
+          ALINA_SOURCE_COLLECTION_EPOCH: ${{ steps.phase.outputs.source_collection_epoch }}
+          ALINA_COLLECTION_CUTOFF_UTC: ${{ steps.phase.outputs.cutoff }}
+          ALINA_JOB_OUTCOME: ${{ job.status }}
+          ALINA_BUILD_OUTCOME: ${{ steps.build_closure.outcome }}
+          ALINA_PUBLISH_OUTCOME: ${{ steps.publish_closure.outcome }}
+          ALINA_DISPATCH_OUTCOME: ${{ steps.dispatch_analysis.outcome }}
+        run: python tools/summarize_global_closure_run.py

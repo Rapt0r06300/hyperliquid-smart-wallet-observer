@@ -153,6 +153,21 @@ jobs:
             ID="$2"
             CFG_TEXT="$3"
             CURSOR="$4"
+            CURSOR="$(python - "$PHASE" "$CURSOR" <<'PY'
+          import json
+          import sys
+          from tools.operator_family_contract import normalize_operator_family
+
+          phase, raw_cursor = sys.argv[1:]
+          cursor = json.loads(raw_cursor)
+          if not isinstance(cursor, dict):
+              raise SystemExit("campaign cursor must be a JSON object")
+          if phase == "ANALYZE":
+              selector = cursor.get("strategy_family") or "all"
+              _, cursor = normalize_operator_family("replay", selector, cursor)
+          print(json.dumps(cursor, sort_keys=True, separators=(",", ":")))
+          PY
+            )"
             P="catalog/campaigns/$ID.json"
             if ! python tools/phase_gate.py allow --kind "$KIND" >/dev/null; then
               echo "phase gate denied $KIND for $PHASE; skipping"
@@ -368,28 +383,12 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          for optional in             catalog/campaigns             catalog/copy_vault_selections             catalog/market_collection_plans             catalog/campaign-history             catalog/dispatch-receipts             catalog/operator-acks             control/phase-receipts; do
+          for optional in             catalog/campaigns             catalog/copy_vault_selections             catalog/market_collection_plans             catalog/campaign-history             catalog/dispatch-receipts             catalog/operator-acks             control/phase-receipts             control/operator-status; do
             if [ -e "$optional" ]; then git add "$optional"; fi
           done
           git diff --cached --quiet && exit 0
           git commit -m "campaign: create continuous resumable work"
-          for i in 1 2 3 4 5; do
-            set +e
-            git pull --rebase origin main
-            pull_rc=$?
-            set -e
-            if [ "$pull_rc" -ne 0 ]; then
-              git rebase --abort >/dev/null 2>&1 || true
-              echo "::warning::Campaign manifest refresh collided with concurrent worker updates; discarding this local batch so the next scheduled/push cycle recomputes from current main."
-              exit 0
-            fi
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((i*2))
-          done
-          echo "::warning::Campaign manifest push remained contended; deferring to the next controller cycle."
-          exit 0
+          python tools/publish_main_commit.py --remote origin --branch main
 
 
 

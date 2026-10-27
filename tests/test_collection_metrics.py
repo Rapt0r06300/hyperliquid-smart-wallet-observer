@@ -15,7 +15,10 @@ def test_instant_collection_metrics_counts_durable_copy_vault_fills(tmp_path, mo
         "accepted_frames": 1406,
         "persisted_frames": 1406,
         "l2_frames": 1338,
+        "bbo_frames": 0,
         "queue_drops": 0,
+        "manifest_inventory_complete": True,
+        "frame_metrics_complete": True,
         "live_fill_counts": {"0xabc": 50},
         "reconciliation": {
             "0xabc": {
@@ -127,6 +130,114 @@ def test_compact_checkpoint_metrics_do_not_depend_on_stdout(tmp_path, monkeypatc
     assert out["instant"]["trades_collected_observed"] == 1234
     assert out["instant"]["compressed_bytes_known"] == 500000
     assert out["instant"]["coverage_complete"] is True
+    assert out["instant"]["persisted_frames"] is None
+
+
+def test_incomplete_frame_metrics_are_not_reported_as_exact_zero(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    (campaigns / "market.json").write_text(
+        json.dumps(
+            {
+                "kind": "market_collection",
+                "status": "COMPLETE",
+                "updated_at": "2026-10-01T15:20:00Z",
+                "completed_units": {
+                    "0": {
+                        "result": {
+                            "durable_persisted": True,
+                            "release_tag": "data-v2-market",
+                            "collection_metrics": {
+                                "trade_count_observed": 4,
+                                "trade_count_coverage_complete": True,
+                                "record_count_observed": 10,
+                                "accepted_frames": 0,
+                                "persisted_frames": 0,
+                                "l2_frames": 0,
+                                "queue_drops": 0,
+                                "manifest_inventory_complete": True,
+                                "frame_metrics_complete": False,
+                                "shard_count": 1,
+                                "safe_count": 1,
+                                "partial_count": 0,
+                                "reject_count": 0,
+                                "compressed_bytes": 128,
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(json.dumps({"totals": {}}), encoding="utf-8")
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+
+    out = metrics.build()
+
+    assert out["instant"]["all_collection_metrics_complete"] is False
+    assert out["instant"]["units_frame_metrics_incomplete"] == 1
+    assert out["instant"]["persisted_frames"] is None
+    assert out["instant"]["l2_frames"] is None
+
+
+def test_exact_zero_frame_metrics_remain_zero_when_explicitly_complete(
+    tmp_path, monkeypatch
+):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    (campaigns / "zero.json").write_text(
+        json.dumps(
+            {
+                "kind": "market_collection",
+                "status": "COMPLETE",
+                "completed_units": {
+                    "0": {
+                        "result": {
+                            "durable_persisted": True,
+                            "release_tag": "data-v2-zero",
+                            "collection_metrics": {
+                                "trade_count_observed": 0,
+                                "trade_count_coverage_complete": True,
+                                "record_count_observed": 0,
+                                "accepted_frames": 0,
+                                "persisted_frames": 0,
+                                "l2_frames": 0,
+                                "bbo_frames": 0,
+                                "queue_drops": 0,
+                                "manifest_inventory_complete": True,
+                                "frame_metrics_complete": True,
+                                "shard_count": 0,
+                                "safe_count": 0,
+                                "partial_count": 0,
+                                "reject_count": 0,
+                                "compressed_bytes": 0,
+                                "uncompressed_bytes": 0,
+                                "uncompressed_size_coverage_complete": True,
+                            },
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(json.dumps({"totals": {}}), encoding="utf-8")
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+
+    out = metrics.build()
+
+    assert out["instant"]["all_collection_metrics_complete"] is True
+    assert out["instant"]["persisted_frames"] == 0
+    assert out["instant"]["l2_frames"] == 0
 
 
 def test_safe_build_preserves_last_good_snapshot_on_failure(tmp_path, monkeypatch):

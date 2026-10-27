@@ -126,6 +126,14 @@ class CapitalAccountingTracker:
         net = sum(position.net_directional_exposure_usd for position in positions)
         margin = sum(position.margin_locked_usd for position in positions)
         mid_pnl = sum(position.unrealized_mid_pnl_usd for position in positions)
+        for name, value in (
+            ("gross_exposure_usd", gross),
+            ("net_directional_exposure_usd", net),
+            ("margin_locked_usd", margin),
+            ("unrealized_mid_pnl_usd", mid_pnl),
+        ):
+            if not _finite(value):
+                raise ValueError(f"{name} aggregate must be finite")
         liquidatable_known = all(
             position.liquidatable_pnl_usd is not None for position in positions
         )
@@ -134,9 +142,33 @@ class CapitalAccountingTracker:
             if liquidatable_known
             else None
         )
+        if liquidatable_pnl is not None and not _finite(liquidatable_pnl):
+            raise ValueError("liquidatable_pnl_usd aggregate must be finite")
+        cash = float(collateral_cash_usd)
+        free_cash = cash - margin
+        mid_equity = cash + mid_pnl
+        liquidatable_equity = (
+            cash + liquidatable_pnl if liquidatable_pnl is not None else None
+        )
+        authoritative_pnl = (
+            liquidatable_equity - self.starting_equity_usd
+            if liquidatable_equity is not None
+            else None
+        )
+        for name, value in (
+            ("free_cash_usd", free_cash),
+            ("mid_equity_usd", mid_equity),
+            ("liquidatable_equity_usd", liquidatable_equity),
+            ("authoritative_pnl_usd", authoritative_pnl),
+        ):
+            if value is not None and not _finite(value):
+                raise ValueError(f"{name} must be finite")
         # Average active margin is sampled only on capital state changes. It is
         # therefore deterministic and does not change when the UI or mark loop
         # polls more frequently.
+        next_margin_sum = self._margin_sum
+        next_margin_observations = self._margin_observations
+        next_last_observed_margin = self._last_observed_margin
         if margin > 0 and (
             self._last_observed_margin is None
             or not math.isclose(
@@ -146,25 +178,22 @@ class CapitalAccountingTracker:
                 abs_tol=1e-12,
             )
         ):
-            self._margin_observations += 1
-            self._margin_sum += margin
-            self._last_observed_margin = margin
-        self._peak_margin = max(self._peak_margin, margin)
+            next_margin_observations += 1
+            next_margin_sum += margin
+            next_last_observed_margin = margin
+        if not _finite(next_margin_sum):
+            raise ValueError("avg_margin_locked_usd accumulator must be finite")
+        next_peak_margin = max(self._peak_margin, margin)
         average_margin = (
-            self._margin_sum / self._margin_observations
-            if self._margin_observations
+            next_margin_sum / next_margin_observations
+            if next_margin_observations
             else 0.0
         )
-        liquidatable_equity = (
-            float(collateral_cash_usd) + liquidatable_pnl
-            if liquidatable_pnl is not None
-            else None
-        )
-        authoritative_pnl = (
-            liquidatable_equity - self.starting_equity_usd
-            if liquidatable_equity is not None
-            else None
-        )
+        if not _finite(average_margin) or not _finite(next_peak_margin):
+            raise ValueError("margin summary must be finite")
+        leverage = gross / margin if margin > 0 else None
+        if leverage is not None and not _finite(leverage):
+            raise ValueError("leverage_effective must be finite")
         buffers = [
             float(position.liquidation_buffer_bps)
             for position in positions
@@ -172,7 +201,7 @@ class CapitalAccountingTracker:
         ]
         snapshot = CapitalAccountingSnapshot(
             starting_equity_usd=round(self.starting_equity_usd, 10),
-            free_cash_usd=round(float(collateral_cash_usd) - margin, 10),
+            free_cash_usd=round(free_cash, 10),
             margin_locked_usd=round(margin, 10),
             gross_exposure_usd=round(gross, 10),
             net_directional_exposure_usd=round(net, 10),
@@ -181,9 +210,7 @@ class CapitalAccountingTracker:
                 for position in positions
                 for value in position.leg_notional_usd
             ),
-            leverage_effective=(
-                round(gross / margin, 10) if margin > 0 else None
-            ),
+            leverage_effective=round(leverage, 10) if leverage is not None else None,
             liquidation_buffer_bps=min(buffers) if len(buffers) == len(positions) and buffers else None,
             realized_pnl_usd=round(float(realized_pnl_usd), 10),
             unrealized_mid_pnl_usd=round(mid_pnl, 10),
@@ -192,7 +219,7 @@ class CapitalAccountingTracker:
                 if liquidatable_pnl is not None
                 else None
             ),
-            mid_equity_usd=round(float(collateral_cash_usd) + mid_pnl, 10),
+            mid_equity_usd=round(mid_equity, 10),
             liquidatable_equity_usd=(
                 round(liquidatable_equity, 10)
                 if liquidatable_equity is not None
@@ -200,7 +227,7 @@ class CapitalAccountingTracker:
             ),
             turnover_usd=round(float(turnover_usd), 10),
             avg_margin_locked_usd=round(average_margin, 10),
-            peak_margin_locked_usd=round(self._peak_margin, 10),
+            peak_margin_locked_usd=round(next_peak_margin, 10),
             ROI_starting_equity=_ratio(
                 authoritative_pnl,
                 self.starting_equity_usd,
@@ -211,7 +238,7 @@ class CapitalAccountingTracker:
             ),
             ROI_peak_margin_locked=_ratio(
                 authoritative_pnl,
-                self._peak_margin,
+                next_peak_margin,
             ),
             return_on_gross_exposure=_ratio(
                 authoritative_pnl,
@@ -223,6 +250,40 @@ class CapitalAccountingTracker:
                 else "UNMEASURABLE_NO_EXECUTABLE_EXIT"
             ),
         )
+        for name in (
+            "starting_equity_usd",
+            "free_cash_usd",
+            "margin_locked_usd",
+            "gross_exposure_usd",
+            "net_directional_exposure_usd",
+            "realized_pnl_usd",
+            "unrealized_mid_pnl_usd",
+            "mid_equity_usd",
+            "turnover_usd",
+            "avg_margin_locked_usd",
+            "peak_margin_locked_usd",
+        ):
+            if not _finite(getattr(snapshot, name)):
+                raise ValueError(f"{name} snapshot must be finite")
+        for name in (
+            "leverage_effective",
+            "liquidation_buffer_bps",
+            "liquidatable_pnl_usd",
+            "liquidatable_equity_usd",
+            "ROI_starting_equity",
+            "ROI_avg_margin_locked",
+            "ROI_peak_margin_locked",
+            "return_on_gross_exposure",
+        ):
+            value = getattr(snapshot, name)
+            if value is not None and not _finite(value):
+                raise ValueError(f"{name} snapshot must be finite or None")
+        if any(not _finite(value) for value in snapshot.leg_notional_usd):
+            raise ValueError("leg_notional_usd snapshot must be finite")
+        self._margin_sum = next_margin_sum
+        self._margin_observations = next_margin_observations
+        self._last_observed_margin = next_last_observed_margin
+        self._peak_margin = next_peak_margin
         self._latest = snapshot
         return snapshot
 
@@ -230,7 +291,8 @@ class CapitalAccountingTracker:
 def _ratio(numerator: float | None, denominator: float) -> float | None:
     if numerator is None or denominator <= 0:
         return None
-    return round(numerator / denominator, 10)
+    ratio = numerator / denominator
+    return round(ratio, 10) if math.isfinite(ratio) else None
 
 
 def _finite(value: object) -> bool:

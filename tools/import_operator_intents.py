@@ -10,6 +10,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from operator_family_contract import normalize_operator_family
+
 COLLECT = {"start_collection"}
 ANALYZE = {
     "analyze",
@@ -164,9 +166,20 @@ def main():
                 continue
             if args.analysis_stage not in set(STAGE_BY_KIND.values()):
                 raise SystemExit("ANALYZE import requires a valid explicit analysis stage")
-        requested_family = str((row.get("config") or {}).get("strategy_family") or "all")
-        if requested_family not in {"all", "copy_vault", "lead_lag", "cross_venue_dislocation"}:
-            raise SystemExit(f"unsupported strategy family: {requested_family}")
+        try:
+            requested_family, normalized_config = normalize_operator_family(
+                intent,
+                row.get("strategy_family"),
+                row.get("config"),
+                scope_root=args.alina_root,
+            )
+        except ValueError as exc:
+            raise SystemExit(f"operator family rejected: {path}: {exc}") from exc
+        if (
+            row.get("schema_version") == "alina.operator_intent.v2"
+            and row.get("strategy_family") != requested_family
+        ):
+            raise SystemExit(f"operator family field mismatch: {path}")
         for campaign_kind in campaign_kinds(intent, args.analysis_stage):
             if intent == "start_collection":
                 if requested_family == "copy_vault" and campaign_kind != "copy_vault_collection":
@@ -191,7 +204,7 @@ def main():
                     )
                 continue
 
-            config = dict(row.get("config") or {})
+            config = dict(normalized_config)
             config["operator_intent"] = intent
             config["request_id"] = request_id
             config["operator_stage"] = campaign_kind

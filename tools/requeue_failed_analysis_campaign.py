@@ -14,10 +14,15 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.operator_family_contract import normalize_operator_family
 
 ANALYSIS_KINDS = {
     "replay",
@@ -85,6 +90,15 @@ def requeue(
         raise SystemExit("analysis campaign lost paper/read-only guards")
     if row.get("real_execution") is not False:
         raise SystemExit("real execution is forbidden")
+
+    cursor_input = dict(row.get("cursor") or {})
+    selector = cursor_input.get("strategy_family") or "all"
+    try:
+        _, normalized_cursor = normalize_operator_family(
+            "replay", selector, cursor_input
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
     # Periodic creation may observe a campaign after another worker has claimed
     # it. RUNNING/terminal state is authoritative and must be a harmless no-op,
@@ -198,7 +212,7 @@ def requeue(
     )
     cursor = {
         key: value
-        for key, value in dict(row.get("cursor") or {}).items()
+        for key, value in normalized_cursor.items()
         if key not in RUNTIME_CURSOR_KEYS
     }
 

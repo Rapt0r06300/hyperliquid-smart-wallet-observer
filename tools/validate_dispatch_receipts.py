@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from operator_family_contract import normalize_operator_family
+
 COLLECT_KINDS = {
     "market_collection", "copy_vault_collection",
     "official_archive_collection", "event_intelligence_collection",
@@ -78,6 +80,21 @@ def main():
         allowed = COLLECT_KINDS if receipt["creation_phase"] == "COLLECT" else ANALYZE_KINDS
         if kind not in allowed:
             raise SystemExit(f"{path}: campaign kind {kind!r} is invalid for phase")
+        if campaign.get("schema_version") == "alina.resumable_campaign.v2":
+            cursor = campaign.get("cursor")
+            if not isinstance(cursor, dict) or not cursor.get("operator_intent"):
+                raise SystemExit(f"{path}: V2 operator campaign lacks intent/config binding")
+            try:
+                effective_family, _ = normalize_operator_family(
+                    str(cursor["operator_intent"]),
+                    receipt.get("strategy_family"),
+                    cursor,
+                    scope_root=Path(__file__).resolve().parents[1],
+                )
+            except ValueError as exc:
+                raise SystemExit(f"{path}: campaign family is outside active scope: {exc}") from exc
+            if effective_family != receipt.get("strategy_family"):
+                raise SystemExit(f"{path}: receipt/campaign family mismatch")
         if receipt["creation_phase"] == "ANALYZE":
             for field in ("source_collection_epoch", "collection_cutoff_at_utc", "dataset_selection_id"):
                 if campaign.get(field) in (None, ""):
