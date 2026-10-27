@@ -35,6 +35,26 @@ def _specs() -> list[dict]:
     )
 
 
+def test_load_specs_consumes_three_value_replay_ready_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proof = {"source_index_sha256": "c" * 64}
+    rows = [_row("dataset-a", "a.jsonl.gz", b"alpha")]
+    required = {("release-1", "bundle.zip"): (11, "a" * 64)}
+    monkeypatch.setattr(
+        verifier,
+        "_load_replay_ready_plan",
+        lambda _index, _metrics: (proof, rows, required),
+    )
+
+    actual_proof, specs = verifier._load_specs(Path("index"), Path("metrics"))
+
+    assert actual_proof == proof
+    assert len(specs) == 1
+    assert specs[0]["member_rows"] == 1
+    assert specs[0]["asset_name"] == "bundle.zip"
+
+
 def test_partition_assignment_is_deterministic_and_byte_balanced() -> None:
     specs = [
         {"release_tag": "r", "asset_name": f"a-{index}", "asset_bytes": size}
