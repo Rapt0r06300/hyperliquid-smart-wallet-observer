@@ -48,9 +48,9 @@ SENSITIVE_PARTS = {
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
-GIT_SYNC_ENGINE_BUILD = "2026-10-27-exact-archive-relocation-v1"
+GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v2"
 # A single historical registry was moved out of the repository root. It is
-# publishable only as an exact byte-for-byte relocation of its current HEAD blob.
+# publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
     "CLAUDE_TASKS.jsonl": "docs/archive/root-history/CLAUDE_TASKS.jsonl",
 }
@@ -151,7 +151,13 @@ def _git_operation_label(args: list[str]) -> str:
     if verb == "merge-base":
         return "Comparer l'historique local et GitHub"
     if verb == "merge":
-        return "Integrer les commits GitHub sans ecraser le travail local"
+        return "Adopter GitHub main en avance rapide"
+    if verb == "rebase":
+        return "Rejouer les commits locaux sans commit de fusion"
+    if verb == "rev-list":
+        return "Verifier les commits locaux a rejouer"
+    if verb == "hash-object":
+        return "Verifier le blob apres normalisation Git"
     if verb == "push":
         return "Publier vers GitHub main sans force"
     if verb == "add":
@@ -259,6 +265,7 @@ class Synchronizer:
             "reset_or_clean": False,
             "local_commit_created": False,
             "merge_commits_created": 0,
+            "rebases_performed": 0,
             "push_attempts": 0,
             "local_syntax_check": "NOT_RUN",
             "verified_historical_relocations": [],
@@ -562,11 +569,12 @@ class Synchronizer:
             if absolute.is_file() and absolute.stat().st_size > MAX_BLOB_BYTES:
                 raise SyncBlocked(f"Fichier >95 Mio interdit dans Git: {path}")
         self.say(
-            f"[FILTRE] {len(eligible)} fichier(s) de code admissible(s); "
+            f"[FILTRE] {len(eligible)} chemin(s) admissible(s); "
             "donnees, binaires et secrets exclus."
         )
         for path in eligible[:30]:
-            self.say(f"  [CODE] {path}")
+            label = "ARCHIVE SAFE" if path in safe_moves else "CODE"
+            self.say(f"  [{label}] {path}")
         if len(eligible) > 30:
             self.say(f"  [CODE] ... {len(eligible) - 30} autre(s) fichier(s).")
         return eligible
@@ -719,10 +727,11 @@ class Synchronizer:
 
     def _capture_conflicts(self, conflicted: list[str], local: str,
                            remote: str) -> None:
-        """Save exact 3-way inputs locally before aborting a failed merge.
+        """Save exact base/local/GitHub blobs before aborting reconciliation.
 
         Never write outside runtime/reports; never post payload to GitHub.
-        This is a manual/AI-assisted resolution kit, NOT an unsafe auto-merge.
+        The copies are resolved from immutable commit IDs, not index stages,
+        whose local/GitHub roles change between merge and rebase conflicts.
         """
         root = self.root / "runtime"
         reports = root / "reports"
@@ -737,10 +746,10 @@ class Synchronizer:
             "local_head": local,
             "remote_head": remote,
             "git_stage_roles": {
-                "base": "common ancestor",
-                "local": "checkpoint Codex/Claude (stage 2)",
-                "github": "origin/main (stage 3)",
-                "conflict": "Git tentative de fusion, NON resolue",
+                "base": "merge-base(local_head, remote_head)",
+                "local": "exact local checkpoint commit",
+                "github": "exact GitHub main commit",
+                "conflict": "Git tentative de rebase lineaire, NON resolue",
             },
             "files": [],
             "includes_shards": False,
@@ -759,15 +768,19 @@ class Synchronizer:
             "",
             "## Fichiers",
         ]
+        base_result = self.command("merge-base", local, remote, check=False)
+        if base_result.returncode:
+            raise SyncBlocked("Base commune locale/GitHub introuvable pour le kit.")
+        base = base_result.stdout.decode("ascii", errors="strict").strip()
         for i, path in enumerate(conflicted):
             if _protected(path):
                 raise SyncBlocked("Conflit sur chemin protege : " + path)
             entry: dict[str, object] = {"path": path, "versions": {}}
             instructions.append(f"- `{path}` : prefixe `{i:02d}-`")
             for label, spec in (
-                ("base", f":1:{path}"),
-                ("local", f":2:{path}"),
-                ("github", f":3:{path}"),
+                ("base", f"{base}:{path}"),
+                ("local", f"{local}:{path}"),
+                ("github", f"{remote}:{path}"),
             ):
                 outcome = self.command("show", spec, check=False)
                 if outcome.returncode:
@@ -803,12 +816,12 @@ class Synchronizer:
             "1. Ouvrir le manifest.json et les 3 versions de chaque conflit.",
             "2. Comparer au HEAD local et a origin/main, jamais choisir",
             "   systematiquement --ours ou --theirs.",
-            "3. Resoudre sur un vrai merge Git, appliquer les modifications",
-            "   coherentes, lancer tests locaux, puis creer le commit de fusion.",
-            "4. Relancer POUSSER-GITHUB-FORCE.cmd pour verifier le push.",
+            "3. Resoudre les intentions dans une serie de commits lineaire, sans",
+            "   commit de fusion ni re-ecriture de main; lancer les tests locaux.",
+            "4. Relancer POUSSER-GITHUB-FORCE.cmd pour verifier la reconciliation.",
             "",
             "Ce kit ne restaure rien automatiquement. Les originaux et les",
-            "commits sont preserves grace a git merge --abort.",
+            "commits sont preserves; le rebase incomplet est annule sans force.",
         ]
         (dest / "RESOLUTION.md").write_text(
             "\n".join(instructions) + "\n", encoding="utf-8"
@@ -855,12 +868,28 @@ class Synchronizer:
         self.command(
             "update-ref", "refs/alina-sync/last-local-checkpoint", local
         )
+        local_merges = self.command(
+            "rev-list", "--merges", f"{remote}..{local}", check=False
+        )
+        if local_merges.returncode:
+            raise SyncBlocked("Verification des commits locaux impossible.")
+        if local_merges.stdout.strip():
+            raise SyncBlocked(
+                "Des commits de fusion locaux non publies existent; "
+                "rejeu automatique refuse pour preserver l'historique."
+            )
+        replay_count = self.command(
+            "rev-list", "--count", f"{remote}..{local}", check=False
+        )
+        if replay_count.returncode:
+            raise SyncBlocked("Comptage des commits locaux a rejouer impossible.")
         self.say(
-            "[INTEGRATION] Historiques divergents: fusion trois-voies; "
-            "aucun choix automatique en cas de conflit."
+            "[INTEGRATION LINEAIRE] Rejeu de "
+            f"{replay_count.stdout.decode('ascii', errors='replace').strip()} "
+            "commit(s) local(aux) sur GitHub main; aucun commit de fusion."
         )
         outcome = self.command(
-            "merge", "--no-edit", "--no-ff", remote, check=False
+            "rebase", "--no-autostash", remote, check=False
         )
         if outcome.returncode:
             conflicted = _paths(self.command(
@@ -872,28 +901,31 @@ class Synchronizer:
                 except (OSError, SyncBlocked) as exc:
                     self.report["conflict_kit_error"] = str(exc)
                     self.say("Kit de conflits non ecrit: " + str(exc))
-            merge_marker = Path(self.text("rev-parse", "--absolute-git-dir")) / "MERGE_HEAD"
-            if merge_marker.exists() and self.command(
-                "merge", "--abort", check=False
-            ).returncode:
-                raise SyncBlocked(
-                    "Echec de merge --abort. Conserver les fichiers et "
-                    "intervenir manuellement: " + ", ".join(conflicted[:12])
-                )
+            gitdir = Path(self.text("rev-parse", "--absolute-git-dir"))
+            rebase_markers = (gitdir / "rebase-merge", gitdir / "rebase-apply")
+            if any(marker.exists() for marker in rebase_markers):
+                abort = self.command("rebase", "--abort", check=False)
+                if abort.returncode or any(marker.exists() for marker in rebase_markers):
+                    raise SyncBlocked(
+                        "Echec de git rebase --abort. Ne rien nettoyer; "
+                        "conserver les commits et terminer la reprise manuellement."
+                    )
             if not conflicted:
                 raise SyncBlocked(
-                    "Git merge refuse (sans conflits index detectes); "
-                    "aucune decision automatique: "
+                    "Git rebase refuse sans conflit index detecte; aucun choix "
+                    "automatique: "
                     + outcome.stderr.decode("utf-8", errors="replace")[:900]
                 )
             raise SyncBlocked(
                 "Conflit de code: " + ", ".join(conflicted[:12])
-                + ". Fusion annulee; deux historiques intacts. "
-                "Voir kit de reconciliation dans runtime/reports/git-sync/conflicts."
+                + ". Rejeu annule; commits locaux et GitHub preserves. "
+                "Voir le kit dans runtime/reports/git-sync/conflicts."
             )
-        self.report["merge_commits_created"] = (
-            int(self.report["merge_commits_created"]) + 1
+        self.report["rebases_performed"] = (
+            int(self.report["rebases_performed"]) + 1
         )
+        self.report["local_rebased_onto"] = remote
+        self.say("[INTEGRATION OK] Commits locaux rejoues en ligne droite.")
 
     def publish(self) -> None:
         local_retries = 0

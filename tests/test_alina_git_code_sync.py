@@ -151,6 +151,9 @@ def test_converges_without_losing_either_author(repos):
     rc, receipt = run_sync(local)
     assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
     assert receipt["local_commit_created"] is True
+    assert receipt["merge_commits_created"] == 0
+    assert receipt["rebases_performed"] == 1
+    assert git(origin, "rev-list", "--merges", "main") == ""
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
     assert git(origin, "show", "main:docs/cloud.md") == "cloud"
     assert git(origin, "show", "main:tools/local.py") == "local = 1"
@@ -217,7 +220,7 @@ def test_pre_staged_secret_blocks_without_unstaging(repos):
     assert ".env" in git(local, "diff", "--cached", "--name-only")
 
 
-def test_conflicting_edits_abort_merge_and_keep_both_commits(repos):
+def test_conflicting_edits_abort_rebase_and_keep_both_commits(repos):
     local, cloud, origin = repos
     cloud_commit(cloud, "src/base.py", "base = 200\n")
     (local / "src/base.py").write_text("base = 300\n")
@@ -226,11 +229,16 @@ def test_conflicting_edits_abort_merge_and_keep_both_commits(repos):
     assert receipt["status"] == "NO_GO"
     assert git(local, "show", "HEAD:src/base.py") == "base = 300"
     assert git(origin, "show", "main:src/base.py") == "base = 200"
+    assert receipt["merge_commits_created"] == 0
+    assert receipt["rebases_performed"] == 0
     assert git(local, "rev-parse", "-q", "--verify", "MERGE_HEAD",
                allow_error=True) == ""
     assert git(local, "rev-parse", "refs/alina-sync/last-local-checkpoint") == git(
         local, "rev-parse", "HEAD"
     )
+    gitdir = Path(git(local, "rev-parse", "--absolute-git-dir"))
+    assert not (gitdir / "rebase-merge").exists()
+    assert not (gitdir / "rebase-apply").exists()
     kit = local / receipt["conflict_kit"]
     assert kit.is_dir() and (kit / "RESOLUTION.md").is_file()
     manifest = json.loads((kit / "manifest.json").read_text(encoding="utf-8"))
@@ -263,6 +271,7 @@ def test_cloud_fast_forward_without_local_changes(repos):
     assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
     assert not receipt["local_commit_created"]
     assert receipt["merge_commits_created"] == 0
+    assert receipt["rebases_performed"] == 0
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
 
 
@@ -325,6 +334,9 @@ def test_exact_historical_jsonl_relocation_syncs_with_concurrent_cloud_change(re
     rc, receipt = run_sync(local)
 
     assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert receipt["merge_commits_created"] == 0
+    assert receipt["rebases_performed"] == 1
+    assert git(origin, "rev-list", "--merges", "main") == ""
     assert receipt["verified_historical_relocations"] == [{
         "source": source,
         "destination": destination,
@@ -440,7 +452,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-exact-archive-relocation-v1' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-linear-safe-relocation-v2' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
