@@ -35,6 +35,18 @@ def test_canonical_spec_does_not_reactivate_retired_families_or_targets() -> Non
 
     assert "historical and inactive" in lowered
     assert "default new-download budget is **8 gib**" in lowered
+    assert "#### lead-lag collection contract — historical and inactive" in lowered
+    assert "#### cross-venue dislocation collection contract — historical and inactive" in lowered
+    assert "### cross-module opportunity allocator — historical and inactive" in lowered
+    assert "## module optimization architecture v3 — historical and inactive" in lowered
+
+
+def test_copy_vault_target_is_the_terminal_economic_gate() -> None:
+    current_policy = SPEC.split("## Canonical-spec governance", maxsplit=1)[0].lower()
+    assert "at least +5 usd net/day" in current_policy
+    assert "200 usd paper" in current_policy
+    assert "terminal economic gate" in current_policy
+    assert "after technical corrections and oos/forward-paper evidence" in current_policy
 
 
 def test_measured_laws_preserve_history_without_claiming_production_scope() -> None:

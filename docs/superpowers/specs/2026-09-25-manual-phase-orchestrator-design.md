@@ -33,6 +33,14 @@ reactivation; stored evidence never makes a paused family active. Environment
 variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
 FAIL-CLOSED and does not stop collectors or restoration processes.
 
+The only current economic target is **at least +5 USD net/day for Copy-Vault
+with 200 USD paper capital**. Evaluate it only at the terminal economic gate,
+after technical corrections and OOS/forward-paper evidence. This target is not
+a prerequisite for earlier work to report completion, cannot be forced by
+changing costs or evidence gates, and is never a profit guarantee. Use only the
+honest verdicts `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, and
+`REJECTED`.
+
 ### Superseding precedence for retained historical sections
 
 The scope above is the only current economic scope. Older multi-family designs,
@@ -269,7 +277,7 @@ Instead, use a two-speed design:
 
 This converts Hyperliquid's user-specific WebSocket limit from a universe cap into a low-latency priority layer.
 
-#### Lead-Lag collection contract
+#### Lead-Lag collection contract — historical and inactive
 
 Lead-Lag needs evidence capable of distinguishing a genuine market lead from exchange-clock error, network-path asymmetry, stale quotes, or a single runner's routing artifact.
 
@@ -291,7 +299,7 @@ Required evidence includes:
 
 For latency-sensitive comparisons, a measured lag is not admissible merely because one exchange timestamp is numerically earlier. The observed lag must exceed the recorded timing uncertainty or be corroborated by same-runner receive ordering.
 
-#### Cross-Venue Dislocation collection contract
+#### Cross-Venue Dislocation collection contract — historical and inactive
 
 Cross-Venue must capture all evidence required for a simultaneous two-leg executable decision rather than a midpoint difference.
 
@@ -315,7 +323,7 @@ Required evidence includes:
 
 The collector must generate direct depth/VWAP evidence for the notionals actually tested by the economic engine. A top-level quantity or midpoint cannot stand in for full executable capacity.
 
-### Same-runner cross-venue clock domain
+### Same-runner cross-venue clock domain — historical and inactive
 
 For Lead-Lag and Cross-Venue, primary market shards are organized **by coin group across venues**, not as isolated one-venue jobs whenever runner capacity permits.
 
@@ -1830,7 +1838,7 @@ For each route evaluate a capacity ladder and choose conservative size from:
 
 Do not keep a universal 15 USD production notional.
 
-### Cross-module opportunity allocator
+### Cross-module opportunity allocator — historical and inactive
 
 **Historical and inactive portfolio-allocation proposal:** the earlier design
 kept family proofs separate and added a shared allocator. It is not part of the
@@ -2481,7 +2489,10 @@ The research program explicitly incorporates ideas from high-signal teaching/res
 
 External curriculum never overrides Alina's own OOS/forward results.
 
-## Module Optimization Architecture V3 — edge portfolios, challengers, and faster proof
+## Module Optimization Architecture V3 — historical and inactive
+
+The edge-portfolio, challenger, and multi-family optimization material in this
+section is retained as historical design only.
 
 **Historical and inactive design statement:** the earlier multi-family plan
 described each module as an edge portfolio. The current active family remains
@@ -4083,7 +4094,7 @@ The preferred resolution to conflict is:
 4. reduce optional breadth/complexity before weakening quality;
 5. use narrower scopes/tiers/cascades rather than global blocking.
 
-### Profitability Convergence V6 — friction-first path to +5 USD net/day
+### Profitability Convergence V6 — historical and inactive
 
 The next architecture layer treats the current economic milestone — **+5 USD net/day per module on 200 USD paper capital, proven under Alina's paper/replay evidence contract** — as a research-allocation target, not as a promise and not as a reason to weaken gates.
 
