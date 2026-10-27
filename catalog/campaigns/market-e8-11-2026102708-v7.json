@@ -1,49 +1,30 @@
 {
   "analysis_stage": null,
-  "attempts": 3,
+  "attempts": 4,
   "campaign_id": "market-e8-11-2026102708-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 1,
+  "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "6dc1cff8a2d9da9b64946226aac965430a8dd7dc",
+  "code_sha": "ba196cf2eeccda31f736b3745342201a972973b9",
   "collection_cutoff_at_utc": null,
-  "completed_units": {
-    "0": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "5e67962e4c73e11f2d9357322f10d66a91540943b81b4c1645d2d092e29dc76b",
-        "previous_status": "COMPLETE",
-        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: release asset identity conflict: ALINA_RECOVERY_INDEX.json already exists with a different size or digest",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "8e33bad5f37fe2b8ed12d3df6683c7ab58d765bcb2c6eb0c48a3aeee9686e0d8"
-    }
-  },
+  "completed_units": {},
   "config_sha256": "f7a8ce1bf4fb4b84cfa3d157b2bd41814b28e7e1bfe82fd5ffd69c7777469957",
-  "consecutive_failures": 1,
+  "consecutive_failures": 0,
   "created_at": "2026-10-27T08:16:26.121968+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "8e33bad5f37fe2b8ed12d3df6683c7ab58d765bcb2c6eb0c48a3aeee9686e0d8",
     "duration_s": 3500,
-    "generation": 1,
-    "handoff_generation": null,
-    "handoff_phase_epoch": 8,
     "hot_handoff_dispatch_at_utc": "2026-10-27T12:08:12.081100Z",
     "hot_handoff_generation": 1,
     "hot_handoff_predecessor_run_id": "40490729091",
     "hot_handoff_predecessor_universe_digest": "5059bff1a7d3eb70b9d0aa849e583bf4a1bce7c9132b7f993ff4670b26a1f16c",
     "hot_handoff_successor_campaign_id": "market-e8-11-2026102710-v7",
     "hot_handoff_successor_universe_digest": "3d37a1ba9e3a7f56775f452a7c7d25c1b8839a7e8156458b1f2dab40232098d2",
-    "last_run_id": "40587231740",
     "market_shard_count": 16,
     "market_shard_index": 11,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026102708/shard-11.json",
     "plan_sha256": "0fcf6d1606cdc36b4ff7dcfaaf23394ecfa7441d7a3a943eccd22a3fa621c5ba",
-    "predecessor_run_id": null,
-    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 50,
@@ -95,6 +76,15 @@
       "from": "RUNNING",
       "reason": "durable_publication_failed",
       "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-11-2026102708-v7.continuation_required.6dc1cff8a2d9.b32d9ec8f39a6af2fda50cd56295736307dd1e65ccf9fa41c0451938e856a601.json",
+      "archived_manifest_sha256": "b32d9ec8f39a6af2fda50cd56295736307dd1e65ccf9fa41c0451938e856a601",
+      "at": "2026-10-27T23:07:08.688407Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "6dc1cff8a2d9da9b64946226aac965430a8dd7dc",
+      "prior_status": "CONTINUATION_REQUIRED",
+      "prior_status_reason": "durable_publication_failed"
     }
   ],
   "kind": "market_collection",
@@ -107,7 +97,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 1,
+  "no_progress_count": 0,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -116,9 +106,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "CONTINUATION_REQUIRED",
-  "status_reason": "durable_publication_failed",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-27T22:57:40.487058Z",
+  "updated_at": "2026-10-27T23:07:08.688419Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
