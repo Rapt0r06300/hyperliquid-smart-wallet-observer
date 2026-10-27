@@ -1,11 +1,11 @@
 {
   "analysis_stage": null,
-  "attempts": 1,
+  "attempts": 3,
   "campaign_id": "market-e8-10-2026102619-v7",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "52b2809fc6002bcaf200adca3a7b2677c89fc87c",
+  "code_sha": "ffe0120860297c66761874ac71ce41e8f9c28d6b",
   "collection_cutoff_at_utc": null,
   "completed_units": {},
   "config_sha256": "d538e4e2dcfb3760e4f35813bcb04851c834721ac7a8d3fd6809f46055a3b6ea",
@@ -76,6 +76,24 @@
       },
       "previous_status": "RUNNING",
       "reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-10-2026102619-v7.stuck.52b2809fc600.1150f28d3248b12cdd3fe99b039f2110021ad7cd9f6bc77f1219a51bcbebf4c5.json",
+      "archived_manifest_sha256": "1150f28d3248b12cdd3fe99b039f2110021ad7cd9f6bc77f1219a51bcbebf4c5",
+      "at": "2026-10-27T02:59:13.191943Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "52b2809fc6002bcaf200adca3a7b2677c89fc87c",
+      "prior_status": "STUCK",
+      "prior_status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-10-2026102619-v7.pending.aebb9e2044e6.ae86b5f87865a6d116b5021aab26a41705c5676abcb1ce894925d0a723b87136.json",
+      "archived_manifest_sha256": "ae86b5f87865a6d116b5021aab26a41705c5676abcb1ce894925d0a723b87136",
+      "at": "2026-10-27T05:36:05.770585Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "aebb9e2044e6ea3957eb35d505c854b9b4faa12a",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
     }
   ],
   "kind": "market_collection",
@@ -97,10 +115,10 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "STUCK",
-  "status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
   "stuck_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-27T01:00:25.735441Z",
+  "updated_at": "2026-10-27T05:36:05.770602Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
