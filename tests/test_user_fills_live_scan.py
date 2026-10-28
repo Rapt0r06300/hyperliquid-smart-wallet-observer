@@ -6,11 +6,11 @@ from hl_observer.storage.database import create_session_factory, create_sqlite_e
 from hl_observer.storage.models import Fill, PositionDeltaModel
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.user_fills_live import (
+    UserFillsLiveResult,
     scan_user_fills_ws,
     store_user_fills_live_result,
     user_fills_from_message,
 )
-
 
 WALLET = "0x" + "c" * 40
 
@@ -142,3 +142,44 @@ def test_user_fills_live_scan_ignores_stale_updates_even_when_snapshot_flag_miss
         assert result.stale_fills_ignored == 1
         assert session.query(Fill).count() == 0
         assert session.query(PositionDeltaModel).count() == 0
+
+
+def test_store_quarantines_fill_without_receive_timestamp(tmp_path):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'userfills_missing_receive.sqlite3'}"
+    init_db(settings.database_url)
+    session_factory = create_session_factory(create_sqlite_engine(settings.database_url))
+    result = UserFillsLiveResult(
+        wallets=[WALLET],
+        duration_seconds=1,
+        network_read=True,
+        fills_seen=1,
+        stopped_reason="duration_elapsed",
+        wallet_fills={
+            WALLET: [
+                {
+                    "coin": "BTC",
+                    "dir": "Open Long",
+                    "px": "100",
+                    "sz": "1",
+                    "fee": "0.01",
+                    "time": now_ms(),
+                    "hash": "0xmissing-receive",
+                    "tid": 99,
+                    "oid": 100,
+                    "startPosition": "0",
+                    "_hypersmart_source": "hyperliquid_ws:userFills",
+                }
+            ]
+        },
+    )
+
+    with session_factory() as session:
+        store_user_fills_live_result(session, result)
+        session.commit()
+
+        assert result.fills_stored == 0
+        assert result.deltas_stored == 0
+        assert session.query(Fill).count() == 0
+        assert session.query(PositionDeltaModel).count() == 0
+    assert any("receive timestamp" in warning for warning in result.warnings)

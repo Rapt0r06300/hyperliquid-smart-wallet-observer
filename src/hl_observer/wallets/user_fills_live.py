@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 
 from hl_observer.collection.collector import WALLET_RE
 from hl_observer.config.settings import Settings
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.storage.repositories import CollectionRepository
 from hl_observer.utils.time import now_ms
 from hl_observer.wallets.position_delta_engine import build_position_delta_from_fill
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 
 @dataclass(slots=True)
@@ -53,11 +53,7 @@ def normalize_user_fill_wallets(wallets: Iterable[str], *, max_users: int = 10) 
 def user_fills_from_message(message: str | bytes | dict[str, Any]) -> tuple[str | None, bool, list[dict[str, Any]]]:
     if isinstance(message, bytes):
         message = message.decode("utf-8", errors="replace")
-    payload: Any
-    if isinstance(message, str):
-        payload = json.loads(message)
-    else:
-        payload = message
+    payload: Any = json.loads(message) if isinstance(message, str) else message
     if not isinstance(payload, dict) or payload.get("channel") != "userFills":
         return None, False, []
     data = payload.get("data")
@@ -187,7 +183,17 @@ def store_user_fills_live_result(
         fresh_fills: list[dict[str, Any]] = []
         for fill in fills:
             fill_time_ms = _safe_int(fill.get("time") or fill.get("timestamp"))
-            received_at_ms = _safe_int(fill.get("_hypersmart_ws_received_at_ms")) or now_ms()
+            received_at_ms = _safe_int(fill.get("_hypersmart_ws_received_at_ms"))
+            if received_at_ms is None or received_at_ms <= 0:
+                result.warnings.append(
+                    f"fill quarantined for {wallet}: missing or invalid WebSocket receive timestamp"
+                )
+                continue
+            if fill_time_ms is None or received_at_ms < fill_time_ms:
+                result.warnings.append(
+                    f"fill quarantined for {wallet}: invalid source/receive timestamp chronology"
+                )
+                continue
             if (
                 max_live_fill_age_ms > 0
                 and fill_time_ms is not None
