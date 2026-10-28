@@ -79,9 +79,12 @@ def _signal_est_zero(appel: ast.Call) -> bool:
 def _teste_la_plateforme(test: ast.expr) -> bool:
     """L'expression parle-t-elle de `os.name` ou de `sys.platform` ?"""
     for n in ast.walk(test):
-        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name):
-            if (n.value.id, n.attr) in {("os", "name"), ("sys", "platform")}:
-                return True
+        if (
+            isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and (n.value.id, n.attr) in {("os", "name"), ("sys", "platform")}
+        ):
+            return True
     return False
 
 
@@ -142,14 +145,14 @@ def test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_Z
                 continue
             if any(d <= appel.lineno <= f_ for d, f_ in sous_garde):
                 continue
-            coupables.append("%s:%d" % (f.relative_to(RACINE).as_posix(), appel.lineno))
+            coupables.append(f"{f.relative_to(RACINE).as_posix()}:{appel.lineno}")
 
     assert not coupables, (
-        "`os.kill(pid, 0)` trouve dans du code de PRODUCTION : %s\n\n"
+        f"`os.kill(pid, 0)` trouve dans du code de PRODUCTION : {', '.join(coupables)}\n\n"
         "Sous Windows, signal 0 == CTRL_C_EVENT -> GenerateConsoleCtrlEvent -> un VRAI Ctrl-C "
         "envoye a TOUTE la console. Ce n'est pas un test d'existence : c'est une arme.\n"
         "  -> passer par `runtime_guards.parent_alive()`, qui INTERROGE le systeme (OpenProcess) "
-        "au lieu de lui ENVOYER un signal." % ", ".join(coupables)
+        "au lieu de lui ENVOYER un signal."
     )
 
 
