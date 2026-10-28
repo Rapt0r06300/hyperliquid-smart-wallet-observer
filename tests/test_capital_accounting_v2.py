@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -552,3 +553,271 @@ def test_incompatible_leg_schema_is_refused_without_mutation() -> None:
     assert refused.event_type == PaperEventType.NO_TRADE
     assert refused.reason == "CAPITAL_LEG_SCHEMA_MISMATCH"
     assert ledger.capital_snapshot() == before
+
+
+def test_position_increase_capital_tracker_failure_is_atomic(monkeypatch) -> None:
+    ledger = PaperLedger(starting_balance_usdc=1_000.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=100.0,
+        quantity=1.0,
+        fill_price=100.0,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        position_id="tracker:add",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+    capital_before = ledger.capital_snapshot()
+    event_count_before = len(ledger.events)
+
+    def fail_observation(_self, **_kwargs):
+        raise ValueError("forced capital tracker rejection")
+
+    monkeypatch.setattr(type(ledger.capital_tracker), "observe", fail_observation)
+    refused = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=50.0,
+        quantity=0.5,
+        fill_price=100.0,
+        timestamp_ms=2_000,
+        fee_bps=0.0,
+        position_id="tracker:add",
+    )
+
+    assert refused.event_type == PaperEventType.NO_TRADE
+    assert refused.reason == "OPEN_EVENT_OR_CAPITAL_INVALID"
+    after = ledger.snapshot()
+    for key in (
+        "cash_balance_usdc",
+        "realized_pnl_usdc",
+        "unrealized_pnl_usdc",
+        "fees_paid_usdc",
+        "equity_usdc",
+        "drawdown_usdc",
+        "turnover_usdc",
+        "positions",
+        "economic_evidence",
+    ):
+        assert after[key] == before[key], key
+    assert ledger.capital_snapshot() == capital_before
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.events[-1].event_type == PaperEventType.NO_TRADE
+    assert ledger.verify_event_chain()
+
+
+def test_partial_close_capital_tracker_failure_publishes_only_no_trade(monkeypatch) -> None:
+    ledger = PaperLedger(starting_balance_usdc=1_000.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=100.0,
+        quantity=1.0,
+        fill_price=100.0,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        position_id="tracker:close",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+    capital_before = ledger.capital_snapshot()
+    event_count_before = len(ledger.events)
+
+    def fail_observation(_self, **_kwargs):
+        raise ValueError("forced capital tracker rejection")
+
+    monkeypatch.setattr(type(ledger.capital_tracker), "observe", fail_observation)
+    refused = ledger.reduce_or_close(
+        coin="HYPE",
+        side="LONG",
+        quantity=0.5,
+        fill_price=101.0,
+        timestamp_ms=2_000,
+        fee_bps=0.0,
+        position_id="tracker:close",
+    )
+
+    assert refused.event_type == PaperEventType.NO_TRADE
+    assert refused.reason == "EXIT_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    for key in (
+        "cash_balance_usdc",
+        "realized_pnl_usdc",
+        "unrealized_pnl_usdc",
+        "fees_paid_usdc",
+        "equity_usdc",
+        "drawdown_usdc",
+        "turnover_usdc",
+        "positions",
+        "economic_evidence",
+    ):
+        assert after[key] == before[key], key
+    assert ledger.capital_snapshot() == capital_before
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.events[-1].event_type == PaperEventType.NO_TRADE
+    assert ledger.verify_event_chain()
+
+
+def test_exit_fee_overflow_is_refused_without_position_or_cash_mutation() -> None:
+    ledger = PaperLedger(starting_balance_usdc=1_000.0)
+    opened = ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=1e304,
+        quantity=1e304,
+        fill_price=1.0,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        position_id="overflow:exit-fee",
+    )
+    assert opened.event_type == PaperEventType.POSITION_OPENED
+    before = ledger.snapshot()
+    capital_before = ledger.capital_snapshot()
+    event_count_before = len(ledger.events)
+
+    refused = ledger.reduce_or_close(
+        coin="HYPE",
+        side="LONG",
+        quantity=1e304,
+        fill_price=1.0,
+        timestamp_ms=2_000,
+        fee_bps=1e308,
+        position_id="overflow:exit-fee",
+    )
+
+    assert refused.event_type == PaperEventType.NO_TRADE
+    assert refused.reason == "EXIT_ACCOUNTING_NON_FINITE"
+    after = ledger.snapshot()
+    for key in (
+        "cash_balance_usdc",
+        "realized_pnl_usdc",
+        "unrealized_pnl_usdc",
+        "fees_paid_usdc",
+        "equity_usdc",
+        "drawdown_usdc",
+        "turnover_usdc",
+        "positions",
+        "economic_evidence",
+    ):
+        assert after[key] == before[key], key
+    assert ledger.capital_snapshot() == capital_before
+    assert len(ledger.events) == event_count_before + 1
+    assert ledger.events[-1].event_type == PaperEventType.NO_TRADE
+    assert ledger.verify_event_chain()
+
+
+def test_open_add_reduce_close_replay_is_deterministic_and_reconciles() -> None:
+    def replay_once():
+        ledger = PaperLedger(
+            starting_balance_usdc=1_000.0,
+            session_id="copy-vault-open-add-reduce-close",
+        )
+        common = {
+            "coin": "PAIR",
+            "side": "LONG",
+            "fee_bps": 5.0,
+            "leverage_effective": 2.0,
+            "leg_direction": (1, -1),
+            "position_id": "copy-vault:pair:1",
+        }
+        opened = ledger.open_position(
+            **common,
+            notional_usdc=100.0,
+            quantity=1.0,
+            fill_price=100.0,
+            leg_notional_usd=(100.0, 200.0),
+            timestamp_ms=1_000,
+        )
+        increased = ledger.open_position(
+            **common,
+            notional_usdc=120.0,
+            quantity=1.0,
+            fill_price=120.0,
+            leg_notional_usd=(120.0, 240.0),
+            timestamp_ms=2_000,
+        )
+        position = ledger.positions["copy-vault:pair:1"]
+        assert position.quantity == 2.0
+        assert position.average_entry_price == 110.0
+        assert position.leg_notional_usd == (220.0, 440.0)
+        reduced = ledger.reduce_or_close(
+            coin="PAIR",
+            side="LONG",
+            quantity=0.5,
+            fill_price=115.0,
+            timestamp_ms=3_000,
+            fee_bps=5.0,
+            position_id="copy-vault:pair:1",
+        )
+        closed = ledger.reduce_or_close(
+            coin="PAIR",
+            side="LONG",
+            quantity=1.5,
+            fill_price=110.0,
+            timestamp_ms=4_000,
+            fee_bps=5.0,
+            position_id="copy-vault:pair:1",
+        )
+
+        assert opened.event_type == PaperEventType.POSITION_OPENED
+        assert increased.event_type == PaperEventType.POSITION_INCREASED
+        assert reduced.event_type == PaperEventType.POSITION_REDUCED
+        assert closed.event_type == PaperEventType.POSITION_CLOSED
+        assert increased.refs["fee_event_id"]
+        assert increased.refs["fee_accounting"] == "SEPARATE_EVENT"
+        assert not ledger.positions
+        assert ledger.fees_paid_usdc > 0.0
+        assert ledger.verify_event_chain()
+        assert ledger.reconciliation().ok
+        return ledger.snapshot(), tuple(event.event_hash for event in ledger.events)
+
+    assert replay_once() == replay_once()
+
+
+def test_paper_ledger_preserves_sub_display_fee_accumulation() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0, session_id="fee-precision-oracle")
+    fee = Decimal("0.00000000001")
+    fee_count = 2_048
+
+    for index in range(fee_count):
+        ledger._charge_fee(
+            float(fee),
+            coin="BTC",
+            side="BUY",
+            timestamp_ms=index + 1,
+            position_id=f"fee-{index}",
+        )
+
+    expected_fees = fee * fee_count
+    observed_fees = Decimal(str(ledger.fees_paid_usdc))
+    observed_cash = Decimal(str(ledger.cash_balance_usdc))
+
+    assert abs(observed_fees - expected_fees) <= Decimal("1e-20")
+    assert abs(observed_cash - (Decimal("200") - expected_fees)) <= Decimal("1e-12")
+
+
+def test_paper_ledger_rejects_relative_tolerance_that_hides_notional_error() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0, session_id="notional-tolerance")
+
+    result = ledger.open_position(
+        coin="BTC",
+        side="LONG",
+        notional_usdc=200.000001,
+        quantity=1.0,
+        fill_price=200.0,
+        timestamp_ms=1_000,
+        fee_bps=0.0,
+        position_id="notional-tolerance:1",
+    )
+
+    assert result.event_type == PaperEventType.NO_TRADE
+    assert result.reason == "FILL_NOTIONAL_MISMATCH"
+    assert ledger.positions == {}
+
+
+def test_zero_equity_is_not_replaced_by_infinity() -> None:
+    ledger = PaperLedger(starting_balance_usdc=200.0, cash_balance_usdc=0.0)
+
+    assert ledger.equity_usdc == 0.0

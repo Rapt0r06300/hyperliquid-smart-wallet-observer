@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from hl_observer.config.settings import Settings
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.loops.engine import LoopEngineeringRunner, load_signal_candidates
 from hl_observer.loops.memory import LoopMemoryStore
 from hl_observer.mainnet_readonly_observer.observer import MainnetObservation
-from hl_observer.testnet.adapters import FakeTestnetExchangeAdapter
 
 
 def _candidate() -> SignalCandidate:
@@ -65,37 +66,22 @@ def test_loop_engineering_prepares_decision_without_execution(tmp_path: Path) ->
     assert "loop-sig-1" in (logs_to_send / "latest_decision_trace.json").read_text(encoding="utf-8")
 
 
-def test_loop_engineering_fake_testnet_executes_only_when_explicitly_confirmed(
-    tmp_path: Path, monkeypatch
+def test_loop_engineering_refuses_testnet_before_recording_or_execution(
+    tmp_path: Path,
 ) -> None:
-    # Ce test porte sur la CONFIRMATION EXPLICITE (le fake adapter n'agit que si `confirmed`),
-    # pas sur la qualite du signal. Le noyau (G2) refuserait ce candidat de copy-trading avant
-    # meme d'arriver a l'executeur, et on ne saurait plus si la confirmation marche. On l'eteint
-    # donc EXPLICITEMENT pour isoler ce qu'on teste vraiment.
-    monkeypatch.setenv("HYPERSMART_NOYAU_AUTORITAIRE", "0")
-    adapter = FakeTestnetExchangeAdapter(prices={"BTC": 60_000.0})
-    runner = LoopEngineeringRunner.with_fake_testnet_executor(
-        Settings(),
-        adapter=adapter,
-        project_root=tmp_path,
-        confirmed=True,
-    )
+    memory = LoopMemoryStore(tmp_path / "learning")
+    runner = LoopEngineeringRunner(settings=Settings(), memory=memory)
 
-    result = runner.run_with_observation(
-        observation=_observation(),
-        candidates=[_candidate()],
-        execute_testnet=True,
-        confirmed=True,
-        notional_usdc=1.0,
-    )
+    with pytest.raises(RuntimeError, match="TESTNET_DISABLED_BY_REPOSITORY_POLICY"):
+        runner.run_with_observation(
+            observation=_observation(),
+            candidates=[_candidate()],
+            execute_testnet=True,
+            confirmed=True,
+            notional_usdc=1.0,
+        )
 
-    assert result.learning.accepted_testnet == 1
-    assert result.feedback[0].execution_status == "ACCEPTED"
-    assert adapter.get_testnet_positions()[0].coin == "BTC"
-    assert (tmp_path / "logs").exists()
-    journals = list((tmp_path / "logs").rglob("testnet_decisions_latest.jsonl"))
-    assert journals
-    assert "accepted" in journals[0].read_text(encoding="utf-8")
+    assert not memory.events_path.exists()
 
 
 def test_load_signal_candidates_accepts_windows_utf8_bom(tmp_path: Path) -> None:

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+
+import pytest
+
+from hl_observer.backtesting.copy_vault_executable import summarize
 from hl_observer.simulation.economic_objective import (
     MIN_PROOF_DAYS,
     STARTING_CAPITAL_USD,
@@ -227,7 +234,10 @@ def test_pnl_train_ne_compte_jamais_dans_la_preuve_quatre_dollars():
         )
     )
 
-    assert result["proof_net_pnl_usd"] == 0.9
+    # Float publication is rounded conservatively to never overstate a proof;
+    # compare numerically while preserving the direction of that bound.
+    assert result["proof_net_pnl_usd"] == pytest.approx(0.9)
+    assert result["proof_net_pnl_usd"] <= 0.9
     assert result["eligible_net_pnl_usd"] is None
     assert "TARGET_NET_USD_NOT_REACHED" in result["objective_reasons"]
 
@@ -321,7 +331,9 @@ def test_daily_net_fails_closed_for_missing_timestamp_or_bad_day() -> None:
     )
 
     assert result["missing_trade_timestamps"] == 1
-    assert result["min_daily_net_pnl_usd"] == 3.99
+    assert result["min_daily_net_pnl_usd"] == pytest.approx(3.99)
+    assert result["min_daily_net_pnl_usd"] < 3.99
+    assert result["days"][0]["net_pnl_usd_exact_decimal"] == "3.99"
     assert result["all_days_at_or_above_target"] is False
 
 
@@ -417,6 +429,51 @@ def test_daily_target_refuses_evidence_that_includes_an_open_utc_day() -> None:
     assert "DAILY_NET_PROOF_HAS_INCOMPLETE_DAY" in result["objective_reasons"]
 
 
+def test_nanosecond_close_keeps_utc_day_without_float_rounding() -> None:
+    boundary = datetime(2026, 10, 28, tzinfo=timezone.utc)
+    boundary_ns = int(boundary.timestamp()) * 1_000_000_000
+    report = evaluate_daily_net(
+        [
+            {"exit_ts_ns": boundary_ns - 1, "net_pnl_usd": 1.0},
+            {"exit_ts_ns": boundary_ns, "net_pnl_usd": 2.0},
+        ],
+        as_of_ms=boundary_ns // 1_000_000 + 86_400_000,
+        complete_utc_days_only=False,
+    )
+
+    assert [day["date_utc"] for day in report["days"]] == [
+        "2026-10-27",
+        "2026-10-28",
+    ]
+    assert [day["net_pnl_usd"] for day in report["days"]] == [1.0, 2.0]
+
+    rounded_source_timestamp = evaluate_daily_net(
+        [{"exit_ts_ns": float(boundary_ns - 1), "net_pnl_usd": 3.0}],
+        as_of_ms=boundary_ns // 1_000_000 + 86_400_000,
+        complete_utc_days_only=False,
+    )
+    assert rounded_source_timestamp["missing_trade_timestamps"] == 1
+    assert rounded_source_timestamp["sample_count"] == 0
+
+
+def test_daily_net_report_keeps_exact_values_in_strict_stable_json() -> None:
+    report = evaluate_daily_net(
+        [{"exit_ts_ms": 1, "net_pnl_usd": Decimal("4.9999999999999999999")}],
+        as_of_ms=86_400_000,
+        complete_utc_days_only=False,
+    )
+
+    assert report["days"][0]["at_or_above_target"] is False
+    assert report["days"][0]["net_pnl_usd_exact_decimal"] == "4.9999999999999999999"
+    assert report["total_net_pnl_usd_exact_decimal"] == "4.9999999999999999999"
+    assert report["mean_daily_net_pnl_usd_exact_ratio"] == {
+        "numerator_decimal": "4.9999999999999999999",
+        "denominator": 1,
+    }
+    encoded = json.dumps(report, sort_keys=True, allow_nan=False)
+    assert encoded == json.dumps(report, sort_keys=True, allow_nan=False)
+
+
 def test_daily_target_is_a_strict_per_family_gate() -> None:
     below = evaluate_objective(
         _proof(
@@ -432,3 +489,168 @@ def test_daily_target_is_a_strict_per_family_gate() -> None:
 
     missing = evaluate_objective(_proof(daily_evidence=None))
     assert "DAILY_NET_PROOF_MISSING" in missing["objective_reasons"]
+
+
+def test_daily_target_never_rounds_a_below_target_day_up_to_five_usd() -> None:
+    day_ms = 86_400_000
+    first_day = 1_725_571_200_000
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": first_day + 1, "net_pnl_usd": 4.999999999},
+            {"exit_ts_ms": first_day + day_ms + 1, "net_pnl_usd": 4.999999999},
+        ],
+        as_of_ms=first_day + 3 * day_ms,
+    )
+
+    assert result["days"][0]["net_pnl_usd"] < 5.0
+    assert result["days"][0]["at_or_above_target"] is False
+    assert result["min_daily_net_pnl_usd"] < 5.0
+    assert result["all_days_at_or_above_target"] is False
+
+
+def test_daily_net_sum_preserves_small_terms_across_large_cancellation() -> None:
+    day_ms = 86_400_000
+    first_day = 1_725_571_200_000
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": first_day + 1, "net_pnl_usd": 1e16},
+            {"exit_ts_ms": first_day + 2, "net_pnl_usd": 1.0},
+            {"exit_ts_ms": first_day + 3, "net_pnl_usd": -1e16},
+        ],
+        as_of_ms=first_day + 2 * day_ms,
+    )
+
+    assert result["days"][0]["net_pnl_usd"] == 1.0
+    assert result["total_net_pnl_usd"] == 1.0
+
+
+def test_daily_profit_factor_keeps_high_precision_loss_magnitude() -> None:
+    day_ms = 86_400_000
+    first_day = 1_725_571_200_000
+    positive = "1." + "0" * 39 + "1"
+    negative = "-1." + "0" * 39 + "2"
+
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": first_day + 1, "net_pnl_usd": positive},
+            {"exit_ts_ms": first_day + day_ms + 1, "net_pnl_usd": negative},
+        ],
+        as_of_ms=first_day + 3 * day_ms,
+    )
+
+    assert Decimal(result["profit_factor_exact_decimal"]) < 1
+    assert result["profit_factor"] < 1.0
+
+
+def test_oos_forward_sum_below_five_cannot_round_up_through_objective_gate() -> None:
+    just_below = 2.4999999999
+    result = evaluate_objective(
+        _proof(
+            oos=_segment(
+                gross=just_below + 0.4,
+                net=just_below,
+                count=2,
+                trade_hash="d",
+                no_lookahead=True,
+            ),
+            forward=_segment(
+                gross=just_below + 0.4,
+                net=just_below,
+                count=2,
+                trade_hash="e",
+                post_freeze=True,
+            ),
+        )
+    )
+
+    assert result["proof_net_pnl_usd"] < 5.0
+    assert result["eligible_net_pnl_usd"] is None
+    assert "TARGET_NET_USD_NOT_REACHED" in result["objective_reasons"]
+
+
+def test_objective_reconciliation_uses_absolute_tolerance_without_relative_slack() -> None:
+    for gross, net in ((1_000_000_000_000.0, 1_000_000_000_000.0), (2.900001, 2.5)):
+        result = evaluate_objective(
+            _proof(
+                oos=_segment(
+                    gross=gross,
+                    net=net,
+                    count=2,
+                    trade_hash="d",
+                    no_lookahead=True,
+                )
+            )
+        )
+        assert "OOS_ECONOMIC_RECONCILIATION_FAILED" in result["objective_reasons"]
+
+
+def test_reconciliation_tolerance_is_never_credited_as_net_pnl() -> None:
+    result = evaluate_objective(
+        _proof(
+            oos=_segment(
+                gross=4.500000005,
+                net=4.100000010,
+                count=2,
+                trade_hash="d",
+                no_lookahead=True,
+            )
+        )
+    )
+
+    assert result["proof_net_pnl_usd"] <= 8.600000005
+
+
+def test_economic_proof_rejects_boolean_as_money() -> None:
+    result = evaluate_objective(
+        _proof(
+            oos=_segment(
+                gross=1.4,
+                net=True,
+                count=2,
+                trade_hash="d",
+                no_lookahead=True,
+            )
+        )
+    )
+
+    assert "OOS_UNMEASURED:net_pnl_usd" in result["objective_reasons"]
+
+
+def test_summarize_to_objective_replay_is_stable_and_keeps_exact_net_gate() -> None:
+    def closed_trade(trade_id: str, net: str, exit_ts_ms: int) -> dict:
+        return {
+            "trade_id": trade_id,
+            "exit_ts_ms": exit_ts_ms,
+            "gross_pnl_usd": str(Decimal(net) + Decimal("0.4")),
+            "fees_usd": "0.1",
+            "spread_cost_usd": "0.1",
+            "slippage_cost_usd": "0.1",
+            "latency_cost_usd": "0.1",
+            "net_pnl_usd": net,
+            "liquidatable_net": True,
+            "financeable_under_paper_policy": True,
+        }
+
+    oos = summarize(
+        [closed_trade("oos-1", "1.2499999999", 1), closed_trade("oos-2", "1.2499999999", 2)]
+    )
+    forward = summarize(
+        [
+            closed_trade("forward-1", "1.2499999999", 3),
+            closed_trade("forward-2", "1.2499999999", 4),
+        ]
+    )
+    proof = _proof(
+        oos={**oos, "sample_count": 2, "trade_ids_count": 2, "no_lookahead": True},
+        forward={**forward, "sample_count": 2, "trade_ids_count": 2, "post_freeze": True},
+    )
+
+    first = evaluate_objective(proof)
+    second = evaluate_objective(proof)
+
+    assert first["proof_net_pnl_usd"] < TARGET_NET_USD
+    assert first["objective_status"] == "NON_ATTEINT"
+    assert "TARGET_NET_USD_NOT_REACHED" in first["objective_reasons"]
+    assert json.dumps(first, sort_keys=True, allow_nan=False) == json.dumps(
+        second, sort_keys=True, allow_nan=False
+    )

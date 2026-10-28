@@ -44,20 +44,18 @@ def main() -> int:
         for key in ("phase", "phase_epoch", "source_collection_epoch", "collection_cutoff_at_utc", "strategy_family"):
             if status.get(key) != intent.get(key):
                 raise SystemExit(f"OPERATOR_STATUS_{key.upper()}_MISMATCH")
-    try:
-        family, _ = normalize_operator_family(
-            str(intent.get("intent") or ""),
-            intent.get("strategy_family"),
-            intent.get("config"),
-            scope_root=Path(__file__).resolve().parents[1],
-        )
-    except ValueError as exc:
-        raise SystemExit(f"OPERATOR_INTENT_FAMILY_INVALID:{exc}") from exc
-    if (
-        intent.get("schema_version") == "alina.operator_intent.v2"
-        and intent.get("strategy_family") != family
-    ):
-        raise SystemExit("OPERATOR_INTENT_FAMILY_MISMATCH")
+    if intent.get("schema_version") == "alina.operator_intent.v2":
+        try:
+            family, _ = normalize_operator_family(
+                str(intent.get("intent") or ""),
+                intent.get("strategy_family"),
+                intent.get("config"),
+                scope_root=Path(__file__).resolve().parents[1],
+            )
+        except ValueError as exc:
+            raise SystemExit(f"OPERATOR_INTENT_FAMILY_INVALID:{exc}") from exc
+        if intent.get("strategy_family") != family:
+            raise SystemExit("OPERATOR_INTENT_FAMILY_MISMATCH")
     expected_digest = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     if status.get("intent_digest") != expected_digest:
         raise SystemExit("OPERATOR_STATUS_INTENT_DIGEST_MISMATCH")
@@ -103,11 +101,7 @@ def main() -> int:
             raise SystemExit("OPERATOR_STATUS_SUPERSESSION_INVALID")
     elif superseded_by is not None:
         raise SystemExit("OPERATOR_STATUS_SUPERSESSION_INVALID")
-    if (
-        intent.get("schema_version") == "alina.operator_intent.v2"
-        and intent.get("intent") in CONTROL_INTENTS
-        and status.get("state") == "COMPLETE"
-    ):
+    if intent.get("intent") in CONTROL_INTENTS and status.get("state") == "COMPLETE":
         receipt = status.get("control_receipt")
         if (
             not isinstance(receipt, dict)
@@ -121,6 +115,10 @@ def main() -> int:
             or receipt.get("paper_only") is not True
             or receipt.get("read_only") is not True
             or receipt.get("real_execution") is not False
+            or (
+                intent.get("intent") in {"pause", "resume"}
+                and receipt.get("campaign_lease_effect") != "PRESERVE_ACTIVE_LEASES"
+            )
             or status.get("control_receipt_sha256")
             != hashlib.sha256(
                 json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()

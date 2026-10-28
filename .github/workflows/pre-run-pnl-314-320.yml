@@ -31,8 +31,12 @@ env:
 jobs:
   preuves-pnl-314-320:
     name: Preuves Copy-Vault canoniques 314-320
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -44,10 +48,12 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Installer dependances fail-closed
+        shell: bash
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
           python -m pip install -e ".[dev]"
       - name: Prouver Copy-Vault 314 a 320 et vérité live
+        shell: bash
         run: |
           python -m pytest -q -p no:cacheprovider \
             --junitxml=junit-pre-run-pnl-314-320.xml \
@@ -59,19 +65,21 @@ jobs:
             tests/test_vault_ledger.py \
             tests/test_copy_vault_checkpoint_tail.py
       - name: Revalider la cible 301 a 313
+        shell: bash
         run: |
           python -m pytest -q -p no:cacheprovider \
             --junitxml=junit-pre-run-pnl-upstream-301-313.xml \
             tests/test_pre_run_pnl_301_313.py \
             tests/test_economic_objective.py
       - name: Audits securite finaux
+        shell: bash
         run: |
           python -m hl_observer safety-audit
           python -m hl_observer audit-safety
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: pre-run-pnl-314-320-${{ github.sha }}
+          name: pre-run-pnl-314-320-${{ github.sha }}-${{ matrix.os }}
           path: junit-pre-run-pnl-*.xml
           if-no-files-found: error
           retention-days: 30

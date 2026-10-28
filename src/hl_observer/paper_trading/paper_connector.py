@@ -84,6 +84,7 @@ class PaperSimConnector:
         observed_at_ms: int,
         asks: tuple[tuple[float, float], ...] = (),
         bids: tuple[tuple[float, float], ...] = (),
+        exchange_ts_ms: object = None,
         min_fill_ratio: float = 0.85,
     ) -> PaperSimConnectorResult:
         if not is_actionable(approved_intent):
@@ -123,6 +124,7 @@ class PaperSimConnector:
                 bids=bids,
                 asks=asks,
                 received_ts_ms=max(1, int(observed_at_ms)),
+                exchange_ts_ms=exchange_ts_ms,
                 source="paper_sim_connector_observed_l2",
                 data_origin="RECORDED_REAL",
             )

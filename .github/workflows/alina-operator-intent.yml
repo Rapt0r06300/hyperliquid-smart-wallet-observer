@@ -109,7 +109,7 @@ jobs:
           status_path.parent.mkdir(parents=True,exist_ok=True)
           if p.exists():
             old=json.loads(p.read_text())
-            stable=("schema_version","intent","request_id","requested_by","phase","phase_epoch","analysis_stage","source_collection_epoch","collection_cutoff_at_utc","config","paper_only","read_only","real_execution")
+            stable=("schema_version","intent","request_id","requested_by","main_code_sha","phase","phase_epoch","analysis_stage","source_collection_epoch","collection_cutoff_at_utc","config","strategy_family","paper_only","read_only","real_execution")
             if any(old.get(k) != row.get(k) for k in stable):
               raise SystemExit("request id already exists with different payload")
             row=old
@@ -135,7 +135,11 @@ jobs:
             "read_only":True,
             "real_execution":False,
           }
-          status_path.write_text(json.dumps(status,sort_keys=True,indent=2)+"\n")
+          # Replayed request IDs are idempotent: never reset RUNNING/terminal
+          # progress or erase a durable control receipt. The following validator
+          # rejects an existing status whose identity/digest does not match.
+          if not status_path.exists():
+            status_path.write_text(json.dumps(status,sort_keys=True,indent=2)+"\n")
           PY
       - name: Validate durable operator status
         run: |

@@ -257,7 +257,6 @@ from hl_observer.testnet.testnet_order_builder import build_testnet_order_intent
 from hl_observer.testnet.testnet_executor_locked import LockedTestnetExecutor
 from hl_observer.testnet.testnet_safety_gates import TestnetLocked
 from hl_observer.testnet.commands import build_testnet_status, run_testnet_command
-from hl_observer.testnet.adapters import FakeTestnetExchangeAdapter
 from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.persistent_state import reset_simulation_state, simulation_state_path
 from hl_observer.utils.logging import configure_logging
@@ -3554,16 +3553,16 @@ def testnet_check(
 
 @app.command("testnet-run")
 def testnet_run(
-    exchange: str = typer.Option("fake", "--exchange", help="fake or hyperliquid. Hyperliquid is ready but locked until signer transport is configured."),
+    exchange: str = typer.Option("fake", "--exchange", help="Legacy option; testnet actions are disabled by repository policy."),
     action: str = typer.Option("open", "--action", help="open, reduce or close."),
     coin: str = typer.Option("BTC", "--coin"),
     side: str = typer.Option("long", "--side", help="long or short."),
     notional_usdc: float = typer.Option(1.0, "--notional"),
     limit_price: float = typer.Option(60000.0, "--limit-price"),
-    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Required for every testnet action."),
-    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Use local fake testnet adapter for a no-network dry proof."),
+    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Cannot enable testnet actions; disabled by repository policy."),
+    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Cannot enable testnet actions; disabled by repository policy."),
 ) -> None:
-    """Run one controlled testnet action through guard -> adapter -> journal -> payload."""
+    """Legacy testnet command; always reports disabled without initializing an adapter."""
     settings = _settings()
     try:
         result = run_testnet_command(
@@ -3615,13 +3614,16 @@ def loop_dashboard_payload(
 @app.command("testnet-loop-dry-run")
 def testnet_loop_dry_run(
     candidate_json: Path = typer.Option(..., "--candidate-json", exists=True, dir_okay=False, help="JSON list of SignalCandidate objects from the scanner."),
-    execute_fake_testnet: bool = typer.Option(False, "--execute-fake-testnet", help="Route accepted decisions through the fake testnet adapter only."),
-    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Enable local fake testnet runtime flags for this dry proof."),
-    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Required if --execute-fake-testnet is used."),
+    execute_fake_testnet: bool = typer.Option(False, "--execute-fake-testnet", help="Disabled by repository policy; this option exits before work."),
+    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Cannot enable testnet; disabled by repository policy."),
+    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Cannot enable testnet; disabled by repository policy."),
     notional_usdc: float = typer.Option(1.0, "--notional", min=0.0),
     live_observe: bool = typer.Option(False, "--live-observe", help="Also query Hyperliquid /info read-only for candidate coins."),
 ) -> None:
-    """Run observer -> decision -> optional fake-testnet -> learning report for explicit candidates only."""
+    """Run observer -> decision -> local learning report for explicit candidates only."""
+    if execute_fake_testnet:
+        typer.echo("Testnet disabled by repository policy: no adapter initialized and no order created.")
+        raise typer.Exit(2)
     settings = _settings()
     candidates = load_signal_candidates(candidate_json)
     if not candidates:
@@ -3636,25 +3638,14 @@ def testnet_loop_dry_run(
         return
 
     prices = {candidate.coin: candidate.observed_price for candidate in candidates}
-    if execute_fake_testnet:
-        if not dry_confirmed:
-            typer.echo("Refusing fake-testnet execution proof without --dry-confirmed.")
-            raise typer.Exit(1)
-        runner = LoopEngineeringRunner.with_fake_testnet_executor(
-            settings,
-            adapter=FakeTestnetExchangeAdapter(prices=prices),
-            project_root=Path.cwd(),
-            confirmed=confirm_testnet,
-        )
-    else:
-        runner = LoopEngineeringRunner(settings=settings, memory=LoopMemoryStore(default_loop_memory_dir(Path.cwd())))
+    runner = LoopEngineeringRunner(settings=settings, memory=LoopMemoryStore(default_loop_memory_dir(Path.cwd())))
 
     if live_observe:
         result = runner.run_once_sync(
             coins=sorted(prices.keys()),
             candidates=candidates,
-            execute_testnet=execute_fake_testnet,
-            confirmed=confirm_testnet,
+            execute_testnet=False,
+            confirmed=False,
             notional_usdc=notional_usdc,
         )
     else:
@@ -3666,8 +3657,8 @@ def testnet_loop_dry_run(
         result = runner.run_with_observation(
             observation=observation,
             candidates=candidates,
-            execute_testnet=execute_fake_testnet,
-            confirmed=confirm_testnet,
+            execute_testnet=False,
+            confirmed=False,
             notional_usdc=notional_usdc,
         )
     typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, default=str))
@@ -3682,12 +3673,15 @@ def testnet_loop_observe(
     max_candidates: int = typer.Option(10, "--max-candidates", min=0, max=100),
     include_recent_deltas: bool = typer.Option(True, "--include-recent-deltas/--no-recent-deltas", help="Also build candidates from recent local position_deltas."),
     recent_delta_window_seconds: int = typer.Option(300, "--recent-delta-window-seconds", min=1, max=86_400, help="Freshness window for local position_deltas."),
-    execute_fake_testnet: bool = typer.Option(False, "--execute-fake-testnet", help="Route accepted decisions through fake testnet adapter only."),
-    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Enable local fake testnet runtime flags for this dry proof."),
-    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Required if --execute-fake-testnet is used."),
+    execute_fake_testnet: bool = typer.Option(False, "--execute-fake-testnet", help="Disabled by repository policy; rejected before network reads."),
+    dry_confirmed: bool = typer.Option(False, "--dry-confirmed", help="Cannot enable testnet; disabled by repository policy."),
+    confirm_testnet: bool = typer.Option(False, "--confirm-testnet", help="Cannot enable testnet; disabled by repository policy."),
     notional_usdc: float = typer.Option(1.0, "--notional", min=0.0),
 ) -> None:
     """Observe Hyperliquid read-only data, build SignalCandidate objects, then run the local loop."""
+    if execute_fake_testnet:
+        typer.echo("Testnet disabled by repository policy: no adapter initialized and no order created.")
+        raise typer.Exit(2)
     if not network_read:
         typer.echo("Refusing network observation without --network-read. No data was invented.")
         raise typer.Exit(2)
@@ -3754,24 +3748,12 @@ def testnet_loop_observe(
         recent_delta_window_seconds=recent_delta_window_seconds if include_recent_deltas else None,
     )
     write_loop_input_diagnostics(input_diagnostics, project_root=Path.cwd())
-    prices = {candidate.coin: candidate.observed_price for candidate in candidates}
-    if execute_fake_testnet:
-        if not dry_confirmed:
-            typer.echo("Refusing fake-testnet execution proof without --dry-confirmed.")
-            raise typer.Exit(1)
-        runner = LoopEngineeringRunner.with_fake_testnet_executor(
-            settings,
-            adapter=FakeTestnetExchangeAdapter(prices=prices),
-            project_root=Path.cwd(),
-            confirmed=confirm_testnet,
-        )
-    else:
-        runner = LoopEngineeringRunner(settings=settings, memory=LoopMemoryStore(default_loop_memory_dir(Path.cwd())))
+    runner = LoopEngineeringRunner(settings=settings, memory=LoopMemoryStore(default_loop_memory_dir(Path.cwd())))
     result = runner.run_with_observation(
         observation=observation,
         candidates=candidates,
-        execute_testnet=execute_fake_testnet,
-        confirmed=confirm_testnet,
+        execute_testnet=False,
+        confirmed=False,
         notional_usdc=notional_usdc,
     )
     typer.echo(

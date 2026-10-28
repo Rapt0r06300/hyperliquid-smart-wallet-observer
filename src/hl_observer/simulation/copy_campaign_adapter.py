@@ -11,26 +11,37 @@ shared economic objective.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
+from hl_observer.economics.numeric import decimal_sum, decimal_value, float_not_above
 from hl_observer.simulation.economic_campaigns import build_copy_campaign
 from hl_observer.simulation.economic_objective import evaluate_objective
 
 
-def _number(value: object) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError, OverflowError):
+def _integer(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return result if result == result else None
+    return value
+
+
+def _segment_net(trades: list[dict[str, Any]]) -> tuple[float, str] | None:
+    exact = decimal_sum(
+        trade["pnl_usd"] for trade in trades if isinstance(trade.get("pnl_usd"), Decimal)
+    )
+    if exact is None:
+        return None
+    conservative = float_not_above(exact)
+    if conservative is None:
+        return None
+    return conservative, format(exact, "f")
 
 
 def _physical_temporal_proof(report: Mapping[str, Any], freeze: Mapping[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if not freeze:
         return None, None
-    try:
-        boundary = int(freeze.get("frozen_at_ms") or 0)
-    except (TypeError, ValueError, OverflowError):
+    boundary = _integer(freeze.get("frozen_at_ms"))
+    if boundary is None:
         return None, None
     if boundary <= 0:
         return None, None
@@ -38,10 +49,9 @@ def _physical_temporal_proof(report: Mapping[str, Any], freeze: Mapping[str, Any
     if not simulation:
         return None, None
     trades = simulation.get("trades") if isinstance(simulation.get("trades"), list) else None
-    try:
-        expected = int(simulation.get("n_trades") or 0)
-        identity_count = int(simulation.get("trade_ids_count") or 0)
-    except (TypeError, ValueError, OverflowError):
+    expected = _integer(simulation.get("n_trades"))
+    identity_count = _integer(simulation.get("trade_ids_count"))
+    if expected is None or identity_count is None:
         return None, None
     if trades is None or expected <= 0 or len(trades) != expected or identity_count != expected:
         return None, None
@@ -49,21 +59,28 @@ def _physical_temporal_proof(report: Mapping[str, Any], freeze: Mapping[str, Any
     for trade in trades:
         if not isinstance(trade, Mapping):
             return None, None
-        try:
-            ts_ms = int(trade.get("ts_ms") or 0)
-        except (TypeError, ValueError, OverflowError):
-            return None, None
-        pnl_usd = _number(trade.get("pnl_usd"))
-        if ts_ms <= 0 or pnl_usd is None:
+        ts_ms = _integer(trade.get("ts_ms"))
+        pnl_usd = decimal_value(trade.get("pnl_usd"))
+        if ts_ms is None or ts_ms <= 0 or pnl_usd is None:
             return None, None
         materialised.append({"ts_ms": ts_ms, "pnl_usd": pnl_usd})
     pre = [trade for trade in materialised if trade["ts_ms"] <= boundary]
     post = [trade for trade in materialised if trade["ts_ms"] > boundary]
-    oos = {"net_pnl_usd": round(sum(trade["pnl_usd"] for trade in pre), 8), "sample_count": len(pre),
-           "no_lookahead": True, "physical_pre_freeze": True, "frozen_at_ms": boundary}
-    forward = {"net_pnl_usd": round(sum(trade["pnl_usd"] for trade in post), 8), "sample_count": len(post),
-               "post_freeze": bool(post), "first_trade_ts_ms": min((trade["ts_ms"] for trade in post), default=None),
-               "frozen_at_ms": boundary, "source": "MATERIALISED_COPY_PAPER_LEDGER"}
+    oos_net = _segment_net(pre)
+    forward_net = _segment_net(post)
+    if oos_net is None or forward_net is None:
+        return None, None
+    oos = {
+        "net_pnl_usd": oos_net[0], "net_pnl_usd_exact_decimal": oos_net[1],
+        "sample_count": len(pre), "no_lookahead": True,
+        "physical_pre_freeze": True, "frozen_at_ms": boundary,
+    }
+    forward = {
+        "net_pnl_usd": forward_net[0], "net_pnl_usd_exact_decimal": forward_net[1],
+        "sample_count": len(post), "post_freeze": bool(post),
+        "first_trade_ts_ms": min((trade["ts_ms"] for trade in post), default=None),
+        "frozen_at_ms": boundary, "source": "MATERIALISED_COPY_PAPER_LEDGER",
+    }
     return oos, forward
 
 

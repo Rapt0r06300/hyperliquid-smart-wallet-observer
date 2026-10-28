@@ -30,23 +30,24 @@ def _campaign(**overrides):
     return payload
 
 
-def test_preuve_absente_demande_de_completer_les_donnees() -> None:
+def test_famille_desactivee_ne_recoit_aucune_recommandation_economique() -> None:
     decision = decide_family("lead_lag", None)
-    assert decision["priority"] == 100
-    assert decision["phase"] == "BUILD_EVIDENCE"
+    assert decision["status"] == "DISABLED_BY_SCOPE"
+    assert decision["priority"] == 0
+    assert decision["phase"] == "DISABLED_BY_SCOPE"
     assert decision["holdout_used_for_ranking"] is False
 
 
-def test_net_negatif_declenche_recherche_de_mecanisme_pas_tuning_holdout() -> None:
+def test_historique_negatif_lead_lag_ne_declenche_pas_de_recherche() -> None:
     decision = decide_family("lead_lag", _campaign(family="lead_lag", net_pnl_usd=-3.0))
-    assert decision["phase"] == "MECHANISM_SEARCH"
+    assert decision["phase"] == "DISABLED_BY_SCOPE"
     assert decision["holdout_used_for_ranking"] is False
 
 
-def test_net_diagnostic_positif_mais_preuve_incomplete_reste_en_recherche_robuste() -> None:
+def test_historique_positif_lead_lag_ne_declenche_pas_de_recherche() -> None:
     decision = decide_family("lead_lag", _campaign(family="lead_lag", net_pnl_usd=2.0))
-    assert decision["phase"] == "ROBUST_TRAIN_REFINEMENT"
-    assert decision["priority"] == 80
+    assert decision["phase"] == "DISABLED_BY_SCOPE"
+    assert decision["priority"] == 0
 
 
 def test_promu_train_only_demande_confirmation_independante() -> None:
@@ -73,7 +74,7 @@ def test_pbo_surajuste_demande_plus_de_donnees_pas_plus_de_parametres() -> None:
     assert decision["priority"] == 55
 
 
-def test_objectif_atteint_gèle_au_lieu_de_retuner() -> None:
+def test_preuve_historique_cross_venue_ne_peut_pas_reactiver_la_famille() -> None:
     decision = decide_family(
         "cross_venue_dislocation_v2",
         _campaign(
@@ -83,9 +84,8 @@ def test_objectif_atteint_gèle_au_lieu_de_retuner() -> None:
             net_pnl_usd=12.0,
         ),
     )
-    assert decision["phase"] == "FREEZE_AND_CONFIRM_FORWARD"
-    assert decision["priority"] == 20
-    assert decision["holdout_gate"] == "PASS"
+    assert decision["phase"] == "DISABLED_BY_SCOPE"
+    assert decision["priority"] == 0
 
 
 def test_brain_ne_prend_pas_la_magnitude_oos_forward_comme_score(tmp_path: Path) -> None:
@@ -106,6 +106,11 @@ def test_brain_ne_prend_pas_la_magnitude_oos_forward_comme_score(tmp_path: Path)
     assert policy["numeric_oos_used_for_parameter_ranking"] is False
     assert policy["numeric_forward_used_for_parameter_ranking"] is False
     assert decision["next_recommended_job"]["mode"] == "historical-deep"
+    assert decision["next_recommended_job"]["top_family"] == "copy_vault"
+    assert [row["family"] for row in decision["family_decisions"]] == ["copy_vault"]
+    assert decision["disabled_families"]["lead_lag"] == "DISABLED_BY_SCOPE"
+    assert decision["disabled_families"]["cross_venue_dislocation"] == "DISABLED_BY_SCOPE"
+    assert "copy_vault" not in decision["disabled_families"]
 
 
 def test_missing_mesure_passe_avant_recherche_parametrique(tmp_path: Path) -> None:
@@ -133,7 +138,7 @@ def _plan(remaining: float) -> dict[str, object]:
     }
 
 
-def test_max_data_escalade_vers_la_suite_de_la_famille_prioritaire() -> None:
+def test_max_data_ignore_les_priorites_des_familles_desactivees() -> None:
     decisions = [
         {"family": "copy_vault", "priority": 40, "phase": "DIAGNOSE"},
         {"family": "lead_lag", "priority": 100, "phase": "MECHANISM_SEARCH"},
@@ -141,6 +146,7 @@ def test_max_data_escalade_vers_la_suite_de_la_famille_prioritaire() -> None:
     ]
     plans = {
         "economic-full": _plan(9.8),
+        "copy-vault-full": _plan(8.3),
         "lead-lag-full": _plan(9.8),
         "microstructure-full": _plan(5.9),
         "research-lab-full": _plan(61.0),
@@ -155,8 +161,9 @@ def test_max_data_escalade_vers_la_suite_de_la_famille_prioritaire() -> None:
         all_targets_reached=False,
     )
     assert result["status"] == "READY"
-    assert result["recommended_suite"] == "lead-lag-full"
+    assert result["recommended_suite"] == "copy-vault-full"
     assert result["recommended_mode"] == "historical-deep"
+    assert result["top_family"] == "copy_vault"
     assert result["holdout_used_for_ranking"] is False
     assert result["target_contract"]["aggregate_substitution_allowed"] is False
 
@@ -179,10 +186,11 @@ def test_max_data_saute_une_suite_trop_grosse_sans_saturer_le_disque() -> None:
     assert result["rejected_before_selection"][0]["reason"] == "INSUFFICIENT_DISK"
 
 
-def test_max_data_sarrete_quand_les_trois_objectifs_independants_sont_prouves() -> None:
+def test_max_data_sarrete_quand_copy_vault_seul_est_prouve() -> None:
     decisions = [
-        {"family": family, "priority": 20, "phase": "FREEZE_AND_CONFIRM_FORWARD"}
-        for family in ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+        {"family": "copy_vault", "priority": 20, "phase": "FREEZE_AND_CONFIRM_FORWARD"},
+        {"family": "lead_lag", "priority": 100, "phase": "MECHANISM_SEARCH"},
+        {"family": "cross_venue_dislocation_v2", "priority": 100, "phase": "COMPLETE_EVIDENCE"},
     ]
     assert targets_reached_from_brain(decisions) is True
     result = choose_max_data_job(
@@ -193,16 +201,29 @@ def test_max_data_sarrete_quand_les_trois_objectifs_independants_sont_prouves() 
     )
     assert result["status"] == "STOP_PROOF_REACHED"
     assert result["recommended_suite"] is None
-    assert result["target_contract"]["target_net_usd_per_family"] == 5.0
+    assert result["target_contract"]["target_net_usd_per_day"] == 5.0
+    assert result["target_contract"]["required_families"] == ["copy_vault"]
 
 
-def test_un_seul_module_atteint_ne_peut_pas_compter_comme_trois() -> None:
+def test_resultats_desactivees_ne_peuvent_pas_bloquer_la_cible_copy_vault() -> None:
     decisions = [
         {"family": "copy_vault", "priority": 20, "phase": "FREEZE_AND_CONFIRM_FORWARD"},
         {"family": "lead_lag", "priority": 100, "phase": "MECHANISM_SEARCH"},
         {"family": "cross_venue_dislocation_v2", "priority": 100, "phase": "COMPLETE_EVIDENCE"},
     ]
-    assert targets_reached_from_brain(decisions) is False
+    assert targets_reached_from_brain(decisions) is True
+
+
+def test_max_data_ignore_un_drapeau_cible_vrai_sans_preuve_copy_vault() -> None:
+    result = choose_max_data_job(
+        family_decisions=[{"family": "copy_vault", "priority": 50, "phase": "DIAGNOSE"}],
+        suite_plans={"economic-full": _plan(2.0)},
+        free_disk_gib=100.0,
+        all_targets_reached=True,
+    )
+
+    assert result["status"] == "READY"
+    assert result["recommended_suite"] == "economic-full"
 
 
 def _job_result(lab_root: Path, **overrides) -> dict[str, object]:

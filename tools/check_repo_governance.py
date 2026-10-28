@@ -63,7 +63,7 @@ def local_failures() -> list[str]:
         for marker in (
             "statuses: write",
             "hypersmart/security-quality",
-            "needs: [governance, supply-chain]",
+            "needs: [scope, governance, supply-chain]",
             "python -m pip_audit",
             "python -m ruff check --select E9,F63,F7,F82 src tools tests",
         ):

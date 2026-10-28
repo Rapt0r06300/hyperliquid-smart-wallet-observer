@@ -6,7 +6,10 @@ from hl_observer.copy_mode.wallet_mirror_runtime import (
 from hl_observer.paper_trading.mirror_paper_executor import execute_mirror_candidate_paper
 from hl_observer.paper_trading.paper_connector import PaperSimConnector
 from hl_observer.position_lifecycle.reconstructor import LifecycleAction
-from hl_observer.risk.proportional_paper_sizer import ProportionalSizingConfig, size_proportional_paper_notional
+from hl_observer.risk.proportional_paper_sizer import (
+    ProportionalSizingConfig,
+    size_proportional_paper_notional,
+)
 from hl_observer.risk.slippage_guard_v2 import SlippageGuardConfig, evaluate_slippage_guard_v2
 from hl_observer.signals.copy_conflict_resolver import resolve_copy_conflicts
 from hl_observer.signals.leader_delta import LeaderDelta
@@ -123,6 +126,7 @@ def test_mirror_paper_trade_has_not_an_order_and_keeps_evidence():
         top_depth_usdt=5_000.0,
         asks=((25.01, 20.0), (25.02, 20.0)),
         bids=((24.99, 20.0),),
+        book_exchange_ts_ms=1_149,
         observed_at_ms=1_150,
         connector=connector,
     )

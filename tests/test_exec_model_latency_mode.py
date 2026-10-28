@@ -6,13 +6,13 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.paper_trading.exec_model import ExecModelConfig, simulate_execution   # noqa: E402
-from hl_observer.paper_trading.execution_truth import ExecutionTruth                    # noqa: E402
+from hl_observer.paper_trading.exec_model import ExecModelConfig, simulate_execution  # noqa: E402
+from hl_observer.paper_trading.execution_truth import ExecutionTruth  # noqa: E402
 
 
 def _truth():
     return ExecutionTruth.from_levels(coin="BTC", bids=[(99.9, 1000.0)], asks=[(100.1, 1000.0)],
-                                      received_ts_ms=1000, source="test")
+                                      received_ts_ms=1000, exchange_ts_ms=999, source="test")
 
 
 def _exec(config):

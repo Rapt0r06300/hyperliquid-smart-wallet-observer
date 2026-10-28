@@ -10,6 +10,7 @@ PAPER/READ-ONLY.  This module imports no exchange or order client.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -26,7 +27,11 @@ from hl_observer.backtesting.copy_vault_v6_balanced_train import (
 from hl_observer.backtesting.copy_vault_v8_entry_efficiency_train import (
     select_entry_efficiency,
 )
-from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.backtesting.train_statistics import (
+    exact_net_rank_value,
+    select_unambiguous_lcb_candidate,
+    stable_hash,
+)
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v9_online_leader_quality_train.v1"
 MECHANISM = "copy_vault_v9_causal_online_leader_quality"
@@ -42,6 +47,7 @@ NEW_TRIAL_COUNT = (
     len(MINIMUM_PRIOR_CLOSED) * len(HISTORY_WINDOWS) * len(VAULT_DAILY_LIMITS)
 )
 BONFERRONI_TRIAL_COUNT = PRIOR_FAMILY_TRIAL_COUNT + NEW_TRIAL_COUNT
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
 def _finite(value: object) -> float | None:
@@ -50,6 +56,97 @@ def _finite(value: object) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _exact_positive_timestamp(value: object) -> int | None:
+    if type(value) is int and value > 0:
+        return value
+    return None
+
+
+def _prior_safe_evidence_refs(
+    prior: Sequence[Mapping[str, Any]], *, leader_id: str, as_of_ms: int
+) -> tuple[list[dict[str, Any]], str]:
+    """Expose only source rows whose SAFE lineage is structurally complete and causal."""
+    evidence: list[dict[str, Any]] = []
+    complete = bool(prior)
+    for trade in prior:
+        trade_id = str(trade.get("trade_id") or trade.get("metaorder_id") or "")
+        exit_ms = _exact_positive_timestamp(trade.get("exit_ts_ms"))
+        fill_refs = trade.get("leader_fill_evidence_refs")
+        book_refs = trade.get("execution_book_evidence_refs")
+        if (
+            trade.get("vault") != leader_id
+            or exit_ms is None
+            or exit_ms >= as_of_ms
+            or trade.get("leader_fill_evidence_status") != "SAFE_CAUSAL_COMPLETE"
+            or trade.get("execution_book_safe_evidence_complete") is not True
+            or not isinstance(fill_refs, (list, tuple))
+            or not fill_refs
+            or not isinstance(book_refs, (list, tuple))
+            or len(book_refs) != 3
+        ):
+            complete = False
+            continue
+        for role, family, refs in (
+            ("LEADER_FILL", "copy_vault_fills", fill_refs),
+            ("EXECUTION_BOOK", "copy_vault_l2", book_refs),
+        ):
+            for index, raw in enumerate(refs):
+                if not isinstance(raw, Mapping):
+                    complete = False
+                    continue
+                dataset_id = raw.get("dataset_id")
+                shard_sha = raw.get("shard_sha256")
+                catalog_sha = raw.get("source_catalog_sha256")
+                observed_ms = _exact_positive_timestamp(
+                    raw.get("event_ts_ms", raw.get("exchange_ts_ms"))
+                )
+                received_ms = _exact_positive_timestamp(raw.get("received_at_ms"))
+                if (
+                    not isinstance(dataset_id, str) or not dataset_id.strip()
+                    or not isinstance(shard_sha, str)
+                    or _SHA256_RE.fullmatch(shard_sha) is None
+                    or not isinstance(catalog_sha, str)
+                    or _SHA256_RE.fullmatch(catalog_sha) is None
+                    or raw.get("quality") != "SAFE"
+                    or raw.get("manifest_verified") is not True
+                    or raw.get("replay_compatible") is not True
+                    or observed_ms is None
+                    or received_ms is None
+                    or observed_ms > received_ms
+                    or received_ms > exit_ms
+                    or received_ms > as_of_ms
+                ):
+                    complete = False
+                    continue
+                event_id = str(raw.get("event_id") or raw.get("raw_frame_sha256") or index)
+                reference = f"v9:{trade_id}:{role}:{dataset_id}:{event_id}"
+                evidence.append(
+                    {
+                        "ref": reference,
+                        "leader_id": leader_id,
+                        "source": family,
+                        "source_family": family,
+                        "source_dataset_id": dataset_id.strip(),
+                        "source_sha256": shard_sha.lower(),
+                        "source_catalog_sha256": catalog_sha.lower(),
+                        "quality": "SAFE",
+                        "manifest_verified": True,
+                        "replay_compatible": True,
+                        "observed_at_ms": observed_ms,
+                        "received_at_ms": received_ms,
+                        "period_start_ms": observed_ms,
+                        "period_end_ms": observed_ms,
+                        "trade_id": trade_id,
+                        "evidence_role": role,
+                    }
+                )
+    unique = {row["ref"]: row for row in evidence}
+    if len(unique) != len(evidence):
+        complete = False
+    status = "SAFE_CAUSAL_COMPLETE" if complete and unique else "INCOMPLETE_OR_UNVERIFIED"
+    return [unique[key] for key in sorted(unique)], status
 
 
 def apply_causal_online_leader_quality(
@@ -61,9 +158,9 @@ def apply_causal_online_leader_quality(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Admit candidates using only same-vault outcomes already closed at entry."""
 
-    if int(minimum_prior_closed) <= 0:
+    if type(minimum_prior_closed) is not int or minimum_prior_closed <= 0:
         raise ValueError("minimum_prior_closed must be positive")
-    if int(history_window) < int(minimum_prior_closed):
+    if type(history_window) is not int or history_window < minimum_prior_closed:
         raise ValueError("history_window must cover minimum_prior_closed")
 
     history_by_vault: dict[str, list[dict[str, Any]]] = {}
@@ -72,11 +169,8 @@ def apply_causal_online_leader_quality(
         row = dict(raw)
         vault = str(row.get("vault") or "")
         net = _finite(row.get("net_pnl_usd"))
-        try:
-            exit_ms = int(row.get("exit_ts_ms") or 0)
-        except (TypeError, ValueError, OverflowError):
-            exit_ms = 0
-        if not vault or net is None or exit_ms <= 0:
+        exit_ms = _exact_positive_timestamp(row.get("exit_ts_ms"))
+        if not vault or net is None or exit_ms is None:
             invalid_history += 1
             continue
         history_by_vault.setdefault(vault, []).append(
@@ -85,42 +179,123 @@ def apply_causal_online_leader_quality(
     for rows in history_by_vault.values():
         rows.sort(key=lambda row: (int(row["exit_ts_ms"]), str(row.get("trade_id") or "")))
 
-    audit: dict[str, int] = {
+    audit: dict[str, Any] = {
         "CANDIDATE_ROWS": len(candidates),
         "INVALID_HISTORY_ROWS": invalid_history,
+        "leader_decisions": [],
     }
     selected: list[dict[str, Any]] = []
     ordered = sorted(
-        (dict(row) for row in candidates),
-        key=lambda row: (int(row.get("entry_ts_ms") or 0), str(row.get("trade_id") or "")),
+        enumerate(dict(row) for row in candidates),
+        key=lambda item: (
+            _exact_positive_timestamp(item[1].get("entry_ts_ms")) or 0,
+            str(item[1].get("trade_id") or item[1].get("metaorder_id") or item[0]),
+        ),
     )
-    for row in ordered:
+    for original_index, row in ordered:
         vault = str(row.get("vault") or "")
-        try:
-            entry_ms = int(row.get("entry_ts_ms") or 0)
-        except (TypeError, ValueError, OverflowError):
-            entry_ms = 0
-        if not vault or entry_ms <= 0:
+        entry_ms = _exact_positive_timestamp(row.get("entry_ts_ms"))
+        candidate_id = str(
+            row.get("trade_id") or row.get("metaorder_id") or f"candidate-{original_index}"
+        )
+        if not vault or entry_ms is None:
             audit["INVALID_CANDIDATE_REJECTED"] = (
                 audit.get("INVALID_CANDIDATE_REJECTED", 0) + 1
+            )
+            audit["leader_decisions"].append(
+                {
+                    "decision_scope": "CANDIDATE_SIGNAL_AT_ENTRY",
+                    "candidate_trade_id": candidate_id,
+                    "leader_id": vault or None,
+                    "as_of_ms": entry_ms,
+                    "outcome": "REJECTED",
+                    "reason": (
+                        "INVALID_CANDIDATE_TIMESTAMP" if entry_ms is None
+                        else "LEADER_ID_MISSING"
+                    ),
+                    "prior_count": 0,
+                    "prior_trade_ids": [],
+                    "evidence_refs": [],
+                    "evidence_status": "INCOMPLETE_OR_UNVERIFIED",
+                }
             )
             continue
         prior = [
             past
             for past in history_by_vault.get(vault, [])
-            if int(past["exit_ts_ms"]) < entry_ms
-        ][-int(history_window) :]
+            if past["exit_ts_ms"] < entry_ms
+        ][-history_window:]
+        prior_trade_ids = [
+            str(past.get("trade_id") or past.get("metaorder_id") or "") for past in prior
+        ]
+        prior_latest_exit = max(
+            (int(past["exit_ts_ms"]) for past in prior), default=None
+        )
         if len(prior) < int(minimum_prior_closed):
             audit["INSUFFICIENT_PRIOR_HISTORY_REJECTED"] = (
                 audit.get("INSUFFICIENT_PRIOR_HISTORY_REJECTED", 0) + 1
             )
+            refs, evidence_status = _prior_safe_evidence_refs(
+                prior, leader_id=vault, as_of_ms=entry_ms
+            )
+            audit["leader_decisions"].append(
+                {
+                    "decision_scope": "CANDIDATE_SIGNAL_AT_ENTRY",
+                    "candidate_trade_id": candidate_id,
+                    "leader_id": vault,
+                    "as_of_ms": entry_ms,
+                    "outcome": "REJECTED",
+                    "reason": "INSUFFICIENT_PRIOR_CLOSED_HISTORY",
+                    "prior_count": len(prior),
+                    "prior_trade_ids": prior_trade_ids,
+                    "prior_latest_exit_ts_ms": prior_latest_exit,
+                    "prior_mean_net_pnl_usd": None,
+                    "evidence_refs": refs,
+                    "evidence_status": evidence_status,
+                }
+            )
             continue
         prior_mean = sum(float(past["net_pnl_usd"]) for past in prior) / len(prior)
+        refs, evidence_status = _prior_safe_evidence_refs(
+            prior, leader_id=vault, as_of_ms=entry_ms
+        )
         if prior_mean <= 0.0:
             audit["NON_POSITIVE_PRIOR_MEAN_REJECTED"] = (
                 audit.get("NON_POSITIVE_PRIOR_MEAN_REJECTED", 0) + 1
             )
+            audit["leader_decisions"].append(
+                {
+                    "decision_scope": "CANDIDATE_SIGNAL_AT_ENTRY",
+                    "candidate_trade_id": candidate_id,
+                    "leader_id": vault,
+                    "as_of_ms": entry_ms,
+                    "outcome": "DEMOTED",
+                    "reason": "NON_POSITIVE_PRIOR_NET_MEAN",
+                    "prior_count": len(prior),
+                    "prior_trade_ids": prior_trade_ids,
+                    "prior_latest_exit_ts_ms": prior_latest_exit,
+                    "prior_mean_net_pnl_usd": prior_mean,
+                    "evidence_refs": refs,
+                    "evidence_status": evidence_status,
+                }
+            )
             continue
+        audit["leader_decisions"].append(
+            {
+                "decision_scope": "CANDIDATE_SIGNAL_AT_ENTRY",
+                "candidate_trade_id": candidate_id,
+                "leader_id": vault,
+                "as_of_ms": entry_ms,
+                "outcome": "RETAINED",
+                "reason": "POSITIVE_PRIOR_NET_MEAN",
+                "prior_count": len(prior),
+                "prior_trade_ids": prior_trade_ids,
+                "prior_latest_exit_ts_ms": prior_latest_exit,
+                "prior_mean_net_pnl_usd": prior_mean,
+                "evidence_refs": refs,
+                "evidence_status": evidence_status,
+            }
+        )
         selected.append(
             {
                 **row,
@@ -197,6 +372,7 @@ def explore_copy_vault_v9_online_leader_quality_train(
         keep_fraction=ENTRY_EFFICIENCY_KEEP_FRACTION,
     )
     variants: list[dict[str, Any]] = []
+    leader_decision_traces: list[dict[str, Any]] = []
     for minimum_prior in MINIMUM_PRIOR_CLOSED:
         for history_window in HISTORY_WINDOWS:
             quality_rows, quality_audit = apply_causal_online_leader_quality(
@@ -205,6 +381,23 @@ def explore_copy_vault_v9_online_leader_quality_train(
                 minimum_prior_closed=minimum_prior,
                 history_window=history_window,
             )
+            decisions = list(quality_audit.get("leader_decisions") or [])
+            leader_decision_traces.append(
+                {
+                    "minimum_prior_closed": minimum_prior,
+                    "history_window": history_window,
+                    "candidate_decision_count": len(decisions),
+                    "safe_causal_complete_count": sum(
+                        row.get("evidence_status") == "SAFE_CAUSAL_COMPLETE"
+                        for row in decisions
+                    ),
+                    "decisions": decisions,
+                }
+            )
+            quality_audit_summary = {
+                key: value for key, value in quality_audit.items()
+                if key != "leader_decisions"
+            }
             for vault_limit in VAULT_DAILY_LIMITS:
                 admitted, budget_audit = apply_causal_daily_risk_budget(
                     quality_rows,
@@ -233,7 +426,7 @@ def explore_copy_vault_v9_online_leader_quality_train(
                         "max_entries_per_vault_day": vault_limit,
                         "max_entries_per_coin_day": COIN_DAILY_LIMIT,
                         "entry_efficiency_audit": efficiency_audit,
-                        "leader_quality_audit": quality_audit,
+                        "leader_quality_audit": quality_audit_summary,
                         "budget_audit": budget_audit,
                         "placebo_signal_match_audit": {
                             "admitted_signal_ids": len(admitted_ids),
@@ -248,17 +441,10 @@ def explore_copy_vault_v9_online_leader_quality_train(
                 )
 
     eligible = [row for row in variants if row["eligible"]]
-    selected = max(
-        eligible,
-        key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
-        ),
-        default=None,
-    )
+    selected, selection_resolution = select_unambiguous_lcb_candidate(eligible)
     diagnostic_best = max(
         variants,
-        key=lambda row: float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+        key=lambda row: exact_net_rank_value(row["statistics"] or {}),
         default=None,
     )
     freeze_candidate = (
@@ -283,6 +469,7 @@ def explore_copy_vault_v9_online_leader_quality_train(
         "mechanism": MECHANISM,
         "status": "TRAIN_ELIGIBLE_TO_FREEZE" if selected else "NO_ROBUST_TRAIN_CANDIDATE",
         "selection_eligible": selected is not None,
+        "selection_numeric_resolution": selection_resolution,
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,
@@ -304,6 +491,15 @@ def explore_copy_vault_v9_online_leader_quality_train(
             "prior_family_trial_count": PRIOR_FAMILY_TRIAL_COUNT,
             "new_trial_count": NEW_TRIAL_COUNT,
             "bonferroni_trial_count": BONFERRONI_TRIAL_COUNT,
+        },
+        "leader_decision_traces": {
+            "schema_version": "copy_vault.leader_quality_decision_trace.v1",
+            "scope": "TRAIN_ONLY_PRE_FREEZE",
+            "decision_scope": "V9_ONLINE_LEADER_QUALITY_AFTER_ENTRY_EFFICIENCY",
+            "durability": "CAMPAIGN_RESULT_ONLY_NOT_APPEND_ONLY_REVIEW_LEDGER",
+            "source_bytes_rehashed_here": False,
+            "canonical_safe_audit_required": True,
+            "traces": leader_decision_traces,
         },
         "selected": selected,
         "diagnostic_best_train_variant": diagnostic_best,

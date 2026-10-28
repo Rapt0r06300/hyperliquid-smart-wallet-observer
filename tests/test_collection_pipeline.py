@@ -255,13 +255,20 @@ def test_collect_once_records_incomplete_fill_window_as_failed_run(tmp_path):
     assert run.success is False
     assert run.errors_count == 1
     assert errors == 1
-    assert len(raw_events) == 2
+    assert len(raw_events) == 3
     assert raw_events[0].request_payload_json["startTime"] == 1
     assert raw_events[0].request_payload_json["endTime"] == 2
     assert raw_events[0].success is True
+    assert raw_events[1].request_type == "userFillsByTimeCoverageError"
     assert raw_events[1].request_payload_json["startTime"] == 1
     assert raw_events[1].request_payload_json["endTime"] == 3
     assert raw_events[1].success is False
+    assert raw_events[1].response_payload_json["coverage_receipt"]["reason"] == "MAX_PAGES_REACHED"
+    assert raw_events[2].request_type == "userFillsByTimeCoverageReceipt"
+    assert raw_events[2].success is False
+    assert raw_events[2].response_payload_json["next_windows"] == [
+        {"start_ms": 3, "end_ms": 3}
+    ]
 
 
 def test_collect_once_rejects_invalid_wallet_address():

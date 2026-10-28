@@ -92,6 +92,36 @@ def test_operator_status_validator_accepts_pinned_copy_vault(tmp_path: Path) -> 
     assert '"valid": true' in result.stdout
 
 
+def test_historical_v1_status_remains_readable_outside_active_scope(tmp_path: Path) -> None:
+    intent_path, status_path = _write_status_pair(tmp_path, "lead_lag", "lead_lag")
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    intent["schema_version"] = "alina.operator_intent.v1"
+    status["schema_version"] = "alina.operator_status.v1"
+    status["intent_digest"] = hashlib.sha256(
+        json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    intent_path.write_text(json.dumps(intent), encoding="utf-8")
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "validate_operator_status.py"),
+            "--intent",
+            str(intent_path),
+            "--status",
+            str(status_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert '"valid": true' in result.stdout
+
+
 def test_intent_importer_refuses_disabled_family_before_materialization(tmp_path: Path) -> None:
     alina_root = tmp_path / "alina"
     scope = alina_root / "src" / "hl_observer" / "strategies" / "active_scope.py"
@@ -148,11 +178,68 @@ def test_intent_importer_refuses_disabled_family_before_materialization(tmp_path
     assert not (tmp_path / "catalog" / "campaigns").exists()
 
 
+def test_intent_importer_refuses_historical_v1_before_materialization(tmp_path: Path) -> None:
+    alina_root = tmp_path / "alina"
+    scope = alina_root / "src" / "hl_observer" / "strategies" / "active_scope.py"
+    scope.parent.mkdir(parents=True)
+    scope.write_bytes((ROOT / "src" / "hl_observer" / "strategies" / "active_scope.py").read_bytes())
+    intent_root = alina_root / "control" / "operator-intents"
+    intent_root.mkdir(parents=True)
+    request_id = "c" * 64
+    intent = {
+        "schema_version": "alina.operator_intent.v1",
+        "intent": "backtest",
+        "request_id": request_id,
+        "analysis_stage": "BACKTEST",
+        "config": {"strategy_family": "copy_vault"},
+        "strategy_family": "copy_vault",
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+    intent_path = intent_root / f"{request_id}.json"
+    intent_path.write_text(json.dumps(intent), encoding="utf-8")
+    original_intent = intent_path.read_bytes()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "import_operator_intents.py"),
+            "--alina-root",
+            str(alina_root),
+            "--phase",
+            "ANALYZE",
+            "--phase-epoch",
+            "2",
+            "--analysis-stage",
+            "BACKTEST",
+            "--source-collection-epoch",
+            "1",
+            "--collection-cutoff-at-utc",
+            "2026-10-26T00:00:00Z",
+            "--code-sha",
+            "c" * 40,
+            "--dataset-repo-sha",
+            "d" * 40,
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "OPERATOR_INTENT_SCHEMA_NOT_EXECUTABLE" in result.stderr
+    assert intent_path.read_bytes() == original_intent
+    assert not (tmp_path / "catalog" / "campaigns").exists()
+
+
 def _write_receipt_tree(root: Path, family: str) -> None:
     request_id, campaign_id = "e" * 64, "operator-" + "e" * 32 + "-backtest"
     receipt_dir = root / "catalog" / "dispatch-receipts"
+    dispatch_dir = root / "catalog" / "operator-dispatches"
     campaign_dir = root / "catalog" / "campaigns"
     receipt_dir.mkdir(parents=True)
+    dispatch_dir.mkdir(parents=True)
     campaign_dir.mkdir(parents=True)
     receipt = {
         "schema": "alina.dispatch_receipt.v1",
@@ -178,11 +265,28 @@ def _write_receipt_tree(root: Path, family: str) -> None:
         "source_collection_epoch": 1,
         "collection_cutoff_at_utc": "2026-10-26T00:00:00Z",
         "dataset_selection_id": "f" * 64,
+        "analysis_stage": "BACKTEST",
         "kind": "backtest",
         "cursor": {"operator_intent": "backtest", "strategy_family": family},
     }
+    dispatch = {
+        "schema": "alina.operator_dispatch.v1",
+        "request_id": request_id,
+        "main_code_sha": "1" * 40,
+        "phase": "ANALYZE",
+        "phase_epoch": 2,
+        "source_collection_epoch": 1,
+        "collection_cutoff_at_utc": "2026-10-26T00:00:00Z",
+        "analysis_stage": "BACKTEST",
+        "intent": "backtest",
+        "strategy_family": family,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
     (receipt_dir / f"{campaign_id}.json").write_text(json.dumps(receipt), encoding="utf-8")
     (campaign_dir / f"{campaign_id}.json").write_text(json.dumps(campaign), encoding="utf-8")
+    (dispatch_dir / f"{request_id}.json").write_text(json.dumps(dispatch), encoding="utf-8")
 
 
 def test_receipt_validator_rejects_v2_campaign_outside_active_scope(tmp_path: Path) -> None:
@@ -197,6 +301,83 @@ def test_receipt_validator_rejects_v2_campaign_outside_active_scope(tmp_path: Pa
 
     assert result.returncode != 0
     assert "DISABLED_BY_SCOPE" in result.stderr
+
+
+def test_receipt_validator_rejects_dispatch_family_mismatch(tmp_path: Path) -> None:
+    _write_receipt_tree(tmp_path, "copy_vault")
+    dispatch_path = next((tmp_path / "catalog" / "operator-dispatches").glob("*.json"))
+    dispatch = json.loads(dispatch_path.read_text(encoding="utf-8"))
+    dispatch["strategy_family"] = "lead_lag"
+    dispatch_path.write_text(json.dumps(dispatch), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "validate_dispatch_receipts.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "dispatch/campaign family mismatch" in result.stderr
+
+
+def test_receipt_validator_requires_operator_dispatch_for_v2_campaign(tmp_path: Path) -> None:
+    _write_receipt_tree(tmp_path, "copy_vault")
+    dispatch_path = next((tmp_path / "catalog" / "operator-dispatches").glob("*.json"))
+    dispatch_path.unlink()
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "validate_dispatch_receipts.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "missing operator dispatch record" in result.stderr
+
+
+def test_receipt_validator_rejects_receipt_campaign_family_mismatch(tmp_path: Path) -> None:
+    _write_receipt_tree(tmp_path, "copy_vault")
+    campaign_path = next((tmp_path / "catalog" / "campaigns").glob("*.json"))
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["cursor"]["strategy_family"] = "lead_lag"
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "validate_dispatch_receipts.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "campaign family is outside active scope" in result.stderr
+
+
+def test_historical_v1_receipt_remains_readable_without_active_scope(tmp_path: Path) -> None:
+    _write_receipt_tree(tmp_path, "lead_lag")
+    campaign_path = next((tmp_path / "catalog" / "campaigns").glob("*.json"))
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["schema_version"] = "alina.resumable_campaign.v1"
+    campaign.pop("cursor", None)
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+    dispatch_path = next((tmp_path / "catalog" / "operator-dispatches").glob("*.json"))
+    dispatch_path.unlink()
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "validate_dispatch_receipts.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "validated 1 dispatch receipts" in result.stdout
 
 
 def test_operator_workflows_use_the_same_family_normalizer() -> None:

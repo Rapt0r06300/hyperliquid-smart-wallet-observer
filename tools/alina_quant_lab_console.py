@@ -288,9 +288,9 @@ def _pytest_parallel_args(test_file_count: int) -> list[str]:
     if importlib.util.find_spec("xdist") is None or test_file_count <= 1:
         return []
     try:
-        percent = int(os.environ.get("ALINA_QUANT_CPU_PERCENT", "65"))
+        percent = int(os.environ.get("ALINA_QUANT_CPU_PERCENT", "60"))
     except ValueError:
-        percent = 65
+        percent = 60
     percent = min(100, max(1, percent))
     logical_cpus = max(1, int(os.cpu_count() or 1))
     workers = max(1, logical_cpus * percent // 100)
@@ -739,6 +739,66 @@ def _safe_copy_vault_exclusion_summary(inputs: Mapping[str, Any]) -> str:
     )
 
 
+def _historical_coverage_text(inputs: Mapping[str, Any]) -> str:
+    raw = inputs.get("historical_coverage_audit")
+    coverage = raw if isinstance(raw, Mapping) else {}
+    expected = coverage.get("expected_release_count")
+    audited = coverage.get("audited_release_count")
+    receipts = coverage.get("durable_receipt_release_count")
+    missing_receipts = coverage.get("missing_durable_receipt_tags")
+    without_audit = coverage.get("receipt_without_backfill_audit_tags")
+    if type(expected) is not int or type(audited) is not int:
+        return "Audit de backfill historique : reçu ou couverture non mesuré."
+    receipt_text = (
+        f"; {receipts:,}/{expected:,} reçus durables de collecte"
+        if type(receipts) is int else ""
+    )
+    missing_count = (
+        len(missing_receipts)
+        if isinstance(missing_receipts, list)
+        else max(0, expected - (receipts if type(receipts) is int else 0))
+    )
+    no_audit_count = (
+        len(without_audit)
+        if isinstance(without_audit, list)
+        else max(0, expected - audited - missing_count)
+    )
+    return (
+        f"Audit de backfill historique : {audited:,}/{expected:,} releases SAFE "
+        f"avec un rapport exploitable{receipt_text}; {no_audit_count:,} reçu(s) sans audit de backfill "
+        f"et {missing_count:,} sans reçu durable. Ce compteur concerne la preuve de couverture, "
+        "pas le nombre de shards locaux présents."
+    ).replace(",", " ")
+
+
+def _payload_rejection_text(inputs: Mapping[str, Any]) -> str:
+    raw = inputs.get("payload_audit")
+    payload_audit = raw if isinstance(raw, Mapping) else {}
+    labels = {
+        "INVALID_OR_NONCAUSAL_L2_REJECTED": "carnets L2 invalides ou non causaux",
+        "INVALID_OR_INCOMPLETE_FILL_REJECTED": "fills invalides ou incomplets",
+        "FILL_LIST_INVALID": "listes de fills invalides",
+        "SNAPSHOT_FAMILY_FLAG_MISMATCH": (
+            "trames userFills sans marqueur isSnapshot valide pour leur famille, exclues"
+        ),
+    }
+    return "; ".join(
+        f"{count:,}".replace(",", " ") + " "
+        + labels.get(str(reason), str(reason).replace("_", " ").lower())
+        for reason, count in payload_audit.items()
+        if type(count) is int and count > 0
+    ) or "aucun enregistrement rejeté"
+
+
+def _read_leader_review_history(root: Path) -> dict[str, Any]:
+    from hl_observer.research.leader_review_ledger import (
+        default_leader_review_path,
+        summarize_leader_reviews,
+    )
+
+    return summarize_leader_reviews(default_leader_review_path(root))
+
+
 def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Path:
     """Write a plain-French dashboard from the exact machine-readable result."""
     economic = dict(summary.get("economic_result") or {})
@@ -748,6 +808,135 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     inputs = dict(summary.get("safe_inputs") or {})
     status = str(summary.get("status") or "UNKNOWN")
     live = dict(summary.get("live") or {})
+    review_history = dict(summary.get("leader_review_history") or {})
+    review_receipts = review_history.get("recent_receipts")
+    review_receipts = review_receipts if isinstance(review_receipts, list) else []
+
+    def review_provenance_html(row: Mapping[str, Any]) -> str:
+        assets = row.get("safe_evidence_assets")
+        assets = [item for item in assets if isinstance(item, Mapping)] if isinstance(assets, list) else []
+        if not assets:
+            return "<span>aucune provenance SAFE liée</span>"
+        shown = assets[:20]
+        details = []
+        for asset in shown:
+            fields = (
+                ("Famille", asset.get("family")),
+                ("Dataset", asset.get("dataset_id")),
+                ("SHA‑256 shard", asset.get("sha256")),
+                ("SHA‑256 catalogue", asset.get("source_catalog_sha256")),
+                ("Release", asset.get("release_tag")),
+                ("Asset", asset.get("release_asset")),
+                ("Manifeste", asset.get("manifest_path")),
+                ("Taille", f"{asset.get('bytes')} octets" if type(asset.get("bytes")) is int else None),
+            )
+            rendered = " · ".join(
+                f"<b>{html.escape(label)}</b> {html.escape(str(value))}"
+                for label, value in fields if value is not None
+            )
+            details.append(f"<li>{rendered}</li>")
+        omitted = len(assets) - len(shown)
+        if omitted:
+            details.append(
+                f"<li>{omitted} source(s) supplémentaires dans le registre JSONL complet.</li>"
+            )
+        return (
+            f"<details><summary>{len(assets)} source(s) SAFE liées à l’inventaire</summary>"
+            f"<ul>{''.join(details)}</ul></details>"
+        )
+
+    def review_findings_html(row: Mapping[str, Any]) -> str:
+        sections = []
+        for key, label in (("favorable", "Éléments favorables"), ("counterevidence", "Contre-évidence")):
+            findings = row.get(key)
+            findings = [item for item in findings if isinstance(item, Mapping)] if isinstance(findings, list) else []
+            entries = []
+            for item in findings[:20]:
+                finding_key = item.get("finding_key")
+                summary_text = item.get("summary")
+                refs = item.get("evidence_refs")
+                refs = [ref for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else []
+                description = " — ".join(
+                    html.escape(str(value)) for value in (finding_key, summary_text) if value is not None
+                ) or "élément sans description"
+                if refs:
+                    description += " · références : " + html.escape(", ".join(refs[:10]))
+                    if len(refs) > 10:
+                        description += f" (+{len(refs) - 10} références)"
+                entries.append(f"<li>{description}</li>")
+            omitted = row.get(f"{key}_omitted_count")
+            if type(omitted) is int and omitted > 0:
+                entries.append(f"<li>{omitted} élément(s) dans le reçu JSONL complet.</li>")
+            if entries:
+                sections.append(f"<b>{label}</b><ul>{''.join(entries)}</ul>")
+
+        unknowns = row.get("unknowns")
+        unknowns = [item for item in unknowns if isinstance(item, str)] if isinstance(unknowns, list) else []
+        omitted_unknowns = row.get("unknowns_omitted_count")
+        if unknowns or (type(omitted_unknowns) is int and omitted_unknowns > 0):
+            entries = [f"<li>{html.escape(item)}</li>" for item in unknowns[:20]]
+            if type(omitted_unknowns) is int and omitted_unknowns > 0:
+                entries.append(f"<li>{omitted_unknowns} inconnue(s) dans le reçu JSONL complet.</li>")
+            sections.append(f"<b>Inconnues</b><ul>{''.join(entries)}</ul>")
+
+        falsification = row.get("falsification_condition")
+        if isinstance(falsification, str) and falsification:
+            sections.append(
+                "<b>Condition de réfutation</b><p>" + html.escape(falsification) + "</p>"
+            )
+        if not sections:
+            return "<span>synthèse consultative non fournie</span>"
+        return "<details><summary>Ouvrir la synthèse consultative</summary>" + "".join(sections) + "</details>"
+
+    review_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(row.get('reviewed_at_utc') or '—'))}</td>"
+        f"<td>{html.escape(str(row.get('leader_id') or '—'))}</td>"
+        f"<td>{html.escape(str(row.get('outcome') or '—'))}</td>"
+        f"<td>{html.escape(str(row.get('as_of_ms') if row.get('as_of_ms') is not None else '—'))}</td>"
+        f"<td>{html.escape(str(row.get('review_status') or 'UNKNOWN'))}</td>"
+        f"<td>{html.escape(', '.join(str(code) for code in (row.get('issues') or [])) or 'aucun')}</td>"
+        f"<td>{review_findings_html(row)}</td>"
+        f"<td>{review_provenance_html(row)}</td>"
+        "</tr>"
+        for row in review_receipts if isinstance(row, Mapping)
+    )
+    if review_history.get("status") == "INVALID":
+        review_history_html = (
+            "<section class='hero'><h2>Revues des leaders et incidents</h2>"
+            "<p class='status bad'>Registre invalide — aucune revue n’est considérée fiable.</p>"
+            f"<p>{html.escape(str(review_history.get('error') or 'Erreur de registre inconnue'))}</p>"
+            f"<p class='path'>{html.escape(str(review_history.get('ledger_path') or ''))}</p></section>"
+        )
+    elif review_history.get("status") == "EMPTY":
+        review_history_html = (
+            "<h2>Revues des leaders et incidents</h2>"
+            "<p>Aucune revue durable enregistrée. Cela ne signifie pas qu’aucun incident n’existe.</p>"
+            f"<p class='path'>{html.escape(str(review_history.get('ledger_path') or ''))}</p>"
+        )
+    elif review_history.get("status") == "AVAILABLE":
+        review_history_html = (
+            "<h2>Revues des leaders et incidents</h2>"
+            f"<p>{int(review_history.get('receipt_count') or 0)} reçus conservés · "
+            f"{int(review_history.get('reviewable_count') or 0)} revues consultatives mesurables · "
+            f"{int(review_history.get('unmeasurable_count') or 0)} non mesurables · "
+            f"{int(review_history.get('incident_count') or 0)} incidents/questions.</p>"
+            + (
+                "<table><thead><tr><th>Date</th><th>Leader</th><th>Issue observée</th><th>As-of (ms)</th>"
+                "<th>État</th><th>Incidents / inconnues</th><th>Synthèse consultative</th>"
+                "<th>Provenance SAFE</th></tr></thead>"
+                f"<tbody>{review_rows}</tbody></table>"
+                if review_rows else "<p>Aucune revue récente à afficher.</p>"
+            )
+            + "<p class='muted'>Ces revues restent consultatives. Le journal rattache les références aux "
+            "hashes de l’inventaire SAFE; il ne rehash pas lui-même les octets des shards et ne prouve pas le PnL.</p>"
+            + f"<p class='path'>{html.escape(str(review_history.get('ledger_path') or ''))}</p>"
+        )
+    else:
+        review_history_html = (
+            "<h2>Revues des leaders et incidents</h2>"
+            "<p class='status warn'>Registre non consulté; son contenu reste inconnu.</p>"
+        )
     auto_refresh = "<meta http-equiv='refresh' content='5'>" if live.get("active") is True else ""
     status_class = "ok" if status == "PROVEN" else (
         "warn" if status in {
@@ -864,55 +1053,9 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         if type(aligned_add_signals) is int and aligned_add_signals >= 0
         else "non mesurable"
     )
-    payload_audit = inputs.get("payload_audit")
-    payload_audit = payload_audit if isinstance(payload_audit, Mapping) else {}
-    historical_coverage = inputs.get("historical_coverage_audit")
-    historical_coverage = (
-        historical_coverage if isinstance(historical_coverage, Mapping) else {}
-    )
-    coverage_expected = historical_coverage.get("expected_release_count")
-    coverage_audited = historical_coverage.get("audited_release_count")
-    coverage_receipts = historical_coverage.get("durable_receipt_release_count")
-    coverage_missing_receipts = historical_coverage.get("missing_durable_receipt_tags")
-    coverage_without_audit = historical_coverage.get("receipt_without_backfill_audit_tags")
-    if type(coverage_expected) is int and type(coverage_audited) is int:
-        receipt_text = (
-            f"; {int(coverage_receipts):,}/{coverage_expected:,} reçus durables de collecte"
-            if type(coverage_receipts) is int else ""
-        )
-        missing_receipt_count = (
-            len(coverage_missing_receipts)
-            if isinstance(coverage_missing_receipts, list)
-            else max(0, coverage_expected - int(coverage_receipts or 0))
-        )
-        no_audit_count = (
-            len(coverage_without_audit)
-            if isinstance(coverage_without_audit, list)
-            else max(0, coverage_expected - coverage_audited - missing_receipt_count)
-        )
-        historical_coverage_text = (
-            f"Audit de backfill historique : {coverage_audited:,}/{coverage_expected:,} releases SAFE "
-            f"avec un rapport exploitable{receipt_text}; {no_audit_count:,} reçu(s) sans audit de backfill "
-            f"et {missing_receipt_count:,} sans reçu durable. Ce compteur concerne la preuve de couverture, "
-            "pas le nombre de shards locaux présents."
-        ).replace(",", " ")
-    else:
-        historical_coverage_text = "Audit de backfill historique : reçu ou couverture non mesuré."
+    historical_coverage_text = _historical_coverage_text(inputs)
+    payload_rejection_text = _payload_rejection_text(inputs)
     safe_exclusion_summary = _safe_copy_vault_exclusion_summary(inputs)
-    payload_rejection_labels = {
-        "INVALID_OR_NONCAUSAL_L2_REJECTED": "carnets L2 invalides ou non causaux",
-        "INVALID_OR_INCOMPLETE_FILL_REJECTED": "fills invalides ou incomplets",
-        "FILL_LIST_INVALID": "listes de fills invalides",
-        "SNAPSHOT_FAMILY_FLAG_MISMATCH": (
-            "trames userFills sans marqueur isSnapshot valide pour leur famille, exclues"
-        ),
-    }
-    payload_rejection_text = "; ".join(
-        f"{int(count):,}".replace(",", " ") + " "
-        + payload_rejection_labels.get(str(reason), str(reason).replace("_", " ").lower())
-        for reason, count in payload_audit.items()
-        if type(count) is int and count > 0
-    ) or "aucun enregistrement rejeté"
     partial_shards_display = int(inputs.get("partial_shards_excluded") or 0)
     reason_display = (
         str(live.get("message") or "campagne active; aucun verdict final")
@@ -1016,6 +1159,8 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
             if history_rows else "<p>Aucun candidat amélioré n'a encore pu être mesuré et gelé.</p>"
         )
         +
+        review_history_html
+        +
         "<h2>Ce que ce run a réellement fait</h2><ul>"
         f"<li>{int(inputs.get('verified_assets') or 0)} shards SAFE contrôlés par taille et identité locale; "
         f"{verified_hashes_recomputed:,} SHA‑256 calculés cette passe et {verified_hashes_reused:,} réutilisés après identité inchangée.</li>"
@@ -1036,6 +1181,7 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
 def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> Path:
     """Atomically refresh the machine result and readable report during a run."""
     report_dir.mkdir(parents=True, exist_ok=True)
+    summary["leader_review_history"] = _read_leader_review_history(ROOT)
     result_path = report_dir / "resultat.json"
     temporary = result_path.with_suffix(".json.partial")
     public_summary = dict(summary)
@@ -1051,6 +1197,9 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
     economic = dict(summary.get("economic_result") or {})
     inputs = dict(summary.get("safe_inputs") or {})
     live = dict(summary.get("live") or {})
+    historical_coverage_text = _historical_coverage_text(inputs)
+    payload_rejection_text = _payload_rejection_text(inputs)
+    review_history = dict(summary.get("leader_review_history") or {})
     lines = [
         "# Laboratoire CopyVault — état en direct",
         "",
@@ -1062,6 +1211,9 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
         f"- Contexte SAFE hors PnL : {_safe_copy_vault_exclusion_summary(inputs)}.",
         f"- {historical_coverage_text}",
         f"- Enregistrements refusés : {payload_rejection_text}.",
+        f"- Revues leader : {review_history.get('status', 'UNKNOWN')} · "
+        f"{review_history.get('receipt_count', 0)} reçus · "
+        f"{review_history.get('incident_count', 0)} incidents/questions.",
         f"- Essais uniques : {economic.get('candidates_tested', 0)} · candidat gelé : "
         f"{'oui' if economic.get('freeze_created') else 'non'} · preuve économique : "
         f"{'oui' if economic.get('economically_proven') else 'non'}.",
@@ -1102,6 +1254,7 @@ def _run_continuous_safe_lab(
         materialize_safe_workspace,
         run_local_campaign,
     )
+    from hl_observer.research.leader_review_ledger import default_leader_review_path
 
     start_monotonic = time.monotonic()
     recovery = ROOT / "runtime" / "recovery" / "full"
@@ -1321,6 +1474,7 @@ def _run_continuous_safe_lab(
                 progress=on_replay_progress,
                 on_update=on_update,
                 input_change_check=dataset_changed,
+                leader_review_ledger_path=default_leader_review_path(ROOT),
             )
             update_summary(fields={
                 "economic_result": result,
@@ -1430,6 +1584,11 @@ def run_economic_lab(
     except ImportError as exc:
         print('LOCAL_ECONOMIC_NO_GO: missing optional local Copy-Vault module: ' + str(exc), flush=True)
         return 2
+    leader_review_ledger_path: Path | None = None
+    if safe_research_mode:
+        from hl_observer.research.leader_review_ledger import default_leader_review_path
+
+        leader_review_ledger_path = default_leader_review_path(ROOT)
     global OBJECTIVE_USD_PER_DAY, PAPER_CAPITAL_USD
     OBJECTIVE_USD_PER_DAY, PAPER_CAPITAL_USD = _objective, _capital
     now = datetime.now(UTC)
@@ -1562,6 +1721,8 @@ def run_economic_lab(
                 economic_result = run_local_campaign(
                     workspace,
                     progress=lambda message: print(f"[3/4] {message}", flush=True),
+                    **({"leader_review_ledger_path": leader_review_ledger_path}
+                       if leader_review_ledger_path is not None else {}),
                 )
             except KeyboardInterrupt:
                 interrupted = True
@@ -1664,6 +1825,7 @@ def run_economic_lab(
         "economic_result": economic_result,
         "status": overall_status,
     }
+    summary["leader_review_history"] = _read_leader_review_history(ROOT)
     (report_dir / "resultat.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -1684,6 +1846,14 @@ def run_economic_lab(
         f"- Objectif : **{OBJECTIVE_USD_PER_DAY} USD nets/jour** avec **{PAPER_CAPITAL_USD} USD paper**.",
         f"- Candidat gelé : **{'OUI' if economic_result.get('freeze_created') else 'NON'}**.",
         f"- Économiquement prouvé : **{'OUI' if economic_result.get('economically_proven') else 'NON'}**.",
+        "",
+        "## Revues de leaders et incidents",
+        "",
+        f"- Registre : **{summary['leader_review_history'].get('status', 'UNKNOWN')}** · "
+        f"{summary['leader_review_history'].get('receipt_count', 0)} reçus · "
+        f"{summary['leader_review_history'].get('incident_count', 0)} incidents/questions.",
+        f"- Source : `{summary['leader_review_history'].get('ledger_path', '')}`.",
+        "- Ces avis sont consultatifs et ne constituent ni une preuve SAFE indépendante ni une preuve de PnL.",
         "",
         "## Groupes de tests",
         "",

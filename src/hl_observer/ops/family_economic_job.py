@@ -20,10 +20,8 @@ from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.autonomous_research_status import status_path, write_status
 from hl_observer.ops.final_economic_certification import certify_campaign
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
+from hl_observer.strategies.active_scope import strategy_can_materialize
 
-FAMILY_ECONOMIC_SUITES = frozenset(
-    {"copy-vault-full", "lead-lag-full", "cross-venue-full"}
-)
 SUITE_CAMPAIGN_FAMILY = {
     "copy-vault-full": "copy_vault",
     "lead-lag-full": "lead_lag",
@@ -34,10 +32,18 @@ SUITE_COVERAGE_FAMILY = {
     "lead-lag-full": "lead_lag",
     "cross-venue-full": "cross_venue",
 }
+KNOWN_FAMILY_ECONOMIC_SUITES = frozenset(SUITE_CAMPAIGN_FAMILY)
+FAMILY_ECONOMIC_SUITES = frozenset(
+    suite for suite, family in SUITE_CAMPAIGN_FAMILY.items()
+    if strategy_can_materialize(family)
+)
 
 
 def validate_family_request(raw: Mapping[str, Any]) -> dict[str, Any]:
     suite = str(raw.get("suite") or "").strip()
+    family = SUITE_CAMPAIGN_FAMILY.get(suite)
+    if family is not None and not strategy_can_materialize(family):
+        raise ValueError(f"DISABLED_BY_SCOPE:{family}")
     if str(raw.get("mode") or "").strip() != "economic" or suite not in FAMILY_ECONOMIC_SUITES:
         raise ValueError("family economic worker accepts only active-family FULL/COLD economic suites")
     shim = dict(raw)
@@ -69,6 +75,8 @@ def record_family_economic_memory(
     coverage_family = SUITE_COVERAGE_FAMILY.get(suite)
     if campaign_family is None or coverage_family is None:
         raise RuntimeError(f"unsupported economic memory suite: {suite}")
+    if not strategy_can_materialize(campaign_family):
+        raise RuntimeError(f"DISABLED_BY_SCOPE:{campaign_family}")
     campaign_path = workspace / "runtime" / "reports" / "economic_campaigns" / f"{campaign_family}.json"
     campaign = _load_json_object(campaign_path)
     if campaign.get("family") != campaign_family:
@@ -305,6 +313,7 @@ def execute_family_job(
 
 __all__ = [
     "FAMILY_ECONOMIC_SUITES",
+    "KNOWN_FAMILY_ECONOMIC_SUITES",
     "SUITE_CAMPAIGN_FAMILY",
     "execute_family_job",
     "record_family_economic_memory",

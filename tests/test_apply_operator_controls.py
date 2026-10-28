@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tools import apply_operator_controls
@@ -134,7 +135,13 @@ def _poll(root: Path, monkeypatch) -> None:
     apply_operator_controls.main()
 
 
-def _write_phase_request(root: Path, action: str, current_phase: str) -> tuple[str, Path, Path]:
+def _write_phase_request(
+    root: Path,
+    action: str,
+    current_phase: str,
+    *,
+    config: dict | None = None,
+) -> tuple[str, Path, Path]:
     request_id = "f" * 64
     intent = {
         "schema_version": "alina.operator_intent.v2",
@@ -148,7 +155,7 @@ def _write_phase_request(root: Path, action: str, current_phase: str) -> tuple[s
         "analysis_stage": None,
         "source_collection_epoch": None,
         "collection_cutoff_at_utc": None,
-        "config": {},
+        "config": config or {},
         "strategy_family": "all",
         "paper_only": True,
         "read_only": True,
@@ -181,10 +188,21 @@ def _write_phase_request(root: Path, action: str, current_phase: str) -> tuple[s
     intent_path.write_text(json.dumps(intent, sort_keys=True), encoding="utf-8")
     status_path.write_text(json.dumps(status, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     phase_path = root / "control" / "alina-phase.json"
-    phase_path.write_text(
-        json.dumps({"schema_version": "alina.phase.v2", "phase": current_phase, "epoch": 4}),
-        encoding="utf-8",
-    )
+    current_state = {
+        "schema_version": "alina.phase.v2",
+        "phase": current_phase,
+        "epoch": 4,
+        "requested_at_utc": "2026-10-26T11:00:00Z",
+        "collection_started_at_utc": (
+            "2026-10-26T10:00:00Z" if current_phase == "COLLECT" else None
+        ),
+        "collection_cutoff_at_utc": None,
+        "source_collection_epoch": None,
+        "analysis_stage": None,
+        "requested_by": "fixture",
+        "request_id": "0" * 64,
+    }
+    phase_path.write_text(json.dumps(current_state), encoding="utf-8")
     return request_id, status_path, phase_path
 
 
@@ -255,6 +273,22 @@ def test_pause_control_is_acknowledged_and_idempotent(tmp_path: Path, monkeypatc
     assert (tmp_path / "control" / "phase-receipts" / f"{request_id}.json").read_bytes() == first_receipt
     assert status["state"] == "COMPLETE"
     assert status["control_receipt"]["target_identity"] == "IDLE"
+    assert status["control_receipt"]["campaign_lease_effect"] == "PRESERVE_ACTIVE_LEASES"
+
+    validation = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "validate_operator_status.py"),
+            "--intent",
+            str(tmp_path / "control" / "operator-intents" / f"{request_id}.json"),
+            "--status",
+            str(status_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert validation.returncode == 0, validation.stderr
 
 
 def test_resume_control_from_idle_is_acknowledged_once(tmp_path: Path, monkeypatch) -> None:
@@ -273,6 +307,104 @@ def test_resume_control_from_idle_is_acknowledged_once(tmp_path: Path, monkeypat
     assert (tmp_path / "control" / "phase-receipts" / f"{request_id}.json").read_bytes() == receipt_bytes
     assert status["state"] == "COMPLETE"
     assert status["control_receipt"]["target_identity"] == "COLLECT"
+    assert status["control_receipt"]["campaign_lease_effect"] == "PRESERVE_ACTIVE_LEASES"
+
+
+@pytest.mark.parametrize(
+    ("source_phase", "target_phase"),
+    (("COLLECT", "COLLECT"), ("IDLE", "IDLE"), ("IDLE", "ANALYZE")),
+)
+def test_resume_rejects_noncanonical_phase_transition_before_mutation(
+    tmp_path: Path,
+    monkeypatch,
+    source_phase: str,
+    target_phase: str,
+) -> None:
+    _, status_path, phase_path = _write_phase_request(
+        tmp_path,
+        "resume",
+        source_phase,
+        config={"phase": target_phase},
+    )
+    before = phase_path.read_bytes()
+
+    with pytest.raises(SystemExit, match="resume requires IDLE to COLLECT"):
+        _poll(tmp_path, monkeypatch)
+
+    assert phase_path.read_bytes() == before
+    assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "DISPATCHED"
+
+
+@pytest.mark.parametrize("action", ("pause", "resume"))
+def test_phase_control_preserves_active_campaign_lease_bytes(
+    tmp_path: Path, monkeypatch, action: str
+) -> None:
+    source_phase = "COLLECT" if action == "pause" else "IDLE"
+    _, _, phase_path = _write_phase_request(tmp_path, action, source_phase)
+    manifest_path = tmp_path / "catalog" / "campaigns" / "active.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "campaign_id": "active",
+                "status": "RUNNING",
+                "creation_phase": "COLLECT",
+                "phase_epoch": 4,
+                "lease": {
+                    "owner": "github-run-1",
+                    "lease_token_sha256": "a" * 64,
+                    "expires_at": "2026-10-26T13:00:00Z",
+                },
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    before = manifest_path.read_bytes()
+
+    _poll(tmp_path, monkeypatch)
+
+    assert manifest_path.read_bytes() == before
+
+
+def test_completed_pause_requires_preserve_lease_effect_in_all_receipt_gates(
+    tmp_path: Path, monkeypatch
+) -> None:
+    request_id, status_path, _ = _write_phase_request(tmp_path, "pause", "COLLECT")
+    _poll(tmp_path, monkeypatch)
+    intent_path = tmp_path / "control" / "operator-intents" / f"{request_id}.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+
+    from tools.build_closure_report import _valid_completed_control_receipt
+
+    assert _valid_completed_control_receipt(status, intent_path) is True
+
+    status["control_receipt"].pop("campaign_lease_effect")
+    status["control_receipt_sha256"] = hashlib.sha256(
+        json.dumps(status["control_receipt"], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+
+    validation = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "validate_operator_status.py"),
+            "--intent",
+            str(intent_path),
+            "--status",
+            str(status_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert validation.returncode != 0
+    assert "OPERATOR_CONTROL_RECEIPT_INVALID" in validation.stderr
+    with pytest.raises(SystemExit, match="durable receipt"):
+        apply_operator_controls._load_status(
+            json.loads(intent_path.read_text(encoding="utf-8"))
+        )
+    assert _valid_completed_control_receipt(status, intent_path) is False
 
 
 def test_newer_control_terminalizes_older_pending_without_replaying_it(
@@ -562,6 +694,110 @@ def test_operator_dispatch_routes_controls_through_creator_once() -> None:
     assert "retry requires the ANALYZE phase" in workflow
     assert "gh workflow run create-resumable-campaigns.yml" in workflow
     assert "gh workflow run resumable-campaign-controller.yml" not in workflow
+    creator = (
+        ROOT / ".github" / "workflows" / "create-resumable-campaigns.yml"
+    ).read_text(encoding="utf-8")
+    assert "if: ${{ needs.create.outputs.phase != 'IDLE' }}" in creator
+
+
+def test_replaying_persisted_operator_request_preserves_terminal_status(tmp_path: Path) -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "alina-operator-intent.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["persist"]["steps"]
+        if step.get("name") == "Persist immutable operator intent"
+    )
+    match = re.search(r"python\s+-\s+<<['\"]PY['\"]\s*\n(.*?)\n\s*PY\s*$", step["run"], re.S)
+    assert match is not None
+    persist_script = match.group(1)
+
+    tools_dir = tmp_path / "tools"
+    scope_dir = tmp_path / "src" / "hl_observer" / "strategies"
+    tools_dir.mkdir()
+    scope_dir.mkdir(parents=True)
+    shutil.copyfile(ROOT / "tools" / "operator_family_contract.py", tools_dir / "operator_family_contract.py")
+    shutil.copyfile(ROOT / "src" / "hl_observer" / "strategies" / "active_scope.py", scope_dir / "active_scope.py")
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    (runner_temp / "alina-phase.json").write_text(
+        json.dumps(
+            {
+                "phase": "COLLECT",
+                "epoch": 4,
+                "analysis_stage": None,
+                "source_collection_epoch": None,
+                "collection_cutoff_at_utc": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "INTENT": "pause",
+        "REQUEST_ID": "a" * 64,
+        "FAMILY": "all",
+        "REQUESTED_BY": "test",
+        "CONFIG_JSON": "{}",
+        "GITHUB_SHA": "b" * 40,
+        "GITHUB_RUN_ID": "100",
+        "RUNNER_TEMP": str(runner_temp),
+    }
+
+    def persist(run_id: str, *, main_code_sha: str = "b" * 40) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", persist_script],
+            cwd=tmp_path,
+            env={**env, "GITHUB_RUN_ID": run_id, "GITHUB_SHA": main_code_sha},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    first = persist("100")
+    assert first.returncode == 0, first.stderr
+    intent_path = tmp_path / "control" / "operator-intents" / f"{'a' * 64}.json"
+    status_path = tmp_path / "control" / "operator-status" / f"{'a' * 64}.json"
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    receipt = {
+        "schema_version": "alina.operator_control_receipt.v1",
+        "request_id": intent["request_id"],
+        "intent": intent["intent"],
+        "intent_digest": status["intent_digest"],
+        "target_identity": "IDLE",
+        "evidence_digest": "c" * 64,
+        "applied": True,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+        "campaign_lease_effect": "PRESERVE_ACTIVE_LEASES",
+    }
+    status.update(
+        {
+            "state": "COMPLETE",
+            "terminal": True,
+            "control_receipt": receipt,
+            "control_receipt_sha256": hashlib.sha256(
+                json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        }
+    )
+    status_path.write_text(json.dumps(status, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    completed_bytes = status_path.read_bytes()
+
+    second = persist("101")
+
+    assert second.returncode == 0, second.stderr
+    assert status_path.read_bytes() == completed_bytes
+
+    conflicting_sha = persist("102", main_code_sha="c" * 40)
+    assert conflicting_sha.returncode != 0
+    assert "request id already exists with different payload" in conflicting_sha.stderr
+    assert status_path.read_bytes() == completed_bytes
 
 
 def test_python_heredocs_in_modified_workflows_compile() -> None:
@@ -602,6 +838,52 @@ def test_retry_refuses_offscope_manifest_without_mutation(tmp_path: Path, monkey
         assert "DISABLED_BY_SCOPE" in str(exc)
     else:
         raise AssertionError("off-scope campaign was accepted")
+
+    assert campaign_path.read_bytes() == before
+    assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "DISPATCHED"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("kind", "collection", "unknown campaign kind"),
+        ("status", "RUNNING", "not STUCK and has no matching retry receipt"),
+    ],
+)
+def test_retry_refuses_wrong_kind_or_non_stuck_manifest_before_mutation(
+    tmp_path: Path, monkeypatch, field: str, value: str, reason: str
+) -> None:
+    _, status_path, campaign_path = _write_retry_request(tmp_path)
+    manifest = json.loads(campaign_path.read_text(encoding="utf-8"))
+    manifest[field] = value
+    campaign_path.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    before = campaign_path.read_bytes()
+
+    with pytest.raises(SystemExit, match=reason):
+        _poll(tmp_path, monkeypatch)
+
+    assert campaign_path.read_bytes() == before
+    assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "DISPATCHED"
+
+
+def test_retry_refuses_missing_campaign_id_without_mutating_any_target(
+    tmp_path: Path, monkeypatch
+) -> None:
+    request_id, status_path, campaign_path = _write_retry_request(tmp_path)
+    intent_path = tmp_path / "control" / "operator-intents" / f"{request_id}.json"
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    intent["config"].pop("campaign_id")
+    digest = hashlib.sha256(
+        json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    intent_path.write_text(json.dumps(intent, sort_keys=True), encoding="utf-8")
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status["intent_digest"] = digest
+    status_path.write_text(json.dumps(status, sort_keys=True), encoding="utf-8")
+    before = campaign_path.read_bytes()
+
+    with pytest.raises(SystemExit, match="path-safe campaign_id"):
+        _poll(tmp_path, monkeypatch)
 
     assert campaign_path.read_bytes() == before
     assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "DISPATCHED"

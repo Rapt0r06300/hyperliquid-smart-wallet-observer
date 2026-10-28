@@ -176,6 +176,112 @@ def test_dashboard_separates_missing_backfill_audit_from_missing_shards(tmp_path
     assert "shards locaux absents : 0" in dashboard
 
 
+def test_economic_report_surfaces_a_corrupt_leader_review_ledger_fail_closed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(lab, "ROOT", tmp_path)
+    ledger = tmp_path / "runtime" / "reports" / "copy_vault" / "leader_reviews.jsonl"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("{not-json}\n", encoding="utf-8")
+    report_dir = tmp_path / "reports" / "run-1"
+    summary = {
+        "run_id": "run-1",
+        "head": "a" * 40,
+        "status": "UNMEASURABLE",
+        "safe_inputs": {},
+        "economic_result": {},
+        "current_copy_vault": {},
+        "historical_replay": {},
+        "improvement_history": [],
+        "live": {},
+        "freeze_verdict": "preuve insuffisante",
+    }
+
+    html_path = lab._write_economic_report_bundle(report_dir, summary)
+
+    saved = json.loads((report_dir / "resultat.json").read_text(encoding="utf-8"))
+    dashboard = html_path.read_text(encoding="utf-8")
+    assert saved["leader_review_history"]["status"] == "INVALID"
+    assert saved["leader_review_history"]["error"].startswith("LEDGER_JSON_INVALID")
+    assert "Registre invalide" in dashboard
+    assert "LEDGER_JSON_INVALID" in dashboard
+
+
+
+
+def test_economic_report_exposes_safe_leader_review_provenance(tmp_path: Path) -> None:
+    summary = {
+        "run_id": "leader-provenance",
+        "head": "b" * 40,
+        "status": "MORE_DATA",
+        "safe_inputs": {},
+        "economic_result": {},
+        "current_copy_vault": {},
+        "historical_replay": {},
+        "improvement_history": [],
+        "live": {},
+        "leader_review_history": {
+            "status": "AVAILABLE",
+            "receipt_count": 1,
+            "reviewable_count": 1,
+            "unmeasurable_count": 0,
+            "incident_count": 0,
+            "recent_receipts": [
+                {
+                    "reviewed_at_utc": "2026-10-28T09:00:00Z",
+                    "leader_id": "leader-1",
+                    "outcome": "RETAINED",
+                    "as_of_ms": 1_900_000,
+                    "review_status": "CONSULTATIVE_REVIEWABLE",
+                    "issues": [],
+                    "favorable": [
+                        {
+                            "finding_key": "post_fill_markout",
+                            "summary": "Résultat favorable <preuve>",
+                            "evidence_refs": ["safe:fill-1"],
+                        }
+                    ],
+                    "counterevidence": [
+                        {"finding_key": "drawdown", "summary": "Risque élevé", "evidence_refs": []}
+                    ],
+                    "unknowns": ["Capacité long terme non mesurée"],
+                    "falsification_condition": "Rétrograder si le markout OOS devient négatif.",
+                    "safe_evidence_assets": [
+                        {
+                            "family": "copy_vault_fills",
+                            "dataset_id": "dataset-1",
+                            "sha256": "a" * 64,
+                            "source_catalog_sha256": "c" * 64,
+                            "release_tag": "release-1",
+                            "release_asset": "fills.jsonl",
+                            "manifest_path": "manifests/<fills>.json",
+                            "bytes": 128,
+                        }
+                    ],
+                }
+            ],
+        },
+        "freeze_verdict": "preuves limitées",
+    }
+
+    dashboard = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
+
+    assert "Provenance SAFE" in dashboard
+    assert "dataset-1" in dashboard
+    assert "copy_vault_fills" in dashboard
+    assert "a" * 64 in dashboard
+    assert "c" * 64 in dashboard
+    assert "release-1" in dashboard
+    assert "manifests/&lt;fills&gt;.json" in dashboard
+    assert "manifests/<fills>.json" not in dashboard
+    assert "Synthèse consultative" in dashboard
+    assert "post_fill_markout" in dashboard
+    assert "Résultat favorable &lt;preuve&gt;" in dashboard
+    assert "drawdown" in dashboard
+    assert "Capacité long terme non mesurée" in dashboard
+    assert "Condition de réfutation" in dashboard
+    assert "Rétrograder si le markout OOS devient négatif." in dashboard
 
 
 def test_lab_fails_closed_when_a_required_test_group_is_empty(tmp_path: Path) -> None:
@@ -198,8 +304,8 @@ def test_lab_covers_copy_vault_scope_paper_and_readiness_boundaries() -> None:
     assert sum(len(paths) for _name, paths in groups) == len(selected)
 
 
-def test_lab_uses_at_most_65_percent_of_logical_cpus(monkeypatch) -> None:
-    monkeypatch.setenv("ALINA_QUANT_CPU_PERCENT", "65")
+def test_lab_uses_at_most_60_percent_of_logical_cpus(monkeypatch) -> None:
+    monkeypatch.setenv("ALINA_QUANT_CPU_PERCENT", "60")
     monkeypatch.setattr(lab.os, "cpu_count", lambda: 16)
     monkeypatch.setattr(
         lab.importlib.util,
@@ -207,8 +313,19 @@ def test_lab_uses_at_most_65_percent_of_logical_cpus(monkeypatch) -> None:
         lambda name: object() if name == "xdist" else None,
     )
 
-    assert lab._pytest_parallel_args(20) == ["-n", "10", "--dist", "loadfile"]
+    assert lab._pytest_parallel_args(20) == ["-n", "9", "--dist", "loadfile"]
 
+
+def test_lab_defaults_to_at_most_60_percent_of_logical_cpus(monkeypatch) -> None:
+    monkeypatch.delenv("ALINA_QUANT_CPU_PERCENT", raising=False)
+    monkeypatch.setattr(lab.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(
+        lab.importlib.util,
+        "find_spec",
+        lambda name: object() if name == "xdist" else None,
+    )
+
+    assert lab._pytest_parallel_args(20) == ["-n", "9", "--dist", "loadfile"]
 
 def test_lab_falls_back_to_serial_when_xdist_is_missing(monkeypatch) -> None:
     monkeypatch.setattr(lab.importlib.util, "find_spec", lambda _name: None)
@@ -223,7 +340,7 @@ def test_copy_vault_lab_launcher_checks_complete_test_runtime() -> None:
 
     assert "tools\\python\\python.exe" in launcher
     assert "import pytest, typer" in launcher
-    assert 'set "ALINA_QUANT_CPU_PERCENT=65"' in launcher
+    assert 'set "ALINA_QUANT_CPU_PERCENT=60"' in launcher
     assert '"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c' in launcher
 
 
@@ -389,6 +506,7 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
     calls = []
     materializations = []
     progress_messages = []
+    campaign_calls = []
 
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
@@ -405,10 +523,19 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
             "unique_fills": 0, "unique_books": 0,
         }
 
+    def fake_campaign(workspace, **kwargs):
+        campaign_calls.append((workspace, kwargs))
+        return {
+            "status": "UNMEASURABLE", "reason": "NO_SAFE_TEST_FIXTURE",
+            "candidates_tested": 0, "freeze_created": False,
+            "economically_proven": False,
+        }
+
     monkeypatch.setattr(lab, "ROOT", tmp_path)
     monkeypatch.setattr(lab, "_open_report", lambda _path: None)
     monkeypatch.setattr(lab.subprocess, "run", fake_run)
     monkeypatch.setattr(local_lab, "materialize_safe_workspace", fake_materialize)
+    monkeypatch.setattr(local_lab, "run_local_campaign", fake_campaign)
     monkeypatch.setattr(
         local_lab,
         "run_historical_trade_replay",
@@ -485,6 +612,9 @@ def test_safe_research_replays_valid_rows_when_corpus_is_incomplete(
     assert console.main(["--safe-research", "--once"]) == 0
 
     assert len(campaign_calls) == 1
+    assert campaign_calls[0][1]["leader_review_ledger_path"] == (
+        tmp_path / "runtime" / "reports" / "copy_vault" / "leader_reviews.jsonl"
+    )
     assert len(historical_calls) == 1
     report = json.loads(next(
         (tmp_path / "runtime/reports/copy_vault_quant_lab").glob("*/resultat.json")
@@ -522,3 +652,32 @@ def test_launcher_keeps_safe_default_and_local_legacy_mode() -> None:
     assert "safe (continu) / once (un passage)" in source
     assert '--legacy-local-economic' in source
     assert '"--tests-only"' not in source
+
+def test_live_report_bundle_includes_safe_coverage_and_payload_rejections(tmp_path: Path) -> None:
+    summary = {
+        "run_id": "run-test",
+        "head": "a" * 40,
+        "status": "UNMEASURABLE",
+        "economic_result": {"status": "UNMEASURABLE", "candidates_tested": 0},
+        "safe_inputs": {
+            "verified_assets": 0,
+            "expected_safe_shards": 2,
+            "unique_fills": 0,
+            "unique_books": 0,
+            "payload_audit": {"INVALID_OR_NONCAUSAL_L2_REJECTED": 2},
+            "historical_coverage_audit": {
+                "expected_release_count": 3,
+                "audited_release_count": 2,
+                "durable_receipt_release_count": 3,
+                "missing_durable_receipt_tags": [],
+                "receipt_without_backfill_audit_tags": ["release-3"],
+            },
+        },
+    }
+
+    html_path = lab._write_economic_report_bundle(tmp_path, summary)
+
+    markdown = (tmp_path / "RAPPORT.md").read_text(encoding="utf-8")
+    assert "Audit de backfill historique" in markdown
+    assert "carnets L2 invalides ou non causaux" in markdown
+    assert html_path.is_file()

@@ -184,6 +184,25 @@ Rules:
 
 ## Phase transitions
 
+### Operator pause/resume controls
+
+An operator `pause` transitions the current phase to `IDLE` using the canonical
+phase controller with the intent's exact expected phase and epoch. An operator
+`resume` is valid only for `IDLE -> COLLECT`; it starts a fresh collection
+epoch. A resume that targets `IDLE` or `ANALYZE`, or whose source phase is not
+`IDLE`, is rejected before phase state is mutated. A pause requested while
+already in `IDLE` may be acknowledged as an idempotent no-op without advancing
+the epoch.
+
+Pause/resume never acquire, release, renew, or rewrite campaign leases. The
+durable operator receipt records `campaign_lease_effect=PRESERVE_ACTIVE_LEASES`,
+and the status validator and global closure gate require that exact value before
+accepting a completed pause/resume. Existing lease owners retain responsibility
+for their bounded unit and its normal checkpoint/release path. `IDLE` prevents
+new campaign launches; old-epoch campaigns remain ineligible after a later
+resume. The phase transition itself still uses the canonical atomic
+phase/epoch compare-and-set and receipt path.
+
 ### IDLE -> COLLECT
 
 When the user says to start collection:
@@ -1300,7 +1319,7 @@ the evidence contract requires them, and missing costs remain unmeasurable.
 
 Current implementation contract for the economic-acceleration path:
 
-- **Copy-Vault**: the physically frozen V21 policy is replayed without retuning and opens held-out evidence sequentially (`VALIDATION -> OOS -> FORWARD`). Failure of an earlier gate keeps later data unopened. The FULL/COLD dataset runner invokes this immutable evaluator directly, and the historical V21 reproducer is portable from the repository root rather than tied to a user PC. Before replay, the hash-bound freeze must contain the complete parameter set, valid safety flags, bounded notionals, finite sizing/risk parameters, and strictly chronological TRAIN/VALIDATION/OOS windows preceding the freeze timestamp; an invalid freeze is rejected explicitly and cannot abort unrelated diagnostics. Every signal-time reference (including the execution engine's reference price, depth imbalance and capacity) must use the latest causally received book with `received_at <= signal_time`; entry and exit observations may be selected only after their respective executable target times. A later or stale book is unavailable and the candidate is unmeasurable/rejected; unsorted continuous observations are refused. In the observed-book adapter, `ts_ms` is the validated local receive time for causal rows. Held-out evaluation must not select a future row to fill a missing reference observation. Until measured funding rows are wired into this Copy-Vault replay, any position interval crossing an hourly funding boundary is refused as `FUNDING_BOUNDARY_UNPRICED`; an unobserved funding charge must never be assumed zero. Frozen notionals must not exceed the paper gross-exposure limit, and the sum of overlapping open notionals must remain under that limit; invalid freezes are reported as rejected, never silently rescaled. The configured daily profit lock is a sizing/risk rule. The **+5 USD net/day** value is a reference metric only, not a pass/fail gate for economic proof; its reported attainment is computed independently from `economically_proven`. Measured outcomes and evidence determine status honestly. Each validated improvement is recorded as its own immutable checkpoint/freeze before further tuning; later work starts from that checkpoint and cannot rewrite its evidence or parameters.
+- **Copy-Vault**: the physically frozen V21 policy is replayed without retuning and opens held-out evidence sequentially (`VALIDATION -> OOS -> FORWARD`). Failure of an earlier gate keeps later data unopened. The FULL/COLD dataset runner invokes this immutable evaluator directly, and the historical V21 reproducer is portable from the repository root rather than tied to a user PC. Before replay, the hash-bound freeze must contain the complete parameter set, valid safety flags, bounded notionals, finite sizing/risk parameters, and strictly chronological TRAIN/VALIDATION/OOS windows preceding the freeze timestamp; an invalid freeze is rejected explicitly and cannot abort unrelated diagnostics. Every signal-time reference (including the execution engine's reference price, depth imbalance and capacity) must use the latest causally received book with `received_at <= signal_time`; entry and exit observations may be selected only after their respective executable target times. A later or stale book is unavailable and the candidate is unmeasurable/rejected; unsorted continuous observations are refused. In the observed-book adapter, `ts_ms` is the validated local receive time for causal rows. Held-out evaluation must not select a future row to fill a missing reference observation. Until measured funding rows are wired into this Copy-Vault replay, any position interval crossing an hourly funding boundary is refused as `FUNDING_BOUNDARY_UNPRICED`; an unobserved funding charge must never be assumed zero. Every evaluated split emits a funding receipt derived from its trade entry/exit timestamps and the applicable settlement rule; measured zero is valid only when complete segment coverage is proven and no settlement boundary is crossed. A blocked or unevaluated split emits `null/NOT_EVALUATED`; missing or invalid calendar coverage, timestamps, settlement rules, or a crossed unpriced boundary emits `null/UNMEASURABLE` and blocks economic eligibility. The aggregate funding value is numeric only when VALIDATION, OOS, and FORWARD are all evaluated, covered, and internally consistent with their trade rows and receipts. Funding stress diagnostics remain separate from realized funding PnL. Frozen notionals must not exceed the paper gross-exposure limit, and the sum of overlapping open notionals must remain under that limit; invalid freezes are reported as rejected, never silently rescaled. The configured daily profit lock is a sizing/risk rule. The **+5 USD net/day** value is a reference metric only, not a pass/fail gate for economic proof; its reported attainment is computed independently from `economically_proven`. Measured outcomes and evidence determine status honestly. Each validated improvement is recorded as its own immutable checkpoint/freeze before further tuning; later work starts from that checkpoint and cannot rewrite its evidence or parameters.
 
 Copy-Vault capacity diagnostics may replay the unchanged frozen policy over the predeclared hypothetical capital ladder `10 / 50 / 100 / 200 / 400 / 1,000 / 2,000 / 5,000 / 10,000 USD`. Sizing and the dollar profit-lock scale proportionally to the scenario capital; gross exposure is capped at that scenario capital, with no leverage assumed. Every such result is `DIAGNOSTIC_ONLY`, is never promotion-eligible, and cannot change the physical 200 USD paper contract or overwrite a strategy freeze. Missing instrument minimums/lot rules or insufficient observed L2 depth must be reported as unmeasured/refused, not inferred from a successful larger-capital run.
 - **Lead-Lag**: TRAIN selection includes a predeclared same-source causal microstructure gate that requires the external shock direction to agree with both follower-book imbalance and signed aggressor notional over a fixed backward-looking window. Its hypotheses are included in the family multiplicity correction; it cannot consume held-out data during selection.
@@ -1444,7 +1463,10 @@ Clock phase alone is not sufficient to create a trade unless it demonstrates ind
 
 #### Toxicity and markout layer
 
-All three modules may use signed markout curves as an execution/information-quality diagnostic.
+Copy-Vault uses signed leader-fill markout curves as an execution/information-quality
+diagnostic. Maker, Cross-Venue and Lead-Lag markout examples below are historical
+design references for families that remain `DISABLED_BY_SCOPE`; they do not authorize
+those families to run.
 
 Examples:
 
@@ -1981,7 +2003,11 @@ Any candidate that appears highly profitable is re-run under adverse but plausib
 
 A candidate whose edge vanishes under tiny perturbations is not treated as "mega PnL" quality.
 
-### Edge Research Program V2 — maximum defensible edge search
+### Edge Research Program V2 — historical and inactive
+
+This archived multi-family research program is retained as historical design only.
+Its broader edge search and module-combination directions do not override the active
+Copy-Vault-only scope.
 
 Alina must not assume that one legacy mechanism contains enough alpha by itself. The research program deliberately searches for **multiple economically distinct edge families per module**, then combines only those that survive independent causal, execution, and held-out tests.
 
@@ -4124,7 +4150,10 @@ The earlier V6 multi-family convergence proposal is retained as historical
 design. Its module targets and expansion plan do not override the current
 Copy-Vault-only scope at the top of this specification.
 
-The next architecture layer treats the current economic milestone — **+5 USD net/day per module on 200 USD paper capital, proven under Alina's paper/replay evidence contract** — as a research-allocation target, not as a promise and not as a reason to weaken gates.
+The earlier V6 proposal treated **+5 USD net/day per module on 200 USD paper capital**
+as a research-allocation target. That multi-family target is historical and inactive;
+the only current economic target is Copy-Vault's +5 USD net/day at the terminal gate,
+after technical corrections and OOS/forward-paper evidence.
 
 The core diagnosis from existing Alina evidence is that many simple ideas have shown **small gross predictability but insufficient economic amplitude after friction**. Therefore the system must stop treating every statistically interesting signal as an equally valuable research direction.
 
@@ -11894,11 +11923,10 @@ Replay output must preserve gap information; it may not invent continuity across
 
 ### BACKTEST
 
-Run the three research families independently:
-
-- Copy-Vault;
-- Lead-Lag;
-- Cross-Venue Dislocation.
+Run Copy-Vault only on the frozen SAFE evidence set. Lead-Lag, Cross-Venue
+Dislocation, arbitrage, Carry/Funding Carry and other unassigned economic families
+remain `DISABLED_BY_SCOPE` and must not produce replay, backtest, OOS, forward,
+PnL-proof or scoreboard results.
 
 Keep existing TRAIN/validation/OOS/forward causality rules and all execution-cost assumptions.
 
@@ -11912,9 +11940,16 @@ Run strictly paper/read-only forward evaluation on evidence arriving after the f
 
 ### PNL_PROOF
 
-Evaluate module-level net PnL after explicit fees, spread, slippage, latency, capacity, and fill assumptions.
+Evaluate Copy-Vault net PnL after explicit fees, spread, slippage, latency, capacity,
+and fill assumptions. This terminal economic gate is reached only after technical
+corrections and valid replay/backtest/OOS/forward-paper evidence.
 
-The current standardized target is a separately proven net result of at least 5 USD per UTC day per module on 200 USD paper capital under the frozen proof contract. PnL may not be combined across modules to rescue a failing module. After that milestone, the objective is the highest robust scalable daily net PnL supported by OOS/forward evidence.
+The only current economic target is at least **+5 USD net per complete UTC day for
+Copy-Vault on 200 USD paper capital**, under the frozen proof contract. It is a
+measurement target, not a gate that can waive repairs or evidence requirements and
+not a promise. Other families cannot contribute or combine PnL. After this terminal
+milestone, research may seek the highest robust scalable daily net PnL supported by
+OOS/forward evidence without weakening the contract.
 
 ### SCOREBOARD
 
@@ -14158,3 +14193,148 @@ financement (`delta.coin/usdc/szi/fundingRate`) et la forme WebSocket aplatie,
 mais conserve les deux payloads bruts. Ces observations de compte leader restent
 des données de contexte : elles ne sont jamais additionnées au PnL du follower,
 ne prouvent pas de résultat forward et ne peuvent autoriser une promotion.
+
+
+### 2026-10-28 — Arithmétique exacte et tolérance comptable Copy-Vault
+
+Toute valeur monétaire admise dans une décision économique est un nombre décimal
+fini, analysé depuis sa représentation source ; les booléens, NaN et infinis sont
+invalides. Les sommes de fill, notionnel, frais, funding, PnL, equity et drawdown
+ne doivent pas dépendre de l'ordre d'addition en virgule flottante. La précision
+d'affichage est distincte de la précision de calcul et un affichage arrondi ne
+peut jamais être réutilisé comme entrée d'un classement, d'un seuil ou d'une
+réconciliation.
+
+Les timestamps entiers en millisecondes/nanosecondes restent entiers lors de
+l'attribution aux journées UTC : aucune conversion nanoseconde→float ne peut
+changer de jour, et une source float dont la précision entière est perdue est
+non mesurable pour cette preuve.
+
+La réconciliation brut/net autorise au plus `0.00000001 USD` d'écart absolu,
+sans tolérance relative. Une ligne dans cette tolérance peut rester admissible,
+mais l'écart toléré ne crée jamais de PnL : le net retenu est le plus faible du
+net déclaré et du net recalculé depuis le brut et les coûts. Les agrégats et
+comparaisons de candidats utilisent la valeur décimale exacte. Pour les champs
+compatibles avec les consommateurs historiques, le PnL et les ratios économiques
+sont convertis vers le bas, les coûts, l'exposition et les mesures de risque vers
+le haut ; la représentation décimale exacte est conservée à côté. Si une valeur
+ne peut pas être agrégée ou représentée sans perte de sûreté, la preuve est
+refusée au lieu d'être remplacée par zéro ou un score approximatif.
+
+USD, USDC, USDT, prix, quantité et unités de contrat restent des grandeurs
+distinctes jusqu'à l'application d'une conversion explicitement sourcée et
+causale. Ces règles ne changent ni les shards SAFE, ni leurs octets, ni leur
+sérialisation canonique ; toute migration de données exigerait un contrat et une
+preuve séparés.
+
+#### Contrats d'unités et de rendu
+
+- **Prix** : valeur en monnaie de cotation par unité native de l'instrument.
+  L'unité, le tick-size et la précision viennent des métadonnées point-in-time
+  de l'instrument. Ne pas arrondir un prix observé pour le faire entrer dans un
+  fill ; une quantification de prix n'est permise que si elle fait partie du
+  modèle d'exécution explicite et reste défavorable ou neutre.
+- **Quantité** : unité native de base ou nombre de contrats, jamais USD par
+  défaut. La taille de lot et le multiplicateur de contrat sont explicites.
+  Toute quantification d'exécution respecte la taille demandée et la profondeur
+  disponible ; elle ne crée jamais de quantité.
+- **Notionnel** : prix × quantité × multiplicateur contractuel explicite, en
+  monnaie de cotation. La conversion vers USD/USDC/USDT exige un taux, une source,
+  un timestamp causal et une borne de fraîcheur ; sans cela, le montant est
+  non mesurable.
+- **Frais** : les taux en basis points sont des fractions de 1/10 000 et
+  s'appliquent au notionnel effectivement exécuté, une seule fois par exécution.
+  Le montant natif, la devise, le taux de conversion et leurs preuves restent
+  distincts. Les frais ne sont jamais soustraits une seconde fois depuis le
+  fill si un événement de frais séparé est déjà comptabilisé.
+- **PnL brut** : calculé depuis quantités exécutées, prix d'entrée/sortie et
+  côté (LONG/SHORT), avant coûts. **PnL net** = brut − frais − spread − slippage
+  − latence + funding signé, sans arrondi intermédiaire. Le funding reçu est
+  positif, le funding payé négatif, et chaque règlement identifié est appliqué
+  une seule fois.
+- **Cash et equity** : le cash contient une seule fois les réalisés, frais et
+  funding ; l'equity = cash + mark-to-market non réalisé. Ne pas réadditionner
+  les PnL réalisés déjà reflétés dans le cash. Un mark exige son prix, sa source,
+  son timestamp source et une fraîcheur admissible.
+- **Drawdown** : max(0, plus-haut exact d'equity − equity exacte), dans la même
+  devise et unité que l'equity. Les coûts, expositions et mesures de risque sont
+  exposés de manière conservatrice vers le haut si une conversion float est
+  nécessaire ; le PnL économique est exposé vers le bas.
+- **Ratios et métriques** : ROI, profit factor, hit-rate, bps et moyennes sont
+  dérivés des numérateurs/dénominateurs non arrondis. Une tolérance de
+  réconciliation ne change jamais un signe, un rang ou un gate. Les valeurs
+  arrondies sont uniquement des champs d'affichage ; si un consommateur ne peut
+  pas conserver la valeur exacte ou décimale à côté, il ne peut pas l'utiliser
+  pour une décision économique.
+- **Bornes LCB et rangs** : le quantile normal supérieur est évalué sans
+  soustraction `1 - alpha` en virgule flottante (utiliser la symétrie de la
+  queue inférieure), puis dirigé vers le haut. La marge du quantile et la borne
+  d'erreur arithmétique doivent être enregistrées séparément du score LCB.
+  Un gate positif utilise la borne inférieure conservatrice ; un challenger ne
+  peut être classé si l'écart exact ne dépasse pas la somme des bornes des deux
+  scores. Un rang numériquement indécidable reste diagnostic et bloque gel,
+  promotion et preuve économique.
+
+Les gates de concentration TRAIN comparent les comptes entiers sous forme de
+fractions exactes aux seuils décimaux déclarés ; les parts converties en float
+ne servent qu'à l'affichage. L'état informatif de l'objectif journalier V21 lit
+la moyenne calendaire exacte du reçu de journées complètes ; un reçu absent,
+incomplet ou sans valeur exacte produit `UNMEASURABLE`. Ainsi, un affichage
+arrondi ou une division binaire ne peut faire franchir un seuil ni sélectionner
+un candidat.
+
+Pour la version actuelle du calcul LCB TRAIN, la précision Decimal est 80,
+la marge de quantile est `1e-12` fois l'erreur-type, et le facteur de borne
+arithmétique est `1e-70` fois l'échelle multipliée par le nombre d'opérations
+majoré. Ces constantes font partie du contrat versionné. La stabilité de
+l'implémentation numérique ne constitue pas une preuve de suffisance des données,
+de validité statistique ni de rentabilité.
+
+Les décimales de prix et de quantité ne sont pas normalisées par un nombre
+universel de chiffres : leur échelle est celle du contrat observé, des
+métadonnées d'instrument et de l'unité du shard. Tout changement de cette échelle
+nécessite une migration avec conversion exacte et tests de compatibilité ; les
+valeurs SAFE publiées restent immuables.
+
+### 2026-10-28 — Traçabilité des champs causaux Copy-Vault
+
+Ce registre relie chaque preuve aux producteurs et consommateurs réellement
+câblés. Une famille Dataset V2 déclarée replayable n'implique pas que chaque
+ligne satisfasse les exigences économiques du labo : le gate du manifeste et la
+revalidation par le consommateur sont tous deux nécessaires.
+
+| Surface | Producteur et champs obligatoires | Persistance et gate SAFE | Consommateur et limite connue |
+| --- | --- | --- | --- |
+| Fills leader WebSocket | `tools/collect_cloud_copy_vault.py:userfills_envelope` puis `src/hl_observer/collection/userfills_live.py:userfill_required_fields_reason`; identité native du vault, `isSnapshot` booléen, coin natif, heure source positive antérieure ou égale à la réception, prix/taille finis et positifs, côté `A/B`, `hash` ou `tid`, réception murale, réception monotone et connexion. | `TickEnvelope` garde le frame brut, les deux horloges et la connexion. Les frames invalides ou de snapshot inconnu sont `copy_vault_unknown`, conservés bruts et exclus des fills. Le pipeline doit publier une réconciliation explicite et un manifeste SAFE/replayable. | `copy_vault_local_lab._fill_rows` revalide l'identité, le snapshot attendu, la réception et les champs du fill. Un `isSnapshot` manquant/invalide n'est jamais un fill replayable. |
+| Fills historiques / bootstrap | `collect_cloud_copy_vault.py:rest_backfill_envelopes` pour `userFillsByTime`; payload natif, vault, heure source, audit de fenêtre, marqueur historique et interdiction d'usage forward. Le bootstrap WS reste explicitement `isSnapshot=true`. | Shards `copy_vault_snapshot` distincts des fills live ; manifest, hash, comptes et statut de backfill/réconciliation conservés. Fenêtre tronquée ou non résolue = PARTIAL/UNAVAILABLE. | Le labo les consomme comme contexte historique seulement. Ils ne prouvent ni activité forward ni PnL du follower. |
+| L2 Hyperliquid | `collect_cloud_copy_vault.py:l2_envelope`; coin natif, heure exchange et réception, horloge monotone, connexion/reconnexion, deux côtés non vides et niveaux prix/taille/compte valides ; l'epoch de gap accompagne l'observation. | Frame brut stocké en `copy_vault_l2`; intégrité de séquence, gaps, régressions, désynchronisation et pertes de file explicités dans le manifeste. Un epoch/gap non réconcilié interdit SAFE replay. | `copy_vault_local_lab._book_row` et le loader L2 revalident le livre avant simulation d'exécution. Le BBO seul ne remplace pas la profondeur. |
+| BBO, trades et contexte marché | `collect_cloud_copy_vault.py:copy_vault_market_envelopes`; BBO/trades exigent instrument natif, heure causale, réception, horloge monotone, connexion et prix/tailles valides ; les trades exigent aussi côté et identité native. `activeAssetCtx` est explicitement une observation à l'heure de réception. | Frames bruts dans `copy_vault_bbo`, `copy_vault_trades` et `copy_vault_active_asset_ctx`; les frames invalides sont préservés dans `copy_vault_unknown`. Les événements stale ou futurs ne sont pas admissibles. | `copy_vault_local_lab._market_context_row` revalide provenance, horloges, identité et forme. `activeAssetCtx` reste contexte, jamais un prix d'exécution. |
+| Funding et ledger du leader | `collect_cloud_copy_vault.py:copy_vault_accounting_envelopes`; identité du vault, snapshot explicite, heure source causale, devise/coin et valeurs natives, plus identité de ligne quand la source en fournit une. | `copy_vault_funding` et `copy_vault_ledger` séparés des fills ; les intervalles tronqués ou ambigus restent incomplets. | `copy_vault_local_lab._accounting_context_row` les conserve comme contexte du leader ; ils ne sont jamais additionnés au PnL du follower. |
+| Positions et sélection | Sweeps d'état et snapshots de sélection du collecteur ; identité vault/instrument, valeur source, horloge de réception et raison/heure causale de sélection. | Données conservées comme observations ; absence ou retard ne signifie pas position nulle ni sélection valide. | Le labo les utilise seulement pour contexte ; les snapshots ne deviennent jamais des fills. |
+| Métadonnées d'instrument | Producteur courant de métadonnées de marché, avec identité venue-native, tick/lot, multiplicateur, devise, minimum notionnel, statut et intervalle d'effet. | Le schéma général connaît `instrument_metadata`, mais le labo Copy-Vault ne l'admet pas dans `_SAFE_FAMILIES` et aucun manifeste/join point-in-time Copy-Vault n'est actuellement vérifié. | **GAP OUVERT** : le replay ne peut pas prétendre quantifier tous les contrats à leurs règles historiques. Tant que la jointure par identité native et heure d'effet n'est pas câblée et prouvée, les cas qui en dépendent restent non mesurables. |
+
+Pour tout manifeste Copy-Vault de flux continu dont le transport inclut WebSocket,
+le collecteur
+attache au manifeste le reçu de heartbeat de la connexion exacte :
+`connection_id`, compteurs ping/pong, pongs non appariés et bornes temporelles
+des réponses. Un reçu absent, d'une autre connexion, hors fenêtre du shard,
+déséquilibré ou avec un pong sans ping interdit `SOURCE_CONTINUITY_VERIFIED`,
+`SAFE` et l'admission au replay. Le labo répète ce contrôle à la lecture pour
+refuser aussi les anciens manifestes encore étiquetés SAFE. Cela prouve une
+réponse de transport observée pendant la fenêtre ; cela ne prouve toujours ni
+l'exhaustivité des fills, ni l'absence de pertes. Les compteurs de gaps,
+reconnexions, désynchronisations et la réconciliation native restent des gates
+indépendants.
+L'exception est `copy_vault_snapshot`, observation ponctuelle dont le marqueur
+de snapshot, la disponibilité causale, l'identité de connexion et les heures
+source/réception sont vérifiés directement ; un heartbeat ultérieur n'est pas
+une condition artificielle pour cette observation.
+
+Pour toutes les surfaces, `validation_allowed` doit être explicitement `true` dans
+le catalogue et le manifeste, avec `quality_status=SAFE`,
+`replay_compatible=true`, taille/hash vérifiés et comptes exacts. Le labo
+revalide les champs utiles à chaque replay. Une heartbeat ou un accusé de
+souscription prouve seulement une réponse de transport : il ne prouve ni
+continuité, ni absence de fills manquants. Après une reconnexion, seule une
+réconciliation de fenêtre complète et sans manque/ambiguïté rétablit la preuve ;
+sinon le corpus reste exclu des mesures qui exigent cette continuité.

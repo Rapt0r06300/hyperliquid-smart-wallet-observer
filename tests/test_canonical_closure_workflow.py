@@ -21,7 +21,8 @@ def test_canonical_closure_rebuilds_from_latest_head_before_push() -> None:
     assert "dataset-v2" not in publish
     assert "python tools/build_closure_report.py" in publish
     assert "--dataset-root ." in publish
-    assert 'if git push origin HEAD:main; then' in publish
+    assert "python tools/publish_main_commit.py --remote origin --branch main" in publish
+    assert "git push origin HEAD:main" not in publish
 
 
 def test_canonical_closure_reacts_to_durable_evidence_changes() -> None:

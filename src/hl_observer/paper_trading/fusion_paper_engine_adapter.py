@@ -83,6 +83,17 @@ def run_copy_votes_through_paper_engine(
             strict_execution_truth=True,
         )
     )
+    if not votes:
+        # With no leader evidence there is no Copy-Vault decision to execute or
+        # mark.  In particular, do not manufacture a timestamp by reaching the
+        # mark-to-market path with an empty conflict and a zero observation time.
+        return FusionPaperEngineSummary(
+            decisions=(),
+            accepted_count=0,
+            equity_usdt=float(starting_cash_usdt),
+            drawdown_usdt=0.0,
+            refusal_reasons=("NO_COPY_VOTES",),
+        )
     conflict = resolve_copy_conflict(votes)
     decisions: list[PaperDecisionResult] = []
     winning_votes = tuple(
@@ -174,6 +185,31 @@ def run_copy_votes_through_paper_engine(
             observed_at_ms=int(observed_at_ms),
         )
         _book_live = _execution_truth is not None
+        if _execution_truth is None:
+            try:
+                from hl_observer.collection.l2_snapshot_cache import (
+                    live_execution_truth_refusal_for,
+                )
+
+                _timestamp_refusal = live_execution_truth_refusal_for(
+                    conflict.coin,
+                    decision_ts_ms=int(observed_at_ms),
+                )
+            except Exception:
+                _timestamp_refusal = None
+                _noter_echec(
+                    "hl_observer/paper_trading/fusion_paper_engine_adapter.py:book_timestamp_refusal"
+                )
+            if _timestamp_refusal and _timestamp_refusal.startswith(
+                ("SOURCE_TIMESTAMP_", "RECEIVED_TIMESTAMP_", "STALE_")
+            ) or _timestamp_refusal == "INVALID_L2_FRESHNESS_CONFIG":
+                return FusionPaperEngineSummary(
+                    decisions=(),
+                    accepted_count=0,
+                    equity_usdt=float(starting_cash_usdt),
+                    drawdown_usdt=0.0,
+                    refusal_reasons=(_timestamp_refusal,),
+                )
         _trace.stamp("score")
         from hl_observer.edge.empirical_edge import edge_from_calibration, empirical_edge_refusal
 

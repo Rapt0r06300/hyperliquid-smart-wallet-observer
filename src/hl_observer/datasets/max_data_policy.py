@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.datasets.archive_library import suite_names
-from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
+from hl_observer.simulation.economic_objective import (
+    STARTING_CAPITAL_USD,
+    TARGET_NET_USD_PER_DAY,
+)
+from hl_observer.strategies.active_scope import (
+    active_strategy_families,
+    strategy_can_materialize,
+)
 
 SCHEMA = "alina.max_data_policy.v1"
 COMPLETED_REGISTRY_SCHEMA = "alina.completed_dataset_suites.v1"
@@ -19,15 +26,14 @@ COMPLETED_REGISTRY_RELATIVE = (
 COMPLETED_HISTORY_LIMIT = 100
 DEFAULT_RESERVE_GIB = 25.0
 MAX_JOB_DOWNLOAD_GIB = 220.0
-TARGET_NET_USD_PER_FAMILY = TARGET_NET_USD_PER_DAY
 ANALYSIS_MODES = {"economic", "historical", "historical-full", "historical-deep"}
 
 FAMILY_SUITES = {
     "copy_vault": "copy-vault-full",
-    "lead_lag": "lead-lag-full",
-    "cross_venue_dislocation_v2": "cross-venue-full",
 }
-REQUIRED_FAMILIES = tuple(FAMILY_SUITES)
+REQUIRED_FAMILIES = tuple(sorted(active_strategy_families()))
+if REQUIRED_FAMILIES != ("copy_vault",):
+    raise RuntimeError("COPY_VAULT_ONLY_SCOPE_REQUIRED")
 
 
 def _number(value: object) -> float | None:
@@ -241,7 +247,12 @@ def load_suite_plans(lab_root: str | Path) -> dict[str, dict[str, Any]]:
 
 
 def _top_family(family_decisions: Iterable[Mapping[str, Any]]) -> str | None:
-    rows = [row for row in family_decisions if str(row.get("family") or "") in FAMILY_SUITES]
+    rows = [
+        row
+        for row in family_decisions
+        if str(row.get("family") or "") in FAMILY_SUITES
+        and strategy_can_materialize(str(row.get("family") or ""))
+    ]
     if not rows:
         return None
     rows.sort(key=lambda row: (-int(row.get("priority") or 0), str(row.get("family") or "")))
@@ -267,7 +278,7 @@ def targets_reached_from_brain(family_decisions: Iterable[Mapping[str, Any]]) ->
         for row in family_decisions
         if isinstance(row, Mapping)
     }
-    return all(
+    return bool(REQUIRED_FAMILIES) and all(
         str(by_family.get(family, {}).get("phase") or "") == "FREEZE_AND_CONFIRM_FORWARD"
         for family in REQUIRED_FAMILIES
     )
@@ -293,17 +304,21 @@ def choose_max_data_job(
     top_family = _top_family(decisions)
     ladder = suite_ladder(top_family)
     target_contract = {
-        "target_net_usd_per_family": TARGET_NET_USD_PER_FAMILY,
+        "target_net_usd_per_day": TARGET_NET_USD_PER_DAY,
+        "paper_capital_usd": STARTING_CAPITAL_USD,
         "required_families": list(REQUIRED_FAMILIES),
-        "independent_targets_required": True,
+        "copy_vault_only": True,
         "aggregate_substitution_allowed": False,
     }
 
-    if all_targets_reached:
+    # The function argument remains for API compatibility. Never trust a
+    # caller-provided boolean over the currently active Copy-Vault evidence.
+    proof_reached = targets_reached_from_brain(decisions)
+    if proof_reached:
         return {
             "schema": SCHEMA,
             "status": "STOP_PROOF_REACHED",
-            "reason": "Les trois objectifs économiques indépendants sont atteints; ne pas consommer plus de données pour retuner le holdout.",
+            "reason": "L'objectif Copy-Vault est atteint; ne pas consommer plus de données pour retuner le holdout.",
             "recommended_suite": None,
             "recommended_mode": None,
             "download_budget_gib": 0.0,
@@ -410,7 +425,8 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
         f"- Budget téléchargement : **{decision.get('download_budget_gib')} Gio**",
         f"- Famille prioritaire : `{decision.get('top_family')}`",
         f"- SHA de code pris en compte : `{decision.get('project_sha_scope')}`",
-        "- Objectif : **≥ 4,00 $ net séparément sur Copy-Vault, Lead-Lag et Cross-Venue**",
+        "- Objectif Copy-Vault : **≥ 5,00 $ net/jour avec 200 $ de capital paper**",
+        "- Familles économiques actives : **Copy-Vault uniquement**",
         "- Compensation entre familles : **INTERDITE**",
         "- OOS/forward utilisés comme gradient : **NON**",
         "",
@@ -433,7 +449,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Choisit la prochaine suite FULL/COLD utile avec garde disque et objectif +5 USD par famille."
+        description="Choisit la prochaine suite FULL/COLD utile pour Copy-Vault avec garde disque et objectif terminal +5 USD/jour sur 200 USD paper."
     )
     parser.add_argument("--brain-json", required=True)
     parser.add_argument("--lab-root", required=True)
@@ -490,7 +506,6 @@ __all__ = [
     "MAX_JOB_DOWNLOAD_GIB",
     "REQUIRED_FAMILIES",
     "SCHEMA",
-    "TARGET_NET_USD_PER_FAMILY",
     "choose_max_data_job",
     "completed_registry_path",
     "completed_suites_from_registry",

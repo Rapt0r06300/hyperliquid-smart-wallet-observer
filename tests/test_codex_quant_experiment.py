@@ -4,6 +4,7 @@ import json
 import sys
 import types
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,9 +22,9 @@ from tools.codex_quant_experiment import run_experiment
 def spec_payload() -> dict:
     return {
         "schema_version": 1,
-        "experiment_id": "ll-latency-001",
-        "family": "lead_lag",
-        "hypothesis_id": "H-LL-latency-decay",
+        "experiment_id": "cv-latency-001",
+        "family": "copy_vault",
+        "hypothesis_id": "H-CV-latency-decay",
         "phase": "train_search",
         "base_sha": "a" * 40,
         "data_fingerprint": "sha256:data-v1",
@@ -53,6 +54,8 @@ def test_spec_validates_and_signature_is_deterministic() -> None:
     ("field", "value"),
     [
         ("family", "funding_carry"),
+        ("family", "lead_lag"),
+        ("family", "cross_venue_dislocation_v2"),
         ("phase", "magic"),
         ("engine", "brute_force_forever"),
         ("evaluator", "tests.fake:evaluate"),
@@ -74,6 +77,17 @@ def test_spec_rejects_missing_required_field() -> None:
     payload.pop("cost_model")
     with pytest.raises(SpecValidationError, match="cost_model"):
         ExperimentSpec.from_mapping(payload)
+
+
+def test_run_experiment_rejects_manually_constructed_disabled_spec_before_writing(
+    tmp_path: Path,
+) -> None:
+    spec = replace(ExperimentSpec.from_mapping(spec_payload()), family="lead_lag")
+
+    with pytest.raises(SpecValidationError, match="DISABLED_BY_SCOPE:lead_lag"):
+        run_experiment(spec, runtime_root=tmp_path, current_sha="a" * 40)
+
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize(
@@ -101,9 +115,9 @@ def test_atomic_json_writes_and_cache_lookup(tmp_path: Path) -> None:
     goal_state = tmp_path / "codex_goal_state.json"
     summary = {"signature": "abc", "verdict": "ITERATE"}
     write_summary_atomic(summary_path, summary)
-    write_goal_state_atomic(goal_state, {"family": "lead_lag", "phase": "train_search"})
+    write_goal_state_atomic(goal_state, {"family": "copy_vault", "phase": "train_search"})
     assert json.loads(summary_path.read_text(encoding="utf-8")) == summary
-    assert json.loads(goal_state.read_text(encoding="utf-8"))["family"] == "lead_lag"
+    assert json.loads(goal_state.read_text(encoding="utf-8"))["family"] == "copy_vault"
 
     cache = tmp_path / "_cache" / "abc.json"
     write_summary_atomic(cache, summary)
@@ -117,7 +131,7 @@ def _install_fake_evaluator() -> dict[str, int]:
     def evaluate(params: dict, *, budget: float = 1.0, context: dict | None = None) -> dict:
         calls["count"] += 1
         assert context is not None
-        assert context["family"] == "lead_lag"
+        assert context["family"] == "copy_vault"
         return {
             "net_usd": float(params.get("score", 1.0)) * budget,
             "pf": 1.2,

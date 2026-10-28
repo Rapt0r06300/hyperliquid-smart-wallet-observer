@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -13,6 +14,58 @@ from hl_observer.backtesting.copy_vault_protocol import (
     expected_open_direction,
 )
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _source_evidence_reference(row: Mapping[str, Any], *, event_id: str) -> dict[str, Any] | None:
+    dataset_id = row.get("source_dataset_id")
+    shard_sha256 = row.get("source_shard_sha256")
+    raw_sha256 = row.get("source_raw_sha256")
+    catalog_sha256 = row.get("source_catalog_sha256")
+    received_at_ms = row.get("received_at_ms", row.get("observed_at_ms"))
+    event_ts_ms = row.get("ts_ms")
+    if (
+        not isinstance(dataset_id, str)
+        or not dataset_id.strip()
+        or not isinstance(shard_sha256, str)
+        or _SHA256_RE.fullmatch(shard_sha256) is None
+        or not isinstance(raw_sha256, str)
+        or _SHA256_RE.fullmatch(raw_sha256) is None
+        or isinstance(event_ts_ms, bool)
+        or not isinstance(event_ts_ms, int)
+        or event_ts_ms <= 0
+        or isinstance(received_at_ms, bool)
+        or not isinstance(received_at_ms, int)
+        or received_at_ms < event_ts_ms
+    ):
+        return None
+    safe_binding_verified = bool(
+        isinstance(catalog_sha256, str)
+        and _SHA256_RE.fullmatch(catalog_sha256) is not None
+        and row.get("source_quality_status") == "SAFE"
+        and row.get("source_manifest_verified") is True
+        and row.get("source_replay_compatible") is True
+    )
+    forward_allowed = bool(
+        row.get("source") == "LIVE_WS"
+        and row.get("is_snapshot") is False
+        and received_at_ms >= event_ts_ms
+    )
+    return {
+        "dataset_id": dataset_id.strip(),
+        "shard_sha256": shard_sha256.lower(),
+        "raw_frame_sha256": raw_sha256.lower(),
+        "source_catalog_sha256": catalog_sha256.lower() if safe_binding_verified else None,
+        "quality": "SAFE" if safe_binding_verified else None,
+        "manifest_verified": safe_binding_verified,
+        "replay_compatible": safe_binding_verified,
+        "event_id": event_id,
+        "event_ts_ms": event_ts_ms,
+        "received_at_ms": received_at_ms,
+        "source": str(row.get("source") or ""),
+        "forward_evidence_allowed": forward_allowed,
+    }
 
 
 def _event_identity(row: Mapping[str, Any]) -> str:
@@ -42,6 +95,7 @@ def cluster_metaorders(
     invalid_events = 0
     non_entry_events = 0
     direction_contradictions = 0
+    source_evidence_missing = 0
     for raw in entries:
         input_events += 1
         try:
@@ -123,6 +177,9 @@ def cluster_metaorders(
                 "move_frac_audit_sum": 0.0,
                 "member_event_ids": [],
                 "member_events": [],
+                "source_evidence_refs": [],
+                "source_evidence_missing_count": 0,
+                "source_evidence_unverified_count": 0,
             }
             cluster["first_event_id"] = row["event_id"]
             cluster["metaorder_id"] = canonical_metaorder_id(
@@ -138,6 +195,15 @@ def cluster_metaorders(
         cluster["leader_notional_usd"] += max(0.0, float(row.get("taille_usd") or 0.0))
         cluster["move_frac_audit_sum"] += max(0.0, float(row.get("move_frac") or 0.0))
         cluster["member_event_ids"].append(row["event_id"])
+        evidence_ref = _source_evidence_reference(row, event_id=row["event_id"])
+        if evidence_ref is None:
+            source_evidence_missing += 1
+            cluster["source_evidence_missing_count"] += 1
+        else:
+            if evidence_ref.get("quality") != "SAFE":
+                cluster["source_evidence_unverified_count"] += 1
+            if evidence_ref not in cluster["source_evidence_refs"]:
+                cluster["source_evidence_refs"].append(evidence_ref)
         cluster["member_events"].append({
             "event_id": row["event_id"],
             "ts_ms": row["ts_ms"],
@@ -145,6 +211,13 @@ def cluster_metaorders(
             "source": row.get("source") or "REST_BACKFILL",
             "causal_forward_eligible": row["causal_forward_eligible"],
             "action": row["action"],
+            "source_dataset_id": row.get("source_dataset_id"),
+            "source_shard_sha256": row.get("source_shard_sha256"),
+            "source_raw_sha256": row.get("source_raw_sha256"),
+            "source_catalog_sha256": row.get("source_catalog_sha256"),
+            "source_quality_status": row.get("source_quality_status"),
+            "source_manifest_verified": row.get("source_manifest_verified") is True,
+            "source_replay_compatible": row.get("source_replay_compatible") is True,
             "taille_usd": max(0.0, float(row.get("taille_usd") or 0.0)),
             "cumulative_leader_notional_usd": cluster["leader_notional_usd"],
         })
@@ -153,6 +226,23 @@ def cluster_metaorders(
     for cluster in completed:
         cluster["leader_notional_usd"] = round(cluster["leader_notional_usd"], 8)
         cluster["move_frac_audit_sum"] = round(cluster["move_frac_audit_sum"], 10)
+        cluster["source_evidence_refs"].sort(
+            key=lambda item: (item["event_ts_ms"], item["dataset_id"], item["event_id"])
+        )
+        cluster["source_evidence_status"] = (
+            "COMPLETE"
+            if cluster["source_evidence_missing_count"] == 0
+            and len(cluster["source_evidence_refs"]) == cluster["fill_count"]
+            else "INCOMPLETE"
+        )
+        cluster["source_safe_evidence_status"] = (
+            "SAFE_CAUSAL_COMPLETE"
+            if cluster["source_evidence_status"] == "COMPLETE"
+            and cluster["source_evidence_unverified_count"] == 0
+            and len({ref.get("source_catalog_sha256") for ref in cluster["source_evidence_refs"]}) == 1
+            and all(ref.get("forward_evidence_allowed") is True for ref in cluster["source_evidence_refs"])
+            else "INCOMPLETE_OR_UNVERIFIED"
+        )
     completed.sort(key=lambda row: (row["signal_ts_ms"], row["metaorder_id"]))
     return completed, {
         "input_events": input_events,
@@ -167,6 +257,18 @@ def cluster_metaorders(
         "entry_policy": "action_OPEN_or_ADD_and_dir_Open_Long_or_Open_Short",
         "causal_forward_metaorders": sum(
             1 for row in completed if row.get("causal_forward_eligible") is True
+        ),
+        "source_evidence_refs": sum(len(row["source_evidence_refs"]) for row in completed),
+        "source_evidence_missing_events": source_evidence_missing,
+        "source_evidence_complete_metaorders": sum(
+            row["source_evidence_status"] == "COMPLETE" for row in completed
+        ),
+        "source_safe_evidence_complete_metaorders": sum(
+            row["source_safe_evidence_status"] == "SAFE_CAUSAL_COMPLETE"
+            for row in completed
+        ),
+        "source_evidence_unverified_events": sum(
+            int(row.get("source_evidence_unverified_count") or 0) for row in completed
         ),
     }
 

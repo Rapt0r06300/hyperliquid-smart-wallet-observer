@@ -34,6 +34,7 @@ def classify_run(
     job_outcome: str,
     build_outcome: str,
     publish_outcome: str,
+    publish_changed: str = "",
 ) -> dict[str, bool | str]:
     """Classify whether this workflow actually refreshed a closure receipt.
 
@@ -45,11 +46,10 @@ def classify_run(
     job_outcome = job_outcome.strip().lower()
     build_outcome = build_outcome.strip().lower()
     publish_outcome = publish_outcome.strip().lower()
+    publish_changed = publish_changed.strip().lower()
 
     if phase not in PHASES or not _positive_epoch(epoch.strip()):
         classification = "PHASE_UNVERIFIED_NOT_PROVEN"
-    elif job_outcome != "success":
-        classification = "CLOSURE_ATTEMPT_FAILED_NOT_PROVEN"
     elif phase != "ANALYZE":
         classification = "NOT_A_CLOSURE_RUN"
     elif stage not in ANALYSIS_STAGES:
@@ -57,9 +57,17 @@ def classify_run(
     elif stage in EARLY_ANALYSIS_STAGES:
         classification = "ANALYSIS_IN_PROGRESS_NOT_CLOSURE"
     elif build_outcome != "success" or publish_outcome != "success":
-        classification = "CLOSURE_INCOMPLETE_NOT_PROVEN"
-    else:
+        classification = (
+            "CLOSURE_ATTEMPT_FAILED_NOT_PROVEN"
+            if job_outcome != "success"
+            else "CLOSURE_INCOMPLETE_NOT_PROVEN"
+        )
+    elif publish_changed == "true":
         classification = "RECEIPT_PUBLISHED_REQUIRES_REVIEW"
+    elif publish_changed == "false":
+        classification = "CLOSURE_ALREADY_CURRENT_NOT_PUBLISHED"
+    else:
+        classification = "CLOSURE_PUBLICATION_UNVERIFIED_NOT_PROVEN"
 
     receipt_published = classification == "RECEIPT_PUBLISHED_REQUIRES_REVIEW"
     reasons = {
@@ -80,6 +88,14 @@ def classify_run(
         "CLOSURE_INCOMPLETE_NOT_PROVEN": (
             "La construction ou la publication du reçu a échoué ou a été "
             "ignorée. La clôture n’est pas prouvée."
+        ),
+        "CLOSURE_ALREADY_CURRENT_NOT_PUBLISHED": (
+            "Les reçus construits sont déjà identiques à ceux de main; aucun "
+            "nouveau reçu n’a été publié par ce run."
+        ),
+        "CLOSURE_PUBLICATION_UNVERIFIED_NOT_PROVEN": (
+            "Le statut de publication ne confirme pas un nouveau commit; "
+            "aucune publication n’est revendiquée."
         ),
         "RECEIPT_PUBLISHED_REQUIRES_REVIEW": (
             "Un reçu a été publié. Son contenu et ses validateurs doivent être "
@@ -108,6 +124,7 @@ def render_summary(
     job_outcome: str,
     commit_sha: str,
     run_id: str,
+    publish_changed: str = "",
 ) -> str:
     stage_label = stage or "(aucune)"
     source_epoch_label = source_collection_epoch or "(aucun)"
@@ -125,6 +142,7 @@ def render_summary(
             f"- Reçu de clôture publié : `{receipt_label}`",
             f"- Build receipt : `{build_outcome or 'unknown'}`",
             f"- Publication receipt : `{publish_outcome or 'unknown'}`",
+            f"- Nouveau reçu publié par ce run : `{publish_changed or 'unknown'}`",
             f"- Dispatch du contrôleur d’analyse : `{dispatch_outcome or 'unknown'}`",
             f"- Commit du run : `{commit_sha or 'unknown'}`",
             f"- Run Actions : `{run_id or 'unknown'}`",
@@ -145,6 +163,7 @@ def main() -> int:
     job_outcome = os.environ.get("ALINA_JOB_OUTCOME", "unknown")
     build_outcome = os.environ.get("ALINA_BUILD_OUTCOME", "unknown")
     publish_outcome = os.environ.get("ALINA_PUBLISH_OUTCOME", "unknown")
+    publish_changed = os.environ.get("ALINA_PUBLISH_CHANGED", "")
     dispatch_outcome = os.environ.get("ALINA_DISPATCH_OUTCOME", "unknown")
 
     result = classify_run(
@@ -154,6 +173,7 @@ def main() -> int:
         job_outcome=job_outcome,
         build_outcome=build_outcome,
         publish_outcome=publish_outcome,
+        publish_changed=publish_changed,
     )
     summary = render_summary(
         result,
@@ -168,6 +188,7 @@ def main() -> int:
         job_outcome=job_outcome,
         commit_sha=os.environ.get("GITHUB_SHA", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
+        publish_changed=publish_changed,
     )
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")

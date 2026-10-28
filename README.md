@@ -28,7 +28,7 @@ Le fonctionnement attendu est organisé autour de trois blocs et de la synchroni
 
 Le labo est le cerveau de recherche : chaque amélioration, même petite ou provisoire, reste inscrite avec son identité, ses données, ses paramètres et ses résultats ; les versions précédentes ne sont pas effacées lorsqu'un candidat ultérieur fait mieux. Un candidat TRAIN ou un score exploratoire n'est pas une preuve économique. **Aucun PnL, fill, coût, prix ou timestamp ne doit être inventé** ; une donnée manquante reste inconnue et peut rendre le résultat `UNMEASURABLE`.
 
-La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. La cible de **+5 USD nets/jour sur 200 USD paper** s'évalue au terme des réparations et preuves requises ; ce n'est ni une promesse ni une raison d'assouplir les contrôles. Copy-Vault est la seule famille économique active ; 3x4 et les autres familles restent hors périmètre.
+La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. La cible terminale de **+5 USD nets/jour sur 200 USD paper** ne s'évalue qu'après les réparations et preuves requises ; ce n'est ni une promesse ni une raison d'assouplir les contrôles. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
 
 Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel est déjà conforme : toute divergence entre un lanceur et ce contrat doit être réparée avant d'annoncer une simulation ou une preuve valide. Les rapports et candidats historiques restent conservés.
 
@@ -277,7 +277,7 @@ Responsabilités :
 - GitHub Releases pour les shards lourds;
 - replays et backtests;
 - OOS / forward paper;
-- Copy-Vault, Lead-Lag et Cross-Venue;
+- Copy-Vault comme seule famille économique active ; Lead-Lag et Cross-Venue restent désactivées, avec leur code et leurs preuves historiques conservés ;
 - PnL proof et scoreboard;
 - tests et GitHub Actions;
 - sécurité paper/read-only et interdiction d'exécution réelle.
@@ -586,7 +586,11 @@ La preuve valide doit respecter :
 
 ---
 
-## 13. Cross-Venue Dislocation
+## 13. Cross-Venue Dislocation — code historique désactivé
+
+Cette famille reste documentée pour conserver son historique. Elle est
+`DISABLED_BY_SCOPE` : aucun collecteur économique, replay, backtest, score ou
+promotion Cross-Venue ne participe au runtime actif Copy-Vault.
 
 Cross-Venue ne juge pas un “spread” au mid-price comme un profit.
 
@@ -742,7 +746,7 @@ Ce tableau décrit l'état structurel actuel sans transformer un composant prés
 
 | Surface | État |
 |---|---|
-| Scope économique des 3 familles | **Implémenté et autoritaire** |
+| Scope économique Copy-Vault-only | **Implémenté et autoritaire** |
 | Sécurité paper/read-only | **Invariant canonique** |
 | Control plane IDLE/COLLECT/ANALYZE | **Fondation implémentée dans le repo principal** |
 | Campaign schema v2 / phase epoch | **Fondation implémentée** |
@@ -755,7 +759,7 @@ Ce tableau décrit l'état structurel actuel sans transformer un composant prés
 | Exact global unique trade closure | **Ne pas considérer fermé tant que la preuve de complétude n'est pas produite** |
 | Whole-corpus SAFE -> replay-compatible closure | **Ne pas considérer fermé tant que le backlog n'est pas classifié** |
 | Real two-segment fresh-runner resume proof | **Contrat final requis par la spec** |
-| OOS + forward + final PnL proof des 3 familles | **Doit être certifié par evidence, pas supposé** |
+| OOS + forward + preuve PnL Copy-Vault | **Doit être certifié par evidence, pas supposé** |
 | Ordres réels/testnet | **Interdits** |
 | Self-hosted / PC cloud dependency | **Interdits** |
 
@@ -1002,4 +1006,4 @@ C'est un **système de recherche, de collecte, de simulation paper et de preuve 
 
 La réussite d'Alina ne sera pas “le logiciel tourne”.
 
-Elle sera atteinte lorsque les trois familles actives disposeront chacune d'une preuve indépendante, causale, reproductible, après coûts réels, avec données fiables, capacité, replays rigoureux, OOS/forward post-freeze et fermeture fail-closed — ou lorsqu'Alina aura démontré honnêtement qu'une famille doit rester `MORE_DATA`, `UNMEASURABLE` ou `KILL`.
+Elle sera atteinte lorsque Copy-Vault disposera d'une preuve indépendante, causale, reproductible, nette de coûts, avec données SAFE fiables, capacité, replays rigoureux et preuve OOS/forward post-freeze — ou lorsque le résultat reste honnêtement `MORE_DATA`, `UNMEASURABLE` ou `REJECTED`.

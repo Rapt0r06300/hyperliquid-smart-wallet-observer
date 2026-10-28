@@ -3,6 +3,7 @@ from __future__ import annotations
 from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
 from hl_observer.backtesting.copy_vault_protocol import NOTIONAL_USD
 from hl_observer.backtesting.copy_vault_v4_train import (
+    _share_exceeds,
     assess_train_variant,
     explore_copy_vault_v4_train,
     replay_continuation_train,
@@ -34,6 +35,8 @@ def _book(ts_ms: int, bid: float, ask: float, line: int) -> dict:
         "capacity_usd": 10_000.0,
         "source_line": line,
         "causal_observation": True,
+        "connection_id": "fixture-ws-1",
+        "l2_gap_epoch": 0,
     }
 
 
@@ -122,6 +125,16 @@ def test_assessment_bloque_un_gain_concentre_sur_un_seul_vault() -> None:
     assert result["placebo_summary"]["net_pnl_usd"] == -4.0
     assert result["eligible"] is False
     assert "VAULT_TRADE_CONCENTRATION_TOO_HIGH" in result["reasons"]
+
+
+def test_concentration_gate_uses_exact_integer_ratio_at_float_boundary() -> None:
+    # A float division rounds this rational to exactly 0.6 and would let a
+    # ratio strictly above the decimal policy limit pass.
+    count = 600_000_000_000_000_001
+    total = 1_000_000_000_000_000_000
+    assert count / total == 0.6
+    assert _share_exceeds(count, total, 0.6) is True
+    assert _share_exceeds(600_000_000_000_000_000, total, 0.6) is False
 
 
 def test_exploration_reste_train_only_et_ne_rejoue_pas_un_petit_echantillon() -> None:

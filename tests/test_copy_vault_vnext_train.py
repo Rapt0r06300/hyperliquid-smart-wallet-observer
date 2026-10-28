@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hl_observer.backtesting.copy_vault_vnext_train import (
     _identity_vote,
+    _reconciled,
     _train_rows,
     admit_consensus_train_rows,
     explore_copy_vault_vnext_train,
@@ -39,6 +40,74 @@ def _row(
     }
 
 
+def test_vnext_reconciliation_uses_absolute_only_error_bound() -> None:
+    row = _row(ts=1_000, vault="0xa", net=4.99999995)
+    row["gross_pnl_usd"] = 5.0
+    row["fees_usd"] = 0.00000001
+
+    assert _reconciled(row) is False
+
+
+def test_vnext_train_rows_never_credit_tolerated_overstatement() -> None:
+    row = _row(ts=1_000, vault="0xa", net=5.000000005)
+    row["gross_pnl_usd"] = 5.0
+    accepted = _train_rows({"trades": [row]})
+
+    assert len(accepted) == 1
+    assert accepted[0]["net_pnl_usd_exact_decimal"] == "5.0"
+    assert accepted[0]["net_pnl_usd"] <= 5.0
+
+
+def test_vnext_candidate_rank_uses_exact_net_when_lcb_and_float_tie(monkeypatch) -> None:
+    import hl_observer.backtesting.copy_vault_vnext_train as module
+
+    rows = [
+        {
+            "coin": "ETH" if index % 2 == 0 else "SOL",
+            "regime_id": "trend" if index < 4 else "range",
+            "entity_concentration_key_at_signal": f"entity-{index % 2}",
+        }
+        for index in range(8)
+    ]
+    monkeypatch.setattr(module, "_train_rows", lambda _report: rows)
+
+    def admit(_rows, *, window_ms, minimum_distinct_wallets):
+        key = f"{window_ms}_{minimum_distinct_wallets}"
+        return [{**row, "rank_key": key} for row in rows], {"ADMITTED": len(rows)}
+
+    def summarize(admitted, **_kwargs):
+        key = admitted[0]["rank_key"]
+        exact = "5.0000000000000002" if key == "300000_3" else "5.0000000000000001"
+        return {
+            "sample_count": 8,
+            "distinct_days": 4,
+            "net_pnl_usd": 5.0,
+            "net_pnl_usd_exact_decimal": exact,
+            "profit_factor": 2.0,
+            "top_positive_trade_share": 0.5,
+            "largest_positive_trade_pnl_usd_exact_decimal": "0.5",
+            "total_positive_trade_pnl_usd_exact_decimal": "1",
+            "total_lcb_usd": 1.0,
+            "lcb_status": "MEASURED",
+            "total_lcb_usd_exact_decimal": (
+                "1.00000000000000002"
+                if key == "300000_3"
+                else "1.00000000000000001"
+            ),
+            "total_lcb_numeric_error_bound_usd_exact_decimal": "0.000000000000000001",
+        }
+
+    monkeypatch.setattr(module, "admit_consensus_train_rows", admit)
+    monkeypatch.setattr(module, "summarize_train_rows", summarize)
+
+    result = module.explore_copy_vault_vnext_train(
+        {"provisional_without_physical_freeze": False}
+    )
+
+    assert result["selected"]["consensus_window_ms"] == 300_000
+    assert result["selected"]["minimum_distinct_wallets"] == 3
+
+
 def test_copy_vnext_selection_ignore_totalement_oos_et_exige_consensus_prior_only() -> None:
     day = 86_400_000
     rows: list[dict] = []
@@ -72,10 +141,11 @@ def test_copy_vnext_selection_ignore_totalement_oos_et_exige_consensus_prior_onl
     assert result["selection_scope"] == "TRAIN_ONLY_PRE_FREEZE"
     assert result["heldout_evaluated"] is False
     assert result["train_rows_seen"] == 12
-    assert result["selection_eligible"] is True
-    assert result["selected"]["statistics"]["net_pnl_usd"] == 8.0
-    assert result["selected"]["largest_coin_trade_share"] == 0.5
-    assert result["freeze_candidate"]["identity_claim"].startswith("ENTITY_NORMALIZED")
+    assert result["selection_eligible"] is False
+    assert result["selection_numeric_resolution"] == "NUMERIC_LCB_RANK_UNRESOLVED"
+    assert result["selected"] is None
+    assert result["diagnostic_train_candidate"]["statistics"]["net_pnl_usd"] == 8.0
+    assert result["diagnostic_train_candidate"]["largest_coin_trade_share"] == 0.5
 
 
 def test_vnext_preserve_le_symbole_natif_dans_les_lignes_et_votes():
@@ -110,6 +180,7 @@ def test_copy_vnext_refuse_de_selectionner_avant_freeze_physique_de_base() -> No
     assert result["diagnostic_not_admitted_pnl"] is True
     assert result["train_rows_seen"] == 12
     assert result["diagnostic_train_candidate_count"] >= 1
+    assert result["diagnostic_selection_numeric_resolution"] == "NUMERIC_LCB_RANK_UNRESOLVED"
     assert result["diagnostic_train_candidate"]["statistics"]["net_pnl_usd"] > 0
     assert all(variant["eligible"] is False for variant in result["variants"])
 

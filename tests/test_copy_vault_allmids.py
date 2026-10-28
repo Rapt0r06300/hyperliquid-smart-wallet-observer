@@ -154,7 +154,15 @@ def test_lecteur_l2_on_demand(tmp_path):
     """Lecture L2 À LA DEMANDE (WS/REST au signal) : source la plus fraîche, admet quand fournie."""
     now = 1_000_000_000_000.0
     _base(tmp_path, _snaps_move(), carnet=[], gele=True)                 # pas de carnet
-    l2 = lambda coin: {"hl_bid": 19.99, "hl_ask": 20.01, "depth_usd": 4000.0, "age_ms": 50}
+    def l2(coin):
+        return {
+            "hl_bid": 19.99,
+            "hl_ask": 20.01,
+            "depth_usd": 4000.0,
+            "age_ms": 50,
+            "received_ts_ms": int(now - 50),
+            "exchange_ts_ms": int(now - 60),
+        }
     sigs, _ = signaux_vaults(tmp_path, now_ms=now, lecteur_l2=l2)
     assert len(sigs) == 1 and sigs[0].meta["src_prix"] == "on_demand" and sigs[0].meta["l2_age_ms"] == 50
 
@@ -173,9 +181,12 @@ def test_leader_close_declenche_sortie(tmp_path):
         positions = [{"coin": "HYPE", "szi": szi}] if szi else []
         snap.write_text(json.dumps({"vault": "0xAAA", "ts_ms": int(now - 1000), "nav_usd": 100000.0,
                                     "positions": positions, "snapshot_id": sid}))
-    w(1000.0, "s1"); assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "AUCUN"     # leader tient
-    w(0.0, "s2");    assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "CLOSE"     # leader a clos
-    w(300.0, "s3");  assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "REDUCE"    # réduit à 30 %
+    w(1000.0, "s1")
+    assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "AUCUN"  # leader tient
+    w(0.0, "s2")
+    assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "CLOSE"  # leader a clos
+    w(300.0, "s3")
+    assert _etat_leader(pos, tmp_path, now_ms=now)["action"] == "REDUCE"  # réduit à 30 %
 
 
 def test_filtre_de_retention_du_score(tmp_path):

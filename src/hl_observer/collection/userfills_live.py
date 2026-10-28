@@ -9,12 +9,56 @@ la boucle WS autour de ces fonctions. Lecture seule. 0 ordre, 0 clé, 0 signatur
 """
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from typing import Any
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.realtime.event_identity import canonicalize_frame
 
 _EPS = 1e-12
+
+
+def userfill_required_fields_reason(
+    fill: object,
+    *,
+    received_at_ms: object = None,
+    require_receive: bool = False,
+) -> str | None:
+    """Explain why a native userFills row cannot identify a causal trade."""
+    if not isinstance(fill, Mapping):
+        return "FILL_ROW_NOT_OBJECT"
+    if not preserve_native_instrument_symbol(fill.get("coin")):
+        return "FILL_NATIVE_INSTRUMENT_MISSING"
+    timestamp = fill.get("time")
+    if type(timestamp) is not int or timestamp <= 0:
+        return "FILL_CAUSAL_TIMESTAMP_INVALID"
+    if require_receive and (type(received_at_ms) is not int or received_at_ms <= 0):
+        return "FILL_RECEIVE_TIMESTAMP_INVALID"
+    if received_at_ms is not None and (
+        type(received_at_ms) is not int
+        or received_at_ms <= 0
+        or timestamp > received_at_ms
+    ):
+        return "FILL_CAUSAL_TIMESTAMP_INVALID"
+    try:
+        price = float(fill.get("px"))
+        size = float(fill.get("sz"))
+    except (TypeError, ValueError, OverflowError):
+        return "FILL_EXECUTION_VALUE_INVALID"
+    if not math.isfinite(price) or price <= 0 or not math.isfinite(size) or size <= 0:
+        return "FILL_EXECUTION_VALUE_INVALID"
+    if str(fill.get("side") or "").upper() not in {"A", "B"}:
+        return "FILL_SIDE_INVALID"
+    native_hash = fill.get("hash")
+    has_hash = isinstance(native_hash, str) and bool(native_hash.strip())
+    tid = fill.get("tid")
+    has_tid = (type(tid) is int and tid >= 0) or (
+        isinstance(tid, str) and tid.strip().isdecimal()
+    )
+    if not has_hash and not has_tid:
+        return "FILL_NATIVE_ID_MISSING"
+    return None
 
 
 def positions_depuis_snapshot(snap: dict) -> dict[str, dict]:
@@ -134,11 +178,16 @@ def parser_message_userfills(
     out: list[dict] = []
     for frame_event in frame_events:
         f = frame_event.payload
+        if userfill_required_fields_reason(
+            f,
+            received_at_ms=frame_event.received_at_ms,
+        ) is not None:
+            continue
         try:
             coin = preserve_native_instrument_symbol(f["coin"])
             px = float(f["px"])
-            sz = abs(float(f["sz"]))
-            ts = int(f["time"])
+            sz = float(f["sz"])
+            ts = f["time"]
         except (KeyError, TypeError, ValueError):
             continue
         side = str(f.get("side") or "").upper()

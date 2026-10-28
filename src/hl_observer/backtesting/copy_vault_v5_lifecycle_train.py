@@ -35,7 +35,12 @@ from hl_observer.backtesting.copy_vault_v4_train import (
     MIN_TRAIN_TRADES,
     assess_train_variant,
 )
-from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.backtesting.train_statistics import (
+    exact_net_rank_value,
+    profit_factor_above_one,
+    select_unambiguous_lcb_candidate,
+    stable_hash,
+)
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v5_lifecycle_train.v1"
@@ -403,17 +408,10 @@ def explore_copy_vault_v5_train(
         )
 
     eligible = [row for row in variants if row["eligible"]]
-    selected = max(
-        eligible,
-        key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
-        ),
-        default=None,
-    )
+    selected, selection_resolution = select_unambiguous_lcb_candidate(eligible)
     diagnostic_best = max(
         variants,
-        key=lambda row: float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+        key=lambda row: exact_net_rank_value(row["statistics"] or {}),
         default=None,
     )
     best_statistics = dict((diagnostic_best or {}).get("statistics") or {})
@@ -424,8 +422,8 @@ def explore_copy_vault_v5_train(
         and diagnostic_best
         and best_reasons
         and not fatal_reasons
-        and float(best_statistics.get("net_pnl_usd") or 0.0) > 0.0
-        and float(best_statistics.get("profit_factor") or 0.0) > 1.0
+        and exact_net_rank_value(best_statistics) > 0
+        and profit_factor_above_one(best_statistics)
     )
     exact_next_evidence = (
         [
@@ -459,6 +457,7 @@ def explore_copy_vault_v5_train(
             "TRAIN_ELIGIBLE_TO_FREEZE" if selected else "NO_ROBUST_TRAIN_CANDIDATE"
         ),
         "selection_eligible": selected is not None,
+        "selection_numeric_resolution": selection_resolution,
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,

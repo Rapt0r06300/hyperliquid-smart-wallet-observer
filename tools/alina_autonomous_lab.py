@@ -37,7 +37,7 @@ def _check_payload() -> dict[str, object]:
         "max_data_route": MAX_DATA_ROUTE,
         "self_hosted_control_module": self_hosted_control.__name__,
         "self_hosted_return_module": self_hosted_return.__name__,
-        "target_net_usd_per_family": max_data_policy.TARGET_NET_USD_PER_FAMILY,
+        "target_net_usd_per_day": max_data_policy.TARGET_NET_USD_PER_DAY,
         "paper_only": True,
         "real_execution": False,
         "self_hosted_ready_in_code": True,

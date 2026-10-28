@@ -105,8 +105,8 @@ class TestnetOrderResult:
     request: TestnetOrderRequest
     average_price: float | None = None
     filled_size: float = 0.0
-    realized_pnl_usdc: float = 0.0
-    unrealized_pnl_usdc: float = 0.0
+    realized_pnl_usdc: float | None = None
+    unrealized_pnl_usdc: float | None = None
     external_ref: str | None = None
     reasons: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)

@@ -55,6 +55,145 @@ def test_https_historical_copy_vault_snapshot_requires_causal_availability_seman
     assert infer_reconciliation_status(verified) == "SNAPSHOT_VERIFIED"
 
 
+def _copy_vault_ws_manifest(*, heartbeat=None):
+    synchronization = {
+        "connection_ids": ["copy-ws-1"],
+        "connection_count": 1,
+    }
+    if heartbeat is not None:
+        synchronization["heartbeat"] = heartbeat
+    return {
+        "event_count": 2,
+        "bytes": 20,
+        "start_ts_ms": 1_000,
+        "end_ts_ms": 2_000,
+        "sha256": "a" * 64,
+        "collector_version": "a" * 40,
+        "family": "copy_vault_bbo",
+        "asset_verified": True,
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+            "invalid_record_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "synchronization": synchronization,
+        "required_channels": [],
+        "observed_channels": ["copy_vault_bbo"],
+        "cost_model": {"applicable": False, "ready": False},
+        "replay_compatible": True,
+    }
+
+
+def test_copy_vault_websocket_shard_without_heartbeat_is_not_replay_admissible():
+    manifest = finalize_manifest(_copy_vault_ws_manifest())
+    assert manifest["reconciliation"]["status"] == "UNVERIFIED"
+    assert manifest["quality_status"] == "PARTIAL"
+    assert manifest["validation_allowed"] is False
+    assert "HEARTBEAT_EVIDENCE_MISSING" in manifest["quality_reasons"]
+
+
+def test_copy_vault_websocket_shard_requires_heartbeat_reply_on_same_connection():
+    heartbeat = {
+        "connection_id": "another-connection",
+        "sent_count": 1,
+        "received_count": 1,
+        "unmatched_pong_count": 0,
+        "first_received_at_ms": 1_500,
+    }
+    manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat=heartbeat))
+    assert manifest["quality_status"] == "PARTIAL"
+    assert manifest["validation_allowed"] is False
+    assert "HEARTBEAT_EVIDENCE_INVALID" in manifest["quality_reasons"]
+
+    heartbeat["connection_id"] = "copy-ws-1"
+    heartbeat["received_count"] = 0
+    manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat=heartbeat))
+    assert manifest["quality_status"] == "PARTIAL"
+    assert "HEARTBEAT_REPLY_MISSING" in manifest["quality_reasons"]
+
+
+def test_copy_vault_websocket_shard_with_causal_heartbeat_can_be_safe():
+    manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat={
+        "connection_id": "copy-ws-1",
+        "sent_count": 1,
+        "received_count": 1,
+        "unmatched_pong_count": 0,
+        "first_received_at_ms": 1_500,
+        "last_received_at_ms": 1_500,
+    }))
+    assert manifest["reconciliation"]["status"] == "SOURCE_CONTINUITY_VERIFIED"
+    assert manifest["quality_status"] == "SAFE"
+    assert manifest["validation_allowed"] is True
+
+
+def test_point_in_time_copy_vault_snapshot_does_not_need_future_heartbeat():
+    manifest = _copy_vault_ws_manifest()
+    manifest["family"] = "copy_vault_snapshot"
+    manifest["observed_channels"] = ["copy_vault_snapshot"]
+    manifest["provenance"]["timestamp_semantics"] = [
+        "causal_event_availability"
+    ]
+    finalized = finalize_manifest(manifest)
+    assert finalized["reconciliation"]["status"] == "SNAPSHOT_VERIFIED"
+    assert finalized["quality_status"] == "SAFE"
+    assert finalized["validation_allowed"] is True
+
+
+def test_copy_vault_manifest_rejects_malformed_transport_evidence():
+    manifest = _copy_vault_ws_manifest(heartbeat={
+        "connection_id": "copy-ws-1",
+        "sent_count": 1,
+        "received_count": 1,
+        "unmatched_pong_count": 0,
+        "first_received_at_ms": 1_500,
+        "last_received_at_ms": 1_500,
+    })
+    manifest["provenance"]["transports"] = "websocket"
+    finalized = finalize_manifest(manifest)
+    assert finalized["quality_status"] == "PARTIAL"
+    assert "TRANSPORT_EVIDENCE_INVALID" in finalized["quality_reasons"]
+
+
+def test_copy_vault_manifest_rejects_heartbeat_outside_shard_time_bounds():
+    manifest = _copy_vault_ws_manifest(heartbeat={
+        "connection_id": "copy-ws-1",
+        "sent_count": 1,
+        "received_count": 1,
+        "unmatched_pong_count": 0,
+        "first_received_at_ms": 2_001,
+        "last_received_at_ms": 2_001,
+    })
+    finalized = finalize_manifest(manifest)
+    assert finalized["quality_status"] == "PARTIAL"
+    assert "HEARTBEAT_EVIDENCE_INVALID" in finalized["quality_reasons"]
+
+
+def test_copy_vault_heartbeat_does_not_override_unreconciled_gap():
+    manifest = _copy_vault_ws_manifest(heartbeat={
+        "connection_id": "copy-ws-1",
+        "sent_count": 1,
+        "received_count": 1,
+        "unmatched_pong_count": 0,
+        "first_received_at_ms": 1_500,
+        "last_received_at_ms": 1_500,
+    })
+    manifest["integrity"]["gap_count"] = 1
+    finalized = finalize_manifest(manifest)
+    assert finalized["quality_status"] == "REJECT"
+    assert finalized["replay_compatible"] is False
+    assert "SEQUENCE_OR_QUEUE_GAP" in finalized["quality_reasons"]
+
+
 def test_connection_change_seals_previous_partition_epoch(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
     writer.append_batch_records(
@@ -643,7 +782,7 @@ def test_queue_loss_attached_after_export_invalidates_old_replay_receipt(tmp_pat
     writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=100000)
     writer.append(_event(1000))
     writer.rotate_all()
-    bundle = build_bundle(
+    build_bundle(
         tmp_path / "ticks",
         tmp_path / "bundle",
         collector_version="a" * 40,

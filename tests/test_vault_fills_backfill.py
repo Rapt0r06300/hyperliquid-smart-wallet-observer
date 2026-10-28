@@ -3,13 +3,89 @@ reconstruits depuis les fills, et surtout la DISTINCTION décision alpha vs RETR
 multi-coins simultané). Pagination + dédup + couverture. Aucun réseau (fills injectés)."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from hl_observer.collection import vault_fills_backfill as VB
+from tools import backfill_vault_fills as BF
 
 
 def test_plan_de_requetes_fenetre():
     plan = VB.plan_de_requetes(0, 3 * VB.MS_PAR_HEURE, fenetre_ms=VB.MS_PAR_HEURE)
-    assert plan == [(0, VB.MS_PAR_HEURE), (VB.MS_PAR_HEURE, 2 * VB.MS_PAR_HEURE), (2 * VB.MS_PAR_HEURE, 3 * VB.MS_PAR_HEURE)]
-    assert VB.plan_de_requetes(10, 10) == []
+    assert plan == [
+        (0, VB.MS_PAR_HEURE),
+        (VB.MS_PAR_HEURE + 1, 2 * VB.MS_PAR_HEURE + 1),
+        (2 * VB.MS_PAR_HEURE + 2, 3 * VB.MS_PAR_HEURE),
+    ]
+    assert VB.plan_de_requetes(10, 10) == [(10, 10)]
+    assert VB.plan_de_requetes(11, 10) == []
+
+
+def test_backfill_cli_uses_canonical_paginator_and_records_single_ms_window(monkeypatch):
+    monkeypatch.setattr(BF.time, "time", lambda: 1_700_000_000.0)
+    queried: list[tuple[int, int]] = []
+
+    def poster(_vault: str, start_ms: int, end_ms: int):
+        queried.append((start_ms, end_ms))
+        return []
+
+    fills, audit = BF.backfill_un_vault_avec_audit(
+        BF.Path("."),
+        "0xABC",
+        lookback_j=0,
+        limiteur=SimpleNamespace(attente=lambda: None),
+        poster=poster,
+    )
+
+    assert fills == []
+    assert queried == [(1_700_000_000_000, 1_700_000_000_000)]
+    assert audit["complete"] is True
+    assert audit["requested_windows"] == 1
+    assert audit["window_attempts"][0]["outcome"] == "EMPTY"
+    assert audit["window_attempts"][0]["start_ms"] == audit["window_attempts"][0]["end_ms"]
+
+
+def test_backfill_cli_request_budget_preserves_next_inclusive_subwindows(monkeypatch):
+    monkeypatch.setattr(BF.time, "time", lambda: 86_410.0)
+    queried: list[tuple[int, int]] = []
+
+    def poster(_vault: str, start_ms: int, end_ms: int):
+        queried.append((start_ms, end_ms))
+        return [
+            {
+                "time": start_ms,
+                "coin": "BTC",
+                "px": "100",
+                "sz": "1",
+                "side": "B",
+                "dir": "Open Long",
+                "tid": index,
+            }
+            for index in range(2)
+        ]
+
+    fills, audit = BF.backfill_un_vault_avec_audit(
+        BF.Path("."),
+        "0xABC",
+        lookback_j=1,
+        limiteur=SimpleNamespace(attente=lambda: None),
+        poster=poster,
+        cap=2,
+        fenetre_ms=100_000_000,
+        min_fenetre_ms=1,
+        max_requests=1,
+    )
+
+    assert fills == []
+    assert queried == [(10_000, 86_410_000)]
+    assert audit["complete"] is False
+    assert audit["request_budget_exhausted"] is True
+    assert audit["pending_window_ranges"] == [
+        {"start_ms": 10_000, "end_ms": 43_210_000},
+        {"start_ms": 43_210_001, "end_ms": 86_410_000},
+    ]
+    assert audit["window_attempts"][0]["outcome"] == "CAP_SPLIT"
 
 
 def test_parser_et_dedup():
@@ -20,6 +96,20 @@ def test_parser_et_dedup():
     fills = VB.dedupliquer(VB.parser_fills(brut, vault="0xA"))
     assert len(fills) == 1 and fills[0]["signe"] == 1 and fills[0]["coin"] == "SOL"
     assert fills[0]["tid"] == 7
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("px", "NaN"), ("px", "Infinity"), ("sz", "NaN"), ("sz", "Infinity"), ("sz", "-1")],
+)
+def test_parser_rejette_prix_et_tailles_non_finis_ou_non_positifs(field, value):
+    fill = {
+        "time": 1_000, "coin": "SOL", "px": "150", "sz": "1",
+        "side": "B", "tid": 7, "hash": "0xf",
+    }
+    fill[field] = value
+
+    assert VB.parser_fills([fill], vault="0xA") == []
 
 
 def test_canonical_fill_id_est_source_independant_et_reproductible():

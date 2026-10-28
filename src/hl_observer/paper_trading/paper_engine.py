@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from hashlib import sha256
 
 from hl_observer.config.settings import Settings
-from hl_observer.hyperliquid.schemas import RiskDecision
+from hl_observer.hyperliquid.schemas import RiskDecision, SignalDecision
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper_trading.canonical_execution import (
     CausalMarketSnapshot,
@@ -219,6 +219,76 @@ class PaperEngine:
                 "execution_source": execution_truth.source if execution_truth else None,
             }
         )
+        if (
+            self.config.strict_execution_truth
+            and execution_truth is not None
+            and execution_truth.coin == preserve_native_instrument_symbol(delta.coin)
+        ):
+            timestamp_refusal = execution_truth.timestamp_refusal_reason(
+                decision_ts_ms=observed_at_ms,
+                max_age_ms=self.config.max_execution_book_age_ms,
+            )
+            if timestamp_refusal is not None:
+                # A temporal-data refusal must not write NO_TRADE or MTM events:
+                # those would mutate the economic ledger without valid evidence.
+                refusal_context = {
+                    **context,
+                    "execution_timestamp_refusal": timestamp_refusal,
+                    "execution_exchange_ts_raw": execution_truth.exchange_ts_raw,
+                    "execution_exchange_ts_status": execution_truth.exchange_ts_status,
+                    "execution_received_ts_ms": execution_truth.received_ts_ms,
+                }
+                risk_decision = RiskDecision(
+                    allowed=False,
+                    decision=SignalDecision.REJECT_ORDERBOOK_STALE,
+                    reasons=[timestamp_refusal],
+                    gates={"execution_timestamps_causal": False},
+                )
+                trade = PaperTrade(
+                    trade_id=_id("notrade", delta.delta_id, timestamp_refusal),
+                    action="NO_TRADE",
+                    coin=delta.coin,
+                    side="NONE",
+                    quantity=0.0,
+                    fill_price=None,
+                    notional_usdt=0.0,
+                    realized_pnl_usdt=0.0,
+                    fees_and_cost_bps=0.0,
+                    source_delta_id=delta.delta_id,
+                    reason_codes=(timestamp_refusal,),
+                    cost_status="UNMEASURABLE",
+                    execution_snapshot_id=execution_truth.snapshot_id,
+                )
+                ledger_snapshot = self.ledger.snapshot()
+                equity = float(ledger_snapshot.get("equity_usdc", self.cash_usdt))
+                unrealized = float(ledger_snapshot.get("unrealized_pnl_usdc", 0.0))
+                drawdown = float(ledger_snapshot.get("drawdown_usdc", 0.0))
+                evidence_hash = _id(
+                    "pevidence",
+                    False,
+                    timestamp_refusal,
+                    delta.delta_id,
+                    execution_truth.snapshot_id,
+                    execution_truth.exchange_ts_raw,
+                    observed_at_ms,
+                    equity,
+                    self.realized_pnl_usdt,
+                )
+                return PaperDecisionResult(
+                    accepted=False,
+                    risk_decision=risk_decision,
+                    trade=trade,
+                    position=None,
+                    cash_usdt=self.cash_usdt,
+                    equity_usdt=equity,
+                    realized_pnl_usdt=round(self.realized_pnl_usdt, 8),
+                    unrealized_pnl_usdt=round(unrealized, 8),
+                    drawdown_usdt=drawdown,
+                    reason_codes=(timestamp_refusal,),
+                    evidence_hash=evidence_hash,
+                    ledger_snapshot=ledger_snapshot,
+                    decision_context=refusal_context,
+                )
         if not _finite_positive_or_false(market_price):
             reasons.append("MARKET_PRICE_INVALID")
         for name, value in (
@@ -587,12 +657,73 @@ class PaperEngine:
         close_fraction = 1.0 if delta.action in {LifecycleAction.CLOSE_LONG, LifecycleAction.CLOSE_SHORT} else _reduce_fraction(position, delta)
         requested_close_quantity = position.quantity * close_fraction
         exit_side = "SELL" if position.side == "LONG" else "BUY"
-        requested_close_notional = book_notional_for_quantity(
-            execution_truth,
-            side=exit_side,
-            quantity=requested_close_quantity,
-            fallback_price=market_price,
-        )
+        try:
+            requested_close_notional = book_notional_for_quantity(
+                execution_truth,
+                side=exit_side,
+                quantity=requested_close_quantity,
+                fallback_price=market_price,
+            )
+        except ValueError as exc:
+            reason = (
+                "NUMERIC_OVERFLOW_BOOK_NOTIONAL"
+                if "NUMERIC_OVERFLOW_BOOK_NOTIONAL" in str(exc)
+                else "BOOK_NOTIONAL_INVALID"
+            )
+            refusal_context = {
+                **decision_context,
+                "execution_numeric_refusal": reason,
+            }
+            risk_refusal = RiskDecision(
+                allowed=False,
+                decision=SignalDecision.REJECT_ORDERBOOK_STALE,
+                reasons=[reason],
+                gates={"execution_numeric_valid": False},
+            )
+            trade = PaperTrade(
+                trade_id=_id("notrade", delta.delta_id, reason),
+                action="NO_TRADE",
+                coin=delta.coin,
+                side="NONE",
+                quantity=0.0,
+                fill_price=None,
+                notional_usdt=0.0,
+                realized_pnl_usdt=0.0,
+                fees_and_cost_bps=0.0,
+                source_delta_id=delta.delta_id,
+                reason_codes=(reason,),
+                cost_status="UNMEASURABLE",
+                execution_snapshot_id=(
+                    execution_truth.snapshot_id if execution_truth is not None else None
+                ),
+            )
+            ledger_snapshot = self.ledger.snapshot()
+            equity = float(ledger_snapshot.get("equity_usdc", self.cash_usdt))
+            unrealized = float(ledger_snapshot.get("unrealized_pnl_usdc", 0.0))
+            drawdown = float(ledger_snapshot.get("drawdown_usdc", 0.0))
+            return PaperDecisionResult(
+                accepted=False,
+                risk_decision=risk_refusal,
+                trade=trade,
+                position=position,
+                cash_usdt=self.cash_usdt,
+                equity_usdt=equity,
+                realized_pnl_usdt=round(self.realized_pnl_usdt, 8),
+                unrealized_pnl_usdt=round(unrealized, 8),
+                drawdown_usdt=drawdown,
+                reason_codes=(reason,),
+                evidence_hash=_id(
+                    "pevidence",
+                    False,
+                    reason,
+                    delta.delta_id,
+                    execution_truth.snapshot_id if execution_truth is not None else None,
+                    equity,
+                    self.realized_pnl_usdt,
+                ),
+                ledger_snapshot=ledger_snapshot,
+                decision_context=refusal_context,
+            )
         canonical_execution = execute_paper_intent(
             _paper_intent_for_delta(
                 delta,
@@ -1038,10 +1169,15 @@ def _finite_or_default(value: object, default: float = 0.0) -> float:
 def _risk_depth(execution_truth: ExecutionTruth | None) -> float | None:
     if execution_truth is None:
         return None
-    return min(
-        execution_truth.visible_notional("BUY"),
-        execution_truth.visible_notional("SELL"),
-    )
+    try:
+        return min(
+            execution_truth.visible_notional("BUY"),
+            execution_truth.visible_notional("SELL"),
+        )
+    except (TypeError, ValueError, OverflowError):
+        # Keep invalid numeric depth out of risk sizing. The strict execution
+        # path below returns the stable refusal and must not leak this exception.
+        return None
 
 
 def _execution_context(result: ExecResult) -> dict[str, object]:

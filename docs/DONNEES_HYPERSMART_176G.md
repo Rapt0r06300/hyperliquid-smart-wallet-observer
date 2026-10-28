@@ -4,7 +4,7 @@
 
 Les grosses données restent hors de l'historique Git du logiciel. Elles sont conservées dans la Release privée du dépôt `Rapt0r06300/hypersmart-datasets`.
 
-Release utilisée par défaut :
+Référence historique, non canonique :
 
 - dépôt : `Rapt0r06300/hypersmart-datasets`
 - release id : `371149058`
@@ -13,6 +13,11 @@ Release utilisée par défaut :
 - **176,0341 Gio bruts**, soit environ **189 Go décimaux**
 - assets GitHub avec empreintes SHA-256
 - reconstruction refusée si taille ou SHA-256 ne correspondent pas
+
+Cette archive séparée n'est plus une dépendance obligatoire du bot ni du labo.
+La source de données active est le dépôt principal et les shards SAFE gérés par
+AlinaSync. Ne pas lancer de téléchargement de cette archive pour une preuve
+Copy-Vault.
 
 Le but n'est pas de réduire cette archive au seul lot `economic-core`. Les ~180 Go constituent une **bibliothèque historique du projet principal** pour replays, backtests, recherche de régimes, microstructure, SQLite, comparaisons et validation de stratégies.
 
@@ -28,8 +33,8 @@ Il permet de travailler avec les suites suivantes :
 
 | Suite | Rôle |
 |---|---|
-| `economic-core` | contrôle rapide du pipeline sur les sources canoniques des trois moteurs |
-| `economic-full` | union large des données Copy-Vault + Lead-Lag + Cross-Venue |
+| `economic-core` | contrôle rapide du pipeline Copy-Vault |
+| `economic-full` | données économiques Copy-Vault et livres de marché compatibles |
 | `copy-vault-full` | toutes les données repérées autour des vaults/leaders/user fills/metaorders/TWAP |
 | `lead-lag-full` | BBO/allMids/microprice/order-flow/OFI |
 | `cross-venue-full` | données de venues/dislocations/Hyperliquid/Binance/dYdX |
@@ -140,7 +145,7 @@ python -m hl_observer.ops.dataset_bridge locate --root . --suite economic-full
 
 ```text
 Release -> manifestes -> plan -> cache -> SHA-256 -> reconstruction
--> Copy-Vault -> Lead-Lag -> Cross-Venue -> petit rapport GitHub
+-> Copy-Vault -> petit rapport
 ```
 
 Il ne représente pas l'ensemble des données historiques.
@@ -153,15 +158,16 @@ La suite prioritaire après validation du smoke test est :
 economic-full
 ```
 
-Elle regroupe toutes les sources repérées pour les trois familles économiques actives et les reconstruit dans un workspace séparé.
+Elle regroupe les sources compatibles Copy-Vault et les reconstruit dans un workspace séparé.
 
 Le raccord FULL/COLD consomme désormais explicitement les sources compatibles :
 
-- Lead-Lag utilise l'ensemble des bandes BBO manifestées ;
 - Copy-Vault construit une vue multi-source dédupliquée ;
-- Cross-Venue fusionne les carnets compatibles et refuse les conflits de même timestamp.
+- le carnet Hyperliquid partagé peut servir d'entrée de marché Copy-Vault après validation ;
+- aucune recherche économique Lead-Lag/Cross-Venue n'est exécutée.
 
-Le rapport `SOURCE_CONSUMPTION_COVERAGE.*` mesure ce qui a réellement été fourni à chaque moteur.
+Le rapport `SOURCE_CONSUMPTION_COVERAGE.*` mesure les sources réellement fournies
+à Copy-Vault et indique les autres familles comme `DISABLED_BY_SCOPE`.
 
 Le moteur de campagne existant reste utilisé : aucun second moteur économique parallèle n'est inventé.
 

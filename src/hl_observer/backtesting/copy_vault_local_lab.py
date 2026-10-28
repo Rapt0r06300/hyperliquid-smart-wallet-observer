@@ -9,12 +9,12 @@ import json
 import math
 import os
 import random
-import statistics
+import re
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from decimal import ROUND_FLOOR, Decimal, localcontext
 from pathlib import Path, PurePosixPath
-from statistics import NormalDist
 from typing import Any
 
 from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
@@ -23,6 +23,19 @@ from hl_observer.backtesting.copy_vault_protocol import canonical_copy_vault_coi
 from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21,
     evaluate_frozen_v21_segment,
+)
+from hl_observer.backtesting.train_statistics import (
+    lcb_rank_is_numerically_resolved,
+    summarize_daily_values,
+)
+from hl_observer.collection.userfills_live import userfill_required_fields_reason
+from hl_observer.datasets.v2_pipeline import copy_vault_heartbeat_reason
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_difference,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
 )
 from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
@@ -44,6 +57,10 @@ _MATERIALIZED_TAPE_NAMES = (
     "copy_vault_funding_tape.jsonl", "copy_vault_ledger_tape.jsonl",
 )
 _MINIMUM_SIGNAL_UTC_DAYS = 6
+_LEADER_REVIEW_MAX_EVIDENCE_AGE_MS = 30 * 24 * 60 * 60 * 1000
+_TRIAL_CHAIN_GENESIS = "0" * 64
+_IMPROVEMENT_CHAIN_GENESIS = "0" * 64
+_IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
 _HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("core_notional_usd", tuple(float(value) for value in range(20, 191, 5))),
@@ -88,6 +105,41 @@ def _sha256(
             if progress is not None:
                 progress(total, size)
     return digest.hexdigest()
+
+
+def _canonical_json_sha256(value: object) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _campaign_engine_source_sha256(pipeline: object) -> str:
+    """Bind a trial to the source files that define its active scoring path."""
+    entry_loader = getattr(pipeline, "charger_entrees_alpha_notional_fixe_avec_audit", None)
+    if entry_loader is None or not hasattr(entry_loader, "__code__"):
+        raise ValueError("COPY_VAULT_PIPELINE_SOURCE_UNAVAILABLE")
+    source_paths = {
+        "local_lab": Path(__file__),
+        "executable_replay": Path(cv.__file__),
+        "frozen_v21": Path(evaluate_frozen_v21_segment.__code__.co_filename),
+        "train_statistics": Path(summarize_daily_values.__code__.co_filename),
+        "numeric_bounds": Path(float_not_above.__code__.co_filename),
+        "l2_normalization": Path(normalize_l2_levels.__code__.co_filename),
+        "freeze_identity": Path(parameter_hash.__code__.co_filename),
+        "safe_release_catalog": Path(load_release_history_audits.__code__.co_filename),
+        "entry_reconstruction": Path(entry_loader.__code__.co_filename),
+    }
+    components: list[dict[str, str]] = []
+    for name, raw_path in sorted(source_paths.items()):
+        if raw_path.is_symlink():
+            raise ValueError(f"COPY_VAULT_ENGINE_SOURCE_INVALID:{name}")
+        path = raw_path.resolve(strict=True)
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"COPY_VAULT_ENGINE_SOURCE_INVALID:{name}")
+        components.append({"component": name, "sha256": _sha256(path)})
+    return _canonical_json_sha256(components)
 
 
 def _number(value: object) -> float:
@@ -298,7 +350,6 @@ def _verified_assets(
         return [], {
             "status": "UNMEASURABLE", "reason": f"ACTIVE_DATA_INDEX_INVALID:{type(exc).__name__}",
         }
-
     selected_rows = [row for row in all_rows if row.get("family") in _SAFE_FAMILIES]
     copy_vault_release_tags = sorted({
         str(row.get("release_tag"))
@@ -339,6 +390,8 @@ def _verified_assets(
     cache_rows: dict[str, Any] = {}
     stat_reused = 0
     hashes_recomputed = 0
+    catalog_validation_permission_fallbacks = 0
+    heartbeat_evidence_missing: list[str] = []
     expected_ids: set[str] = set()
     recovery = Path(recovery_root).resolve()
     ordered_safe_rows = sorted(safe_rows, key=lambda item: str(item.get("dataset_id") or ""))
@@ -362,10 +415,19 @@ def _verified_assets(
         try:
             if (
                 family not in _SAFE_FAMILIES or row.get("replay_compatible") is not True
-                or row.get("validation_allowed") is False or len(sha) != 64
+                or (
+                    row.get("validation_allowed") is not None
+                    and row.get("validation_allowed") is not True
+                )
+                or len(sha) != 64
                 or any(char not in "0123456789abcdef" for char in sha)
                 or type(size) is not int or size <= 0
             ):
+                if (
+                    row.get("validation_allowed") is not None
+                    and row.get("validation_allowed") is not True
+                ):
+                    raise ValueError("CATALOG_VALIDATION_NOT_ALLOWED")
                 raise ValueError("catalog row is not replay-admissible SAFE")
             if (
                 not tag or PurePosixPath(tag).name != tag or tag in {".", ".."}
@@ -392,6 +454,20 @@ def _verified_assets(
             ):
                 raise ValueError("SAFE manifest missing or symlinked")
             manifest = json.loads(manifest_io_path.read_text(encoding="utf-8"))
+            heartbeat_reason = copy_vault_heartbeat_reason(manifest)
+            heartbeat_unproven = False
+            if heartbeat_reason is not None:
+                if heartbeat_reason != "HEARTBEAT_EVIDENCE_MISSING":
+                    raise ValueError(f"SAFE_MANIFEST_{heartbeat_reason}")
+                if not _historical_exploratory_heartbeat_fallback_is_safe(
+                    manifest, family=family
+                ):
+                    raise ValueError(
+                        "HISTORICAL_EXPLORATORY_HEARTBEAT_FALLBACK_INTEGRITY_UNPROVEN"
+                    )
+                heartbeat_unproven = True
+            if manifest.get("validation_allowed") is not True:
+                raise ValueError("SAFE_MANIFEST_VALIDATION_NOT_ALLOWED")
             if (
                 manifest.get("schema") != "alina.shard_manifest.v2"
                 or manifest.get("quality_status") != "SAFE"
@@ -406,6 +482,10 @@ def _verified_assets(
                 or str(manifest.get("sha256") or "").lower() != sha
             ):
                 raise ValueError("SAFE manifest does not match active catalog row")
+            if row.get("validation_allowed") is None:
+                # DATA_INDEX currently omits this field on verified SAFE rows;
+                # the matching, SHA-bound manifest remains the explicit authority.
+                catalog_validation_permission_fallbacks += 1
             usable_root = recovery / "usable" / "shards"
             path = usable_root / tag / asset_name
             if any(part.is_symlink() for part in (
@@ -448,7 +528,11 @@ def _verified_assets(
             else:
                 hashes_recomputed += 1
             cache_rows[dataset_id] = {"sha256": sha, "identity": identity}
-            selected.append((io_path, {**dict(row), "manifest": manifest}))
+            selected_asset = {**dict(row), "manifest": manifest}
+            if heartbeat_unproven:
+                heartbeat_evidence_missing.append(dataset_id)
+                selected_asset["_heartbeat_evidence_missing"] = True
+            selected.append((io_path, selected_asset))
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
             rejected.append({"dataset_id": dataset_id, "reason": str(exc)[:180]})
 
@@ -490,6 +574,8 @@ def _verified_assets(
         "rejected_sample": rejected[:50],
         "cached_hashes_reused_after_stat_match": stat_reused,
         "hashes_recomputed": hashes_recomputed,
+        "catalog_validation_allowed_manifest_fallbacks": catalog_validation_permission_fallbacks,
+        "heartbeat_evidence_missing_dataset_ids": sorted(heartbeat_evidence_missing),
         "no_downloads": True,
         "paper_read_only": True,
         "real_execution": False,
@@ -508,6 +594,75 @@ def _verified_assets(
         "verified": cache_rows,
     })
     return selected, audit
+
+
+def _historical_exploratory_heartbeat_fallback_is_safe(
+    manifest: Mapping[str, Any], *, family: str,
+) -> bool:
+    """Allow integrity-checked legacy WS rows into TRAIN exploration only.
+
+    A missing heartbeat never becomes continuity evidence: the caller records
+    the missing proof and keeps the SAFE corpus incomplete, which blocks every
+    held-out/economic proof gate. This narrow fallback only prevents otherwise
+    hash-verified historical fills/books from being silently unusable for
+    exploratory TRAIN diagnostics.
+    """
+    if family not in {"copy_vault_fills", "copy_vault_l2"}:
+        return False
+    synchronization = manifest.get("synchronization")
+    integrity = manifest.get("integrity")
+    provenance = manifest.get("provenance")
+    if not isinstance(synchronization, Mapping) or not isinstance(integrity, Mapping):
+        return False
+    if not isinstance(provenance, Mapping):
+        return False
+    transports = provenance.get("transports")
+    if not isinstance(transports, list) or "websocket" not in {
+        str(value).lower() for value in transports
+    }:
+        return False
+    connection_ids = synchronization.get("connection_ids")
+    if (
+        not isinstance(connection_ids, list)
+        or len(connection_ids) != 1
+        or not isinstance(connection_ids[0], str)
+        or not connection_ids[0].strip()
+        or type(synchronization.get("connection_count")) is not int
+        or synchronization["connection_count"] != 1
+        or type(synchronization.get("reconnect_delta")) is not int
+        or synchronization["reconnect_delta"] != 0
+        or type(synchronization.get("max_reconnect_count")) is not int
+        or synchronization["max_reconnect_count"] < 0
+    ):
+        return False
+    required_integrity = (
+        "gap_count", "regression_count", "desync_count", "duplicate_count",
+        "missing_timestamp_count", "missing_monotonic_count",
+    )
+    if any(
+        type(integrity.get(name)) is not int or integrity[name] != 0
+        for name in required_integrity
+    ):
+        return False
+    if "invalid_record_count" in integrity and (
+        type(integrity.get("invalid_record_count")) is not int
+        or integrity["invalid_record_count"] != 0
+    ):
+        return False
+    event_count = manifest.get("event_count")
+    record_count = manifest.get("record_count")
+    start = manifest.get("start_ts_ms")
+    end = manifest.get("end_ts_ms")
+    receive_delta = synchronization.get("receive_minus_exchange_ms")
+    return bool(
+        type(event_count) is int and event_count > 0
+        and type(record_count) is int and record_count == event_count
+        and type(start) is int and start > 0
+        and type(end) is int and end >= start
+        and isinstance(receive_delta, Mapping)
+        and type(receive_delta.get("count")) is int
+        and receive_delta["count"] == record_count
+    )
 
 
 def _load_wrappers(path: Path):
@@ -536,6 +691,11 @@ def _load_wrappers(path: Path):
 def _fill_rows(
     wrapper: Mapping[str, Any], *, family: str,
     audit: Counter[str] | None = None,
+    source_dataset_id: str | None = None,
+    source_shard_sha256: str | None = None,
+    source_catalog_sha256: str | None = None,
+    source_continuity_proven: bool | None = None,
+    expected_connection_id: str | None = None,
 ) -> list[dict[str, Any]]:
     raw = wrapper["_raw"]
     if raw.get("channel") != "userFills" or not isinstance(raw.get("data"), Mapping):
@@ -581,6 +741,29 @@ def _fill_rows(
             audit["USERFILLS_VAULT_IDENTITY_MISMATCH"] += 1
         return []
     rows: list[dict[str, Any]] = []
+    wrapper_connection_id = wrapper.get("connection_id")
+    if expected_connection_id is not None and wrapper_connection_id != expected_connection_id:
+        if audit is not None:
+            audit["SAFE_WRAPPER_CONNECTION_ID_MISMATCH"] += 1
+        return rows
+    if expected_connection_id is not None and (
+        type(wrapper.get("gap_count")) is not int or wrapper["gap_count"] != 0
+    ):
+        if audit is not None:
+            audit["SAFE_WRAPPER_GAP_EVIDENCE_INVALID"] += 1
+        return rows
+    if source_dataset_id is not None or source_shard_sha256 is not None:
+        digest = str(source_shard_sha256 or "").lower()
+        catalog_digest = str(source_catalog_sha256 or "").lower()
+        if (
+            not isinstance(source_dataset_id, str)
+            or not source_dataset_id.strip()
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            if audit is not None:
+                audit["SAFE_SOURCE_SHARD_PROVENANCE_INVALID"] += 1
+            return []
     raw_fills = data.get("fills")
     if not isinstance(raw_fills, list):
         if audit is not None:
@@ -588,25 +771,37 @@ def _fill_rows(
         return []
     for fill in raw_fills:
         try:
-            if not isinstance(fill, Mapping):
-                raise TypeError("fill row is not an object")
+            receive_value = wrapper.get("received_ts_ms")
+            receive = int(receive_value) if type(receive_value) is int and receive_value > 0 else None
+            field_error = userfill_required_fields_reason(
+                fill,
+                received_at_ms=receive,
+                require_receive=True,
+            )
+            if field_error is not None:
+                if audit is not None:
+                    audit[field_error] += 1
+                continue
+            assert isinstance(fill, Mapping)
+            event_ts = fill["time"]
             side = str(fill.get("side") or "").upper()
             if side not in {"A", "B"}:
                 raise ValueError("fill side missing or invalid")
             fee = _number(fill["fee"])
-            receive_value = wrapper.get("received_ts_ms")
-            receive = int(receive_value) if type(receive_value) is int and receive_value > 0 else None
-            event_ts = int(fill["time"])
-            if receive is None or not 0 < event_ts <= receive:
-                raise ValueError("fill timestamp is missing or noncausal")
             start_position = _number(fill["startPosition"]) if fill.get("startPosition") is not None else None
             closed_pnl = _number(fill["closedPnl"]) if fill.get("closedPnl") is not None else None
-            rows.append({
+            price = _number(fill["px"])
+            size = _number(fill["sz"])
+            if price <= 0 or size <= 0:
+                if audit is not None:
+                    audit["FILL_EXECUTION_VALUE_INVALID"] += 1
+                continue
+            row = {
                 "vault": vault,
                 "ts_ms": event_ts,
                 "coin": canonical_copy_vault_coin(fill["coin"]),
-                "px": _number(fill["px"]),
-                "sz": _number(fill["sz"]),
+                "px": price,
+                "sz": size,
                 "signe": 1 if side == "B" else -1,
                 "dir": str(fill.get("dir") or ""),
                 "start_position": start_position,
@@ -628,7 +823,23 @@ def _fill_rows(
                 "received_at_ms": receive,
                 "observed_at_ms": receive if not snapshot else None,
                 "source_raw_sha256": wrapper.get("raw_sha256"),
-            })
+            }
+            if isinstance(wrapper_connection_id, str) and wrapper_connection_id.strip():
+                row["connection_id"] = wrapper_connection_id.strip()
+            if source_continuity_proven is not None:
+                row["source_continuity_proven"] = source_continuity_proven is True
+            if source_dataset_id is not None and source_shard_sha256 is not None:
+                row["source_dataset_id"] = source_dataset_id.strip()
+                row["source_shard_sha256"] = str(source_shard_sha256).lower()
+                if (
+                    len(catalog_digest) == 64
+                    and all(char in "0123456789abcdef" for char in catalog_digest)
+                ):
+                    row["source_catalog_sha256"] = catalog_digest
+                    row["source_quality_status"] = "SAFE"
+                    row["source_manifest_verified"] = True
+                    row["source_replay_compatible"] = True
+            rows.append(row)
         except (KeyError, TypeError, ValueError, OverflowError):
             if audit is not None:
                 audit["INVALID_OR_INCOMPLETE_FILL_REJECTED"] += 1
@@ -636,7 +847,14 @@ def _fill_rows(
     return rows
 
 
-def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
+def _book_row(
+    wrapper: Mapping[str, Any], *,
+    source_dataset_id: str | None = None,
+    source_shard_sha256: str | None = None,
+    source_catalog_sha256: str | None = None,
+    source_continuity_proven: bool | None = None,
+    expected_connection_id: str | None = None,
+) -> dict[str, Any] | None:
     raw = wrapper["_raw"]
     data = raw.get("data") if isinstance(raw.get("data"), Mapping) else {}
     levels = data.get("levels")
@@ -663,7 +881,7 @@ def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
         exchange = int(data.get("time") or wrapper.get("exchange_ts_ms") or 0)
         if received < exchange or exchange <= 0 or received - exchange > 30_000:
             return None
-        return {
+        row = {
             "schema_version": "hypersmart.copy_vault_l2.v1",
             "coin": canonical_copy_vault_coin(
                 data.get("coin") or wrapper.get("instrument")
@@ -680,6 +898,54 @@ def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
             "causal_observation": True,
             "source_raw_sha256": wrapper.get("raw_sha256"),
         }
+        connection_id = wrapper.get("connection_id")
+        if connection_id is not None:
+            if not isinstance(connection_id, str) or not connection_id.strip():
+                return None
+            row["connection_id"] = connection_id.strip()
+        if expected_connection_id is not None and row.get("connection_id") != expected_connection_id:
+            return None
+        if expected_connection_id is not None and (
+            type(wrapper.get("gap_count")) is not int or wrapper["gap_count"] != 0
+        ):
+            return None
+        parsed_summary = wrapper.get("parsed_summary")
+        gap_epoch = (
+            parsed_summary.get("l2_gap_epoch")
+            if isinstance(parsed_summary, Mapping)
+            else None
+        )
+        if gap_epoch is not None:
+            if type(gap_epoch) is not int or gap_epoch < 0:
+                return None
+            row["l2_gap_epoch"] = gap_epoch
+        if source_continuity_proven is True and (
+            not row.get("connection_id") or type(row.get("l2_gap_epoch")) is not int
+        ):
+            return None
+        if source_continuity_proven is not None:
+            row["source_continuity_proven"] = source_continuity_proven is True
+        if source_dataset_id is not None or source_shard_sha256 is not None:
+            dataset_id = source_dataset_id.strip() if isinstance(source_dataset_id, str) else ""
+            shard_sha = source_shard_sha256.lower() if isinstance(source_shard_sha256, str) else ""
+            catalog_sha = source_catalog_sha256.lower() if isinstance(source_catalog_sha256, str) else ""
+            if (
+                not dataset_id
+                or len(shard_sha) != 64
+                or any(char not in "0123456789abcdef" for char in shard_sha)
+            ):
+                return None
+            row["source_dataset_id"] = dataset_id
+            row["source_shard_sha256"] = shard_sha
+            if (
+                len(catalog_sha) == 64
+                and all(char in "0123456789abcdef" for char in catalog_sha)
+            ):
+                row["source_catalog_sha256"] = catalog_sha
+                row["source_quality_status"] = "SAFE"
+                row["source_manifest_verified"] = True
+                row["source_replay_compatible"] = True
+        return row
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
 
@@ -973,6 +1239,27 @@ def materialize_safe_workspace(
     for asset_number, (path, asset) in enumerate(assets, 1):
         try:
             family = str(asset.get("family") or "")
+            source_continuity_proven = not bool(
+                asset.get("_heartbeat_evidence_missing")
+            )
+            manifest = asset.get("manifest")
+            synchronization = (
+                manifest.get("synchronization")
+                if isinstance(manifest, Mapping)
+                else None
+            )
+            connection_ids = (
+                synchronization.get("connection_ids")
+                if isinstance(synchronization, Mapping)
+                else None
+            )
+            expected_connection_id = (
+                connection_ids[0]
+                if isinstance(connection_ids, list)
+                and len(connection_ids) == 1
+                and isinstance(connection_ids[0], str)
+                else None
+            )
             if family == "copy_vault_snapshot":
                 historical_snapshot_shards += 1
             for wrapper in _load_wrappers(path):
@@ -987,7 +1274,24 @@ def materialize_safe_workspace(
                             and isinstance(raw_fill_list, list)
                         ):
                             historical_fill_observations += len(raw_fill_list)
-                    for row in _fill_rows(wrapper, family=family, audit=payload_audit):
+                    for row in _fill_rows(
+                        wrapper,
+                        family=family,
+                        audit=payload_audit,
+                        source_dataset_id=str(asset.get("dataset_id") or ""),
+                        source_shard_sha256=str(asset.get("sha256") or ""),
+                        source_catalog_sha256=str(audit.get("source_index_sha256") or ""),
+                        source_continuity_proven=(
+                            source_continuity_proven
+                            if family == "copy_vault_fills"
+                            else None
+                        ),
+                        expected_connection_id=(
+                            expected_connection_id
+                            if family == "copy_vault_fills"
+                            else None
+                        ),
+                    ):
                         identity = (
                             row["vault"], row["coin"], row["ts_ms"], row.get("tid"),
                             row.get("hash"), row.get("oid"), row["px"], row["sz"], row["signe"],
@@ -999,7 +1303,20 @@ def materialize_safe_workspace(
                         ):
                             fills[identity] = row
                 elif asset.get("family") == "copy_vault_l2":
-                    row = _book_row(wrapper)
+                    dataset_id = asset.get("dataset_id")
+                    shard_sha256 = asset.get("sha256")
+                    row = _book_row(
+                        wrapper,
+                        source_dataset_id=(
+                            str(dataset_id) if isinstance(dataset_id, str) and dataset_id else None
+                        ),
+                        source_shard_sha256=(
+                            str(shard_sha256) if isinstance(shard_sha256, str) and shard_sha256 else None
+                        ),
+                        source_catalog_sha256=str(audit.get("source_index_sha256") or ""),
+                        source_continuity_proven=source_continuity_proven,
+                        expected_connection_id=expected_connection_id,
+                    )
                     if row:
                         identity = (
                             row["coin"], row["received_at_ms"], row["exchange_ts_ms"],
@@ -1088,6 +1405,43 @@ def materialize_safe_workspace(
         key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
     )
     historical_unique_fills = sum(bool(row.get("isSnapshot")) for row in fill_rows)
+    verified_source_assets = [
+        {
+            "dataset_id": asset.get("dataset_id"),
+            "family": asset.get("family"),
+            "release_tag": asset.get("release_tag"),
+            "release_asset": asset.get("release_asset"),
+            "manifest_path": asset.get("manifest_path"),
+            "bytes": asset.get("bytes"),
+            "sha256": str(asset.get("sha256") or "").lower() or None,
+        }
+        for _path, asset in sorted(
+            assets, key=lambda pair: str(pair[1].get("dataset_id") or "")
+        )
+    ]
+    source_asset_inventory_complete = bool(verified_source_assets) and all(
+        isinstance(asset.get("dataset_id"), str)
+        and bool(asset["dataset_id"].strip())
+        and type(asset.get("bytes")) is int
+        and asset["bytes"] > 0
+        and isinstance(asset.get("sha256"), str)
+        and len(asset["sha256"]) == 64
+        and all(char in "0123456789abcdef" for char in asset["sha256"])
+        and isinstance(asset.get("manifest_path"), str)
+        and bool(asset["manifest_path"])
+        for asset in verified_source_assets
+    )
+    source_asset_inventory_sha256 = _source_asset_inventory_sha256(
+        verified_source_assets
+    )
+    source_asset_inventory_error = _source_asset_inventory_error({
+        "verified_source_assets": verified_source_assets,
+        "source_asset_inventory_count": len(verified_source_assets),
+        "source_asset_inventory_sha256": source_asset_inventory_sha256,
+        "source_asset_inventory_complete": source_asset_inventory_complete,
+        "source_index_sha256": audit.get("source_index_sha256"),
+        "selection_digest": audit.get("selection_digest"),
+    })
     materialized_tapes: dict[str, dict[str, Any]] = {}
     for name, rows in (
         ("vault_fills.jsonl", fill_rows),
@@ -1114,8 +1468,10 @@ def materialize_safe_workspace(
     data_complete = (
         audit.get("status") == "SAFE_COMPLETE"
         and history_audit.get("status") == "COMPLETE"
+        and source_asset_inventory_error is None
         and wrapper_rejections == 0
         and not payload_audit
+        and not audit.get("heartbeat_evidence_missing_dataset_ids")
     )
     replay_inputs_available = bool(fill_rows and book_rows)
     status = (
@@ -1131,8 +1487,12 @@ def materialize_safe_workspace(
         reason = "SAFE_WRAPPERS_REJECTED"
     elif payload_audit:
         reason = "SAFE_PAYLOAD_ROWS_REJECTED"
+    elif audit.get("heartbeat_evidence_missing_dataset_ids"):
+        reason = "COPY_VAULT_HEARTBEAT_CONTINUITY_UNPROVEN"
     elif history_audit.get("status") != "COMPLETE":
         reason = "HISTORICAL_BACKFILL_COVERAGE_PARTIAL_OR_UNKNOWN"
+    elif source_asset_inventory_error is not None:
+        reason = source_asset_inventory_error
     else:
         reason = audit.get("reason") or "FILLS_OR_CAUSAL_L2_MISSING"
     result = {
@@ -1168,7 +1528,22 @@ def materialize_safe_workspace(
         "book_start_ms": book_rows[0]["received_at_ms"] if book_rows else None,
         "book_end_ms": book_rows[-1]["received_at_ms"] if book_rows else None,
         "data_complete": data_complete,
+        "continuity_evidence_status": (
+            "UNPROVEN"
+            if audit.get("heartbeat_evidence_missing_dataset_ids")
+            else "NO_MISSING_HEARTBEAT_EVIDENCE"
+        ),
+        "continuity_evidence_missing_shards": len(
+            audit.get("heartbeat_evidence_missing_dataset_ids") or []
+        ),
+        "continuity_evidence_missing_dataset_ids": audit.get(
+            "heartbeat_evidence_missing_dataset_ids", []
+        ),
         "replay_inputs_available": replay_inputs_available,
+        "verified_source_assets": verified_source_assets,
+        "source_asset_inventory_count": len(verified_source_assets),
+        "source_asset_inventory_sha256": source_asset_inventory_sha256,
+        "source_asset_inventory_complete": source_asset_inventory_complete,
         "materialized_tapes": materialized_tapes,
         "safe_catalog_status": audit.get("status"),
         "paper_read_only": True,
@@ -1182,6 +1557,73 @@ def materialize_safe_workspace(
     if audit.get("_watch_files") is not None:
         result["_watch_files"] = audit["_watch_files"]
     return result
+
+
+def _source_asset_inventory_sha256(assets: Sequence[Mapping[str, Any]]) -> str:
+    material = "\n".join(
+        "\0".join(
+            str(asset.get(key) if asset.get(key) is not None else "<MISSING>")
+            for key in (
+                "dataset_id", "family", "release_tag", "release_asset",
+                "manifest_path", "bytes", "sha256",
+            )
+        )
+        for asset in assets
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _source_selection_digest(
+    source_index_sha256: str, assets: Sequence[Mapping[str, Any]]
+) -> str:
+    material = source_index_sha256 + "\n" + "\n".join(
+        f"{asset['dataset_id']}\0{asset['sha256']}"
+        for asset in sorted(assets, key=lambda row: str(row.get("dataset_id") or ""))
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _source_asset_inventory_error(manifest: Mapping[str, Any]) -> str | None:
+    """Check the inventory receipt and bind it to the SAFE selection digest."""
+
+    assets = manifest.get("verified_source_assets")
+    if (
+        manifest.get("source_asset_inventory_complete") is not True
+        or not isinstance(assets, list)
+        or not assets
+        or type(manifest.get("source_asset_inventory_count")) is not int
+        or manifest.get("source_asset_inventory_count") != len(assets)
+    ):
+        return "SAFE_SOURCE_ASSET_INVENTORY_MISSING_OR_INCOMPLETE"
+    seen: set[str] = set()
+    for asset in assets:
+        if not isinstance(asset, Mapping):
+            return "SAFE_SOURCE_ASSET_INVENTORY_ROW_INVALID"
+        dataset_id = asset.get("dataset_id")
+        digest = asset.get("sha256")
+        if (
+            not isinstance(dataset_id, str) or not dataset_id.strip()
+            or dataset_id in seen
+            or asset.get("family") not in _SAFE_FAMILIES
+            or type(asset.get("bytes")) is not int or asset["bytes"] <= 0
+            or not isinstance(digest, str) or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or not isinstance(asset.get("release_tag"), str) or not asset["release_tag"]
+            or not isinstance(asset.get("release_asset"), str) or not asset["release_asset"]
+            or not isinstance(asset.get("manifest_path"), str) or not asset["manifest_path"]
+        ):
+            return "SAFE_SOURCE_ASSET_INVENTORY_ROW_INVALID"
+        seen.add(dataset_id)
+    expected_inventory = _source_asset_inventory_sha256(assets)
+    if manifest.get("source_asset_inventory_sha256") != expected_inventory:
+        return "SAFE_SOURCE_ASSET_INVENTORY_DIGEST_MISMATCH"
+    source_index_sha = str(manifest.get("source_index_sha256") or "").lower()
+    if len(source_index_sha) != 64 or any(char not in "0123456789abcdef" for char in source_index_sha):
+        return "SAFE_SOURCE_INDEX_SHA256_INVALID"
+    expected_selection = _source_selection_digest(source_index_sha, assets)
+    if str(manifest.get("selection_digest") or "").lower() != expected_selection:
+        return "SAFE_SELECTION_DIGEST_DOES_NOT_BIND_SOURCE_INVENTORY"
+    return None
 
 
 def _load_pipeline():
@@ -1273,6 +1715,312 @@ def _candidate_parameters(sequence_index: int) -> dict[str, Any] | None:
     return params
 
 
+def _campaign_search_config(bounds: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+    """Freeze the deterministic proposal contract and TRAIN-only time bounds."""
+    config = {
+        "schema": "hypersmart.copy_vault_search_config.v1",
+        "family": "copy_vault",
+        "proposal_method": "HALTON_RADICAL_INVERSE_V1",
+        "proposal_seed": 0,
+        "first_sequence_index": 1,
+        "halton_bases": list(_HALTON_BASES),
+        "parameter_domains": {
+            name: list(domain) for name, domain in _PARAMETER_DOMAINS
+        },
+        "paper_capital_usd": PAPER_CAPITAL_USD,
+        "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
+        "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+        "heldout_tuning_allowed": False,
+        "temporal_windows": dict(bounds),
+    }
+    return config, _canonical_json_sha256(config)
+
+
+def _trial_receipt_payload(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in row.items() if key != "trial_receipt_sha256"}
+
+
+def _trial_with_receipt_chain(
+    row: Mapping[str, Any], previous_receipt_sha256: str,
+) -> dict[str, Any]:
+    if (
+        not isinstance(previous_receipt_sha256, str)
+        or len(previous_receipt_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in previous_receipt_sha256)
+    ):
+        raise ValueError("invalid prior trial receipt chain hash")
+    receipt = dict(row)
+    receipt["previous_trial_receipt_sha256"] = previous_receipt_sha256
+    receipt.pop("trial_receipt_sha256", None)
+    receipt["trial_receipt_sha256"] = _canonical_json_sha256(
+        _trial_receipt_payload(receipt)
+    )
+    return receipt
+
+
+def _campaign_trial_chain(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[str, list[str]]:
+    """Validate the append-only receipt chain, including its legacy v1 prefix."""
+    previous = _TRIAL_CHAIN_GENESIS
+    prefixes: list[str] = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"trial receipt chain row {index} is invalid")
+        schema = row.get("schema")
+        if schema == "hypersmart.copy_vault_local_trial.v1":
+            if "previous_trial_receipt_sha256" in row or "trial_receipt_sha256" in row:
+                raise ValueError(f"trial receipt chain legacy row {index} has receipt fields")
+            digest = _canonical_json_sha256(dict(row))
+        elif schema == "hypersmart.copy_vault_local_trial.v2":
+            if row.get("previous_trial_receipt_sha256") != previous:
+                raise ValueError(f"trial receipt chain predecessor mismatch at row {index}")
+            supplied = row.get("trial_receipt_sha256")
+            if (
+                not isinstance(supplied, str)
+                or len(supplied) != 64
+                or any(char not in "0123456789abcdef" for char in supplied)
+                or supplied != _canonical_json_sha256(_trial_receipt_payload(row))
+            ):
+                raise ValueError(f"trial receipt chain hash mismatch at row {index}")
+            digest = supplied
+        else:
+            raise ValueError(f"trial receipt chain schema mismatch at row {index}")
+        previous = digest
+        prefixes.append(digest)
+    return previous, prefixes
+
+
+def _attempt_with_receipt_chain(
+    row: Mapping[str, Any], previous_receipt_sha256: str,
+) -> dict[str, Any]:
+    if (
+        not isinstance(previous_receipt_sha256, str)
+        or len(previous_receipt_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in previous_receipt_sha256)
+    ):
+        raise ValueError("invalid prior attempt receipt chain hash")
+    receipt = dict(row)
+    receipt["previous_attempt_receipt_sha256"] = previous_receipt_sha256
+    receipt.pop("attempt_receipt_sha256", None)
+    receipt["attempt_receipt_sha256"] = _canonical_json_sha256({
+        key: value for key, value in receipt.items()
+        if key != "attempt_receipt_sha256"
+    })
+    return receipt
+
+
+def _campaign_attempt_chain(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[str, list[str]]:
+    previous = _TRIAL_CHAIN_GENESIS
+    prefixes: list[str] = []
+    for index, row in enumerate(rows, 1):
+        supplied = row.get("attempt_receipt_sha256")
+        payload = {
+            key: value for key, value in row.items()
+            if key != "attempt_receipt_sha256"
+        }
+        if (
+            row.get("schema") != "hypersmart.copy_vault_local_attempt.v1"
+            or row.get("previous_attempt_receipt_sha256") != previous
+            or not isinstance(supplied, str)
+            or len(supplied) != 64
+            or any(char not in "0123456789abcdef" for char in supplied)
+            or supplied != _canonical_json_sha256(payload)
+        ):
+            raise ValueError(f"attempt receipt chain mismatch at row {index}")
+        previous = supplied
+        prefixes.append(supplied)
+    return previous, prefixes
+
+
+def _load_campaign_attempts(path: Path, selection_digest: str) -> list[dict[str, Any]]:
+    if path.is_symlink():
+        raise ValueError("unsafe Copy-Vault attempt ledger symlink")
+    if not path.exists():
+        return []
+    if not path.is_file():
+        raise ValueError("unsafe Copy-Vault attempt ledger")
+    rows: list[dict[str, Any]] = []
+    sequences: set[int] = set()
+    signatures: set[str] = set()
+    with path.open("r", encoding="utf-8") as handle:
+        for number, line in enumerate(handle, 1):
+            try:
+                row = json.loads(line)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"attempt ledger corrupted at line {number}") from exc
+            if (
+                not isinstance(row, dict)
+                or row.get("schema") != "hypersmart.copy_vault_local_attempt.v1"
+                or row.get("selection_digest") != selection_digest
+                or type(row.get("sequence_index")) is not int
+                or row["sequence_index"] <= 0
+                or type(row.get("trial_number")) is not int
+                or row["trial_number"] <= 0
+                or not isinstance(row.get("parameter_signature"), str)
+                or row.get("parameter_signature") != parameter_hash(row.get("parameters"))
+                or row["sequence_index"] in sequences
+                or row["parameter_signature"] in signatures
+                or row.get("paper_read_only") is not True
+                or row.get("real_execution") is not False
+            ):
+                raise ValueError(f"attempt ledger identity mismatch at line {number}")
+            for key in (
+                "source_catalog_sha256", "source_asset_inventory_sha256",
+                "engine_source_sha256", "campaign_config_sha256",
+            ):
+                value = row.get(key)
+                if (
+                    not isinstance(value, str)
+                    or len(value) != 64
+                    or any(char not in "0123456789abcdef" for char in value)
+                ):
+                    raise ValueError(f"attempt ledger lineage invalid at line {number}: {key}")
+            if (
+                row.get("proposal_method") != "HALTON_RADICAL_INVERSE_V1"
+                or type(row.get("proposal_seed")) is not int
+                or row.get("proposal_seed") != 0
+                or not isinstance(row.get("temporal_windows"), dict)
+            ):
+                raise ValueError(f"attempt ledger search config invalid at line {number}")
+            sequences.add(row["sequence_index"])
+            signatures.add(row["parameter_signature"])
+            rows.append(row)
+    _campaign_attempt_chain(rows)
+    return rows
+
+
+def _checkpoint_resume_state(
+    checkpoint: Mapping[str, Any] | None,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    attempts: Sequence[Mapping[str, Any]] | None = None,
+    selection_digest: str,
+    source_catalog_sha256: str,
+    source_asset_inventory_sha256: str,
+    engine_source_sha256: str,
+    campaign_config_sha256: str,
+) -> dict[str, Any]:
+    final_chain, prefixes = _campaign_trial_chain(rows)
+    if attempts is None:
+        attempt_chain, attempt_prefixes = _TRIAL_CHAIN_GENESIS, []
+        attempt_count = len(rows)
+    else:
+        attempt_chain, attempt_prefixes = _campaign_attempt_chain(attempts)
+        legacy_count = sum(
+            row.get("schema") == "hypersmart.copy_vault_local_trial.v1"
+            for row in rows
+        )
+        attempt_count = legacy_count + len(attempts)
+        attempts_by_hash = {
+            str(row.get("attempt_receipt_sha256")): row for row in attempts
+        }
+        for index, row in enumerate(rows, 1):
+            if row.get("schema") != "hypersmart.copy_vault_local_trial.v2":
+                continue
+            reservation = attempts_by_hash.get(str(row.get("attempt_receipt_sha256")))
+            if (
+                reservation is None
+                or reservation.get("sequence_index") != row.get("sequence_index")
+                or reservation.get("trial_number") != row.get("trial_number")
+                or reservation.get("parameter_signature") != row.get("parameter_signature")
+                or reservation.get("engine_source_sha256") != row.get("engine_source_sha256")
+                or reservation.get("campaign_config_sha256") != row.get("campaign_config_sha256")
+            ):
+                raise ValueError(f"Copy-Vault trial has no matching durable attempt at row {index}")
+    max_sequence = max(
+        (
+            int(row.get("sequence_index") or 0)
+            for row in [*rows, *(attempts or ())]
+        ),
+        default=0,
+    )
+    checkpoint_present = checkpoint is not None
+    checkpoint = checkpoint or {}
+    if checkpoint_present:
+        if checkpoint.get("schema") not in {
+            "hypersmart.copy_vault_search_checkpoint.v1",
+            "hypersmart.copy_vault_search_checkpoint.v2",
+        }:
+            raise ValueError("Copy-Vault checkpoint schema mismatch")
+        if checkpoint.get("selection_digest") != selection_digest:
+            raise ValueError("Copy-Vault checkpoint does not match this SAFE selection")
+        for key, expected in (
+            ("source_catalog_sha256", source_catalog_sha256),
+            ("source_asset_inventory_sha256", source_asset_inventory_sha256),
+        ):
+            recorded = checkpoint.get(key)
+            if recorded is not None and recorded != expected:
+                raise ValueError(f"Copy-Vault checkpoint data identity mismatch: {key}")
+        count = checkpoint.get("campaign_trials", 0)
+        if type(count) is not int or count < 0:
+            raise ValueError("Copy-Vault checkpoint trial count is invalid")
+        if count > len(rows):
+            raise ValueError("Copy-Vault checkpoint is ahead of durable trial receipts")
+        if checkpoint.get("schema") == "hypersmart.copy_vault_search_checkpoint.v2":
+            for key in ("engine_source_sha256", "campaign_config_sha256"):
+                value = checkpoint.get(key)
+                if (
+                    not isinstance(value, str)
+                    or len(value) != 64
+                    or any(char not in "0123456789abcdef" for char in value)
+                ):
+                    raise ValueError(f"Copy-Vault checkpoint identity is invalid: {key}")
+            checkpoint_attempts = checkpoint.get("campaign_attempts", count)
+            if type(checkpoint_attempts) is not int or checkpoint_attempts < count:
+                raise ValueError("Copy-Vault checkpoint attempt count is invalid")
+            if (
+                checkpoint_attempts > attempt_count
+                and checkpoint.get("schema") == "hypersmart.copy_vault_search_checkpoint.v2"
+            ):
+                raise ValueError("Copy-Vault checkpoint is ahead of durable attempt receipts")
+            attempt_receipt_count = checkpoint.get("attempt_receipt_count", 0)
+            if type(attempt_receipt_count) is not int or attempt_receipt_count < 0:
+                raise ValueError("Copy-Vault checkpoint attempt receipt count is invalid")
+            if attempt_receipt_count > len(attempt_prefixes):
+                raise ValueError("Copy-Vault checkpoint is ahead of durable attempt receipts")
+            if checkpoint.get("schema") == "hypersmart.copy_vault_search_checkpoint.v2":
+                expected_attempt_chain = (
+                    attempt_prefixes[attempt_receipt_count - 1]
+                    if attempt_receipt_count else _TRIAL_CHAIN_GENESIS
+                )
+                if checkpoint.get("attempt_receipt_chain_sha256") != expected_attempt_chain:
+                    raise ValueError("Copy-Vault checkpoint attempt receipt chain mismatch")
+            expected_chain = prefixes[count - 1] if count else _TRIAL_CHAIN_GENESIS
+            if checkpoint.get("trial_receipt_chain_sha256") != expected_chain:
+                raise ValueError("Copy-Vault checkpoint receipt chain mismatch")
+        else:
+            checkpoint_attempts = count
+        next_sequence = checkpoint.get("next_sequence_index", 1)
+        if type(next_sequence) is not int or next_sequence <= 0:
+            raise ValueError("Copy-Vault checkpoint next sequence is invalid")
+        next_sequence = max(next_sequence, max_sequence + 1)
+    else:
+        count = 0
+        checkpoint_attempts = attempt_count
+        next_sequence = max_sequence + 1
+    return {
+        "campaign_trials": len(rows),
+        "campaign_attempts": max(len(rows), attempt_count, checkpoint_attempts),
+        "attempt_receipt_count": len(attempt_prefixes),
+        "attempt_receipt_chain_sha256": attempt_chain,
+        "incomplete_attempts": max(0, attempt_count - len(rows)),
+        "next_sequence_index": next_sequence,
+        "trial_receipt_chain_sha256": final_chain,
+        "ledger_reconciled": len(rows) > count or attempt_count > checkpoint_attempts,
+        "engine_changed": bool(
+            checkpoint_present
+            and checkpoint.get("engine_source_sha256") != engine_source_sha256
+        ),
+        "config_changed": bool(
+            checkpoint_present
+            and checkpoint.get("campaign_config_sha256") != campaign_config_sha256
+        ),
+    }
+
+
 def _search_space_size() -> int:
     core = dict(_PARAMETER_DOMAINS)["core_notional_usd"]
     probe = dict(_PARAMETER_DOMAINS)["probe_notional_usd"]
@@ -1327,13 +2075,16 @@ def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
 
 
 def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, Any]]:
+    if path.is_symlink():
+        raise ValueError("unsafe Copy-Vault trial ledger symlink")
     if not path.exists():
         return []
-    if path.is_symlink() or not path.is_file():
+    if not path.is_file():
         raise ValueError("unsafe Copy-Vault trial ledger")
     rows: list[dict[str, Any]] = []
     signatures: set[str] = set()
     sequences: set[int] = set()
+    trial_numbers: set[int] = set()
     with path.open("r", encoding="utf-8") as handle:
         for number, line in enumerate(handle, 1):
             try:
@@ -1342,7 +2093,10 @@ def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, A
                 raise ValueError(f"trial ledger corrupted at line {number}") from exc
             if (
                 not isinstance(row, dict)
-                or row.get("schema") != "hypersmart.copy_vault_local_trial.v1"
+                or row.get("schema") not in {
+                    "hypersmart.copy_vault_local_trial.v1",
+                    "hypersmart.copy_vault_local_trial.v2",
+                }
                 or row.get("selection_digest") != selection_digest
                 or not isinstance(row.get("parameter_signature"), str)
                 or not isinstance(row.get("parameters"), dict)
@@ -1351,15 +2105,40 @@ def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, A
                 or row.get("sequence_index", 0) <= 0
                 or type(row.get("trial_number")) is not int
                 or row.get("trial_number", 0) <= 0
+                or row.get("trial_number") in trial_numbers
                 or row.get("paper_read_only") is not True
                 or row.get("real_execution") is not False
                 or row.get("parameter_signature") in signatures
                 or row.get("sequence_index") in sequences
             ):
                 raise ValueError(f"trial ledger identity mismatch at line {number}")
+            if row.get("schema") == "hypersmart.copy_vault_local_trial.v2":
+                for key in (
+                    "engine_source_sha256", "campaign_config_sha256",
+                    "source_catalog_sha256", "source_asset_inventory_sha256",
+                    "attempt_receipt_sha256",
+                ):
+                    value = row.get(key)
+                    if (
+                        not isinstance(value, str)
+                        or len(value) != 64
+                        or any(char not in "0123456789abcdef" for char in value)
+                    ):
+                        raise ValueError(
+                            f"trial ledger lineage is invalid at line {number}: {key}"
+                        )
+                if (
+                    type(row.get("proposal_seed")) is not int
+                    or row.get("proposal_seed") != 0
+                    or row.get("proposal_method") != "HALTON_RADICAL_INVERSE_V1"
+                    or not isinstance(row.get("temporal_windows"), dict)
+                ):
+                    raise ValueError(f"trial ledger search config is invalid at line {number}")
             signatures.add(row["parameter_signature"])
             sequences.add(row["sequence_index"])
+            trial_numbers.add(row["trial_number"])
             rows.append(row)
+    _campaign_trial_chain(rows)
     return rows
 
 
@@ -1398,55 +2177,60 @@ def _prior_copy_vault_trial_count(
             if campaign.name == exclude_selection_digest:
                 continue
             trial_path = campaign / "TRIALS.jsonl"
-            if not trial_path.exists():
-                checkpoint_path = campaign / "CHECKPOINT.json"
-                if checkpoint_path.is_symlink():
-                    raise ValueError("prior Copy-Vault checkpoint is symlinked")
-                if checkpoint_path.is_file():
-                    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-                    if int(checkpoint.get("campaign_trials") or 0) > 0:
-                        raise ValueError("prior Copy-Vault trial receipts are missing")
-                continue
-            if trial_path.is_symlink() or not trial_path.is_file():
-                raise ValueError("unsafe prior Copy-Vault trial history")
-            campaign_trial_count = len(_load_campaign_trials(trial_path, campaign.name))
-            total += campaign_trial_count
+            attempt_path = campaign / "ATTEMPTS.jsonl"
             checkpoint_path = campaign / "CHECKPOINT.json"
-            if checkpoint_path.is_symlink():
-                raise ValueError("prior Copy-Vault checkpoint is symlinked")
+            if trial_path.is_symlink() or attempt_path.is_symlink() or checkpoint_path.is_symlink():
+                raise ValueError("prior Copy-Vault campaign receipt is symlinked")
+            rows = _load_campaign_trials(trial_path, campaign.name)
+            attempts = _load_campaign_attempts(attempt_path, campaign.name)
+            checkpoint = None
             if checkpoint_path.is_file():
                 checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-                checkpoint_count = checkpoint.get("campaign_trials")
-                if (
-                    checkpoint.get("schema") != "hypersmart.copy_vault_search_checkpoint.v1"
-                    or checkpoint.get("selection_digest") != campaign.name
-                    or type(checkpoint_count) is not int
-                    or checkpoint_count < 0
-                    or checkpoint_count > campaign_trial_count
-                ):
-                    raise ValueError("prior Copy-Vault checkpoint conflicts with durable trial receipts")
+                if not isinstance(checkpoint, dict):
+                    raise ValueError("prior Copy-Vault checkpoint is invalid")
+            source_row = (attempts or rows or [{}])[0]
+            state = _checkpoint_resume_state(
+                checkpoint,
+                rows,
+                attempts=attempts,
+                selection_digest=campaign.name,
+                source_catalog_sha256=str(
+                    (checkpoint or {}).get("source_catalog_sha256")
+                    or source_row.get("source_catalog_sha256") or ""
+                ),
+                source_asset_inventory_sha256=str(
+                    (checkpoint or {}).get("source_asset_inventory_sha256")
+                    or source_row.get("source_asset_inventory_sha256") or ""
+                ),
+                engine_source_sha256=str(
+                    (checkpoint or {}).get("engine_source_sha256")
+                    or source_row.get("engine_source_sha256") or ""
+                ),
+                campaign_config_sha256=str(
+                    (checkpoint or {}).get("campaign_config_sha256")
+                    or source_row.get("campaign_config_sha256") or ""
+                ),
+            )
+            total += state["campaign_attempts"]
     return total
 
 
-def _daily_lcb(daily_values: object, trial_count: int) -> float | None:
+def _daily_lcb(daily_values: object, trial_count: int) -> dict[str, Any]:
     if not isinstance(daily_values, (list, tuple)):
-        return None
-    values: list[float] = []
-    for raw in daily_values:
-        try:
-            value = float(raw)
-        except (TypeError, ValueError, OverflowError):
-            return None
-        if not math.isfinite(value):
-            return None
-        values.append(value)
-    if len(values) < 3:
-        return None
-    alpha = min(0.499999, max(1e-12, 0.05 / max(1, trial_count)))
-    z = NormalDist().inv_cdf(1.0 - alpha)
-    mean = statistics.mean(values)
-    standard_error = statistics.stdev(values) / math.sqrt(len(values))
-    return mean - z * standard_error
+        return summarize_daily_values((), trial_count=trial_count)
+    return summarize_daily_values(daily_values, trial_count=trial_count)
+
+
+def _daily_lcb_rank(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Adapt the active-day score and error bound to the shared rank guard."""
+    return {
+        "total_lcb_usd_exact_decimal": summary.get(
+            "daily_mean_lcb_usd_exact_decimal"
+        ),
+        "total_lcb_numeric_error_bound_usd_exact_decimal": summary.get(
+            "daily_mean_lcb_numeric_error_bound_usd_exact_decimal"
+        ),
+    }
 
 
 def _campaign_lock(path: Path) -> SingleWriterFileLock:
@@ -1466,9 +2250,11 @@ def run_local_campaign(
     progress: Callable[[str], None] | None = None,
     continuous: bool = False,
     campaign_root: str | Path | None = None,
+    repository_root: str | Path | None = None,
     max_trials: int = 128,
     on_update: Callable[[Mapping[str, Any]], None] | None = None,
     input_change_check: Callable[[], bool] | None = None,
+    leader_review_ledger_path: str | Path | None = None,
 ) -> dict[str, Any]:
     workspace = Path(workspace)
     say = progress or (lambda _message: None)
@@ -1482,6 +2268,18 @@ def run_local_campaign(
         }
     selection_digest = str(input_manifest.get("selection_digest") or "")
     source_catalog_sha = str(input_manifest.get("source_index_sha256") or "").lower()
+    source_inventory_error = _source_asset_inventory_error(input_manifest)
+    if source_inventory_error is not None:
+        return {
+            "status": "UNMEASURABLE", "reason": source_inventory_error,
+            "selection_digest": selection_digest,
+            "source_asset_inventory_sha256": input_manifest.get(
+                "source_asset_inventory_sha256"
+            ),
+            "candidates_tested": 0, "freeze_created": False,
+            "economically_proven": False, "paper_read_only": True,
+            "real_execution": False,
+        }
     if (
         input_manifest.get("paper_read_only") is not True
         or input_manifest.get("real_execution") is not False
@@ -1515,6 +2313,83 @@ def run_local_campaign(
     entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(workspace)
     metaorders, meta_audit = cv.cluster_metaorders(entries)
     books, books_audit = cv.load_observed_books(workspace, coins={str(row["coin"]) for row in metaorders})
+    leader_review_persistence: dict[str, Any] = {"status": "NOT_REQUESTED"}
+    leader_quality_train: dict[str, Any] = {}
+    if leader_review_ledger_path is not None:
+        try:
+            from hl_observer.backtesting.copy_vault_v9_online_leader_quality_train import (
+                explore_copy_vault_v9_online_leader_quality_train,
+            )
+            from hl_observer.research.leader_review_ledger import (
+                append_copy_vault_v9_leader_reviews,
+            )
+
+            v9_metaorders, v9_books, causal_protocol_audit = (
+                cv.select_causal_protocol_inputs(metaorders, books)
+            )
+            lifecycle_events, lifecycle_audit = (
+                pipeline.charger_evenements_lifecycle_avec_audit(workspace)
+            )
+            v9_result = explore_copy_vault_v9_online_leader_quality_train(
+                v9_metaorders,
+                v9_books,
+                lifecycle_events,
+                input_audit={
+                    "entries": entries_audit,
+                    "metaorders": meta_audit,
+                    "books": books_audit,
+                    "causal_protocol": causal_protocol_audit,
+                    "lifecycle": lifecycle_audit,
+                },
+            )
+            v9_source_path = Path(
+                explore_copy_vault_v9_online_leader_quality_train.__code__.co_filename
+            )
+            engine_sha256 = _sha256(v9_source_path)
+            leader_review_persistence = append_copy_vault_v9_leader_reviews(
+                leader_review_ledger_path,
+                v9_result,
+                safe_inventory=input_manifest,
+                reviewer_id="copy-vault-v9-online-quality-train",
+                max_evidence_age_ms=_LEADER_REVIEW_MAX_EVIDENCE_AGE_MS,
+                engine_sha256=engine_sha256,
+            )
+            traces = v9_result.get("leader_decision_traces", {}).get("traces", [])
+            leader_quality_train = {
+                "schema_version": v9_result.get("schema_version"),
+                "status": v9_result.get("status"),
+                "selection_scope": v9_result.get("selection_scope"),
+                "heldout_evaluated": v9_result.get("heldout_evaluated"),
+                "selection_eligible": v9_result.get("selection_eligible"),
+                "decision_count": sum(
+                    len(trace.get("decisions", []))
+                    for trace in traces if isinstance(trace, Mapping)
+                ),
+                "trace_count": len(traces),
+                "engine_sha256": engine_sha256,
+                "max_evidence_age_ms": _LEADER_REVIEW_MAX_EVIDENCE_AGE_MS,
+                "decision_authority": "CONSULTATIVE_ONLY_CANONICAL_GATES_REMAIN_AUTHORITATIVE",
+            }
+            say(
+                "Revues leaders V9 TRAIN : "
+                f"{leader_review_persistence.get('decision_count', 0)} décisions · "
+                f"{leader_review_persistence.get('reviewable_count', 0)} mesurables · "
+                f"{leader_review_persistence.get('unmeasurable_count', 0)} non mesurables · "
+                f"registre {leader_review_persistence.get('status')}"
+            )
+        except Exception as exc:  # noqa: BLE001 - preserve an explicit failure without granting authority
+            leader_review_persistence = {
+                "status": "FAILED",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "ledger_path": str(leader_review_ledger_path),
+                "consultative_only": True,
+                "can_change_decision": False,
+                "can_modify_frozen_candidate": False,
+                "can_modify_oos_forward_splits": False,
+                "can_select_champion": False,
+                "can_prove_pnl": False,
+            }
+            say("Revues leaders V9 TRAIN : échec de persistance explicite — " + leader_review_persistence["reason"])
     timestamps = [int(row["signal_ts_ms"]) for row in metaorders]
     bounds = _bounds(timestamps)
     signal_coverage = _signal_coverage(timestamps)
@@ -1533,6 +2408,12 @@ def run_local_campaign(
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
         "paper_capital_usd": PAPER_CAPITAL_USD,
         "selection_digest": selection_digest,
+        "source_asset_inventory_sha256": input_manifest.get(
+            "source_asset_inventory_sha256"
+        ),
+        "source_asset_inventory_count": input_manifest.get(
+            "source_asset_inventory_count"
+        ),
         "source_catalog_sha256": input_manifest.get("source_index_sha256"),
         "input_data_complete": input_manifest.get("data_complete") is True,
         "expected_safe_shards": input_manifest.get("expected_safe_shards"),
@@ -1559,6 +2440,8 @@ def run_local_campaign(
         "signal_coverage": signal_coverage,
         "temporally_aligned_add_signals": aligned_adds,
         "input_audit": {"entries": entries_audit, "metaorders": meta_audit, "books": books_audit},
+        "leader_quality_v9_train": leader_quality_train,
+        "leader_review_persistence": leader_review_persistence,
     }
     if not metaorders or not books:
         return {
@@ -1600,12 +2483,19 @@ def run_local_campaign(
             "freeze_created": False,
             "economically_proven": False,
         }
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = (
+        Path(repository_root).resolve()
+        if repository_root is not None
+        else Path(__file__).resolve().parents[3]
+    )
+    campaign_config, campaign_config_sha = _campaign_search_config(bounds)
+    engine_source_sha = _campaign_engine_source_sha256(pipeline)
     campaign_root = Path(campaign_root) if campaign_root else (
         repository_root / "runtime" / "codex_research" / "copy_vault_continuous_lab" / selection_digest
     )
     campaign_root.mkdir(parents=True, exist_ok=True)
     trial_path = campaign_root / "TRIALS.jsonl"
+    attempt_path = campaign_root / "ATTEMPTS.jsonl"
     checkpoint_path = campaign_root / "CHECKPOINT.json"
     lock_path = (
         repository_root / "runtime" / "codex_research"
@@ -1621,33 +2511,51 @@ def run_local_campaign(
             exclude_selection_digest=selection_digest,
         )
         history_rows = _load_campaign_trials(trial_path, selection_digest)
-        seen = {str(row["parameter_signature"]) for row in history_rows}
-        sequence_index = max(
-            (int(row.get("sequence_index") or 0) for row in history_rows), default=0
-        ) + 1
-        best = None
-        if checkpoint_path.is_file() and not checkpoint_path.is_symlink():
+        attempt_rows = _load_campaign_attempts(attempt_path, selection_digest)
+        seen = {
+            str(row["parameter_signature"])
+            for row in [*history_rows, *attempt_rows]
+        }
+        checkpoint = None
+        if checkpoint_path.is_symlink():
+            raise ValueError("Copy-Vault checkpoint is symlinked")
+        if checkpoint_path.is_file():
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            if (
-                checkpoint.get("schema") != "hypersmart.copy_vault_search_checkpoint.v1"
-                or checkpoint.get("selection_digest") != selection_digest
-            ):
-                raise ValueError("Copy-Vault checkpoint does not match this SAFE selection")
-            sequence_index = max(sequence_index, int(checkpoint.get("next_sequence_index") or 1))
-            best = checkpoint.get("best_candidate") if isinstance(checkpoint.get("best_candidate"), dict) else None
+            if not isinstance(checkpoint, dict):
+                raise ValueError("Copy-Vault checkpoint must be an object")
+        resume = _checkpoint_resume_state(
+            checkpoint,
+            history_rows,
+            attempts=attempt_rows,
+            selection_digest=selection_digest,
+            source_catalog_sha256=source_catalog_sha,
+            source_asset_inventory_sha256=str(
+                input_manifest.get("source_asset_inventory_sha256") or ""
+            ),
+            engine_source_sha256=engine_source_sha,
+            campaign_config_sha256=campaign_config_sha,
+        )
+        sequence_index = resume["next_sequence_index"]
+        campaign_attempts = resume["campaign_attempts"]
+        trial_chain = resume["trial_receipt_chain_sha256"]
+        attempt_chain = resume["attempt_receipt_chain_sha256"]
+        best = None
         if best is None:
             frozen_rows = [
                 row for row in history_rows
                 if row.get("strict_improvement_over_baseline_and_prior_best") is True
                 and row.get("frozen_record") is not None
-                and isinstance(row.get("daily_lcb_usd_per_active_day"), (int, float))
-                and not isinstance(row.get("daily_lcb_usd_per_active_day"), bool)
-                and math.isfinite(float(row.get("daily_lcb_usd_per_active_day")))
+                and row.get("numeric_rank_resolved_against_comparators") is True
+                and decimal_value(
+                    row.get("daily_lcb_usd_per_active_day_exact_decimal")
+                ) is not None
             ]
             if frozen_rows:
                 recovered = max(
                     frozen_rows,
-                    key=lambda row: float(row.get("daily_lcb_usd_per_active_day")),
+                    key=lambda row: decimal_value(
+                        row["daily_lcb_usd_per_active_day_exact_decimal"]
+                    ),
                 )
                 recovered_sequence = int(recovered["sequence_index"])
                 recovered_trial = int(recovered["trial_number"])
@@ -1660,6 +2568,9 @@ def run_local_campaign(
                         "sample_count": recovered.get("closed_trade_count"),
                         "distinct_days": recovered.get("active_day_count"),
                         "daily_net_pnl_usd": recovered.get("daily_net_pnl_usd"),
+                        "daily_net_pnl_usd_exact_decimal": recovered.get(
+                            "daily_net_pnl_usd_exact_decimal"
+                        ),
                     },
                     "eligible": True,
                     "candidate_count": recovered.get("candidate_count"),
@@ -1672,9 +2583,25 @@ def run_local_campaign(
                     ),
                     "train": recovered_train,
                     "daily_net_pnl_usd": list(recovered.get("daily_net_pnl_usd") or []),
+                    "daily_net_pnl_usd_exact_decimal": list(
+                        recovered.get("daily_net_pnl_usd_exact_decimal") or []
+                    ),
                     "score_usd_per_active_day": float(recovered["daily_lcb_usd_per_active_day"]),
+                    "score_usd_per_active_day_exact_decimal": recovered[
+                        "daily_lcb_usd_per_active_day_exact_decimal"
+                    ],
                     "trial_number": recovered_trial,
                 }
+        if resume["ledger_reconciled"]:
+            say(
+                f"Reprise réconciliée · {len(history_rows):,} essais durables · "
+                f"séquence {sequence_index:,}"
+            )
+        if resume["engine_changed"] or resume["config_changed"]:
+            say(
+                "Nouvelle empreinte de moteur/configuration · les essais antérieurs "
+                "restent archivés et chaque nouvel essai sera lié à ses empreintes."
+            )
         trial_limit = None if continuous else max(1, int(max_trials))
         search_space_size = _search_space_size()
         prior_count_known = prior_trial_count is not None
@@ -1711,21 +2638,79 @@ def run_local_campaign(
         except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             baseline_train = None
             baseline_comparison_basis = "CURRENT_COPY_VAULT_BASELINE_UNMEASURABLE"
+        if isinstance(best, dict) and isinstance(best.get("candidate"), Mapping):
+            # Re-score the immutable incumbent on the same current TRAIN input
+            # before comparing a challenger; old float-only receipts are not
+            # sufficient evidence for a new promotion decision.
+            try:
+                incumbent_train = evaluate_frozen_v21_segment(
+                    metaorders, books, best["candidate"], segment="train"
+                )
+                best["train"] = incumbent_train
+                incumbent_statistics = incumbent_train.get("statistics") or {}
+                incumbent_exact_days = incumbent_statistics.get(
+                    "daily_net_pnl_usd_exact_decimal"
+                )
+                if isinstance(incumbent_exact_days, list):
+                    best["daily_net_pnl_usd_exact_decimal"] = incumbent_exact_days
+                    best["daily_net_pnl_usd"] = incumbent_statistics.get(
+                        "daily_net_pnl_usd"
+                    )
+                else:
+                    best["daily_net_pnl_usd_exact_decimal"] = None
+                    best["daily_net_pnl_usd"] = None
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                # Keep the frozen record, but do not compare or replace it using
+                # an unmeasurable incumbent.
+                best["incumbent_comparison_unmeasurable"] = True
+                best["daily_net_pnl_usd_exact_decimal"] = None
+                best["daily_net_pnl_usd"] = None
         base["baseline_comparison_basis"] = baseline_comparison_basis
 
         completed_this_run = 0
         duplicates_since_checkpoint = 0
         baseline_days = (
-            (baseline_train.get("statistics") or {}).get("daily_net_pnl_usd")
+            (baseline_train.get("statistics") or {}).get(
+                "daily_net_pnl_usd_exact_decimal"
+            )
+            or (baseline_train.get("statistics") or {}).get("daily_net_pnl_usd")
             if baseline_train else None
         )
         best_days = (
-            best.get("daily_net_pnl_usd") if isinstance(best, dict) else None
+            best.get("daily_net_pnl_usd_exact_decimal")
+            or best.get("daily_net_pnl_usd")
+            if isinstance(best, dict) else None
         )
         if best_days is None and isinstance(best, dict):
             best_days = (best.get("train") or {}).get("daily_net_pnl_usd")
         status = "SEARCH_RUNNING"
         reason = "TRAIN_ONLY_SEARCH_CONTINUES_UNTIL_CTRL_C" if continuous else "BOUNDED_TRAIN_SEARCH_BATCH_COMPLETE"
+
+        def persist_checkpoint(checkpoint_status: str) -> None:
+            _atomic_json(checkpoint_path, {
+                "schema": "hypersmart.copy_vault_search_checkpoint.v2",
+                "selection_digest": selection_digest,
+                "source_catalog_sha256": source_catalog_sha,
+                "source_asset_inventory_sha256": input_manifest.get(
+                    "source_asset_inventory_sha256"
+                ),
+                "engine_source_sha256": engine_source_sha,
+                "campaign_config_sha256": campaign_config_sha,
+                "campaign_config": campaign_config,
+                "next_sequence_index": sequence_index,
+                "campaign_trials": len(history_rows),
+                "campaign_attempts": campaign_attempts,
+                "attempt_receipt_count": len(attempt_rows),
+                "global_trial_count": prior_trial_count + campaign_attempts,
+                "trial_receipt_chain_sha256": trial_chain,
+                "attempt_receipt_chain_sha256": attempt_chain,
+                "best_candidate": best,
+                "status": checkpoint_status,
+                "updated_at_utc": datetime.now(UTC).isoformat(),
+                "paper_read_only": True,
+                "real_execution": False,
+            })
+
         while trial_limit is None or completed_this_run < trial_limit:
             if len(seen) >= search_space_size:
                 status, reason = "SEARCH_SPACE_EXHAUSTED", "ALL_VALID_PARAMETER_CONFIGURATIONS_ALREADY_TRIED"
@@ -1734,14 +2719,7 @@ def run_local_campaign(
                 sequence_index += 1
                 duplicates_since_checkpoint += 1
                 if duplicates_since_checkpoint >= 1_000:
-                    _atomic_json(checkpoint_path, {
-                        "schema": "hypersmart.copy_vault_search_checkpoint.v1",
-                        "selection_digest": selection_digest,
-                        "next_sequence_index": sequence_index,
-                        "campaign_trials": len(history_rows),
-                        "best_candidate": best,
-                        "status": status,
-                    })
+                    persist_checkpoint(status)
                     duplicates_since_checkpoint = 0
                 continue
             params = _candidate_parameters(sequence_index)
@@ -1755,8 +2733,36 @@ def run_local_campaign(
                     status, reason = "DATASET_CHANGED", "LOCAL_SAFE_INPUTS_CHANGED_DURING_SEARCH"
                     break
                 continue
-            trial_count = prior_trial_count + len(history_rows) + 1
+            trial_count = prior_trial_count + campaign_attempts + 1
             candidate_id = f"cv-{selection_digest[:12]}-{this_sequence:012d}"
+            # Reserve the sequence before scoring/freezing so a crash cannot
+            # reuse a candidate ID whose immutable freeze was already written.
+            attempt = _attempt_with_receipt_chain({
+                "schema": "hypersmart.copy_vault_local_attempt.v1",
+                "selection_digest": selection_digest,
+                "source_catalog_sha256": source_catalog_sha,
+                "source_asset_inventory_sha256": input_manifest.get(
+                    "source_asset_inventory_sha256"
+                ),
+                "engine_source_sha256": engine_source_sha,
+                "campaign_config_sha256": campaign_config_sha,
+                "proposal_method": campaign_config["proposal_method"],
+                "proposal_seed": campaign_config["proposal_seed"],
+                "temporal_windows": dict(bounds),
+                "sequence_index": this_sequence,
+                "trial_number": trial_count,
+                "parameter_signature": signature,
+                "parameters": params,
+                "status": "TRIAL_RESERVED",
+                "paper_read_only": True,
+                "real_execution": False,
+            }, attempt_chain)
+            _append_jsonl(attempt_path, attempt)
+            attempt_rows.append(attempt)
+            attempt_chain = attempt["attempt_receipt_sha256"]
+            campaign_attempts += 1
+            seen.add(signature)
+            persist_checkpoint("TRIAL_RESERVED")
             freeze = _candidate(params, bounds, max(timestamps) + 1, candidate_id, trial_count)
             say(
                 f"Essai {trial_count} · séquence {this_sequence:,} · "
@@ -1765,23 +2771,95 @@ def run_local_campaign(
             train = evaluate_frozen_v21_segment(metaorders, books, freeze, segment="train")
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
             daily_values = list(stats.get("daily_net_pnl_usd") or [])
-            candidate_score = _daily_lcb(daily_values, trial_count)
-            baseline_score = _daily_lcb(baseline_days, trial_count)
-            incumbent_score = _daily_lcb(best_days, trial_count)
-            comparison_floor = max(
-                value for value in (baseline_score, incumbent_score) if value is not None
-            ) if any(value is not None for value in (baseline_score, incumbent_score)) else None
+            daily_exact_values = list(
+                stats.get("daily_net_pnl_usd_exact_decimal") or daily_values
+            )
+            candidate_lcb = _daily_lcb(daily_exact_values, trial_count)
+            baseline_lcb = _daily_lcb(baseline_days, trial_count)
+            incumbent_lcb = _daily_lcb(best_days, trial_count)
+            candidate_score = decimal_value(
+                candidate_lcb.get("daily_mean_lcb_usd_exact_decimal")
+            )
+            baseline_score = decimal_value(
+                baseline_lcb.get("daily_mean_lcb_usd_exact_decimal")
+            )
+            incumbent_score = decimal_value(
+                incumbent_lcb.get("daily_mean_lcb_usd_exact_decimal")
+            )
+            candidate_score_display = (
+                float_not_above(candidate_score) if candidate_score is not None else None
+            )
+            baseline_score_display = (
+                float_not_above(baseline_score) if baseline_score is not None else None
+            )
+            incumbent_score_display = (
+                float_not_above(incumbent_score) if incumbent_score is not None else None
+            )
+            comparison_summaries = [baseline_lcb]
+            if isinstance(best, dict):
+                comparison_summaries.append(incumbent_lcb)
+            comparison_scores = [
+                decimal_value(item.get("daily_mean_lcb_usd_exact_decimal"))
+                for item in comparison_summaries
+            ]
+            comparison_bounds = [
+                decimal_value(
+                    item.get("daily_mean_lcb_numeric_error_bound_usd_exact_decimal")
+                )
+                for item in comparison_summaries
+            ]
+            comparison_floor = (
+                max(value for value in comparison_scores if value is not None)
+                if comparison_scores and all(value is not None for value in comparison_scores)
+                else None
+            )
+            comparison_rank_resolved = bool(
+                candidate_score is not None
+                and all(value is not None for value in comparison_scores)
+                and all(value is not None for value in comparison_bounds)
+                and all(
+                    candidate_score > benchmark
+                    and lcb_rank_is_numerically_resolved(
+                        _daily_lcb_rank(candidate_lcb),
+                        _daily_lcb_rank(summary),
+                    )
+                    for benchmark, summary in zip(
+                        comparison_scores, comparison_summaries, strict=True
+                    )
+                    if benchmark is not None
+                )
+            )
+            improvement_exact = (
+                decimal_difference(candidate_score, comparison_floor)
+                if candidate_score is not None and comparison_floor is not None
+                else None
+            )
+            improvement_display = (
+                float_not_above(improvement_exact)
+                if improvement_exact is not None else None
+            )
             improvement = (
                 train.get("eligible") is True
                 and candidate_score is not None
+                and candidate_score_display is not None
                 and comparison_floor is not None
-                and candidate_score > comparison_floor + 1e-12
+                and improvement_display is not None
+                and comparison_rank_resolved
                 and prior_count_known
             )
             trial = {
-                "schema": "hypersmart.copy_vault_local_trial.v1",
+                "schema": "hypersmart.copy_vault_local_trial.v2",
                 "selection_digest": selection_digest,
+                "source_asset_inventory_sha256": input_manifest.get(
+                    "source_asset_inventory_sha256"
+                ),
                 "source_catalog_sha256": input_manifest.get("source_index_sha256"),
+                "attempt_receipt_sha256": attempt["attempt_receipt_sha256"],
+                "engine_source_sha256": engine_source_sha,
+                "campaign_config_sha256": campaign_config_sha,
+                "proposal_method": campaign_config["proposal_method"],
+                "proposal_seed": campaign_config["proposal_seed"],
+                "temporal_windows": dict(bounds),
                 "sequence_index": this_sequence,
                 "trial_number": trial_count,
                 "parameter_signature": signature,
@@ -1792,10 +2870,21 @@ def run_local_campaign(
                 "closed_trade_count": int(stats.get("sample_count") or 0),
                 "active_day_count": int(stats.get("distinct_days") or 0),
                 "daily_mean_usd_per_active_day": train.get("active_day_mean_net_pnl_usd"),
-                "daily_lcb_usd_per_active_day": candidate_score,
+                "daily_lcb_usd_per_active_day": candidate_score_display,
+                "daily_lcb_usd_per_active_day_exact_decimal": (
+                    format(candidate_score, "f") if candidate_score is not None else None
+                ),
+                "daily_lcb_numeric_error_bound_usd_exact_decimal": candidate_lcb.get(
+                    "daily_mean_lcb_numeric_error_bound_usd_exact_decimal"
+                ),
                 "daily_net_pnl_usd": daily_values,
-                "baseline_lcb_usd_per_active_day": baseline_score,
+                "daily_net_pnl_usd_exact_decimal": daily_exact_values,
+                "baseline_lcb_usd_per_active_day": baseline_score_display,
+                "baseline_lcb_usd_per_active_day_exact_decimal": (
+                    format(baseline_score, "f") if baseline_score is not None else None
+                ),
                 "baseline_comparison_basis": baseline_comparison_basis,
+                "numeric_rank_resolved_against_comparators": comparison_rank_resolved,
                 "strict_improvement_over_baseline_and_prior_best": bool(improvement),
                 "bonferroni_trial_count": trial_count,
                 "data_complete": input_manifest.get("data_complete") is True,
@@ -1812,17 +2901,49 @@ def run_local_campaign(
                     "train": train,
                     "comparison": {
                         "metric": "BONFERRONI_LCB_USD_PER_ACTIVE_TRAIN_DAY",
-                        "baseline_score": baseline_score,
-                        "candidate_score": candidate_score,
-                        "improvement": candidate_score - comparison_floor,
+                        "baseline_score": baseline_score_display,
+                        "baseline_score_exact_decimal": (
+                            format(baseline_score, "f") if baseline_score is not None else None
+                        ),
+                        "candidate_score": candidate_score_display,
+                        "candidate_score_exact_decimal": (
+                            format(candidate_score, "f") if candidate_score is not None else None
+                        ),
+                        "improvement": improvement_display,
+                        "improvement_exact_decimal": (
+                            format(improvement_exact, "f")
+                            if improvement_exact is not None else None
+                        ),
                         "baseline_daily_mean": baseline_train.get("active_day_mean_net_pnl_usd") if baseline_train else None,
                         "candidate_daily_mean": train.get("active_day_mean_net_pnl_usd"),
-                        "prior_best_score": incumbent_score,
+                        "prior_best_score": incumbent_score_display,
+                        "prior_best_score_exact_decimal": (
+                            format(incumbent_score, "f") if incumbent_score is not None else None
+                        ),
                         "trial_count": trial_count,
                         "baseline_comparison_basis": baseline_comparison_basis,
+                        "numeric_rank_resolved": comparison_rank_resolved,
                     },
                     "selection_digest": selection_digest,
+                    "source_asset_inventory_sha256": input_manifest.get(
+                        "source_asset_inventory_sha256"
+                    ),
+                    "source_asset_inventory_count": input_manifest.get(
+                        "source_asset_inventory_count"
+                    ),
                     "source_catalog_sha256": input_manifest.get("source_index_sha256"),
+                    "engine_source_sha256": engine_source_sha,
+                    "campaign_config_sha256": campaign_config_sha,
+                    "proposal_method": campaign_config["proposal_method"],
+                    "proposal_seed": campaign_config["proposal_seed"],
+                    "temporal_windows": dict(bounds),
+                    "attempt_receipt_sha256": attempt["attempt_receipt_sha256"],
+                    "paper_capital_usd": PAPER_CAPITAL_USD,
+                    "paper_read_only": True,
+                    "real_execution": False,
+                    "candidate_history_path": str(trial_path),
+                    "attempt_history_path": str(attempt_path),
+                    "checkpoint_path": str(checkpoint_path),
                     "data_complete": input_manifest.get("data_complete") is True,
                     "heldout_evaluated": False,
                 }
@@ -1841,44 +2962,42 @@ def run_local_campaign(
                         "candidate_count": train.get("candidate_count"),
                     },
                     "daily_net_pnl_usd": daily_values,
-                    "score_usd_per_active_day": candidate_score,
+                    "daily_net_pnl_usd_exact_decimal": daily_exact_values,
+                    "score_usd_per_active_day": candidate_score_display,
+                    "score_usd_per_active_day_exact_decimal": (
+                        format(candidate_score, "f") if candidate_score is not None else None
+                    ),
                     "trial_number": trial_count,
                 }
-                best_days = daily_values
-                say(f"CANDIDAT GELÉ · {candidate_id} · amélioration conservative {candidate_score - comparison_floor:+.6f} USD/jour actif TRAIN")
+                best_days = daily_exact_values
+                say(f"CANDIDAT GELÉ · {candidate_id} · amélioration conservative {improvement_display:+.6f} USD/jour actif TRAIN")
             trial["frozen_record"] = frozen_record
+            trial["campaign_config"] = campaign_config
+            trial = _trial_with_receipt_chain(trial, trial_chain)
             _append_jsonl(trial_path, trial)
             history_rows.append(trial)
+            trial_chain = trial["trial_receipt_sha256"]
             seen.add(signature)
             completed_this_run += 1
-            _atomic_json(checkpoint_path, {
-                "schema": "hypersmart.copy_vault_search_checkpoint.v1",
-                "selection_digest": selection_digest,
-                "source_catalog_sha256": input_manifest.get("source_index_sha256"),
-                "next_sequence_index": sequence_index,
-                "campaign_trials": len(history_rows),
-                "global_trial_count": trial_count,
-                "best_candidate": best,
-                "status": status,
-                "updated_at_utc": datetime.now(UTC).isoformat(),
-                "paper_read_only": True,
-                "real_execution": False,
-            })
+            persist_checkpoint(status)
             update = {
                 **base,
                 "status": status,
                 "reason": reason,
                 "candidates_tested": len(history_rows),
                 "trials_this_run": completed_this_run,
+                "campaign_attempts": campaign_attempts,
                 "global_trial_count": trial_count,
                 "search_space_upper_bound": search_space_size,
                 "best_candidate": best,
                 "baseline_train": baseline_train,
                 "last_trial": trial,
+                "last_attempt_receipt_sha256": trial["attempt_receipt_sha256"],
                 "freeze_created": best is not None,
                 "economically_proven": False,
                 "heldout_evaluated": False,
                 "candidate_history_path": str(trial_path),
+                "attempt_history_path": str(attempt_path),
                 "checkpoint_path": str(checkpoint_path),
                 "data_complete": input_manifest.get("data_complete") is True,
                 "paper_read_only": True,
@@ -1898,7 +3017,8 @@ def run_local_campaign(
             "reason": reason,
             "candidates_tested": len(history_rows),
             "trials_this_run": completed_this_run,
-            "global_trial_count": prior_trial_count + len(history_rows),
+            "global_trial_count": prior_trial_count + campaign_attempts,
+            "campaign_attempts": campaign_attempts,
             "global_trial_count_source_known": prior_count_known,
             "search_space_upper_bound": search_space_size,
             "selected_candidate": best.get("candidate") if isinstance(best, dict) else None,
@@ -1908,41 +3028,99 @@ def run_local_campaign(
             "economically_proven": False,
             "heldout_evaluated": False,
             "candidate_history_path": str(trial_path),
+            "attempt_history_path": str(attempt_path),
             "checkpoint_path": str(checkpoint_path),
+            "resume_reconciled": resume["ledger_reconciled"],
+            "engine_source_sha256": engine_source_sha,
+            "campaign_config_sha256": campaign_config_sha,
             "data_complete": input_manifest.get("data_complete") is True,
             "paper_read_only": True,
             "real_execution": False,
         }
     except KeyboardInterrupt:
-        checkpoint = {}
-        if checkpoint_path.is_file() and not checkpoint_path.is_symlink():
-            try:
-                checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError):
-                checkpoint = {}
-        checkpoint.update({
-            "schema": "hypersmart.copy_vault_search_checkpoint.v1",
+        try:
+            durable_rows = _load_campaign_trials(trial_path, selection_digest)
+            durable_attempts = _load_campaign_attempts(attempt_path, selection_digest)
+            durable_state = _checkpoint_resume_state(
+                None,
+                durable_rows,
+                attempts=durable_attempts,
+                selection_digest=selection_digest,
+                source_catalog_sha256=source_catalog_sha,
+                source_asset_inventory_sha256=str(
+                    input_manifest.get("source_asset_inventory_sha256") or ""
+                ),
+                engine_source_sha256=engine_source_sha,
+                campaign_config_sha256=campaign_config_sha,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            return {
+                **base,
+                "status": "TECHNICAL_FAILURE",
+                "reason": f"INTERRUPTED_TRIAL_LEDGER_UNSAFE:{type(exc).__name__}:{exc}",
+                "candidates_tested": 0,
+                "freeze_created": False,
+                "economically_proven": False,
+                "paper_read_only": True,
+                "real_execution": False,
+            }
+        durable_chain, _ = _campaign_trial_chain(durable_rows)
+        durable_attempt_chain, _ = _campaign_attempt_chain(durable_attempts)
+        durable_sequences = [int(row["sequence_index"]) for row in durable_rows]
+        durable_sequences.extend(int(row["sequence_index"]) for row in durable_attempts)
+        next_sequence = max(
+            sequence_index if "sequence_index" in locals() else 1,
+            max(durable_sequences, default=0) + 1,
+        )
+        best = locals().get("best")
+        if isinstance(best, dict):
+            durable_trial_numbers = {
+                int(row["trial_number"])
+                for row in durable_rows
+                if row.get("frozen_record") is not None
+                and row.get("strict_improvement_over_baseline_and_prior_best") is True
+            }
+            if best.get("trial_number") not in durable_trial_numbers:
+                best = None
+        _atomic_json(checkpoint_path, {
+            "schema": "hypersmart.copy_vault_search_checkpoint.v2",
             "selection_digest": selection_digest,
-            "next_sequence_index": sequence_index if "sequence_index" in locals() else 1,
-            "campaign_trials": len(locals().get("history_rows", [])),
-            "best_candidate": locals().get("best"),
+            "source_catalog_sha256": source_catalog_sha,
+            "source_asset_inventory_sha256": input_manifest.get(
+                "source_asset_inventory_sha256"
+            ),
+            "engine_source_sha256": engine_source_sha,
+            "campaign_config_sha256": campaign_config_sha,
+            "campaign_config": campaign_config,
+            "next_sequence_index": next_sequence,
+            "campaign_trials": len(durable_rows),
+            "campaign_attempts": durable_state["campaign_attempts"],
+            "attempt_receipt_count": len(durable_attempts),
+            "global_trial_count": int(locals().get("prior_trial_count") or 0)
+            + durable_state["campaign_attempts"],
+            "trial_receipt_chain_sha256": durable_chain,
+            "attempt_receipt_chain_sha256": durable_attempt_chain,
+            "best_candidate": best,
             "status": "INTERRUPTED",
             "updated_at_utc": datetime.now(UTC).isoformat(),
             "paper_read_only": True,
             "real_execution": False,
         })
-        _atomic_json(checkpoint_path, checkpoint)
         return {
             **base,
             "status": "INTERRUPTED",
             "reason": "USER_CTRL_C_COMPLETED_TRIALS_CHECKPOINTED",
-            "candidates_tested": len(locals().get("history_rows", [])),
-            "selected_candidate": (locals().get("best") or {}).get("candidate")
-            if isinstance(locals().get("best"), dict) else None,
-            "freeze_created": bool(locals().get("best")),
+            "candidates_tested": len(durable_rows),
+            "campaign_attempts": durable_state["campaign_attempts"],
+            "global_trial_count": int(locals().get("prior_trial_count") or 0)
+            + durable_state["campaign_attempts"],
+            "selected_candidate": best.get("candidate")
+            if isinstance(best, dict) else None,
+            "freeze_created": isinstance(best, dict),
             "economically_proven": False,
             "heldout_evaluated": False,
             "candidate_history_path": str(trial_path),
+            "attempt_history_path": str(attempt_path),
             "checkpoint_path": str(checkpoint_path),
             "paper_read_only": True,
             "real_execution": False,
@@ -1976,6 +3154,18 @@ def evaluate_current_copy_vault(
         return {
             "status": "UNMEASURABLE", "reason": f"LOCAL_SAFE_MANIFEST_UNAVAILABLE:{type(exc).__name__}",
             "economically_proven": False, "paper_read_only": True, "real_execution": False,
+        }
+    source_inventory_error = _source_asset_inventory_error(input_manifest)
+    if source_inventory_error is not None:
+        return {
+            "status": "UNMEASURABLE", "reason": source_inventory_error,
+            "selection_digest": input_manifest.get("selection_digest"),
+            "source_asset_inventory_sha256": input_manifest.get(
+                "source_asset_inventory_sha256"
+            ),
+            "economically_proven": False,
+            "paper_read_only": True,
+            "real_execution": False,
         }
     tape_error = _verify_materialized_tapes(Path(workspace), input_manifest)
     if tape_error is not None:
@@ -2016,6 +3206,13 @@ def evaluate_current_copy_vault(
         "oos": result.get("oos"),
         "forward": result.get("forward"),
         "parameters_sha256": result.get("parameters_sha256"),
+        "selection_digest": input_manifest.get("selection_digest"),
+        "source_asset_inventory_sha256": input_manifest.get(
+            "source_asset_inventory_sha256"
+        ),
+        "source_asset_inventory_count": input_manifest.get(
+            "source_asset_inventory_count"
+        ),
         "paper_read_only": True,
         "real_execution": False,
     }
@@ -2082,20 +3279,138 @@ def _latest_daily(source: Mapping[str, Any]) -> tuple[str | None, float | None]:
     return None, None
 
 
-def load_improvement_history(root: str | Path) -> list[dict[str, Any]]:
+def _improvement_receipt_payload(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in row.items()
+        if key != "receipt_sha256"
+    }
+
+
+def _improvement_content(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in row.items()
+        if key not in {"previous_receipt_sha256", "receipt_sha256"}
+    }
+
+
+def _load_improvement_history_unlocked(root: str | Path) -> list[dict[str, Any]]:
     ledger = Path(root) / "runtime" / "codex_research" / "copy_vault_improvements" / "HISTORY.jsonl"
-    if not ledger.is_file():
+    if ledger.is_symlink():
+        raise ValueError("COPY_VAULT_IMPROVEMENT_HISTORY_SYMLINKED")
+    if not ledger.exists():
         return []
     rows: list[dict[str, Any]] = []
-    with ledger.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            try:
-                row = json.loads(line)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if isinstance(row, dict):
+    seen_run_ids: set[str] = set()
+    previous = _IMPROVEMENT_CHAIN_GENESIS
+    try:
+        with ledger.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, 1):
+                try:
+                    row = json.loads(line)
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"COPY_VAULT_IMPROVEMENT_HISTORY_JSON_INVALID line {line_number}"
+                    ) from exc
+                if not isinstance(row, dict):
+                    raise ValueError(
+                        f"COPY_VAULT_IMPROVEMENT_HISTORY_ROW_INVALID line {line_number}"
+                    )
+                run_id = row.get("run_id")
+                if not isinstance(run_id, str) or not run_id or run_id in seen_run_ids:
+                    raise ValueError(
+                        f"COPY_VAULT_IMPROVEMENT_HISTORY_ID_INVALID line {line_number}"
+                    )
+                schema = row.get("schema_version")
+                if schema == "hypersmart.copy_vault_local_improvement.v1":
+                    if "previous_receipt_sha256" in row or "receipt_sha256" in row:
+                        raise ValueError(
+                            f"COPY_VAULT_IMPROVEMENT_HISTORY_LEGACY_RECEIPT_INVALID line {line_number}"
+                        )
+                    digest = _canonical_json_sha256(row)
+                elif schema == "hypersmart.copy_vault_local_improvement.v2":
+                    if row.get("previous_receipt_sha256") != previous:
+                        raise ValueError(
+                            f"COPY_VAULT_IMPROVEMENT_HISTORY_PREDECESSOR_MISMATCH line {line_number}"
+                        )
+                    supplied = row.get("receipt_sha256")
+                    if (
+                        not isinstance(supplied, str)
+                        or len(supplied) != 64
+                        or any(char not in "0123456789abcdef" for char in supplied)
+                        or supplied != _canonical_json_sha256(_improvement_receipt_payload(row))
+                    ):
+                        raise ValueError(
+                            f"COPY_VAULT_IMPROVEMENT_HISTORY_RECEIPT_HASH_MISMATCH line {line_number}"
+                        )
+                    digest = supplied
+                else:
+                    raise ValueError(
+                        f"COPY_VAULT_IMPROVEMENT_HISTORY_SCHEMA_INVALID line {line_number}"
+                    )
+                previous = digest
+                seen_run_ids.add(run_id)
                 rows.append(row)
+    except UnicodeDecodeError as exc:
+        raise ValueError("COPY_VAULT_IMPROVEMENT_HISTORY_ENCODING_INVALID") from exc
     return rows
+
+
+def load_improvement_history(root: str | Path) -> list[dict[str, Any]]:
+    registry = Path(root) / "runtime" / "codex_research" / "copy_vault_improvements"
+    ledger = registry / "HISTORY.jsonl"
+    lock_path = registry / ".HISTORY.lock"
+    if registry.is_symlink() or ledger.is_symlink() or lock_path.is_symlink():
+        raise ValueError("COPY_VAULT_IMPROVEMENT_HISTORY_SYMLINKED")
+    if not ledger.exists():
+        return []
+    try:
+        with SingleWriterFileLock(lock_path):
+            return _load_improvement_history_unlocked(root)
+    except WriterBusy as exc:
+        raise ValueError("COPY_VAULT_IMPROVEMENT_HISTORY_LOCK_BUSY") from exc
+
+
+def _has_complete_economic_proof(result: Mapping[str, Any]) -> bool:
+    if (
+        result.get("economically_proven") is not True
+        or result.get("status") != "PROVEN"
+        or result.get("heldout_evaluated") is not True
+        or result.get("paper_read_only") is not True
+        or result.get("real_execution") is not False
+        or result.get("data_complete") is not True
+        or decimal_value(result.get("paper_capital_usd")) != Decimal(str(PAPER_CAPITAL_USD))
+    ):
+        return False
+    for segment_name in ("validation", "oos", "forward"):
+        segment = result.get(segment_name)
+        if (
+            not isinstance(segment, Mapping)
+            or segment.get("eligible") is not True
+            or segment.get("heldout_evaluated") is not True
+            or segment.get("retuned_on_heldout") is not False
+        ):
+            return False
+    return True
+
+
+def _append_improvement_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
+    encoded = (
+        json.dumps(receipt, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n"
+    ).encode("utf-8")
+    flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    fd = os.open(path, flags, 0o600)
+    try:
+        remaining = memoryview(encoded)
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise OSError("COPY_VAULT_IMPROVEMENT_HISTORY_APPEND_INCOMPLETE")
+            remaining = remaining[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def record_frozen_candidate(
@@ -2107,10 +3422,19 @@ def record_frozen_candidate(
     """Persist every selected candidate without ever overwriting an older one."""
     if economic_result.get("freeze_created") is not True:
         return None
+    if not isinstance(run_id, str) or _IMPROVEMENT_RUN_ID_RE.fullmatch(run_id) is None:
+        raise ValueError("COPY_VAULT_IMPROVEMENT_RUN_ID_INVALID")
     root = Path(root)
     registry = root / "runtime" / "codex_research" / "copy_vault_improvements"
     entries = registry / "entries"
+    ledger = registry / "HISTORY.jsonl"
+    lock_path = registry / ".HISTORY.lock"
+    if registry.is_symlink() or entries.is_symlink() or ledger.is_symlink() or lock_path.is_symlink():
+        raise OSError("COPY_VAULT_IMPROVEMENT_HISTORY_SYMLINKED")
+    registry.mkdir(parents=True, exist_ok=True)
     entries.mkdir(parents=True, exist_ok=True)
+    if registry.is_symlink() or entries.is_symlink() or ledger.is_symlink() or lock_path.is_symlink():
+        raise OSError("COPY_VAULT_IMPROVEMENT_HISTORY_SYMLINKED")
     baseline_segment, baseline_daily = _latest_daily(current_copy_vault)
     candidate_segment, candidate_daily = _latest_daily(economic_result)
     comparable = (
@@ -2130,9 +3454,10 @@ def record_frozen_candidate(
         score_improvement = None
     if score_improvement is not None and not math.isfinite(score_improvement):
         score_improvement = None
+    economic_proven = _has_complete_economic_proof(economic_result)
     classification = (
         "ECONOMICALLY_PROVEN_IMPROVEMENT"
-        if economic_result.get("economically_proven") is True and improvement is not None and improvement > 0
+        if economic_proven and improvement is not None and improvement > 0
         else "CANDIDATE_FROZEN_TRAIN_SCORE_IMPROVEMENT_INCOMPLETE_DATA"
         if score_improvement is not None and score_improvement > 0 and economic_result.get("data_complete") is not True
         else "CANDIDATE_FROZEN_TRAIN_SCORE_IMPROVEMENT"
@@ -2143,8 +3468,8 @@ def record_frozen_candidate(
         if not comparable
         else "CANDIDATE_FROZEN_NO_IMPROVEMENT"
     )
-    record = {
-        "schema_version": "hypersmart.copy_vault_local_improvement.v1",
+    record: dict[str, Any] = {
+        "schema_version": "hypersmart.copy_vault_local_improvement.v2",
         "run_id": str(run_id),
         "family": "copy_vault",
         "classification": classification,
@@ -2155,42 +3480,147 @@ def record_frozen_candidate(
         "comparison": comparison,
         "selection_digest": economic_result.get("selection_digest"),
         "source_catalog_sha256": economic_result.get("source_catalog_sha256"),
+        "source_asset_inventory_sha256": economic_result.get("source_asset_inventory_sha256"),
+        "source_asset_inventory_count": economic_result.get("source_asset_inventory_count"),
+        "engine_source_sha256": economic_result.get("engine_source_sha256"),
+        "campaign_config_sha256": economic_result.get("campaign_config_sha256"),
+        "proposal_method": economic_result.get("proposal_method"),
+        "proposal_seed": economic_result.get("proposal_seed"),
+        "temporal_windows": economic_result.get("temporal_windows"),
+        "attempt_receipt_sha256": economic_result.get("attempt_receipt_sha256"),
+        "trial_receipt_sha256": economic_result.get("trial_receipt_sha256"),
+        "candidate_history_path": economic_result.get("candidate_history_path"),
+        "attempt_history_path": economic_result.get("attempt_history_path"),
+        "checkpoint_path": economic_result.get("checkpoint_path"),
+        "restoration_receipt": economic_result.get("restoration_receipt"),
+        "paper_capital_usd": economic_result.get("paper_capital_usd"),
         "data_complete": economic_result.get("data_complete") is True,
         "heldout_evaluated": economic_result.get("heldout_evaluated") is True,
         "trial_number": comparison.get("trial_count"),
-        "economically_proven": economic_result.get("economically_proven") is True,
+        "economically_proven": economic_proven,
         "candidate_status": economic_result.get("status"),
         "candidate": economic_result.get("selected_candidate"),
+        "proof_gates": {
+            segment: {
+                "eligible": (
+                    economic_result.get(segment, {}).get("eligible")
+                    if isinstance(economic_result.get(segment), Mapping) else None
+                ),
+                "heldout_evaluated": (
+                    economic_result.get(segment, {}).get("heldout_evaluated")
+                    if isinstance(economic_result.get(segment), Mapping) else None
+                ),
+                "retuned_on_heldout": (
+                    economic_result.get(segment, {}).get("retuned_on_heldout")
+                    if isinstance(economic_result.get(segment), Mapping) else None
+                ),
+            }
+            for segment in ("validation", "oos", "forward")
+        },
         "paper_read_only": True,
         "real_execution": False,
     }
     target = entries / f"{run_id}.json"
-    serialized = json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    if target.exists():
-        existing = json.loads(target.read_text(encoding="utf-8"))
-        if existing != record:
-            raise RuntimeError("IMMUTABLE_COPY_VAULT_CANDIDATE_CONFLICT")
-    else:
-        with target.open("x", encoding="utf-8") as handle:
-            handle.write(serialized)
-            handle.flush()
-            os.fsync(handle.fileno())
-    history = load_improvement_history(root)
-    if not any(str(row.get("run_id")) == str(run_id) for row in history):
-        ledger = registry / "HISTORY.jsonl"
-        if ledger.is_symlink():
-            raise OSError("COPY_VAULT_IMPROVEMENT_HISTORY_SYMLINKED")
-        with ledger.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+    try:
+        with SingleWriterFileLock(lock_path):
+            history = _load_improvement_history_unlocked(root)
+            existing_receipt = next(
+                (row for row in history if row.get("run_id") == run_id), None
+            )
+            if existing_receipt is not None:
+                if _improvement_content(existing_receipt) != record:
+                    raise RuntimeError("IMMUTABLE_COPY_VAULT_CANDIDATE_CONFLICT")
+                record = existing_receipt
+            else:
+                previous = (
+                    str(history[-1].get("receipt_sha256") or "")
+                    if history and history[-1].get("schema_version")
+                    == "hypersmart.copy_vault_local_improvement.v2"
+                    else _canonical_json_sha256(history[-1])
+                    if history else _IMPROVEMENT_CHAIN_GENESIS
+                )
+                record["previous_receipt_sha256"] = previous
+                record["receipt_sha256"] = _canonical_json_sha256(
+                    _improvement_receipt_payload(record)
+                )
+
+            if target.is_symlink():
+                raise OSError("IMMUTABLE_COPY_VAULT_CANDIDATE_SYMLINKED")
+            if target.exists():
+                try:
+                    existing_entry = json.loads(target.read_text(encoding="utf-8"))
+                except (OSError, ValueError, TypeError) as exc:
+                    raise RuntimeError("IMMUTABLE_COPY_VAULT_CANDIDATE_INVALID") from exc
+                if existing_entry != record:
+                    raise RuntimeError("IMMUTABLE_COPY_VAULT_CANDIDATE_CONFLICT")
+            else:
+                temporary = entries / (
+                    f".{run_id}.{os.getpid()}.{random.getrandbits(64):016x}.partial"
+                )
+                with temporary.open("x", encoding="utf-8", newline="\n") as handle:
+                    handle.write(json.dumps(
+                        record, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False
+                    ) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, target)
+
+            if existing_receipt is None:
+                _append_improvement_receipt(ledger, record)
+    except WriterBusy as exc:
+        raise RuntimeError("COPY_VAULT_IMPROVEMENT_HISTORY_LOCK_BUSY") from exc
+
     if classification == "ECONOMICALLY_PROVEN_IMPROVEMENT":
         champion = registry / "CURRENT_CHAMPION.json"
-        temporary = champion.with_suffix(".json.partial")
-        if champion.is_symlink() or temporary.is_symlink():
-            raise OSError("COPY_VAULT_CURRENT_CHAMPION_SYMLINKED")
-        temporary.write_text(serialized, encoding="utf-8")
-        os.replace(temporary, champion)
+        temporary = registry / (
+            f".CURRENT_CHAMPION.{os.getpid()}.{random.getrandbits(64):016x}.partial"
+        )
+        try:
+            with SingleWriterFileLock(lock_path):
+                if registry.is_symlink() or champion.is_symlink() or temporary.is_symlink():
+                    raise OSError("COPY_VAULT_CURRENT_CHAMPION_SYMLINKED")
+                should_promote = True
+                if champion.exists():
+                    try:
+                        incumbent = json.loads(champion.read_text(encoding="utf-8"))
+                    except (OSError, ValueError, TypeError) as exc:
+                        raise RuntimeError("COPY_VAULT_CURRENT_CHAMPION_INVALID") from exc
+                    if not isinstance(incumbent, Mapping):
+                        raise RuntimeError("COPY_VAULT_CURRENT_CHAMPION_INVALID")
+                    incumbent_daily = incumbent.get("candidate_daily_net_usd")
+                    incumbent_segment = incumbent.get("comparison_segment")
+                    incumbent_capital = incumbent.get("paper_capital_usd")
+                    try:
+                        incumbent_daily_value = float(incumbent_daily)
+                        incumbent_capital_value = float(incumbent_capital)
+                    except (TypeError, ValueError, OverflowError):
+                        raise RuntimeError("COPY_VAULT_CURRENT_CHAMPION_INVALID") from None
+                    if not math.isfinite(incumbent_daily_value) or not math.isfinite(
+                        incumbent_capital_value
+                    ):
+                        raise RuntimeError("COPY_VAULT_CURRENT_CHAMPION_INVALID")
+                    candidate_capital = economic_result.get("paper_capital_usd")
+                    try:
+                        candidate_capital_value = float(candidate_capital)
+                    except (TypeError, ValueError, OverflowError):
+                        candidate_capital_value = float("nan")
+                    should_promote = (
+                        incumbent_segment == record.get("comparison_segment")
+                        and incumbent_capital_value == candidate_capital_value
+                        and (record.get("candidate_daily_net_usd") or 0)
+                        > incumbent_daily_value
+                    )
+                if should_promote:
+                    with temporary.open("x", encoding="utf-8", newline="\n") as handle:
+                        handle.write(json.dumps(
+                            record, ensure_ascii=False, indent=2, sort_keys=True,
+                            allow_nan=False,
+                        ) + "\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temporary, champion)
+        except WriterBusy as exc:
+            raise RuntimeError("COPY_VAULT_CURRENT_CHAMPION_LOCK_BUSY") from exc
     return record
 
 
@@ -2230,6 +3660,63 @@ def run_historical_trade_replay(
             "status": "UNAVAILABLE", "reason": "HISTORICAL_EXECUTABLE_REPLAY_CONTRACT_INVALID",
             "trial_count": 0, "economically_proven": False,
         }
+    seen_trade_ids: set[str] = set()
+    economic_keys = (
+        "gross_pnl_usd",
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+        "net_pnl_usd",
+    )
+    for index, row in enumerate(trades):
+        trade_id = str(row.get("trade_id") or "").strip()
+        if not trade_id or trade_id in seen_trade_ids:
+            return {
+                "status": "UNAVAILABLE",
+                "reason": "HISTORICAL_EXECUTABLE_TRADE_ID_INVALID_OR_DUPLICATE",
+                "trial_count": 0,
+                "economically_proven": False,
+            }
+        seen_trade_ids.add(trade_id)
+        amounts = {key: decimal_value(row.get(key)) for key in economic_keys}
+        if any(value is None for value in amounts.values()):
+            return {
+                "status": "UNAVAILABLE",
+                "reason": f"HISTORICAL_EXECUTABLE_ECONOMICS_UNMEASURED:{index}",
+                "trial_count": 0,
+                "economically_proven": False,
+            }
+        costs = [amounts[key] for key in economic_keys[1:-1]]
+        if any(value < 0 for value in costs):
+            return {
+                "status": "UNAVAILABLE",
+                "reason": f"HISTORICAL_EXECUTABLE_NEGATIVE_COST:{index}",
+                "trial_count": 0,
+                "economically_proven": False,
+            }
+        recomputed_net = decimal_sum(
+            (
+                amounts["gross_pnl_usd"],
+                *(value.copy_negate() for value in costs),
+            )
+        )
+        if (
+            recomputed_net is None
+            or (recomputed_delta := decimal_difference(recomputed_net, amounts["net_pnl_usd"]))
+            is None
+            or recomputed_delta.copy_abs() > USD_RECONCILIATION_ABS_TOLERANCE
+        ):
+            return {
+                "status": "UNAVAILABLE",
+                "reason": f"HISTORICAL_EXECUTABLE_ECONOMIC_RECONCILIATION_FAILED:{index}",
+                "trial_count": 0,
+                "economically_proven": False,
+            }
+        row["_exact_costs_usd"] = tuple(costs)
+        row["_exact_conservative_net_usd"] = min(
+            recomputed_net, amounts["net_pnl_usd"]
+        )
     numeric_features = {
         "spread": [float(row["regime_reference_spread_bps"]) for row in trades],
         "imbalance": [float(row["signed_reference_depth_imbalance"]) for row in trades],
@@ -2294,24 +3781,52 @@ def run_historical_trade_replay(
         rows: list[dict[str, Any]], *, capital: float, fee: float, spread: float,
         latency: float, slippage: float,
     ) -> dict[str, Any]:
-        scale = capital / exposure
-        daily = {day: 0.0 for day in all_days}
+        with localcontext() as context:
+            context.prec = 80
+            scale = Decimal(str(capital)) / Decimal(str(exposure))
+        fee_factor = Decimal(str(fee))
+        spread_factor = Decimal(str(spread))
+        latency_factor = Decimal(str(latency))
+        slippage_factor = Decimal(str(slippage))
+        daily_parts: dict[int, list[Decimal]] = {day: [] for day in all_days}
         for row in rows:
-            net = (
-                float(row["gross_pnl_usd"])
-                - float(row["fees_usd"]) * fee
-                - float(row["spread_cost_usd"]) * spread
-                - float(row["slippage_cost_usd"]) * slippage
-                - float(row["latency_cost_usd"]) * latency
-            ) * scale
-            daily[int(row["exit_ts_ms"]) // 86_400_000] += net
-        values = list(daily.values())
-        mean = statistics.mean(values) if values else None
+            fees, spread_cost, slippage_cost, latency_cost = row["_exact_costs_usd"]
+            with localcontext() as context:
+                context.prec = 80
+                incremental_cost = (
+                    fees * (fee_factor - Decimal(1))
+                    + spread_cost * (spread_factor - Decimal(1))
+                    + slippage_cost * (slippage_factor - Decimal(1))
+                    + latency_cost * (latency_factor - Decimal(1))
+                )
+                stressed_net = (
+                    row["_exact_conservative_net_usd"] - incremental_cost
+                ) * scale
+            daily_parts[int(row["exit_ts_ms"]) // 86_400_000].append(stressed_net)
+        daily = {
+            day: decimal_sum(parts) if parts else Decimal(0)
+            for day, parts in daily_parts.items()
+        }
+        total_net = decimal_sum(daily.values())
+        if total_net is None:
+            raise ValueError("Historical Copy-Vault replay could not sum exact daily PnL")
+        with localcontext() as context:
+            context.prec = 80
+            mean = total_net / Decimal(len(daily)) if daily else None
+        mean_float = float_not_above(mean) if mean is not None else None
+        total_float = float_not_above(total_net)
+        if total_float is None or (mean is not None and mean_float is None):
+            raise ValueError("Historical Copy-Vault replay PnL cannot be serialized")
+        values = [float_not_above(value) for value in daily.values()]
+        if any(value is None for value in values):
+            raise ValueError("Historical Copy-Vault daily PnL is not serializable")
         return {
             "sample_count": len(rows), "distinct_complete_days": len(values),
-            "daily_net_pnl_usd": round(mean, 8) if mean is not None else None,
-            "total_net_pnl_usd": round(sum(values), 8),
-            "_daily_values": values,
+            "daily_net_pnl_usd": mean_float,
+            "daily_net_pnl_usd_exact_decimal": format(mean, "f") if mean is not None else None,
+            "total_net_pnl_usd": total_float,
+            "total_net_pnl_usd_exact_decimal": format(total_net, "f"),
+            "_daily_values_exact": [format(value, "f") for value in daily.values()],
         }
 
     trials: list[dict[str, Any]] = []
@@ -2352,22 +3867,55 @@ def run_historical_trade_replay(
         and row["fee_multiplier"] == row["spread_multiplier"] == row["latency_multiplier"] == row["slippage_multiplier"] == 1.0
         and int(row["sample_count"]) >= 4
     ]
-    best = max(comparable, key=lambda row: float(row["daily_net_pnl_usd"] or -1e100))
+    def exact_daily_rank(row: Mapping[str, Any]) -> Decimal:
+        value = decimal_value(row["daily_net_pnl_usd_exact_decimal"])
+        return value if value is not None else Decimal("-Infinity")
+
+    best = max(comparable, key=exact_daily_rank)
     rng = random.Random(21_200_540)
-    for row in (baseline, best):
-        values = list(row.pop("_daily_values", []))
+    bootstrap_rows = {id(row): row for row in (baseline, best)}
+    for row in bootstrap_rows.values():
+        values = [
+            value
+            for item in row.pop("_daily_values_exact", [])
+            if (value := decimal_value(item)) is not None
+        ]
         if not values:
             continue
-        bootstrap = sorted(
-            statistics.mean(rng.choice(values) for _day in values)
-            for _ in range(max(100, int(bootstrap_samples)))
-        )
-        row["bootstrap_p05_usd_per_day"] = round(
-            bootstrap[int(len(bootstrap) * 0.05)], 8
-        )
+        bootstrap: list[Decimal] = []
+        for _ in range(max(100, int(bootstrap_samples))):
+            sample_total = decimal_sum(rng.choice(values) for _day in values)
+            if sample_total is None:
+                continue
+            with localcontext() as context:
+                context.prec = 80
+                context.rounding = ROUND_FLOOR
+                bootstrap.append(sample_total / Decimal(len(values)))
+        if not bootstrap:
+            continue
+        bootstrap.sort()
+        p05 = bootstrap[int(len(bootstrap) * 0.05)]
+        row["bootstrap_p05_usd_per_day"] = float_not_above(p05)
+        row["bootstrap_p05_usd_per_day_exact_decimal"] = format(p05, "f")
     for row in trials:
-        row.pop("_daily_values", None)
-    improvement = float(best["daily_net_pnl_usd"]) - float(baseline["daily_net_pnl_usd"])
+        row.pop("_daily_values_exact", None)
+    best_daily_exact = decimal_value(best["daily_net_pnl_usd_exact_decimal"])
+    baseline_daily_exact = decimal_value(baseline["daily_net_pnl_usd_exact_decimal"])
+    improvement_exact = (
+        decimal_difference(best_daily_exact, baseline_daily_exact)
+        if best_daily_exact is not None and baseline_daily_exact is not None
+        else None
+    )
+    improvement = (
+        float_not_above(improvement_exact) if improvement_exact is not None else None
+    )
+    if improvement is None:
+        return {
+            "status": "UNAVAILABLE",
+            "reason": "HISTORICAL_EXECUTABLE_IMPROVEMENT_UNREPRESENTABLE",
+            "trial_count": len(trials),
+            "economically_proven": False,
+        }
     return {
         "status": "COMPLETED_EXPLORATORY",
         "reason": "TRAIN_ONLY_PRESERVED_EXECUTABLE_TRADES_NO_HELDOUT_PROOF",
@@ -2379,8 +3927,9 @@ def run_historical_trade_replay(
             item for row in filters.values() for item in row[0] if item != "BASELINE"
         }),
         "baseline": baseline, "best_candidate": best,
-        "improvement_usd_per_day": round(improvement, 8),
-        "improvement_found": improvement > 0.0,
+        "improvement_usd_per_day": improvement,
+        "improvement_usd_per_day_exact_decimal": format(improvement_exact, "f"),
+        "improvement_found": improvement_exact > 0,
         "trials": trials,
         "economically_proven": False,
         "paper_read_only": True, "real_execution": False,

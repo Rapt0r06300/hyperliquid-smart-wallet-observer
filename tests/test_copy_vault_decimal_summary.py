@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from hl_observer.backtesting.copy_vault_executable import summarize
 from hl_observer.economics.numeric import (
+    decimal_difference,
     decimal_sum,
     decimal_value,
     float_not_above,
@@ -33,6 +34,14 @@ def test_summary_does_not_report_more_pnl_than_its_gross_and_cost_evidence() -> 
 
 def test_decimal_sum_preserves_small_terms_across_large_cancellation() -> None:
     assert decimal_sum(("10000000000000000", "1", "-10000000000000000")) == Decimal(1)
+
+
+def test_decimal_difference_preserves_sub_28_digit_gaps() -> None:
+    left = Decimal("1.000000000000000000000000000000000000000000000000000000000000000001")
+    right = Decimal("1.000000000000000000000000000000000000000000000000000000000000000000")
+
+    assert decimal_difference(left, right) == Decimal("1e-66")
+    assert decimal_difference(left, left) == Decimal(0)
 
 
 def test_money_parser_rejects_booleans_and_nonfinite_values() -> None:

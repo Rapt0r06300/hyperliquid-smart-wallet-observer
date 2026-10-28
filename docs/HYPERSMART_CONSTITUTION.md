@@ -39,7 +39,7 @@ La seule famille économique active est **Copy-Vault**. Lead-Lag, Cross-Venue/Di
 
 Le marqueur de compatibilité documentaire « Carry est historique et non actif » demeure strictement vrai.
 
-La roadmap technique cumulative V5/776+ est distincte de la mission économique : son Done dépend de l'implémentation, du câblage, des tests et des preuves techniques de ses exigences. Atteindre +4 USD, 3×4 USD ou un PnL positif n'est pas un critère de clôture de cette roadmap technique.
+La roadmap technique cumulative V5/776+ est distincte de la mission économique : son Done dépend de l'implémentation, du câblage, des tests et des preuves techniques de ses exigences. Atteindre la cible terminale Copy-Vault de +5 USD nets/jour sur 200 USD paper, ou obtenir un PnL positif, n'est pas un critère de clôture de cette roadmap technique.
 
 ## 4. Contrat agents et parallélisme
 

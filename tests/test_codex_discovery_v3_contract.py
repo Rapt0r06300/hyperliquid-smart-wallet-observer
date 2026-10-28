@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -47,7 +46,10 @@ def test_runbook_preserves_machine_daily_contract() -> None:
     assert "codex_quant_batch.py" in text
     assert "0,99" in text or "0.99" in text
     assert "2 jours utc complets" in text
-    assert "+4.00 usd net/jour" in text
+    assert "+5.00 usd net/jour" in text
+    assert "copy_vault" in text
+    assert "terminal" in text
+    assert "les familles désactivées" in text
     assert "needs-rediscovery" in text
     assert "needs-challenger" in text
 

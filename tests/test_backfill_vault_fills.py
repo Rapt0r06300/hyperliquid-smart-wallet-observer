@@ -36,9 +36,11 @@ def test_backfill_un_vault_pagine_parse_dedup(tmp_path):
 
     def faux_poster(vault, a, b):
         appels["n"] += 1
-        return [{"time": 1000, "coin": "SOL", "px": "150", "sz": "10", "side": "B",
-                 "dir": "Open Long", "startPosition": "0", "oid": 1}]   # même fill à chaque fenêtre
+        row = {"time": a, "coin": "SOL", "px": "150", "sz": "10", "side": "B",
+               "dir": "Open Long", "startPosition": "0", "oid": 1}
+        return [row, dict(row)]
 
     fills = BF.backfill_un_vault(tmp_path, "0xR1", lookback_j=2, limiteur=CF.Limiteur(0.0), poster=faux_poster)
-    assert appels["n"] >= 2                                            # plusieurs fenêtres paginées
-    assert len(fills) == 1 and fills[0]["coin"] == "SOL"              # doublons dédupliqués
+    assert appels["n"] == 2
+    assert len(fills) == 2 and all(row["coin"] == "SOL" for row in fills)
+    assert len({row["ts_ms"] for row in fills}) == 2

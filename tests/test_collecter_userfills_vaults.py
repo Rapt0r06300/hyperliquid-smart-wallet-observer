@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -44,7 +46,7 @@ def test_journal_conserve_identite_vault_complete(tmp_path):
     C._journal(
         tmp_path,
         {"vault": vault, "coin": "SOL", "dir": "Open Long", "ts_ms": 1000,
-         "source": "LIVE_WS", "isSnapshot": False},
+         "received_at_ms": 1005, "source": "LIVE_WS", "isSnapshot": False},
         "PROBE",
         {"refus": "EDGE_PRELIM_ABSENT"},
         1010,
@@ -55,7 +57,7 @@ def test_journal_conserve_identite_vault_complete(tmp_path):
     assert saved["vault_short"] == vault[:12]
     assert saved["source"] == "LIVE_WS"
     assert saved["isSnapshot"] is False
-    assert saved["received_at_ms"] == 1010
+    assert saved["received_at_ms"] == 1005
 
 
 def test_journal_liquidation_separe_live_causal_et_snapshot(tmp_path, monkeypatch):
@@ -103,6 +105,114 @@ def test_snapshot_initial_ignore_et_curseur_pose():
     assert len(cur["0xV"]["event_ids_at_ts"]) == 2
 
 
+def test_snapshot_de_reconnexion_ne_devient_jamais_un_fill_forward():
+    cur = {"0xV": {"version": 2, "ts_ms": 1000, "event_ids_at_ts": []}}
+    identities = {}
+    diagnostics = []
+    historical = _f(2000, snap=True)
+
+    assert C.fills_a_traiter(
+        "0xV", [historical], cur,
+        identity_fingerprints=identities, diagnostics=diagnostics,
+    ) == []
+    assert cur["0xV"]["ts_ms"] == 1000
+
+    # The same event echoed as a live update after reconnect is still history.
+    live_echo = {**historical, "isSnapshot": False}
+    assert C.fills_a_traiter(
+        "0xV", [live_echo], cur,
+        identity_fingerprints=identities, diagnostics=diagnostics,
+    ) == []
+
+
+def test_collision_identite_native_avec_contenu_divergent_est_quarantaine():
+    cur = {}
+    diagnostics = []
+    identities = {}
+    first = {**_f(1000), "tid": 77, "hash": "0xabc", "px": 100.0}
+    conflict = {**_f(1000, suffix="b"), "tid": 77, "hash": "0xabc", "px": 101.0}
+
+    assert C.fills_a_traiter(
+        "0xV", [first, conflict], cur,
+        identity_fingerprints=identities, diagnostics=diagnostics,
+    ) == []
+    assert cur == {}
+    assert any(row["reason_code"] == "FILL_NATIVE_ID_CONTENT_CONFLICT" for row in diagnostics)
+    assert C.fills_a_traiter(
+        "0xV", [first], cur, identity_fingerprints=identities,
+        diagnostics=diagnostics,
+    ) == []
+
+
+def test_fill_en_retard_derriere_curseur_est_diagnostique_et_non_admis():
+    cur = {"0xV": {"version": 2, "ts_ms": 5000, "event_ids_at_ts": []}}
+    diagnostics = []
+
+    assert C.fills_a_traiter(
+        "0xV", [_f(4000)], cur,
+        identity_fingerprints={}, diagnostics=diagnostics,
+    ) == []
+    assert any(
+        row["reason_code"] == "LATE_FILL_BEHIND_CURSOR_UNRECONCILED"
+        for row in diagnostics
+    )
+
+
+def test_gaps_critiques_inclut_toutes_les_pertes_de_preuve(monkeypatch):
+    valeurs = {
+        "drops": 1,
+        "tape_drops": 2,
+        "unreconciled_gaps": 3,
+        "native_identity_conflicts": 4,
+        "unclassified_snapshot_frames": 5,
+        "integrity_diagnostic_write_failures": 6,
+        "unclassified_frame_write_failures": 7,
+    }
+    for name, value in valeurs.items():
+        monkeypatch.setitem(C._HEARTBEAT_WS, name, value)
+
+    assert C._gaps_critiques_userfills() == sum(valeurs.values())
+
+
+def test_journal_integrite_protege_ses_champs_de_confiance(tmp_path):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    C._journal_userfills_integrity(tmp_path, {
+        "reason_code": "FILL_NATIVE_ID_CONTENT_CONFLICT",
+        "schema": "forged",
+        "read_only": False,
+        "real_execution": True,
+        "detected_at_ms": 1,
+    })
+
+    saved = json.loads((tmp_path / C.FILLS_INTEGRITY).read_text(encoding="utf-8"))
+    assert saved["schema"] == "alina.userfills_integrity_diagnostic.v1"
+    assert saved["read_only"] is True
+    assert saved["real_execution"] is False
+    assert saved["detected_at_ms"] > 1
+
+
+def test_gap_rest_ws_non_reconcilie_est_journalise_et_compte(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    initial = int(C._HEARTBEAT_WS.get("unreconciled_gaps") or 0)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "unreconciled_gaps", initial)
+
+    C._journal_userfills_integrity(tmp_path, {
+        "reason_code": "REST_WS_GAP_UNRECONCILED",
+        "source": "REST_WS_RECONCILIATION",
+        "vault": "0xV",
+        "count": 2,
+        "details": {"sample_native_keys": ["fill-a", "fill-b"]},
+    })
+
+    saved = json.loads((tmp_path / C.FILLS_INTEGRITY).read_text(encoding="utf-8"))
+    assert saved["reason_code"] == "REST_WS_GAP_UNRECONCILED"
+    assert saved["count"] == 2
+    assert saved["read_only"] is True
+    assert saved["real_execution"] is False
+    assert C._HEARTBEAT_WS["unreconciled_gaps"] == initial + 2
+    assert C._gaps_critiques_userfills() >= initial + 2
+
+
 def test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur():
     cur = {}
     assert C.fills_a_traiter("0xV", [_f(100, snap=None)], cur) == []
@@ -128,11 +238,11 @@ def test_trame_non_classee_est_conservee_comme_preuve_brute(tmp_path):
     assert saved["read_only"] is True and saved["real_execution"] is False
 
 
-def test_reconnexion_rejoue_les_inconnus_recents_et_migre_legacy():
+def test_reconnexion_admet_uniquement_les_updates_live_et_migre_legacy():
     cur = {"0xV": 200}
     a = C.fills_a_traiter(
         "0xV",
-        [_f(150, snap=True), _f(300, snap=True)],
+        [_f(150, snap=False), _f(300, snap=False)],
         cur,
     )
     assert [f["ts_ms"] for f in a] == [300]
@@ -182,16 +292,280 @@ def test_fill_persiste_avec_horodatage_de_reception_causale(tmp_path, monkeypatc
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     monkeypatch.setattr(C, "_TAPE_FILLS", None)
     monkeypatch.setattr(C.CO, "COHORTES", {})
+    monkeypatch.setitem(C._HEARTBEAT_WS, "persisted_fills", 0)
     fill = {
         "vault": "0xV", "coin": "SOL", "ts_ms": 1000, "source": "LIVE_WS",
-        "isSnapshot": False, "hash": "0xfill",
+        "received_at_ms": 1_005, "isSnapshot": False, "hash": "0xfill",
     }
 
     C._traiter_un(tmp_path, fill, set(), 1.0)
 
     saved = json.loads((tmp_path / C.FILLS_LIVE).read_text(encoding="utf-8"))
     assert saved["received_at_ms"] >= saved["ts_ms"]
-    assert "received_at_ms" not in fill
+    assert fill["received_at_ms"] == 1_005
+    assert C._HEARTBEAT_WS["persisted_fills"] == 1
+
+
+def test_fill_quarantined_for_bad_receive_time_is_not_counted_as_persisted(
+    tmp_path, monkeypatch,
+):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    monkeypatch.setattr(C, "_TAPE_FILLS", None)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "persisted_fills", 0)
+    fill = {
+        "vault": "0xV", "coin": "SOL", "ts_ms": 1000,
+        "received_at_ms": None, "isSnapshot": False,
+    }
+
+    C._traiter_un(tmp_path, fill, set(), 1.0)
+
+    assert C._HEARTBEAT_WS["persisted_fills"] == 0
+    assert not (tmp_path / C.FILLS_LIVE).exists()
+    assert (tmp_path / C.FILLS_UNCLASSIFIED).is_file()
+    assert C._HEARTBEAT_WS["receive_clock_rejections"] >= 1
+    assert C._gaps_critiques_userfills() >= 1
+
+
+def test_userfills_ack_is_explicit_matched_and_required_for_every_vault(monkeypatch):
+    vaults = ["0xAAA", "0xBBB"]
+    monkeypatch.setitem(C._HEARTBEAT_WS, "acknowledged_userfills", set())
+    monkeypatch.setitem(C._HEARTBEAT_WS, "acks", 0)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "invalid_subscription_acks", 0)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "messages", 900)
+    monkeypatch.setattr(C, "_CURRENT_ROTATION_VAULTS", tuple(vaults))
+
+    valid_ack = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": "0xaaa"},
+        },
+    }
+    assert C._record_userfills_subscription_ack(valid_ack, vaults) == "0xAAA"
+    assert C._heartbeat_userfills_state(5)["n_ecrites"] == 0
+    assert C._heartbeat_userfills_state(5)["souscription_ack"] is False
+
+    wrong_user_ack = {
+        **valid_ack,
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": "0xOTHER"},
+        },
+    }
+    unsubscribe_ack = {
+        **valid_ack,
+        "data": {**valid_ack["data"], "method": "unsubscribe"},
+    }
+    assert C._record_userfills_subscription_ack(wrong_user_ack, vaults) is None
+    assert C._record_userfills_subscription_ack(unsubscribe_ack, vaults) is None
+    assert C._HEARTBEAT_WS["invalid_subscription_acks"] == 2
+    assert C._HEARTBEAT_WS["acks"] == 1
+    l2_ack = {
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "l2Book", "coin": "BTC"},
+        },
+    }
+    assert C._record_userfills_subscription_ack(l2_ack, vaults) is None
+    assert C._HEARTBEAT_WS["invalid_subscription_acks"] == 2
+
+    second_ack = {
+        **valid_ack,
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": "0xBBB"},
+        },
+    }
+    assert C._record_userfills_subscription_ack(second_ack, vaults) == "0xBBB"
+    assert C._heartbeat_userfills_state(5)["souscription_ack"] is True
+    assert C._heartbeat_userfills_state(5)["metriques"]["subscription_ack_count"] == 2
+
+
+def test_reconnexion_invalide_les_acks_de_son_groupe(monkeypatch):
+    monkeypatch.setitem(
+        C._HEARTBEAT_WS, "acknowledged_userfills", {"0xAAA", "0xBBB", "0xCCC"},
+    )
+    monkeypatch.setitem(C._HEARTBEAT_WS, "acks", 3)
+
+    C._invalidate_userfills_subscription_acks(["0xAAA", "0xBBB"])
+
+    assert C._HEARTBEAT_WS["acknowledged_userfills"] == {"0xCCC"}
+    assert C._HEARTBEAT_WS["acks"] == 1
+
+
+def test_userfills_demux_refuse_unexpected_channel():
+    known = {"0xabc": "0xABC"}
+    assert C._vault_du_message(
+        {"channel": "userFills", "data": {"user": "0xAbC"}}, known,
+    ) == "0xABC"
+    assert C._vault_du_message(
+        {"channel": "notification", "data": {"user": "0xAbC"}}, known,
+    ) is None
+
+
+def test_userfills_socket_ignores_frames_until_matching_subscription_ack(
+    tmp_path, monkeypatch,
+):
+    vault = "0xAAA"
+    frames = [
+        "{malformed-json",
+        {
+            "channel": "notification",
+            "data": {"user": vault},
+        },
+        {
+            "channel": "userFills",
+            "data": {"user": "0xUNKNOWN", "isSnapshot": True, "fills": []},
+        },
+        {
+            "channel": "userFills",
+            "data": {"user": vault, "isSnapshot": True, "fills": []},
+        },
+        {
+            "channel": "subscriptionResponse",
+            "data": {
+                "method": "subscribe",
+                "subscription": {"type": "userFills", "user": "0xOTHER"},
+            },
+        },
+        {
+            "channel": "subscriptionResponse",
+            "data": {
+                "method": "subscribe",
+                "subscription": {"type": "userFills", "user": vault},
+            },
+        },
+        {
+            "channel": "userFills",
+            "data": {"user": vault, "isSnapshot": True, "fills": []},
+        },
+    ]
+
+    class FakeSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def send(self, message):
+            self.sent.append(json.loads(message))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if frames:
+                frame = frames.pop(0)
+                return frame if isinstance(frame, str) else json.dumps(frame)
+            raise asyncio.CancelledError
+
+    socket = FakeSocket()
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setitem(sys.modules, "websockets", SimpleNamespace(connect=lambda *_args, **_kwargs: socket))
+    monkeypatch.setattr(C.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(C.time, "time", lambda: 1_000.0)
+    monkeypatch.setattr(C.time, "monotonic_ns", lambda: 1_000_000_000)
+    monkeypatch.setattr(C, "_CURRENT_ROTATION_VAULTS", (vault,))
+    C._HEARTBEAT_WS.update({
+        "messages": 0,
+        "fills": 0,
+        "acks": 0,
+        "drops": 0,
+        "tape_drops": 0,
+        "acknowledged_userfills": set(),
+        "invalid_subscription_acks": 0,
+        "pre_ack_userfills_frames": 0,
+        "invalid_json_frames": 0,
+        "unexpected_userfills_channels": 0,
+        "receive_clock_rejections": 0,
+        "unreconciled_gaps": 0,
+        "native_identity_conflicts": 0,
+        "unclassified_snapshot_frames": 0,
+        "integrity_diagnostic_write_failures": 0,
+        "unclassified_frame_write_failures": 0,
+    })
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(C._userfills_multiplex(tmp_path, [vault], asyncio.Queue(), "T"))
+
+    assert socket.sent == [
+        {"method": "subscribe", "subscription": {"type": "userFills", "user": vault}},
+    ]
+    assert C._HEARTBEAT_WS["pre_ack_userfills_frames"] == 1
+    assert C._HEARTBEAT_WS["invalid_json_frames"] == 1
+    assert C._HEARTBEAT_WS["unexpected_userfills_channels"] == 2
+    assert C._HEARTBEAT_WS["unreconciled_gaps"] == 4
+    assert C._HEARTBEAT_WS["invalid_subscription_acks"] == 1
+    assert C._HEARTBEAT_WS["acknowledged_userfills"] == {vault}
+    assert C._HEARTBEAT_WS["acks"] == 1
+    assert C._HEARTBEAT_WS["messages"] == 1
+    state = C._heartbeat_userfills_state(0)
+    assert state["metriques"]["invalid_json_frames"] == 1
+    assert state["metriques"]["unexpected_userfills_channels"] == 2
+    assert state["metriques"]["receive_clock_rejections"] == 0
+    assert C._gaps_critiques_userfills() == 5
+
+
+def test_l2_invalid_json_is_attributed_to_l2_not_userfills(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    frames = ["{invalid-l2-json"]
+
+    class FakeSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def send(self, message):
+            self.sent.append(json.loads(message))
+
+        async def recv(self):
+            if frames:
+                return frames.pop(0)
+            raise asyncio.CancelledError
+
+    socket = FakeSocket()
+    monkeypatch.setitem(
+        sys.modules,
+        "websockets",
+        SimpleNamespace(connect=lambda *_args, **_kwargs: socket),
+    )
+    monkeypatch.setattr(C, "_coins_actifs", lambda _root: {"BTC"})
+    monkeypatch.setattr(C.time, "time", lambda: 1_000.0)
+    C._HEARTBEAT_WS.update({
+        "invalid_json_frames": 0,
+        "l2_validation_rejections": 0,
+        "l2_reject_reasons": {},
+        "unreconciled_gaps": 0,
+    })
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(C._l2_dynamique(tmp_path))
+
+    lifecycle = (tmp_path / C.L2_LIFECYCLE).read_text(encoding="utf-8").splitlines()
+    event = json.loads(lifecycle[-1])
+    assert socket.sent == [
+        {"method": "subscribe", "subscription": {"type": "l2Book", "coin": "BTC"}},
+    ]
+    assert C._HEARTBEAT_WS["invalid_json_frames"] == 1
+    assert C._HEARTBEAT_WS["l2_validation_rejections"] == 1
+    assert C._HEARTBEAT_WS["l2_reject_reasons"] == {"L2_INVALID_JSON_FRAME": 1}
+    assert event["evt"] == "L2_FRAME_REJECTED"
+    assert event["coin"] is None
+    assert event["reason_code"] == "L2_INVALID_JSON_FRAME"
+    assert not (tmp_path / C.FILLS_INTEGRITY).exists()
 
 
 def test_file_l2_saturee_est_signalee_sans_perdre_le_fill_source(tmp_path, monkeypatch):

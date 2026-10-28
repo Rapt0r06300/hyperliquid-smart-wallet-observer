@@ -2,14 +2,16 @@ from types import SimpleNamespace
 
 import pytest
 
+import hl_observer.testnet.testnet_executor_locked as locked_executor
 from hl_observer.config.settings import ExecutionEnvironment
 from hl_observer.execution_core.central_budget_checker import BudgetCentral
 from hl_observer.hyperliquid.schemas import SignalDecision
 from hl_observer.order_lifecycle.post_only_invariant import REJETE, verifier
 from hl_observer.security.mainnet_guard import MainnetExecutionForbidden, assert_not_mainnet_execution
-import hl_observer.testnet.testnet_executor_locked as locked_executor
 from hl_observer.testnet.testnet_safety_gates import (
     TestnetExecutionIntent as _TestnetExecutionIntent,
+)
+from hl_observer.testnet.testnet_safety_gates import (
     TestnetLocked,
     assert_testnet_unlocked,
 )
@@ -65,11 +67,11 @@ def test_locked_testnet_executor_returns_only_validated_scaffold_after_gate(monk
     assert observed["intent"].reduce_only is True
 
 
-def test_testnet_gate_rejects_mainnet_execution_flag() -> None:
+def test_testnet_gate_rejects_even_when_every_override_is_enabled() -> None:
     settings = SimpleNamespace(
         environment=ExecutionEnvironment.TESTNET,
         execution=SimpleNamespace(
-            enable_mainnet_execution=True,
+            enable_mainnet_execution=False,
             enable_testnet_execution=True,
         ),
     )
@@ -84,5 +86,5 @@ def test_testnet_gate_rejects_mainnet_execution_flag() -> None:
     with pytest.raises(TestnetLocked) as exc_info:
         assert_testnet_unlocked(settings, risk_decision, intent)
 
-    assert exc_info.value.reasons == ["mainnet execution flag must remain false"]
+    assert exc_info.value.reasons == ["TESTNET_DISABLED_BY_REPOSITORY_POLICY"]
     assert exc_info.value.decision is SignalDecision.REJECT_TESTNET_LOCKED

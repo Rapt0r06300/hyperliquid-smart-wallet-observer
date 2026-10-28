@@ -3,15 +3,18 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
+import tools.unpack_verified_safe as unpack_module
+from tools.restore_alina import _windows_io_path as canonical_windows_io_path
 from tools.unpack_verified_safe import SafeUnpackError, expand_safe_corpus
 
 
 def fixture(root):
     path = root / "usable" / "shards" / "release-one" / "safe.jsonl.gz"
     path.parent.mkdir(parents=True)
-    path.write_bytes(gzip.compress(b'{"px":100}\n', mtime=0))
+    canonical_windows_io_path(path).write_bytes(gzip.compress(b'{"px":100}\n', mtime=0))
     _bind_catalog(root, path, "safe")
 
 
@@ -22,7 +25,7 @@ def _digest(root):
 def _bind_catalog(root, source, dataset_id):
     index = root / "catalog" / "DATA_INDEX.json"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(json.dumps({
+    canonical_windows_io_path(index).write_text(json.dumps({
         "schema": "alina.data_index.v2",
         "shards": [{
             "dataset_id": dataset_id,
@@ -31,11 +34,11 @@ def _bind_catalog(root, source, dataset_id):
             "release_asset": source.name,
             "quality_status": "SAFE",
             "replay_compatible": True,
-            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-            "bytes": source.stat().st_size,
+            "sha256": hashlib.sha256(canonical_windows_io_path(source).read_bytes()).hexdigest(),
+            "bytes": canonical_windows_io_path(source).stat().st_size,
         }],
     }), encoding="utf-8")
-    (root / "RESTORE_REPORT.json").write_text(json.dumps({
+    canonical_windows_io_path(root / "RESTORE_REPORT.json").write_text(json.dumps({
         "status": "REPLAY_READY_COMPLETE",
         "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "classification": {"materialization_complete": True, "usable_shards": 1},
@@ -81,15 +84,17 @@ def test_copy_vault_only_unpack_ignores_and_preserves_other_safe_families(tmp_pa
             "release_asset": source.name,
             "quality_status": "SAFE",
             "replay_compatible": True,
-            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-            "bytes": source.stat().st_size,
+            "sha256": hashlib.sha256(canonical_windows_io_path(source).read_bytes()).hexdigest(),
+            "bytes": canonical_windows_io_path(source).stat().st_size,
         })
     index = tmp_path / "catalog" / "DATA_INDEX.json"
     index.parent.mkdir(parents=True)
-    index.write_text(json.dumps({"schema": "alina.data_index.v2", "shards": rows}),
-                     encoding="utf-8")
+    canonical_windows_io_path(index).write_text(
+        json.dumps({"schema": "alina.data_index.v2", "shards": rows}),
+        encoding="utf-8",
+    )
     digest = _digest(tmp_path)
-    (tmp_path / "RESTORE_REPORT.json").write_text(json.dumps({
+    canonical_windows_io_path(tmp_path / "RESTORE_REPORT.json").write_text(json.dumps({
         "status": "REPLAY_READY_COMPLETE",
         "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "selection_scope": "COPY_VAULT_ONLY",
@@ -199,3 +204,30 @@ def test_old_success_report_is_invalidated_on_missing_restore_certificate(tmp_pa
         _expand(tmp_path)
     report = json.loads((tmp_path / "UNPACK_REPORT.json").read_text())
     assert report["status"] == "UNPACK_IN_PROGRESS_NOT_CERTIFIED"
+
+
+
+def test_long_release_paths_are_normalized_before_unpack_io(tmp_path, monkeypatch):
+    root = tmp_path / "copy-vault"
+    release_tag = "r" * 180
+    dataset_id = "d" * 180
+    source = root / "usable" / "shards" / release_tag / f"{dataset_id}.jsonl.gz"
+    canonical_windows_io_path(source).parent.mkdir(parents=True, exist_ok=True)
+    canonical_windows_io_path(source).write_bytes(gzip.compress(b'{"px":123}\n', mtime=0))
+    _bind_catalog(root, source, dataset_id)
+    assert len(str(source)) > 260
+
+    normalized = []
+    original = unpack_module._windows_io_path
+
+    def recording_normalizer(path):
+        normalized.append(str(path))
+        return original(path)
+
+    monkeypatch.setattr(unpack_module, "_windows_io_path", recording_normalizer)
+    report = _expand(root)
+
+    target = root / "usable" / "unpacked" / release_tag / f"{dataset_id}.jsonl"
+    assert report["status"] == "SAFE_UNPACK_COMPLETE"
+    assert canonical_windows_io_path(target).read_bytes() == b'{"px":123}\n'
+    assert any(Path(path).resolve() == root.resolve() for path in normalized)

@@ -79,11 +79,57 @@ def test_published_receipt_is_not_itself_economic_proof() -> None:
         job_outcome="success",
         build_outcome="success",
         publish_outcome="success",
+        publish_changed="true",
     )
 
     assert result["classification"] == "RECEIPT_PUBLISHED_REQUIRES_REVIEW"
     assert result["receipt_published"] is True
     assert result["economic_proof"] is False
+
+
+def test_unchanged_receipt_is_not_reported_as_published_this_run() -> None:
+    result = classify_run(
+        phase="ANALYZE",
+        stage="DONE",
+        epoch="9",
+        job_outcome="success",
+        build_outcome="success",
+        publish_outcome="success",
+        publish_changed="false",
+    )
+
+    assert result["classification"] == "CLOSURE_ALREADY_CURRENT_NOT_PUBLISHED"
+    assert result["receipt_published"] is False
+    assert result["economic_proof"] is False
+
+
+def test_published_receipt_remains_visible_if_later_dispatch_fails() -> None:
+    result = classify_run(
+        phase="ANALYZE",
+        stage="DONE",
+        epoch="9",
+        job_outcome="failure",
+        build_outcome="success",
+        publish_outcome="success",
+        publish_changed="true",
+    )
+
+    assert result["classification"] == "RECEIPT_PUBLISHED_REQUIRES_REVIEW"
+    assert result["receipt_published"] is True
+
+
+def test_unknown_publication_receipt_is_not_reported_as_published() -> None:
+    result = classify_run(
+        phase="ANALYZE",
+        stage="DONE",
+        epoch="9",
+        job_outcome="success",
+        build_outcome="success",
+        publish_outcome="success",
+    )
+
+    assert result["classification"] == "CLOSURE_PUBLICATION_UNVERIFIED_NOT_PROVEN"
+    assert result["receipt_published"] is False
 
 
 def test_unrecognized_phase_or_epoch_is_not_a_proof() -> None:

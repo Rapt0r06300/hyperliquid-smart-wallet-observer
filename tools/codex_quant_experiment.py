@@ -9,9 +9,10 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SRC = _REPO_ROOT / "src"
@@ -21,15 +22,16 @@ for _path in (_SRC, _REPO_ROOT, _TOOLS):
         sys.path.insert(0, str(_path))
 
 from hl_observer.research.experiment_protocol import (  # noqa: E402
+    VERDICTS,
     ExperimentSpec,
     SpecValidationError,
-    VERDICTS,
     load_cached_summary,
     load_spec,
     result_dir,
     write_goal_state_atomic,
     write_summary_atomic,
 )
+from hl_observer.strategies.active_scope import require_active_strategy  # noqa: E402
 
 Optimizer = Callable[..., dict[str, Any]]
 Evaluator = Callable[..., Mapping[str, Any]]
@@ -225,6 +227,10 @@ def run_experiment(
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     """Execute a bounded local search and return a compact machine-readable summary."""
+    try:
+        require_active_strategy(spec.family)
+    except ValueError as exc:
+        raise SpecValidationError(str(exc)) from exc
     runtime_root = Path(runtime_root)
     repo_root = Path(repo_root) if repo_root is not None else _REPO_ROOT
     if force and not (force_reason and force_reason.strip()):

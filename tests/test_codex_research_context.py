@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from hl_observer.research.process_memory import ProcessMemoryValidationError
-from hl_observer.research.research_context import build_research_context
+from hl_observer.research.research_context import _select_family, build_research_context
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,11 +50,7 @@ def test_context_auto_selects_underworked_family_and_stays_compact(tmp_path):
         ledger_path=ledger,
         process_memory_path=memory,
     )
-    assert context["family"] in {
-        "copy_vault",
-        "lead_lag",
-        "cross_venue_dislocation_v2",
-    }
+    assert context["family"] == "copy_vault"
     assert context["head"] == "UNKNOWN"
     assert context["next_actions"]
     assert len(json.dumps(context, separators=(",", ":"))) < 6000
@@ -62,6 +58,43 @@ def test_context_auto_selects_underworked_family_and_stays_compact(tmp_path):
     assert context["quota_policy"]["resume_source"] == "compact_context_only"
     assert context["quota_policy"]["full_history_scan"] is False
     assert context["quota_policy"]["raw_log_scan"] is False
+
+
+def test_auto_scope_ignores_historical_trial_counts_for_disabled_families():
+    records = [
+        {"family": "lead_lag", "trial_count": 0},
+        {"family": "cross_venue_dislocation_v2", "trial_count": 0},
+    ]
+
+    assert _select_family(records) == "copy_vault"
+
+
+def test_context_rejects_explicit_disabled_family_before_building_context(tmp_path):
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE:lead_lag"):
+        build_research_context(tmp_path, family="lead_lag")
+
+
+def test_context_cli_refuses_disabled_family_without_writing_output(tmp_path):
+    output = tmp_path / "blocked.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(ROOT / "tools/codex_research_context.py"),
+            "--family",
+            "lead_lag",
+            "--out",
+            str(output),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "DISABLED_BY_SCOPE:lead_lag" in result.stderr
+    assert not output.exists()
 
 
 def test_context_reads_exact_head_without_shelling_out(tmp_path):
@@ -124,8 +157,8 @@ def test_context_reports_semantic_candidates_filtered_before_llm_for_exact_head(
                 "schema_version": 2,
                 "head": sha,
                 "families": {
-                    "lead_lag": {
-                        "family": "lead_lag",
+                    "copy_vault": {
+                        "family": "copy_vault",
                         "generated": 2000,
                         "shortlisted": 12,
                         "filtered_before_llm": 1988,
@@ -135,7 +168,7 @@ def test_context_reports_semantic_candidates_filtered_before_llm_for_exact_head(
         ),
         encoding="utf-8",
     )
-    context = build_research_context(tmp_path, family="lead_lag")
+    context = build_research_context(tmp_path, family="copy_vault")
     assert context["trial_accounting"]["semantic_candidates_filtered_before_llm"] == 1988
     assert context["semantic_discovery"]["available"] is True
     assert "raw_records" not in context
@@ -152,8 +185,8 @@ def test_context_rejects_semantic_status_from_another_head(tmp_path):
                 "schema_version": 2,
                 "head": "5" * 40,
                 "families": {
-                    "lead_lag": {
-                        "family": "lead_lag",
+                    "copy_vault": {
+                        "family": "copy_vault",
                         "generated": 2000,
                         "shortlisted": 12,
                         "filtered_before_llm": 1988,
@@ -164,7 +197,7 @@ def test_context_rejects_semantic_status_from_another_head(tmp_path):
         encoding="utf-8",
     )
 
-    context = build_research_context(tmp_path, family="lead_lag")
+    context = build_research_context(tmp_path, family="copy_vault")
 
     assert context["semantic_discovery"]["available"] is False
     assert context["trial_accounting"]["semantic_candidates_filtered_before_llm"] == 0
@@ -186,7 +219,6 @@ def test_context_rejects_duplicate_ids_across_historical_and_runtime_memory(tmp_
     with pytest.raises(ProcessMemoryValidationError, match="duplicate record_id PM-DUP"):
         build_research_context(
             tmp_path,
-            family="lead_lag",
             process_memory_path=runtime,
         )
 
@@ -201,5 +233,6 @@ def test_context_cli_runs_from_clean_isolated_interpreter():
     )
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
+    assert payload["family"] == "copy_vault"
     assert payload["network_io"] is False
     assert payload["quota_policy"]["resume_source"] == "compact_context_only"

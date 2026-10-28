@@ -40,7 +40,10 @@ from hl_observer.collection.partitioned_tick_dataset import (  # noqa: E402
     PartitionedTickDatasetWriter,
 )
 from hl_observer.collection.tick_dataset import TickEnvelope  # noqa: E402
-from hl_observer.collection.userfills_live import parser_message_userfills  # noqa: E402
+from hl_observer.collection.userfills_live import (  # noqa: E402
+    parser_message_userfills,
+    userfill_required_fields_reason,
+)
 from hl_observer.collection.vault_fills_backfill import (  # noqa: E402
     CAP_USERFILLS,
     canonical_fill_id,
@@ -59,6 +62,10 @@ from hl_observer.datasets.v2_pipeline import (  # noqa: E402
     infer_reconciliation_status,
     locally_replay_admissible,
     summarize_admission_rejections,
+)
+from hl_observer.hyperliquid.rest_info_client import (  # noqa: E402
+    HyperliquidInfoClient,
+    HyperliquidInfoError,
 )
 from hl_observer.normalization.instrument_identity import (  # noqa: E402
     preserve_native_instrument_symbol as canonical_copy_vault_coin,
@@ -295,6 +302,50 @@ def userfills_envelope(
     data = message.get("data")
     snapshot_value = data.get("isSnapshot") if isinstance(data, Mapping) else None
     snapshot_flag_valid = type(snapshot_value) is bool
+    raw_fills = data.get("fills") if isinstance(data, Mapping) else None
+    invalid_reason = None
+    if not isinstance(raw_fills, list):
+        invalid_reason = "USERFILLS_LIST_INVALID"
+    elif isinstance(data, Mapping) and str(data.get("user") or "").strip().lower() != str(vault).strip().lower():
+        invalid_reason = "FILL_VAULT_IDENTITY_MISMATCH"
+    elif not snapshot_flag_valid:
+        invalid_reason = "USERFILLS_SNAPSHOT_FLAG_INVALID"
+    else:
+        for raw_fill in raw_fills:
+            invalid_reason = userfill_required_fields_reason(
+                raw_fill,
+                received_at_ms=receive_wall_ms,
+                require_receive=True,
+            )
+            if invalid_reason is not None:
+                break
+    if invalid_reason is not None:
+        return (
+            TickEnvelope(
+                source_id="hyperliquid_public_userfills",
+                channel="copy_vault_unknown",
+                instrument=str(vault).strip().lower(),
+                event_kind="UNCLASSIFIED",
+                raw_payload=dict(message),
+                received_ts_ms=int(receive_wall_ms),
+                local_monotonic_ns=int(receive_mono_ns),
+                connection_id=connection_id,
+                provenance={
+                    "url": WS_URL,
+                    "network": "mainnet",
+                    "access": "read_only",
+                    "transport": "websocket",
+                    "authenticated": False,
+                    "selection_causal": True,
+                },
+                parsed_summary={
+                    "unclassified_reason": invalid_reason,
+                    "raw_fill_count": len(raw_fills) if isinstance(raw_fills, list) else None,
+                    "data_gate_ready": False,
+                },
+            ),
+            [],
+        )
     fills = parser_message_userfills(
         message,
         vault=vault,
@@ -304,7 +355,9 @@ def userfills_envelope(
     )
     if not fills and not (snapshot_flag_valid and snapshot_value is True):
         return None, []
-    is_snapshot = snapshot_value if snapshot_flag_valid else None
+    # The frame was quarantined above unless the venue explicitly classified
+    # it as a snapshot or a live update. Unknown cannot fall through as a fill.
+    is_snapshot = snapshot_value
     for fill in fills:
         fill["isSnapshot"] = is_snapshot
     exchange_times = [
@@ -447,6 +500,7 @@ def new_l2_state() -> dict[str, Any]:
         "reconnects": 0,
         "heartbeats": 0,
         "heartbeats_received": 0,
+        "connection_heartbeats": {},
         "subscription_ack_mismatches": 0,
         "invalid_subscription_acks": 0,
         "received": 0,
@@ -468,6 +522,42 @@ def new_l2_state() -> dict[str, Any]:
         "market_rejected_by_reason": {},
         "market_subscription_rejections": {},
     }
+
+
+def _heartbeat_connection(
+    ledger: dict[str, Any], connection_id: str
+) -> dict[str, Any]:
+    record = ledger.get(connection_id)
+    if isinstance(record, dict):
+        return record
+    record = {
+        "connection_id": str(connection_id),
+        "sent_count": 0,
+        "received_count": 0,
+        "unmatched_pong_count": 0,
+        "first_received_at_ms": None,
+        "last_received_at_ms": None,
+    }
+    ledger[str(connection_id)] = record
+    return record
+
+
+def _heartbeat_sent(record: dict[str, Any], at_ms: int) -> None:
+    record["sent_count"] = int(record.get("sent_count", 0)) + 1
+    record["last_sent_at_ms"] = int(at_ms)
+
+
+def _heartbeat_received(record: dict[str, Any], at_ms: int) -> None:
+    received_at_ms = int(at_ms)
+    if int(record.get("received_count", 0)) >= int(record.get("sent_count", 0)):
+        record["unmatched_pong_count"] = int(
+            record.get("unmatched_pong_count", 0)
+        ) + 1
+        return
+    record["received_count"] = int(record.get("received_count", 0)) + 1
+    if record.get("first_received_at_ms") is None:
+        record["first_received_at_ms"] = received_at_ms
+    record["last_received_at_ms"] = received_at_ms
 
 
 def _append_l2_history(
@@ -984,6 +1074,13 @@ def _l2_diagnostics(
         "reconnects": counter("reconnects"),
         "heartbeats_sent": counter("heartbeats"),
         "heartbeats_received": counter("heartbeats_received"),
+        "heartbeat_connections": {
+            str(connection_id): dict(record)
+            for connection_id, record in state.get("connection_heartbeats", {}).items()
+            if isinstance(record, Mapping)
+        }
+        if isinstance(state.get("connection_heartbeats"), Mapping)
+        else None,
         "subscription_ack_mismatches": counter("subscription_ack_mismatches"),
         "invalid_subscription_acks": counter("invalid_subscription_acks"),
         "same_connection_market_stream": {
@@ -1456,6 +1553,9 @@ async def _dynamic_l2_collector(
                 max_size=2**23,
             ) as socket:
                 send_lock = asyncio.Lock()
+                heartbeat_record = _heartbeat_connection(
+                    state.setdefault("connection_heartbeats", {}), connection_id
+                )
                 connection_started_ms = int(time.time() * 1_000)
                 _append_l2_history(
                     state,
@@ -1594,9 +1694,16 @@ async def _dynamic_l2_collector(
                         finally:
                             _request_queue.task_done()
 
-                async def heartbeat(*, _send_json: Any = send_json) -> None:
+                async def heartbeat(
+                    *,
+                    _send_json: Any = send_json,
+                    _heartbeat_record: dict[str, Any] = heartbeat_record,
+                ) -> None:
                     while True:
                         await asyncio.sleep(30.0)
+                        _heartbeat_sent(
+                            _heartbeat_record, int(time.time() * 1_000)
+                        )
                         await _send_json({"method": "ping"})
                         state["heartbeats"] = state.get("heartbeats", 0) + 1
 
@@ -1623,6 +1730,7 @@ async def _dynamic_l2_collector(
                             channel = str(raw_message.get("channel") or "")
                             if channel == "pong":
                                 _record_l2_ignored(state, "pong")
+                                _heartbeat_received(heartbeat_record, wall)
                                 state["heartbeats_received"] = int(
                                     state.get("heartbeats_received", 0)
                                 ) + 1
@@ -2302,6 +2410,7 @@ async def _socket_group(
     subscription_attempts_dropped: dict[str, int],
     subscription_diagnostics: dict[str, int],
     snapshot_fill_ids: dict[str, set[str]] | None = None,
+    connection_heartbeats: dict[str, Any] | None = None,
 ) -> None:
     attempt = 0
     known = {vault.lower(): vault.lower() for vault in vaults}
@@ -2342,6 +2451,10 @@ async def _socket_group(
                 max_size=2**23,
             ) as socket:
                 send_lock = asyncio.Lock()
+                heartbeat_record = _heartbeat_connection(
+                    connection_heartbeats if connection_heartbeats is not None else {},
+                    connection_id,
+                )
 
                 async def send_json(
                     payload: Mapping[str, Any],
@@ -2428,10 +2541,17 @@ async def _socket_group(
                         )
                         await asyncio.sleep(0.15)
 
-                async def heartbeat() -> None:
+                async def heartbeat(
+                    *,
+                    _heartbeat_record: dict[str, Any] = heartbeat_record,
+                    _send_json: Any = send_json,
+                ) -> None:
                     while True:
                         await asyncio.sleep(30.0)
-                        await send_json({"method": "ping"})
+                        _heartbeat_sent(
+                            _heartbeat_record, int(time.time() * 1_000)
+                        )
+                        await _send_json({"method": "ping"})
 
                 attempt = 0
                 try:
@@ -2452,6 +2572,7 @@ async def _socket_group(
                             continue
                         channel = str(message.get("channel") or "")
                         if channel == "pong":
+                            _heartbeat_received(heartbeat_record, wall)
                             continue
                         if channel == "subscriptionResponse":
                             ack = classify_subscription_ack(message)
@@ -2981,90 +3102,122 @@ async def exact_window_backfill(
     max_requests: int = MAX_RECONCILIATION_REQUESTS_PER_VAULT,
     pacer: RestWeightPacer | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Adaptive exact-window REST reconciliation using the 2,000 response cap."""
-    pending: deque[tuple[int, int]] = deque([(int(start_ms), int(end_ms))])
+    """Use the canonical REST paginator and preserve its complete query receipt."""
+    if int(end_ms) < int(start_ms):
+        raise ValueError("userFillsByTime end_ms precedes start_ms")
     accepted: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
-    capped_minimum: list[dict[str, Any]] = []
-    requests = 0
-    splits = 0
-    request_budget_exhausted = False
     invalid_fill_count = 0
+    audit: dict[str, Any] = {}
+    info_client = HyperliquidInfoClient(client=client)
 
-    while pending:
-        if requests >= max(1, int(max_requests)):
-            request_budget_exhausted = True
-            break
-        left, right = pending.popleft()
-        requests += 1
-        try:
-            if pacer is not None:
-                await pacer.before_request()
-            raw = await _post_userfills(client, vault, left, right)
-        except Exception as exc:
-            failures.append(
-                {
-                    "start_ms": left,
-                    "end_ms": right,
-                    "error": type(exc).__name__,
-                }
-            )
-            continue
-        if len(raw) >= CAP_USERFILLS:
-            span = right - left
-            if span <= int(min_window_ms):
-                capped_minimum.append(
-                    {
-                        "start_ms": left,
-                        "end_ms": right,
-                        "rows": len(raw),
-                        "cap": CAP_USERFILLS,
-                    }
-                )
-                parsed = parser_fills(raw, vault=vault, include_raw=True)
-                invalid_fill_count += len(raw) - len(parsed)
-                accepted.extend(parsed)
-                continue
-            middle = left + max(1, span // 2)
-            pending.appendleft((middle + 1, right))
-            pending.appendleft((left, middle))
-            splits += 1
-            continue
-        parsed = parser_fills(raw, vault=vault, include_raw=True)
-        invalid_fill_count += len(raw) - len(parsed)
-        accepted.extend(parsed)
+    async def fetch_page(
+        requested_vault: str,
+        left: int,
+        right: int,
+        *,
+        aggregate_by_time: bool = False,
+    ) -> list[dict[str, Any]]:
+        del aggregate_by_time
+        if pacer is not None:
+            await pacer.before_request()
+        return await _post_userfills(client, requested_vault, left, right)
+
+    info_client.user_fills_by_time = fetch_page  # type: ignore[method-assign]
+    try:
+        async for raw, _left, _right in info_client._iter_user_fills_by_time_windows(
+            vault,
+            int(start_ms),
+            int(end_ms),
+            max_pages=max(0, int(max_requests)),
+            min_window_ms=max(0, int(min_window_ms)),
+            audit=audit,
+        ):
+            parsed = parser_fills(raw, vault=vault, include_raw=True)
+            invalid_fill_count += len(raw) - len(parsed)
+            accepted.extend(parsed)
+    except HyperliquidInfoError as exc:
+        if isinstance(exc.coverage_receipt, dict):
+            audit = exc.coverage_receipt
+        elif not audit:
+            audit = {
+                "status": "PARTIAL",
+                "reason": "PAGINATION_ERROR",
+                "requested_start_ms": int(start_ms),
+                "requested_end_ms": int(end_ms),
+                "next_windows": [{"start_ms": int(start_ms), "end_ms": int(end_ms)}],
+                "subrequests": [],
+            }
+        audit.setdefault("pagination_error", str(exc)[:300])
 
     rows = dedupliquer(accepted)
-    retention_cap_reached = len(rows) >= MAX_PUBLIC_USERFILLS
     fill_times = [
         int(row["ts_ms"])
         for row in rows
         if type(row.get("ts_ms")) is int and int(row["ts_ms"]) > 0
     ]
-    return rows, {
-        "status": (
-            "COMPLETE"
-            if not failures
-            and not capped_minimum
-            and not request_budget_exhausted
-            and not invalid_fill_count
-            and not retention_cap_reached
-            else "PARTIAL"
-        ),
-        "requested_start_ms": int(start_ms),
-        "requested_end_ms": int(end_ms),
-        "requests": requests,
-        "splits": splits,
-        "failed_windows": failures,
-        "cap_blocked_windows": capped_minimum,
-        "request_budget_exhausted": request_budget_exhausted,
-        "pending_windows": len(pending),
-        "invalid_fill_count": invalid_fill_count,
-        "retention_cap_reached": retention_cap_reached,
-        "oldest_fill_ts_ms": min(fill_times) if fill_times else None,
-        "newest_fill_ts_ms": max(fill_times) if fill_times else None,
-        "rows": len(rows),
-    }
+    historical_censored = bool(audit.get("historical_censored")) or (
+        len(rows) >= MAX_PUBLIC_USERFILLS
+    )
+    failures = [
+        attempt for attempt in audit.get("subrequests", [])
+        if attempt.get("outcome") == "FAILED"
+    ]
+    capped_minimum = [
+        attempt for attempt in audit.get("subrequests", [])
+        if attempt.get("outcome") == "CAP_BLOCKED"
+    ]
+    splits = sum(
+        1 for attempt in audit.get("subrequests", [])
+        if attempt.get("outcome") == "CAP_SPLIT"
+    )
+    request_budget_exhausted = audit.get("reason") == "MAX_PAGES_REACHED"
+    partial_reasons = list(audit.get("partial_reasons") or [])
+    for reason, present in (
+        ("INVALID_FILL_ROWS", bool(invalid_fill_count)),
+        ("PUBLIC_RETENTION_LIMIT_REACHED", historical_censored),
+    ):
+        if present and reason not in partial_reasons:
+            partial_reasons.append(reason)
+    complete = (
+        audit.get("status") == "COMPLETE"
+        and not invalid_fill_count
+        and not historical_censored
+    )
+    if not complete:
+        audit["status"] = "PARTIAL"
+        if audit.get("reason") is None:
+            audit["reason"] = partial_reasons[0] if partial_reasons else "INCOMPLETE_COVERAGE"
+    audit.update(
+        {
+            "status": "COMPLETE" if complete else "PARTIAL",
+            "requested_start_ms": int(start_ms),
+            "requested_end_ms": int(end_ms),
+            "requests": int(audit.get("request_count") or 0),
+            "api_response_cap": CAP_USERFILLS,
+            "api_history_limit": MAX_PUBLIC_USERFILLS,
+            "window_attempts": list(audit.get("subrequests") or []),
+            "splits": splits,
+            "failed_windows": failures,
+            "cap_blocked_windows": capped_minimum,
+            "request_budget_exhausted": request_budget_exhausted,
+            "pending_windows": len(audit.get("next_windows") or []),
+            "pending_window_ranges": list(audit.get("next_windows") or []),
+            "invalid_fill_count": invalid_fill_count,
+            "retention_cap_reached": historical_censored,
+            "historical_censored": historical_censored,
+            "partial_reasons": partial_reasons,
+            "usable_horizon": {
+                "start_ms": min(fill_times) if fill_times else None,
+                "end_ms": max(fill_times) if fill_times else None,
+                "basis": "observed_historical_rest_fills_only",
+            },
+            "prospective_capture_separate": True,
+            "oldest_fill_ts_ms": min(fill_times) if fill_times else None,
+            "newest_fill_ts_ms": max(fill_times) if fill_times else None,
+            "rows": len(rows),
+        }
+    )
+    return rows, audit
 
 
 def rest_backfill_envelopes(
@@ -3492,6 +3645,7 @@ def build_copy_vault_bundle(
     selection: Mapping[str, Any],
     collection_run_id: str,
     historical_backfill: Mapping[str, Mapping[str, Any]] | None = None,
+    connection_heartbeats: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     assets = output / "assets"
     manifests_dir = output / "manifests"
@@ -3506,6 +3660,13 @@ def build_copy_vault_bundle(
             collector_version=collector_version,
             reconciliation_status="UNVERIFIED",
         )
+        synchronization = dict(preliminary.get("synchronization") or {})
+        connection_ids = synchronization.get("connection_ids")
+        if isinstance(connection_ids, list) and len(connection_ids) == 1:
+            heartbeat = (connection_heartbeats or {}).get(str(connection_ids[0]))
+            if isinstance(heartbeat, Mapping):
+                synchronization["heartbeat"] = dict(heartbeat)
+        preliminary["synchronization"] = synchronization
         vault = str(preliminary.get("symbol") or "").lower()
         family = str(preliminary.get("family") or "")
         report = reconciliation.get(vault, {})
@@ -3801,6 +3962,7 @@ async def collect(
                 subscription_attempts_dropped=subscription_attempts_dropped,
                 subscription_diagnostics=subscription_diagnostics,
                 snapshot_fill_ids=snapshot_fill_ids,
+                connection_heartbeats=l2_state["connection_heartbeats"],
             )
         )
         for group in groups
@@ -3892,6 +4054,7 @@ async def collect(
         selection=selection,
         collection_run_id=run_id,
         historical_backfill=historical_reports,
+        connection_heartbeats=l2_state["connection_heartbeats"],
     )
     effective_start_ms = min(
         observation_start_ms.values(),

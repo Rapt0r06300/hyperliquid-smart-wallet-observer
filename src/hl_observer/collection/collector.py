@@ -344,6 +344,11 @@ async def _collect_plan(
             start_ms = plan.start_ms or (end_ms - plan.page_window_ms)
             page_index = 0
             fills_started = now_ms()
+            fills_coverage_receipt: dict[str, Any] = {
+                "status": "IN_PROGRESS",
+                "requested_start_ms": int(start_ms),
+                "requested_end_ms": int(end_ms),
+            }
             try:
                 async for page, page_start_ms, page_end_ms in client._iter_user_fills_by_time_windows(
                     wallet,
@@ -351,6 +356,7 @@ async def _collect_plan(
                     end_ms,
                     page_window_ms=plan.page_window_ms,
                     max_pages=plan.limit_pages,
+                    audit=fills_coverage_receipt,
                 ):
                     page_index += 1
                     request_payload = build_user_fills_by_time_payload(
@@ -380,6 +386,15 @@ async def _collect_plan(
                     result.fetched_items += 1
             except Exception as exc:  # noqa: BLE001 - partial history must be recorded.
                 error_message = str(exc)
+                attached_receipt = getattr(exc, "coverage_receipt", None)
+                if isinstance(attached_receipt, dict):
+                    fills_coverage_receipt = attached_receipt
+                elif fills_coverage_receipt.get("status") == "IN_PROGRESS":
+                    fills_coverage_receipt["status"] = "PARTIAL"
+                    fills_coverage_receipt["reason"] = "COLLECTOR_CLIENT_ERROR"
+                    fills_coverage_receipt["next_windows"] = [
+                        {"start_ms": int(start_ms), "end_ms": int(end_ms)}
+                    ]
                 latency_ms = now_ms() - fills_started
                 result.errors_count += 1
                 repo.add_collection_item(
@@ -411,16 +426,45 @@ async def _collect_plan(
                     repo.store_raw_event(
                         source="hyperliquid",
                         endpoint="/info",
-                        request_type="userFillsByTime",
-                        request_payload=build_user_fills_by_time_payload(
-                            wallet, start_ms, end_ms
-                        ),
-                        response_payload={"error": error_message},
+                        request_type="userFillsByTimeCoverageError",
+                        request_payload={
+                            "type": "userFillsByTime",
+                            "user": wallet,
+                            "startTime": int(start_ms),
+                            "endTime": int(end_ms),
+                            "receipt_only": True,
+                        },
+                        response_payload={
+                            "error": error_message,
+                            "coverage_receipt": fills_coverage_receipt,
+                        },
                         wallet_address=wallet,
                         success=False,
                         error_message=error_message,
                     )
                     result.raw_events_stored += 1
+            receipt_complete = fills_coverage_receipt.get("status") == "COMPLETE"
+            repo.store_raw_event(
+                source="hyperliquid",
+                endpoint="/info",
+                request_type="userFillsByTimeCoverageReceipt",
+                request_payload={
+                    "type": "userFillsByTime",
+                    "user": wallet,
+                    "startTime": int(start_ms),
+                    "endTime": int(end_ms),
+                    "receipt_only": True,
+                },
+                response_payload=fills_coverage_receipt,
+                wallet_address=wallet,
+                success=receipt_complete,
+                error_message=(
+                    None
+                    if receipt_complete
+                    else str(fills_coverage_receipt.get("reason") or "INCOMPLETE_COVERAGE")
+                ),
+            )
+            result.raw_events_stored += 1
         if plan.oid_or_cloid is not None:
             await _record_call(
                 repo,

@@ -24,7 +24,11 @@ from hl_observer.backtesting.copy_vault_v5_lifecycle_train import replay_lifecyc
 from hl_observer.backtesting.copy_vault_v6_balanced_train import (
     apply_causal_daily_risk_budget,
 )
-from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.backtesting.train_statistics import (
+    exact_net_rank_value,
+    select_unambiguous_lcb_candidate,
+    stable_hash,
+)
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v8_entry_efficiency_train.v1"
 MECHANISM = "copy_vault_v8c_causal_entry_efficiency_risk_budget"
@@ -236,17 +240,10 @@ def explore_copy_vault_v8_entry_efficiency_train(
             )
 
     eligible = [row for row in variants if row["eligible"]]
-    selected = max(
-        eligible,
-        key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
-        ),
-        default=None,
-    )
+    selected, selection_resolution = select_unambiguous_lcb_candidate(eligible)
     diagnostic_best = max(
         variants,
-        key=lambda row: float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+        key=lambda row: exact_net_rank_value(row["statistics"] or {}),
         default=None,
     )
     freeze_candidate = (
@@ -267,6 +264,7 @@ def explore_copy_vault_v8_entry_efficiency_train(
         "mechanism": MECHANISM,
         "status": "TRAIN_ELIGIBLE_TO_FREEZE" if selected else "NO_ROBUST_TRAIN_CANDIDATE",
         "selection_eligible": selected is not None,
+        "selection_numeric_resolution": selection_resolution,
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,

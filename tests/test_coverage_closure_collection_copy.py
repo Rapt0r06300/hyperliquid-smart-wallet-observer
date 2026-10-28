@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 import hl_observer.collection.run_collect_all as collect_all
 import hl_observer.copy_mode.multi_wallet_copy_session as multi_session
-from hl_observer.copy_mode.multi_wallet_copy_session import MultiWalletSessionConfig, run_multi_wallet_copy_session
+from hl_observer.copy_mode.multi_wallet_copy_session import (
+    MultiWalletSessionConfig,
+    run_multi_wallet_copy_session,
+)
 from hl_observer.copy_mode.wallet_mirror_runtime import MirrorCandidate
 from hl_observer.scoring.live_wallet_scoring_loop import score_live_wallets
 
@@ -98,7 +99,7 @@ def test_multi_wallet_session_selects_best_executes_accept_and_reject(monkeypatc
     )
 
     def _execute(candidate, **kwargs):
-        seen.append((candidate.candidate_id, kwargs["mid_price"], kwargs["asks"], kwargs["bids"]))
+        seen.append((candidate.candidate_id, kwargs["mid_price"], kwargs["asks"], kwargs["bids"], kwargs["book_exchange_ts_ms"]))
         if candidate.coin == "BTC":
             return SimpleNamespace(accepted=True, reason_codes=())
         return SimpleNamespace(accepted=False, reason_codes=("PAPER_REJECT",))
@@ -108,7 +109,7 @@ def test_multi_wallet_session_selects_best_executes_accept_and_reject(monkeypatc
         [a, b, c, d],
         equity_usdt=1000.0,
         mids={"BTC": 101.0},
-        books={"BTC": {"asks": ((101.0, 1.0),), "bids": ((99.0, 1.0),)}},
+        books={"BTC": {"asks": ((101.0, 1.0),), "bids": ((99.0, 1.0),), "exchange_ts_ms": 1199}},
         observed_at_ms=1200,
     )
     assert len(result.accepted) == 1
@@ -116,6 +117,7 @@ def test_multi_wallet_session_selects_best_executes_accept_and_reject(monkeypatc
     assert seen[0][1] == 101.0
     assert seen[0][2] == ((101.0, 1.0),)
     assert seen[0][3] == ((99.0, 1.0),)
+    assert seen[0][4] == 1199
     assert seen[1][0] == "c"
     assert seen[1][1] == 100.0
     assert any(row["candidate_id"] == "c" and row["reason_codes"] == ["PAPER_REJECT"] for row in result.rejected)

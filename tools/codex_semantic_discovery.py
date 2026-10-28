@@ -24,6 +24,7 @@ from hl_observer.research.semantic_discovery import (  # noqa: E402
     load_catalog,
     rank_semantic_plans,
 )
+from hl_observer.strategies.active_scope import require_active_strategy  # noqa: E402
 
 DEFAULT_CATALOG = (
     REPO_ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
@@ -100,8 +101,13 @@ def _load_aggregate_status(path: Path, head: str) -> dict[str, dict]:
 
 def main() -> int:
     args = _parser().parse_args()
-    catalog = load_catalog(args.catalog)
-    plans = generate_semantic_plans(catalog, args.family, args.pool_size, args.seed)
+    try:
+        family = require_active_strategy(args.family)
+        catalog = load_catalog(args.catalog)
+        plans = generate_semantic_plans(catalog, family, args.pool_size, args.seed)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return 2
     if args.retest_evidence:
         plans = [{**plan, "retest_evidence": list(args.retest_evidence)} for plan in plans]
     ledger = load_records(args.ledger)
@@ -112,7 +118,7 @@ def main() -> int:
     filtered = max(0, len(plans) - len(ranked))
     head = read_repository_head(REPO_ROOT)
     family_status = {
-        "family": args.family,
+        "family": family,
         "generated": len(plans),
         "shortlisted": len(ranked),
         "distinct_mechanisms": len({row["mechanism_signature"] for row in ranked}),
@@ -125,7 +131,7 @@ def main() -> int:
     }
     status_path = _output_path(args.status_out)
     families = _load_aggregate_status(status_path, head)
-    families[args.family] = family_status
+    families[family] = family_status
     _atomic_json(
         status_path,
         {

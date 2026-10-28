@@ -2,8 +2,9 @@
 
 Boucle WS = réception PURE (met chaque message dans une FILE BORNÉE) ; un WORKER consomme la file et
 appelle `cohortes.traiter_fill` pour les DEUX cohortes (ALPHA + PROBE) : admission → L2<1s → open inline,
-avec latence fill→copie. Snapshot INITIAL ignoré ; après RECONNEXION, on rejoue seulement les fills
-INCONNUS plus récents que le CURSEUR PERSISTANT par vault (aucun événement perdu pendant la coupure).
+avec latence fill→copie. Les snapshots initiaux et de reconnexion restent historiques ; seuls les
+updates `isSnapshot=false` après le curseur peuvent alimenter le flux prospectif. Les collisions,
+retards et pertes de file sont refusés ou diagnostiqués, jamais convertis en preuve.
 REDUCE/CLOSE/FLIP du leader suivis proportionnellement. Exits stop/TP re-vérifiés à chaque événement
 (fill) + toutes ~2 s. Lecture seule ; 0 ordre, 0 clé, 0 signature.
 """
@@ -12,7 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
-from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import math
 import os
@@ -20,6 +21,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
@@ -58,6 +60,7 @@ import collecter_vaults as CV  # noqa: E402  (univers officiel public, observati
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
 FILLS_UNCLASSIFIED = Path("runtime") / "data" / "userfills_unclassified.jsonl"
+FILLS_INTEGRITY = Path("runtime") / "data" / "userfills_integrity_diagnostics.jsonl"
 COPY_VAULT_L2_TAPE = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 JOURNAL = Path("runtime") / "data" / "fills_journal.jsonl"       # CHAQUE fill live non-snapshot + gate + latence
 LIQ_CONFIRMEES = Path("runtime") / "data" / "liquidations_confirmees.jsonl"  # 25/07 : fill.liquidation non-null = REAL_LIQUIDATION
@@ -83,9 +86,18 @@ _WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS 
 WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
+                 "persisted_fills": 0, "acknowledged_userfills": set(),
+                 "invalid_subscription_acks": 0, "pre_ack_userfills_frames": 0,
+                 "invalid_json_frames": 0, "unexpected_userfills_channels": 0,
+                 "receive_clock_rejections": 0,
                  "drops": 0, "tape_drops": 0, "unclassified_snapshot_frames": 0,
                  "l2_validation_rejections": 0, "l2_reject_reasons": {},
+                 "native_identity_conflicts": 0, "unreconciled_gaps": 0,
+                 "integrity_diagnostic_write_failures": 0,
+                 "unclassified_frame_write_failures": 0,
                  "dernier_exchange_ts": None}
+USERFILL_IDENTITY_CACHE_CAP = 20_000
+USERFILL_IDENTITY_CONFLICT = "!CONFLICT!"
 _CURRENT_ROTATION_VAULTS: tuple[str, ...] = ()
 _METAORDER_RUN_LOCK = threading.Lock()
 
@@ -364,82 +376,197 @@ def _fill_cursor_id(fill: dict) -> str:
     return canonical_fill_id(fill)
 
 
-def fills_a_traiter(vault: str, fills: list[dict], curseurs: dict) -> list[dict]:
-    """Lossless cursor for live/reconnect userFills.
+def _native_fill_identity(vault: str, fill: dict, event_id: str) -> str:
+    tid = fill.get("tid")
+    if type(tid) is int and tid >= 0:
+        native = ("tid", str(tid))
+    elif isinstance(tid, str) and tid.strip().isdecimal():
+        native = ("tid", str(int(tid.strip())))
+    else:
+        tx_hash = fill.get("hash")
+        if isinstance(tx_hash, str) and tx_hash.strip():
+            ts_ms = _strict_positive_timestamp_ms(fill.get("ts_ms"))
+            native = (
+                "hash", tx_hash.strip().lower(), str(ts_ms or ""),
+                canonical_copy_vault_coin(fill.get("coin")) or "",
+                str(fill.get("oid") or ""),
+            )
+        else:
+            native = ("event", event_id)
+    return json.dumps(
+        (str(vault or "").strip().lower(), *native),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
-    V1 stored only a millisecond timestamp. That can drop a distinct fill sharing
-    the exact same exchange millisecond as the last processed fill. V2 stores the
-    boundary timestamp plus every canonical fill id seen at that timestamp.
 
-    Legacy scalar cursors keep their old strict timestamp semantics for the one
-    migration boundary, avoiding accidental duplicate paper actions. Once a newer
-    fill arrives, the cursor upgrades itself to v2.
-    """
+def _append_fill_diagnostic(
+    diagnostics: list[dict] | None, *, reason_code: str, vault: str,
+    fill: dict, event_id: str, native_identity: str, details: dict | None = None,
+) -> None:
+    if diagnostics is None:
+        return
+    diagnostics.append({
+        "reason_code": reason_code,
+        "vault": str(vault or ""),
+        "ts_ms": fill.get("ts_ms"),
+        "event_id": event_id,
+        "native_identity_sha256": hashlib.sha256(native_identity.encode("utf-8")).hexdigest(),
+        "details": dict(details or {}),
+    })
+
+
+def fills_a_traiter(
+    vault: str, fills: list[dict], curseurs: dict, *,
+    identity_fingerprints: dict[str, str] | None = None,
+    diagnostics: list[dict] | None = None,
+) -> list[dict]:
+    """Return only causal live fills; snapshots and ambiguous events fail closed."""
     if not fills:
         return []
-
     snapshot_flags = {fill.get("isSnapshot") for fill in fills}
     if len(snapshot_flags) != 1 or any(type(flag) is not bool for flag in snapshot_flags):
         return []
 
-    est_snap = fills[0]["isSnapshot"]
+    is_snapshot = fills[0]["isSnapshot"]
     raw_cursor = curseurs.get(vault, 0)
-    cur_ts, ids_at_cur, legacy = _cursor_state(raw_cursor)
+    cursor_ts, ids_at_cursor, legacy = _cursor_state(raw_cursor)
+    identities = identity_fingerprints if identity_fingerprints is not None else {}
+    seen_in_batch: dict[str, tuple[str, dict]] = {}
+    normalized: list[tuple[int, str, str, dict]] = []
+    conflicts: set[str] = set()
 
-    normalized: list[tuple[int, str, dict]] = []
-    seen_batch: set[str] = set()
     for fill in fills:
+        ts_ms = _strict_positive_timestamp_ms(fill.get("ts_ms"))
+        if ts_ms is None:
+            continue
         try:
-            ts_ms = int(float(fill.get("ts_ms") or 0))
+            event_id = _fill_cursor_id(fill)
         except (TypeError, ValueError, OverflowError):
             continue
-        if ts_ms <= 0:
+        native_id = _native_fill_identity(vault, fill, event_id)
+        previous = seen_in_batch.get(native_id)
+        if previous is not None:
+            previous_event_id, _previous_fill = previous
+            if previous_event_id == event_id:
+                continue
+            conflicts.add(native_id)
+            _append_fill_diagnostic(
+                diagnostics, reason_code="FILL_NATIVE_ID_CONTENT_CONFLICT",
+                vault=vault, fill=fill, event_id=event_id,
+                native_identity=native_id,
+                details={"conflicts_with_event_id": previous_event_id},
+            )
             continue
-        event_id = _fill_cursor_id(fill)
-        if event_id in seen_batch:
-            continue
-        seen_batch.add(event_id)
-        normalized.append((ts_ms, event_id, fill))
+        seen_in_batch[native_id] = (event_id, fill)
+        previous_event_id = identities.get(native_id)
+        if previous_event_id is not None and previous_event_id != event_id:
+            conflicts.add(native_id)
+            _append_fill_diagnostic(
+                diagnostics, reason_code="FILL_NATIVE_ID_CONTENT_CONFLICT",
+                vault=vault, fill=fill, event_id=event_id,
+                native_identity=native_id,
+                details={"conflicts_with_event_id": previous_event_id},
+            )
+        normalized.append((ts_ms, event_id, native_id, fill))
+
+    for native_id in conflicts:
+        identities[native_id] = USERFILL_IDENTITY_CONFLICT
+    while len(identities) > USERFILL_IDENTITY_CACHE_CAP:
+        identities.pop(next(iter(identities)))
+    normalized = [row for row in normalized if row[2] not in conflicts]
     if not normalized:
         return []
 
-    if est_snap and cur_ts == 0:
-        boundary = max(ts for ts, _event_id, _fill in normalized)
-        boundary_ids = sorted(
-            event_id for ts, event_id, _fill in normalized if ts == boundary
-        )
-        curseurs[vault] = {
-            "version": 2,
-            "ts_ms": boundary,
-            "event_ids_at_ts": boundary_ids,
-        }
+    def remember(native_id: str, event_id: str) -> None:
+        if native_id not in identities:
+            identities[native_id] = event_id
+        while len(identities) > USERFILL_IDENTITY_CACHE_CAP:
+            identities.pop(next(iter(identities)))
+
+    # Snapshots are historical on initial subscribe and after reconnect. Only
+    # the initial snapshot seeds the cursor; subsequent snapshots do not move it.
+    if is_snapshot:
+        for _ts_ms, event_id, native_id, _fill in normalized:
+            remember(native_id, event_id)
+        if cursor_ts == 0:
+            boundary = max(row[0] for row in normalized)
+            boundary_ids = sorted(
+                event_id for ts_ms, event_id, _native_id, _fill in normalized
+                if ts_ms == boundary
+            )
+            curseurs[vault] = {
+                "version": 2,
+                "ts_ms": boundary,
+                "event_ids_at_ts": boundary_ids,
+                "snapshot_boundary_ts_ms": boundary,
+            }
         return []
 
-    accepted: list[tuple[int, str, dict]] = []
-    for ts_ms, event_id, fill in normalized:
-        if ts_ms > cur_ts:
-            accepted.append((ts_ms, event_id, fill))
-        elif ts_ms == cur_ts and not legacy and event_id not in ids_at_cur:
-            accepted.append((ts_ms, event_id, fill))
+    accepted: list[tuple[int, str, str, dict]] = []
+    for ts_ms, event_id, native_id, fill in normalized:
+        previous_event_id = identities.get(native_id)
+        if previous_event_id == event_id:
+            continue
+        if previous_event_id is not None:
+            _append_fill_diagnostic(
+                diagnostics, reason_code="FILL_NATIVE_ID_CONTENT_CONFLICT",
+                vault=vault, fill=fill, event_id=event_id,
+                native_identity=native_id,
+                details={"conflicts_with_event_id": previous_event_id},
+            )
+            continue
+        if ts_ms > cursor_ts:
+            accepted.append((ts_ms, event_id, native_id, fill))
+        elif ts_ms == cursor_ts and not legacy and event_id not in ids_at_cursor:
+            accepted.append((ts_ms, event_id, native_id, fill))
+        elif ts_ms < cursor_ts:
+            _append_fill_diagnostic(
+                diagnostics, reason_code="LATE_FILL_BEHIND_CURSOR_UNRECONCILED",
+                vault=vault, fill=fill, event_id=event_id,
+                native_identity=native_id,
+                details={"cursor_ts_ms": cursor_ts},
+            )
+        elif ts_ms == cursor_ts and legacy:
+            _append_fill_diagnostic(
+                diagnostics, reason_code="LEGACY_CURSOR_BOUNDARY_EXCLUDED",
+                vault=vault, fill=fill, event_id=event_id,
+                native_identity=native_id,
+                details={"cursor_ts_ms": cursor_ts},
+            )
+        else:
+            # Exact duplicate already present at the current cursor boundary.
+            remember(native_id, event_id)
 
     if not accepted:
         return []
-
-    max_ts = max(ts for ts, _event_id, _fill in accepted)
-    if max_ts == cur_ts and not legacy:
-        boundary_ids = ids_at_cur | {
-            event_id for ts, event_id, _fill in accepted if ts == max_ts
+    accepted.sort(key=lambda row: (row[0], row[1]))
+    max_ts = max(row[0] for row in accepted)
+    if max_ts == cursor_ts and not legacy:
+        boundary_ids = ids_at_cursor | {
+            event_id for ts_ms, event_id, _native_id, _fill in accepted
+            if ts_ms == max_ts
         }
     else:
         boundary_ids = {
-            event_id for ts, event_id, _fill in accepted if ts == max_ts
+            event_id for ts_ms, event_id, _native_id, _fill in accepted
+            if ts_ms == max_ts
         }
     curseurs[vault] = {
         "version": 2,
         "ts_ms": max_ts,
         "event_ids_at_ts": sorted(boundary_ids),
     }
-    return [fill for _ts, _event_id, fill in accepted]
+    snapshot_boundary = (
+        _cursor_ts_ms(raw_cursor.get("snapshot_boundary_ts_ms"))
+        if isinstance(raw_cursor, dict)
+        else 0
+    )
+    if snapshot_boundary > 0:
+        curseurs[vault]["snapshot_boundary_ts_ms"] = snapshot_boundary
+    for _ts_ms, event_id, native_id, _fill in accepted:
+        remember(native_id, event_id)
+    return [fill for _ts_ms, _event_id, _native_id, fill in accepted]
 
 ETATS = {}
 
@@ -463,23 +590,39 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
     etat = "OUVERTURE" if d.get("ouverture") else ("FERMETURE" if d.get("fermeture") else (
         "REDUCTION" if d.get("reduction") else ("REFUS:" + str(d.get("refus")) if d.get("refus") else "AUCUN")))
     vault = str(fill.get("vault") or "")
-    try:
-        received_at_ms = int(fill.get("received_at_ms"))
-    except (TypeError, ValueError, OverflowError):
-        received_at_ms = int(recu_ms)
-    fill_ts = float(fill.get("ts_ms") or received_at_ms)
-    ligne = {"recu_ms": int(recu_ms), "cohorte": cohorte, "coin": fill.get("coin"), "vault": vault,
+    received_at_raw = fill.get("received_at_ms")
+    received_at_ms = _strict_positive_timestamp_ms(received_at_raw)
+    fill_ts = _strict_positive_timestamp_ms(fill.get("ts_ms"))
+    processed_at_ms = int(recu_ms)
+    fill_receive_latency = (
+        received_at_ms - fill_ts
+        if received_at_ms is not None and fill_ts is not None and received_at_ms >= fill_ts
+        else None
+    )
+    receive_process_latency = (
+        processed_at_ms - received_at_ms
+        if received_at_ms is not None and processed_at_ms >= received_at_ms
+        else None
+    )
+    fill_decision_latency = (
+        processed_at_ms - fill_ts
+        if received_at_ms is not None and fill_ts is not None
+        and processed_at_ms >= fill_ts
+        else None
+    )
+    ligne = {"recu_ms": processed_at_ms, "cohorte": cohorte, "coin": fill.get("coin"), "vault": vault,
              "vault_short": vault[:12],
              "dir": fill.get("dir"), "sz": fill.get("sz"), "px": fill.get("px"),
              "hash": fill.get("hash"), "tid": fill.get("tid"), "oid": fill.get("oid"),
              "source": fill.get("source"), "isSnapshot": fill.get("isSnapshot"),
-             "received_at_ms": received_at_ms, "processed_at_ms": int(recu_ms),
+             "received_at_ms": received_at_ms, "received_at_ms_raw": received_at_raw,
+             "processed_at_ms": processed_at_ms,
              "recv_mono_ns": fill.get("recv_mono_ns"),
              "connection_id": fill.get("connection_id"),
              "fill_ts_ms": fill.get("ts_ms"),
-             "latence_fill_receive_ms": round(received_at_ms - fill_ts),
-             "latence_receive_process_ms": round(recu_ms - received_at_ms),
-             "latence_fill_decision_ms": round(recu_ms - fill_ts),
+             "latence_fill_receive_ms": fill_receive_latency,
+             "latence_receive_process_ms": receive_process_latency,
+             "latence_fill_decision_ms": fill_decision_latency,
              "decision": etat, "run_id": RUN_ID}
     with (root / JOURNAL).open("a", encoding="utf-8") as f:
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
@@ -811,7 +954,7 @@ RAW_L2_LIVE = Path("runtime") / "data" / "raw_l2_live.json"
 _ROOT_LIVE: Path = RACINE                            # racine réelle (posée dans _boucle) pour le book WS
 
 
-def _log_l2(root: Path, evt: str, coin: str, extra: dict | None = None) -> None:
+def _log_l2(root: Path, evt: str, coin: str | None, extra: dict | None = None) -> None:
     try:
         with (root / L2_LIFECYCLE).open("a", encoding="utf-8") as f:
             f.write(json.dumps({"ts_ms": int(time.time() * 1000), "evt": evt, "coin": coin,
@@ -937,7 +1080,22 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
                         continue
                     try:
                         msg = json.loads(brut)
-                    except ValueError:
+                    except ValueError as exc:
+                        _HEARTBEAT_WS["invalid_json_frames"] = int(
+                            _HEARTBEAT_WS.get("invalid_json_frames") or 0
+                        ) + 1
+                        reason = "L2_INVALID_JSON_FRAME"
+                        _record_l2_validation_rejection(reason)
+                        _log_l2(
+                            root,
+                            "L2_FRAME_REJECTED",
+                            None,
+                            {
+                                "reason_code": reason,
+                                "error_type": type(exc).__name__,
+                                "connection_state": "CONNECTED",
+                            },
+                        )
                         continue
                     ch = msg.get("channel")
                     if ch == "subscriptionResponse":
@@ -982,17 +1140,55 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
-    try:
-        received = int(fill.get("received_at_ms"))
-    except (TypeError, ValueError, OverflowError):
-        received = int(recu)
+    received_raw = fill.get("received_at_ms")
+    received = _strict_positive_timestamp_ms(received_raw)
+    processed_at_ms = int(recu)
+    rejection_reason = (
+        "FILL_RECEIVE_TIMESTAMP_INVALID"
+        if received is None
+        else "FILL_RECEIVE_AFTER_PROCESSING"
+        if received > processed_at_ms
+        else None
+    )
+    if rejection_reason is not None:
+        quarantine = {
+            "schema": "alina.userfills_unclassified.v1",
+            "source": "hyperliquid_public_userfills",
+            "vault": str(fill.get("vault") or ""),
+            "received_at_ms": None,
+            "received_at_ms_raw": received_raw,
+            "processed_at_ms": processed_at_ms,
+            "connection_id": fill.get("connection_id"),
+            "reason": rejection_reason,
+            "raw_payload": dict(fill),
+            "read_only": True,
+            "real_execution": False,
+        }
+        path = root / FILLS_UNCLASSIFIED
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(quarantine, ensure_ascii=False) + "\n")
+        _HEARTBEAT_WS["receive_clock_rejections"] = int(
+            _HEARTBEAT_WS.get("receive_clock_rejections") or 0
+        ) + 1
+        _journal_userfills_integrity(root, {
+            "reason_code": "FILL_RECEIVE_CLOCK_REJECTED",
+            "vault": str(fill.get("vault") or "")[:80],
+            "connection_id": fill.get("connection_id"),
+            "count": 1,
+        })
+        print("[userfills] fill mis en quarantaine: %s" % rejection_reason, flush=True)
+        return
     persisted_fill = {
         **fill,
         "received_at_ms": received,
-        "processed_at_ms": int(recu),
+        "processed_at_ms": processed_at_ms,
     }
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
         f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
+    _HEARTBEAT_WS["persisted_fills"] = int(
+        _HEARTBEAT_WS.get("persisted_fills") or 0
+    ) + 1
     coins_a_verifier.add(fill.get("coin"))
     if _TAPE_FILLS is not None:                                   # → tape L2/OFI : réception MONOTONE (même process)
         try:
@@ -1016,13 +1212,24 @@ def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float)
 
 async def _worker(root: Path, file: asyncio.Queue) -> None:
     curseurs = _charger_curseurs(root)
+    identity_fingerprints_by_vault: dict[str, dict[str, str]] = {}
     while True:
         vault, fills, t_ws = await file.get()
         try:
             before_cursor = json.dumps(
                 curseurs.get(vault, 0), sort_keys=True, separators=(",", ":")
             )
-            a_traiter = fills_a_traiter(vault, fills, curseurs)
+            frame_diagnostics: list[dict] = []
+            identity_fingerprints = identity_fingerprints_by_vault.setdefault(vault, {})
+            a_traiter = fills_a_traiter(
+                vault,
+                fills,
+                curseurs,
+                identity_fingerprints=identity_fingerprints,
+                diagnostics=frame_diagnostics,
+            )
+            for diagnostic in frame_diagnostics:
+                _journal_userfills_integrity(root, diagnostic)
             after_cursor = json.dumps(
                 curseurs.get(vault, 0), sort_keys=True, separators=(",", ":")
             )
@@ -1052,9 +1259,78 @@ def _shards_userfills(vaults: list, taille: int = TAILLE_SHARD) -> list:
 def _vault_du_message(msg, connus_par_lc: dict) -> str | None:
     """Démux d'un message userFills MULTIPLEXÉ : extrait le user (data.user) et le mappe sur la forme
     canonique abonnée (insensible à la casse). None si inconnu/illisible."""
-    data = msg.get("data") if isinstance(msg, dict) else None
+    if not isinstance(msg, dict) or msg.get("channel") != "userFills":
+        return None
+    data = msg.get("data")
     u = (data or {}).get("user") if isinstance(data, dict) else None
     return connus_par_lc.get(str(u).lower()) if u else None
+
+
+def _invalidate_userfills_subscription_acks(vaults: list[str] | tuple[str, ...]) -> None:
+    acknowledged = _HEARTBEAT_WS.setdefault("acknowledged_userfills", set())
+    acknowledged.difference_update(vaults)
+    _HEARTBEAT_WS["acks"] = len(acknowledged)
+
+
+def _record_userfills_subscription_ack(message: dict, vaults: list[str]) -> str | None:
+    data = message.get("data") if isinstance(message, dict) else None
+    subscription = data.get("subscription") if isinstance(data, dict) else None
+    user = subscription.get("user") if isinstance(subscription, dict) else None
+    known = {vault.lower(): vault for vault in vaults}
+    matched = known.get(str(user).lower()) if user else None
+    if (
+        not isinstance(subscription, dict)
+        or subscription.get("type") != "userFills"
+    ):
+        # Other channels (for example l2Book) have independent valid ACKs.
+        return None
+    if (
+        not isinstance(data, dict)
+        or data.get("method") != "subscribe"
+        or matched is None
+    ):
+        _HEARTBEAT_WS["invalid_subscription_acks"] = int(
+            _HEARTBEAT_WS.get("invalid_subscription_acks") or 0
+        ) + 1
+        return None
+    acknowledged = _HEARTBEAT_WS.setdefault("acknowledged_userfills", set())
+    acknowledged.add(matched)
+    _HEARTBEAT_WS["acks"] = len(acknowledged)
+    return matched
+
+
+def _heartbeat_userfills_state(previous_persisted: int) -> dict:
+    try:
+        persisted_total = max(0, int(_HEARTBEAT_WS.get("persisted_fills") or 0))
+    except (TypeError, ValueError):
+        persisted_total = 0
+    required = set(_CURRENT_ROTATION_VAULTS)
+    acknowledged = set(_HEARTBEAT_WS.get("acknowledged_userfills") or ())
+    acknowledged_required = required.intersection(acknowledged)
+    return {
+        "n_ecrites": max(0, persisted_total - max(0, int(previous_persisted))),
+        "persisted_total": persisted_total,
+        "souscription_ack": bool(required) and acknowledged_required == required,
+        "metriques": {
+            "subscription_ack_count": len(acknowledged_required),
+            "subscription_required_count": len(required),
+            "invalid_subscription_acks": int(
+                _HEARTBEAT_WS.get("invalid_subscription_acks") or 0
+            ),
+            "pre_ack_userfills_frames": int(
+                _HEARTBEAT_WS.get("pre_ack_userfills_frames") or 0
+            ),
+            "invalid_json_frames": int(
+                _HEARTBEAT_WS.get("invalid_json_frames") or 0
+            ),
+            "unexpected_userfills_channels": int(
+                _HEARTBEAT_WS.get("unexpected_userfills_channels") or 0
+            ),
+            "receive_clock_rejections": int(
+                _HEARTBEAT_WS.get("receive_clock_rejections") or 0
+            ),
+        },
+    }
 
 
 def _journal_userfills_non_classe(
@@ -1085,6 +1361,53 @@ def _journal_userfills_non_classe(
         os.fsync(handle.fileno())
 
 
+def _journal_userfills_integrity(root: Path, event: dict) -> None:
+    """Persist an append-only, fail-closed diagnostic for collisions and gaps."""
+    reason = str(event.get("reason_code") or "USERFILLS_INTEGRITY_UNKNOWN")
+    if reason == "FILL_NATIVE_ID_CONTENT_CONFLICT":
+        _HEARTBEAT_WS["native_identity_conflicts"] = int(
+            _HEARTBEAT_WS.get("native_identity_conflicts") or 0
+        ) + 1
+    elif reason in {
+        "LATE_FILL_BEHIND_CURSOR_UNRECONCILED",
+        "LEGACY_CURSOR_BOUNDARY_EXCLUDED",
+        "REST_WS_GAP_UNRECONCILED",
+        "WS_QUEUE_DROP_UNRECONCILED",
+        "USERFILLS_FRAME_BEFORE_SUBSCRIPTION_ACK",
+        "USERFILLS_INVALID_JSON_FRAME",
+        "USERFILLS_UNSUBSCRIBED_VAULT_FRAME",
+        "USERFILLS_UNEXPECTED_CHANNEL",
+        "FILL_RECEIVE_CLOCK_REJECTED",
+    }:
+        _HEARTBEAT_WS["unreconciled_gaps"] = int(
+            _HEARTBEAT_WS.get("unreconciled_gaps") or 0
+        ) + max(1, int(event.get("count") or 1))
+    path = root / FILLS_INTEGRITY
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        **event,
+        "schema": "alina.userfills_integrity_diagnostic.v1",
+        "detected_at_ms": int(time.time() * 1000),
+        "source": "hyperliquid_public_userfills",
+        "read_only": True,
+        "real_execution": False,
+    }
+    try:
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except (OSError, TypeError, ValueError) as exc:
+        _HEARTBEAT_WS["integrity_diagnostic_write_failures"] = int(
+            _HEARTBEAT_WS.get("integrity_diagnostic_write_failures") or 0
+        ) + 1
+        print(
+            "[userfills] FILL_INTEGRITY_DIAGNOSTIC_WRITE_FAILED "
+            f"reason={reason} error={type(exc).__name__}",
+            flush=True,
+        )
+
+
 async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, socket_id: str = "A") -> None:
     """UNE socket WS pour un SHARD de ≤5 userFills (HL cape ~5/connexion). 2 shards (A,B) de 5 + la socket L2
     = 3 connexions au total (< 10). Démux par data.user ; ACK réel = subscriptionResponse. Si CETTE socket
@@ -1102,27 +1425,93 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     connection_serial,
                 )
                 _WS_PAR_SOCKET[socket_id] = ws                    # exposé au garde REST↔WS (reconnexion ciblée)
+                _invalidate_userfills_subscription_acks(vaults)
                 for i, v in enumerate(vaults):
                     await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "userFills", "user": v}}))
                     print("[userfills] socket %s subscribe %d/%d userFills %s" % (socket_id, i + 1, len(vaults), v[:10]), flush=True)
                     await asyncio.sleep(0.3)                   # THROTTLE léger (5 subscribes) : évite tout drop HL
                 print("[userfills] socket %s — %d abonnements userFills demandes" % (socket_id, len(vaults)), flush=True)
-                confirmes: set = set()                            # vaults ayant envoyé ≥1 message = ABONNEMENT CONFIRMÉ
+                premiers_messages: set = set()
                 async for brut in ws:
                     recv_mono_ns = time.monotonic_ns()
                     recv_wall_ms = int(time.time() * 1000)
                     try:
                         msg = json.loads(brut)
                     except ValueError:
+                        _HEARTBEAT_WS["invalid_json_frames"] = int(
+                            _HEARTBEAT_WS.get("invalid_json_frames") or 0
+                        ) + 1
+                        _journal_userfills_integrity(root, {
+                            "reason_code": "USERFILLS_INVALID_JSON_FRAME",
+                            "connection_id": connection_id,
+                            "count": 1,
+                        })
                         continue
-                    if isinstance(msg, dict) and msg.get("channel") == "subscriptionResponse":
-                        sub = ((msg.get("data") or {}).get("subscription")) or {}
-                        if sub.get("type") == "userFills":
-                            _HEARTBEAT_WS["acks"] += 1
-                            print("[userfills] socket %s ACK subscribe userFills %s" % (socket_id, str(sub.get("user") or "")[:10]), flush=True)
+                    if (
+                        isinstance(msg, dict)
+                        and msg.get("channel") == "subscriptionResponse"
+                    ):
+                        data = msg.get("data")
+                        subscription = (
+                            data.get("subscription") if isinstance(data, dict) else None
+                        )
+                        if (
+                            not isinstance(subscription, dict)
+                            or subscription.get("type") != "userFills"
+                        ):
+                            continue
+                        matched_vault = _record_userfills_subscription_ack(msg, vaults)
+                        if matched_vault is not None:
+                            print(
+                                "[userfills] socket %s ACK userFills %s (%d/%d)"
+                                % (
+                                    socket_id,
+                                    matched_vault[:10],
+                                    _HEARTBEAT_WS["acks"],
+                                    len(_CURRENT_ROTATION_VAULTS),
+                                ),
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                "[userfills] socket %s ACK refuse: subscription non correspondante"
+                                % socket_id,
+                                flush=True,
+                            )
                         continue
                     vault = _vault_du_message(msg, connus)
                     if not vault:
+                        data = msg.get("data") if isinstance(msg, dict) else None
+                        user = data.get("user") if isinstance(data, dict) else None
+                        if user and (
+                            (isinstance(msg, dict) and msg.get("channel") == "userFills")
+                            or str(user).lower() in connus
+                        ):
+                            _HEARTBEAT_WS["unexpected_userfills_channels"] = int(
+                                _HEARTBEAT_WS.get("unexpected_userfills_channels") or 0
+                            ) + 1
+                            reason = (
+                                "USERFILLS_UNSUBSCRIBED_VAULT_FRAME"
+                                if isinstance(msg, dict) and msg.get("channel") == "userFills"
+                                else "USERFILLS_UNEXPECTED_CHANNEL"
+                            )
+                            _journal_userfills_integrity(root, {
+                                "reason_code": reason,
+                                "connection_id": connection_id,
+                                "vault": str(user)[:80],
+                                "count": 1,
+                            })
+                        continue
+                    if vault not in _HEARTBEAT_WS.get("acknowledged_userfills", set()):
+                        _HEARTBEAT_WS["pre_ack_userfills_frames"] = int(
+                            _HEARTBEAT_WS.get("pre_ack_userfills_frames") or 0
+                        ) + 1
+                        _journal_userfills_integrity(root, {
+                            "reason_code": "USERFILLS_FRAME_BEFORE_SUBSCRIPTION_ACK",
+                            "vault": vault,
+                            "connection_id": connection_id,
+                            "count": 1,
+                        })
                         continue
                     _HEARTBEAT_WS["messages"] += 1
                     data = msg.get("data")
@@ -1138,14 +1527,21 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                                 connection_id=connection_id,
                             )
                         except (OSError, TypeError, ValueError) as exc:
+                            _HEARTBEAT_WS["unclassified_frame_write_failures"] = int(
+                                _HEARTBEAT_WS.get("unclassified_frame_write_failures") or 0
+                            ) + 1
                             print(
                                 "[userfills] frame non classe non sauvegardee (%s)"
                                 % type(exc).__name__,
                                 flush=True,
                             )
-                    if vault not in confirmes:                     # 1er message (snapshot/fill) = ABONNEMENT CONFIRMÉ (fiable,
-                        confirmes.add(vault)                       # contrairement au subscriptionResponse partiel de HL)
-                        print("[userfills] socket %s vault CONFIRME (1er msg) %s [%d/%d]" % (socket_id, vault[:10], len(confirmes), len(vaults)), flush=True)
+                    if vault not in premiers_messages:
+                        premiers_messages.add(vault)
+                        print(
+                            "[userfills] socket %s premier message post-ACK %s [%d/%d]"
+                            % (socket_id, vault[:10], len(premiers_messages), len(vaults)),
+                            flush=True,
+                        )
                     bruts = (msg.get("data") or {}).get("fills") or []   # CLÉS COMPOSITES REÇUES (pour REST−WS par id)
                     if bruts:
                         timestamps = []
@@ -1183,9 +1579,21 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                                 dq.append(key)
                     except asyncio.QueueFull:
                         _HEARTBEAT_WS["drops"] += len(fills)
+                        _journal_userfills_integrity(root, {
+                            "reason_code": "WS_QUEUE_DROP_UNRECONCILED",
+                            "vault": vault,
+                            "count": len(fills),
+                            "connection_id": connection_id,
+                            "details": {
+                                "event_ids": [
+                                    _fill_cursor_id(fill) for fill in fills[:20]
+                                ]
+                            },
+                        })
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
         except Exception as exc:  # noqa: BLE001 — reconnecte SEULEMENT ce shard de 5 (curseur+dédup -> catch-up)
             _HEARTBEAT_WS["reconnects"] += 1
+            _invalidate_userfills_subscription_acks(vaults)
             _WS_PAR_SOCKET.pop(socket_id, None)
             print("[userfills] socket %s reconnect (%s)" % (socket_id, str(exc)[:50]), flush=True)
             await asyncio.sleep(3.0)
@@ -1227,6 +1635,17 @@ async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: 
             if manquants:
                 total_manquants += len(manquants)
                 defaillants.add(sid)
+                _journal_userfills_integrity(root, {
+                    "reason_code": "REST_WS_GAP_UNRECONCILED",
+                    "source": "REST_WS_RECONCILIATION",
+                    "vault": v,
+                    "count": len(manquants),
+                    "details": {
+                        "sample_native_keys": [
+                            str(SD.cle_fill(fill)) for fill in manquants[:20]
+                        ]
+                    },
+                })
                 k0 = SD.cle_fill(manquants[0]) or (None, None, None, None, None)
                 print("[userfills] ⛔ shard %s DEFAILLANT : REST-WS=%d par id sur %s (ex tid=%s ts=%s) -> reconnexion ciblee"
                       % (sid, len(manquants), v[:10], k0[2], k0[0]), flush=True)
@@ -1259,25 +1678,45 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
 
 
 async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> None:
-    derniers_messages = 0
+    derniers_fills_persistes = 0
     while True:
         VI.heartbeat(root, NOM_VERROU, info)
         messages = int(_HEARTBEAT_WS["messages"])
+        state = _heartbeat_userfills_state(derniers_fills_persistes)
         HB.battre(
             root,
             "userfills-live",
             pid=os.getppid(),
-            n_ecrites=max(0, messages - derniers_messages),
+            n_ecrites=state["n_ecrites"],
             dernier_exchange_ts=_HEARTBEAT_WS["dernier_exchange_ts"],
-            souscription_ack=bool(_HEARTBEAT_WS["acks"] or messages),
-            note="%d WS messages, %d fills" % (messages, int(_HEARTBEAT_WS["fills"])),
+            souscription_ack=state["souscription_ack"],
+            note=(
+                "%d WS messages, %d parsed, %d persisted, ACK %d/%d"
+                % (
+                    messages,
+                    int(_HEARTBEAT_WS["fills"]),
+                    state["persisted_total"],
+                    state["metriques"]["subscription_ack_count"],
+                    state["metriques"]["subscription_required_count"],
+                )
+            ),
             metriques={
+                **state["metriques"],
                 "unclassified_snapshot_frames": int(
                     _HEARTBEAT_WS.get("unclassified_snapshot_frames") or 0
                 ),
-                "gaps_critiques": (
-                    int(_HEARTBEAT_WS["drops"])
-                    + int(_HEARTBEAT_WS.get("tape_drops") or 0)
+                "gaps_critiques": _gaps_critiques_userfills(),
+                "unreconciled_gaps": int(
+                    _HEARTBEAT_WS.get("unreconciled_gaps") or 0
+                ),
+                "native_identity_conflicts": int(
+                    _HEARTBEAT_WS.get("native_identity_conflicts") or 0
+                ),
+                "integrity_diagnostic_write_failures": int(
+                    _HEARTBEAT_WS.get("integrity_diagnostic_write_failures") or 0
+                ),
+                "unclassified_frame_write_failures": int(
+                    _HEARTBEAT_WS.get("unclassified_frame_write_failures") or 0
                 ),
                 "source_queue_drops": int(_HEARTBEAT_WS["drops"]),
                 "l2_tape_queue_drops": int(
@@ -1291,8 +1730,23 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
             },
             protocol=UNBOUND_L2_SOURCE_PROTOCOL,
         )
-        derniers_messages = messages
+        derniers_fills_persistes = state["persisted_total"]
         await asyncio.sleep(intervalle_s)
+
+
+def _gaps_critiques_userfills() -> int:
+    """Count every condition that weakens causal coverage or its durable evidence."""
+    counters = (
+        "drops",
+        "tape_drops",
+        "unreconciled_gaps",
+        "native_identity_conflicts",
+        "invalid_subscription_acks",
+        "unclassified_snapshot_frames",
+        "integrity_diagnostic_write_failures",
+        "unclassified_frame_write_failures",
+    )
+    return sum(max(0, int(_HEARTBEAT_WS.get(key) or 0)) for key in counters)
 
 
 def _promotion_une_passe(root: Path) -> None:
@@ -1446,6 +1900,8 @@ async def _superviser_rotation_vaults(root: Path, file: asyncio.Queue) -> None:
 
         _DEMARRAGE_MS = time.time() * 1000
         _CURRENT_ROTATION_VAULTS = tuple(vaults)
+        _HEARTBEAT_WS["acknowledged_userfills"] = set()
+        _HEARTBEAT_WS["acks"] = 0
         for vault in vaults:
             _WS_KEYS.pop(vault, None)
         print(
@@ -2089,13 +2545,34 @@ def _git_commit(root: Path) -> str:
 
 async def _boucle(root: Path) -> None:
     global RUN_ID, RUN_TOKEN, _MUTEX, _ROOT_LIVE, TRIGGER_VERSION, GIT_COMMIT, _DEMARRAGE_MS, _TAPE_FILLS
+    global _CURRENT_ROTATION_VAULTS
     _ROOT_LIVE = root
+    _CURRENT_ROTATION_VAULTS = ()
     _TAPE_FILLS = asyncio.Queue(maxsize=5000)                     # fills → tape L2 (réception MONOTONE en process)
     _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
-    _HEARTBEAT_WS.update({"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
-                          "drops": 0, "tape_drops": 0,
-                          "l2_validation_rejections": 0, "l2_reject_reasons": {},
-                          "dernier_exchange_ts": None})
+    _HEARTBEAT_WS.update({
+        "messages": 0,
+        "fills": 0,
+        "persisted_fills": 0,
+        "acks": 0,
+        "acknowledged_userfills": set(),
+        "invalid_subscription_acks": 0,
+        "pre_ack_userfills_frames": 0,
+        "invalid_json_frames": 0,
+        "unexpected_userfills_channels": 0,
+        "receive_clock_rejections": 0,
+        "reconnects": 0,
+        "drops": 0,
+        "tape_drops": 0,
+        "unclassified_snapshot_frames": 0,
+        "l2_validation_rejections": 0,
+        "l2_reject_reasons": {},
+        "native_identity_conflicts": 0,
+        "unreconciled_gaps": 0,
+        "integrity_diagnostic_write_failures": 0,
+        "unclassified_frame_write_failures": 0,
+        "dernier_exchange_ts": None,
+    })
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)
     import secrets

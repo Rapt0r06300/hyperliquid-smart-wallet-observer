@@ -13,7 +13,8 @@ UNCLAIMED = {"PENDING", "CONTINUATION_REQUIRED", "STUCK"}
 
 def atomic_write(path: Path, row: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(row, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(row, sort_keys=True, indent=2) + "\n")
     os.replace(temporary, path)
 
 

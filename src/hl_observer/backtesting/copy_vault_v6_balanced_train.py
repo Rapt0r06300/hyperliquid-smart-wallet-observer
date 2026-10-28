@@ -21,7 +21,11 @@ from hl_observer.backtesting.copy_vault_executable import (
 from hl_observer.backtesting.copy_vault_protocol import COPY_DELAY_MS, MAX_TARGET_LAG_MS
 from hl_observer.backtesting.copy_vault_v4_train import assess_train_variant
 from hl_observer.backtesting.copy_vault_v5_lifecycle_train import replay_lifecycle_train
-from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.backtesting.train_statistics import (
+    exact_net_rank_value,
+    select_unambiguous_lcb_candidate,
+    stable_hash,
+)
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v6_balanced_train.v1"
@@ -166,17 +170,10 @@ def explore_copy_vault_v6_balanced_train(
             )
 
     eligible = [row for row in variants if row["eligible"]]
-    selected = max(
-        eligible,
-        key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
-        ),
-        default=None,
-    )
+    selected, selection_resolution = select_unambiguous_lcb_candidate(eligible)
     diagnostic_best = max(
         variants,
-        key=lambda row: float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+        key=lambda row: exact_net_rank_value(row["statistics"] or {}),
         default=None,
     )
     freeze_candidate = (
@@ -196,6 +193,7 @@ def explore_copy_vault_v6_balanced_train(
         "mechanism": MECHANISM,
         "status": "TRAIN_ELIGIBLE_TO_FREEZE" if selected else "NO_ROBUST_TRAIN_CANDIDATE",
         "selection_eligible": selected is not None,
+        "selection_numeric_resolution": selection_resolution,
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,

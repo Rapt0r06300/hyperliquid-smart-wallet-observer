@@ -10,14 +10,19 @@ ANALYSER = ROOT / "tools/launchers/ANALYSER_DONNEES_HYPERSMART.cmd"
 def test_wrapper_full_cold_installe_les_adaptateurs_et_la_provenance_complete() -> None:
     text = WRAPPER.read_text(encoding="utf-8", errors="replace")
     assert "install_copy_vault_adapter" in text
-    assert "install_cross_venue_adapter" in text
+    assert "install_cross_venue_adapter" not in text
     assert "write_economic_source_coverage" in text
     # La provenance FULL/COLD doit être injectée dans une copie isolée des
     # globals du runner canonique : aucun monkeypatch global durable n'est admis.
     assert 'environment["dataset_provenance"] = provenance_builder' in text
     assert "canonical.dataset_provenance = dataset_provenance" not in text
     assert 'result["canonical_globals_mutated"] = False' in text
-    assert "load_family_source_paths(data_root, \"lead_lag\")" in text
+    assert 'load_family_source_paths(root, "copy_vault")' in text
+    assert 'load_family_source_paths(root, "cross_venue")' in text  # shared book input for Copy-Vault only
+    assert 'load_family_source_paths(data_root, "lead_lag")' not in text
+    assert '"lead_lag": "DISABLED_BY_SCOPE"' in text
+    assert '"cross_venue_dislocation": "DISABLED_BY_SCOPE"' in text
+    assert '"carry_pnl_usd": 0.0' not in text
     assert "start_collection=False" in text
     assert "--no-start-collection est obligatoire" in text
     assert "/exchange" not in text.casefold()
@@ -37,7 +42,10 @@ def test_canonical_runner_loads_tools_from_code_checkout_not_data_workspace() ->
         encoding="utf-8", errors="replace"
     )
     assert '_tool("hypersmart_copy_pipeline", ROOT / "tools" / "pipeline_copie_reel.py")' in text
-    assert '_tool("hypersmart_cross_campaign", ROOT / "tools" / "backtest_dislocation_2jambes.py")' in text
+    assert '_tool("hypersmart_cross_campaign", ROOT / "tools" / "backtest_dislocation_2jambes.py")' not in text
+    assert 'require_active_strategy("copy_vault")' in text
+    assert 'active_strategy_families() != frozenset({"copy_vault"})' in text
+    assert text.index("return _finalize_campaigns(") < text.index('load_family_source_paths(root, "lead_lag")')
     assert 'root / "tools" / "pipeline_copie_reel.py"' not in text
     assert 'root / "tools" / "backtest_dislocation_2jambes.py"' not in text
 

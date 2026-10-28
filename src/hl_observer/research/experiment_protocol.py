@@ -12,9 +12,12 @@ import math
 import os
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+
+from hl_observer.strategies.active_scope import require_active_strategy
 
 SCHEMA_VERSION = 1
 FAMILIES = frozenset({"copy_vault", "lead_lag", "cross_venue_dislocation_v2"})
@@ -148,7 +151,7 @@ class ExperimentSpec:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentSpec":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> ExperimentSpec:
         if not isinstance(payload, Mapping):
             raise SpecValidationError("experiment spec must be a JSON object")
         required = (
@@ -183,6 +186,10 @@ class ExperimentSpec:
         family = payload["family"]
         if family not in FAMILIES:
             raise SpecValidationError(f"family must be one of {sorted(FAMILIES)}")
+        try:
+            family = require_active_strategy(family)
+        except ValueError as exc:
+            raise SpecValidationError(str(exc)) from exc
 
         hypothesis_id = payload["hypothesis_id"]
         if not isinstance(hypothesis_id, str) or not _HYPOTHESIS_RE.fullmatch(hypothesis_id):

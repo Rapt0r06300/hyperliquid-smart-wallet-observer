@@ -80,7 +80,7 @@ def test_parser_message_userfills_separe_exchange_et_reception_ws():
 
 def test_parser_userfills_preserve_la_casse_native_de_l_instrument():
     msg = {"channel": "userFills", "data": {"fills": [
-        {"coin": "kPEPE", "px": "0.01", "sz": "1", "side": "B", "time": 1000}
+        {"coin": "kPEPE", "px": "0.01", "sz": "1", "side": "B", "time": 1000, "tid": 5}
     ]}}
 
     [fill] = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1500)
@@ -90,7 +90,7 @@ def test_parser_userfills_preserve_la_casse_native_de_l_instrument():
 
 def test_parser_preserves_unknown_snapshot_classification():
     msg = {"channel": "userFills", "data": {"user": "0xA", "fills": [
-        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000}
+        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000, "tid": 6}
     ]}}
     [fill] = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1500)
     assert fill["isSnapshot"] is None
@@ -103,7 +103,7 @@ def test_parser_preserves_unknown_snapshot_classification():
 @pytest.mark.parametrize("received_at_ms", [None, "invalid", 0, -1])
 def test_parser_never_invents_a_receive_timestamp(received_at_ms):
     msg = {"channel": "userFills", "data": {"fills": [
-        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000}
+        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000, "tid": 7}
     ]}}
     kwargs = {} if received_at_ms is None else {"received_at_ms": received_at_ms}
 
@@ -122,3 +122,27 @@ def test_stable_event_id_ne_depend_pas_du_moment_de_reception():
     b = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1800)[0]
     assert a["stable_event_id"] == b["stable_event_id"]
     assert a["received_at_ms"] != b["received_at_ms"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"hash": None, "tid": None},
+        {"time": True},
+        {"px": "0"},
+        {"sz": "-1"},
+        {"side": "?"},
+        {"coin": " "},
+    ],
+)
+def test_parser_rejects_fill_missing_native_identity_or_causal_fields(changes):
+    fill = {
+        "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+        "time": 1_000, "hash": "0xfill", "tid": 1,
+        **changes,
+    }
+    message = {"channel": "userFills", "data": {"fills": [fill]}}
+
+    assert UL.parser_message_userfills(
+        message, vault="0xA", received_at_ms=1_010
+    ) == []

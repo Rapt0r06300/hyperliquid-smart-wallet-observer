@@ -8,6 +8,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+import tools.copy_vault_safe_bridge as bridge_module
+from tools.restore_alina import _windows_io_path as canonical_windows_io_path
 
 from tools.copy_vault_safe_bridge import SafeBridgeError, build_safe_copy_workspace
 
@@ -81,7 +83,10 @@ def _envelope(
     }
 
 
-def _corpus(tmp_path: Path, envelopes: list[dict]) -> Path:
+def _corpus(
+    tmp_path: Path, envelopes: list[dict], *, release_tag: str = "test-release",
+    long_dataset_names: bool = False,
+) -> Path:
     recovery = tmp_path / "runtime" / "recovery" / "full"
     recovery.mkdir(parents=True)
     index = tmp_path / "catalog" / "DATA_INDEX.json"
@@ -100,18 +105,18 @@ def _corpus(tmp_path: Path, envelopes: list[dict]) -> Path:
         "stat_mtime_ns INTEGER, stat_ctime_ns INTEGER)"
     )
     for n, record in enumerate(envelopes):
-        tag = "test-release"
-        name = f"safe-{n}.jsonl"
+        tag = release_tag
+        name = f"{'d' * 180}-{n}.jsonl" if long_dataset_names else f"safe-{n}.jsonl"
         plain = recovery / "usable" / "unpacked" / tag / name
-        plain.parent.mkdir(parents=True, exist_ok=True)
+        canonical_windows_io_path(plain).parent.mkdir(parents=True, exist_ok=True)
         data = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
-        plain.write_bytes(data)
+        canonical_windows_io_path(plain).write_bytes(data)
         gz = recovery / "usable" / "shards" / tag / (name + ".gz")
-        gz.parent.mkdir(parents=True, exist_ok=True)
-        with gzip.open(gz, "wb") as stream:
+        canonical_windows_io_path(gz).parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(canonical_windows_io_path(gz), "wb") as stream:
             stream.write(data)
-        compressed = gz.read_bytes()
-        (plain.parent / (name + ".alina.json")).write_text(
+        compressed = canonical_windows_io_path(gz).read_bytes()
+        canonical_windows_io_path(plain.parent / (name + ".alina.json")).write_text(
             json.dumps({
                 "schema": "alina.safe_jsonl_proof.v1",
                 "compressed_sha256": _sha(compressed),
@@ -119,7 +124,7 @@ def _corpus(tmp_path: Path, envelopes: list[dict]) -> Path:
                 "jsonl_bytes": len(data),
             }), encoding="utf-8",
         )
-        stat = gz.stat()
+        stat = canonical_windows_io_path(gz).stat()
         db.execute(
             "INSERT INTO current_safe_shards VALUES (?,?,?,?,?,?,?)",
             (
@@ -211,7 +216,7 @@ def test_bridge_excludes_snapshot_fills(tmp_path: Path) -> None:
     _corpus(tmp_path, [
         _envelope("copy_vault_fills", snapshot=True), _envelope("copy_vault_l2"),
     ])
-    with pytest.raises(SafeBridgeError, match="lacks both causal fills"):
+    with pytest.raises(SafeBridgeError, match="no causal live fills"):
         build_safe_copy_workspace(tmp_path)
 
 
@@ -253,12 +258,21 @@ def test_bridge_rejects_corrupted_extracted_data(tmp_path: Path) -> None:
         build_safe_copy_workspace(tmp_path)
 
 
-def test_bridge_rejects_shallow_l2(tmp_path: Path) -> None:
+def test_bridge_preserves_available_shallow_l2_depth(tmp_path: Path) -> None:
     _corpus(tmp_path, [
         _envelope("copy_vault_fills"), _envelope("copy_vault_l2", shallow=True),
     ])
-    with pytest.raises(SafeBridgeError, match="fewer than five levels"):
-        build_safe_copy_workspace(tmp_path)
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["counts"]["copy_vault_l2"] == 1
+    workspace = Path(report["workspace"])
+    book = json.loads(
+        (workspace / "runtime/data/copy_vault_l2_tape.jsonl").read_text()
+    )
+    assert book["source_bid_levels"] == 4
+    assert book["source_ask_levels"] == 4
+    assert len(book["bids5"]) == len(book["asks5"]) == 4
 
 
 def test_bridge_rejects_stale_safe_registry(tmp_path: Path) -> None:
@@ -278,3 +292,132 @@ def test_bridge_refuses_stale_catalog_after_alinasync(tmp_path: Path) -> None:
     )
     with pytest.raises(SafeBridgeError, match="active DATA_INDEX changed"):
         build_safe_copy_workspace(tmp_path)
+
+
+
+def test_bridge_reads_long_safe_release_paths(tmp_path: Path, monkeypatch) -> None:
+    release_tag = "r" * 180
+    _corpus(
+        tmp_path,
+        [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")],
+        release_tag=release_tag,
+        long_dataset_names=True,
+    )
+    seen = []
+    original = bridge_module._windows_io_path
+
+    def recording_normalizer(path):
+        if len(str(path)) > 260:
+            seen.append(str(path))
+        return original(path)
+
+    monkeypatch.setattr(bridge_module, "_windows_io_path", recording_normalizer)
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert report["selected_shards"] == 2
+    assert len(seen) >= 6
+
+
+
+def test_bridge_l2_freshness_and_depth_match_canonical_replay_contract() -> None:
+    record = _envelope("copy_vault_l2", shallow=True)
+    record["received_ts_ms"] = record["exchange_ts_ms"] + 1_501
+
+    book = bridge_module._book(record)
+
+    assert book["causal_observation"] is True
+    assert book["received_at_ms"] - book["exchange_ts_ms"] == 1_501
+    assert book["source_bid_levels"] == 4
+    assert book["source_ask_levels"] == 4
+    assert len(book["bids5"]) == len(book["asks5"]) == 4
+
+    record["received_ts_ms"] = record["exchange_ts_ms"] + 30_000
+    assert bridge_module._book(record)["received_at_ms"] - record["exchange_ts_ms"] == 30_000
+
+    record["received_ts_ms"] += 1
+    with pytest.raises(SafeBridgeError, match="freshness"):
+        bridge_module._book(record)
+
+
+
+def test_bridge_records_bad_l2_as_quarantined_without_dropping_the_frame(tmp_path: Path) -> None:
+    bad = _envelope("copy_vault_l2")
+    message = json.loads(bad["raw_payload"])
+    message["data"]["levels"][0] = []
+    bad["raw_payload"] = json.dumps(message, sort_keys=True, separators=(",", ":"))
+    bad["raw_sha256"] = _sha(bad["raw_payload"].encode("utf-8"))
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills"), bad, _envelope("copy_vault_l2"),
+    ])
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert report["counts"]["copy_vault_l2"] == 1
+    assert report["input_decisions"]["quarantined"] == 1
+    workspace = Path(report["workspace"])
+    provenance = json.loads((
+        workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
+    ).read_text(encoding="utf-8"))
+    decisions = (workspace / provenance["input_decisions"]["path"]).read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(decisions) == 1
+    decision = json.loads(decisions[0])
+    assert decision["decision"] == "QUARANTINE"
+    assert decision["reason_code"] == "L2_REPLAY_CONTRACT_REJECTED"
+    assert decision["frame_sha256"] == _sha(
+        (json.dumps(bad, sort_keys=True) + "\n").encode("utf-8")
+    )
+
+
+
+def test_bridge_quarantines_fill_with_unknown_snapshot_semantics(tmp_path: Path) -> None:
+    unknown = _envelope("copy_vault_fills")
+    message = json.loads(unknown["raw_payload"])
+    del message["data"]["isSnapshot"]
+    unknown["raw_payload"] = json.dumps(message, sort_keys=True, separators=(",", ":"))
+    unknown["raw_sha256"] = _sha(unknown["raw_payload"].encode("utf-8"))
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills"), unknown, _envelope("copy_vault_l2"),
+    ])
+
+    report = build_safe_copy_workspace(tmp_path)
+
+    assert report["counts"]["copy_vault_fills"] == 1
+    assert report["input_decisions"]["quarantined"] == 1
+    workspace = Path(report["workspace"])
+    provenance = json.loads((
+        workspace / "runtime/reports/datasets/SELECTION_PROVENANCE.json"
+    ).read_text(encoding="utf-8"))
+    decision = json.loads((workspace / provenance["input_decisions"]["path"]).read_text(
+        encoding="utf-8"
+    ).splitlines()[0])
+    assert decision["reason_code"] == "FILL_REPLAY_CONTRACT_REJECTED"
+    assert decision["frame_sha256"] == _sha(
+        (json.dumps(unknown, sort_keys=True) + "\n").encode("utf-8")
+    )
+
+
+
+def test_bridge_persists_auditable_no_go_when_live_fills_are_absent(tmp_path: Path) -> None:
+    _corpus(tmp_path, [
+        _envelope("copy_vault_fills", snapshot=True), _envelope("copy_vault_l2"),
+    ])
+
+    with pytest.raises(SafeBridgeError, match="no causal live fills"):
+        build_safe_copy_workspace(tmp_path)
+
+    diagnostic_files = list((
+        tmp_path / "runtime/research_lab/copy_vault_safe/diagnostics"
+    ).glob("no-go-*/NO_GO.json"))
+    assert len(diagnostic_files) == 1
+    diagnostic = json.loads(diagnostic_files[0].read_text(encoding="utf-8"))
+    assert diagnostic["status"] == "SAFE_COPY_NO_GO"
+    assert diagnostic["counts"]["copy_vault_fills"] == 0
+    assert diagnostic["counts"]["copy_vault_l2"] == 1
+    assert diagnostic["economic_proof"] is False
+    decisions = diagnostic_files[0].parent / "SAFE_INPUT_DECISIONS.jsonl"
+    assert decisions.is_file()
+    assert _sha(decisions.read_bytes()) == diagnostic["input_decisions"]["sha256"]

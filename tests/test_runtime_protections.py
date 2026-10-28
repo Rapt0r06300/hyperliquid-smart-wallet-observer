@@ -8,8 +8,10 @@ Paper only : 0 réseau, 0 ordre réel, 0 clé, 0 signature.
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,6 +89,109 @@ def test_hors_depot_git_letat_est_inconnu_et_non_reproductible(tmp_path):
     m = P.manifeste_execution(tmp_path)
     assert m["git_dirty"] is None and m["reproductible"] is False
     assert "INCONNU" in m["avertissement"]
+
+
+def test_git_status_failure_is_reported_with_return_code_and_stderr(monkeypatch, tmp_path):
+    def fake_run(command, **_kwargs):
+        if command[1] == "rev-parse":
+            return SimpleNamespace(returncode=0, stdout="a" * 40, stderr="")
+        return SimpleNamespace(
+            returncode=128,
+            stdout="",
+            stderr="fatal: index unavailable",
+        )
+
+    monkeypatch.setattr(P.subprocess, "run", fake_run)
+
+    manifest = P.manifeste_execution(tmp_path)
+
+    assert manifest["git_head"] == "a" * 40
+    assert manifest["git_dirty"] is None
+    assert manifest["reproductible"] is False
+    assert manifest["git_status_diagnostic"] == {
+        "command": "git status --porcelain",
+        "return_code": 128,
+        "error_code": "GIT_STATUS_EXIT_NONZERO",
+        "stderr": "fatal: index unavailable",
+        "retry_attempted": False,
+        "retry_timeout_seconds": None,
+        "first_attempt_error_code": None,
+        "first_attempt_stderr": "",
+    }
+
+
+def test_git_status_timeout_is_reported_without_treating_tree_as_clean(monkeypatch, tmp_path):
+    def fake_run(command, **kwargs):
+        if command[1] == "rev-parse":
+            return SimpleNamespace(returncode=0, stdout="b" * 40, stderr="")
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(P.subprocess, "run", fake_run)
+
+    manifest = P.manifeste_execution(tmp_path)
+
+    assert manifest["git_dirty"] is None
+    assert manifest["git_status_diagnostic"]["error_code"] == "GIT_STATUS_TIMEOUT"
+    assert manifest["git_status_diagnostic"]["return_code"] is None
+    assert manifest["git_status_diagnostic"]["retry_attempted"] is True
+    assert manifest["git_status_diagnostic"]["first_attempt_error_code"] == "GIT_STATUS_TIMEOUT"
+    assert manifest["reproductible"] is False
+
+
+def test_git_status_os_error_is_reported_without_treating_tree_as_clean(monkeypatch, tmp_path):
+    def fake_run(command, **_kwargs):
+        if command[1] == "rev-parse":
+            return SimpleNamespace(returncode=0, stdout="d" * 40, stderr="")
+        raise PermissionError("git executable blocked")
+
+    monkeypatch.setattr(P.subprocess, "run", fake_run)
+
+    manifest = P.manifeste_execution(tmp_path)
+
+    assert manifest["git_dirty"] is None
+    assert manifest["reproductible"] is False
+    assert manifest["git_status_diagnostic"]["error_code"] == "GIT_STATUS_OS_ERROR"
+    assert manifest["git_status_diagnostic"]["stderr"] == "git executable blocked"
+
+
+def test_git_status_uses_lossy_utf8_decoding_and_keeps_unknown_path_dirty(monkeypatch, tmp_path):
+    def fake_run(command, **kwargs):
+        if command[1] == "rev-parse":
+            return SimpleNamespace(returncode=0, stdout="e" * 40, stderr="")
+        assert kwargs.get("encoding") == "utf-8"
+        assert kwargs.get("errors") == "replace"
+        return SimpleNamespace(returncode=0, stdout="?? path-�.json\n", stderr="")
+
+    monkeypatch.setattr(P.subprocess, "run", fake_run)
+
+    manifest = P.manifeste_execution(tmp_path)
+
+    assert manifest["git_dirty"] is True
+    assert manifest["reproductible"] is False
+    assert manifest["git_status_diagnostic"]["return_code"] == 0
+
+
+def test_git_status_retries_once_after_initial_timeout_and_records_retry(monkeypatch, tmp_path):
+    status_timeouts = []
+
+    def fake_run(command, **kwargs):
+        if command[1] == "rev-parse":
+            return SimpleNamespace(returncode=0, stdout="c" * 40, stderr="")
+        status_timeouts.append(kwargs["timeout"])
+        if len(status_timeouts) == 1:
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(P.subprocess, "run", fake_run)
+
+    manifest = P.manifeste_execution(tmp_path)
+
+    assert status_timeouts == [8.0, 45.0]
+    assert manifest["git_dirty"] is False
+    assert manifest["reproductible"] is True
+    assert manifest["git_status_diagnostic"]["retry_attempted"] is True
+    assert manifest["git_status_diagnostic"]["first_attempt_error_code"] == "GIT_STATUS_TIMEOUT"
+    assert manifest["git_status_diagnostic"]["return_code"] == 0
 
 
 def test_le_manifeste_porte_le_contexte_fourni(tmp_path):

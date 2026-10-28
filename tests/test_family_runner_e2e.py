@@ -14,8 +14,6 @@ from hl_observer.ops import self_hosted_return
 SHA = "a" * 40
 SUITE_COVERAGE_FAMILY = {
     "copy-vault-full": "copy_vault",
-    "lead-lag-full": "lead_lag",
-    "cross-venue-full": "cross_venue",
 }
 
 
@@ -75,14 +73,7 @@ def _fake_run_logged(name: str, *_args: object, **_kwargs: object) -> dict[str, 
 
 @pytest.mark.parametrize(
     "suite,expected_steps",
-    [
-        ("copy-vault-full", ["02_economic_campaigns", "04_connection_audit"]),
-        (
-            "lead-lag-full",
-            ["02_economic_campaigns", "03_lead_lag_causal_audit", "04_connection_audit"],
-        ),
-        ("cross-venue-full", ["02_economic_campaigns", "04_connection_audit"]),
-    ],
+    [("copy-vault-full", ["02_economic_campaigns", "04_connection_audit"])],
 )
 def test_family_runner_control_to_alina_return_is_exact_sha_paper_only(
     tmp_path: Path,
@@ -181,6 +172,31 @@ def test_family_runner_refuse_stale_sha_avant_toute_etape(
     )
 
     with pytest.raises(RuntimeError, match="SHA projet différent"):
+        family_economic_job.execute_family_job(
+            request_path,
+            project_root=tmp_path / "project",
+            lab_root=tmp_path / "lab",
+            result_dir=tmp_path / "result",
+        )
+
+
+@pytest.mark.parametrize("suite", ["lead-lag-full", "cross-venue-full"])
+def test_family_runner_refuse_famille_desactivee_avant_toute_etape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suite: str
+) -> None:
+    request = self_hosted_control.build_worker_request(
+        _control("copy-vault-full"), project_sha=SHA
+    )
+    request["suite"] = suite
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    monkeypatch.setattr(
+        family_economic_job.canonical_job,
+        "_run_logged",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("disabled suite executed")),
+    )
+
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
         family_economic_job.execute_family_job(
             request_path,
             project_root=tmp_path / "project",

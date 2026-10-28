@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -147,7 +147,8 @@ def finalize(
             }
         )
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(row, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(row, sort_keys=True, indent=2) + "\n")
         os.replace(temporary, path)
         changed += 1
         finalized.append(

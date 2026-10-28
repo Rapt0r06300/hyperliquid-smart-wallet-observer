@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
-from hl_observer.simulation.economic_objective import CANONICAL_FAMILIES
+from hl_observer.strategies.active_scope import (
+    active_strategy_families,
+    authoritative_strategy_scope,
+    canonical_strategy_family,
+    strategy_can_materialize,
+)
 
 REPORT_DIR = Path("runtime") / "reports" / "economic_campaigns"
 BRAIN_RELATIVE = Path("runtime") / "reports" / "autonomous_research" / "RESEARCH_BRAIN_DECISION.json"
@@ -49,7 +55,7 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 def load_campaigns(root: str | Path) -> dict[str, dict[str, Any]]:
     root_path = Path(root).resolve()
     found: dict[str, dict[str, Any]] = {}
-    for family in CANONICAL_FAMILIES:
+    for family in sorted(active_strategy_families()):
         payload = _load_json(root_path / REPORT_DIR / f"{family}.json")
         if payload is not None:
             found[family] = payload
@@ -90,6 +96,17 @@ def decide_family(
     strict_copy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Décide une phase sans utiliser la magnitude OOS/forward pour optimiser."""
+
+    family = canonical_strategy_family(family)
+    if not strategy_can_materialize(family):
+        return {
+            "family": family,
+            "status": "DISABLED_BY_SCOPE",
+            "priority": 0,
+            "phase": "DISABLED_BY_SCOPE",
+            "reason": "La famille est inactive et ne peut recevoir ni calcul ni promotion économique.",
+            "holdout_used_for_ranking": False,
+        }
 
     if campaign is None:
         return {
@@ -188,6 +205,9 @@ def decide_family(
 
 def build_decision(root: str | Path) -> dict[str, Any]:
     root_path = Path(root).resolve()
+    active = active_strategy_families()
+    if active != frozenset({"copy_vault"}):
+        raise RuntimeError("COPY_VAULT_ONLY_SCOPE_REQUIRED")
     campaigns = load_campaigns(root_path)
     strict_copy = _strict_copy_summary(root_path)
     decisions = [
@@ -196,7 +216,7 @@ def build_decision(root: str | Path) -> dict[str, Any]:
             campaigns.get(family),
             strict_copy=strict_copy if family == "copy_vault" else None,
         )
-        for family in CANONICAL_FAMILIES
+        for family in sorted(active)
     ]
     ranked = sorted(decisions, key=lambda row: (-int(row["priority"]), str(row["family"])))
 
@@ -226,6 +246,11 @@ def build_decision(root: str | Path) -> dict[str, Any]:
             "retune_after_holdout_failure": "TRAIN_VALIDATION_ONLY_OR_NEW_DATA",
         },
         "family_decisions": ranked,
+        "disabled_families": {
+            entry.family: "DISABLED_BY_SCOPE"
+            for entry in authoritative_strategy_scope()
+            if entry.family not in active
+        },
         "next_recommended_job": {
             "suite": recommended_suite,
             "mode": recommended_mode,

@@ -12,6 +12,7 @@ from typing import Any
 
 from hl_observer.research.hypothesis_ledger import FAMILIES
 from hl_observer.research.process_memory import candidate_memory_effect
+from hl_observer.strategies.active_scope import require_active_strategy
 
 _COMPONENTS = (
     ("events", "event"),
@@ -184,6 +185,7 @@ def generate_semantic_plans(
     """Generate a deterministic, validated and exact-deduplicated local pool."""
     if family not in FAMILIES:
         raise ValueError(f"family must be one of {sorted(FAMILIES)}")
+    family = require_active_strategy(family)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("limit must be a positive integer")
     if not isinstance(seed, int) or isinstance(seed, bool):

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
+from hl_observer.strategies.active_scope import strategy_can_materialize
 
 SCHEMA = "alina.economic_memory.v1"
 RELATIVE_PATH = Path("runtime") / "reports" / "economic_memory" / "ECONOMIC_MEMORY.json"
@@ -127,6 +128,8 @@ def record_certified_proof(
     net = _certified_net(net_pnl_usd, label="net_pnl_usd")
     project = _sha(project_sha, 40, "project_sha")
     fam = _family(family)
+    if not strategy_can_materialize(fam):
+        raise EconomicMemoryError(f"DISABLED_BY_SCOPE:{fam}")
     snapshot = _sha(dataset_snapshot_sha256, 64, "dataset_snapshot_sha256")
     config = _sha(config_sha256, 64, "config_sha256")
     runtime = _sha(runtime_proof_sha256, 64, "runtime_proof_sha256")
@@ -181,9 +184,12 @@ def load_exact_proof(
     suite: object,
     runtime_proof_sha256: object | None = None,
 ) -> dict[str, Any]:
+    fam = _family(family)
+    if not strategy_can_materialize(fam):
+        raise EconomicMemoryError(f"DISABLED_BY_SCOPE:{fam}")
     key = proof_key(
         project_sha=project_sha,
-        family=family,
+        family=fam,
         dataset_snapshot_sha256=dataset_snapshot_sha256,
         config_sha256=config_sha256,
         suite=suite,

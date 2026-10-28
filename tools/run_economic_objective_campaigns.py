@@ -101,6 +101,10 @@ from hl_observer.simulation.lead_lag_l2_history import (  # noqa: E402
 from hl_observer.simulation.lead_lag_measured_replay import (  # noqa: E402
     load_runtime_latency_evidence,
 )
+from hl_observer.strategies.active_scope import (  # noqa: E402
+    active_strategy_families,
+    require_active_strategy,
+)
 
 
 def _tool(name: str, path: Path):
@@ -158,7 +162,7 @@ def _environment_provenance(root: Path) -> dict[str, Any]:
         "timezone": os.environ.get("TZ") or time.tzname[0],
         "dependency_files": [str(path.relative_to(root)) for path in dependency_files if path.is_file()],
         "dependency_digest": dependency_digest,
-        "github_runner_image": os.environ.get("ImageOS") or os.environ.get("RUNNER_OS"),
+        "github_runner_image": os.environ.get("ImageOS") or os.environ.get("RUNNER_OS"),  # noqa: SIM112 - GitHub documents this exact environment key.
     }
 
 
@@ -199,6 +203,95 @@ def _lead_trade_window_ms(
     return min(timestamps_ms), max(timestamps_ms) + max(0, int(trailing_padding_ms))
 
 
+def _finalize_campaigns(
+    root: Path,
+    campaigns: list[dict[str, Any]],
+    raw_reports: dict[str, dict[str, Any]],
+    *,
+    dataset_mode: bool,
+    dataset_manifest_path: Path | None,
+    dataset_sources: dict[str, object] | None,
+    environment_provenance: dict[str, Any],
+    analysis_stage: str,
+) -> dict[str, Any]:
+    for campaign in campaigns:
+        campaign["analysis_stage"] = analysis_stage
+        campaign["analysis_stage_contract"] = {
+            "stage": analysis_stage,
+            "paper_read_only": True,
+            "real_execution": False,
+            "input_selection": {
+                "dataset_workspace": dataset_mode,
+                "dataset_source_manifest": (
+                    str(dataset_manifest_path) if dataset_manifest_path is not None else None
+                ),
+            },
+        }
+    scoreboards_path = export_scoreboards(root)
+    report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_campaign_report(campaigns), encoding="utf-8", newline="\n")
+
+    stage_receipt = {
+        "schema": "alina.analysis_stage_artifact.v1",
+        "analysis_stage": analysis_stage,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+        "input_selection": {
+            "dataset_workspace": dataset_mode,
+            "dataset_source_manifest": (
+                str(dataset_manifest_path) if dataset_manifest_path is not None else None
+            ),
+            "source_summary": dataset_sources,
+        },
+        "environment_provenance": environment_provenance,
+        "campaigns": [
+            {
+                "family": row.get("family"),
+                "analysis_stage": row.get("analysis_stage"),
+                "objective_status": row.get("objective_status"),
+                "daily_evidence": row.get("daily_evidence"),
+            }
+            for row in campaigns
+        ],
+        "scoreboard_artifact": str(scoreboards_path),
+        "report_artifact": str(report_path),
+    }
+    stage_receipt_path = (
+        root / "runtime" / "reports" / "analysis_stages" / f"{analysis_stage.lower()}.json"
+    )
+    stage_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    stage_receipt["artifact_digest"] = _stable_json_sha256(stage_receipt)
+    stage_receipt_path.write_text(
+        json.dumps(stage_receipt, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    collector_state = inspect_bounded_collectors(root)
+    collection_plan = build_collection_plan(
+        campaigns,
+        raw_reports,
+        collector_state=collector_state,
+    )
+    collection_path, collection_report_path = write_collection_plan(root, collection_plan)
+    return {
+        "campaigns": campaigns,
+        "report_path": str(report_path),
+        "scoreboards_path": str(scoreboards_path),
+        "collector_state": collector_state,
+        "collection_plan_path": str(collection_path),
+        "collection_plan_report_path": str(collection_report_path),
+        "dataset_workspace": dataset_mode,
+        "dataset_source_manifest": (
+            str(dataset_manifest_path) if dataset_manifest_path is not None else None
+        ),
+        "dataset_source_summary": dataset_sources,
+        "paper_read_only": True,
+        "real_execution": False,
+        "active_families": sorted(active_strategy_families()),
+    }
+
+
 def run_campaigns(
     root: Path,
     *,
@@ -211,6 +304,12 @@ def run_campaigns(
     analysis_stage: str | None = None,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    require_active_strategy("copy_vault")
+    if active_strategy_families() != frozenset({"copy_vault"}):
+        raise RuntimeError("COPY_VAULT_ONLY_SCOPE_REQUIRED")
+    # The legacy inactive-family code below is retained for audit/history.
+    # It is unreachable under the mandatory Copy-Vault-only guard.
+    cross_tool: Any = None
     if start_collection:
         raise RuntimeError(
             "ANALYZE cannot start collectors; run COLLECT first, freeze the cutoff, then analyze"
@@ -232,7 +331,6 @@ def run_campaigns(
     # workspace. Loading them from `root/tools` made GitHub-hosted backtest/OOS
     # campaigns fail with FileNotFoundError after materialization.
     copy_tool = _tool("hypersmart_copy_pipeline", ROOT / "tools" / "pipeline_copie_reel.py")
-    cross_tool = _tool("hypersmart_cross_campaign", ROOT / "tools" / "backtest_dislocation_2jambes.py")
 
     copy_data = dataset_provenance(
         root,
@@ -451,6 +549,19 @@ def run_campaigns(
     )
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
+
+    # Current machine scope is Copy-Vault only. Return before any Lead-Lag or
+    # Cross-Venue shard discovery, replay, parameter selection, or publication.
+    return _finalize_campaigns(
+        root,
+        [copy_campaign],
+        {"copy_vault": copy_raw},
+        dataset_mode=dataset_mode,
+        dataset_manifest_path=dataset_manifest_path,
+        dataset_sources=dataset_sources,
+        environment_provenance=environment_provenance,
+        analysis_stage=analysis_stage,
+    )
 
     if dataset_mode:
         # Dans un workspace FULL/COLD, le manifeste explicite est la source de vérité.
@@ -834,85 +945,21 @@ def run_campaigns(
     write_campaign(root, cross_campaign)
 
     campaigns = [copy_campaign, lead_campaign, cross_campaign]
-    for campaign in campaigns:
-        campaign["analysis_stage"] = analysis_stage
-        campaign["analysis_stage_contract"] = {
-            "stage": analysis_stage,
-            "paper_read_only": True,
-            "real_execution": False,
-            "input_selection": {
-                "dataset_workspace": dataset_mode,
-                "dataset_source_manifest": (
-                    str(dataset_manifest_path) if dataset_manifest_path is not None else None
-                ),
-            },
-        }
-    scoreboards_path = export_scoreboards(root)
-    markdown = render_campaign_report(campaigns)
-    report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
-    report_path.write_text(markdown, encoding="utf-8", newline="\n")
-
     raw_reports = {
         "copy_vault": copy_raw,
         "lead_lag": lead_raw,
         "cross_venue_dislocation_v2": cross_raw,
     }
-    stage_receipt = {
-        "schema": "alina.analysis_stage_artifact.v1",
-        "analysis_stage": analysis_stage,
-        "paper_only": True,
-        "read_only": True,
-        "real_execution": False,
-        "input_selection": {
-            "dataset_workspace": dataset_mode,
-            "dataset_source_manifest": (
-                str(dataset_manifest_path) if dataset_manifest_path is not None else None
-            ),
-            "source_summary": dataset_sources,
-        },
-        "environment_provenance": environment_provenance,
-        "campaigns": [
-            {
-                "family": row.get("family"),
-                "analysis_stage": row.get("analysis_stage"),
-                "objective_status": row.get("objective_status"),
-                "daily_evidence": row.get("daily_evidence"),
-            }
-            for row in campaigns
-        ],
-        "scoreboard_artifact": str(scoreboards_path),
-        "report_artifact": str(report_path),
-    }
-    stage_receipt_path = (
-        root / "runtime" / "reports" / "analysis_stages" / f"{analysis_stage.lower()}.json"
-    )
-    stage_receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    stage_receipt["artifact_digest"] = _stable_json_sha256(stage_receipt)
-    stage_receipt_path.write_text(
-        json.dumps(stage_receipt, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    preliminary_plan = build_collection_plan(campaigns, raw_reports)
-    collector_state = inspect_bounded_collectors(root)
-    collection_plan = build_collection_plan(
+    return _finalize_campaigns(
+        root,
         campaigns,
         raw_reports,
-        collector_state=collector_state,
+        dataset_mode=dataset_mode,
+        dataset_manifest_path=dataset_manifest_path,
+        dataset_sources=dataset_sources,
+        environment_provenance=environment_provenance,
+        analysis_stage=analysis_stage,
     )
-    collection_path, collection_report_path = write_collection_plan(root, collection_plan)
-    return {
-        "campaigns": campaigns,
-        "report_path": str(report_path),
-        "scoreboards_path": str(scoreboards_path),
-        "collector_state": collector_state,
-        "collection_plan_path": str(collection_path),
-        "collection_plan_report_path": str(collection_report_path),
-        "dataset_workspace": dataset_mode,
-        "dataset_source_manifest": (
-            str(dataset_manifest_path) if dataset_manifest_path is not None else None
-        ),
-        "dataset_source_summary": dataset_sources,
-    }
 
 
 def main(argv: list[str] | None = None) -> int:

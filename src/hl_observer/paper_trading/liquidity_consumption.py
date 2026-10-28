@@ -188,7 +188,7 @@ class LiquidityConsumptionLedger:
             bids=bids,
             asks=asks,
             received_ts_ms=truth.received_ts_ms,
-            exchange_ts_ms=truth.exchange_ts_ms,
+            exchange_ts_ms=truth.exchange_ts_raw,
             source=truth.source,
             snapshot_id=truth.snapshot_id,
             data_origin=truth.data_origin,
@@ -204,8 +204,8 @@ class LiquidityConsumptionLedger:
         raw_fills = tuple(getattr(result, "level_fills", ()) or ())
         rows: list[LevelConsumption] = []
         for fill in raw_fills:
-            price = float(getattr(fill, "price"))
-            quantity = max(0.0, float(getattr(fill, "filled_quantity")))
+            price = float(fill.price)
+            quantity = max(0.0, float(fill.filled_quantity))
             if quantity <= 0:
                 continue
             key = self._key(

@@ -39,7 +39,7 @@ def test_canonical_worker_stays_narrow() -> None:
 
 @pytest.mark.parametrize(
     "suite",
-    ["copy-vault-full", "lead-lag-full", "cross-venue-full"],
+    ["copy-vault-full"],
 )
 def test_router_accepts_only_active_family_economic_suites(suite: str) -> None:
     before = set(canonical_job.ECONOMIC_SUITES)
@@ -47,6 +47,12 @@ def test_router_accepts_only_active_family_economic_suites(suite: str) -> None:
     assert validated["suite"] == suite
     assert validated["mode"] == "economic"
     assert set(canonical_job.ECONOMIC_SUITES) == before
+
+
+@pytest.mark.parametrize("suite", ["lead-lag-full", "cross-venue-full"])
+def test_router_rejects_disabled_family_economic_suites(suite: str) -> None:
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        router.validate_request(_request(suite))
 
 
 def test_router_does_not_turn_unrelated_archives_into_economic_jobs() -> None:
@@ -155,12 +161,12 @@ def _main_args(tmp_path: Path) -> list[str]:
 
 
 def test_main_routes_family_success_and_postprocessing(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(canonical_job, "_load_request", lambda _path: {"mode": "economic", "suite": "lead-lag-full"})
+    monkeypatch.setattr(canonical_job, "_load_request", lambda _path: {"mode": "economic", "suite": "copy-vault-full"})
     monkeypatch.setattr(router, "execute_family_job", lambda *args, **kwargs: 0)
     seen = []
     monkeypatch.setattr(router, "_run_family_postprocessing", lambda **kwargs: seen.append(kwargs))
     assert router.main(_main_args(tmp_path)) == 0
-    assert seen == [{"suite": "lead-lag-full", "result_dir": (tmp_path / "result").resolve()}]
+    assert seen == [{"suite": "copy-vault-full", "result_dir": (tmp_path / "result").resolve()}]
 
 
 def test_main_skips_postprocessing_after_family_failure(tmp_path: Path, monkeypatch) -> None:

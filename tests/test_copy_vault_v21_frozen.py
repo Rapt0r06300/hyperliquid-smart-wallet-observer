@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
@@ -59,6 +60,8 @@ def _segment(name: str, eligible: bool) -> dict:
         "retuned_on_heldout": False,
         "paper_read_only": True,
         "real_execution": False,
+        "calendar_day_statistics": {"status": "MEASURABLE", "calendar_day_count": 1},
+        "trades": [],
         "carry_pnl_usd": 0.0,
         "funding_receipt": {
             "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
@@ -254,9 +257,16 @@ def test_frozen_v21_opens_heldouts_sequentially(monkeypatch: pytest.MonkeyPatch)
     assert report["forward"]["funding_receipt"]["status"] == "NOT_EVALUATED"
     assert report["carry_pnl_usd"] is None
     assert report["funding_receipt"]["status"] == "NOT_EVALUATED"
+    assert report["paper_read_only"] is True
+    assert report["real_execution"] is False
+
+    exported = json.loads(json.dumps(report, allow_nan=False))
+    assert exported["carry_pnl_usd"] is None
+    assert exported["funding_receipt"]["carry_pnl_usd"] is None
+    assert exported["forward"]["funding_receipt"]["status"] == "NOT_EVALUATED"
 
 
-def test_segment_calendar_coverage_does_not_discard_malformed_day_entries() -> None:
+def test_segment_calendar_coverage_rejects_malformed_day_entries() -> None:
     params = _freeze()["freeze"]["parameters"]
     result = V21._evaluate_segment(
         [],
@@ -273,8 +283,167 @@ def test_segment_calendar_coverage_does_not_discard_malformed_day_entries() -> N
         result["calendar_day_statistics"]["reason"]
         == "INVALID_COMPLETE_UTC_DAY_COVERAGE"
     )
-    assert result["carry_pnl_usd"] == 0.0
+    assert result["carry_pnl_usd"] is None
+    assert result["eligible"] is False
+    assert "CALENDAR_PNL_UNMEASURABLE" in result["reasons"]
+    assert result["funding_receipt"]["status"] == "UNMEASURABLE"
+    assert result["funding_receipt"]["reason"] == "SEGMENT_COVERAGE_UNMEASURABLE"
+
+
+def test_funding_zero_requires_explicit_complete_utc_day_coverage() -> None:
+    params = _freeze()["freeze"]["parameters"]
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=2 * 86_400_000 - 1,
+        params=params,
+    )
+
+    assert result["calendar_day_statistics"]["status"] == "UNMEASURABLE"
+    assert result["funding_receipt"]["status"] == "UNMEASURABLE"
+    assert result["carry_pnl_usd"] is None
+    assert result["eligible"] is False
+    assert "CALENDAR_PNL_UNMEASURABLE" in result["reasons"]
+
+
+def test_complete_coverage_proves_zero_funding_when_no_positions_execute() -> None:
+    params = _freeze()["freeze"]["parameters"]
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=2 * 86_400_000 - 1,
+        params=params,
+        complete_utc_day_starts_ms=[0, 86_400_000],
+    )
+
+    assert result["calendar_day_statistics"]["status"] == "MEASURABLE"
     assert result["funding_receipt"]["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+    assert result["carry_pnl_usd"] == 0.0
+
+
+def test_short_executed_position_proves_zero_without_crossing_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day = 86_400_000
+    trade = {
+        "entry_ts_ms": 1_000,
+        "exit_ts_ms": 2_000,
+        "net_pnl_usd": 1.0,
+    }
+    monkeypatch.setattr(V21, "_segment_candidates", lambda *_args, **_kwargs: ([], {}))
+    monkeypatch.setattr(V21, "_settle", lambda *_args, **_kwargs: ([trade], [], {}))
+    monkeypatch.setattr(
+        V21,
+        "assess_train_variant",
+        lambda *_args, **_kwargs: {
+            "statistics": {"daily_net_pnl_usd": [1.0]},
+            "reasons": [],
+        },
+    )
+
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=day - 1,
+        params=_freeze()["freeze"]["parameters"],
+        complete_utc_day_starts_ms=[0],
+    )
+
+    assert result["eligible"] is True
+    assert result["funding_receipt"]["status"] == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+    assert result["funding_receipt"]["trade_count"] == 1
+    assert result["funding_receipt"]["settlement_crossing_count"] == 0
+    assert result["carry_pnl_usd"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("segment", "expected_status"),
+    [
+        (
+            {"heldout_evaluated": False, "funding_receipt": {"status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "carry_pnl_usd": 0.0}},
+            "NOT_EVALUATED",
+        ),
+        (
+            {"heldout_evaluated": True, "calendar_day_statistics": {"status": "UNMEASURABLE"}, "funding_receipt": {"status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "carry_pnl_usd": 0.0}},
+            "UNMEASURABLE",
+        ),
+    ],
+)
+def test_funding_aggregate_rejects_uncovered_or_blocked_segment(
+    segment: dict, expected_status: str
+) -> None:
+    receipt = V21._aggregate_funding_receipt({"validation": segment})
+
+    assert receipt["status"] == expected_status
+    assert receipt["carry_pnl_usd"] is None
+
+
+def test_unknown_funding_settlement_rule_blocks_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day = 86_400_000
+    trade = {"entry_ts_ms": 1_000, "exit_ts_ms": 2_000}
+    monkeypatch.setattr(V21, "_segment_candidates", lambda *_args, **_kwargs: ([], {}))
+    monkeypatch.setattr(V21, "_settle", lambda *_args, **_kwargs: ([trade], [], {}))
+    monkeypatch.setattr(
+        V21,
+        "assess_train_variant",
+        lambda *_args, **_kwargs: {"statistics": {"daily_net_pnl_usd": [1.0]}, "reasons": []},
+    )
+
+    def unknown_rule(*_args, **_kwargs):
+        raise ValueError("settlement rule unavailable")
+
+    monkeypatch.setattr(V21, "next_funding_time_ms", unknown_rule)
+    result = V21._evaluate_segment(
+        [],
+        {},
+        segment="validation",
+        start_ms=0,
+        end_ms=day - 1,
+        params=_freeze()["freeze"]["parameters"],
+        complete_utc_day_starts_ms=[0],
+    )
+
+    assert result["eligible"] is False
+    assert result["carry_pnl_usd"] is None
+    assert result["funding_receipt"]["status"] == "UNMEASURABLE"
+    assert result["funding_receipt"]["reason"] == "FUNDING_SETTLEMENT_RULE_UNMEASURABLE"
+
+
+def test_funding_aggregate_requires_all_three_evaluated_segments() -> None:
+    receipt = V21._aggregate_funding_receipt({})
+
+    assert receipt["status"] == "NOT_EVALUATED"
+    assert receipt["carry_pnl_usd"] is None
+    assert set(receipt["segments"]) == {"validation", "oos", "forward"}
+
+
+def test_funding_aggregate_rechecks_zero_receipt_against_segment_trades() -> None:
+    validation = _segment("validation", True)
+    validation["trades"] = [
+        {"entry_ts_ms": 3_599_999, "exit_ts_ms": 3_600_000}
+    ]
+    segments = {
+        name: _segment(name, True)
+        for name in ("validation", "oos", "forward")
+    }
+    segments["validation"] = validation
+
+    receipt = V21._aggregate_funding_receipt(segments)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["carry_pnl_usd"] is None
+    assert (
+        receipt["segments"]["validation"]["reason"]
+        == "ACCEPTED_TRADE_CROSSES_FUNDING_BOUNDARY"
+    )
 
 
 def test_calendar_pnl_is_attributed_to_trade_close_utc_day(
@@ -644,6 +813,8 @@ def test_stress_matrix_runs_the_real_causal_l2_executor_and_records_delay_refusa
             "asks5": [[101.0, 20.0]],
             "causal_observation": True,
             "source_line": index + 1,
+            "connection_id": "fixture-ws-1",
+            "l2_gap_epoch": 0,
         }
         for index, ts_ms in enumerate(
             (signal_ms, signal_ms + 60_000, signal_ms + 360_000)
@@ -704,14 +875,15 @@ def test_frozen_v21_does_not_use_the_five_dollar_reference_as_a_gate(
         [],
         {},
         segment="validation",
-        start_ms=1_000,
-        end_ms=2_000,
+        start_ms=0,
+        end_ms=86_400_000 - 1,
         params={
             "daily_profit_lock_usd": 4.0,
             "bonferroni_trial_count": 432,
             "minimum_leader_fill_notional_usd": 100.0,
             "signed_depth_imbalance_minimum": 0.0,
         },
+        complete_utc_day_starts_ms=[0],
     )
 
     assert result["eligible"] is True
@@ -726,12 +898,11 @@ def test_reference_objective_status_is_independent_from_economic_proof(
         V21,
         "_evaluate_segment",
         lambda *_args, segment, **_kwargs: {
-            "segment": segment,
-            "eligible": True,
+            **_segment(segment, True),
             "daily_mean_net_pnl_usd": 4.5,
-            "funding_receipt": {
-                "status": "MEASURED_ZERO_NO_SETTLEMENT_CROSSED",
-                "carry_pnl_usd": 0.0,
+            "calendar_day_statistics": {
+                "status": "MEASURABLE",
+                "calendar_day_mean_net_pnl_usd_exact_decimal": "4.5",
             },
         },
     )
@@ -741,3 +912,29 @@ def test_reference_objective_status_is_independent_from_economic_proof(
     assert report["economically_proven"] is True
     assert report["objective_status"] == "NON_ATTEINT"
     assert report["objective_is_informational_reference_only"] is True
+
+
+def test_reference_objective_uses_exact_calendar_net_not_display_float() -> None:
+    def segment(name: str, *, exact: str, displayed: float) -> dict:
+        row = _segment(name, True)
+        row["daily_mean_net_pnl_usd"] = displayed
+        row["calendar_day_statistics"] = {
+            "status": "MEASURABLE",
+            "calendar_day_mean_net_pnl_usd_exact_decimal": exact,
+        }
+        return row
+
+    above = segment(
+        "validation", exact="5.0000000000000000001", displayed=4.999999999999999
+    )
+    at_target = segment("oos", exact="5", displayed=4.999999999999999)
+    forward = segment("forward", exact="5.1", displayed=5.1)
+    assert V21._reference_objective_status(above, at_target, forward) == "ATTEINT"
+
+    below = segment("validation", exact="4.9999999999999999999", displayed=5.0)
+    assert V21._reference_objective_status(below, at_target, forward) == "NON_ATTEINT"
+
+
+def test_reference_objective_is_unmeasurable_without_exact_daily_receipt() -> None:
+    rows = [_segment(name, True) for name in ("validation", "oos", "forward")]
+    assert V21._reference_objective_status(*rows) == "UNMEASURABLE"

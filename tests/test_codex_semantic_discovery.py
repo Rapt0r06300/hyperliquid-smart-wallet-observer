@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from hl_observer.research.process_memory import load_process_records
+from hl_observer.research.research_context import read_repository_head
 from hl_observer.research.semantic_discovery import (
     generate_semantic_plans,
     load_catalog,
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def _catalog():
     return {
         "families": {
-            "lead_lag": {
+            "copy_vault": {
                 "events": ["external-bbo-move", "trade-burst"],
                 "contexts": ["liquid", "volatile"],
                 "data_surfaces": ["binance-bbo", "hl-bbo"],
@@ -82,11 +83,11 @@ def _failure(plan, record_id):
 
 
 def test_generation_is_deterministic_structured_deduplicated_and_filters_invalid():
-    first = generate_semantic_plans(_catalog(), "lead_lag", 40, 7)
-    second = generate_semantic_plans(_catalog(), "lead_lag", 40, 7)
+    first = generate_semantic_plans(_catalog(), "copy_vault", 40, 7)
+    second = generate_semantic_plans(_catalog(), "copy_vault", 40, 7)
     assert first == second
     assert len({p["semantic_key"] for p in first}) == len(first)
-    assert all(p["family"] == "lead_lag" for p in first)
+    assert all(p["family"] == "copy_vault" for p in first)
     assert not any(
         p["event"] == "trade-burst"
         and p["context"] == "volatile"
@@ -94,6 +95,41 @@ def test_generation_is_deterministic_structured_deduplicated_and_filters_invalid
         for p in first
     )
     assert all("data_feasibility" in p for p in first)
+
+
+def test_disabled_family_is_refused_before_semantic_generation():
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE:lead_lag"):
+        generate_semantic_plans({}, "lead_lag", 40, 7)
+
+
+def test_disabled_semantic_cli_writes_no_shortlist_or_status(tmp_path):
+    catalog_path = tmp_path / "invalid-if-read.json"
+    output = tmp_path / "shortlist.json"
+    status = tmp_path / "status.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(ROOT / "tools/codex_semantic_discovery.py"),
+            "--family",
+            "lead_lag",
+            "--catalog",
+            str(catalog_path),
+            "--out",
+            str(output),
+            "--status-out",
+            str(status),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "DISABLED_BY_SCOPE:lead_lag" in result.stderr
+    assert not output.exists()
+    assert not status.exists()
 
 
 def test_shortlist_prioritizes_distinct_mechanisms_before_timing_variants():
@@ -110,7 +146,7 @@ def test_shortlist_prioritizes_distinct_mechanisms_before_timing_variants():
 
 def test_catalog_rejects_invalid_rule_values_outside_declared_axes(tmp_path):
     catalog = _catalog()
-    catalog["families"]["lead_lag"]["invalid_combinations"] = [
+    catalog["families"]["copy_vault"]["invalid_combinations"] = [
         {"regime": "typo-regime"}
     ]
     path = tmp_path / "catalog.json"
@@ -121,7 +157,7 @@ def test_catalog_rejects_invalid_rule_values_outside_declared_axes(tmp_path):
 
 
 def test_ranking_vetoes_only_matching_failed_context_and_is_deterministic():
-    plans = generate_semantic_plans(_catalog(), "lead_lag", 40, 3)
+    plans = generate_semantic_plans(_catalog(), "copy_vault", 40, 3)
     failed_plan = plans[0]
     failed = [_failure(failed_plan, "PM-1"), _failure(failed_plan, "PM-2")]
     ranked = rank_semantic_plans(plans, [], failed, 5)
@@ -138,7 +174,7 @@ def test_ranking_vetoes_only_matching_failed_context_and_is_deterministic():
 
 
 def test_ranking_includes_regime_in_negative_memory_context():
-    plans = generate_semantic_plans(_catalog(), "lead_lag", 80, 5)
+    plans = generate_semantic_plans(_catalog(), "copy_vault", 80, 5)
     normal = next(plan for plan in plans if plan["regime"] == "normal")
     other_regime = next(
         plan
@@ -166,7 +202,7 @@ def test_ranking_includes_regime_in_negative_memory_context():
 
 
 def test_ranking_filters_near_semantic_duplicate_from_ledger():
-    plans = generate_semantic_plans(_catalog(), "lead_lag", 80, 11)
+    plans = generate_semantic_plans(_catalog(), "copy_vault", 80, 11)
     left = next(
         plan
         for plan in plans
@@ -197,7 +233,7 @@ def test_ranking_filters_near_semantic_duplicate_from_ledger():
 
 
 def test_ranking_keeps_material_single_axis_change_from_ledger():
-    plans = generate_semantic_plans(_catalog(), "lead_lag", 80, 13)
+    plans = generate_semantic_plans(_catalog(), "copy_vault", 80, 13)
     left = next(
         plan
         for plan in plans
@@ -239,31 +275,23 @@ def test_ranking_keeps_material_single_axis_change_from_ledger():
     assert [plan["semantic_key"] for plan in ranked] == [right["semantic_key"]]
 
 
-def test_seeded_history_vetoes_compatible_cross_venue_cost_region():
+def test_cross_venue_history_stays_readable_but_generation_is_disabled():
     catalog = load_catalog(
         ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
-    )
-    plans = generate_semantic_plans(
-        catalog, "cross_venue_dislocation_v2", 2000, 0
     )
     history = load_process_records(
         ROOT / "docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl"
     )
 
-    ranked = rank_semantic_plans(plans, [], history, len(plans))
-
-    assert not any(
-        plan["execution"] == "paper-taker-taker"
-        and plan["context"] == "fee-headroom"
-        and plan["target"] == "net-executable-headroom"
-        for plan in ranked
-    )
+    assert all(record["family"] in {"copy_vault", "lead_lag", "cross_venue_dislocation_v2"} for record in history)
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE:cross_venue_dislocation"):
+        generate_semantic_plans(catalog, "cross_venue_dislocation_v2", 2000, 0)
 
 
 def test_semantic_cli_combines_historical_memory_and_accepts_retest_evidence(tmp_path):
     catalog_path = tmp_path / "catalog.json"
     catalog_path.write_text(json.dumps(_catalog()), encoding="utf-8")
-    plans = generate_semantic_plans(_catalog(), "lead_lag", 40, 3)
+    plans = generate_semantic_plans(_catalog(), "copy_vault", 40, 3)
     failed_plan = plans[0]
     historical = tmp_path / "historical.jsonl"
     historical.write_text(
@@ -288,7 +316,7 @@ def test_semantic_cli_combines_historical_memory_and_accepts_retest_evidence(tmp
                 "-I",
                 str(ROOT / "tools/codex_semantic_discovery.py"),
                 "--family",
-                "lead_lag",
+                "copy_vault",
                 "--pool-size",
                 "40",
                 "--shortlist",
@@ -336,7 +364,17 @@ def test_semantic_status_preserves_multiple_families_and_binds_to_head(tmp_path)
     for path in (ledger, runtime, historical):
         path.write_text("", encoding="utf-8")
 
-    for family in ("lead_lag", "copy_vault"):
+    legacy_status = {
+        "family": "lead_lag",
+        "generated": 120,
+        "shortlisted": 8,
+        "filtered_before_llm": 112,
+    }
+    status.write_text(
+        json.dumps({"schema_version": 2, "head": read_repository_head(ROOT), "families": {"lead_lag": legacy_status}}),
+        encoding="utf-8",
+    )
+    for family in ("copy_vault",):
         result = subprocess.run(
             [
                 sys.executable,
@@ -368,6 +406,7 @@ def test_semantic_status_preserves_multiple_families_and_binds_to_head(tmp_path)
     assert payload["schema_version"] == 2
     assert len(payload["head"]) == 40
     assert set(payload["families"]) == {"copy_vault", "lead_lag"}
+    assert payload["families"]["lead_lag"] == legacy_status
 
 
 def test_semantic_cli_runs_from_clean_interpreter_without_touching_repo_runtime(tmp_path):
@@ -379,7 +418,7 @@ def test_semantic_cli_runs_from_clean_interpreter_without_touching_repo_runtime(
             "-I",
             str(ROOT / "tools/codex_semantic_discovery.py"),
             "--family",
-            "lead_lag",
+            "copy_vault",
             "--pool-size",
             "40",
             "--shortlist",
@@ -398,5 +437,5 @@ def test_semantic_cli_runs_from_clean_interpreter_without_touching_repo_runtime(
     payload = json.loads(output.read_text(encoding="utf-8"))
     accounting = json.loads(status.read_text(encoding="utf-8"))
     assert payload["certifying"] is False
-    family_status = accounting["families"]["lead_lag"]
+    family_status = accounting["families"]["copy_vault"]
     assert family_status["filtered_before_llm"] == family_status["generated"] - 5

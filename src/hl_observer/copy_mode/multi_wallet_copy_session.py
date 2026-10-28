@@ -6,7 +6,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from hl_observer.copy_mode.wallet_mirror_runtime import MirrorCandidate
-from hl_observer.paper_trading.mirror_paper_executor import MirrorPaperExecutionConfig, MirrorPaperExecutionResult, execute_mirror_candidate_paper
+from hl_observer.paper_trading.mirror_paper_executor import (
+    MirrorPaperExecutionConfig,
+    MirrorPaperExecutionResult,
+    execute_mirror_candidate_paper,
+)
 from hl_observer.paper_trading.paper_connector import PaperSimConnector
 from hl_observer.signals.copy_conflict_resolver import resolve_copy_conflicts
 
@@ -32,7 +36,7 @@ def run_multi_wallet_copy_session(
     *,
     equity_usdt: float,
     mids: dict[str, float],
-    books: dict[str, dict[str, tuple[tuple[float, float], ...]]] | None = None,
+    books: dict[str, dict[str, object]] | None = None,
     observed_at_ms: int,
     connector: PaperSimConnector | None = None,
     config: MultiWalletSessionConfig | None = None,
@@ -69,6 +73,7 @@ def run_multi_wallet_copy_session(
             top_depth_usdt=None,
             asks=tuple(book.get("asks", ())),
             bids=tuple(book.get("bids", ())),
+            book_exchange_ts_ms=book.get("exchange_ts_ms"),
             observed_at_ms=observed_at_ms,
             connector=paper_connector,
             config=cfg.execution,

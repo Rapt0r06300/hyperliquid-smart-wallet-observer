@@ -407,7 +407,7 @@ def test_ancienne_identite_de_checkpoint_est_reinitialisee_sans_rejouer_historiq
             "schema_version": "hypersmart.copy_vault_checkpoint_tail.v2",
             "protocol": (
                 "copy_vault_checkpoint_companion_v2_for_"
-                "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+                "copy_vault_executable_walk_forward_v8_explicit_l2_gap_identity"
             ),
             "paper_read_only": True,
             "real_execution": False,

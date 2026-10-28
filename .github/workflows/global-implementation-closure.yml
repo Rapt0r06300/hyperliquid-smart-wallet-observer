@@ -15,6 +15,9 @@ on:
       - "catalog/CAMPAIGN_WATCHDOG_RECEIPT.json"
       - "tools/build_global_implementation_closure.py"
       - "tools/build_analysis_frozen_coverage_receipt.py"
+      - "tools/phase_gate.py"
+      - "tools/verify_global_closure_phase.py"
+      - "tools/summarize_global_closure_run.py"
       - ".github/workflows/global-implementation-closure.yml"
   schedule:
     - cron: '47 */6 * * *'
@@ -66,14 +69,33 @@ jobs:
       - id: build_closure
         name: Build fail-closed global closure receipt
         if: steps.phase.outputs.phase == 'ANALYZE' && steps.phase.outputs.stage != 'DRAIN' && steps.phase.outputs.stage != 'QUALITY' && steps.phase.outputs.stage != 'REPLAY'
+        env:
+          ALINA_EXPECTED_PHASE: ${{ steps.phase.outputs.phase }}
+          ALINA_EXPECTED_STAGE: ${{ steps.phase.outputs.stage }}
+          ALINA_EXPECTED_EPOCH: ${{ steps.phase.outputs.epoch }}
+          ALINA_EXPECTED_SOURCE_COLLECTION_EPOCH: ${{ steps.phase.outputs.source_collection_epoch }}
+          ALINA_EXPECTED_CUTOFF: ${{ steps.phase.outputs.cutoff }}
         run: |
           set -euo pipefail
+          python tools/verify_global_closure_phase.py \
+            --state control/alina-phase.json \
+            --phase "$ALINA_EXPECTED_PHASE" \
+            --stage "$ALINA_EXPECTED_STAGE" \
+            --epoch "$ALINA_EXPECTED_EPOCH" \
+            --source-collection-epoch "$ALINA_EXPECTED_SOURCE_COLLECTION_EPOCH" \
+            --cutoff "$ALINA_EXPECTED_CUTOFF"
           python tools/build_analysis_frozen_coverage_receipt.py
           python tools/build_global_implementation_closure.py --alina-root .
 
       - id: publish_closure
         name: Publish closure receipt from latest canonical head
         if: steps.phase.outputs.phase == 'ANALYZE' && steps.phase.outputs.stage != 'DRAIN' && steps.phase.outputs.stage != 'QUALITY' && steps.phase.outputs.stage != 'REPLAY'
+        env:
+          ALINA_EXPECTED_PHASE: ${{ steps.phase.outputs.phase }}
+          ALINA_EXPECTED_STAGE: ${{ steps.phase.outputs.stage }}
+          ALINA_EXPECTED_EPOCH: ${{ steps.phase.outputs.epoch }}
+          ALINA_EXPECTED_SOURCE_COLLECTION_EPOCH: ${{ steps.phase.outputs.source_collection_epoch }}
+          ALINA_EXPECTED_CUTOFF: ${{ steps.phase.outputs.cutoff }}
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
@@ -81,12 +103,33 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --hard origin/main
+            python tools/verify_global_closure_phase.py \
+              --state control/alina-phase.json \
+              --phase "$ALINA_EXPECTED_PHASE" \
+              --stage "$ALINA_EXPECTED_STAGE" \
+              --epoch "$ALINA_EXPECTED_EPOCH" \
+              --source-collection-epoch "$ALINA_EXPECTED_SOURCE_COLLECTION_EPOCH" \
+              --cutoff "$ALINA_EXPECTED_CUTOFF"
             python tools/build_analysis_frozen_coverage_receipt.py
             python tools/build_global_implementation_closure.py --alina-root .
+            python tools/verify_global_closure_phase.py \
+              --state control/alina-phase.json \
+              --phase "$ALINA_EXPECTED_PHASE" \
+              --stage "$ALINA_EXPECTED_STAGE" \
+              --epoch "$ALINA_EXPECTED_EPOCH" \
+              --source-collection-epoch "$ALINA_EXPECTED_SOURCE_COLLECTION_EPOCH" \
+              --cutoff "$ALINA_EXPECTED_CUTOFF"
             git add catalog/ANALYSIS_FROZEN_COVERAGE_RECEIPT.json catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json
-            if git diff --cached --quiet; then exit 0; fi
+            if git diff --cached --quiet; then
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Closure receipts are already current; this run did not publish a new receipt."
+              exit 0
+            fi
             git commit -m "closure: publish single-repository implementation receipt"
-            if git push origin HEAD:main; then exit 0; fi
+            if git push origin HEAD:main; then
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             git reset --hard origin/main
             sleep "$((attempt * 2))"
           done
@@ -136,5 +179,6 @@ jobs:
           ALINA_JOB_OUTCOME: ${{ job.status }}
           ALINA_BUILD_OUTCOME: ${{ steps.build_closure.outcome }}
           ALINA_PUBLISH_OUTCOME: ${{ steps.publish_closure.outcome }}
+          ALINA_PUBLISH_CHANGED: ${{ steps.publish_closure.outputs.published }}
           ALINA_DISPATCH_OUTCOME: ${{ steps.dispatch_analysis.outcome }}
         run: python tools/summarize_global_closure_run.py

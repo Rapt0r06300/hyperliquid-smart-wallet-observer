@@ -140,7 +140,7 @@ def _entry(event_id: str, ts_ms: int, *, vault="0xA", coin="BTC", direction=1, a
 
 
 def _book(ts_ms: int, *, bid: float, ask: float, capacity=500.0, causal=True, line=1):
-    return {
+    row = {
         "coin": "BTC",
         "ts_ms": ts_ms,
         "bid": bid,
@@ -149,6 +149,9 @@ def _book(ts_ms: int, *, bid: float, ask: float, capacity=500.0, causal=True, li
         "source_line": line,
         "causal_observation": causal,
     }
+    if causal:
+        row.update({"connection_id": "pre-run-copy-fixture", "l2_gap_epoch": 0})
+    return row
 
 
 def _strict_trade(
@@ -210,13 +213,15 @@ def _execution_fixture(*, capacity=500.0, causal=True):
 
 def _scenario_userfills_pagination():
     first = plan_de_requetes(0, 25, fenetre_ms=10)
+    covered = [timestamp for start, end in first for timestamp in range(start, end + 1)]
+    positive = first == [(0, 10), (11, 21), (22, 25)] and covered == list(range(26))
     negative = False
     try:
         plan_de_requetes(0, 25, fenetre_ms=0)
     except ValueError:
         negative = True
     return Scenario(
-        first == [(0, 10), (10, 20), (20, 25)],
+        positive,
         negative,
         first == plan_de_requetes(0, 25, fenetre_ms=10),
         {"windows": first},

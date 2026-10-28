@@ -135,7 +135,9 @@ Interdit notamment :
 - compenser l'échec d'une famille par le profit d'une autre ;
 - transformer `MORE_DATA` ou `UNMEASURABLE` en `PROVEN` sans preuve.
 
-La cible de recherche **>= +5 USD NET/jour** par famille, sur 200 USD paper, n'a jamais priorité sur l'intégrité de la preuve.
+La cible terminale de recherche est **>= +5 USD NET/jour pour Copy-Vault** sur
+200 USD paper, après les réparations techniques et la preuve OOS/forward
+requise. Elle n'a jamais priorité sur l'intégrité de la preuve.
 
 ## 8. Scope économique effectif
 

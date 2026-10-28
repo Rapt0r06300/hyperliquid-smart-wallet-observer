@@ -11,11 +11,17 @@ import json
 import math
 import os
 import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
-from hl_observer.paper_trading.execution_truth import ExecutionTruth, Levels
+from hl_observer.paper_trading.execution_truth import (
+    MAX_SUPPORTED_EPOCH_MS,
+    ExecutionTruth,
+    Levels,
+)
 
 DYNAMIC_L2_RELPATH = Path("runtime") / "data" / "raw_l2_live.json"
 BBO_RELPATH = Path("runtime") / "data" / "bbo_synchro.jsonl"
@@ -40,9 +46,26 @@ class LiveL2Snapshot:
     bids: Levels = ()
     asks: Levels = ()
     data_origin: str = "REAL"
+    exchange_ts_raw: object = None
+    exchange_ts_status: str = "MISSING"
+    received_ts_raw: object = None
+    received_ts_unit: str = "ms_since_unix_epoch"
+
+    def __post_init__(self) -> None:
+        if self.exchange_ts_status == "MISSING" and self.exchange_ts_ms is not None:
+            raw = self.exchange_ts_ms if self.exchange_ts_raw is None else self.exchange_ts_raw
+            parsed, status = _parse_exchange_ts_ms(raw)
+            object.__setattr__(self, "exchange_ts_raw", raw)
+            object.__setattr__(self, "exchange_ts_ms", parsed)
+            object.__setattr__(self, "exchange_ts_status", status)
 
     def age_ms(self, now_ms: int) -> int:
-        return max(0, int(now_ms) - self.received_ts_ms)
+        if type(now_ms) is not int or not 0 < now_ms <= MAX_SUPPORTED_EPOCH_MS:
+            raise ValueError("L2 age reference must be a supported epoch millisecond")
+        age = now_ms - self.received_ts_ms
+        if age < 0:
+            raise ValueError("L2 observation received after reference time")
+        return age
 
     @property
     def has_full_book(self) -> bool:
@@ -58,6 +81,16 @@ class LiveL2Snapshot:
             "age_ms": self.age_ms(now_ms),
             "received_ts_ms": self.received_ts_ms,
             "exchange_ts_ms": self.exchange_ts_ms,
+            "exchange_ts_raw": self.exchange_ts_raw,
+            "exchange_ts_status": self.exchange_ts_status,
+            "received_ts_raw": (
+                str(self.received_ts_raw)
+                if isinstance(self.received_ts_raw, Decimal)
+                else self.received_ts_ms
+                if self.received_ts_raw is None
+                else self.received_ts_raw
+            ),
+            "received_ts_unit": self.received_ts_unit,
             "data_origin": self.data_origin,
         }
         if self.has_full_book:
@@ -75,9 +108,15 @@ class LiveL2Snapshot:
             bids=self.bids,
             asks=self.asks,
             received_ts_ms=self.received_ts_ms,
-            exchange_ts_ms=self.exchange_ts_ms,
+            exchange_ts_ms=self.exchange_ts_raw,
             source=self.source,
             data_origin=self.data_origin,
+            received_ts_raw=(
+                self.received_ts_ms
+                if self.received_ts_raw is None
+                else self.received_ts_raw
+            ),
+            received_ts_unit=self.received_ts_unit,
         )
 
 
@@ -95,6 +134,8 @@ class LiveL2Service:
         self.root = Path(root)
         self.on_demand_reader = on_demand_reader
         self.max_age_ms = max(0, int(max_age_ms))
+        # Kept for call-site compatibility. Local receipt clocks are now
+        # strictly causal, so this setting cannot admit future observations.
         self.future_skew_ms = max(0, int(future_skew_ms))
 
     def resolve(
@@ -108,7 +149,12 @@ class LiveL2Service:
         normalized = str(coin or "").strip().upper()
         if not normalized:
             return None
-        now = int(now_ms if now_ms is not None else time.time() * 1_000)
+        if now_ms is None:
+            now = time.time_ns() // 1_000_000
+        elif type(now_ms) is int and 0 < now_ms <= MAX_SUPPORTED_EPOCH_MS:
+            now = now_ms
+        else:
+            return None
         candidates: list[tuple[int, int, LiveL2Snapshot]] = []
 
         if self.on_demand_reader is not None:
@@ -157,7 +203,7 @@ class LiveL2Service:
 
     def as_legacy_reader(self) -> Callable[[str], dict[str, Any] | None]:
         def read(coin: str) -> dict[str, Any] | None:
-            now = int(time.time() * 1_000)
+            now = time.time_ns() // 1_000_000
             snapshot = self.resolve(coin, now_ms=now)
             return None if snapshot is None else snapshot.as_legacy_payload(now_ms=now)
 
@@ -174,7 +220,10 @@ class LiveL2Service:
         if snapshot is None:
             return
         age = now_ms - snapshot.received_ts_ms
-        if age < -self.future_skew_ms or age > self.max_age_ms:
+        # A local receipt timestamp is produced by this machine's wall clock;
+        # tolerating a future value here would make age_ms clamp it to zero and
+        # could leak a future book through the legacy adapter.
+        if age < 0 or age > self.max_age_ms:
             return
         candidates.append((snapshot.received_ts_ms, priority, snapshot))
 
@@ -198,23 +247,39 @@ def snapshot_from_mapping(
             ask = asks[0][0]
         if bid is None or ask is None or ask < bid:
             return None
-        received_ts_ms = _received_ts_ms(payload, now_ms=now_ms)
-        exchange_ts_ms = _optional_ts_ms(
-            payload.get("exchange_ts_ms")
-            or payload.get("exchange_ts_hl_ms")
-            or payload.get("ts_ex_hl")
-            or payload.get("time")
+        received_ts_ms, parsed_received_raw, parsed_received_unit = _received_timestamp(payload)
+        if received_ts_ms is None:
+            return None
+        received_ts_raw = payload.get("received_ts_raw", parsed_received_raw)
+        received_ts_unit = payload.get("received_ts_unit", parsed_received_unit)
+        if received_ts_unit not in {
+            "ms_since_unix_epoch",
+            "s_since_unix_epoch_utc",
+        }:
+            return None
+        raw_exchange_ts = _first_present(
+            payload,
+            (
+                "exchange_ts_raw",
+                "exchange_ts_ms",
+                "exchange_ts_hl_ms",
+                "ts_ex_hl",
+                "time",
+            ),
         )
+        exchange_ts_ms, exchange_ts_status = _parse_exchange_ts_ms(raw_exchange_ts)
         depth = _positive(
             payload.get("depth_usd")
             or payload.get("taille_top_usd")
             or payload.get("taille_min_usd")
         )
-        if depth is None and bids and asks:
-            depth = min(
-                sum(price * size for price, size in bids),
-                sum(price * size for price, size in asks),
-            )
+        if bids and asks:
+            bid_depth = _visible_notional_usd(bids)
+            ask_depth = _visible_notional_usd(asks)
+            if bid_depth is None or ask_depth is None:
+                return None
+            if depth is None:
+                depth = min(bid_depth, ask_depth)
         actual_source = str(payload.get("source") or payload.get("src") or source).strip() or source
         origin = str(payload.get("data_origin") or "REAL").strip().upper()
         if origin not in {"REAL", "RECORDED_REAL"}:
@@ -230,6 +295,10 @@ def snapshot_from_mapping(
             bids=bids,
             asks=asks,
             data_origin=origin,
+            exchange_ts_raw=raw_exchange_ts,
+            exchange_ts_status=exchange_ts_status,
+            received_ts_raw=received_ts_raw,
+            received_ts_unit=received_ts_unit,
         )
     except (TypeError, ValueError, OverflowError):
         return None
@@ -252,7 +321,17 @@ def write_dynamic_snapshot(
         "depth_usd": snapshot.depth_usd,
         "source": snapshot.source,
         "received_ts_ms": snapshot.received_ts_ms,
+        "received_ts_raw": (
+            str(snapshot.received_ts_raw)
+            if isinstance(snapshot.received_ts_raw, Decimal)
+            else snapshot.received_ts_ms
+            if snapshot.received_ts_raw is None
+            else snapshot.received_ts_raw
+        ),
+        "received_ts_unit": snapshot.received_ts_unit,
         "exchange_ts_ms": snapshot.exchange_ts_ms,
+        "exchange_ts_raw": snapshot.exchange_ts_raw,
+        "exchange_ts_status": snapshot.exchange_ts_status,
         "collecte_ts": snapshot.received_ts_ms / 1_000.0,
         "data_origin": snapshot.data_origin,
         "bids": [list(level) for level in snapshot.bids],
@@ -304,7 +383,25 @@ def _positive(value: Any) -> float | None:
     return parsed if math.isfinite(parsed) and parsed > 0 else None
 
 
-def _received_ts_ms(payload: Mapping[str, Any], *, now_ms: int) -> int:
+def _visible_notional_usd(levels: Levels) -> float | None:
+    total = 0.0
+    for price, size in levels:
+        notional = price * size
+        if not math.isfinite(notional) or notional <= 0.0:
+            return None
+        total += notional
+        if not math.isfinite(total):
+            return None
+    return total if total > 0.0 else None
+
+
+def _received_ts_ms(payload: Mapping[str, Any]) -> int | None:
+    return _received_timestamp(payload)[0]
+
+
+def _received_timestamp(
+    payload: Mapping[str, Any],
+) -> tuple[int | None, object, str]:
     for key in (
         "received_ts_ms",
         "recv_wall_ts_ms",
@@ -313,29 +410,61 @@ def _received_ts_ms(payload: Mapping[str, Any], *, now_ms: int) -> int:
         "write_wall_ts_ms",
         "ts_ms",
     ):
-        parsed = _optional_ts_ms(payload.get(key))
-        if parsed is not None:
-            return parsed
-    collecte = _positive(payload.get("collecte_ts"))
-    if collecte is not None:
-        return int(collecte * 1_000)
-    age = payload.get("age_ms")
-    if age is not None:
-        parsed_age = max(0, int(float(age)))
-        return max(1, now_ms - parsed_age)
-    return max(1, now_ms)
+        if key in payload:
+            value = payload.get(key)
+            parsed = (
+                value
+                if type(value) is int and 0 < value <= MAX_SUPPORTED_EPOCH_MS
+                else None
+            )
+            return parsed, value, "ms_since_unix_epoch"
+    if "collecte_ts" in payload:
+        value = payload.get("collecte_ts")
+        if type(value) is int:
+            seconds = Decimal(value)
+        elif isinstance(value, (float, Decimal)) and not isinstance(value, bool):
+            seconds = Decimal(str(value))
+        else:
+            return None, value, "s_since_unix_epoch_utc"
+        try:
+            milliseconds = seconds * 1_000
+        except (InvalidOperation, ValueError, TypeError):
+            return None, value, "s_since_unix_epoch_utc"
+        if (
+            not milliseconds.is_finite()
+            or milliseconds <= 0
+            or milliseconds > MAX_SUPPORTED_EPOCH_MS
+        ):
+            return None, value, "s_since_unix_epoch_utc"
+        # The legacy source is a wall-clock float in seconds and commonly has
+        # sub-millisecond precision. Floor to the stored millisecond boundary;
+        # this is conservative for freshness and never rounds the observation
+        # forward into the future.
+        return (
+            int(milliseconds.to_integral_value(rounding=ROUND_FLOOR)),
+            value,
+            "s_since_unix_epoch_utc",
+        )
+    return None, None, "ms_since_unix_epoch"
 
 
-def _optional_ts_ms(value: Any) -> int | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(parsed) or parsed <= 0:
-        return None
-    if parsed < 100_000_000_000:
-        parsed *= 1_000
-    return int(parsed)
+def _first_present(payload: Mapping[str, Any], keys: Sequence[str]) -> Any:
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            return payload[key]
+    return None
+
+
+def _parse_exchange_ts_ms(value: object) -> tuple[int | None, str]:
+    if value is None:
+        return None, "MISSING"
+    if (
+        type(value) is not int
+        or value < 100_000_000_000
+        or value > MAX_SUPPORTED_EPOCH_MS
+    ):
+        return None, "INVALID"
+    return value, "VALID"
 
 
 def _read_dynamic_mapping(root: Path) -> dict[str, Mapping[str, Any]]:
@@ -363,7 +492,7 @@ def _latest_jsonl_by_coin(path: Path) -> dict[str, Mapping[str, Any]]:
         raw = raw.split(b"\n", 1)[-1]
     for line in raw.decode("utf-8", errors="ignore").splitlines():
         try:
-            row = json.loads(line)
+            row = json.loads(line, parse_float=Decimal)
         except (TypeError, ValueError):
             continue
         if not isinstance(row, Mapping):
@@ -376,7 +505,7 @@ def _latest_jsonl_by_coin(path: Path) -> dict[str, Mapping[str, Any]]:
 
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"), parse_float=Decimal)
     except (OSError, ValueError):
         return {}
     return dict(value) if isinstance(value, Mapping) else {}

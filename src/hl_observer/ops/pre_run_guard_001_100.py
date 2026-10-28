@@ -13,8 +13,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from hl_observer.audit.pre_run_001_100 import inspect_coverage
 from hl_observer.runtime.protections import JournalIncidents, manifeste_execution
@@ -117,6 +118,9 @@ def build_report(
         blockers.append("GIT_HEAD_UNKNOWN")
     if require_clean_git and provenance["git_dirty"] is not False:
         blockers.append("GIT_TREE_NOT_PROVEN_CLEAN")
+        diagnostic = provenance.get("git_status_diagnostic") or {}
+        if diagnostic.get("error_code"):
+            blockers.append("GIT_STATUS_UNAVAILABLE")
     elif provenance["git_dirty"] is True:
         warnings.append("GIT_TREE_DIRTY")
     elif provenance["git_dirty"] is None:

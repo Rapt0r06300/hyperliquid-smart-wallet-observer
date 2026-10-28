@@ -30,7 +30,15 @@ from hl_observer.backtesting.copy_vault_protocol import (
     MAX_TARGET_LAG_MS,
     NOTIONAL_USD,
 )
-from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
+from hl_observer.backtesting.train_statistics import (
+    exact_net_rank_value,
+    profit_factor_above_one,
+    select_unambiguous_lcb_candidate,
+    stable_hash,
+    summarize_train_rows,
+    top_positive_share_within_limit,
+)
+from hl_observer.economics.numeric import decimal_value
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v4_train.v1"
 MECHANISM = "copy_vault_v4_causal_observed_fill_continuation"
@@ -43,9 +51,15 @@ MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
 
 
-def _concentration(rows: Sequence[Mapping[str, Any]], field: str) -> float:
-    counts = Counter(str(row.get(field) or "UNKNOWN") for row in rows)
-    return max(counts.values(), default=0) / max(1, len(rows))
+def _share_exceeds(count: int, total: int, threshold: object) -> bool:
+    """Compare a count ratio to the decimal policy limit without float rounding."""
+    if type(count) is not int or type(total) is not int or count < 0 or total <= 0:
+        return True
+    exact_threshold = decimal_value(threshold)
+    if exact_threshold is None or exact_threshold < 0:
+        return True
+    numerator, denominator = exact_threshold.as_integer_ratio()
+    return count * denominator > total * numerator
 
 
 def replay_continuation_train(
@@ -130,30 +144,42 @@ def assess_train_variant(
         trial_count=int(trial_count),
         family_alpha=FAMILY_ALPHA,
     )
-    coin_share = _concentration(rows, "coin")
-    vault_share = _concentration(rows, "vault")
-    net = float(statistics.get("net_pnl_usd") or 0.0)
-    placebo_net = float(placebo.get("net_pnl_usd") or 0.0)
-    profit_factor = statistics.get("profit_factor")
-    total_lcb = statistics.get("total_lcb_usd")
+    coin_count = max(
+        Counter(str(row.get("coin") or "UNKNOWN") for row in rows).values(),
+        default=0,
+    )
+    vault_count = max(
+        Counter(str(row.get("vault") or "UNKNOWN") for row in rows).values(),
+        default=0,
+    )
+    denominator = max(1, len(rows))
+    coin_share = coin_count / denominator
+    vault_share = vault_count / denominator
+    net = decimal_value(statistics.get("net_pnl_usd_exact_decimal"))
+    placebo_net = decimal_value(placebo.get("net_pnl_usd_exact_decimal"))
+    total_lcb = decimal_value(statistics.get("total_lcb_usd_exact_decimal"))
     reasons: list[str] = []
     if len(rows) < MIN_TRAIN_TRADES:
         reasons.append("INSUFFICIENT_TRAIN_TRADES")
     if int(statistics.get("distinct_days") or 0) < MIN_DISTINCT_DAYS:
         reasons.append("INSUFFICIENT_DISTINCT_DAYS")
-    if net <= 0.0:
+    if net is None or net <= 0:
         reasons.append("TRAIN_NET_NOT_POSITIVE")
-    if profit_factor is None or float(profit_factor) <= 1.0:
+    if not profit_factor_above_one(statistics):
         reasons.append("TRAIN_PROFIT_FACTOR_NOT_ABOVE_ONE")
-    if total_lcb is None or float(total_lcb) <= 0.0:
+    if (
+        statistics.get("lcb_status") != "MEASURED"
+        or total_lcb is None
+        or total_lcb <= 0
+    ):
         reasons.append("MULTIPLICITY_ADJUSTED_LCB_NOT_POSITIVE")
-    if float(statistics.get("top_positive_trade_share") or 1.0) > MAX_TOP_POSITIVE_SHARE:
+    if not top_positive_share_within_limit(statistics, MAX_TOP_POSITIVE_SHARE):
         reasons.append("TOP_POSITIVE_TRADE_CONCENTRATION_TOO_HIGH")
-    if coin_share > MAX_COIN_TRADE_SHARE:
+    if _share_exceeds(coin_count, len(rows), MAX_COIN_TRADE_SHARE):
         reasons.append("COIN_TRADE_CONCENTRATION_TOO_HIGH")
-    if vault_share > MAX_VAULT_TRADE_SHARE:
+    if _share_exceeds(vault_count, len(rows), MAX_VAULT_TRADE_SHARE):
         reasons.append("VAULT_TRADE_CONCENTRATION_TOO_HIGH")
-    if net <= placebo_net + 1e-12:
+    if placebo_net is None or net is None or net <= placebo_net:
         reasons.append("PLACEBO_NOT_BEATEN")
     if economic.get("LIQUIDATABLE_NET") is not True:
         reasons.append("LIQUIDATABLE_NET_NOT_PROVEN")
@@ -262,17 +288,10 @@ def explore_copy_vault_v4_train(
         )
 
     eligible_rows = [row for row in variants if row["eligible"]]
-    selected = max(
-        eligible_rows,
-        key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
-        ),
-        default=None,
-    )
+    selected, selection_resolution = select_unambiguous_lcb_candidate(eligible_rows)
     diagnostic_best = max(
         variants,
-        key=lambda row: float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+        key=lambda row: exact_net_rank_value(row["statistics"] or {}),
         default=None,
     )
     freeze_candidate = (
@@ -314,6 +333,7 @@ def explore_copy_vault_v4_train(
             "liquidatable_net_required": True,
         },
         "selected": selected,
+        "selection_numeric_resolution": selection_resolution,
         "diagnostic_best_train_variant": diagnostic_best,
         "freeze_candidate": freeze_candidate,
         "freeze_candidate_sha256": stable_hash(freeze_candidate) if freeze_candidate else None,

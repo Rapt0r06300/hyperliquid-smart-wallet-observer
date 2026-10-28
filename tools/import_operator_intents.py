@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -151,6 +152,15 @@ def main():
         expected_phase = "COLLECT" if intent in COLLECT else "ANALYZE"
         if args.phase != expected_phase:
             continue
+        schema_version = row.get("schema_version")
+        if schema_version == "alina.operator_intent.v1":
+            print(
+                f"OPERATOR_INTENT_SCHEMA_NOT_EXECUTABLE: historical intent skipped: {path}",
+                file=sys.stderr,
+            )
+            continue
+        if schema_version != "alina.operator_intent.v2":
+            raise SystemExit(f"unsupported operator intent schema: {path}")
         if (
             expected_phase == "ANALYZE"
             and row.get("analysis_stage") not in (None, "DRAIN", args.analysis_stage)

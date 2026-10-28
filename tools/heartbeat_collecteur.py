@@ -125,6 +125,13 @@ CLES_METRIQUES = (
     "source_queue_drops",   # userFills perdus avant persistence/reconciliation
     "l2_tape_queue_drops",  # fills persistés mais non remis à la tape L2 dérivée
     "l2_validation_rejections",  # snapshots L2 rejetés fail-closed avant admission au tape Copy-Vault
+    "subscription_ack_count",   # abonnements userFills reconnus sur la rotation courante
+    "subscription_required_count",  # abonnements attendus sur la rotation courante
+    "invalid_subscription_acks",  # réponses serveur non corrélées à une souscription demandée
+    "pre_ack_userfills_frames",  # données reçues avant l'ACK explicite de leur souscription
+    "invalid_json_frames",  # trames WS non JSON observées dans les flux userFills/L2
+    "unexpected_userfills_channels",  # notifications du mauvais canal ou d'un vault non abonné
+    "receive_clock_rejections",  # fills mis en quarantaine pour horloge de réception invalide
     "checkpoint_expirations",
     "checkpoint_queue_rejections",
     "input_rotations",
@@ -134,6 +141,10 @@ _CLES_METRIQUES_ENTIERES = frozenset({
     "gaps_critiques", "reconnects", "hors_ordre",
     "source_queue_drops", "l2_tape_queue_drops",
     "l2_validation_rejections",
+    "subscription_ack_count", "subscription_required_count",
+    "invalid_subscription_acks", "pre_ack_userfills_frames",
+    "invalid_json_frames", "unexpected_userfills_channels",
+    "receive_clock_rejections",
     "checkpoint_expirations", "checkpoint_queue_rejections",
     "input_rotations",
 })

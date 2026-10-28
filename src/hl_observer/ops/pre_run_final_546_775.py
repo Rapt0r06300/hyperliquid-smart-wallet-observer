@@ -312,7 +312,7 @@ def _anti_probes(root: Path) -> dict[str, Probe]:
 def _maxdata_probes(root: Path) -> dict[str, Probe]:
     from hl_observer.datasets.economic_memory import EconomicMemoryError, load_exact_proof, record_certified_proof
     from hl_observer.datasets.max_data_policy import (
-        TARGET_NET_USD_PER_FAMILY,
+        TARGET_NET_USD_PER_DAY,
         choose_max_data_job,
         completed_suites_from_registry,
         record_completed_suite_from_result,
@@ -361,9 +361,19 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
         with tempfile.TemporaryDirectory() as tmp:
             common = dict(project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64, net_pnl_usd=5.2, analysis_complete=True, certified=True)
             a = record_certified_proof(tmp, family="copy_vault", **common)
-            b = record_certified_proof(tmp, family="lead_lag", **common)
+            b = record_certified_proof(
+                tmp,
+                family="copy_vault",
+                **{**common, "config_sha256": "f" * 64, "runtime_proof_sha256": "e" * 64},
+            )
             exact = load_exact_proof(tmp, family="copy_vault", project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64)
-            return a["key"] != b["key"] and exact["family"] == "copy_vault"
+            try:
+                record_certified_proof(tmp, family="lead_lag", **common)
+            except EconomicMemoryError:
+                disabled_family_rejected = True
+            else:
+                disabled_family_rejected = False
+            return a["key"] != b["key"] and exact["family"] == "copy_vault" and disabled_family_rejected
 
     def memory_negative() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
@@ -396,7 +406,7 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
     common_mem = (memory_path,)
     return {
-        "target_5usd": Probe(TARGET_NET_USD_PER_FAMILY == 5.0 and TARGET_NET_USD == 5.0, _safe(select_ready), _safe(lambda: not targets_reached_from_brain(decisions)), _safe(lambda: TARGET_NET_USD_PER_FAMILY == TARGET_NET_USD == 5.0), (policy_path, "src/hl_observer/simulation/economic_objective.py")),
+        "target_5usd": Probe(TARGET_NET_USD_PER_DAY == 5.0 and TARGET_NET_USD == 5.0, _safe(select_ready), _safe(lambda: not targets_reached_from_brain(decisions)), _safe(lambda: TARGET_NET_USD_PER_DAY == TARGET_NET_USD == 5.0), (policy_path, "src/hl_observer/simulation/economic_objective.py")),
         "completed_suites_truth": Probe(_contains(root, policy_path, "_explicit_zero", "analysis_complete", "completion_recorded"), _safe(completed_registry_probe), _safe(completed_registry_negative), _safe(completed_registry_probe), (policy_path, completion_path)),
         "state_sha": Probe(_contains(root, policy_path, "project_sha"), _safe(completed_registry_probe), _safe(lambda: completed_suites_from_registry(tempfile.mkdtemp(), project_sha="a" * 40) == ()), _safe(completed_registry_probe), (policy_path,)),
         "state_dataset": Probe(_contains(root, memory_path, "dataset_snapshot_sha256"), _safe(memory_probe), _safe(memory_negative), _safe(memory_probe), common_mem),

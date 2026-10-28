@@ -15,6 +15,8 @@ def test_check_annonce_le_plan_de_controle_self_hosted(capsys) -> None:
     assert payload["self_hosted_ready_in_code"] is True
     assert payload["compact_return_ready_in_code"] is True
     assert payload["max_data_route"] == "src/hl_observer/datasets/max_data_router.py"
+    assert payload["target_net_usd_per_day"] == 5.0
+    assert "target_net_usd_per_family" not in payload
     assert payload["paper_only"] is True
     assert payload["real_execution"] is False
 

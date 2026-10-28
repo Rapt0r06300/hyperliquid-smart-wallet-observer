@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 from collections import deque
@@ -12,8 +13,13 @@ import httpx
 if TYPE_CHECKING:
     from hl_observer.sources.collection_recorder import CollectionRecorder
 
+from hl_observer.collection.vault_fills_backfill import (
+    plan_de_requetes,
+    split_inclusive_window,
+)
 from hl_observer.hyperliquid.rate_limits import AsyncRateLimiter
 from hl_observer.hyperliquid.rate_weights import (
+    HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT,
     HYPERSMART_USER_FILLS_RECENT_LIMIT,
     HYPERSMART_USER_TWAP_SLICE_FILLS_RECENT_LIMIT,
 )
@@ -84,6 +90,15 @@ READ_ONLY_INFO_TYPES = {
 
 class HyperliquidInfoError(RuntimeError):
     """Raised when a read-only Hyperliquid info call fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        coverage_receipt: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.coverage_receipt = copy.deepcopy(coverage_receipt)
 
 
 def _ensure_read_only_payload(payload: dict[str, Any]) -> None:
@@ -433,6 +448,9 @@ class HyperliquidInfoClient:
         page_window_ms: int | None = None,
         max_pages: int | None = None,
         aggregate_by_time: bool = False,
+        min_window_ms: int = 0,
+        response_cap: int = MAX_USER_FILLS_PAGE_SIZE,
+        audit: dict[str, Any] | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page, _, _ in self._iter_user_fills_by_time_windows(
             user,
@@ -441,6 +459,9 @@ class HyperliquidInfoClient:
             page_window_ms=page_window_ms,
             max_pages=max_pages,
             aggregate_by_time=aggregate_by_time,
+            min_window_ms=min_window_ms,
+            response_cap=response_cap,
+            audit=audit,
         ):
             yield page
 
@@ -452,32 +473,79 @@ class HyperliquidInfoClient:
         page_window_ms: int | None = None,
         max_pages: int | None = None,
         aggregate_by_time: bool = False,
+        min_window_ms: int = 0,
+        response_cap: int = MAX_USER_FILLS_PAGE_SIZE,
+        audit: dict[str, Any] | None = None,
     ) -> AsyncIterator[tuple[list[dict[str, Any]], int, int]]:
         if end_time < start_time:
             raise HyperliquidInfoError("userFillsByTime end_time precedes start_time")
         if page_window_ms is not None and page_window_ms < 0:
             raise HyperliquidInfoError("userFillsByTime pagination window did not advance")
+        if min_window_ms < 0:
+            raise HyperliquidInfoError("userFillsByTime minimum window cannot be negative")
+        if not 0 < int(response_cap) <= MAX_USER_FILLS_PAGE_SIZE:
+            raise HyperliquidInfoError("userFillsByTime response cap exceeds the official API limit")
 
-        pending: deque[tuple[int, int]] = deque()
-        cursor = start_time
-        while cursor <= end_time:
-            request_end = min(end_time, cursor + page_window_ms) if page_window_ms else end_time
-            if request_end < cursor:
-                raise HyperliquidInfoError("userFillsByTime pagination window did not advance")
-            pending.append((cursor, request_end))
-            cursor = request_end + 1
+        window_ms = (
+            int(page_window_ms)
+            if page_window_ms
+            else max(1, int(end_time) - int(start_time))
+        )
+        pending: deque[tuple[int, int]] = deque(
+            plan_de_requetes(start_time, end_time, fenetre_ms=window_ms)
+        )
+        receipt = audit if audit is not None else {}
+        receipt.clear()
+        receipt.update(
+            {
+                "status": "IN_PROGRESS",
+                "requested_start_ms": int(start_time),
+                "requested_end_ms": int(end_time),
+                "minimum_window_ms": int(min_window_ms),
+                "api_response_cap": int(response_cap),
+                "api_history_limit": HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT,
+                "request_count": 0,
+                "received_count": 0,
+                "accepted_count": 0,
+                "subrequests": [],
+                "next_windows": [],
+                "last_observed_boundary_ms": None,
+                "usable_horizon_start_ms": None,
+                "usable_horizon_end_ms": None,
+                "historical_capture": "REST_BOUNDED",
+                "prospective_capture_separate": True,
+                "historical_censored": False,
+            }
+        )
 
         pages_seen = 0
         seen_page_hashes: set[str] = set()
         while pending:
             if max_pages is not None and pages_seen >= max_pages:
-                next_start, next_end = pending[0]
+                receipt["status"] = "PARTIAL"
+                receipt["reason"] = "MAX_PAGES_REACHED"
+                receipt["next_windows"] = [
+                    {"start_ms": left, "end_ms": right}
+                    for left, right in pending
+                ]
                 raise HyperliquidInfoError(
                     "userFillsByTime max_pages exhausted before the requested range; "
-                    f"{len(pending)} window(s) remain, starting at [{next_start}, {next_end}]; "
-                    "coverage is incomplete"
+                    f"{len(pending)} window(s) remain, starting at "
+                    f"[{pending[0][0]}, {pending[0][1]}]; coverage is incomplete",
+                    coverage_receipt=receipt,
                 )
             window_start, window_end = pending.popleft()
+            attempt: dict[str, Any] = {
+                "start_ms": window_start,
+                "end_ms": window_end,
+                "cursor_ms": window_start,
+                "api_response_cap": int(response_cap),
+                "response_rows": None,
+                "last_observed_boundary_ms": None,
+                "outcome": "REQUESTED",
+            }
+            receipt["subrequests"].append(attempt)
+            receipt["request_count"] += 1
             try:
                 page = await self.user_fills_by_time(
                     user,
@@ -486,43 +554,147 @@ class HyperliquidInfoClient:
                     aggregate_by_time=aggregate_by_time,
                 )
             except Exception as exc:
+                attempt["outcome"] = "FAILED"
+                attempt["error_type"] = type(exc).__name__
+                attempt["error"] = str(exc)[:300]
+                receipt["status"] = "PARTIAL"
+                receipt["reason"] = "REQUEST_FAILED"
+                receipt["next_windows"] = [
+                    {"start_ms": window_start, "end_ms": window_end},
+                    *(
+                        {"start_ms": left, "end_ms": right}
+                        for left, right in pending
+                    ),
+                ]
                 raise HyperliquidInfoError(
                     "userFillsByTime request failed for inclusive window "
-                    f"[{window_start}, {window_end}]: {exc}"
+                    f"[{window_start}, {window_end}]: {exc}",
+                    coverage_receipt=receipt,
                 ) from exc
             pages_seen += 1
+            attempt["response_rows"] = len(page)
+            receipt["received_count"] += len(page)
             if not page:
+                attempt["outcome"] = "EMPTY"
                 continue
 
             try:
                 page_times = [int(fill["time"]) for fill in page]
             except (KeyError, TypeError, ValueError) as exc:
+                attempt["outcome"] = "INVALID_TIMESTAMP"
+                receipt["status"] = "PARTIAL"
+                receipt["reason"] = "INVALID_TIMESTAMP"
+                receipt["next_windows"] = [
+                    {"start_ms": window_start, "end_ms": window_end},
+                    *(
+                        {"start_ms": left, "end_ms": right}
+                        for left, right in pending
+                    ),
+                ]
                 raise HyperliquidInfoError(
-                    "userFillsByTime returned a fill without a valid timestamp"
+                    "userFillsByTime returned a fill without a valid timestamp",
+                    coverage_receipt=receipt,
                 ) from exc
+            attempt["last_observed_boundary_ms"] = max(page_times)
+            last_boundary = receipt.get("last_observed_boundary_ms")
+            receipt["last_observed_boundary_ms"] = (
+                max(int(last_boundary), max(page_times))
+                if last_boundary is not None
+                else max(page_times)
+            )
             if any(not window_start <= timestamp <= window_end for timestamp in page_times):
+                attempt["outcome"] = "OUT_OF_RANGE"
+                receipt["status"] = "PARTIAL"
+                receipt["reason"] = "OUT_OF_RANGE_FILL"
+                receipt["next_windows"] = [
+                    {"start_ms": window_start, "end_ms": window_end},
+                    *(
+                        {"start_ms": left, "end_ms": right}
+                        for left, right in pending
+                    ),
+                ]
                 raise HyperliquidInfoError(
-                    "userFillsByTime returned a fill outside the requested inclusive window"
+                    "userFillsByTime returned a fill outside the requested inclusive window",
+                    coverage_receipt=receipt,
                 )
 
-            if len(page) == MAX_USER_FILLS_PAGE_SIZE:
-                if window_start == window_end:
-                    raise HyperliquidInfoError(
-                        "userFillsByTime reached the documented cap at the minimum 1 ms "
-                        f"window [{window_start}, {window_end}]; coverage is incomplete"
+            if len(page) >= int(response_cap):
+                split = split_inclusive_window(window_start, window_end)
+                if split is None or window_end - window_start <= int(min_window_ms):
+                    attempt["outcome"] = "CAP_BLOCKED"
+                    receipt["status"] = "PARTIAL"
+                    receipt["reason"] = (
+                        "CAP_AT_MINIMUM_WINDOW"
+                        if int(min_window_ms)
+                        else "CAP_AT_MINIMUM_MILLISECOND"
                     )
-                midpoint = window_start + (window_end - window_start) // 2
-                # API bounds are inclusive. Split on adjacent integer milliseconds
-                # so the two child windows cover the parent without overlap.
-                pending.appendleft((midpoint + 1, window_end))
-                pending.appendleft((window_start, midpoint))
+                    receipt["next_windows"] = [
+                        {"start_ms": window_start, "end_ms": window_end},
+                        *(
+                            {"start_ms": left, "end_ms": right}
+                            for left, right in pending
+                        ),
+                    ]
+                    minimum_label = (
+                        f"configured minimum {int(min_window_ms)} ms window"
+                        if int(min_window_ms)
+                        else "minimum 1 ms window"
+                    )
+                    raise HyperliquidInfoError(
+                        f"userFillsByTime reached the documented cap at the {minimum_label} "
+                        f"[{window_start}, {window_end}]; coverage is incomplete",
+                        coverage_receipt=receipt,
+                    )
+                attempt["outcome"] = "CAP_SPLIT"
+                left, right = split
+                pending.appendleft(right)
+                pending.appendleft(left)
                 continue
 
             page_hash = stable_json_hash(page)
             if page_hash in seen_page_hashes:
-                raise HyperliquidInfoError("Duplicate userFillsByTime page detected")
+                attempt["outcome"] = "DUPLICATE_PAGE"
+                receipt["status"] = "PARTIAL"
+                receipt["reason"] = "DUPLICATE_PAGE"
+                receipt["next_windows"] = [
+                    {"start_ms": left, "end_ms": right}
+                    for left, right in pending
+                ]
+                raise HyperliquidInfoError(
+                    "Duplicate userFillsByTime page detected",
+                    coverage_receipt=receipt,
+                )
             seen_page_hashes.add(page_hash)
+            attempt["outcome"] = "ACCEPTED"
+            receipt["accepted_count"] += len(page)
+            horizon_start = receipt["usable_horizon_start_ms"]
+            horizon_end = receipt["usable_horizon_end_ms"]
+            receipt["usable_horizon_start_ms"] = (
+                min(int(horizon_start), min(page_times))
+                if horizon_start is not None
+                else min(page_times)
+            )
+            receipt["usable_horizon_end_ms"] = (
+                max(int(horizon_end), max(page_times))
+                if horizon_end is not None
+                else max(page_times)
+            )
             yield page, window_start, window_end
+
+        receipt["historical_censored"] = (
+            int(receipt["accepted_count"]) >= HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT
+        )
+        receipt["status"] = "PARTIAL" if receipt["historical_censored"] else "COMPLETE"
+        receipt["reason"] = (
+            "PUBLIC_RETENTION_LIMIT_REACHED" if receipt["historical_censored"] else None
+        )
+        receipt["next_windows"] = []
+        if receipt["historical_censored"]:
+            raise HyperliquidInfoError(
+                "userFillsByTime reached the documented per-wallet history limit; "
+                "older history may be censored",
+                coverage_receipt=receipt,
+            )
 
     async def order_status(self, user: str, oid_or_cloid: int | str) -> OrderStatus:
         data = await self._post_info("orderStatus", {"user": user, "oid": oid_or_cloid})

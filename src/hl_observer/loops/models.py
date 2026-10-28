@@ -34,7 +34,7 @@ class ResearchThesis:
         return asdict(self)
 
     @classmethod
-    def from_observation(cls, observation: MainnetObservation) -> "ResearchThesis":
+    def from_observation(cls, observation: MainnetObservation) -> ResearchThesis:
         fills_seen = sum(len(fills) for fills in observation.wallet_fills.values())
         notes: list[str] = []
         next_actions: list[str] = []
@@ -43,7 +43,7 @@ class ResearchThesis:
             next_actions.append("Relancer le read-only observer ou verifier la connectivite Hyperliquid.")
         if observation.errors:
             notes.append("Observation partielle: certaines sources ont echoue.")
-            next_actions.append("Consulter source_health et le journal de collecte avant toute execution testnet.")
+            next_actions.append("Consulter source_health et le journal de collecte avant toute conclusion.")
         if observation.all_mids and not observation.errors:
             notes.append("Observation read-only exploitable pour scoring local.")
         payload = {
@@ -89,7 +89,7 @@ class ExecutionFeedback:
         *,
         result: TestnetOrderResult | None = None,
         status: str = "PREPARED_ONLY",
-    ) -> "ExecutionFeedback":
+    ) -> ExecutionFeedback:
         return cls(
             candidate_id=decision.candidate_id,
             decision_action=decision.action.value,
@@ -114,7 +114,7 @@ class LearningSummary:
         return asdict(self)
 
     @classmethod
-    def from_feedback(cls, feedback: list[ExecutionFeedback]) -> "LearningSummary":
+    def from_feedback(cls, feedback: list[ExecutionFeedback]) -> LearningSummary:
         recurring: dict[str, int] = {}
         prepared = accepted = rejected = no_trade = 0
         for item in feedback:
@@ -132,9 +132,13 @@ class LearningSummary:
         if no_trade:
             next_actions.append("Analyser les raisons NO_TRADE avant d'assouplir les seuils.")
         if prepared and accepted == 0:
-            next_actions.append("Valider les flags testnet/fake adapter avant toute execution testnet controlee.")
+            next_actions.append(
+                "Execution testnet desactivee par politique; garder la recherche en PAPER/READ-ONLY."
+            )
         if accepted:
-            next_actions.append("Comparer fills/positions/PNL testnet contre le journal de decision.")
+            next_actions.append(
+                "Resultat testnet hors perimetre: exclure de toute preuve Copy-Vault et auditer la voie."
+            )
         if not feedback:
             next_actions.append("Aucun candidat: fournir des SignalCandidate issus du scanner read-only.")
         return cls(

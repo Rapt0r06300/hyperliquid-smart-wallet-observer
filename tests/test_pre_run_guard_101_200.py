@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from hl_observer.ops import pre_run_guard_001_100 as upstream_guard
 from hl_observer.ops.pre_run_guard_101_200 import build_report
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -22,6 +23,38 @@ def test_guard_keeps_real_execution_and_secret_blockers():
     assert r['status']=='BLOCKED' and 'REAL_OR_TESTNET_EXECUTION_FLAG_ARMED' in r['blockers']
     e=dict(SAFE); e['HYPERSMART_PRIVATE_KEY']='forbidden'; r=build_report(ROOT,environ=e)
     assert r['status']=='BLOCKED' and 'WALLET_OR_SECRET_CONFIGURATION_PRESENT' in r['blockers']
+
+
+@pytest.mark.parametrize(
+    ("git_dirty", "git_status_diagnostic", "expected_blocker"),
+    [
+        (False, {"error_code": None, "return_code": 0}, False),
+        (True, {"error_code": None, "return_code": 0}, True),
+        (None, {"error_code": "GIT_STATUS_TIMEOUT", "return_code": None}, True),
+        (None, {"error_code": "GIT_STATUS_EXIT_NONZERO", "return_code": 128}, True),
+    ],
+)
+def test_require_clean_git_passes_only_verified_clean_and_diagnoses_unknown(
+    monkeypatch, git_dirty, git_status_diagnostic, expected_blocker
+):
+    monkeypatch.setattr(
+        upstream_guard,
+        "manifeste_execution",
+        lambda _root, **_kwargs: {
+            "git_head": "a" * 40,
+            "git_dirty": git_dirty,
+            "git_status_diagnostic": git_status_diagnostic,
+            "reproductible": git_dirty is False,
+            "avertissement": None if git_dirty is False else "état git inconnu/sale",
+        },
+    )
+
+    report = build_report(ROOT, environ=SAFE, require_clean_git=True)
+
+    assert ("GIT_TREE_NOT_PROVEN_CLEAN" in report["blockers"]) is expected_blocker
+    assert ("GIT_STATUS_UNAVAILABLE" in report["blockers"]) is (
+        git_status_diagnostic["error_code"] is not None
+    )
 
 def test_guard_source_has_no_network_or_order_surface():
     s=(ROOT/'src/hl_observer/ops/pre_run_guard_101_200.py').read_text(encoding='utf-8').lower()

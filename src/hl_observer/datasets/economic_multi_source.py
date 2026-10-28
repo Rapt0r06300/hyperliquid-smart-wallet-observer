@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from hl_observer.datasets.source_discovery import (
     FAMILY_SOURCE_MANIFEST,
     is_dataset_workspace,
     load_family_source_paths,
 )
+from hl_observer.strategies.active_scope import active_strategy_families
 
 _COPY_BASENAMES = (
     "vault_fills.jsonl",
@@ -363,26 +365,37 @@ def write_economic_source_coverage(
     cross_consumed: Iterable[Path],
 ) -> tuple[Path, Path, dict[str, object]]:
     resolved = Path(root).resolve()
+    # Kept for call-site compatibility; inactive families are not consumed or
+    # measured here, so do not even inspect their supplied paths.
+    del lead_consumed, cross_consumed
     copy_discovered = load_family_source_paths(resolved, "copy_vault")
+    # Copy-Vault may reuse the Hyperliquid book side of carnet_venues as a
+    # shared market-data input. This does not activate Cross-Venue economics.
     cross_discovered = load_family_source_paths(resolved, "cross_venue")
     # carnet_venues is a shared book source for Copy-Vault.
     copy_discovered_union = sorted(
         set([*copy_discovered, *[p for p in cross_discovered if p.name.casefold() == "carnet_venues.jsonl"]]),
         key=lambda path: path.as_posix().casefold(),
     )
+    active = active_strategy_families()
+    if active != frozenset({"copy_vault"}):
+        raise RuntimeError("COPY_VAULT_ONLY_SCOPE_REQUIRED")
     families = {
         "copy_vault": _family_coverage(copy_discovered_union, list(copy_consumed)),
-        "lead_lag": _family_coverage(
-            load_family_source_paths(resolved, "lead_lag"), list(lead_consumed)
-        ),
-        "cross_venue": _family_coverage(cross_discovered, list(cross_consumed)),
     }
+    disabled_families = {
+        "lead_lag": "DISABLED_BY_SCOPE",
+        "cross_venue_dislocation": "DISABLED_BY_SCOPE",
+    }
+    all_active_families_full = all(row["status"] == "FULL" for row in families.values())
     payload: dict[str, object] = {
         "schema": "hypersmart.dataset_source_consumption_coverage.v1",
         "dataset_workspace": is_dataset_workspace(resolved),
         "source_release_id": 371149058,
         "families": families,
-        "all_families_full": all(row["status"] == "FULL" for row in families.values()),
+        "disabled_families": disabled_families,
+        "all_active_families_full": all_active_families_full,
+        "all_families_full": all_active_families_full,
     }
     report_dir = resolved / "runtime" / "reports" / "datasets"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -393,7 +406,7 @@ def write_economic_source_coverage(
         encoding="utf-8",
     )
     lines = [
-        "# Couverture des sources FULL/COLD réellement consommées",
+        "# Couverture Copy-Vault des sources FULL/COLD réellement consommées",
         "",
         "| Famille | Fichiers découverts | Fichiers consommés | Couverture fichiers | Couverture octets | Statut |",
         "|---|---:|---:|---:|---:|---|",
@@ -408,6 +421,7 @@ def write_economic_source_coverage(
             "",
             "`FULL` signifie que chaque fichier compatible découvert pour cette famille est inclus dans la vue ou la liste réellement donnée au moteur.",
             "Une couverture complète ne prouve pas une stratégie rentable : elle prouve seulement que les sources compatibles ne sont pas oubliées.",
+            "Lead-Lag et Cross-Venue sont DISABLED_BY_SCOPE : leur couverture économique n'est pas mesurée dans ce rapport.",
             "",
         ]
     )

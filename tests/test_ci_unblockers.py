@@ -25,3 +25,16 @@ def test_pre_run_clean_gate_is_shell_level_before_and_after_python_probe() -> No
     assert block.count(clean_cmd) == 2
     assert "--require-clean-git" not in block
     assert block.index(clean_cmd) < block.index(probe) < block.rindex(clean_cmd)
+
+
+def test_pre_run_101_200_gate_avoids_full_tree_status_timeout() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "pre-run-101-200.yml").read_text(
+        encoding="utf-8"
+    )
+    block = workflow.split("- name: Gate initial exact HEAD securite et couverture", 1)[1].split(
+        "- uses: actions/setup-python", 1
+    )[0]
+    assert "git diff --quiet HEAD -- src tests tools .github" in block
+    assert "--require-clean-git" not in block
+    assert "git status" in block  # explanatory comment documents the avoided slow probe
+    assert "pre_run_guard_101_200" in block

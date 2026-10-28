@@ -504,7 +504,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--max-download-gib", type=int, default=8,
-        help="limit NEW SAFE payload transfers to this many GiB (default 8)",
+        help="limit NEW SAFE payload transfers to this many GiB "
+             "(default %(default)s)",
     )
     parser.add_argument(
         "--unpack-safe", action="store_true",

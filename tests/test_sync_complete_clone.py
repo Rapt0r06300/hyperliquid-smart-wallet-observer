@@ -517,7 +517,21 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
         "catalog/DATA_INDEX.json text eol=lf",
         "catalog/DATA_METRICS.json text eol=lf",
         "catalog/data-index-parts/*.json text eol=lf",
+        "catalog/campaigns/*.json text eol=lf",
+        "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md text eol=lf",
+        "pyproject.toml text eol=lf",
+        "requirements*.txt text eol=lf",
     }.issubset(active)
+    # These inputs feed byte-exact catalog, provenance, or reproducibility
+    # digests. A Windows checkout must not leave Git-expanded CRLF bytes here.
+    campaign_manifests = sorted((ROOT / "catalog" / "campaigns").glob("*.json"))
+    assert campaign_manifests
+    for path in campaign_manifests:
+        assert b"\r" not in path.read_bytes(), path.relative_to(ROOT)
+    dependency_files = [ROOT / "pyproject.toml", *ROOT.glob("requirements*.txt")]
+    for path in dependency_files:
+        assert path.is_file()
+        assert b"\r" not in path.read_bytes(), path.relative_to(ROOT)
 
 
 def _write_catalog_budget_fixture(tmp_path, rows):

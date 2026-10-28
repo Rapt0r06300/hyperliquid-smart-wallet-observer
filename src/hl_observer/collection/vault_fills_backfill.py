@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -37,17 +38,30 @@ def plan_de_requetes(start_ms: int, end_ms: int, *, fenetre_ms: int = 24 * MS_PA
     l'endpoint ; cette fonction ne promet donc jamais qu'une fenêtre de 24 h
     est complète à elle seule.
     """
-    if start_ms >= end_ms:
+    start_ms = int(start_ms)
+    end_ms = int(end_ms)
+    fenetre_ms = int(fenetre_ms)
+    if end_ms < start_ms:
         return []
     if fenetre_ms <= 0:
         raise ValueError("fenetre_ms doit etre > 0")
     out: list[tuple[int, int]] = []
-    t = int(start_ms)
-    while t < end_ms:
-        suivant = min(t + int(fenetre_ms), int(end_ms))
+    t = start_ms
+    while t <= end_ms:
+        suivant = min(t + fenetre_ms, end_ms)
         out.append((t, suivant))
-        t = suivant
+        t = suivant + 1
     return out
+
+
+def split_inclusive_window(start_ms: int, end_ms: int) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """Split inclusive integer-ms bounds into adjacent, non-overlapping children."""
+    start_ms = int(start_ms)
+    end_ms = int(end_ms)
+    if end_ms <= start_ms:
+        return None
+    middle = start_ms + (end_ms - start_ms) // 2
+    return (start_ms, middle), (middle + 1, end_ms)
 
 
 # ─────────────────────────────── parsing ───────────────────────────────
@@ -63,11 +77,19 @@ def parser_fills(
         try:
             coin = preserve_native_instrument_symbol(f["coin"])
             px = float(f["px"])
-            sz = abs(float(f["sz"]))
+            sz = float(f["sz"])
             ts = int(f["time"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if (
+            not coin or ts <= 0
+            or not math.isfinite(px) or px <= 0
+            or not math.isfinite(sz) or sz <= 0
+        ):
             continue
         side = str(f.get("side") or "").upper()                    # 'B' = achat, 'A' = vente
+        if side not in {"A", "B"}:
+            continue
         signe = 1 if side == "B" else (-1 if side == "A" else 0)
         try:
             start_pos = float(f.get("startPosition"))
@@ -241,19 +263,30 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
                 component_sz: float,
                 direction: int,
                 dir_label: str | None = None,
+                source_fill: dict = f,
+                event_vault: str = vault,
+                event_coin: str = coin,
+                event_fill_id: str = fill_id,
+                rebased: bool = position_rebased,
             ) -> None:
-                taille_usd = abs(float(component_sz)) * float(f["px"])
-                raw_snapshot = f.get("isSnapshot")
-                label = str(dir_label if dir_label is not None else (f.get("dir") or ""))
+                taille_usd = abs(float(component_sz)) * float(source_fill["px"])
+                raw_snapshot = source_fill.get("isSnapshot")
+                label = str(
+                    dir_label
+                    if dir_label is not None
+                    else (source_fill.get("dir") or "")
+                )
                 events.append({
-                    "ts_ms": f["ts_ms"], "vault": vault, "coin": coin, "action": action,
+                    "ts_ms": source_fill["ts_ms"], "vault": event_vault,
+                    "coin": event_coin, "action": action,
                     "direction": int(direction), "taille_usd": round(taille_usd, 2),
                     "pos_avant": round(composant_avant, 8), "pos_apres": round(composant_apres, 8),
-                    "px": f["px"], "sz": abs(float(component_sz)), "dir": label,
-                    "leader_dir": f.get("dir"), "tid": f.get("tid"),
-                    "oid": f.get("oid"), "hash": f.get("hash"), "fill_id": fill_id,
+                    "px": source_fill["px"], "sz": abs(float(component_sz)), "dir": label,
+                    "leader_dir": source_fill.get("dir"), "tid": source_fill.get("tid"),
+                    "oid": source_fill.get("oid"), "hash": source_fill.get("hash"),
+                    "fill_id": event_fill_id,
                     "event_id": _event_id(
-                        fill_id,
+                        event_fill_id,
                         component_index=component_index,
                         action=action,
                         pos_avant=composant_avant,
@@ -261,11 +294,15 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
                     ),
                     "fill_component_index": int(component_index),
                     "fill_component_count": int(component_count),
-                    "position_rebased": bool(position_rebased),
-                    "source": f.get("source") or "REST_BACKFILL",
+                    "position_rebased": bool(rebased),
+                    "source": source_fill.get("source") or "REST_BACKFILL",
                     "is_snapshot": raw_snapshot if isinstance(raw_snapshot, bool) else None,
-                    "observed_at_ms": f.get("received_at_ms"),
-                    "stable_event_id": f.get("stable_event_id"),
+                    "observed_at_ms": source_fill.get("received_at_ms"),
+                    "received_at_ms": source_fill.get("received_at_ms"),
+                    "stable_event_id": source_fill.get("stable_event_id"),
+                    "source_dataset_id": source_fill.get("source_dataset_id"),
+                    "source_shard_sha256": source_fill.get("source_shard_sha256"),
+                    "source_raw_sha256": source_fill.get("source_raw_sha256"),
                 })
 
             eps = 1e-9
@@ -407,6 +444,6 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
             "par_vault": vaults}
 
 
-__all__ = ["plan_de_requetes", "parser_fills", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
+__all__ = ["plan_de_requetes", "split_inclusive_window", "parser_fills", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
            "reconstruire_episodes", "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture",
            "CAP_USERFILLS", "RETENTION_USERFILLS", "MS_PAR_HEURE"]

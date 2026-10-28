@@ -7,15 +7,17 @@ leader delta -> proportional sizing -> slippage/depth guard -> risk approval
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Callable
 
 from hl_observer.copy_mode.wallet_mirror_runtime import MirrorCandidate, candidate_to_paper_intent
 from hl_observer.paper_trading.paper_connector import PaperSimConnector, PaperSimConnectorResult
-from hl_observer.risk.proportional_paper_sizer import ProportionalSizingConfig, size_proportional_paper_notional
+from hl_observer.risk.proportional_paper_sizer import (
+    ProportionalSizingConfig,
+    size_proportional_paper_notional,
+)
 from hl_observer.risk.slippage_guard_v2 import SlippageGuardConfig, evaluate_slippage_guard_v2
-from hl_observer.strategies.models import PaperIntent, approve_with_risk, approve_with_risk_and_gate
-
+from hl_observer.strategies.models import PaperIntent, approve_with_risk_and_gate
 
 RiskFn = Callable[[PaperIntent], tuple[bool, list[str] | tuple[str, ...]]]
 
@@ -57,6 +59,7 @@ def execute_mirror_candidate_paper(
     top_depth_usdt: float | None = None,
     asks: tuple[tuple[float, float], ...] = (),
     bids: tuple[tuple[float, float], ...] = (),
+    book_exchange_ts_ms: object = None,
     observed_at_ms: int,
     connector: PaperSimConnector | None = None,
     risk_fn: RiskFn | None = None,
@@ -135,6 +138,7 @@ def execute_mirror_candidate_paper(
         observed_at_ms=observed_at_ms,
         asks=asks,
         bids=bids,
+        exchange_ts_ms=book_exchange_ts_ms,
         min_fill_ratio=cfg.slippage.min_fill_ratio,
     )
     evidence["paper_connector"] = result.as_dict()

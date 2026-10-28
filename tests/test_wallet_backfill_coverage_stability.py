@@ -5,24 +5,27 @@ from typing import Any
 
 from hl_observer.wallets import backfill
 
-
 WALLET = "0x1111111111111111111111111111111111111111"
 
 
 class _FailingClient:
-    async def user_fills_by_time(
+    async def _iter_user_fills_by_time_windows(
         self,
         wallet: str,
         start_ms: int,
         end_ms: int,
         *,
+        page_window_ms: int,
+        max_pages: int,
         aggregate_by_time: bool,
-    ) -> list[dict[str, Any]]:
+        audit: dict[str, Any],
+    ):
         assert wallet == WALLET
         assert start_ms == 100
         assert end_ms == 200
         assert aggregate_by_time is False
         raise RuntimeError("read-only info failure")
+        yield [], start_ms, end_ms
 
 
 class _RecordingRepo:
@@ -36,6 +39,9 @@ class _RecordingRepo:
 
     def store_api_health(self, **kwargs: Any) -> None:
         self.health.append(kwargs)
+
+    def update_source_health(self, *_args: Any, **_kwargs: Any) -> None:
+        pass
 
     def store_raw_event(self, **kwargs: Any) -> None:
         self.raw.append(kwargs)
@@ -54,11 +60,13 @@ def test_user_fills_by_time_network_exception_is_captured_fail_closed() -> None:
     )
 
     assert len(pages) == 1
-    page, exc, latency_ms = pages[0]
+    page, exc, latency_ms, _start_ms, _end_ms = pages[0]
     assert page is None
     assert isinstance(exc, RuntimeError)
     assert str(exc) == "read-only info failure"
     assert latency_ms >= 0
+    assert pages.coverage_receipt["status"] == "PARTIAL"
+    assert pages.coverage_receipt["reason"] == "BACKFILL_CLIENT_ERROR"
 
 
 def test_user_fills_by_time_error_page_persists_health_and_raw_trace() -> None:
@@ -100,6 +108,6 @@ def test_user_fills_by_time_error_page_persists_health_and_raw_trace() -> None:
         }
     ]
     assert repo.raw[0]["endpoint"] == "/info"
-    assert repo.raw[0]["request_type"] == "userFillsByTime"
+    assert repo.raw[0]["request_type"] == "userFillsByTimeCoverageError"
     assert repo.raw[0]["success"] is False
     assert repo.raw[0]["error_message"] == "read-only info failure"

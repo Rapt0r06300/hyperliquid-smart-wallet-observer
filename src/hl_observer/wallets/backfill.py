@@ -30,6 +30,14 @@ from hl_observer.wallets.wallet_coin_profile import build_wallet_coin_profiles
 DEFAULT_BACKFILL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 
+class UserFillPageResults(list):
+    """Accepted pages plus the durable completeness receipt for their REST scan."""
+
+    def __init__(self, pages: list[tuple[Any, ...]], coverage_receipt: dict[str, Any]) -> None:
+        super().__init__(pages)
+        self.coverage_receipt = coverage_receipt
+
+
 class WalletBackfillPlan(BaseModel):
     fetch: bool = True
     dry_run: bool = False
@@ -333,8 +341,13 @@ async def _fetch_user_fills_by_time(
     end_ms: int,
     page_window_ms: int,
     limit_pages: int,
-) -> list[tuple[Any | None, Exception | None, int, int | None, int | None]]:
-    pages_results = []
+) -> UserFillPageResults:
+    pages_results: list[tuple[Any | None, Exception | None, int, int | None, int | None]] = []
+    coverage_receipt: dict[str, Any] = {
+        "status": "IN_PROGRESS",
+        "requested_start_ms": int(start_ms),
+        "requested_end_ms": int(end_ms),
+    }
     last_started = now_ms()
     try:
         async for page, page_start_ms, page_end_ms in client._iter_user_fills_by_time_windows(
@@ -344,6 +357,7 @@ async def _fetch_user_fills_by_time(
             page_window_ms=page_window_ms,
             max_pages=limit_pages,
             aggregate_by_time=False,
+            audit=coverage_receipt,
         ):
             completed_at = now_ms()
             pages_results.append(
@@ -352,9 +366,18 @@ async def _fetch_user_fills_by_time(
             last_started = completed_at
     except Exception as exc:
         completed_at = now_ms()
+        attached_receipt = getattr(exc, "coverage_receipt", None)
+        if isinstance(attached_receipt, dict):
+            coverage_receipt = attached_receipt
+        elif coverage_receipt.get("status") == "IN_PROGRESS":
+            coverage_receipt["status"] = "PARTIAL"
+            coverage_receipt["reason"] = "BACKFILL_CLIENT_ERROR"
+            coverage_receipt["next_windows"] = [
+                {"start_ms": int(start_ms), "end_ms": int(end_ms)}
+            ]
         pages_results.append((None, exc, completed_at - last_started, None, None))
 
-    return pages_results
+    return UserFillPageResults(pages_results, coverage_receipt)
 
 
 async def _fetch_wallet_network_data(
@@ -485,12 +508,38 @@ def _process_fetched_user_fills_by_time(
     fills_for_rebuild: list[dict[str, Any]],
     pages_results: list[tuple[Any | None, Exception | None, int, int | None, int | None]],
 ) -> None:
+    coverage_receipt = getattr(pages_results, "coverage_receipt", None)
+    if isinstance(coverage_receipt, dict):
+        complete = coverage_receipt.get("status") == "COMPLETE"
+        receipt_error = None if complete else str(coverage_receipt.get("reason") or "INCOMPLETE_COVERAGE")
+        repo.store_raw_event(
+            source="hyperliquid",
+            endpoint="/info",
+            request_type="userFillsByTimeCoverageReceipt",
+            request_payload={
+                "type": "userFillsByTime",
+                "user": wallet,
+                "startTime": int(start_ms),
+                "endTime": int(end_ms),
+                "receipt_only": True,
+            },
+            response_payload=coverage_receipt,
+            wallet_address=wallet,
+            success=complete,
+            error_message=receipt_error,
+        )
+        result.raw_events_stored += 1
     if not pages_results:
         return
 
-    for page_index, (page, exc, latency, page_start_ms, page_end_ms) in enumerate(
-        pages_results, start=1
-    ):
+    for page_index, page_result in enumerate(pages_results, start=1):
+        if len(page_result) == 3:
+            page, exc, latency = page_result
+            page_start_ms = page_end_ms = None
+        elif len(page_result) == 5:
+            page, exc, latency, page_start_ms, page_end_ms = page_result
+        else:
+            raise ValueError("unexpected userFillsByTime page result shape")
         if exc is not None:
             error_message = str(exc)
             result.errors_count += 1
@@ -523,9 +572,18 @@ def _process_fetched_user_fills_by_time(
                 repo.store_raw_event(
                     source="hyperliquid",
                     endpoint="/info",
-                    request_type="userFillsByTime",
-                    request_payload=build_user_fills_by_time_payload(wallet, start_ms, end_ms),
-                    response_payload={"error": error_message},
+                    request_type="userFillsByTimeCoverageError",
+                    request_payload={
+                        "type": "userFillsByTime",
+                        "user": wallet,
+                        "startTime": int(start_ms),
+                        "endTime": int(end_ms),
+                        "receipt_only": True,
+                    },
+                    response_payload={
+                        "error": error_message,
+                        "coverage_receipt": getattr(exc, "coverage_receipt", None),
+                    },
                     wallet_address=wallet,
                     success=False,
                     error_message=error_message,

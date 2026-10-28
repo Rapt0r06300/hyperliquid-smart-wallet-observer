@@ -16,7 +16,7 @@ from typing import Any
 from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
-PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+PROTOCOL_NAME = "copy_vault_executable_walk_forward_v8_explicit_l2_gap_identity"
 UNBOUND_L2_SOURCE_PROTOCOL = "copy_vault_unbound_ws_l2_v1"
 INSTRUMENT_IDENTITY_SCHEMA = "hyperliquid_native_instrument_identity.v1"
 CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v3"
@@ -138,6 +138,9 @@ def protocol_signature() -> dict[str, Any]:
         "fill_source": "LIVE_WS_non_snapshot_with_receive_time_for_all_protocol_segments",
         "historical_source_policy": "REST_BACKFILL_and_historical_books_audit_only",
         "causal_observation_required_all_segments": True,
+        "causal_book_gap_identity_policy": (
+            "same_connection_and_explicit_gap_epoch_required_for_causal_stream_triplets_v1"
+        ),
         "forward_signal_policy": "causal_live_first_fill_observed_after_physical_freeze",
         "purge_policy": "copy_delay_plus_candidate_horizon_plus_max_target_lag",
     }

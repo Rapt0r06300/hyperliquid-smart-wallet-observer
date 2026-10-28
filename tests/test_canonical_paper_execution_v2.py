@@ -19,7 +19,6 @@ from hl_observer.strategies.models import (
     approve_with_risk,
 )
 
-
 WALLET = "0x" + "c" * 40
 OBSERVED_AT_MS = 1_800_000_000_000
 BIDS = ((99.99, 100.0), (99.98, 100.0))
@@ -53,6 +52,38 @@ def test_execution_truth_received_after_decision_is_not_fresh() -> None:
         truth.age_ms(OBSERVED_AT_MS)
 
 
+def test_execution_truth_zero_age_tolerance_requires_exact_causal_timestamps() -> None:
+    exact = ExecutionTruth.from_levels(
+        coin="HYPE",
+        bids=BIDS,
+        asks=ASKS,
+        received_ts_ms=OBSERVED_AT_MS,
+        exchange_ts_ms=OBSERVED_AT_MS,
+        source="recorded:exact-decision-ms",
+        data_origin="RECORDED_REAL",
+    )
+    future_receive = _truth(received_ts_ms=OBSERVED_AT_MS + 1)
+
+    assert exact.age_ms(OBSERVED_AT_MS) == 0
+    assert exact.is_fresh(decision_ts_ms=OBSERVED_AT_MS, max_age_ms=0)
+    assert not future_receive.is_fresh(
+        decision_ts_ms=OBSERVED_AT_MS, max_age_ms=0
+    )
+
+
+def test_execution_truth_rejects_nanosecond_epoch_as_out_of_supported_range() -> None:
+    with pytest.raises(ValueError, match="supported positive epoch millisecond"):
+        ExecutionTruth.from_levels(
+            coin="HYPE",
+            bids=BIDS,
+            asks=ASKS,
+            received_ts_ms=1_800_000_000_000_000_000,
+            exchange_ts_ms=OBSERVED_AT_MS,
+            source="recorded:ns-receipt",
+            data_origin="RECORDED_REAL",
+        )
+
+
 def test_future_execution_book_cannot_create_a_fill_or_position_mutation() -> None:
     truth = _truth(received_ts_ms=OBSERVED_AT_MS + 1)
     market = CausalMarketSnapshot.from_truth(
@@ -62,7 +93,7 @@ def test_future_execution_book_cannot_create_a_fill_or_position_mutation() -> No
 
     result = execute_paper_intent(_execution_intent(), market)
 
-    assert result.execution.reason == "STALE_EXECUTION_BOOK"
+    assert result.execution.reason == "RECEIVED_TIMESTAMP_AFTER_DECISION"
     assert result.execution.fill_price is None
     assert result.execution.filled_notional_usdc == 0.0
     assert result.position_mutation.status == "NO_MUTATION"
@@ -149,6 +180,7 @@ def test_main_engine_connector_and_direct_core_share_fill_truth() -> None:
         observed_at_ms=OBSERVED_AT_MS,
         bids=BIDS,
         asks=ASKS,
+        exchange_ts_ms=OBSERVED_AT_MS - 2,
         min_fill_ratio=0.0,
     )
     assert connector_result.accepted is True
@@ -205,6 +237,24 @@ def test_main_engine_connector_and_direct_core_share_fill_truth() -> None:
     assert evidence["execution"]["fill_price"] == direct.execution.fill_price
     assert evidence["execution"]["filled_notional_usdc"] == direct.execution.filled_notional_usdc
     assert evidence["execution"]["net_cost_bps"] == direct.execution.net_cost_bps
+
+
+def test_connector_refuses_observed_book_when_source_timestamp_is_missing() -> None:
+    connector = PaperSimConnector()
+    result = connector.apply_intent(
+        approve_with_risk(_strategy_intent(), lambda _: (True, ())),
+        mid_price=100.0,
+        top_depth_usdt=None,
+        observed_at_ms=OBSERVED_AT_MS,
+        bids=BIDS,
+        asks=ASKS,
+        min_fill_ratio=0.0,
+    )
+
+    assert result.accepted is False
+    assert result.reason_codes == ("SOURCE_TIMESTAMP_MISSING",)
+    assert result.evidence["canonical_execution"]["liquidity_reservation"] is None
+    assert connector.fills == ()
 
 
 def test_canonical_intent_and_execution_truth_preserve_symbol_case() -> None:

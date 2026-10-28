@@ -872,7 +872,37 @@ def test_empty_userfills_snapshot_is_preserved_as_a_snapshot_event() -> None:
     assert fills == []
 
 
-def test_missing_snapshot_flag_is_preserved_but_never_classified_live() -> None:
+def test_malformed_live_userfill_is_preserved_as_quarantined_unknown_frame() -> None:
+    address = "0x" + "1" * 40
+    message = {
+        "channel": "userFills",
+        "data": {
+            "user": address,
+            "isSnapshot": False,
+            "fills": [{
+                "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+                "time": 1_000, "hash": None, "tid": None,
+            }],
+        },
+    }
+
+    envelope, fills = C.userfills_envelope(
+        message,
+        vault=address,
+        receive_wall_ms=1_010,
+        receive_mono_ns=123,
+        connection_id="copy-test",
+    )
+
+    assert envelope is not None
+    assert envelope.channel == "copy_vault_unknown"
+    assert envelope.event_kind == "UNCLASSIFIED"
+    assert envelope.raw_payload == message
+    assert envelope.parsed_summary["unclassified_reason"] == "FILL_NATIVE_ID_MISSING"
+    assert fills == []
+
+
+def test_missing_snapshot_flag_is_quarantined_and_never_replay_classified() -> None:
     envelope, fills = C.userfills_envelope(
         {
             "channel": "userFills",
@@ -891,11 +921,11 @@ def test_missing_snapshot_flag_is_preserved_but_never_classified_live() -> None:
         connection_id="copy-test",
     )
     assert envelope is not None
-    assert envelope.channel == "copy_vault_fills"
+    assert envelope.channel == "copy_vault_unknown"
     assert envelope.event_kind == "UNCLASSIFIED"
-    assert envelope.parsed_summary["snapshot_flag_status"] == "MISSING_OR_INVALID"
-    assert envelope.parsed_summary["is_snapshot"] is None
-    assert fills[0]["isSnapshot"] is None
+    assert envelope.parsed_summary["unclassified_reason"] == "USERFILLS_SNAPSHOT_FLAG_INVALID"
+    assert envelope.raw_payload["data"]["fills"][0]["tid"] == 3
+    assert fills == []
 
 
 def test_selection_envelope_is_observation_only_and_causal() -> None:
@@ -977,6 +1007,19 @@ def test_exact_window_backfill_splits_at_2000_response_cap() -> None:
         assert audit["status"] == "COMPLETE"
         assert audit["requests"] == 3
         assert audit["splits"] == 1
+        assert audit["api_response_cap"] == C.CAP_USERFILLS
+        assert [
+            (
+                item["start_ms"], item["end_ms"], item["response_rows"],
+                item["last_observed_boundary_ms"], item["outcome"],
+            )
+            for item in audit["window_attempts"]
+        ] == [
+            (10_000, 20_000, C.CAP_USERFILLS, 11_999, "CAP_SPLIT"),
+            (10_000, 15_000, 1, 10_001, "ACCEPTED"),
+            (15_001, 20_000, 1, 15_002, "ACCEPTED"),
+        ]
+        assert audit["pending_window_ranges"] == []
         assert len(rows) == 2
         assert queried_windows == [
             (10_000, 20_000),
@@ -1224,6 +1267,12 @@ def test_exact_window_backfill_fails_closed_when_request_budget_is_exhausted() -
         assert audit["requests"] == 2
         assert audit["request_budget_exhausted"] is True
         assert audit["pending_windows"] > 0
+        assert audit["pending_window_ranges"] == [
+            {"start_ms": 10_000, "end_ms": 15_000},
+            {"start_ms": 15_001, "end_ms": 20_000},
+            {"start_ms": 20_001, "end_ms": 30_000},
+        ]
+        assert len(audit["window_attempts"]) == 2
 
     asyncio.run(scenario())
 
@@ -1285,6 +1334,16 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
             "vaults": [{"address": address}],
         },
         collection_run_id="copy-vault-test-run",
+        connection_heartbeats={
+            "copy-vault-test": {
+                "connection_id": "copy-vault-test",
+                "sent_count": 1,
+                "received_count": 1,
+                "unmatched_pong_count": 0,
+                "first_received_at_ms": 10_010,
+                "last_received_at_ms": 10_010,
+            }
+        },
     )
     assert fill_id
     assert index["collection_kind"] == "copy_vault_forward"
@@ -1296,6 +1355,54 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
     assert manifest["collection_run_id"] == "copy-vault-test-run"
     assert manifest["reconciliation"]["status"] == "MATCHED"
     assert manifest["copy_vault_selection"]["forward_only"] is True
+    assert manifest["synchronization"]["heartbeat"]["connection_id"] == "copy-vault-test"
+
+
+def test_connection_heartbeat_ledger_rejects_unmatched_pong_and_counts_reply() -> None:
+    ledger: dict[str, object] = {}
+    record = C._heartbeat_connection(ledger, "ws-heartbeat-test")
+    C._heartbeat_received(record, 1_000)
+    assert record["unmatched_pong_count"] == 1
+    assert record["received_count"] == 0
+
+    C._heartbeat_sent(record, 1_100)
+    C._heartbeat_received(record, 1_120)
+    assert record["sent_count"] == record["received_count"] == 1
+    assert record["first_received_at_ms"] == 1_120
+
+
+def test_copy_vault_bundle_excludes_ws_shard_without_connection_heartbeat(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    writer = C.PartitionedTickDatasetWriter(raw, rotate_bytes=10_000_000)
+    received = int(C.time.time() * 1_000)
+    envelope = C.copy_vault_market_envelopes(
+        {
+            "channel": "bbo",
+            "data": {
+                "coin": "BTC", "time": received - 1,
+                "bbo": [{"px": "99", "sz": "1"}, {"px": "101", "sz": "1"}],
+            },
+        },
+        receive_wall_ms=received,
+        receive_mono_ns=123,
+        connection_id="no-heartbeat-connection",
+    )[0]
+    writer.append(envelope)
+    writer.rotate_all()
+
+    index = C.build_copy_vault_bundle(
+        raw,
+        tmp_path / "bundle",
+        collector_version="a" * 40,
+        reconciliation={},
+        queue_drops={},
+        selection={"selected_at_ms": received},
+        collection_run_id="missing-heartbeat-test",
+    )
+    assert index["shard_count"] == 0
+    assert index["source_admission"]["blocking_reasons"][
+        "HEARTBEAT_EVIDENCE_MISSING"
+    ] == 1
 
 
 def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> None:
@@ -1393,6 +1500,16 @@ def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> No
         queue_drops={},
         selection={"selected_at_ms": received},
         collection_run_id="market-context-test",
+        connection_heartbeats={
+            "market-bundle-test": {
+                "connection_id": "market-bundle-test",
+                "sent_count": 1,
+                "received_count": 1,
+                "unmatched_pong_count": 0,
+                "first_received_at_ms": received,
+                "last_received_at_ms": received,
+            }
+        },
     )
 
     assert index["shard_count"] == 5
@@ -1764,6 +1881,14 @@ def test_userfills_forward_starts_after_ack_and_reconnect_reanchors(
                 for message in self.messages:
                     if message is ack and self.advance_clock_on_ack:
                         clock[0] = 1_700_000_010.0
+                    data = message.get("data") if isinstance(message, dict) else None
+                    raw_fills = data.get("fills") if isinstance(data, dict) else None
+                    if any(
+                        isinstance(fill, dict) and fill.get("tid") in {3, 5}
+                        for fill in (raw_fills or [])
+                    ):
+                        # A received fill must not carry a future exchange time.
+                        clock[0] = 1_700_000_011.0
                     if message is ack and self.delay_before_ack_s:
                         await asyncio.sleep(self.delay_before_ack_s)
                     yield json.dumps(message)

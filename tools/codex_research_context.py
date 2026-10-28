@@ -19,7 +19,7 @@ from hl_observer.research.research_context import build_research_context  # noqa
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--auto", action="store_true", help="auto-select the underworked family")
+    parser.add_argument("--auto", action="store_true", help="select the sole active economic family")
     parser.add_argument("--family", choices=sorted(FAMILIES))
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--process-memory", type=Path)
@@ -30,12 +30,16 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _parser().parse_args()
     family = None if args.auto or args.family is None else args.family
-    context = build_research_context(
-        REPO_ROOT,
-        family=family,
-        ledger_path=args.ledger,
-        process_memory_path=args.process_memory,
-    )
+    try:
+        context = build_research_context(
+            REPO_ROOT,
+            family=family,
+            ledger_path=args.ledger,
+            process_memory_path=args.process_memory,
+        )
+    except ValueError as exc:
+        print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return 2
     encoded = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if args.out is None:
         print(encoded)

@@ -28,10 +28,11 @@ def _common():
     )
 
 
-def test_memory_is_partitioned_by_family_and_exact_provenance(tmp_path):
+def test_memory_is_partitioned_by_exact_provenance_within_copy_vault(tmp_path):
     copy = record_certified_proof(tmp_path, family="copy_vault", **_common())
-    lead = record_certified_proof(tmp_path, family="lead_lag", **_common())
-    assert copy["key"] != lead["key"]
+    second_config = {**_common(), "config_sha256": "f" * 64, "runtime_proof_sha256": "e" * 64}
+    second = record_certified_proof(tmp_path, family="copy_vault", **second_config)
+    assert copy["key"] != second["key"]
     assert load_memory(tmp_path)["proof_count"] == 2
     loaded = load_exact_proof(
         tmp_path,
@@ -43,6 +44,63 @@ def test_memory_is_partitioned_by_family_and_exact_provenance(tmp_path):
         runtime_proof_sha256="d" * 64,
     )
     assert loaded["net_pnl_usd"] == pytest.approx(5.25)
+
+
+@pytest.mark.parametrize("family", ["lead_lag", "cross_venue_dislocation_v2"])
+def test_memory_refuses_certification_for_disabled_families(tmp_path, family):
+    with pytest.raises(EconomicMemoryError, match="DISABLED_BY_SCOPE"):
+        record_certified_proof(tmp_path, family=family, **_common())
+    assert load_memory(tmp_path)["proofs"] == {}
+
+
+@pytest.mark.parametrize("family", ["lead_lag", "cross_venue_dislocation_v2"])
+def test_memory_preserves_but_never_certifies_archived_disabled_family(tmp_path, family):
+    common = _common()
+    key = proof_key(
+        project_sha=common["project_sha"],
+        family=family,
+        dataset_snapshot_sha256=common["dataset_snapshot_sha256"],
+        config_sha256=common["config_sha256"],
+        suite=common["suite"],
+    )
+    archived = {
+        "key": key,
+        "project_sha": common["project_sha"],
+        "family": family,
+        "dataset_snapshot_sha256": common["dataset_snapshot_sha256"],
+        "config_sha256": common["config_sha256"],
+        "suite": common["suite"],
+        "runtime_proof_sha256": common["runtime_proof_sha256"],
+        "net_pnl_usd": common["net_pnl_usd"],
+        "analysis_complete": True,
+        "certified": True,
+        "paper_only": True,
+        "real_execution": False,
+    }
+    path = tmp_path / RELATIVE_PATH
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({
+            "schema": SCHEMA,
+            "proofs": {key: archived},
+            "proof_count": 1,
+            "paper_only": True,
+            "real_execution": False,
+        }),
+        encoding="utf-8",
+    )
+
+    assert load_memory(tmp_path)["proof_count"] == 1
+    with pytest.raises(EconomicMemoryError, match="DISABLED_BY_SCOPE"):
+        load_exact_proof(
+            tmp_path,
+            project_sha=common["project_sha"],
+            family=family,
+            dataset_snapshot_sha256=common["dataset_snapshot_sha256"],
+            config_sha256=common["config_sha256"],
+            suite=common["suite"],
+            runtime_proof_sha256=common["runtime_proof_sha256"],
+        )
 
 
 def test_memory_refuses_incomplete_stale_or_silent_overwrite(tmp_path):
@@ -57,7 +115,7 @@ def test_memory_refuses_incomplete_stale_or_silent_overwrite(tmp_path):
     with pytest.raises(EconomicMemoryError, match="incomplete"):
         record_certified_proof(
             tmp_path,
-            family="lead_lag",
+            family="copy_vault",
             **{**common, "analysis_complete": False},
         )
     with pytest.raises(EconomicMemoryError, match="no certified proof"):
@@ -86,7 +144,7 @@ def test_memory_refuses_non_finite_certified_net(tmp_path, bad):
     with pytest.raises(EconomicMemoryError, match="finite"):
         record_certified_proof(
             tmp_path,
-            family="lead_lag",
+            family="copy_vault",
             **{**_common(), "net_pnl_usd": bad},
         )
 

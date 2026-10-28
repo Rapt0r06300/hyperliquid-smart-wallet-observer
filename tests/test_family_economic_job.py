@@ -45,6 +45,12 @@ def test_family_validator_est_pur_et_conserve_la_suite(suite: str) -> None:
     assert set(canonical_job.ECONOMIC_SUITES) == before
 
 
+@pytest.mark.parametrize("suite", ["lead-lag-full", "cross-venue-full"])
+def test_family_validator_refuse_les_familles_desactivees(suite: str) -> None:
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        validate_family_request(_request(suite))
+
+
 def test_family_validator_refuse_les_suites_non_actives_sans_mutation_globale() -> None:
     before = set(canonical_job.ECONOMIC_SUITES)
     with pytest.raises(ValueError, match="active-family"):

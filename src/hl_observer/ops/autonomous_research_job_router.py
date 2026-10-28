@@ -7,6 +7,7 @@ from typing import Iterable, Mapping
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.family_economic_job import (
     FAMILY_ECONOMIC_SUITES,
+    KNOWN_FAMILY_ECONOMIC_SUITES,
     execute_family_job,
     validate_family_request,
 )
@@ -22,7 +23,7 @@ def allowed_economic_suites() -> frozenset[str]:
 def validate_request(raw):
     suite = str(raw.get("suite") or "").strip()
     mode = str(raw.get("mode") or "").strip()
-    if mode == "economic" and suite in FAMILY_ECONOMIC_SUITES:
+    if mode == "economic" and suite in KNOWN_FAMILY_ECONOMIC_SUITES:
         return validate_family_request(raw)
     return canonical_job.validate_request(raw)
 
@@ -128,6 +129,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
 __all__ = [
     "FAMILY_ECONOMIC_SUITES",
+    "KNOWN_FAMILY_ECONOMIC_SUITES",
     "_print_lead_lag_diagnostic",
     "_run_family_postprocessing",
     "allowed_economic_suites",

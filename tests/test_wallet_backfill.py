@@ -329,10 +329,22 @@ def test_wallet_backfill_user_fills_by_time_respects_max_pages(tmp_path):
     assert result.errors_count == 1
     with session_factory() as session:
         raw_events = session.query(RawEvent).order_by(RawEvent.id).all()
-    assert raw_events[0].request_payload_json["startTime"] == 1
-    assert raw_events[0].request_payload_json["endTime"] == 1001
-    assert raw_events[1].request_payload_json["startTime"] == 1002
-    assert raw_events[1].request_payload_json["endTime"] == 2002
+    receipt = next(
+        event for event in raw_events
+        if event.request_type == "userFillsByTimeCoverageReceipt"
+    )
+    assert receipt.response_payload_json["status"] == "PARTIAL"
+    assert receipt.response_payload_json["reason"] == "MAX_PAGES_REACHED"
+    assert receipt.response_payload_json["next_windows"] == [
+        {"start_ms": 2003, "end_ms": 3003},
+        {"start_ms": 3004, "end_ms": 4004},
+        {"start_ms": 4005, "end_ms": 5000},
+    ]
+    pages = [event for event in raw_events if event.request_type == "userFillsByTime"]
+    assert [
+        (event.request_payload_json["startTime"], event.request_payload_json["endTime"])
+        for event in pages
+    ] == [(1, 1001), (1002, 2002)]
 
 
 def test_wallet_backfill_deduplicates_same_fill_for_deltas(tmp_path):

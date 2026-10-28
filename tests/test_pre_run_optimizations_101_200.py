@@ -30,7 +30,7 @@ def test_inspect_coverage_reports_missing_registry_item(monkeypatch):
 
 def test_range_bindings_are_current_and_explicit():
     for i in range(101,131):
-        x=ITEMS[i]; assert 'src/hl_observer/ops/lab_rapport.py' in x.sources; assert 'src/hl_observer/paper_trading/paper_engine.py' in x.sources; assert 'ANALYSER_BACKTESTS_REPLAYS.cmd' in x.sources; assert 'tests/test_recette_windows_e2e.py' in x.tests
+        x=ITEMS[i]; assert 'src/hl_observer/ops/lab_rapport.py' in x.sources; assert 'src/hl_observer/paper_trading/paper_engine.py' in x.sources; assert 'tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd' in x.sources; assert 'tests/test_recette_windows_e2e.py' in x.tests
     for i in range(131,161):
         x=ITEMS[i]; assert 'src/hl_observer/runtime/protections.py' in x.sources; assert 'src/hl_observer/research/scenario_rigor.py' in x.sources; assert 'tests/test_validation_stats.py' in x.tests
     for i in range(161,201):

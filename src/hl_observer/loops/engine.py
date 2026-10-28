@@ -6,16 +6,18 @@ from pathlib import Path
 from typing import Iterable
 
 from hl_observer.config.settings import Settings
-from hl_observer.decision_engine.local_engine import DecisionAction, LocalDecision, LocalDecisionEngine
+from hl_observer.decision_engine.local_engine import LocalDecision, LocalDecisionEngine
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.loops.memory import LoopMemoryStore, default_loop_memory_dir
-from hl_observer.loops.models import ExecutionFeedback, LearningSummary, LoopRunResult, ResearchThesis, stable_hash
+from hl_observer.loops.models import (
+    ExecutionFeedback,
+    LearningSummary,
+    LoopRunResult,
+    ResearchThesis,
+    stable_hash,
+)
 from hl_observer.mainnet_readonly_observer.observer import MainnetObservation, MainnetReadOnlyObserver
-from hl_observer.testnet.adapters import TestnetExchangeAdapter
-from hl_observer.testnet.executor import TestnetExecutor
-from hl_observer.testnet.journal import TestnetDecisionJournal, default_testnet_journal_path
-from hl_observer.testnet.models import TestnetAction, TestnetOrderRequest, TestnetOrderResult
-from hl_observer.testnet.safety import build_testnet_runtime_settings
+from hl_observer.testnet.safety import TESTNET_DISABLED_REASON
 
 
 @dataclass(slots=True)
@@ -23,7 +25,6 @@ class LoopEngineeringRunner:
     settings: Settings
     observer: MainnetReadOnlyObserver | None = None
     decision_engine: LocalDecisionEngine | None = None
-    executor: TestnetExecutor | None = None
     memory: LoopMemoryStore | None = None
 
     def __post_init__(self) -> None:
@@ -44,6 +45,9 @@ class LoopEngineeringRunner:
         confirmed: bool = False,
         notional_usdc: float = 1.0,
     ) -> LoopRunResult:
+        if execute_testnet:
+            raise RuntimeError(TESTNET_DISABLED_REASON)
+        del confirmed
         thesis = ResearchThesis.from_observation(observation)
         assert self.memory is not None
         self.memory.record_thesis(thesis)
@@ -57,8 +61,7 @@ class LoopEngineeringRunner:
                 cloid=f"loop-{candidate.coin.lower()}-{candidate.id}-{index}",
             )
             decisions.append(decision)
-            result = self._maybe_execute(decision, execute_testnet=execute_testnet, confirmed=confirmed)
-            item = ExecutionFeedback.from_decision(decision, result=result)
+            item = ExecutionFeedback.from_decision(decision, status="PREPARED_ONLY")
             feedback.append(item)
             self.memory.record_feedback(item)
 
@@ -88,6 +91,9 @@ class LoopEngineeringRunner:
         confirmed: bool = False,
         notional_usdc: float = 1.0,
     ) -> LoopRunResult:
+        if execute_testnet:
+            raise RuntimeError(TESTNET_DISABLED_REASON)
+        del confirmed
         if self.observer is None:
             self.observer = MainnetReadOnlyObserver()
         observation = await self.observer.observe(
@@ -99,56 +105,13 @@ class LoopEngineeringRunner:
         return self.run_with_observation(
             observation=observation,
             candidates=candidates,
-            execute_testnet=execute_testnet,
-            confirmed=confirmed,
+            execute_testnet=False,
+            confirmed=False,
             notional_usdc=notional_usdc,
         )
 
     def run_once_sync(self, **kwargs) -> LoopRunResult:
         return asyncio.run(self.run_once(**kwargs))
-
-    @classmethod
-    def with_fake_testnet_executor(
-        cls,
-        settings: Settings,
-        *,
-        adapter: TestnetExchangeAdapter,
-        project_root: Path | None = None,
-        confirmed: bool = False,
-    ) -> "LoopEngineeringRunner":
-        runtime_settings = build_testnet_runtime_settings(settings, confirmed=confirmed)
-        memory = LoopMemoryStore(default_loop_memory_dir(project_root))
-        journal = TestnetDecisionJournal(default_testnet_journal_path(project_root))
-        executor = TestnetExecutor(settings=runtime_settings, adapter=adapter, journal=journal)
-        return cls(settings=runtime_settings, executor=executor, memory=memory)
-
-    def _maybe_execute(
-        self,
-        decision: LocalDecision,
-        *,
-        execute_testnet: bool,
-        confirmed: bool,
-    ) -> TestnetOrderResult | None:
-        if not execute_testnet:
-            return None
-        if decision.order_request is None or decision.action is DecisionAction.NO_TRADE:
-            return None
-        if self.executor is None:
-            return None
-        request = decision.order_request
-        if request.action is TestnetAction.OPEN:
-            return self.executor.open_position(request, confirmed=confirmed)
-        if request.action is TestnetAction.REDUCE:
-            return self.executor.reduce_position(request, confirmed=confirmed)
-        if request.action is TestnetAction.CLOSE:
-            return self.executor.close_position(
-                request.coin,
-                request.side,
-                cloid=request.cloid,
-                confirmed=confirmed,
-                evidence=request.evidence,
-            )
-        return None
 
 
 def load_signal_candidates(path: Path) -> list[SignalCandidate]:

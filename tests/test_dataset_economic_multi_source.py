@@ -119,7 +119,7 @@ def test_cross_multi_source_consomme_tous_les_fichiers_et_refuse_conflit(tmp_pat
     assert len(series2["BTC"]) == 2
 
 
-def test_rapport_couverture_prouve_les_sources_consommees(tmp_path: Path) -> None:
+def test_rapport_couverture_ne_mesure_que_copy_vault_et_marque_le_reste_inactif(tmp_path: Path) -> None:
     _mark_workspace(tmp_path)
     copy = _write(tmp_path, "runtime/data/vault_fills.jsonl", [{"fill_id": "a"}])
     lead = _write(tmp_path, "runtime/data/bbo_tape.jsonl", [{"coin": "BTC"}])
@@ -132,8 +132,12 @@ def test_rapport_couverture_prouve_les_sources_consommees(tmp_path: Path) -> Non
     )
     assert json_path.is_file()
     assert md_path.is_file()
+    assert payload["all_active_families_full"] is True
     assert payload["all_families_full"] is True
+    assert set(payload["families"]) == {"copy_vault"}
+    assert payload["disabled_families"] == {
+        "lead_lag": "DISABLED_BY_SCOPE",
+        "cross_venue_dislocation": "DISABLED_BY_SCOPE",
+    }
     assert payload["families"]["copy_vault"]["status"] == "FULL"
-    assert payload["families"]["lead_lag"]["status"] == "FULL"
-    assert payload["families"]["cross_venue"]["status"] == "FULL"
     assert len(load_family_source_paths(tmp_path, "cross_venue")) == 1

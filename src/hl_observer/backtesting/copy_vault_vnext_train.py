@@ -16,13 +16,29 @@ from __future__ import annotations
 import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from decimal import Decimal
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_protocol import (
     MAX_REFERENCE_LAG_MS,
     MAX_TARGET_LAG_MS,
 )
-from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
+from hl_observer.backtesting.train_statistics import (
+    exact_lcb_rank_value,
+    exact_net_rank_value,
+    profit_factor_above_one,
+    select_unambiguous_lcb_candidate,
+    stable_hash,
+    summarize_train_rows,
+    top_positive_share_within_limit,
+)
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_difference,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
+)
 from hl_observer.following.entity_consensus import entity_consensus_gate
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
@@ -48,13 +64,18 @@ def _number(value: object) -> float | None:
     return result if math.isfinite(result) else None
 
 
-def _reconciled(row: Mapping[str, Any]) -> bool:
+def _reconciled_net(row: Mapping[str, Any]) -> Decimal | None:
     if row.get("economic_reconciliation_ok") is False:
-        return False
-    net = _number(row.get("net_pnl_usd"))
-    gross = _number(row.get("gross_pnl_usd"))
+        return None
+
+    def amount(field: str) -> Decimal | None:
+        exact = row.get(f"{field}_exact_decimal")
+        return decimal_value(exact if exact is not None else row.get(field))
+
+    net = amount("net_pnl_usd")
+    gross = amount("gross_pnl_usd")
     costs = [
-        _number(row.get(key))
+        amount(key)
         for key in (
             "fees_usd",
             "spread_cost_usd",
@@ -62,11 +83,24 @@ def _reconciled(row: Mapping[str, Any]) -> bool:
             "latency_cost_usd",
         )
     ]
-    if net is None or gross is None or any(cost is None or cost < 0.0 for cost in costs):
-        return False
-    fees, spread, slippage, latency = (float(cost) for cost in costs)
-    expected = gross - fees - spread - slippage - latency
-    return math.isclose(expected, net, abs_tol=max(1e-8, abs(expected) * 1e-8))
+    if net is None or gross is None or any(cost is None or cost < 0 for cost in costs):
+        return None
+    expected = decimal_sum(
+        (gross, *(cost.copy_negate() for cost in costs if cost is not None))
+    )
+    reconciliation_delta = decimal_difference(expected, net)
+    if (
+        expected is None
+        or reconciliation_delta is None
+        or reconciliation_delta.copy_abs() > USD_RECONCILIATION_ABS_TOLERANCE
+    ):
+        return None
+    # The tolerated discrepancy is uncertainty, never extra credited PnL.
+    return min(net, expected)
+
+
+def _reconciled(row: Mapping[str, Any]) -> bool:
+    return _reconciled_net(row) is not None
 
 
 def _execution_evidence_complete(row: Mapping[str, Any]) -> bool:
@@ -127,6 +161,7 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             signal_ts_ms = int(raw.get("signal_ts_ms") or 0)
         except (TypeError, ValueError, OverflowError):
             continue
+        conservative_net = _reconciled_net(raw)
         if (
             not trade_id
             or trade_id in seen
@@ -136,7 +171,7 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             or signal_ts_ms <= 0
             or raw.get("liquidatable_net") is not True
             or not _execution_evidence_complete(raw)
-            or not _reconciled(raw)
+            or conservative_net is None
         ):
             continue
         metaorder_id = str(raw.get("metaorder_id") or "").strip()
@@ -144,8 +179,14 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             if metaorder_id in seen_metaorders:
                 continue
             seen_metaorders.add(metaorder_id)
+        accepted_net = float_not_above(conservative_net)
+        if accepted_net is None:
+            continue
         seen.add(trade_id)
-        result.append(dict(raw))
+        accepted = dict(raw)
+        accepted["net_pnl_usd_exact_decimal"] = format(conservative_net, "f")
+        accepted["net_pnl_usd"] = accepted_net
+        result.append(accepted)
     result.sort(key=lambda row: (int(row["signal_ts_ms"]), str(row["trade_id"])))
     return result
 
@@ -316,21 +357,21 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
         coin_share = _concentration(admitted, "coin")
         entity_share = _concentration(admitted, "entity_concentration_key_at_signal")
         distinct_regimes = _distinct_regimes(admitted)
-        net = float(stats.get("net_pnl_usd") or 0.0)
-        pf = stats.get("profit_factor")
-        lcb = stats.get("total_lcb_usd")
+        net = decimal_value(stats.get("net_pnl_usd_exact_decimal"))
+        lcb = decimal_value(stats.get("total_lcb_usd_exact_decimal"))
         train_statistics_eligible = bool(
             len(admitted) >= MIN_TRAIN_TRADES
             and int(stats.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
             and distinct_regimes >= MIN_DISTINCT_REGIMES
-            and net > 0.0
-            and pf is not None
-            and float(pf) > 1.0
+            and net is not None
+            and net > 0
+            and profit_factor_above_one(stats)
+            and stats.get("lcb_status") == "MEASURED"
             and lcb is not None
-            and float(lcb) > 0.0
+            and lcb > 0
             and coin_share <= MAX_COIN_TRADE_SHARE
             and entity_share <= MAX_VAULT_TRADE_SHARE
-            and float(stats.get("top_positive_trade_share") or 1.0) <= MAX_TOP_POSITIVE_SHARE
+            and top_positive_share_within_limit(stats, MAX_TOP_POSITIVE_SHARE)
         )
         variants.append(
             {
@@ -349,25 +390,22 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
             }
         )
     diagnostic_rows = [row for row in variants if row["train_statistics_eligible"]]
+    # Diagnostics may name the nominal top row but never authorize a freeze.
+    # The separate resolution status makes an overlapping rank explicit.
     diagnostic_selected = max(
         diagnostic_rows,
         key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
+            exact_lcb_rank_value(row["statistics"] or {}),
+            exact_net_rank_value(row["statistics"] or {}),
             int((row["statistics"] or {}).get("sample_count") or 0),
         ),
         default=None,
+    )
+    _, diagnostic_selection_resolution = select_unambiguous_lcb_candidate(
+        diagnostic_rows
     )
     eligible_rows = [row for row in variants if row["eligible"]]
-    selected = max(
-        eligible_rows,
-        key=lambda row: (
-            float((row["statistics"] or {}).get("total_lcb_usd") or 0.0),
-            float((row["statistics"] or {}).get("net_pnl_usd") or 0.0),
-            int((row["statistics"] or {}).get("sample_count") or 0),
-        ),
-        default=None,
-    )
+    selected, selection_resolution = select_unambiguous_lcb_candidate(eligible_rows)
     freeze_candidate = (
         {
             "mechanism": MECHANISM,
@@ -391,6 +429,8 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
             else "NO_ROBUST_TRAIN_CANDIDATE"
         ),
         "selection_eligible": selected is not None,
+        "selection_numeric_resolution": selection_resolution,
+        "diagnostic_selection_numeric_resolution": diagnostic_selection_resolution,
         "physical_freeze_allowed": selected is not None,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,

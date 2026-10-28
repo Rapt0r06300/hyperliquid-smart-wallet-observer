@@ -11,6 +11,7 @@ import bisect
 import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from decimal import Decimal
 from typing import Any
 
 from hl_observer.backtesting import copy_vault_executable as cv
@@ -31,6 +32,7 @@ from hl_observer.backtesting.train_statistics import (
     summarize_complete_utc_days,
 )
 from hl_observer.config.frais_venues import frais_taker_bps
+from hl_observer.economics.numeric import decimal_value
 from hl_observer.funding.funding_times import next_funding_time_ms
 from hl_observer.normalization.l2_book import (
     normalize_l2_levels,
@@ -45,6 +47,7 @@ FROZEN_COPY_DELAY_MS = 60_000
 FROZEN_MAX_REFERENCE_LAG_MS = 30_000
 FROZEN_MAX_TARGET_LAG_MS = 30_000
 CAPACITY_SCENARIOS_USD = (10.0, 50.0, 100.0, 200.0, 400.0, 1_000.0, 2_000.0, 5_000.0, 10_000.0)
+REQUIRED_FUNDING_SEGMENTS = ("validation", "oos", "forward")
 
 
 def _first_action(metaorder: Mapping[str, Any]) -> str:
@@ -222,12 +225,28 @@ def _reference_objective_status(*segments: Mapping[str, Any]) -> str:
         for segment in segments
     ):
         return "UNMEASURABLE"
-    daily_means = [segment.get("daily_mean_net_pnl_usd") for segment in segments]
-    if not daily_means or any(value is None for value in daily_means):
+    daily_means: list[Decimal] = []
+    for segment in segments:
+        calendar_stats = segment.get("calendar_day_statistics")
+        if (
+            not isinstance(calendar_stats, Mapping)
+            or calendar_stats.get("status") != "MEASURABLE"
+        ):
+            return "UNMEASURABLE"
+        exact_mean = decimal_value(
+            calendar_stats.get("calendar_day_mean_net_pnl_usd_exact_decimal")
+        )
+        if exact_mean is None:
+            return "UNMEASURABLE"
+        daily_means.append(exact_mean)
+    if not daily_means:
         return "UNMEASURABLE"
     return (
         "ATTEINT"
-        if all(float(value) >= REFERENCE_DAILY_OBJECTIVE_USD for value in daily_means)
+        if all(
+            value >= Decimal(str(REFERENCE_DAILY_OBJECTIVE_USD))
+            for value in daily_means
+        )
         else "NON_ATTEINT"
     )
 
@@ -268,10 +287,36 @@ def _funding_receipt(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             }
         # Subtract one millisecond so an entry exactly at settlement remains
         # ambiguous and is counted as crossing the boundary.
-        first_possible_funding_ms = next_funding_time_ms(
-            entry_raw - 1,
-            interval_hours=1,
-        )
+        try:
+            first_possible_funding_ms = next_funding_time_ms(
+                entry_raw - 1,
+                interval_hours=1,
+            )
+        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+            return {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": trade_count,
+                "settlement_crossing_count": None,
+                "settlement_interval_hours": 1,
+                "reason": "FUNDING_SETTLEMENT_RULE_UNMEASURABLE",
+                "rule_error_type": type(exc).__name__,
+                "trade_index": index,
+            }
+        if (
+            isinstance(first_possible_funding_ms, bool)
+            or not isinstance(first_possible_funding_ms, int)
+            or first_possible_funding_ms <= entry_raw - 1
+        ):
+            return {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": trade_count,
+                "settlement_crossing_count": None,
+                "settlement_interval_hours": 1,
+                "reason": "FUNDING_SETTLEMENT_RULE_UNMEASURABLE",
+                "trade_index": index,
+            }
         if first_possible_funding_ms <= exit_raw:
             return {
                 "status": "UNMEASURABLE",
@@ -308,11 +353,82 @@ def _aggregate_funding_receipt(
     segments: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     receipts: dict[str, dict[str, Any]] = {}
-    for name, segment in segments.items():
+    for name in REQUIRED_FUNDING_SEGMENTS:
+        segment = segments.get(name)
+        if not isinstance(segment, Mapping):
+            receipts[name] = _not_evaluated_funding_receipt(
+                "REQUIRED_SEGMENT_MISSING"
+            )
+            continue
+        if segment.get("heldout_evaluated") is not True:
+            receipts[name] = _not_evaluated_funding_receipt(
+                "SEGMENT_NOT_EVALUATED"
+            )
+            continue
+
+        calendar_stats = segment.get("calendar_day_statistics")
+        if (
+            not isinstance(calendar_stats, Mapping)
+            or calendar_stats.get("status") != "MEASURABLE"
+        ):
+            receipts[name] = {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": None,
+                "settlement_crossing_count": None,
+                "settlement_interval_hours": 1,
+                "reason": "SEGMENT_COVERAGE_UNMEASURABLE",
+            }
+            continue
+
         raw = segment.get("funding_receipt")
-        receipts[name] = dict(raw) if isinstance(raw, Mapping) else _not_evaluated_funding_receipt(
-            "SEGMENT_FUNDING_RECEIPT_MISSING"
-        )
+        if not isinstance(raw, Mapping):
+            receipts[name] = {
+                "status": "UNMEASURABLE",
+                "carry_pnl_usd": None,
+                "trade_count": None,
+                "settlement_crossing_count": None,
+                "settlement_interval_hours": 1,
+                "reason": "SEGMENT_FUNDING_RECEIPT_MISSING",
+            }
+            continue
+
+        receipt = dict(raw)
+        if receipt.get("status") == "MEASURED_ZERO_NO_SETTLEMENT_CROSSED":
+            trades = segment.get("trades")
+            if not isinstance(trades, Sequence) or isinstance(
+                trades, (str, bytes, bytearray)
+            ):
+                receipt = {
+                    **receipt,
+                    "status": "UNMEASURABLE",
+                    "carry_pnl_usd": None,
+                    "reason": "SEGMENT_TRADES_MISSING_FOR_FUNDING_PROOF",
+                }
+            else:
+                verified = _funding_receipt(trades)
+                top_level_carry = segment.get("carry_pnl_usd")
+                if (
+                    verified.get("status")
+                    != "MEASURED_ZERO_NO_SETTLEMENT_CROSSED"
+                    or receipt.get("carry_pnl_usd") != verified.get("carry_pnl_usd")
+                    or receipt.get("trade_count") != verified.get("trade_count")
+                    or receipt.get("settlement_crossing_count")
+                    != verified.get("settlement_crossing_count")
+                    or top_level_carry != verified.get("carry_pnl_usd")
+                ):
+                    receipt = {
+                        **verified,
+                        "status": "UNMEASURABLE",
+                        "carry_pnl_usd": None,
+                        "reason": (
+                            verified.get("reason")
+                            if verified.get("status") == "UNMEASURABLE"
+                            else "SEGMENT_FUNDING_RECEIPT_INCONSISTENT"
+                        ),
+                    }
+        receipts[name] = receipt
+
     measured_receipts = all(
         receipt.get("status")
         in {"MEASURED_ZERO_NO_SETTLEMENT_CROSSED", "MEASURED"}
@@ -754,6 +870,21 @@ def _evaluate_segment(
     )
     funding_receipt = _funding_receipt(trades)
     reasons = list(assessment["reasons"])
+    if calendar_stats.get("status") != "MEASURABLE":
+        receipt_reason = (
+            funding_receipt.get("reason")
+            if funding_receipt.get("status") == "UNMEASURABLE"
+            else "SEGMENT_COVERAGE_UNMEASURABLE"
+        )
+        funding_receipt = {
+            **funding_receipt,
+            "status": "UNMEASURABLE",
+            "carry_pnl_usd": None,
+            "reason": receipt_reason,
+            "coverage_status": calendar_stats.get("status"),
+            "coverage_reason": calendar_stats.get("reason"),
+        }
+        reasons.append("CALENDAR_PNL_UNMEASURABLE")
     if funding_receipt["status"] != "MEASURED_ZERO_NO_SETTLEMENT_CROSSED":
         reasons.append("FUNDING_PNL_UNMEASURABLE")
     return {

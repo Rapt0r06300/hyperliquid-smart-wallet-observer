@@ -12,14 +12,15 @@ Hyperliquid ``userFillsByTime`` et ``userNonFundingLedgerUpdates``.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 import time
 import urllib.error
 import urllib.request
-from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
@@ -27,6 +28,10 @@ sys.path.insert(0, str(RACINE / "src"))
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
 from hl_observer.collection import vault_ledger as VL  # noqa: E402
+from hl_observer.hyperliquid.rest_info_client import (  # noqa: E402
+    HyperliquidInfoClient,
+    HyperliquidInfoError,
+)
 
 URL_HL = "https://api.hyperliquid.xyz/info"
 OUT_LEDGER = Path("runtime") / "data" / "vault_ledger.jsonl"
@@ -37,6 +42,7 @@ OUT_EPISODES = Path("runtime") / "data" / "vault_episodes.jsonl"
 OUT_COUVERTURE = Path("runtime") / "data" / "vault_fills_couverture.json"
 LOOKBACK_J_DEFAUT = 14
 MIN_PAGINATION_WINDOW_MS = 60_000
+MAX_FILL_BACKFILL_REQUESTS = 512
 
 Poster = Callable[[str, int, int], Any]
 
@@ -64,6 +70,32 @@ def _window_failure(a: int, b: int, exc: BaseException) -> dict[str, Any]:
         "error_type": type(exc).__name__,
         "error": str(exc)[:300],
     }
+
+
+class _PosterBackfillClient(HyperliquidInfoClient):
+    """Adapt the legacy sync poster to the canonical REST pagination engine."""
+
+    def __init__(self, poster: Poster, limiteur: CF.Limiteur) -> None:
+        super().__init__()
+        self._poster = poster
+        self._limiteur = limiteur
+
+    async def user_fills_by_time(
+        self,
+        user: str,
+        start_time: int,
+        end_time: int,
+        *,
+        aggregate_by_time: bool = False,
+    ) -> list[dict[str, Any]]:
+        del aggregate_by_time
+        await asyncio.to_thread(self._limiteur.attente)
+        payload = await asyncio.to_thread(
+            self._poster, user, int(start_time), int(end_time)
+        )
+        if not isinstance(payload, list):
+            raise HyperliquidInfoError("userFillsByTime returned non-list response")
+        return payload
 
 
 def backfill_ledger_un_vault_avec_audit(
@@ -154,6 +186,7 @@ def backfill_un_vault_avec_audit(
     cap: int = VB.CAP_USERFILLS,
     fenetre_ms: int = 24 * VB.MS_PAR_HEURE,
     min_fenetre_ms: int = MIN_PAGINATION_WINDOW_MS,
+    max_requests: int = MAX_FILL_BACKFILL_REQUESTS,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Backfill ``userFillsByTime`` adaptatif et fail-closed.
 
@@ -165,72 +198,82 @@ def backfill_un_vault_avec_audit(
     """
     del root
     cap = int(cap)
-    if cap <= 0:
-        raise ValueError("cap doit etre > 0")
+    if not 0 < cap <= VB.CAP_USERFILLS:
+        raise ValueError(f"cap doit etre compris entre 1 et {VB.CAP_USERFILLS}")
     fenetre_ms = int(fenetre_ms)
-    min_fenetre_ms = max(1, int(min_fenetre_ms))
+    min_fenetre_ms = max(0, int(min_fenetre_ms))
+    max_requests = int(max_requests)
+    if max_requests <= 0:
+        raise ValueError("max_requests doit etre > 0")
     fin = int(time.time() * 1000)
     debut = fin - int(lookback_j) * 24 * VB.MS_PAR_HEURE
     vault_id = VB.normaliser_vault(vault)
-    pending = deque(VB.plan_de_requetes(debut, fin, fenetre_ms=fenetre_ms))
-    brut: list[dict] = []
-    failed_windows: list[dict[str, Any]] = []
-    cap_blocked_windows: list[dict[str, Any]] = []
-    requested_windows = 0
-    split_windows = 0
-    capped_responses = 0
-    accepted_windows = 0
+    client = _PosterBackfillClient(poster, limiteur)
+    receipt: dict[str, Any] = {}
+    raw_pages: list[dict[str, Any]] = []
 
-    while pending:
-        a, b = pending.popleft()
-        requested_windows += 1
-        limiteur.attente()
-        try:
-            rep = poster(vault_id, a, b)
-        except (urllib.error.URLError, OSError, ValueError, TypeError, TimeoutError) as exc:
-            failed_windows.append(_window_failure(a, b, exc))
-            continue
-        if not isinstance(rep, list):
-            failed_windows.append({
-                "start_ms": int(a), "end_ms": int(b),
-                "error_type": "INVALID_RESPONSE_TYPE",
-                "error": type(rep).__name__,
-            })
-            continue
-        parsed = VB.parser_fills(rep, vault=vault_id)
-        if len(rep) >= cap:
-            capped_responses += 1
-            span = int(b) - int(a)
-            if span <= min_fenetre_ms:
-                cap_blocked_windows.append({
-                    "start_ms": int(a), "end_ms": int(b),
-                    "response_rows": len(rep), "cap": cap,
-                    "reason": "CAP_REACHED_AT_MINIMUM_WINDOW",
-                })
-                # On conserve les données observées pour diagnostic, mais elles
-                # ne peuvent jamais rendre la couverture complète.
-                brut.extend(parsed)
-                continue
-            mid = int(a) + max(1, span // 2)
-            if mid >= int(b):
-                cap_blocked_windows.append({
-                    "start_ms": int(a), "end_ms": int(b),
-                    "response_rows": len(rep), "cap": cap,
-                    "reason": "UNSPLITTABLE_CAPPED_WINDOW",
-                })
-                brut.extend(parsed)
-                continue
-            # Le parent capped n'est PAS accepté ; seuls ses enfants peuvent
-            # certifier la couverture de cet intervalle.
-            pending.appendleft((mid, int(b)))
-            pending.appendleft((int(a), mid))
-            split_windows += 1
-            continue
-        brut.extend(parsed)
-        accepted_windows += 1
+    async def collect() -> None:
+        async for page, _left, _right in client._iter_user_fills_by_time_windows(
+            vault_id,
+            debut,
+            fin,
+            page_window_ms=fenetre_ms,
+            max_pages=max_requests,
+            min_window_ms=min_fenetre_ms,
+            response_cap=cap,
+            audit=receipt,
+        ):
+            raw_pages.extend(page)
 
-    fills = VB.dedupliquer(brut)
-    complete = not failed_windows and not cap_blocked_windows
+    try:
+        asyncio.run(collect())
+    except HyperliquidInfoError as exc:
+        if isinstance(exc.coverage_receipt, dict):
+            receipt = exc.coverage_receipt
+        elif not receipt:
+            receipt.update(
+                {
+                    "status": "PARTIAL",
+                    "reason": "PAGINATION_ERROR",
+                    "requested_start_ms": debut,
+                    "requested_end_ms": fin,
+                    "next_windows": [{"start_ms": debut, "end_ms": fin}],
+                    "subrequests": [],
+                }
+            )
+        receipt["pagination_error"] = str(exc)[:300]
+
+    parsed_pages = VB.parser_fills(raw_pages, vault=vault_id)
+    invalid_fill_count = len(raw_pages) - len(parsed_pages)
+    fills = VB.dedupliquer(parsed_pages)
+    attempts = list(receipt.get("subrequests") or [])
+    failed_windows = [item for item in attempts if item.get("outcome") == "FAILED"]
+    cap_blocked_windows = [item for item in attempts if item.get("outcome") == "CAP_BLOCKED"]
+    accepted_windows = sum(
+        1 for item in attempts if item.get("outcome") in {"ACCEPTED", "EMPTY"}
+    )
+    split_windows = sum(1 for item in attempts if item.get("outcome") == "CAP_SPLIT")
+    historical_censored = bool(receipt.get("historical_censored")) or (
+        len(fills) >= VB.RETENTION_USERFILLS
+    )
+    complete = (
+        receipt.get("status") == "COMPLETE"
+        and not historical_censored
+        and not invalid_fill_count
+    )
+    fill_times = [
+        int(fill["ts_ms"])
+        for fill in fills
+        if type(fill.get("ts_ms")) is int and int(fill["ts_ms"]) > 0
+    ]
+    partial_reasons = list(receipt.get("partial_reasons") or [])
+    if historical_censored and "PUBLIC_RETENTION_LIMIT_REACHED" not in partial_reasons:
+        partial_reasons.append("PUBLIC_RETENTION_LIMIT_REACHED")
+    if invalid_fill_count and "INVALID_FILL_ROWS" not in partial_reasons:
+        partial_reasons.append("INVALID_FILL_ROWS")
+    if not complete and not partial_reasons:
+        partial_reasons.append(str(receipt.get("reason") or "INCOMPLETE_COVERAGE"))
+    next_windows = list(receipt.get("next_windows") or [])
     audit = {
         "vault": vault_id,
         "kind": "userFillsByTime",
@@ -239,12 +282,37 @@ def backfill_un_vault_avec_audit(
         "cap": cap,
         "base_window_ms": fenetre_ms,
         "minimum_window_ms": min_fenetre_ms,
-        "requested_windows": requested_windows,
+        "max_requests": max_requests,
+        "requested_windows": int(receipt.get("request_count") or 0),
         "accepted_windows": accepted_windows,
         "split_windows": split_windows,
-        "capped_responses": capped_responses,
+        "capped_responses": split_windows + len(cap_blocked_windows),
         "failed_windows": failed_windows,
         "cap_blocked_windows": cap_blocked_windows,
+        "api_response_cap": cap,
+        "window_attempts": attempts,
+        "received_count": int(receipt.get("received_count") or 0),
+        "last_observed_boundary_ms": receipt.get("last_observed_boundary_ms"),
+        "pending_windows": len(next_windows),
+        "pending_window_ranges": next_windows,
+        "request_budget_exhausted": receipt.get("reason") == "MAX_PAGES_REACHED",
+        "api_history_limit": VB.RETENTION_USERFILLS,
+        "historical_censored": historical_censored,
+        "censoring_reason": (
+            "PUBLIC_RETENTION_LIMIT_REACHED" if historical_censored else None
+        ),
+        "coverage_status": (
+            "COMPLETE_FOR_REQUESTED_RANGE" if complete
+            else "CENSORED_OR_PARTIAL"
+        ),
+        "status": "COMPLETE" if complete else "PARTIAL",
+        "partial_reasons": partial_reasons,
+        "usable_horizon": {
+            "start_ms": min(fill_times) if fill_times else None,
+            "end_ms": max(fill_times) if fill_times else None,
+            "basis": "observed_historical_rest_fills_only",
+        },
+        "prospective_capture_separate": True,
         "n_fills": len(fills),
         "complete": bool(complete),
         "paper_read_only": True,
@@ -273,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Backfill userFillsByTime des vaults (lecture seule).")
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--lookback-j", type=int, default=LOOKBACK_J_DEFAUT)
+    p.add_argument("--max-requests", type=int, default=MAX_FILL_BACKFILL_REQUESTS)
     p.add_argument("--une-fois", action="store_true", default=True)
     a = p.parse_args(argv)
     root = Path(a.root)
@@ -290,7 +359,11 @@ def main(argv: list[str] | None = None) -> int:
     for grp, vaults in (("RETENU", retenus), ("TEMOIN", temoin)):
         for v in vaults:
             fills, fill_audit = backfill_un_vault_avec_audit(
-                root, v, lookback_j=a.lookback_j, limiteur=limiteur
+                root,
+                v,
+                lookback_j=a.lookback_j,
+                limiteur=limiteur,
+                max_requests=a.max_requests,
             )
             ledger, ledger_audit = backfill_ledger_un_vault_avec_audit(
                 root, v, lookback_j=a.lookback_j, limiteur=limiteur
@@ -304,9 +377,9 @@ def main(argv: list[str] | None = None) -> int:
             tous_fills.extend(fills)
             tous_ledger.extend(ledger)
             print(
-                "[backfill-fills] %s %s : %d fills (complete=%s), ledger=%d (complete=%s)"
-                % (grp, VB.normaliser_vault(v)[:10], len(fills), fill_audit["complete"],
-                   len(ledger), ledger_audit["complete"]),
+                f"[backfill-fills] {grp} {VB.normaliser_vault(v)[:10]} : "
+                f"{len(fills)} fills (complete={fill_audit['complete']}), "
+                f"ledger={len(ledger)} (complete={ledger_audit['complete']})",
                 flush=True,
             )
 
@@ -347,10 +420,12 @@ def main(argv: list[str] | None = None) -> int:
     (root / OUT_COUVERTURE).write_text(json.dumps(cov, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(
-        "[backfill-fills] couverture: %d fills, %.1f h, %d coins, %d episodes, %d entrees alpha "
-        "(retraits ledger=%d heur=%d) complete=%s"
-        % (cov["n_fills"], cov["span_h"], len(cov["coins"]), cov["n_episodes"], cov["n_entrees_alpha"],
-           cov["n_retraits_ledger"], cov["n_retraits_heuristique"], cov["backfill_complete"]),
+        f"[backfill-fills] couverture: {cov['n_fills']} fills, {cov['span_h']:.1f} h, "
+        f"{len(cov['coins'])} coins, {cov['n_episodes']} episodes, "
+        f"{cov['n_entrees_alpha']} entrees alpha "
+        f"(retraits ledger={cov['n_retraits_ledger']} "
+        f"heur={cov['n_retraits_heuristique']}) "
+        f"complete={cov['backfill_complete']}",
         flush=True,
     )
     # Les données partielles restent disponibles pour diagnostic, mais une

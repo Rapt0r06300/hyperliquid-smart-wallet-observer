@@ -12,12 +12,15 @@ from hl_observer.research.process_memory import (
     load_process_records,
     process_memory_summary,
 )
+from hl_observer.strategies.active_scope import (
+    active_strategy_families,
+    require_active_strategy,
+)
 
 DEFAULT_LEDGER = Path("runtime/codex_research/HYPOTHESIS_LEDGER.jsonl")
 DEFAULT_PROCESS_MEMORY = Path("runtime/codex_research/PROCESS_MEMORY.jsonl")
 HISTORICAL_PROCESS_MEMORY = Path("docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl")
 SEMANTIC_STATUS = Path("runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json")
-_FAMILY_ORDER = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 _DATA_HINTS = (
     "data/bbo_synchro.jsonl",
     "runtime/data/bbo_synchro.jsonl",
@@ -115,19 +118,11 @@ def _resolve(repo_root: Path, value: str | Path | None, default: Path) -> Path:
 
 
 def _select_family(records: list[dict[str, Any]]) -> str:
-    ranked: list[tuple[int, int, int, int, str]] = []
-    for index, family in enumerate(_FAMILY_ORDER):
-        status = compact_status(records, family=family)
-        ranked.append(
-            (
-                int(status["trial_count"]),
-                int(status["unique_hypotheses"]),
-                int(status["records"]),
-                index,
-                family,
-            )
-        )
-    return min(ranked)[-1]
+    del records  # Historical activity never changes the authoritative family scope.
+    active = sorted(active_strategy_families())
+    if len(active) != 1:
+        raise RuntimeError("research auto-selection requires exactly one active family")
+    return require_active_strategy(active[0])
 
 
 def _next_actions(status: dict[str, Any]) -> list[str]:
@@ -227,13 +222,13 @@ def build_research_context(
 ) -> dict[str, Any]:
     """Build a compact deterministic context pack using local files only."""
     root = Path(repo_root).resolve()
+    selected_family = _select_family([]) if family is None else require_active_strategy(family)
+    if selected_family not in FAMILIES:
+        raise ValueError(f"family must be one of {sorted(FAMILIES)}")
     ledger_target = _resolve(root, ledger_path, DEFAULT_LEDGER)
     process_target = _resolve(root, process_memory_path, DEFAULT_PROCESS_MEMORY)
     ledger_records = load_records(ledger_target)
 
-    if family is not None and family not in FAMILIES:
-        raise ValueError(f"family must be one of {sorted(FAMILIES)}")
-    selected_family = family or _select_family(ledger_records)
     selected_status = compact_status(ledger_records, family=selected_family)
 
     runtime_memory = load_process_records(process_target)

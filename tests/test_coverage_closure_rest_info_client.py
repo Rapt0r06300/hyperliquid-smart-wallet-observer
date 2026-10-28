@@ -9,6 +9,14 @@ import hl_observer.hyperliquid.rest_info_client as info
 from hl_observer.hyperliquid.schemas import OrderStatusKind
 
 
+def test_collection_package_keeps_lazy_collector_exports_available() -> None:
+    from hl_observer.collection import CollectionPlan, CollectionResult, run_collection_once
+
+    assert CollectionPlan.__name__ == "CollectionPlan"
+    assert CollectionResult.__name__ == "CollectionResult"
+    assert callable(run_collection_once)
+
+
 def test_payload_builders_read_only_and_validation() -> None:
     assert info.build_all_mids_payload() == {"type": "allMids"}
     assert info.build_meta_payload() == {"type": "meta"}
@@ -423,15 +431,28 @@ def test_fill_iterator_splits_capped_windows_without_losing_same_timestamp_fills
         return matching[:cap]
 
     monkeypatch.setattr(c, "user_fills_by_time", by_time)
+    audit: dict[str, object] = {}
 
     async def collect() -> list[dict]:
-        pages = [page async for page in c.iter_user_fills_by_time("u", 0, 3)]
+        pages = [page async for page in c.iter_user_fills_by_time("u", 0, 3, audit=audit)]
         return [fill for page in pages for fill in page]
 
     result = asyncio.run(collect())
     assert len(result) == cap + 1
     assert {fill["tid"] for fill in result} == {fill["tid"] for fill in fills}
     assert calls == [(0, 3), (0, 1), (2, 3)]
+    assert audit["status"] == "COMPLETE"
+    assert audit["requested_start_ms"] == 0
+    assert audit["requested_end_ms"] == 3
+    assert audit["api_response_cap"] == cap
+    assert audit["api_history_limit"] == 10_000
+    assert audit["request_count"] == 3
+    assert audit["received_count"] == 2 * cap + 1
+    assert audit["last_observed_boundary_ms"] == 3
+    assert [
+        (item["start_ms"], item["end_ms"], item["outcome"])
+        for item in audit["subrequests"]
+    ] == [(0, 3, "CAP_SPLIT"), (0, 1, "ACCEPTED"), (2, 3, "ACCEPTED")]
 
 
 def test_fill_iterator_fails_closed_when_one_millisecond_window_is_still_capped(monkeypatch) -> None:
@@ -443,17 +464,26 @@ def test_fill_iterator_fails_closed_when_one_millisecond_window_is_still_capped(
 
     monkeypatch.setattr(c, "user_fills_by_time", by_time)
 
+    audit: dict[str, object] = {}
+
     async def collect() -> None:
-        async for _ in c.iter_user_fills_by_time("u", 7, 7):
+        async for _ in c.iter_user_fills_by_time("u", 7, 7, audit=audit):
             pass
 
-    with pytest.raises(info.HyperliquidInfoError, match="minimum 1 ms window"):
+    with pytest.raises(info.HyperliquidInfoError, match="minimum 1 ms window") as raised:
         asyncio.run(collect())
+    assert audit["status"] == "PARTIAL"
+    assert raised.value.coverage_receipt["reason"] == "CAP_AT_MINIMUM_MILLISECOND"
+    assert raised.value.coverage_receipt["next_windows"] == [
+        {"start_ms": 7, "end_ms": 7}
+    ]
+    assert raised.value.coverage_receipt["subrequests"][0]["response_rows"] == cap
 
 
 def test_fill_iterator_reports_max_pages_as_incomplete(monkeypatch) -> None:
     c = info.HyperliquidInfoClient("https://x/info", client=Client([]))
     calls: list[tuple[int, int]] = []
+    audit: dict[str, object] = {}
 
     async def by_time(user, start_time, end_time, **kwargs):
         calls.append((start_time, end_time))
@@ -462,9 +492,55 @@ def test_fill_iterator_reports_max_pages_as_incomplete(monkeypatch) -> None:
     monkeypatch.setattr(c, "user_fills_by_time", by_time)
 
     async def collect() -> None:
-        async for _ in c.iter_user_fills_by_time("u", 1, 5, page_window_ms=2, max_pages=1):
+        async for _ in c.iter_user_fills_by_time(
+            "u", 1, 5, page_window_ms=2, max_pages=1, audit=audit
+        ):
             pass
 
-    with pytest.raises(info.HyperliquidInfoError, match="max_pages.*incomplete"):
+    with pytest.raises(info.HyperliquidInfoError, match="max_pages.*incomplete") as raised:
         asyncio.run(collect())
     assert calls == [(1, 3)]
+    assert raised.value.coverage_receipt["status"] == "PARTIAL"
+    assert raised.value.coverage_receipt["reason"] == "MAX_PAGES_REACHED"
+    assert raised.value.coverage_receipt["next_windows"] == [
+        {"start_ms": 4, "end_ms": 5}
+    ]
+    assert raised.value.coverage_receipt["subrequests"][0]["cursor_ms"] == 1
+    assert raised.value.coverage_receipt["subrequests"][0]["last_observed_boundary_ms"] == 1
+
+
+def test_fill_iterator_marks_10000_recent_fill_limit_as_censored(monkeypatch) -> None:
+    c = info.HyperliquidInfoClient("https://x/info", client=Client([]))
+    audit: dict[str, object] = {}
+    sequence = 0
+
+    async def by_time(user, start_time, end_time, **kwargs):
+        nonlocal sequence
+        count = 5 if start_time == 10 else 1_999
+        page = []
+        for _ in range(count):
+            page.append({"time": start_time, "tid": str(sequence)})
+            sequence += 1
+        return page
+
+    monkeypatch.setattr(c, "user_fills_by_time", by_time)
+
+    async def collect() -> None:
+        async for _ in c.iter_user_fills_by_time(
+            "u", 0, 11, page_window_ms=1, audit=audit
+        ):
+            pass
+
+    with pytest.raises(info.HyperliquidInfoError, match="history limit") as raised:
+        asyncio.run(collect())
+
+    receipt = raised.value.coverage_receipt
+    assert receipt["status"] == "PARTIAL"
+    assert receipt["reason"] == "PUBLIC_RETENTION_LIMIT_REACHED"
+    assert receipt["historical_censored"] is True
+    assert receipt["api_history_limit"] == 10_000
+    assert receipt["request_count"] == 6
+    assert receipt["received_count"] == receipt["accepted_count"] == 10_000
+    assert receipt["usable_horizon_start_ms"] == 0
+    assert receipt["usable_horizon_end_ms"] == 10
+    assert audit == receipt

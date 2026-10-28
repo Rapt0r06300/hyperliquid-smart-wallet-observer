@@ -16,12 +16,15 @@ Deux morceaux :
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
+import sys
 import threading
 import time
 
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 
 CONSUME_FLAG = "HYPERSMART_V26_LIVE_BOOK_COSTS"
@@ -40,14 +43,27 @@ _cache: dict[str, tuple[float, float, float]] = {}   # coin -> (spread_bps, slip
 _book_cache: dict[str, ExecutionTruth] = {}
 _started_lock = threading.Lock()
 _started = False
+_logger = logging.getLogger(__name__)
 
 
 def _f(name: str, env: dict | None = None) -> float:
     e = env if env is not None else os.environ
-    try:
-        return float(e.get(name, _DEF[name]) or _DEF[name])
-    except (TypeError, ValueError):
+    if name not in e:
         return float(_DEF[name])
+    try:
+        return float(e[name])
+    except (TypeError, ValueError, OverflowError):
+        return math.nan
+
+
+def _freshness_age_ms(env: dict | None = None) -> int | None:
+    freshness_s = _f(FRESH_ENV, env)
+    if not math.isfinite(freshness_s) or freshness_s < 0:
+        return None
+    freshness_ms = freshness_s * 1_000.0
+    if not math.isfinite(freshness_ms) or freshness_ms > (2**63 - 1):
+        return None
+    return int(freshness_ms)
 
 
 def _on(flag: str, env: dict | None = None) -> bool:
@@ -85,43 +101,72 @@ def compute_book_costs(
     ``hl_observer/arbitrage/executable_legs.py``. Cette fonction-ci reste le raccourci
     « spread + slippage à l'achat » du chemin de coûts.
     """
+    return compute_book_costs_with_reason(levels_bid, levels_ask, notional_usd)[0]
+
+
+def compute_book_costs_with_reason(
+    levels_bid: list[tuple[float, float]],
+    levels_ask: list[tuple[float, float]],
+    notional_usd: float,
+) -> tuple[tuple[float, float] | None, str | None]:
+    """Compute walk-the-book costs with a stable fail-closed refusal category."""
+
     try:
         if not levels_bid or not levels_ask:
-            return None
+            return None, "INVALID_BOOK"
         best_bid, best_ask = float(levels_bid[0][0]), float(levels_ask[0][0])
-        if best_bid <= 0 or best_ask <= 0 or best_ask < best_bid:
-            return None
-        mid = (best_bid + best_ask) / 2.0
-        spread_bps = (best_ask - best_bid) / mid * 10_000.0
-
         cible = float(notional_usd)
-        if not (cible > 0.0):
-            return None
+    except (TypeError, ValueError, OverflowError, IndexError):
+        return None, "INVALID_BOOK"
+    if not math.isfinite(best_bid) or not math.isfinite(best_ask):
+        return None, "INVALID_BOOK"
+    if best_bid <= 0.0 or best_ask <= 0.0 or best_ask < best_bid:
+        return None, "INVALID_BOOK"
+    if not math.isfinite(cible) or cible <= 0.0:
+        return None, "INVALID_NOTIONAL"
 
-        # walk-the-book : quantité acquise niveau par niveau pour le notionnel visé
-        qty = 0.0
-        remain_usd2 = cible
-        for px, sz in levels_ask:
-            px, sz = float(px), float(sz)
-            if px <= 0.0 or sz <= 0.0:
-                continue
-            take_usd = min(remain_usd2, px * sz)
-            qty += take_usd / px
-            remain_usd2 -= take_usd
-            if remain_usd2 <= 1e-12:
+    mid = best_bid / 2.0 + best_ask / 2.0
+    if not math.isfinite(mid) or mid <= 0.0:
+        return None, "NUMERIC_OVERFLOW"
+    spread_bps = (best_ask - best_bid) / mid * 10_000.0
+    if not math.isfinite(spread_bps) or spread_bps < 0.0:
+        return None, "NUMERIC_OVERFLOW"
+
+    qty = 0.0
+    remaining = cible
+    try:
+        for raw_px, raw_sz in levels_ask:
+            px, sz = float(raw_px), float(raw_sz)
+            if not math.isfinite(px) or not math.isfinite(sz) or px <= 0.0 or sz <= 0.0:
+                return None, "INVALID_BOOK"
+            available_notional = px * sz
+            if not math.isfinite(available_notional) or available_notional <= 0.0:
+                return None, "NUMERIC_OVERFLOW"
+            take_notional = min(remaining, available_notional)
+            taken_quantity = take_notional / px
+            qty += taken_quantity
+            remaining -= take_notional
+            if not all(math.isfinite(value) for value in (take_notional, taken_quantity, qty, remaining)):
+                return None, "NUMERIC_OVERFLOW"
+            if remaining <= 1e-12:
                 break
+    except (TypeError, ValueError, OverflowError):
+        return None, "INVALID_BOOK"
 
-        if remain_usd2 > 1e-9:
-            # Le carnet VISIBLE ne peut pas absorber ce notionnel. On ne l'invente pas.
-            return None
-        if qty <= 0.0:
-            return None
-
-        avg_px = cible / qty
-        slip_bps = max(0.0, (avg_px - best_ask) / best_ask * 10_000.0)
-        return round(spread_bps, 4), round(slip_bps, 4)
-    except Exception:
-        return None
+    if remaining > 1e-9:
+        return None, "INSUFFICIENT_DEPTH"
+    if qty <= 0.0:
+        return None, "NUMERIC_OVERFLOW"
+    average_price = cible / qty
+    if not math.isfinite(average_price) or average_price <= 0.0:
+        return None, "NUMERIC_OVERFLOW"
+    slip_bps = max(0.0, (average_price - best_ask) / best_ask * 10_000.0)
+    if not math.isfinite(slip_bps):
+        return None, "NUMERIC_OVERFLOW"
+    costs = (round(spread_bps, 4), round(slip_bps, 4))
+    if not all(math.isfinite(value) for value in costs):
+        return None, "NUMERIC_OVERFLOW"
+    return costs, None
 
 
 def push_costs(coin: str, spread_bps: float, slip_bps: float, ts: float | None = None) -> None:
@@ -138,7 +183,7 @@ def push_book(
     asks: list[tuple[float, float]] | tuple[tuple[float, float], ...],
     *,
     received_ts_ms: int,
-    exchange_ts_ms: int | None = None,
+    exchange_ts_ms: object = None,
     source: str = "hyperliquid:/info:l2Book",
 ) -> ExecutionTruth:
     """Store the full causal L2 snapshot used by strict paper execution."""
@@ -153,6 +198,8 @@ def push_book(
     )
     with _lock:
         _book_cache[truth.coin] = truth
+        # Scalar costs are only meaningful for the exact book they summarize.
+        _cache.pop(truth.coin, None)
     return truth
 
 
@@ -166,8 +213,26 @@ def live_costs_for(coin: str, env: dict | None = None, now: float | None = None)
     if entry is None:
         return None
     spread, slip, ts = entry
-    t = float(now) if now is not None else time.time()
-    if t - ts > _f(FRESH_ENV, env):
+    max_age_ms = _freshness_age_ms(env)
+    if max_age_ms is None:
+        return None
+    try:
+        t = float(now) if now is not None else time.time()
+    except (TypeError, ValueError, OverflowError):
+        return None
+    age_s = t - ts
+    freshness_s = max_age_ms / 1_000.0
+    if (
+        not math.isfinite(t)
+        or not math.isfinite(ts)
+        or not math.isfinite(spread)
+        or not math.isfinite(slip)
+        or spread < 0.0
+        or slip < 0.0
+        or not math.isfinite(age_s)
+        or age_s < 0.0
+        or age_s > freshness_s
+    ):
         return None  # périmé -> constantes V25 (jamais de coût vieux)
     return spread, slip
 
@@ -188,10 +253,40 @@ def live_execution_truth_for(
         truth = _book_cache.get(key)
     if truth is None:
         return None
-    max_age_ms = int(max(0.0, _f(FRESH_ENV, env)) * 1_000)
-    if not truth.is_fresh(decision_ts_ms=int(decision_ts_ms), max_age_ms=max_age_ms):
+    max_age_ms = _freshness_age_ms(env)
+    if max_age_ms is None:
+        return None
+    if truth.timestamp_refusal_reason(
+        decision_ts_ms=decision_ts_ms,
+        max_age_ms=max_age_ms,
+    ) is not None:
         return None
     return truth
+
+
+def live_execution_truth_refusal_for(
+    coin: str,
+    *,
+    decision_ts_ms: int,
+    env: dict | None = None,
+    require_consume_flag: bool = True,
+) -> str | None:
+    """Explain why a cached book cannot support a strict paper execution."""
+
+    if require_consume_flag and not _on(CONSUME_FLAG, env):
+        return "LIVE_BOOK_CONSUMPTION_DISABLED"
+    key = preserve_native_instrument_symbol(coin)
+    with _lock:
+        truth = _book_cache.get(key)
+    if truth is None:
+        return "NO_LIVE_EXECUTABLE_BOOK"
+    max_age_ms = _freshness_age_ms(env)
+    if max_age_ms is None:
+        return "INVALID_L2_FRESHNESS_CONFIG"
+    return truth.timestamp_refusal_reason(
+        decision_ts_ms=decision_ts_ms,
+        max_age_ms=max_age_ms,
+    )
 
 
 def parse_l2book(payload: object) -> tuple[list[tuple[float, float]], list[tuple[float, float]]] | None:
@@ -232,21 +327,30 @@ def poll_once(coins: list[str], *, opener=None, env: dict | None = None) -> int:
                 continue
             received_ts_ms = int(time.time() * 1_000)
             raw_exchange_ts = decoded.get("time") if isinstance(decoded, dict) else None
-            try:
-                exchange_ts_ms = int(raw_exchange_ts) if raw_exchange_ts is not None else None
-            except (TypeError, ValueError, OverflowError):
-                exchange_ts_ms = None
-            push_book(
+            truth = push_book(
                 coin,
                 parsed[0],
                 parsed[1],
                 received_ts_ms=received_ts_ms,
-                exchange_ts_ms=exchange_ts_ms,
+                exchange_ts_ms=raw_exchange_ts,
                 source=f"hyperliquid:/info:l2Book:{target}",
             )
-            costs = compute_book_costs(parsed[0], parsed[1], notional)
-            if costs is not None:
-                push_costs(coin, costs[0], costs[1], ts=received_ts_ms / 1_000.0)
+            key = preserve_native_instrument_symbol(coin)
+            if truth is not None and truth.timestamp_refusal_reason(
+                decision_ts_ms=received_ts_ms,
+            ) is None:
+                costs = compute_book_costs(parsed[0], parsed[1], notional)
+                with _lock:
+                    # Do not publish costs if a newer concurrent poll replaced the book.
+                    if _book_cache.get(key) is truth and costs is not None:
+                        _cache[key] = (
+                            costs[0], costs[1], received_ts_ms / 1_000.0
+                        )
+            else:
+                # A cost derived from a temporally invalid book is not usable.
+                with _lock:
+                    if _book_cache.get(key) is truth:
+                        _cache.pop(key, None)
             # ENREGISTREMENT (audit PnL 2026-07-11, opt-in HYPERSMART_RECORD_MICROSTRUCTURE=1).
             # Ce poller recuperait DEJA le carnet complet et le JETAIT apres en avoir tire deux
             # chiffres. Or le carnet est la seule donnee qui permette de tester les strategies
@@ -350,7 +454,7 @@ def coins_a_sonder(*, limit: int, universe=None, recorder=None, env: dict | None
     return sortie[:lim]
 
 
-def _loop(interval_s: float) -> None:  # pragma: no cover — boucle démon runtime
+def _loop(interval_s: float, max_coins: int) -> None:  # pragma: no cover — boucle démon runtime
     while True:
         try:
             # BUG CORRIGE 2026-07-11 -- CETTE LISTE ETAIT TOUJOURS VIDE.
@@ -361,8 +465,7 @@ def _loop(interval_s: float) -> None:  # pragma: no cover — boucle démon runt
             from hl_observer.collection import coin_universe as _cu
             from hl_observer.signals.v26_entry_vetos import DEFAULT_EDGE_TREND_RECORDER
 
-            _limite = int(_f(MAX_COINS_ENV))
-            coins = coins_a_sonder(limit=_limite, universe=_cu, recorder=DEFAULT_EDGE_TREND_RECORDER)
+            coins = coins_a_sonder(limit=max_coins, universe=_cu, recorder=DEFAULT_EDGE_TREND_RECORDER)
             if coins:
                 poll_once(coins)
         except Exception:
@@ -370,15 +473,45 @@ def _loop(interval_s: float) -> None:  # pragma: no cover — boucle démon runt
         time.sleep(max(10.0, interval_s))
 
 
+def _poller_config_refusal(env: dict | None = None) -> str | None:
+    interval_s = _f(INTERVAL_ENV, env)
+    if (
+        not math.isfinite(interval_s)
+        or interval_s <= 0.0
+        or interval_s > threading.TIMEOUT_MAX
+    ):
+        return "INVALID_L2_POLL_INTERVAL"
+    max_coins_value = _f(MAX_COINS_ENV, env)
+    if (
+        not math.isfinite(max_coins_value)
+        or max_coins_value < 1.0
+        or not max_coins_value.is_integer()
+        or max_coins_value > sys.maxsize
+    ):
+        return "INVALID_L2_POLL_MAX_COINS"
+    return None
+
+
 def ensure_started(env: dict | None = None) -> bool:
     """Démarre le poller carnet UNE fois si opt-in. Sinon no-op (aucun réseau)."""
     global _started
     if not _on(POLLER_FLAG, env):
         return False
+    refusal = _poller_config_refusal(env)
+    if refusal is not None:
+        _logger.warning("L2 poller startup refused: %s", refusal)
+        return False
+    interval_s = _f(INTERVAL_ENV, env)
+    max_coins_value = _f(MAX_COINS_ENV, env)
     with _started_lock:
         if _started:
             return True
-        t = threading.Thread(target=_loop, args=(_f(INTERVAL_ENV, env),), daemon=True, name="v26-book-poller")
+        t = threading.Thread(
+            target=_loop,
+            args=(interval_s, int(max_coins_value)),
+            daemon=True,
+            name="v26-book-poller",
+        )
         t.start()
         _started = True
         return True
@@ -391,8 +524,8 @@ def clear() -> None:
 
 
 __all__ = [
-    "CONSUME_FLAG", "POLLER_FLAG", "compute_book_costs", "push_costs",
-    "live_costs_for", "live_execution_truth_for", "push_book",
+    "CONSUME_FLAG", "POLLER_FLAG", "compute_book_costs", "compute_book_costs_with_reason", "push_costs",
+    "live_costs_for", "live_execution_truth_for", "live_execution_truth_refusal_for", "push_book",
     "parse_l2book", "poll_once", "ensure_started", "clear",
     "coins_a_sonder", "DEFAUT_COINS", "DEFAUT_COINS_ENV", "BALAYAGE_FLAG",
 ]

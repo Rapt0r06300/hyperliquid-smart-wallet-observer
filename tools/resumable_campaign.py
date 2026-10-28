@@ -12,6 +12,7 @@ from pathlib import Path
 
 from hl_observer.control_plane.resumable_campaign import (
     ANALYSIS_STAGE_BY_KIND,
+    SCHEMA_VERSION_V1,
     CampaignManifest,
     acquire_lease,
     complete_work_unit,
@@ -31,6 +32,8 @@ def load(path: str | Path) -> CampaignManifest:
 
 
 def save(path: str | Path, manifest: CampaignManifest, expected: str | None = None) -> None:
+    if manifest.schema_version == SCHEMA_VERSION_V1:
+        raise ValueError("V1 manifest is immutable; historical evidence is read-only")
     target = Path(path)
     if target.exists() and expected:
         # The optimistic-concurrency token is the exact on-disk JSON digest.
@@ -184,6 +187,9 @@ def main() -> int:
         raw = json.loads(path.read_text(encoding="utf-8"))
         print(sha256_json(raw))
         return 0
+
+    if manifest.schema_version == SCHEMA_VERSION_V1:
+        raise SystemExit("V1 manifest is immutable; historical evidence is read-only")
 
     if args.command in {"start", "acquire-lease"}:
         token = acquire_lease(manifest, args.owner or "manual", max(60, int(args.ttl_s)), expected_phase=args.expected_phase, expected_epoch=args.expected_epoch)

@@ -1,11 +1,9 @@
-"""FULL/COLD adapter around the canonical economic campaign runner.
+"""Copy-Vault-only FULL/COLD adapter around the canonical campaign runner.
 
-The canonical economic strategies stay untouched. This wrapper is used only
-for materialized dataset workspaces: it supplies deterministic multi-source
-views for Copy-Vault/Cross-Venue, lets Lead-Lag consume its manifest sources,
-and replaces canonical-only provenance with provenance of all original files.
-No canonical module global is monkeypatched: run_campaigns executes with an
-isolated copy of its globals containing the explicit adapters.
+The wrapper supplies Copy-Vault's deterministic multi-source inputs and
+provenance. Lead-Lag and Cross-Venue remain disabled; their strategy loaders
+are not installed or invoked. The canonical function runs with isolated
+globals so dataset paths never leak into the code checkout.
 """
 from __future__ import annotations
 
@@ -24,13 +22,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from hl_observer.backtesting.copy_vault_v21_frozen import SCHEMA_VERSION as COPY_V21_EVALUATION_SCHEMA  # noqa: E402
 from hl_observer.backtesting.copy_vault_v21_frozen import evaluate_frozen_v21  # noqa: E402
 from hl_observer.backtesting.economic_vnext_pack import run_economic_vnext_pack  # noqa: E402
-from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
-    DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
-    diagnose_causal_book_coverage,
-)
 from hl_observer.datasets.economic_multi_source import (  # noqa: E402
     install_copy_vault_adapter,
-    install_cross_venue_adapter,
     write_economic_source_coverage,
 )
 from hl_observer.datasets.source_discovery import (  # noqa: E402
@@ -58,6 +51,7 @@ def _unique_paths(values: Iterable[Path]) -> list[Path]:
 
 
 def _copy_original_sources(root: Path) -> list[Path]:
+    """Return Copy-Vault data plus its shared Hyperliquid book-side source."""
     copy = load_family_source_paths(root, "copy_vault")
     shared_books = [
         path
@@ -65,10 +59,6 @@ def _copy_original_sources(root: Path) -> list[Path]:
         if path.name.casefold() == "carnet_venues.jsonl"
     ]
     return _unique_paths([*copy, *shared_books])
-
-
-def _cross_original_sources(root: Path) -> list[Path]:
-    return _unique_paths(load_family_source_paths(root, "cross_venue"))
 
 
 def _looks_like_copy_provenance(paths: Iterable[str | Path]) -> bool:
@@ -83,11 +73,6 @@ def _looks_like_copy_provenance(paths: Iterable[str | Path]) -> bool:
             "copy_vault_l2_tape.jsonl",
         }
     )
-
-
-def _looks_like_cross_provenance(paths: Iterable[str | Path]) -> bool:
-    names = {Path(value).name.casefold() for value in paths}
-    return names == {"carnet_venues.jsonl"}
 
 
 def _isolated_run_campaigns(
@@ -115,92 +100,6 @@ def _isolated_run_campaigns(
     return isolated
 
 
-def _lead_lag_diagnostic_overrides(canonical) -> dict[str, object]:
-    """Route every FULL/COLD Lead-Lag causal verdict through canonical v4.
-
-    The canonical queue replay still detects/trades only its frozen 20-bps
-    economic shocks. The 8-bps sample expands *diagnostic* event windows only.
-    Crucially, campaign, replay and runner audit all consume the same v4
-    classifier, including event-local counter deltas and loader-incomplete
-    evidence. No alternative gap classifier remains active in this path.
-    """
-
-    original_detect = canonical.detect_rolling_shocks
-    original_loader = canonical.load_market_microstructure_event_windows
-    original_replay = canonical.replay_lead_lag_queue_maker
-    state: dict[str, object] = {
-        "diagnostic_shocks": [],
-        "microstructure_meta": {},
-    }
-
-    def economic_detect_with_diagnostic_capture(trades, *args, **kwargs):
-        economic = original_detect(trades, *args, **kwargs)
-        diagnostic_kwargs = dict(kwargs)
-        diagnostic_kwargs["threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
-        state["diagnostic_shocks"] = original_detect(trades, *args, **diagnostic_kwargs)
-        return economic
-
-    def loader_with_diagnostic_windows(root, event_ts_ms, **kwargs):
-        economic_events = [int(value) for value in event_ts_ms]
-        diagnostic_shocks = list(state.get("diagnostic_shocks") or [])
-        diagnostic_events = [
-            int(row["trigger_ts_ms"])
-            for row in diagnostic_shocks
-            if isinstance(row, dict) and row.get("trigger_ts_ms") is not None
-        ]
-        merged_events = sorted(set([*economic_events, *diagnostic_events]))
-        books, trades, meta = original_loader(root, merged_events, **kwargs)
-        meta = dict(meta)
-        meta["economic_event_count_requested"] = len(economic_events)
-        meta["diagnostic_event_count_8bps"] = len(diagnostic_events)
-        meta["diagnostic_shock_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
-        meta["diagnostic_only_expansion"] = True
-        meta["economic_parameters_changed"] = False
-        state["microstructure_meta"] = meta
-        return books, trades, meta
-
-    def canonical_causal_diagnostic(shocks, l2_history, **kwargs):
-        max_delay = int(kwargs.get("max_book_delay_ms") or 750)
-        return diagnose_causal_book_coverage(
-            list(shocks),
-            l2_history,
-            dict(state.get("microstructure_meta") or {}),
-            max_book_delay_ms=max_delay,
-        )
-
-    def replay_with_canonical_diagnostic(tape, l2_history, public_trade_history, **kwargs):
-        replay = original_replay(tape, l2_history, public_trade_history, **kwargs)
-        diagnostic_shocks = list(state.get("diagnostic_shocks") or [])
-        replay = dict(replay)
-        replay["causal_gap_diagnostic"] = canonical_causal_diagnostic(
-            diagnostic_shocks,
-            l2_history,
-            max_book_delay_ms=int(
-                (replay.get("parameters") or {}).get("max_book_delay_ms") or 750
-            ),
-        )
-        replay["causal_gap_diagnostic"]["economic_shock_threshold_bps"] = (
-            replay.get("parameters") or {}
-        ).get("shock_threshold_bps")
-        replay["causal_gap_diagnostic"]["economic_shocks_seen"] = replay.get(
-            "strong_shocks_seen"
-        )
-        replay["causal_gap_diagnostic"]["diagnostic_shocks_seen"] = len(
-            diagnostic_shocks
-        )
-        replay["causal_gap_diagnostic"]["strategy_parameters_changed"] = False
-        replay["causal_gap_diagnostic"]["paper_read_only"] = True
-        replay["causal_gap_diagnostic"]["real_execution"] = False
-        return replay
-
-    return {
-        "detect_rolling_shocks": economic_detect_with_diagnostic_capture,
-        "load_market_microstructure_event_windows": loader_with_diagnostic_windows,
-        "diagnose_causal_book_availability": canonical_causal_diagnostic,
-        "replay_lead_lag_queue_maker": replay_with_canonical_diagnostic,
-    }
-
-
 def run_dataset_campaigns(
     data_root: Path,
     *,
@@ -224,9 +123,6 @@ def run_dataset_campaigns(
     canonical.assert_execution_disabled()
 
     copy_sources = _copy_original_sources(data_root)
-    cross_sources = _cross_original_sources(data_root)
-    lead_sources = _unique_paths(load_family_source_paths(data_root, "lead_lag"))
-
     original_tool_loader = canonical._tool
     adapter_state: dict[str, object] = {}
     runtime_tools: dict[str, object] = {}
@@ -240,11 +136,6 @@ def run_dataset_campaigns(
                 copy_tool=tool,
                 copy_executable=canonical.copy_vault_executable,
             )
-        elif name == "hypersmart_cross_campaign":
-            adapter_state["cross_venue"] = install_cross_venue_adapter(
-                data_root,
-                cross_tool=tool,
-            )
         return tool
 
     original_provenance = canonical.dataset_provenance
@@ -254,24 +145,16 @@ def run_dataset_campaigns(
         resolved = Path(root_value).resolve()
         if resolved == data_root and _looks_like_copy_provenance(values):
             return original_provenance(data_root, copy_sources)
-        if resolved == data_root and _looks_like_cross_provenance(values):
-            return original_provenance(data_root, cross_sources)
         return original_provenance(root_value, values)
 
     isolated_run = _isolated_run_campaigns(
         canonical,
         tool_loader=dataset_tool_loader,
         provenance_builder=dataset_provenance,
-        overrides=_lead_lag_diagnostic_overrides(canonical),
     )
     result = isolated_run(
         data_root,
-        cross_budget_s=cross_budget_s,
-        cross_current_only=cross_current_only,
-        lead_history_sources=lead_history_sources,
         start_collection=False,
-        collection_duration_s=collection_duration_s,
-        collection_startup_wait_s=collection_startup_wait_s,
     )
     # Strong postcondition: the canonical loaded module was never changed.
     if canonical._tool is not original_tool_loader or canonical.dataset_provenance is not original_provenance:
@@ -280,13 +163,13 @@ def run_dataset_campaigns(
     coverage_json, coverage_md, coverage = write_economic_source_coverage(
         data_root,
         copy_consumed=copy_sources,
-        lead_consumed=lead_sources,
-        cross_consumed=cross_sources,
+        lead_consumed=[],
+        cross_consumed=[],
     )
     # vNext research is intentionally downstream of the canonical campaign.
     # It can only propose a later freeze and cannot alter the just-computed
     # canonical verdicts or scoreboards.
-    vnext_research = run_economic_vnext_pack(data_root, lead_sources=lead_sources)
+    vnext_research = run_economic_vnext_pack(data_root, lead_sources=[])
 
     copy_v21: dict[str, Any] = {
         "schema_version": COPY_V21_EVALUATION_SCHEMA,
@@ -296,7 +179,6 @@ def run_dataset_campaigns(
         "economically_proven": False,
         "paper_read_only": True,
         "real_execution": False,
-        "carry_pnl_usd": 0.0,
     }
     copy_tool = runtime_tools.get("copy_vault")
     freeze_path = ROOT / "runtime" / "codex_research" / "COPY_V21_PHYSICAL_FREEZE.json"
@@ -379,9 +261,17 @@ def run_dataset_campaigns(
     result["paper_read_only"] = True
     result["real_execution"] = False
     result["canonical_globals_mutated"] = False
-    result["lead_lag_diagnostic_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
-    result["lead_lag_economic_parameters_changed"] = False
-    result["lead_lag_causal_diagnostic_schema"] = "hypersmart.lead_lag_causal_book_coverage.v4"
+    result["disabled_families"] = {
+        "lead_lag": "DISABLED_BY_SCOPE",
+        "cross_venue_dislocation": "DISABLED_BY_SCOPE",
+    }
+    result["ignored_legacy_family_options"] = {
+        "cross_budget_s": cross_budget_s,
+        "cross_current_only": cross_current_only,
+        "lead_history_sources": lead_history_sources,
+        "collection_duration_s": collection_duration_s,
+        "collection_startup_wait_s": collection_startup_wait_s,
+    }
     return result
 
 

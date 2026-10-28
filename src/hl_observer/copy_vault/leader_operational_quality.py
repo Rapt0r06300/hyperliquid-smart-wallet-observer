@@ -1,10 +1,12 @@
-"""[COPY-VAULT lot2 #64] LEADER OPERATIONAL-QUALITY SCORE : les erreurs, reconnects, états incohérents, cadence
-extrême et données absentes d'un leader deviennent une PÉNALITÉ DISTINCTE de son PnL. Un leader très rentable mais
-opérationnellement chaotique (qu'on réplique mal) n'est pas un bon leader à copier ; ce score sépare « bon trader »
-de « bon à copier ». Score [0,1]. Pur, 0 réseau, 0 ordre réel.
+"""[COPY-VAULT lot2 #64] LEADER OPERATIONAL-QUALITY SCORE.
+
+Les erreurs, reconnects, états incohérents, cadence extrême et données absentes deviennent une pénalité
+distincte du PnL. Un leader très rentable mais opérationnellement chaotique (qu'on réplique mal) n'est
+pas un bon leader à copier. Score [0,1]. Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -13,7 +15,13 @@ def score(*, erreurs: Any = 0, reconnects: Any = 0, etats_incoherents: Any = 0,
     """Part de 1.0 et retranche pour chaque catégorie de défaut opérationnel. Valeurs invalides comptent comme
     défaut (score plus bas, jamais gonflé). Indépendant du PnL."""
     def _n(x: Any) -> int:
-        return int(x) if isinstance(x, (int, float)) and x >= 0 else 1
+        if isinstance(x, bool):
+            return 1
+        if isinstance(x, int):
+            return x if x >= 0 else 1
+        if isinstance(x, float) and math.isfinite(x) and x >= 0 and x.is_integer():
+            return int(x)
+        return 1
 
     s = 1.0
     penalites = {}

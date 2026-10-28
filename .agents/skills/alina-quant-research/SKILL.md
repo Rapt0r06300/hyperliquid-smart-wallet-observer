@@ -1,9 +1,9 @@
 ---
 name: alina-quant-research
-description: Use for Alina SmartFlow quantitative edge discovery, backtests, tuning, falsification, OOS/forward validation, and certification of copy_vault, lead_lag, or cross_venue_dislocation_v2.
+description: Use for Alina SmartFlow Copy-Vault-only quantitative discovery, backtests, tuning, falsification, OOS/forward validation, and certification.
 ---
 
-# Alina Quant Research — Discovery V3.2
+# Alina Quant Research — Copy-Vault Discovery V3.2
 
 ## Start / resume
 
@@ -18,14 +18,22 @@ One LLM controller; no LLM subagents inside an economic Discovery campaign. The 
 
 Preferred cadence: `1 model decision -> large local batch -> compact summary -> 1 model decision`.
 
-## DISCOVERY
+## DISCOVERY — Copy-Vault only
 
 Enter on a fresh family cycle, `needs-rediscovery`, PIVOT, or champion-challenger event. Read `references/discovery-v32.md` only then.
 
 Default 12 structurally distinct hypotheses; hard minimum 8; target >=5 mechanism archetypes. `PARAMETER_ONLY` changes do not count as new hypotheses.
 
+Only `copy_vault` is an executable economic family. Lead-Lag, Cross-Venue,
+arbitrage, carry/funding and shadow/research-only families remain readable as
+historical evidence, but must not be generated, tuned, replayed, certified or
+promoted. The central machine scope in
+`src/hl_observer/strategies/active_scope.py` is authoritative; environment
+variables cannot widen it. Fail closed if a tool or stale status requests a
+disabled family.
+
 Before spending model turns enumerating combinations, use:
-`python tools/codex_semantic_discovery.py --family <family> --pool-size 2000 --shortlist 12`.
+`python tools/codex_semantic_discovery.py --family copy_vault --pool-size 2000 --shortlist 12`.
 
 The semantic engine expands locally, rejects invalid combinations, filters exact/near duplicates and high-confidence process-memory vetoes, applies bounded positive priors, scores research priority, and returns only a diverse shortlist. Search score is not economic proof.
 
@@ -54,6 +62,13 @@ High-confidence negative memory may veto only a sufficiently equivalent mechanis
 
 All tried variants count toward search pressure. Search/feedback evidence is disjoint from final held-out proof. OOS/forward observed then used to retune becomes exploratory; refreeze and collect new disjoint proof.
 
-Final target remains >= +4.00 USD NET/day **for each canonical family separately**, with exact-HEAD machine gates, costs, liquidatability, closed positions, provenance, no-lookahead and strict post-freeze forward. `python tools/run_daily_economic_certification.py .` is final authority.
+The terminal economic target is >= +5.00 USD NET/day for Copy-Vault on 200 USD
+paper capital. Treat it only as the final objective after the collectors,
+SAFE data path, replay/backtest engine, execution-cost model, OOS and forward
+paper proof are technically sound. It is a target, never a threshold to force
+or a claim that profit is guaranteed. A positive TRAIN result alone is not
+proof. Use exact-HEAD gates, costs, liquidatability, closed positions,
+provenance, no-lookahead and strict post-freeze forward. `python
+tools/run_daily_economic_certification.py .` is the final authority.
 
 Never route/sign/submit exchange orders, handle keys, deposits or withdrawals. Paper/read-only only; fail closed.

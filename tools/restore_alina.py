@@ -30,8 +30,10 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections import deque
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Iterator, Mapping, TypeVar
+from typing import Any, TypeVar
 
 try:
     from tools.partitioned_data_index import select_index_rows
@@ -69,10 +71,8 @@ def _bounded_parallel_map(
                 break
         while pending:
             yield pending.popleft().result()
-            try:
+            with suppress(StopIteration):
                 pending.append(executor.submit(function, next(iterator)))
-            except StopIteration:
-                pass
 
 
 def _safe_component(value: str) -> str:
@@ -1812,7 +1812,7 @@ def _prune_verified_unselected_assets(
 def _staged_asset_receipt_path(
     destination: Path, tag: str, name: str,
 ) -> Path:
-    identity = hashlib.sha256(f"{tag}\0{name}".encode("utf-8")).hexdigest()
+    identity = hashlib.sha256(f"{tag}\0{name}".encode()).hexdigest()
     return destination / "control" / "staged_assets" / f"{identity}.json"
 
 
@@ -3843,7 +3843,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--max-download-gib", type=int, default=8,
-        help="hard cap in GiB on missing Release bytes transferred; default 8 GiB; "
+        help="hard cap in GiB on missing Release bytes transferred; "
+             "default %(default)s GiB; "
              "0 means no new payload transfer",
     )
     parser.add_argument(

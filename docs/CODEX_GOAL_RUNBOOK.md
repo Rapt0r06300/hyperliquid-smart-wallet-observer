@@ -1,4 +1,4 @@
-# Codex Goal Runbook — Alina SmartFlow Discovery V3.2
+# Codex Goal Runbook — Alina SmartFlow Copy-Vault Discovery V3.2
 
 Ce runbook est **lazy-load**. `AGENTS.md` route d'abord vers le context pack ; ne lire ce document que pour une vraie décision de recherche. Codex reste **un seul agent LLM** : **aucun sous-agent** IA dans une campagne économique.
 
@@ -24,12 +24,17 @@ Pas de scan de l'historique Git complet, pas de scan des 775 optimisations scell
 
 ## 2. Mission et preuve machine
 
-Même SHA certifié de `main`, sans compensation :
-- `copy_vault >= +4.00 USD NET/jour PROUVÉS` ;
-- `lead_lag >= +4.00 USD NET/jour PROUVÉS` ;
-- `cross_venue_dislocation_v2 >= +4.00 USD NET/jour PROUVÉS`.
+Famille économique active unique : `copy_vault`. Les anciens résultats
+Lead-Lag/Cross-Venue restent consultables pour provenance, mais ne reçoivent
+aucun budget de recherche, replay économique, sélection ou promotion.
 
-Suivre les gates du HEAD exact. Le contrat courant demande notamment **2 jours UTC complets**, couverture >= **0.99**, coûts complets, forward strict post-freeze et certification finale `python tools/run_daily_economic_certification.py .`.
+L'objectif terminal est **>= +5.00 USD NET/jour sur 200 USD paper** pour
+Copy-Vault, uniquement après les réparations techniques et la preuve OOS /
+forward-paper requise. C'est une cible de mesure, jamais une promesse ni une
+raison de modifier les gates. Suivre les critères du HEAD exact, les coûts
+complets, la causalité, **2 jours UTC complets**, une couverture >= **0.99**,
+le forward strict post-freeze et les exigences de certification finale de
+`python tools/run_daily_economic_certification.py .`.
 
 ## 3. Mémoire V3.2
 
@@ -42,7 +47,9 @@ Historique stable non certifiant : `docs/quant/HISTORICAL_EXPERIMENT_MEMORY.json
 Commandes V3.1 conservées : `codex_hypothesis_ledger.py register|score|status|needs-rediscovery|needs-challenger`.
 La mémoire négative haute confiance peut veto un mécanisme+contexte équivalent après échecs répétés ; un **retest** reste permis avec donnée/surface nouvelle, changement causal matériel ou contradiction fraîche. La mémoire positive est un petit prior borné, jamais une preuve.
 
-Lead-Lag maker/taker/streaming, Cross-Venue V5 et les lignées Copy-Vault déjà présentes au HEAD sont des baselines existantes, pas de la nouveauté automatique.
+Lead-Lag maker/taker/streaming et Cross-Venue V5 sont des preuves/code
+historiques désactivés. Les lignées Copy-Vault déjà présentes au HEAD sont des
+baselines, pas de la nouveauté automatique.
 
 ## 4. DISCOVERY V3.2
 
@@ -51,7 +58,7 @@ Charger `$alina-quant-research` et `references/discovery-v32.md` seulement à l'
 Pool modèle : 12 hypothèses structurellement distinctes par défaut, minimum 8, >=5 archétypes. Un seuil/fenêtre/seed seul = `PARAMETER_ONLY`, pas une nouvelle hypothèse.
 
 Avant d'utiliser un tour modèle pour inventer toutes les combinaisons, lancer le moteur local :
-`python tools/codex_semantic_discovery.py --family <family> --pool-size 2000 --shortlist 12`
+`python tools/codex_semantic_discovery.py --family copy_vault --pool-size 2000 --shortlist 12`
 
 Il peut étendre le pool jusqu'à 1 000-20 000 combinaisons CPU si utile, filtrer invalides, doublons/near-doublons et veto mémoire, scorer nouveauté/undercoverage/faisabilité/coût de falsification/headroom, puis n'exposer que la shortlist au modèle. Le score est une priorité de recherche, **jamais** une certification économique.
 
@@ -80,4 +87,7 @@ Tous les essais comptent. OOS/forward observé puis utilisé pour retuner = feed
 
 Ne jamais baisser une gate, ignorer un test ou transformer `None` en 0 pour fabriquer du vert. Si seul le temps/nouvelles données manque, laisser les collecteurs locaux nécessaires tourner et arrêter les tours modèle inutiles.
 
-DONE économique uniquement quand `python tools/run_daily_economic_certification.py .` certifie séparément les trois familles sur le même SHA, avec toutes les gates du HEAD vertes.
+DONE économique uniquement quand `python tools/run_daily_economic_certification.py .`
+certifie Copy-Vault sur le SHA exact avec toutes les gates applicables au HEAD
+vertes. Les familles désactivées ne sont pas requises pour la certification et
+ne peuvent pas compenser ou promouvoir un résultat Copy-Vault.

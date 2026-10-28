@@ -100,3 +100,31 @@ def test_copy_trade_exactly_on_freeze_boundary_never_counts_as_forward():
     assert campaign["oos"]["sample_count"] == 1
     assert campaign["forward"]["sample_count"] == 0
     assert campaign["forward"]["post_freeze"] is False
+
+
+def test_physical_oos_sum_cannot_round_up_across_economic_threshold():
+    campaign = build_strict_copy_campaign(
+        _report(
+            trades=[
+                {"ts_ms": 999, "pnl_usd": 4.999999999},
+                {"ts_ms": 1_001, "pnl_usd": 0.0},
+            ]
+        ),
+        freeze=_freeze(),
+        datasets={"files": []},
+    )
+
+    assert campaign["physical_forward_proof_complete"] is True
+    assert campaign["oos"]["net_pnl_usd"] < 5.0
+    assert campaign["oos"]["net_pnl_usd_exact_decimal"] == "4.999999999"
+
+
+def test_physical_oos_rejects_boolean_and_infinite_pnl():
+    for invalid in (True, float("inf")):
+        campaign = build_strict_copy_campaign(
+            _report(trades=[{"ts_ms": 999, "pnl_usd": invalid}]),
+            freeze=_freeze(),
+            datasets={"files": []},
+        )
+
+        assert campaign["physical_forward_proof_complete"] is False

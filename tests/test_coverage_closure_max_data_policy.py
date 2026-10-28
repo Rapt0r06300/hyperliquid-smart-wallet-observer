@@ -153,11 +153,23 @@ def test_choose_max_data_job_all_outcomes() -> None:
         "copy-vault-full": {"missing_asset_count": 0, "download_gib": 2},
     }
     stop = policy.choose_max_data_job(
-        family_decisions=decisions, suite_plans=plans, free_disk_gib=100,
-        all_targets_reached=True,
+        family_decisions=[
+            {"family": "copy_vault", "priority": 10, "phase": "FREEZE_AND_CONFIRM_FORWARD"}
+        ],
+        suite_plans=plans,
+        free_disk_gib=100,
+        all_targets_reached=False,
     )
     assert stop["status"] == "STOP_PROOF_REACHED"
     assert stop["download_budget_gib"] == 0.0
+
+    forged_stop = policy.choose_max_data_job(
+        family_decisions=decisions,
+        suite_plans=plans,
+        free_disk_gib=100,
+        all_targets_reached=True,
+    )
+    assert forged_stop["status"] == "READY"
 
     ready = policy.choose_max_data_job(
         family_decisions=decisions, suite_plans=plans, completed_suites=(),
@@ -203,7 +215,11 @@ def test_write_decision_and_main_ready_and_no_go(monkeypatch, tmp_path, capsys) 
     }
     json_path, md_path = policy.write_decision(tmp_path / "out", decision)
     assert json.loads(json_path.read_text())["status"] == "READY"
-    assert "Compensation entre familles" in md_path.read_text()
+    markdown = md_path.read_text()
+    assert "Compensation entre familles" in markdown
+    assert "5,00 $ net/jour avec 200 $ de capital paper" in markdown
+    assert "Copy-Vault uniquement" in markdown
+    assert "Lead-Lag et Cross-Venue" not in markdown
 
     brain = tmp_path / "brain.json"
     brain.write_text(json.dumps({"family_decisions": [{"family": "copy_vault", "phase": "EXPLORE"}]}), encoding="utf-8")

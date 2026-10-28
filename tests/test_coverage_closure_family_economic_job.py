@@ -30,14 +30,29 @@ def _request(**overrides):
 
 def test_validate_family_request_only_allows_active_economic_suites(monkeypatch) -> None:
     monkeypatch.setattr(family.canonical_job, "validate_request", lambda raw: dict(raw))
-    for suite in family.FAMILY_ECONOMIC_SUITES:
-        validated = family.validate_family_request(_request(suite=suite))
-        assert validated["suite"] == suite
-        assert validated["mode"] == "economic"
+    validated = family.validate_family_request(_request(suite="copy-vault-full"))
+    assert validated["suite"] == "copy-vault-full"
+    assert validated["mode"] == "economic"
+    for suite in ("lead-lag-full", "cross-venue-full"):
+        with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+            family.validate_family_request(_request(suite=suite))
     with pytest.raises(ValueError):
         family.validate_family_request(_request(suite="economic-full"))
     with pytest.raises(ValueError):
         family.validate_family_request(_request(mode="historical"))
+
+
+@pytest.mark.parametrize("suite", ["lead-lag-full", "cross-venue-full"])
+def test_record_family_memory_refuses_disabled_suite_before_reading_artifacts(
+    tmp_path, suite
+) -> None:
+    with pytest.raises(RuntimeError, match="DISABLED_BY_SCOPE"):
+        family.record_family_economic_memory(
+            lab_root=tmp_path,
+            workspace=tmp_path,
+            suite=suite,
+            project_sha=SHA,
+        )
 
 
 def test_load_json_object_success_and_failures(tmp_path) -> None:

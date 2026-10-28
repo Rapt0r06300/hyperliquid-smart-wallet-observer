@@ -14,7 +14,6 @@ from hl_observer.collection.circuit_breaker import (
     record_failure,
     record_success,
 )
-from hl_observer.collection.collector import CollectionPlan, CollectionResult, run_collection_once
 from hl_observer.collection.html_scraper import HtmlScrapeResult, HtmlWalletCandidate, parse_wallets_from_html
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 from hl_observer.collection.native_venue_market import (
@@ -52,6 +51,28 @@ from hl_observer.collection.weight_budgeter import (
     format_budget_plan,
     plan_readonly_collection_budget,
 )
+
+
+def __getattr__(name: str):
+    """Load the runtime collector lazily to keep REST/backfill imports acyclic.
+
+    ``rest_info_client`` reuses the pure vault-fill paginator. Eagerly importing
+    ``collector`` from this package initializer would re-enter that client
+    before its class definitions have run.
+    """
+    if name in {"CollectionPlan", "CollectionResult", "run_collection_once"}:
+        from hl_observer.collection.collector import (
+            CollectionPlan,
+            CollectionResult,
+            run_collection_once,
+        )
+
+        return {
+            "CollectionPlan": CollectionPlan,
+            "CollectionResult": CollectionResult,
+            "run_collection_once": run_collection_once,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "BackoffDecision",

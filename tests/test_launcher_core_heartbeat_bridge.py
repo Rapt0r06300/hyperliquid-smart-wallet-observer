@@ -48,16 +48,24 @@ def test_allmids_rest_readiness_does_not_invent_exchange_subscription():
     assert proof.horodatages_presents
 
 
-def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monkeypatch):
+def test_userfills_bridge_counts_only_persisted_fills_and_matched_ack(
+    tmp_path: Path, monkeypatch,
+):
     USERFILLS._HEARTBEAT_WS.update({
-        "messages": 2,
+        "messages": 900,
         "fills": 3,
-        "acks": 1,
+        "persisted_fills": 2,
+        "acknowledged_userfills": {"0xAAA"},
         "reconnects": 0,
         "drops": 0,
         "tape_drops": 0,
+        "invalid_subscription_acks": 0,
+        "invalid_json_frames": 2,
+        "unexpected_userfills_channels": 1,
+        "receive_clock_rejections": 3,
         "dernier_exchange_ts": 123456,
     })
+    monkeypatch.setattr(USERFILLS, "_CURRENT_ROTATION_VAULTS", ("0xAAA",))
     monkeypatch.setattr(USERFILLS.os, "getppid", lambda: 5252)
     monkeypatch.setattr(USERFILLS.VI, "heartbeat", lambda *_args, **_kwargs: None)
 
@@ -73,6 +81,43 @@ def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monk
     assert heartbeat["n_ecrites_cumul"] == 2
     assert heartbeat["dernier_exchange_ts"] == 123456
     assert heartbeat["souscription_ack"] is True
+    assert heartbeat["metriques"]["subscription_ack_count"] == 1
+    assert heartbeat["metriques"]["subscription_required_count"] == 1
+    assert heartbeat["metriques"]["invalid_json_frames"] == 2
+    assert heartbeat["metriques"]["unexpected_userfills_channels"] == 1
+    assert heartbeat["metriques"]["receive_clock_rejections"] == 3
+
+
+def test_userfills_bridge_does_not_infer_writes_or_ack_from_messages(
+    tmp_path: Path, monkeypatch,
+):
+    USERFILLS._HEARTBEAT_WS.update({
+        "messages": 50,
+        "fills": 8,
+        "persisted_fills": 0,
+        "acks": 8,
+        "acknowledged_userfills": set(),
+        "reconnects": 0,
+        "drops": 0,
+        "tape_drops": 0,
+        "dernier_exchange_ts": None,
+    })
+    monkeypatch.setattr(USERFILLS, "_CURRENT_ROTATION_VAULTS", ("0xAAA",))
+    monkeypatch.setattr(USERFILLS.os, "getppid", lambda: 5252)
+    monkeypatch.setattr(USERFILLS.VI, "heartbeat", lambda *_args, **_kwargs: None)
+
+    async def stop_after_write(_seconds):
+        raise RuntimeError("test-stop")
+
+    monkeypatch.setattr(USERFILLS.asyncio, "sleep", stop_after_write)
+    with pytest.raises(RuntimeError, match="test-stop"):
+        asyncio.run(USERFILLS._heartbeat(tmp_path, {}))
+
+    heartbeat = HB.lire(tmp_path, "userfills-live")
+    assert heartbeat["n_ecrites_cumul"] == 0
+    assert heartbeat["souscription_ack"] is False
+    assert heartbeat["metriques"]["subscription_ack_count"] == 0
+    assert heartbeat["metriques"]["subscription_required_count"] == 1
 
 
 def test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2(tmp_path: Path, monkeypatch):

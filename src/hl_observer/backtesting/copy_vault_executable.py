@@ -7,7 +7,7 @@ import json
 import math
 import time
 from collections.abc import Iterable, Mapping
-from decimal import Decimal, localcontext
+from decimal import ROUND_FLOOR, Decimal, localcontext
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
@@ -53,6 +53,7 @@ from hl_observer.economics.assumptions import (
 from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.economics.numeric import (
     USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_difference,
     decimal_sum,
     decimal_value,
     float_not_above,
@@ -118,14 +119,24 @@ def _last_at_or_before(
 
 def _observed_book_epoch_rejection(
     rows: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+    *,
+    require_proven_identity: bool = False,
 ) -> str | None:
     connection_ids = [row.get("connection_id") for row in rows]
+    if require_proven_identity and any(
+        not isinstance(value, str) or not value for value in connection_ids
+    ):
+        return "L2_CONNECTION_IDENTITY_INCOMPLETE"
     if any(value is not None for value in connection_ids):
         if any(not isinstance(value, str) or not value for value in connection_ids):
             return "L2_CONNECTION_IDENTITY_INCOMPLETE"
         if len(set(connection_ids)) != 1:
             return "L2_CONNECTION_GAP_CROSSED"
     gap_epochs = [row.get("l2_gap_epoch") for row in rows]
+    if require_proven_identity and any(
+        type(value) is not int or value < 0 for value in gap_epochs
+    ):
+        return "L2_GAP_EPOCH_IDENTITY_INCOMPLETE"
     if any(value is not None for value in gap_epochs):
         if any(type(value) is not int or value < 0 for value in gap_epochs):
             return "L2_GAP_EPOCH_IDENTITY_INCOMPLETE"
@@ -315,8 +326,18 @@ def execute_metaorder(
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
         book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
+    causal_books = all(
+        row.get("causal_observation") is True
+        for row in (reference, entry, exit_book)
+    )
+    if require_causal_books and not causal_books:
+        return None, "NON_CAUSAL_FORWARD_BOOK"
     epoch_rejection = _observed_book_epoch_rejection(
-        (reference, entry, exit_book)
+        (reference, entry, exit_book),
+        require_proven_identity=(
+            require_causal_books
+            and book_binding_method == "CONTINUOUS_CAUSAL_BOOK"
+        ),
     )
     if epoch_rejection is not None:
         return None, epoch_rejection
@@ -376,9 +397,6 @@ def execute_metaorder(
             for row in (reference, entry, exit_book)
         )
     )
-    causal_books = all(row.get("causal_observation") is True for row in (reference, entry, exit_book))
-    if require_causal_books and not causal_books:
-        return None, "NON_CAUSAL_FORWARD_BOOK"
     if min(float(entry["capacity_usd"]), float(exit_book["capacity_usd"])) < float(notional_usd):
         return None, "OBSERVED_TOP_CAPACITY_TOO_LOW"
     direction = meta_direction * int(direction_multiplier)
@@ -522,10 +540,110 @@ def execute_metaorder(
                 },
             ],
         }
+    def _book_evidence(row: Mapping[str, Any], role: str) -> dict[str, Any] | None:
+        dataset_id = row.get("source_dataset_id")
+        shard_sha = row.get("source_shard_sha256")
+        raw_sha = row.get("source_raw_sha256")
+        if (
+            not isinstance(dataset_id, str) or not dataset_id.strip()
+            or not isinstance(shard_sha, str) or len(shard_sha) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in shard_sha)
+            or not isinstance(raw_sha, str) or len(raw_sha) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in raw_sha)
+        ):
+            return None
+        return {
+            "role": role,
+            "dataset_id": dataset_id.strip(),
+            "shard_sha256": shard_sha.lower(),
+            "raw_frame_sha256": raw_sha.lower(),
+            "source_catalog_sha256": row.get("source_catalog_sha256"),
+            "quality": row.get("source_quality_status"),
+            "manifest_verified": row.get("source_manifest_verified") is True,
+            "replay_compatible": row.get("source_replay_compatible") is True,
+            "exchange_ts_ms": row.get("exchange_ts_ms"),
+            "received_at_ms": row.get("received_at_ms", row.get("ts_ms")),
+            "source": row.get("source"),
+        }
+
+    signal_member_ids = {
+        str(value)
+        for value in (metaorder.get("member_event_ids_at_signal") or ())
+        if isinstance(value, (str, int)) and not isinstance(value, bool)
+    }
+    raw_leader_evidence = metaorder.get("source_evidence_refs")
+    leader_fill_evidence_refs = [
+        dict(row)
+        for row in raw_leader_evidence
+        if isinstance(row, Mapping)
+        and (not signal_member_ids or str(row.get("event_id") or "") in signal_member_ids)
+        and row.get("forward_evidence_allowed") is True
+        and isinstance(row.get("event_ts_ms"), int)
+        and not isinstance(row.get("event_ts_ms"), bool)
+        and isinstance(row.get("received_at_ms"), int)
+        and not isinstance(row.get("received_at_ms"), bool)
+        and 0 < row["event_ts_ms"] <= row["received_at_ms"] <= signal_ms
+    ] if isinstance(raw_leader_evidence, (list, tuple)) else []
+    expected_signal_fills = metaorder.get("confirmation_fill_count")
+    if type(expected_signal_fills) is not int or expected_signal_fills <= 0:
+        expected_signal_fills = len(signal_member_ids) or int(metaorder.get("fill_count") or 0)
+    leader_fill_evidence_missing_count = max(
+        0, int(expected_signal_fills) - len(leader_fill_evidence_refs)
+    )
+    leader_fill_evidence_complete = bool(
+        expected_signal_fills > 0
+        and len(leader_fill_evidence_refs) == expected_signal_fills
+        and len({row.get("source_catalog_sha256") for row in leader_fill_evidence_refs}) == 1
+        and all(
+            row.get("quality") == "SAFE"
+            and row.get("manifest_verified") is True
+            and row.get("replay_compatible") is True
+            and isinstance(row.get("source_catalog_sha256"), str)
+            and len(str(row.get("source_catalog_sha256"))) == 64
+            and all(
+                char in "0123456789abcdef"
+                for char in str(row.get("source_catalog_sha256")).lower()
+            )
+            and row.get("forward_evidence_allowed") is True
+            for row in leader_fill_evidence_refs
+        )
+    )
+
+    execution_evidence_rows = [
+        _book_evidence(reference, "REFERENCE"),
+        _book_evidence(entry, "ENTRY"),
+        _book_evidence(exit_book, "EXIT"),
+    ]
+    execution_evidence_refs = [row for row in execution_evidence_rows if row is not None]
+    execution_book_safe_evidence_complete = bool(
+        len(execution_evidence_refs) == 3
+        and len({row.get("source_catalog_sha256") for row in execution_evidence_refs}) == 1
+        and all(
+            row.get("quality") == "SAFE"
+            and row.get("manifest_verified") is True
+            and row.get("replay_compatible") is True
+            and isinstance(row.get("source_catalog_sha256"), str)
+            and len(row["source_catalog_sha256"]) == 64
+            and all(char in "0123456789abcdef" for char in row["source_catalog_sha256"].lower())
+            for row in execution_evidence_refs
+        )
+    )
+    execution_book_unverified_count = 3 - len(execution_evidence_refs) + sum(
+        not (
+            row.get("quality") == "SAFE"
+            and row.get("manifest_verified") is True
+            and row.get("replay_compatible") is True
+            and isinstance(row.get("source_catalog_sha256"), str)
+            and len(row["source_catalog_sha256"]) == 64
+            and all(char in "0123456789abcdef" for char in row["source_catalog_sha256"].lower())
+        )
+        for row in execution_evidence_refs
+    )
     return {
         "trade_id": trade_id,
         "metaorder_id": metaorder["metaorder_id"],
         "vault": metaorder["vault"],
+        "leader_id": metaorder["vault"],
         "coin": metaorder["coin"],
         "direction": direction,
         "signal_ts_ms": signal_ms,
@@ -538,6 +656,12 @@ def execute_metaorder(
         "confirmation_burst_ms": metaorder.get("confirmation_burst_ms"),
         "member_event_ids_at_signal": list(
             metaorder.get("member_event_ids_at_signal") or ()
+        ),
+        "leader_fill_evidence_refs": leader_fill_evidence_refs,
+        "leader_fill_evidence_missing_count": leader_fill_evidence_missing_count,
+        "leader_fill_evidence_status": (
+            "SAFE_CAUSAL_COMPLETE" if leader_fill_evidence_complete
+            else "INCOMPLETE_OR_UNVERIFIED"
         ),
         "causal_books_eligible": causal_books,
         "causal_forward_eligible": metaorder.get("causal_forward_eligible") is True and causal_books,
@@ -594,6 +718,16 @@ def execute_metaorder(
         "real_execution": False,
         "entry_source_line": entry["source_line"],
         "exit_source_line": exit_book["source_line"],
+        "execution_book_evidence_refs": execution_evidence_refs,
+        "execution_book_evidence_missing_count": 3 - len(execution_evidence_refs),
+        "execution_book_evidence_status": (
+            "STRUCTURALLY_COMPLETE" if len(execution_evidence_refs) == 3 else "INCOMPLETE"
+        ),
+        "execution_book_safe_evidence_status": (
+            "SAFE_CAUSAL_COMPLETE" if execution_book_safe_evidence_complete
+            else "INCOMPLETE_OR_UNVERIFIED"
+        ),
+        "execution_book_unverified_count": execution_book_unverified_count,
     }, "LIQUIDATABLE_NET"
 
 
@@ -609,8 +743,8 @@ def replay_metaorders(
         "capital_margin_rejected": 0,
     }
     active_exit_times: list[int] = []
-    active_notional_usd = 0.0
-    active_positions: list[tuple[int, float]] = []
+    active_notional_usd = Decimal(0)
+    active_positions: list[tuple[int, Decimal]] = []
     trades: list[dict[str, Any]] = []
     seen: set[str] = set()
     for metaorder in sorted(metaorders, key=lambda row: int(row["signal_ts_ms"])):
@@ -642,9 +776,25 @@ def replay_metaorders(
             if exit_ts > current_entry
         ]
         active_positions = still_open
-        active_notional_usd = sum(notional for _, notional in active_positions)
+        active_notional_usd = decimal_sum(notional for _, notional in active_positions)
+        trade_notional_usd = decimal_value(trade.get("notional_usd"))
+        exposure_limit_usd = decimal_value(MAX_GROSS_EXPOSURE_USD)
+        total_exposure_usd = (
+            decimal_sum((active_notional_usd, trade_notional_usd))
+            if active_notional_usd is not None and trade_notional_usd is not None
+            else None
+        )
+        if (
+            active_notional_usd is None
+            or trade_notional_usd is None
+            or trade_notional_usd <= 0
+            or exposure_limit_usd is None
+            or total_exposure_usd is None
+        ):
+            counters["capital_margin_rejected"] += 1
+            continue
         active_exit_times = [exit_ts for exit_ts, _ in active_positions]
-        if active_notional_usd + float(trade["notional_usd"]) > float(MAX_GROSS_EXPOSURE_USD):
+        if total_exposure_usd > exposure_limit_usd:
             counters["capital_margin_rejected"] += 1
             continue
         if len(active_exit_times) >= MAX_OPEN_POSITIONS:
@@ -652,8 +802,8 @@ def replay_metaorders(
             continue
         seen.add(trade["trade_id"])
         active_exit_times.append(int(trade["exit_ts_ms"]))
-        active_positions.append((int(trade["exit_ts_ms"]), float(trade["notional_usd"])))
-        active_notional_usd += float(trade["notional_usd"])
+        active_positions.append((int(trade["exit_ts_ms"]), trade_notional_usd))
+        active_notional_usd = total_exposure_usd
         trade["financeable_under_paper_policy"] = True
         trade["paper_equity_usd"] = float(MAX_GROSS_EXPOSURE_USD)
         trades.append(trade)
@@ -665,6 +815,40 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     rows = list(trades)
     ids = [str(row.get("trade_id") or "") for row in rows]
     duplicates = len(ids) - len(set(ids))
+    if not rows:
+        return {
+            "positions_ouvertes": 0,
+            "positions_fermees": 0,
+            "sample_count": 0,
+            "paper_capital_policy": {
+                "equity_usd": float(MAX_GROSS_EXPOSURE_USD),
+                "max_gross_exposure_usd": float(MAX_GROSS_EXPOSURE_USD),
+                "leverage": 1.0,
+                "execution": "forbidden",
+                "read_only": True,
+            },
+            "financeable_trade_count": 0,
+            "non_financeable_trade_count": 0,
+            "gross_pnl_usd": None,
+            "fees_usd": None,
+            "spread_cost_usd": None,
+            "slippage_cost_usd": None,
+            "latency_cost_usd": None,
+            "net_pnl_usd": None,
+            "net_pnl_usd_exact_decimal": None,
+            "roi_pct": None,
+            "max_drawdown_usd": None,
+            "max_drawdown_usd_exact_decimal": None,
+            "winning_trade_count": 0,
+            "hit_rate": None,
+            "profit_factor": None,
+            "profit_factor_exact_decimal": None,
+            "LIQUIDATABLE_NET": False,
+            "duplicate_trade_ids": duplicates,
+            "trade_ids_count": 0,
+            "trade_ids_sha256": hashlib.sha256(b"").hexdigest(),
+            "economic_reconciliation_ok": False,
+        }
     fields = (
         "gross_pnl_usd",
         "fees_usd",
@@ -684,7 +868,13 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     reported_net_total = totals["net_pnl_usd"]
     costs = (fees_total, spread_total, slippage_total, latency_total)
     recomputed_net_total = decimal_sum(
-        (gross_total, -fees_total, -spread_total, -slippage_total, -latency_total)
+        (
+            gross_total,
+            fees_total.copy_negate(),
+            spread_total.copy_negate(),
+            slippage_total.copy_negate(),
+            latency_total.copy_negate(),
+        )
     )
     if recomputed_net_total is None:
         raise ValueError("Copy-Vault summary could not reconcile aggregate PnL")
@@ -702,19 +892,25 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             value is None for value in cost_values
         ):
             raise ValueError("Copy-Vault trade contains invalid economic values")
-        recomputed_net = decimal_sum((gross_value, *(-value for value in cost_values)))
+        recomputed_net = decimal_sum(
+            (gross_value, *(value.copy_negate() for value in cost_values if value is not None))
+        )
         if recomputed_net is None:
             raise ValueError("Copy-Vault trade could not reconcile net PnL")
+        trade_discrepancy = decimal_difference(recomputed_net, reported_net)
         economic_reconciliation_ok = economic_reconciliation_ok and all(
             value >= 0 for value in cost_values
-        ) and abs(recomputed_net - reported_net) <= USD_RECONCILIATION_ABS_TOLERANCE
+        ) and trade_discrepancy is not None and (
+            trade_discrepancy.copy_abs() <= USD_RECONCILIATION_ABS_TOLERANCE
+        )
         conservative_nets.append(min(recomputed_net, reported_net))
     net_total = decimal_sum(conservative_nets)
     if net_total is None:
         raise ValueError("Copy-Vault summary could not aggregate conservative PnL")
+    total_discrepancy = decimal_difference(recomputed_net_total, reported_net_total)
     economic_reconciliation_ok = economic_reconciliation_ok and (
-        abs(recomputed_net_total - reported_net_total)
-        <= USD_RECONCILIATION_ABS_TOLERANCE
+        total_discrepancy is not None
+        and total_discrepancy.copy_abs() <= USD_RECONCILIATION_ABS_TOLERANCE
     )
 
     def _output_float(
@@ -750,28 +946,33 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         zip(rows, conservative_nets, strict=True),
         key=lambda pair: int(pair[0]["exit_ts_ms"]),
     )
-    with localcontext() as context:
-        context.prec = 80
-        for _row, pnl in paired_rows:
-            equity += pnl
-            peak = max(peak, equity)
-            drawdown = peak - equity
-            max_drawdown = max(max_drawdown, drawdown)
-            if pnl > 0:
-                wins += 1
-                positive_values.append(pnl)
-            elif pnl < 0:
-                negative_values.append(-pnl)
+    for _row, pnl in paired_rows:
+        next_equity = decimal_sum((equity, pnl))
+        if next_equity is None:
+            raise ValueError("Copy-Vault summary could not exactly aggregate equity")
+        equity = next_equity
+        peak = max(peak, equity)
+        drawdown = decimal_difference(peak, equity)
+        if drawdown is None:
+            raise ValueError("Copy-Vault summary could not exactly aggregate drawdown")
+        max_drawdown = max(max_drawdown, drawdown)
+        if pnl > 0:
+            wins += 1
+            positive_values.append(pnl)
+        elif pnl < 0:
+            negative_values.append(pnl.copy_abs())
     gains = decimal_sum(positive_values) or Decimal(0)
     losses = decimal_sum(negative_values) or Decimal(0)
     with localcontext() as context:
         context.prec = 80
+        context.rounding = ROUND_FLOOR
         roi = net_total / Decimal(str(STARTING_CAPITAL_USD)) * Decimal(100)
         profit_factor = gains / losses if losses > 0 else None
     financeable_count = sum(1 for row in rows if row.get("financeable_under_paper_policy") is True)
     non_financeable_count = len(rows) - financeable_count
     return {
         "positions_ouvertes": len(rows), "positions_fermees": len(rows),
+        "sample_count": len(rows),
         "paper_capital_policy": {
             "equity_usd": float(MAX_GROSS_EXPOSURE_USD),
             "max_gross_exposure_usd": float(MAX_GROSS_EXPOSURE_USD),
@@ -784,10 +985,16 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "gross_pnl_usd": gross, "fees_usd": fees,
         "spread_cost_usd": spread, "slippage_cost_usd": slippage,
         "latency_cost_usd": latency, "net_pnl_usd": net,
+        "net_pnl_usd_exact_decimal": format(net_total, "f"),
         "roi_pct": _output_float(roi, round_down=True),
         "max_drawdown_usd": _output_float(max_drawdown, round_up=True),
+        "max_drawdown_usd_exact_decimal": format(max_drawdown, "f"),
+        "winning_trade_count": wins,
         "hit_rate": wins / len(rows) if rows else 0.0,
         "profit_factor": _output_float(profit_factor, round_down=True) if profit_factor is not None else None,
+        "profit_factor_exact_decimal": (
+            format(profit_factor, "f") if profit_factor is not None else None
+        ),
         "LIQUIDATABLE_NET": bool(rows) and all(row.get("liquidatable_net") is True for row in rows),
         "duplicate_trade_ids": duplicates, "trade_ids_count": len(set(ids)),
         "trade_ids_sha256": hashlib.sha256("\n".join(sorted(set(ids))).encode("utf-8")).hexdigest(),
@@ -863,18 +1070,32 @@ def calibrate_train_only(
         )
         summary = summarize(trades)
         profit_factor = summary.get("profit_factor")
+        net_exact = decimal_value(summary.get("net_pnl_usd_exact_decimal"))
+        profit_factor_exact = decimal_value(
+            summary.get("profit_factor_exact_decimal")
+        )
+        closed_trade_count = summary.get("positions_fermees")
+        winning_trade_count = summary.get("winning_trade_count")
         all_wins_without_loss_denominator = bool(
-            summary["positions_fermees"] >= MIN_TRAIN_TRADES
-            and float(summary.get("net_pnl_usd") or 0.0) > 0.0
-            and float(summary.get("hit_rate") or 0.0) == 1.0 and profit_factor is None
+            isinstance(closed_trade_count, int)
+            and not isinstance(closed_trade_count, bool)
+            and isinstance(winning_trade_count, int)
+            and not isinstance(winning_trade_count, bool)
+            and closed_trade_count >= MIN_TRAIN_TRADES
+            and winning_trade_count == closed_trade_count
+            and net_exact is not None
+            and net_exact > 0
+            and profit_factor is None
         )
         economic_gate = bool(
             summary["positions_fermees"] >= MIN_TRAIN_TRADES
             and summary.get("LIQUIDATABLE_NET") is True
             and summary.get("economic_reconciliation_ok") is True
-            and float(summary.get("net_pnl_usd") or 0.0) > 0.0
+            and net_exact is not None
+            and net_exact > 0
             and (all_wins_without_loss_denominator or (
-                profit_factor is not None and float(profit_factor) > 1.0
+                profit_factor_exact is not None
+                and profit_factor_exact > Decimal(1)
             ))
         )
         grid.append({
@@ -882,9 +1103,10 @@ def calibrate_train_only(
             "diagnostics": diagnostics,
             "sample_eligible": summary["positions_fermees"] >= MIN_TRAIN_TRADES,
             "economic_gate": {
-                "net_positive": float(summary.get("net_pnl_usd") or 0.0) > 0.0,
+                "net_positive": net_exact is not None and net_exact > 0,
                 "profit_factor_above_one": bool(
-                    profit_factor is not None and float(profit_factor) > 1.0
+                    profit_factor_exact is not None
+                    and profit_factor_exact > Decimal(1)
                 ),
                 "all_wins_without_loss_denominator": all_wins_without_loss_denominator,
                 "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True,
@@ -893,9 +1115,21 @@ def calibrate_train_only(
             "eligible": economic_gate,
         })
     eligible = [row for row in grid if row["eligible"]]
+
+    def exact_candidate_net(row: Mapping[str, Any]) -> Decimal:
+        value = decimal_value(
+            row["summary"].get("net_pnl_usd_exact_decimal")
+        )
+        if value is None:
+            raise ValueError("Eligible Copy-Vault candidate has no exact net PnL")
+        return value
+
     selected = max(
         eligible,
-        key=lambda row: (float(row["summary"]["net_pnl_usd"]), -int(row["horizon_ms"])),
+        key=lambda row: (
+            exact_candidate_net(row),
+            -int(row["horizon_ms"]),
+        ),
         default=None,
     )
     selected_horizon = int(selected["horizon_ms"]) if selected else int(HORIZONS_MS[0])

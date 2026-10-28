@@ -34,6 +34,32 @@ def test_charger_entrees_alpha_exclut_retraits_et_ajoute_move_frac(tmp_path):
     assert len(entrees) == 1 and entrees[0]["coin"] == "SOL" and entrees[0]["move_frac"] == 0.09
 
 
+def test_reconstruire_episodes_propage_la_lignee_du_shard_et_du_frame():
+    fill = {
+        "vault": "0xA",
+        "coin": "BTC",
+        "ts_ms": 1_000,
+        "signe": 1,
+        "sz": 2.0,
+        "px": 100.0,
+        "dir": "Open Long",
+        "source": "LIVE_WS",
+        "isSnapshot": False,
+        "received_at_ms": 1_010,
+        "source_dataset_id": "dataset-live-1",
+        "source_shard_sha256": "a" * 64,
+        "source_raw_sha256": "b" * 64,
+    }
+
+    episodes = PR.VB.reconstruire_episodes([fill])
+
+    assert len(episodes) == 1
+    assert episodes[0]["source_dataset_id"] == "dataset-live-1"
+    assert episodes[0]["source_shard_sha256"] == "a" * 64
+    assert episodes[0]["source_raw_sha256"] == "b" * 64
+    assert episodes[0]["received_at_ms"] == 1_010
+
+
 def test_nav_asof_interdit_fuite_future_et_deduplique_episodes(tmp_path):
     data = tmp_path / "runtime" / "data"
     data.mkdir(parents=True)

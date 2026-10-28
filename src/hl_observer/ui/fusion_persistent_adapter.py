@@ -1593,12 +1593,30 @@ def _apply_direct_paper_close_order(
             state.simulation_processed_delta_keys.add(delta_key)
             return
         exit_side = "SELL" if side == "LONG" else "BUY"
-        requested_notional = book_notional_for_quantity(
-            truth,
-            side=exit_side,
-            quantity=open_quantity,
-            fallback_price=exit_price,
-        )
+        try:
+            requested_notional = book_notional_for_quantity(
+                truth,
+                side=exit_side,
+                quantity=open_quantity,
+                fallback_price=exit_price,
+            )
+        except ValueError as exc:
+            reason = (
+                "NUMERIC_OVERFLOW_BOOK_NOTIONAL"
+                if "NUMERIC_OVERFLOW_BOOK_NOTIONAL" in str(exc)
+                else "BOOK_NOTIONAL_INVALID"
+            )
+            result["skipped_count"] += 1
+            result["reasons"].append(reason)
+            _record_direct_order_refusal(
+                state,
+                order,
+                delta_key=delta_key,
+                current_ms=current_ms,
+                reason=reason,
+            )
+            state.simulation_processed_delta_keys.add(delta_key)
+            return
         if requested_notional <= 0:
             result["skipped_count"] += 1
             result["reasons"].append("DIRECT_EXIT_NO_VISIBLE_DEPTH")

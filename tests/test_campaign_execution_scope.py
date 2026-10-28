@@ -7,10 +7,16 @@ from pathlib import Path
 import pytest
 
 from hl_observer.control_plane.resumable_campaign import (
+    SCHEMA_VERSION_V1,
     SCHEMA_VERSION_V2,
     CampaignManifest,
     acquire_lease,
+    complete_work_unit,
+    mark_continuation,
+    mark_terminal,
+    release_lease,
     select_due_campaigns,
+    transition,
 )
 from tools import resumable_campaign as campaign_cli
 
@@ -125,6 +131,55 @@ def test_retry_cli_refuses_unsafe_campaign_without_mutating_manifest(tmp_path: P
         campaign_cli.main()
 
     assert manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "command_args",
+    [
+        ["retry"],
+        ["finish"],
+        ["fail"],
+        ["continue", "--reason", "manual"],
+        ["record-unit", "--unit-id", "unit-1", "--sha256", "f" * 64],
+    ],
+)
+def test_v1_historical_campaign_cannot_be_mutated(
+    tmp_path: Path, monkeypatch, command_args: list[str]
+) -> None:
+    manifest_path = tmp_path / "historical-v1.json"
+    raw = _analysis_campaign("lead_lag", status="STUCK").to_dict()
+    raw["schema_version"] = SCHEMA_VERSION_V1
+    manifest_path.write_text(json.dumps(raw, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    before = manifest_path.read_bytes()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["resumable_campaign.py", *command_args, str(manifest_path)],
+    )
+
+    with pytest.raises(SystemExit, match="V1 manifest is immutable"):
+        campaign_cli.main()
+
+    assert manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["transition", "complete", "continue", "terminal", "release"])
+def test_v1_historical_campaign_mutation_primitives_are_read_only(operation: str) -> None:
+    manifest = _analysis_campaign("lead_lag", status="STUCK")
+    manifest.schema_version = SCHEMA_VERSION_V1
+    before = manifest.to_dict()
+    mutators = {
+        "transition": lambda: transition(manifest, "RUNNING", "test"),
+        "complete": lambda: complete_work_unit(manifest, "unit-1", "f" * 64, {}),
+        "continue": lambda: mark_continuation(manifest, "test", progressed=True),
+        "terminal": lambda: mark_terminal(manifest, "FAILED", "test"),
+        "release": lambda: release_lease(manifest, "not-a-token"),
+    }
+
+    with pytest.raises(ValueError, match="V1 manifest is immutable"):
+        mutators[operation]()
+
+    assert manifest.to_dict() == before
 
 
 def test_retry_cli_refuses_active_lease_without_mutating_manifest(tmp_path: Path, monkeypatch) -> None:

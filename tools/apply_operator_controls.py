@@ -90,7 +90,18 @@ def _load_status(intent: dict[str, Any]) -> tuple[Path, dict[str, Any], bool]:
             or receipt.get("request_id") != request_id
             or receipt.get("intent_digest") != digest
             or receipt.get("intent") != intent.get("intent")
+            or receipt.get("target_identity") in (None, "")
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(receipt.get("evidence_digest") or "")
+            )
             or receipt.get("applied") is not True
+            or receipt.get("paper_only") is not True
+            or receipt.get("read_only") is not True
+            or receipt.get("real_execution") is not False
+            or (
+                intent.get("intent") in {"pause", "resume"}
+                and receipt.get("campaign_lease_effect") != "PRESERVE_ACTIVE_LEASES"
+            )
             or status.get("control_receipt_sha256") != sha256_json(receipt)
         ):
             raise SystemExit("completed control status lacks matching durable receipt")
@@ -122,6 +133,10 @@ def _complete_status(
         "read_only": True,
         "real_execution": False,
     }
+    if intent.get("intent") in {"pause", "resume"}:
+        # Phase controls never acquire, release, or rewrite a campaign lease.
+        # In-flight lease owners finish/checkpoint their bounded work normally.
+        receipt["campaign_lease_effect"] = "PRESERVE_ACTIVE_LEASES"
     updated = {
         **status,
         "state": "COMPLETE",
@@ -154,9 +169,18 @@ def _apply_phase_control(
     env: dict[str, str],
 ) -> tuple[str, str]:
     action = str(intent.get("intent") or "")
-    target_phase = "IDLE" if action == "pause" else str(
-        config.get("phase") or config.get("resume_phase") or "COLLECT"
-    )
+    source_phase = intent.get("phase")
+    source_epoch = intent.get("phase_epoch")
+    if type(source_epoch) is not int or source_epoch < 1:
+        raise SystemExit("phase control intent has an invalid phase epoch")
+    if action == "pause":
+        target_phase = "IDLE"
+    elif action == "resume":
+        target_phase = str(config.get("phase") or config.get("resume_phase") or "COLLECT")
+        if source_phase != "IDLE" or target_phase != "COLLECT":
+            raise SystemExit("resume requires IDLE to COLLECT")
+    else:
+        raise SystemExit(f"unsupported phase control intent: {action}")
     if target_phase not in {"IDLE", "COLLECT", "ANALYZE"}:
         raise SystemExit(f"invalid phase requested by {action}: {target_phase}")
 
@@ -178,8 +202,6 @@ def _apply_phase_control(
             return target_phase, sha256_json(receipt)
         raise SystemExit("phase transition receipt identity mismatch")
 
-    source_phase = intent.get("phase")
-    source_epoch = intent.get("phase_epoch")
     already_committed = (
         current.get("request_id") == request_id
         and current.get("phase") == target_phase

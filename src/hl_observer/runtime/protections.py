@@ -22,12 +22,15 @@ import json
 import os
 import subprocess
 from collections import deque
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 SCHEMA_VERSION = "hypersmart.runtime_protections.v2"
 DEFAULT_DEDUP_MAX_IDS = 200_000
 DEFAULT_DEDUP_COMPACT_EVERY = 50_000
+GIT_STATUS_FAST_TIMEOUT_SECONDS = 8.0
+GIT_STATUS_RETRY_TIMEOUT_SECONDS = 45.0
 
 TYPES_INCIDENT = (
     "WS_GAP",
@@ -273,34 +276,94 @@ def manifeste_execution(racine: Path | str, **contexte: Any) -> dict[str, Any]:
     import platform
     import sys
 
-    def _git(*args: str, timeout: float = 8.0) -> str | None:
-        proc = None
-        try:
-            proc = subprocess.Popen(
-                ["git", *args],
-                cwd=str(racine),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            )
-            sortie, _ = proc.communicate(timeout=timeout)
-            return None if proc.returncode != 0 else (sortie or "").strip()
-        except Exception:  # noqa: BLE001
-            if proc is not None:
-                try:
-                    proc.kill()
-                except Exception:  # noqa: BLE001
-                    import logging as _lg
-                    _lg.getLogger(__name__).debug("kill git impossible", exc_info=True)
-            return None
+    base = Path(racine)
 
-    head = _git("rev-parse", "HEAD")
-    statut = _git("status", "--porcelain")
-    sale = None if statut is None else bool(statut.strip())
+    def _stdout(*args: str, timeout: float = 8.0) -> str | None:
+        try:
+            proc = subprocess.run(
+                ["git", *args],
+                cwd=str(base),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return (proc.stdout or "").strip() if proc.returncode == 0 else None
+
+    head = _stdout("rev-parse", "HEAD")
+    diagnostic: dict[str, Any] = {
+        "command": "git status --porcelain",
+        "return_code": None,
+        "error_code": None,
+        "stderr": "",
+        "retry_attempted": False,
+        "retry_timeout_seconds": None,
+        "first_attempt_error_code": None,
+        "first_attempt_stderr": "",
+    }
+    try:
+        try:
+            status_proc = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(base),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=GIT_STATUS_FAST_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            diagnostic["retry_attempted"] = True
+            diagnostic["retry_timeout_seconds"] = GIT_STATUS_RETRY_TIMEOUT_SECONDS
+            diagnostic["first_attempt_error_code"] = "GIT_STATUS_TIMEOUT"
+            first_stderr = exc.stderr or ""
+            if isinstance(first_stderr, bytes):
+                first_stderr = first_stderr.decode("utf-8", errors="replace")
+            diagnostic["first_attempt_stderr"] = str(first_stderr)[:300]
+            status_proc = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(base),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=GIT_STATUS_RETRY_TIMEOUT_SECONDS,
+                check=False,
+            )
+        diagnostic["return_code"] = int(status_proc.returncode)
+        diagnostic["stderr"] = str(status_proc.stderr or "")[:300]
+        if status_proc.returncode == 0:
+            statut = str(status_proc.stdout or "").strip()
+        else:
+            statut = None
+            diagnostic["error_code"] = "GIT_STATUS_EXIT_NONZERO"
+    except subprocess.TimeoutExpired as exc:
+        statut = None
+        diagnostic["error_code"] = "GIT_STATUS_TIMEOUT"
+        stderr = exc.stderr or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        diagnostic["stderr"] = str(stderr)[:300]
+    except OSError as exc:
+        statut = None
+        diagnostic["error_code"] = "GIT_STATUS_OS_ERROR"
+        diagnostic["stderr"] = str(exc)[:300]
+    except subprocess.SubprocessError as exc:
+        statut = None
+        diagnostic["error_code"] = "GIT_STATUS_PROCESS_ERROR"
+        diagnostic["stderr"] = str(exc)[:300]
+
+    sale = None if statut is None else bool(statut)
     return {
         "schema_version": SCHEMA_VERSION,
         "git_head": head or None,
         "git_dirty": sale,
+        "git_status_diagnostic": diagnostic,
         "python": sys.version.split()[0],
         "plateforme": platform.system(),
         "reproductible": bool(head) and sale is False,

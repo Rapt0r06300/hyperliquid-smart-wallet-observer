@@ -7,6 +7,7 @@ observed records become Copy-Vault inputs. No network, trading or collectors.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import math
@@ -21,6 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from hl_observer.backtesting.copy_vault_book_loader import MAX_TARGET_LAG_MS  # noqa: E402
 from hl_observer.collection.userfills_live import parser_message_userfills  # noqa: E402
 from hl_observer.normalization.instrument_identity import (  # noqa: E402
     preserve_native_instrument_symbol as canonical_copy_vault_coin,
@@ -29,6 +31,15 @@ from hl_observer.normalization.instrument_identity import (  # noqa: E402
 
 class SafeBridgeError(RuntimeError):
     """A SAFE corpus is absent, inconsistent or unusable for Copy-Vault."""
+
+
+def _windows_io_path(path: Path) -> Path:
+    """Reuse the restore layer's extended-path handling for immutable shard names."""
+    try:
+        from tools.restore_alina import _windows_io_path as normalize
+    except ModuleNotFoundError:
+        from restore_alina import _windows_io_path as normalize
+    return normalize(Path(path))
 
 
 def _digest(path: Path) -> str:
@@ -61,11 +72,14 @@ def _safe_paths(recovery: Path, relative: str) -> tuple[Path, Path, Path]:
         or not parts[3].endswith(".jsonl.gz")
     ):
         raise SafeBridgeError(f"unsafe SAFE registry path: {relative}")
-    archive = recovery.joinpath(*parts)
-    extracted = recovery / "usable" / "unpacked" / parts[2] / parts[3][:-3]
-    seal = extracted.with_suffix(".jsonl.alina.json")
+    archive = _windows_io_path(recovery.joinpath(*parts))
+    extracted = _windows_io_path(
+        recovery / "usable" / "unpacked" / parts[2] / parts[3][:-3]
+    )
+    seal = _windows_io_path(extracted.with_suffix(".jsonl.alina.json"))
     if any(path.is_symlink() for path in (
-        recovery / "usable", archive.parent, archive, recovery / "usable" / "unpacked",
+        _windows_io_path(recovery / "usable"), archive.parent, archive,
+        _windows_io_path(recovery / "usable" / "unpacked"),
         extracted.parent, extracted, seal,
     )):
         raise SafeBridgeError(f"symlinked SAFE input: {relative}")
@@ -218,8 +232,8 @@ def _historical_fills(record: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _levels(side: Any, *, descending: bool) -> list[list[float]]:
-    if not isinstance(side, list) or len(side) < 5:
-        raise SafeBridgeError("L2 has fewer than five levels")
+    if not isinstance(side, list) or not side:
+        raise SafeBridgeError("L2 side has no observed levels")
     output: list[list[float]] = []
     previous: float | None = None
     for entry in side[:5]:
@@ -248,9 +262,11 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
     if (
         not coin or canonical_copy_vault_coin(data.get("coin")) != coin
         or data.get("time") != exchange
-        or receive - exchange > 1_000
+        or receive - exchange > MAX_TARGET_LAG_MS
     ):
-        raise SafeBridgeError("L2 missing identity, exchange timestamp or subsecond freshness")
+        raise SafeBridgeError(
+            "L2 missing identity, exchange timestamp or replay freshness"
+        )
     sides = data.get("levels")
     if not isinstance(sides, list) or len(sides) != 2:
         raise SafeBridgeError("invalid L2 book sides")
@@ -281,6 +297,8 @@ def _book(record: dict[str, Any]) -> dict[str, Any]:
         "ask": asks[0][0],
         "bids5": bids,
         "asks5": asks,
+        "source_bid_levels": len(sides[0]),
+        "source_ask_levels": len(sides[1]),
         "capacity_usd": capacity,
         "received_at_ms": receive,
         "exchange_ts_ms": exchange,
@@ -355,12 +373,17 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
     parent.mkdir(parents=True, exist_ok=True)
-    selection = hashlib.sha256(catalog.encode("ascii"))
-    # Immutable artifact name is scoped to the certified input set; unchanged
-    # inputs are reused only if the output byte digests still match.
+    bridge_schema = "hypersmart.dataset_selection_provenance.v4"
+    selection = hashlib.sha256()
+    selection.update(bridge_schema.encode("ascii") + b"\0" + catalog.encode("ascii"))
+    # A schema change gets a new immutable artifact directory instead of
+    # conflicting with a prior result built from the same SAFE inputs.
     stage = Path(tempfile.mkdtemp(prefix=".copy-safe-", dir=parent))
     destination = stage / "runtime" / "data"
     destination.mkdir(parents=True)
+    proof_dir = stage / "runtime" / "reports" / "datasets"
+    proof_dir.mkdir(parents=True)
+    decisions_path = proof_dir / "SAFE_INPUT_DECISIONS.jsonl"
     paths = {
         "copy_vault_fills": destination / "vault_fills_live.jsonl",
         "copy_vault_snapshot": destination / "vault_fills.jsonl",
@@ -374,14 +397,42 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
         "snapshots_excluded_from_forward": 0,
     }
     inputs: list[dict[str, Any]] = []
+    decision_reasons: Counter[str] = Counter()
+    decision_totals = {"rows": 0, "quarantined": 0, "scope_excluded": 0}
     total = len(registry)
+    processed_shards = 0
     try:
         with (
             paths["copy_vault_fills"].open("w", encoding="utf-8", newline="\n") as fill_out,
             paths["copy_vault_snapshot"].open("w", encoding="utf-8", newline="\n") as history_out,
             paths["copy_vault_l2"].open("w", encoding="utf-8", newline="\n") as l2_out,
+            decisions_path.open("w", encoding="utf-8", newline="\n") as decisions_out,
         ):
+            def record_decision(
+                *, decision: str, reason_code: str, reason: str,
+                relative: str, archive_sha: str, jsonl_sha: str,
+                line_number: int, line: bytes,
+            ) -> None:
+                decisions_out.write(json.dumps({
+                    "schema": "hypersmart.copy_vault_safe_input_decision.v1",
+                    "decision": decision,
+                    "reason_code": reason_code,
+                    "reason": reason,
+                    "source_relative_path": relative,
+                    "source_archive_sha256": archive_sha,
+                    "source_jsonl_sha256": jsonl_sha,
+                    "line_number": line_number,
+                    "frame_sha256": hashlib.sha256(line).hexdigest(),
+                    "frame_bytes": len(line),
+                }, sort_keys=True, allow_nan=False) + "\n")
+                decision_totals["rows"] += 1
+                decision_totals[
+                    "quarantined" if decision == "QUARANTINE" else "scope_excluded"
+                ] += 1
+                decision_reasons[reason_code] += 1
+
             for i, (relative, size, sha, stat_identity) in enumerate(registry, 1):
+                processed_shards = i
                 archive, plain, seal_path = _safe_paths(recovery, relative)
                 if not archive.is_file() or not plain.is_file() or not seal_path.is_file():
                     raise SafeBridgeError(f"missing registered SAFE shard: {relative}")
@@ -397,8 +448,6 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
                     raise SafeBridgeError(f"empty SAFE shard: {relative}")
                 peek = _source_record(first)
                 channel = peek.get("channel")
-                if channel not in paths:
-                    continue
                 seal = _read_json(seal_path)
                 if (
                     seal.get("schema") != "alina.safe_jsonl_proof.v1"
@@ -408,52 +457,139 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
                     or seal.get("jsonl_bytes") != plain.stat().st_size
                 ):
                     raise SafeBridgeError(f"SAFE shard byte proof mismatch: {relative}")
-                selection.update(relative.encode("utf-8"))
-                selection.update(sha.encode("ascii"))
-                rows = 0
+                for identity in (relative, sha, str(seal["jsonl_sha256"])):
+                    selection.update(identity.encode("utf-8") + b"\0")
+                rows = admitted_frames = quarantined_frames = 0
+                scope_excluded_frames = admitted_raw_bytes = 0
                 with plain.open("rb") as stream:
-                    for line in stream:
+                    for line_number, line in enumerate(stream, 1):
+                        rows += 1
                         record = _source_record(line)
-                        if record.get("channel") != channel:
+                        record_channel = record.get("channel")
+                        if record_channel != channel:
                             raise SafeBridgeError(f"mixed channel in SAFE shard: {relative}")
-                        if channel == "copy_vault_fills":
-                            normalized, excluded = _fills(record)
+                        if record_channel not in paths:
+                            record_decision(
+                                decision="SCOPE_EXCLUDED",
+                                reason_code="CHANNEL_NOT_CONSUMED_BY_ECONOMIC_BRIDGE",
+                                reason=f"channel {record_channel!r} is outside this bridge's input contract",
+                                relative=relative, archive_sha=sha,
+                                jsonl_sha=str(seal["jsonl_sha256"]),
+                                line_number=line_number, line=line,
+                            )
+                            scope_excluded_frames += 1
+                            continue
+                        if record_channel == "copy_vault_fills":
+                            try:
+                                normalized, excluded = _fills(record)
+                            except SafeBridgeError as exc:
+                                record_decision(
+                                    decision="QUARANTINE",
+                                    reason_code="FILL_REPLAY_CONTRACT_REJECTED",
+                                    reason=str(exc),
+                                    relative=relative, archive_sha=sha,
+                                    jsonl_sha=str(seal["jsonl_sha256"]),
+                                    line_number=line_number, line=line,
+                                )
+                                quarantined_frames += 1
+                                continue
                             counts["snapshots_excluded_from_forward"] += excluded
                             for fill in normalized:
                                 fill_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
-                            counts[channel] += len(normalized)
-                        elif channel == "copy_vault_snapshot":
-                            normalized = _historical_fills(record)
+                            counts[record_channel] += len(normalized)
+                        elif record_channel == "copy_vault_snapshot":
+                            try:
+                                normalized = _historical_fills(record)
+                            except SafeBridgeError as exc:
+                                record_decision(
+                                    decision="QUARANTINE",
+                                    reason_code="SNAPSHOT_REPLAY_CONTRACT_REJECTED",
+                                    reason=str(exc),
+                                    relative=relative, archive_sha=sha,
+                                    jsonl_sha=str(seal["jsonl_sha256"]),
+                                    line_number=line_number, line=line,
+                                )
+                                quarantined_frames += 1
+                                continue
                             for fill in normalized:
                                 history_out.write(json.dumps(fill, sort_keys=True, allow_nan=False) + "\n")
-                            counts[channel] += 1
+                            counts[record_channel] += 1
                             counts["historical_fill_observations"] += len(normalized)
                         else:
-                            l2_out.write(json.dumps(_book(record), sort_keys=True, allow_nan=False) + "\n")
-                            counts[channel] += 1
-                        rows += 1
+                            try:
+                                book = _book(record)
+                            except SafeBridgeError as exc:
+                                record_decision(
+                                    decision="QUARANTINE",
+                                    reason_code="L2_REPLAY_CONTRACT_REJECTED",
+                                    reason=str(exc),
+                                    relative=relative, archive_sha=sha,
+                                    jsonl_sha=str(seal["jsonl_sha256"]),
+                                    line_number=line_number, line=line,
+                                )
+                                quarantined_frames += 1
+                                continue
+                            l2_out.write(json.dumps(book, sort_keys=True, allow_nan=False) + "\n")
+                            counts[record_channel] += 1
+                        admitted_frames += 1
+                        admitted_raw_bytes += len(line)
                 inputs.append({
                     "relative_path": relative, "sha256": sha,
                     "jsonl_sha256": seal["jsonl_sha256"], "jsonl_bytes": seal["jsonl_bytes"],
                     "channel": channel, "frames": rows,
+                    "admitted_frames": admitted_frames,
+                    "quarantined_frames": quarantined_frames,
+                    "scope_excluded_frames": scope_excluded_frames,
+                    "admitted_jsonl_bytes": admitted_raw_bytes,
                 })
-                if len(inputs) % 100 == 0 or i == total:
-                    print(f"ALINA_COPY_SAFE_PROGRESS={i}/{total} selected={len(inputs)}", flush=True)
+                if i % 100 == 0 or i == total:
+                    print(
+                        f"ALINA_COPY_SAFE_PROGRESS={i}/{total} "
+                        f"admitted_shards={sum(bool(row['admitted_frames']) for row in inputs)} "
+                        f"quarantined={decision_totals['quarantined']} "
+                        f"scope_excluded={decision_totals['scope_excluded']}",
+                        flush=True,
+                    )
         if not counts["copy_vault_fills"] or not counts["copy_vault_l2"]:
-            raise SafeBridgeError("SAFE corpus lacks both causal fills and subsecond L2")
+            missing = []
+            if not counts["copy_vault_fills"]:
+                missing.append("no causal live fills")
+            if not counts["copy_vault_l2"]:
+                missing.append("no replay-admissible L2")
+            raise SafeBridgeError(
+                "; ".join(missing)
+                + f" (fills={counts['copy_vault_fills']}, L2={counts['copy_vault_l2']}, "
+                + f"quarantined={decision_totals['quarantined']}, "
+                + f"scope_excluded={decision_totals['scope_excluded']})"
+            )
         digest = selection.hexdigest()
-        outputs = {name: {"path": "runtime/data/" + path.name,
-                          "sha256": _digest(path), "bytes": path.stat().st_size}
-                   for name, path in paths.items()}
+        outputs = {
+            name: {"path": "runtime/data/" + path.name,
+                   "sha256": _digest(path), "bytes": path.stat().st_size}
+            for name, path in paths.items()
+        }
+        decisions = {
+            "path": "runtime/reports/datasets/SAFE_INPUT_DECISIONS.jsonl",
+            "sha256": _digest(decisions_path),
+            "bytes": decisions_path.stat().st_size,
+            "rows": decision_totals["rows"],
+            "quarantined": decision_totals["quarantined"],
+            "scope_excluded": decision_totals["scope_excluded"],
+            "reasons": dict(sorted(decision_reasons.items())),
+        }
+        admitted_inputs = [row for row in inputs if row["admitted_frames"]]
         provenance = {
-            "schema": "hypersmart.dataset_selection_provenance.v3",
+            "schema": bridge_schema,
             "source_kind": "alina-sync-safe-unpacked",
             "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "catalog_sha256": catalog,
             "selection_digest": digest,
-            "selected_files": len(inputs),
-            "selected_raw_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
+            "selected_files": len(admitted_inputs),
+            "verified_safe_input_shards": len(inputs),
+            "selected_raw_bytes": sum(row["admitted_jsonl_bytes"] for row in admitted_inputs),
+            "verified_unpacked_bytes": sum(int(row["jsonl_bytes"]) for row in inputs),
             "safe_input_shards": inputs,
+            "input_decisions": decisions,
             "outputs": outputs,
             "counts": counts,
             "paper_read_only": True,
@@ -462,17 +598,18 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             "snapshot_fills_excluded_from_forward": True,
             "economic_proof": False,
         }
-        proof_dir = stage / "runtime" / "reports" / "datasets"
-        proof_dir.mkdir(parents=True)
-        (proof_dir / "SELECTION_PROVENANCE.json").write_text(
+        provenance_path = proof_dir / "SELECTION_PROVENANCE.json"
+        provenance_path.write_text(
             json.dumps(provenance, sort_keys=True, indent=2) + "\n", encoding="utf-8"
         )
         final = parent / digest[:24]
         if final.exists():
             existing = _read_json(final / "runtime" / "reports" / "datasets" / "SELECTION_PROVENANCE.json")
-            if existing != provenance or any(
-                _digest(final / row["path"]) != row["sha256"]
-                for row in outputs.values()
+            decision_output = final / decisions["path"]
+            if (
+                existing != provenance
+                or any(_digest(final / row["path"]) != row["sha256"] for row in outputs.values())
+                or _digest(decision_output) != decisions["sha256"]
             ):
                 raise SafeBridgeError("existing Copy-Vault workspace is inconsistent")
             shutil.rmtree(stage)
@@ -480,12 +617,63 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             os.replace(stage, final)
         return {
             "status": "SAFE_COPY_WORKSPACE_READY", "workspace": str(final),
-            "catalog_sha256": catalog, "selected_shards": len(inputs),
-            "counts": counts, "outputs": outputs, "economic_proof": False,
+            "catalog_sha256": catalog, "selected_shards": len(admitted_inputs),
+            "counts": counts, "outputs": outputs, "input_decisions": decisions,
+            "economic_proof": False,
         }
-    except Exception:
+    except Exception as exc:
+        diagnostic_path = None
+        try:
+            diagnostic_root = parent / "diagnostics"
+            diagnostic_root.mkdir(parents=True, exist_ok=True)
+            diagnostic_dir = Path(tempfile.mkdtemp(prefix="no-go-", dir=diagnostic_root))
+            ledger_copy = diagnostic_dir / "SAFE_INPUT_DECISIONS.jsonl"
+            if decisions_path.is_file():
+                shutil.copy2(decisions_path, ledger_copy)
+                decision_artifact = {
+                    "path": ledger_copy.name,
+                    "sha256": _digest(ledger_copy),
+                    "bytes": ledger_copy.stat().st_size,
+                    "rows": decision_totals["rows"],
+                    "quarantined": decision_totals["quarantined"],
+                    "scope_excluded": decision_totals["scope_excluded"],
+                    "reasons": dict(sorted(decision_reasons.items())),
+                }
+            else:
+                decision_artifact = {
+                    "path": None, "sha256": None, "bytes": 0,
+                    "rows": 0, "quarantined": 0, "scope_excluded": 0,
+                    "reasons": {},
+                }
+            diagnostic = {
+                "schema": "hypersmart.copy_vault_safe_no_go.v1",
+                "status": "SAFE_COPY_NO_GO",
+                "catalog_sha256": catalog,
+                "processed_shards": processed_shards,
+                "total_shards": total,
+                "verified_safe_input_shards": len(inputs),
+                "counts": counts,
+                "input_decisions": decision_artifact,
+                "error": str(exc),
+                "paper_read_only": True,
+                "real_execution": False,
+                "economic_proof": False,
+            }
+            temporary = diagnostic_dir / "NO_GO.json.partial"
+            diagnostic_path = diagnostic_dir / "NO_GO.json"
+            temporary.write_text(
+                json.dumps(diagnostic, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(diagnostic_path)
+        except OSError:
+            diagnostic_path = None
         if stage.exists():
             shutil.rmtree(stage)
+        if diagnostic_path is not None:
+            raise SafeBridgeError(
+                f"{exc}; diagnostic={diagnostic_path}"
+            ) from exc
         raise
 
 

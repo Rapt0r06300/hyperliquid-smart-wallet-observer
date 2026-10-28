@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import math
+from decimal import Decimal
 
 import pytest
 
+import hl_observer.backtesting.copy_vault_executable as copy_vault_executable
 from hl_observer.backtesting.copy_vault_executable import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS,
@@ -77,6 +79,53 @@ def test_metaorders_refusent_les_sorties_et_les_contradictions_de_sens() -> None
     assert audit["action_direction_contradictions_rejected"] == 1
 
 
+def test_metaorder_conserve_la_provenance_complete_des_fills_sources() -> None:
+    event = {
+        **_entry("safe-event", 1_000, action="OPEN"),
+        "source": "LIVE_WS",
+        "is_snapshot": False,
+        "observed_at_ms": 1_010,
+        "received_at_ms": 1_010,
+        "source_dataset_id": "dataset-live-1",
+        "source_shard_sha256": "a" * 64,
+        "source_raw_sha256": "b" * 64,
+        "source_catalog_sha256": "c" * 64,
+        "source_quality_status": "SAFE",
+        "source_manifest_verified": True,
+        "source_replay_compatible": True,
+    }
+
+    metaorders, audit = cluster_metaorders([event])
+
+    assert metaorders[0]["source_evidence_status"] == "COMPLETE"
+    assert metaorders[0]["source_evidence_refs"] == [
+        {
+            "dataset_id": "dataset-live-1",
+            "shard_sha256": "a" * 64,
+            "raw_frame_sha256": "b" * 64,
+            "source_catalog_sha256": "c" * 64,
+            "quality": "SAFE",
+            "manifest_verified": True,
+            "replay_compatible": True,
+            "event_id": "safe-event",
+            "event_ts_ms": 1_000,
+            "received_at_ms": 1_010,
+            "source": "LIVE_WS",
+            "forward_evidence_allowed": True,
+        }
+    ]
+    assert metaorders[0]["member_events"][0]["source_dataset_id"] == "dataset-live-1"
+    assert audit["source_evidence_missing_events"] == 0
+
+
+def test_metaorder_without_shard_lineage_is_marked_incomplete() -> None:
+    metaorders, audit = cluster_metaorders([_entry("legacy-event", 1_000, action="OPEN")])
+
+    assert metaorders[0]["source_evidence_status"] == "INCOMPLETE"
+    assert metaorders[0]["source_evidence_refs"] == []
+    assert audit["source_evidence_missing_events"] == 1
+
+
 def _book(
     ts_ms: int,
     bid: float,
@@ -86,7 +135,7 @@ def _book(
     line: int = 1,
     causal: bool = False,
 ) -> dict:
-    return {
+    row = {
         "coin": "BTC",
         "ts_ms": ts_ms,
         "bid": bid,
@@ -97,6 +146,10 @@ def _book(
         "source_line": line,
         "causal_observation": causal,
     }
+    if causal:
+        row["connection_id"] = "fixture-causal-connection"
+        row["l2_gap_epoch"] = 0
+    return row
 
 
 def test_metaorders_collapse_slices_even_when_other_coin_is_interleaved() -> None:
@@ -145,6 +198,13 @@ def test_observed_book_loader_does_not_case_fold_native_coin(tmp_path) -> None:
         "bid": 0.0001, "ask": 0.0002, "capacity_usd": 10.0,
         "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
         "causal_observation": True,
+        "source_dataset_id": "safe-kpepe-l2",
+        "source_shard_sha256": "a" * 64,
+        "source_raw_sha256": "b" * 64,
+        "source_catalog_sha256": "c" * 64,
+        "source_quality_status": "SAFE",
+        "source_manifest_verified": True,
+        "source_replay_compatible": True,
     }
     (data / "copy_vault_l2_tape.jsonl").write_text(
         json.dumps(row) + "\n", encoding="utf-8"
@@ -153,6 +213,14 @@ def test_observed_book_loader_does_not_case_fold_native_coin(tmp_path) -> None:
     books, _audit = load_observed_books(tmp_path, coins={"kPEPE"})
 
     assert list(books) == ["kPEPE"]
+    assert books["kPEPE"][0]["source_dataset_id"] == "safe-kpepe-l2"
+    assert books["kPEPE"][0]["source_shard_sha256"] == "a" * 64
+    assert books["kPEPE"][0]["source_raw_sha256"] == "b" * 64
+    assert books["kPEPE"][0]["source_evidence_status"] == "STRUCTURALLY_COMPLETE"
+    assert books["kPEPE"][0]["source_catalog_sha256"] == "c" * 64
+    assert books["kPEPE"][0]["source_quality_status"] == "SAFE"
+    assert books["kPEPE"][0]["source_manifest_verified"] is True
+    assert books["kPEPE"][0]["source_replay_compatible"] is True
     assert load_observed_books(tmp_path, coins={"KPEPE"})[0] == {}
 
 
@@ -167,6 +235,44 @@ def test_metaorder_id_ne_change_pas_quand_une_slice_future_arrive() -> None:
     assert initial["first_event_id"] == enriched["first_event_id"] == "first"
 
 
+def test_portfolio_exposure_uses_decimal_before_comparing_the_paper_cap(monkeypatch) -> None:
+    trades = {
+        "first": {
+            "trade_id": "trade-first", "entry_ts_ms": 10, "exit_ts_ms": 100,
+            "notional_usd": 100.00000000000001,
+        },
+        "second": {
+            "trade_id": "trade-second", "entry_ts_ms": 20, "exit_ts_ms": 200,
+            "notional_usd": 100.0,
+        },
+    }
+
+    def fake_execute(metaorder, _books, **_kwargs):
+        return trades[metaorder["id"]].copy(), "LIQUIDATABLE_NET"
+
+    monkeypatch.setattr(copy_vault_executable, "execute_metaorder", fake_execute)
+    metaorders = [
+        {"id": "first", "signal_ts_ms": 1, "entry_ts_ms": 10, "coin": "BTC"},
+        {"id": "second", "signal_ts_ms": 2, "entry_ts_ms": 20, "coin": "ETH"},
+    ]
+
+    accepted, counters = replay_metaorders(
+        metaorders, {}, horizon_ms=1_000
+    )
+
+    assert [trade["trade_id"] for trade in accepted] == ["trade-first"]
+    assert counters["capital_margin_rejected"] == 1
+
+    trades["first"]["notional_usd"] = 100.0
+    accepted_at_limit, exact_limit_counters = replay_metaorders(
+        metaorders, {}, horizon_ms=1_000
+    )
+    assert [trade["trade_id"] for trade in accepted_at_limit] == [
+        "trade-first", "trade-second",
+    ]
+    assert exact_limit_counters["capital_margin_rejected"] == 0
+
+
 def test_continuation_attend_trois_fills_observes_sans_regarder_le_futur() -> None:
     def live(event_id: str, ts_ms: int, action: str) -> dict:
         return {
@@ -174,6 +280,14 @@ def test_continuation_attend_trois_fills_observes_sans_regarder_le_futur() -> No
             "source": "LIVE_WS",
             "is_snapshot": False,
             "observed_at_ms": ts_ms + 25,
+            "received_at_ms": ts_ms + 25,
+            "source_dataset_id": f"dataset-{event_id}",
+            "source_shard_sha256": "a" * 64,
+            "source_raw_sha256": "b" * 64,
+            "source_catalog_sha256": "c" * 64,
+            "source_quality_status": "SAFE",
+            "source_manifest_verified": True,
+            "source_replay_compatible": True,
         }
 
     prefix = [
@@ -204,6 +318,14 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
             "source": "LIVE_WS",
             "is_snapshot": False,
             "observed_at_ms": ts_ms + 25,
+            "received_at_ms": ts_ms + 25,
+            "source_dataset_id": f"dataset-{event_id}",
+            "source_shard_sha256": "a" * 64,
+            "source_raw_sha256": "b" * 64,
+            "source_catalog_sha256": "c" * 64,
+            "source_quality_status": "SAFE",
+            "source_manifest_verified": True,
+            "source_replay_compatible": True,
         }
 
     metaorders = cluster_metaorders(
@@ -218,9 +340,23 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
     )
     signal_ms = selected[0]["signal_ts_ms"]
     books = [
-        _book(signal_ms, 99.0, 101.0, causal=True),
-        _book(signal_ms + COPY_DELAY_MS, 100.0, 102.0, causal=True),
-        _book(signal_ms + COPY_DELAY_MS + 300_000, 109.0, 111.0, causal=True),
+        {
+            **_book(ts_ms, bid, ask, causal=True),
+            "source_dataset_id": "safe-l2-dataset",
+            "source_shard_sha256": "a" * 64,
+            "source_raw_sha256": "b" * 64,
+            "source_catalog_sha256": "c" * 64,
+            "source_quality_status": "SAFE",
+            "source_manifest_verified": True,
+            "source_replay_compatible": True,
+            "exchange_ts_ms": ts_ms,
+            "received_at_ms": ts_ms,
+        }
+        for ts_ms, bid, ask in (
+            (signal_ms, 99.0, 101.0),
+            (signal_ms + COPY_DELAY_MS, 100.0, 102.0),
+            (signal_ms + COPY_DELAY_MS + 300_000, 109.0, 111.0),
+        )
     ]
 
     trade, reason = execute_metaorder(selected[0], books, horizon_ms=300_000)
@@ -231,6 +367,25 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
     assert trade["leader_notional_usd_at_signal"] == 200.0
     assert trade["confirmation_burst_ms"] == 1_000
     assert trade["member_event_ids_at_signal"] == ["first", "second"]
+    assert trade["leader_id"] == "0xA"
+    assert trade["leader_fill_evidence_status"] == "SAFE_CAUSAL_COMPLETE"
+    assert trade["leader_fill_evidence_missing_count"] == 0
+    assert trade["execution_book_safe_evidence_status"] == "SAFE_CAUSAL_COMPLETE"
+    assert trade["execution_book_unverified_count"] == 0
+    assert [row["event_id"] for row in trade["leader_fill_evidence_refs"]] == [
+        "first", "second",
+    ]
+    assert all(row["received_at_ms"] <= trade["signal_ts_ms"] for row in trade["leader_fill_evidence_refs"])
+    assert trade["execution_book_evidence_status"] == "STRUCTURALLY_COMPLETE"
+    assert [row["role"] for row in trade["execution_book_evidence_refs"]] == [
+        "REFERENCE", "ENTRY", "EXIT",
+    ]
+    assert all(
+        row["dataset_id"] == "safe-l2-dataset"
+        and row["shard_sha256"] == "a" * 64
+        and row["raw_frame_sha256"] == "b" * 64
+        for row in trade["execution_book_evidence_refs"]
+    )
 
 
 def test_execution_reference_book_ne_peut_pas_etre_postérieur_au_signal() -> None:
@@ -350,11 +505,140 @@ def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
 
     assert [row["causal_observation"] for row in books["BTC"]] == [False, True]
     assert books["BTC"][1]["ts_ms"] == 2_010
+    assert books["BTC"][0]["source_timestamp_raw"] == "1.0"
+    assert books["BTC"][0]["source_timestamp_unit"] == "s_since_unix_epoch_utc"
+    assert books["BTC"][0]["timestamp_unit"] == "ms_since_unix_epoch"
+    assert books["BTC"][1]["exchange_ts_ms"] == 2_000
+    assert books["BTC"][1]["received_at_ms"] == 2_010
     assert audit["source_counts"] == {
         "historical_observed": 1,
         "causal_ws": 1,
         "causal_info_checkpoint": 0,
     }
+
+
+def test_l2_tape_gap_epoch_survives_loader_and_blocks_forward_replay(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    books = [
+        {
+            "schema_version": "hypersmart.copy_vault_l2.v1",
+            "coin": "BTC",
+            "received_at_ms": ts_ms,
+            "exchange_ts_ms": ts_ms - 10,
+            "bid": bid,
+            "ask": ask,
+            "capacity_usd": 1_000.0,
+            "source": "HYPERLIQUID_L2_WS",
+            "data_origin": "REAL_OBSERVED",
+            "causal_observation": True,
+            "connection_id": "connection-a",
+            "l2_gap_epoch": gap_epoch,
+        }
+        for ts_ms, bid, ask, gap_epoch in zip(
+            (1_000, 61_000, 361_000),
+            (99.0, 100.0, 109.0),
+            (101.0, 102.0, 111.0),
+            (0, 1, 1),
+            strict=True,
+        )
+    ]
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in books),
+        encoding="utf-8",
+    )
+    metaorder = cluster_metaorders([
+        {
+            **_entry("forward-gap", 1_000),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": 1_000,
+        }
+    ])[0][0]
+
+    loaded_books, _audit = load_observed_books(tmp_path, coins={"BTC"})
+    trades, diagnostics = replay_metaorders(
+        [metaorder],
+        loaded_books,
+        horizon_ms=300_000,
+        require_causal_observation=True,
+    )
+
+    assert [row["l2_gap_epoch"] for row in loaded_books["BTC"]] == [0, 1, 1]
+    assert trades == []
+    assert diagnostics["L2_GAP_EPOCH_CROSSED"] == 1
+
+
+def test_historical_loader_floors_fractional_epoch_seconds_at_utc_midnight(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "coin": "BTC", "collecte_ts": 1_793_145_600.0009,
+        "hl_bid": 99.0, "hl_ask": 101.0, "taille_min_usd": 500.0,
+    }
+    (data / "carnet_venues.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books["BTC"][0]["ts_ms"] == 1_793_145_600_000
+    assert books["BTC"][0]["source_timestamp_raw"] == "1793145600.0009"
+    assert audit["invalid_rows"] == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("received_at_ms", 2_010.5),
+        ("exchange_ts_ms", 2_000.5),
+        ("received_at_ms", "2010"),
+        ("exchange_ts_ms", "2000"),
+        ("received_at_ms", 1_700_000_000_000_000_000),
+        ("exchange_ts_ms", 1_700_000_000_000_000_000),
+    ],
+)
+def test_causal_loader_rejects_fractional_string_or_nanosecond_timestamps(
+    tmp_path, field, value
+) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    row[field] = value
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
+
+
+def test_causal_loader_rejects_source_receive_drift_beyond_causal_tolerance(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1",
+        "coin": "BTC", "received_at_ms": 32_001, "exchange_ts_ms": 2_000,
+        "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        json.dumps(row) + "\n", encoding="utf-8"
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert books == {}
+    assert audit["invalid_rows"] == 1
 
 
 @pytest.mark.parametrize(
@@ -727,6 +1011,46 @@ def test_calibration_causale_refuse_un_signal_historique() -> None:
     )
 
 
+def test_calibration_ne_traite_pas_un_hit_rate_float_arrondi_comme_tous_gagnants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trade_count = 1 << 54
+    winning_trade_count = trade_count - 1
+    assert winning_trade_count / trade_count == 1.0
+
+    fake_summary = {
+        "positions_fermees": trade_count,
+        "winning_trade_count": winning_trade_count,
+        "hit_rate": 1.0,
+        "profit_factor": None,
+        "profit_factor_exact_decimal": None,
+        "net_pnl_usd_exact_decimal": "1",
+        "LIQUIDATABLE_NET": True,
+        "economic_reconciliation_ok": True,
+    }
+    monkeypatch.setattr(
+        copy_vault_executable,
+        "replay_metaorders",
+        lambda *args, **kwargs: ([], {}),
+    )
+    monkeypatch.setattr(
+        copy_vault_executable,
+        "summarize",
+        lambda _trades: dict(fake_summary),
+    )
+
+    result = calibrate_train_only(
+        [{"signal_ts_ms": timestamp} for timestamp in (1, 2, 3)],
+        {"BTC": []},
+    )
+
+    assert result["selection_eligible"] is False
+    assert all(
+        row["economic_gate"]["all_wins_without_loss_denominator"] is False
+        for row in result["grid"]
+    )
+
+
 def test_stale_reference_is_refused_instead_of_using_future_price() -> None:
     metaorder = cluster_metaorders([_entry("a", 1_000)])[0][0]
     books = [_book(40_001, 99.0, 101.0)]
@@ -771,6 +1095,95 @@ def test_replay_refuses_book_triplets_crossing_observed_l2_gaps(
 
     assert trade is None
     assert reason == expected_reason
+
+
+@pytest.mark.parametrize(
+    ("identity_field", "expected_reason"),
+    [
+        ("connection_id", "L2_CONNECTION_IDENTITY_INCOMPLETE"),
+        ("l2_gap_epoch", "L2_GAP_EPOCH_IDENTITY_INCOMPLETE"),
+    ],
+)
+def test_causal_replay_refuses_missing_l2_gap_identity_instead_of_assuming_no_gap(
+    identity_field: str,
+    expected_reason: str,
+) -> None:
+    metaorder = cluster_metaorders([_entry("missing-gap-identity", 1_000)])[0][0]
+    books = [
+        {**_book(ts_ms, bid, ask), "causal_observation": True}
+        for ts_ms, bid, ask in zip(
+            (1_000, 61_000, 361_000),
+            (99.0, 100.0, 109.0),
+            (101.0, 102.0, 111.0),
+            strict=True,
+        )
+    ]
+    if identity_field == "l2_gap_epoch":
+        for row in books:
+            row["connection_id"] = "same-connection"
+
+    trade, reason = execute_metaorder(
+        metaorder,
+        books,
+        horizon_ms=300_000,
+        require_causal_books=True,
+    )
+
+    assert trade is None
+    assert reason == expected_reason
+
+
+def test_causal_replay_accepts_complete_same_connection_gap_epoch_identity() -> None:
+    metaorder = cluster_metaorders([_entry("complete-gap-identity", 1_000)])[0][0]
+    books = [
+        {
+            **_book(ts_ms, bid, ask),
+            "causal_observation": True,
+            "connection_id": "same-connection",
+            "l2_gap_epoch": 0,
+        }
+        for ts_ms, bid, ask in zip(
+            (1_000, 61_000, 361_000),
+            (99.0, 100.0, 109.0),
+            (101.0, 102.0, 111.0),
+            strict=True,
+        )
+    ]
+
+    trade, reason = execute_metaorder(
+        metaorder,
+        books,
+        horizon_ms=300_000,
+        require_causal_books=True,
+    )
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+
+
+def test_forward_replay_quarantines_causal_window_with_missing_gap_receipt() -> None:
+    metaorder = cluster_metaorders([_entry("missing-gap-receipt", 1_000)])[0][0]
+    metaorder["causal_forward_eligible"] = True
+    books = [
+        {**_book(ts_ms, bid, ask), "causal_observation": True}
+        for ts_ms, bid, ask in zip(
+            (1_000, 61_000, 361_000),
+            (99.0, 100.0, 109.0),
+            (101.0, 102.0, 111.0),
+            strict=True,
+        )
+    ]
+
+    trades, diagnostics = replay_metaorders(
+        [metaorder],
+        {"BTC": books},
+        horizon_ms=300_000,
+        require_causal_observation=True,
+    )
+
+    assert trades == []
+    assert diagnostics["completed_positions"] == 0
+    assert diagnostics["L2_CONNECTION_IDENTITY_INCOMPLETE"] == 1
 
 
 def test_unsorted_continuous_books_are_rejected_before_replay() -> None:
@@ -905,11 +1318,15 @@ def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
         _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
         _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
     ]
+    for row in books:
+        row.pop("connection_id")
+        row.pop("l2_gap_epoch")
 
     trade, reason = execute_metaorder(
         metaorder,
         books,
         horizon_ms=300_000,
+        require_causal_books=True,
         economic_mode=EconomicRunMode.CERTIFIABLE,
     )
 
@@ -1009,6 +1426,41 @@ def test_preuve_temporelle_ne_revendiqe_jamais_un_no_lookahead_non_prouve() -> N
 
     assert proof["oos"]["no_lookahead"] is False
     assert proof["oos"]["purged"] is False
+
+
+@pytest.mark.parametrize(
+    ("oos_exact", "placebo_exact", "expected"),
+    [
+        ("5.0000000000000002", "5.0000000000000001", True),
+        ("5.0000000000000001", "5.0000000000000002", False),
+    ],
+)
+def test_placebo_comparison_uses_exact_decimal_nets(
+    oos_exact: str, placebo_exact: str, expected: bool
+) -> None:
+    proof = temporal_evidence({
+        "segments": {
+            "oos": {"summary": {
+                "positions_fermees": 1,
+                "net_pnl_usd": 5.0,
+                "net_pnl_usd_exact_decimal": oos_exact,
+            }},
+            "forward": {"summary": {"positions_fermees": 1}},
+        },
+        "placebo_inverted_oos": {"summary": {
+            "positions_fermees": 1,
+            "net_pnl_usd": 5.0,
+            "net_pnl_usd_exact_decimal": placebo_exact,
+        }},
+        "trades": {"forward": [{"causal_forward_eligible": True}]},
+        "causal_observation_required_all_segments": True,
+        "temporal_purge_verified": True,
+    })
+
+    assert proof["placebos"]["beaten"] is expected
+    assert proof["placebos"]["candidate_net_usd_exact_decimal"] == oos_exact
+    assert proof["placebos"]["placebo_net_usd_exact_decimal"] == placebo_exact
+    assert json.dumps(proof, allow_nan=False, sort_keys=True)
 
 
 def test_executeur_ne_peut_pas_emprunter_les_checkpoints_dun_autre_metaordre() -> None:
@@ -1183,8 +1635,59 @@ def test_all_win_profit_factor_is_unmeasured_not_json_infinity() -> None:
     assert reason == "LIQUIDATABLE_NET"
     assert trade is not None and trade["net_pnl_usd"] > 0
     summary = summarize([trade])
+    assert summary["sample_count"] == 1
     assert summary["profit_factor"] is None
     assert "Infinity" not in __import__("json").dumps(summary)
+
+
+def test_empty_trade_summary_does_not_report_zero_economics() -> None:
+    summary = summarize([])
+    assert summary["sample_count"] == 0
+
+    assert summary["positions_fermees"] == 0
+    for key in (
+        "gross_pnl_usd",
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+        "net_pnl_usd",
+        "net_pnl_usd_exact_decimal",
+        "roi_pct",
+        "max_drawdown_usd",
+        "max_drawdown_usd_exact_decimal",
+        "hit_rate",
+    ):
+        assert summary[key] is None
+    assert summary["LIQUIDATABLE_NET"] is False
+    assert summary["economic_reconciliation_ok"] is False
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summary_profit_factor_does_not_round_tiny_loss_into_false_edge() -> None:
+    positive = "1." + "0" * 99 + "1"
+    negative = "-1." + "0" * 99 + "2"
+    rows = [
+        {
+            "trade_id": f"precision-{index}",
+            "exit_ts_ms": index + 1,
+            "gross_pnl_usd": pnl,
+            "fees_usd": "0",
+            "spread_cost_usd": "0",
+            "slippage_cost_usd": "0",
+            "latency_cost_usd": "0",
+            "net_pnl_usd": pnl,
+            "liquidatable_net": True,
+        }
+        for index, pnl in enumerate((positive, negative))
+    ]
+
+    result = summarize(rows)
+
+    assert Decimal(result["net_pnl_usd_exact_decimal"]) < 0
+    assert Decimal(result["profit_factor_exact_decimal"]) < 1
+    assert result["profit_factor"] < 1.0
+    assert Decimal(result["max_drawdown_usd_exact_decimal"]) > 1
 
 
 def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> None:
@@ -1304,6 +1807,12 @@ def test_new_proof_policy_uses_only_complete_utc_days_after_freeze(monkeypatch) 
 def test_protocol_signature_invalidates_pre_vwap_pre_complete_day_freezes() -> None:
     signature = protocol_signature()
 
+    assert signature["calibration_protocol"] == (
+        "copy_vault_executable_walk_forward_v8_explicit_l2_gap_identity"
+    )
+    assert signature["causal_book_gap_identity_policy"] == (
+        "same_connection_and_explicit_gap_epoch_required_for_causal_stream_triplets_v1"
+    )
     assert signature["paper_equity_usd"] == 200.0
     assert signature["max_gross_exposure_usd"] == 200.0
     assert signature["notional_usd"] == 150.0
@@ -1398,3 +1907,48 @@ def test_calibration_never_selects_the_least_bad_losing_horizon(monkeypatch) -> 
     assert result["status"] == "KILL_TRAIN_NO_POSITIVE_RECONCILED_CANDIDATE"
     assert all(row["sample_eligible"] is True for row in result["grid"])
     assert all(row["eligible"] is False for row in result["grid"])
+
+
+def test_calibration_ranks_candidates_by_unrounded_decimal_net(monkeypatch) -> None:
+    entries = [
+        {
+            **_entry(f"exact-rank-{index}", 1_000 + index * 4_000_000),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": 1_000 + index * 4_000_000,
+        }
+        for index in range(20)
+    ]
+    metaorders, _ = cluster_metaorders(entries, gap_ms=60_000)
+
+    def replay_with_close_nets(*args, horizon_ms, **kwargs):
+        del args, kwargs
+        amount = (
+            "1.0000000000000000002"
+            if horizon_ms == max(HORIZONS_MS)
+            else "1.0000000000000000001"
+        )
+        return [
+            {
+                "trade_id": f"{horizon_ms}-{index}",
+                "exit_ts_ms": index + 1,
+                "gross_pnl_usd": amount,
+                "fees_usd": "0",
+                "spread_cost_usd": "0",
+                "slippage_cost_usd": "0",
+                "latency_cost_usd": "0",
+                "net_pnl_usd": amount,
+                "liquidatable_net": True,
+            }
+            for index in range(8)
+        ], {}
+
+    monkeypatch.setattr(
+        "hl_observer.backtesting.copy_vault_executable.replay_metaorders",
+        replay_with_close_nets,
+    )
+
+    result = calibrate_train_only(metaorders, {"BTC": []})
+
+    assert result["selection_eligible"] is True
+    assert result["selected_horizon_ms"] == max(HORIZONS_MS)

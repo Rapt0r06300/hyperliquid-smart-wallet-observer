@@ -95,6 +95,44 @@ def main():
                 raise SystemExit(f"{path}: campaign family is outside active scope: {exc}") from exc
             if effective_family != receipt.get("strategy_family"):
                 raise SystemExit(f"{path}: receipt/campaign family mismatch")
+            if str(receipt["campaign_id"]).startswith("operator-"):
+                dispatch_path = Path("catalog/operator-dispatches") / (
+                    str(receipt["request_id"]) + ".json"
+                )
+                if not dispatch_path.is_file():
+                    raise SystemExit(f"{path}: missing operator dispatch record")
+                dispatch = json.loads(dispatch_path.read_text(encoding="utf-8"))
+                if dispatch.get("schema") != "alina.operator_dispatch.v1":
+                    raise SystemExit(f"{path}: unsupported operator dispatch schema")
+                linked_fields = {
+                    "request_id": receipt["request_id"],
+                    "phase": receipt["creation_phase"],
+                    "phase_epoch": receipt["phase_epoch"],
+                    "intent": cursor["operator_intent"],
+                    "strategy_family": effective_family,
+                }
+                for field, expected in linked_fields.items():
+                    if dispatch.get(field) != expected:
+                        label = "family" if field == "strategy_family" else field
+                        raise SystemExit(
+                            f"{path}: dispatch/campaign {label} mismatch"
+                        )
+                if (
+                    dispatch.get("paper_only") is not True
+                    or dispatch.get("read_only") is not True
+                    or dispatch.get("real_execution") is not False
+                ):
+                    raise SystemExit(f"{path}: unsafe operator dispatch")
+                if receipt["creation_phase"] == "ANALYZE":
+                    for field in (
+                        "source_collection_epoch",
+                        "collection_cutoff_at_utc",
+                        "analysis_stage",
+                    ):
+                        if dispatch.get(field) != campaign.get(field):
+                            raise SystemExit(
+                                f"{path}: dispatch/campaign {field} mismatch"
+                            )
         if receipt["creation_phase"] == "ANALYZE":
             for field in ("source_collection_epoch", "collection_cutoff_at_utc", "dataset_selection_id"):
                 if campaign.get(field) in (None, ""):

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import Counter
 from collections.abc import Iterable
+from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +22,49 @@ from hl_observer.backtesting.copy_vault_protocol import (
     canonical_copy_vault_coin,
 )
 from hl_observer.normalization.l2_book import validate_l2_book_sides
+from hl_observer.paper_trading.execution_truth import MAX_SUPPORTED_EPOCH_MS
 
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
 # Regression tests assert equality with the canonical protocol constants.
 MAX_TARGET_LAG_MS = 30_000
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
+
+
+def _epoch_seconds_to_ms(value: object) -> int:
+    """Convert a numeric UTC epoch-seconds value without rounding forward."""
+
+    if type(value) is int:
+        seconds = Decimal(value)
+    elif isinstance(value, Decimal):
+        seconds = value
+    else:
+        raise ValueError("epoch seconds must be a JSON number")
+    milliseconds = seconds * 1_000
+    if (
+        not milliseconds.is_finite()
+        or milliseconds <= 0
+        or milliseconds > MAX_SUPPORTED_EPOCH_MS
+    ):
+        raise ValueError("epoch seconds outside supported UTC range")
+    timestamp_ms = int(milliseconds.to_integral_value(rounding=ROUND_FLOOR))
+    if timestamp_ms <= 0:
+        raise ValueError("epoch seconds below millisecond resolution")
+    return timestamp_ms
+
+
+def _required_epoch_ms(value: object, name: str) -> int:
+    if type(value) is not int or not 0 < value <= MAX_SUPPORTED_EPOCH_MS:
+        raise ValueError(f"{name} must be a supported integer epoch millisecond")
+    return value
+
+
+def _optional_epoch_ms(value: object) -> int:
+    if type(value) is int and 0 <= value <= MAX_SUPPORTED_EPOCH_MS:
+        return value
+    return 0
 
 
 def _validated_recorded_levels(
@@ -65,7 +103,7 @@ def load_observed_books(
         else ""
     )
     try:
-        clean_epoch_ms = int(checkpoint_state.get("clean_epoch_ms") or 0)
+        clean_epoch_ms = _optional_epoch_ms(checkpoint_state.get("clean_epoch_ms"))
         output_start_offset = int(checkpoint_state.get("output_start_offset") or 0)
     except (AttributeError, TypeError, ValueError, OverflowError):
         clean_epoch_ms = 0
@@ -119,6 +157,7 @@ def load_observed_books(
         "causal_ws": 0,
         "causal_info_checkpoint": 0,
     }
+    source_evidence_counts: Counter[str] = Counter()
 
     def add_row(
         *, coin: str, ts_ms: int, bid: float, ask: float, capacity_usd: float,
@@ -134,6 +173,16 @@ def load_observed_books(
         collector_protocol: str | None = None,
         checkpoint_writer_run_id: str | None = None,
         checkpoint_clean_epoch_ms: int | None = None,
+        source_timestamp_raw: str | None = None,
+        source_timestamp_unit: str | None = None,
+        exchange_ts_ms: int | None = None,
+        source_dataset_id: str | None = None,
+        source_shard_sha256: str | None = None,
+        source_raw_sha256: str | None = None,
+        source_catalog_sha256: str | None = None,
+        source_quality_status: str | None = None,
+        source_manifest_verified: bool | None = None,
+        source_replay_compatible: bool | None = None,
     ) -> None:
         nonlocal invalid, duplicate_rows
         if (
@@ -164,7 +213,54 @@ def load_observed_books(
             "source": source,
             "source_line": source_line,
             "causal_observation": causal_observation,
+            "timestamp_unit": "ms_since_unix_epoch",
         }
+        provenance_values = (
+            source_dataset_id,
+            source_shard_sha256,
+            source_raw_sha256,
+        )
+        if all(value is None for value in provenance_values):
+            row["source_evidence_status"] = "UNAVAILABLE"
+            source_evidence_counts["unavailable"] += 1
+        elif (
+            isinstance(source_dataset_id, str)
+            and bool(source_dataset_id.strip())
+            and isinstance(source_shard_sha256, str)
+            and _SHA256_RE.fullmatch(source_shard_sha256) is not None
+            and isinstance(source_raw_sha256, str)
+            and _SHA256_RE.fullmatch(source_raw_sha256) is not None
+        ):
+            row.update({
+                "source_dataset_id": source_dataset_id.strip(),
+                "source_shard_sha256": source_shard_sha256.lower(),
+                "source_raw_sha256": source_raw_sha256.lower(),
+                "source_evidence_status": "STRUCTURALLY_COMPLETE",
+            })
+            if (
+                isinstance(source_catalog_sha256, str)
+                and _SHA256_RE.fullmatch(source_catalog_sha256) is not None
+                and source_quality_status == "SAFE"
+                and source_manifest_verified is True
+                and source_replay_compatible is True
+            ):
+                row.update({
+                    "source_catalog_sha256": source_catalog_sha256.lower(),
+                    "source_quality_status": "SAFE",
+                    "source_manifest_verified": True,
+                    "source_replay_compatible": True,
+                })
+            source_evidence_counts["complete"] += 1
+        else:
+            row["source_evidence_status"] = "INCOMPLETE_OR_INVALID"
+            source_evidence_counts["incomplete_or_invalid"] += 1
+        if source_timestamp_raw is not None:
+            row["source_timestamp_raw"] = source_timestamp_raw
+        if source_timestamp_unit is not None:
+            row["source_timestamp_unit"] = source_timestamp_unit
+        if exchange_ts_ms is not None:
+            row["exchange_ts_ms"] = exchange_ts_ms
+            row["received_at_ms"] = ts_ms
         if bids5 is not None and asks5 is not None:
             row["bids5"] = bids5
             row["asks5"] = asks5
@@ -195,7 +291,7 @@ def load_observed_books(
             for line_number, line in enumerate(handle, 1):
                 rows_read += 1
                 try:
-                    raw = json.loads(line)
+                    raw = json.loads(line, parse_float=Decimal)
                     coin = canonical_copy_vault_coin(raw.get("coin"))
                     if wanted is not None and coin not in wanted:
                         continue
@@ -207,13 +303,15 @@ def load_observed_books(
                         continue
                     add_row(
                         coin=coin,
-                        ts_ms=int(round(float(raw["collecte_ts"]) * 1000.0)),
+                        ts_ms=_epoch_seconds_to_ms(raw["collecte_ts"]),
                         bid=float(raw["hl_bid"]),
                         ask=float(raw["hl_ask"]),
                         capacity_usd=float(raw["taille_min_usd"]),
                         source=relative_path,
                         source_line=line_number,
                         causal_observation=False,
+                        source_timestamp_raw=str(raw["collecte_ts"]),
+                        source_timestamp_unit="s_since_unix_epoch_utc",
                     )
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     invalid += 1
@@ -224,7 +322,7 @@ def load_observed_books(
         with causal_path.open("r", encoding="utf-8", errors="ignore") as handle:
             for line in handle:
                 try:
-                    raw = json.loads(line)
+                    raw = json.loads(line, parse_float=Decimal)
                     coin = canonical_copy_vault_coin(raw.get("coin"))
                     if wanted is not None and coin not in wanted:
                         continue
@@ -234,9 +332,11 @@ def load_observed_books(
                     metaorder_id = str(raw.get("metaorder_id") or "").strip()
                     checkpoint_stage = str(raw.get("checkpoint_stage") or "").strip()
                     collector_protocol = str(raw.get("collector_protocol") or "").strip()
-                    received = int(raw["received_at_ms"])
-                    exchange_ts = int(raw["exchange_ts_ms"])
-                    checkpoint_target_ms = int(raw["checkpoint_target_ms"])
+                    received = _required_epoch_ms(raw["received_at_ms"], "received_at_ms")
+                    exchange_ts = _required_epoch_ms(raw["exchange_ts_ms"], "exchange_ts_ms")
+                    checkpoint_target_ms = _required_epoch_ms(
+                        raw["checkpoint_target_ms"], "checkpoint_target_ms"
+                    )
                     bid = float(raw["bid"])
                     ask = float(raw["ask"])
                     capacity_usd = float(raw["capacity_usd"])
@@ -277,7 +377,7 @@ def load_observed_books(
                     checkpoint_counts[checkpoint_id] += 1
                     checkpoint_metaorders.setdefault(checkpoint_id, set()).add(metaorder_id)
                     row_writer_run_id = str(raw.get("writer_run_id") or "").strip()
-                    row_clean_epoch_ms = int(raw.get("clean_epoch_ms") or 0)
+                    row_clean_epoch_ms = _optional_epoch_ms(raw.get("clean_epoch_ms"))
                     if (
                         clean_epoch_receipt_valid
                         and row_writer_run_id == writer_run_id
@@ -325,8 +425,8 @@ def load_observed_books(
                     coin = canonical_copy_vault_coin(raw.get("coin"))
                     if wanted is not None and coin not in wanted:
                         continue
-                    received = int(raw["received_at_ms"])
-                    exchange_ts = int(raw["exchange_ts_ms"])
+                    received = _required_epoch_ms(raw["received_at_ms"], "received_at_ms")
+                    exchange_ts = _required_epoch_ms(raw["exchange_ts_ms"], "exchange_ts_ms")
                     allowed_source = raw.get("source") in {
                         "HYPERLIQUID_L2_WS",
                         "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
@@ -344,7 +444,8 @@ def load_observed_books(
                         str(raw.get("collector_protocol") or "").strip() or None
                     )
                     checkpoint_target_ms = (
-                        int(raw["checkpoint_target_ms"]) if is_checkpoint else None
+                        _required_epoch_ms(raw["checkpoint_target_ms"], "checkpoint_target_ms")
+                        if is_checkpoint else None
                     )
                     connection_id = raw.get("connection_id")
                     l2_gap_epoch = raw.get("l2_gap_epoch")
@@ -415,6 +516,7 @@ def load_observed_books(
                         source=str(raw["source"]),
                         source_line=line_number,
                         causal_observation=True,
+                        exchange_ts_ms=exchange_ts,
                         bids5=bids5,
                         asks5=asks5,
                         connection_id=connection_id,
@@ -428,8 +530,30 @@ def load_observed_books(
                             str(raw.get("writer_run_id") or "").strip() or None
                         ),
                         checkpoint_clean_epoch_ms=(
-                            int(raw.get("clean_epoch_ms") or 0) or None
+                            _optional_epoch_ms(raw.get("clean_epoch_ms")) or None
                         ),
+                        source_dataset_id=(
+                            raw.get("source_dataset_id")
+                            if isinstance(raw.get("source_dataset_id"), str) else None
+                        ),
+                        source_shard_sha256=(
+                            raw.get("source_shard_sha256")
+                            if isinstance(raw.get("source_shard_sha256"), str) else None
+                        ),
+                        source_raw_sha256=(
+                            raw.get("source_raw_sha256")
+                            if isinstance(raw.get("source_raw_sha256"), str) else None
+                        ),
+                        source_catalog_sha256=(
+                            raw.get("source_catalog_sha256")
+                            if isinstance(raw.get("source_catalog_sha256"), str) else None
+                        ),
+                        source_quality_status=(
+                            raw.get("source_quality_status")
+                            if isinstance(raw.get("source_quality_status"), str) else None
+                        ),
+                        source_manifest_verified=raw.get("source_manifest_verified"),
+                        source_replay_compatible=raw.get("source_replay_compatible"),
                     )
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     invalid += 1
@@ -447,6 +571,7 @@ def load_observed_books(
         "duplicate_rows_rejected": duplicate_rows,
         "duplicate_checkpoint_ids": duplicate_checkpoint_ids,
         "duplicate_checkpoint_rows": duplicate_checkpoint_rows,
+        "source_evidence_rows": dict(sorted(source_evidence_counts.items())),
         "quarantined_checkpoint_metaorders": len(quarantined_checkpoint_metaorders),
         "quarantined_checkpoint_rows": quarantined_checkpoint_rows,
         "clean_epoch_receipt": {

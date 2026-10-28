@@ -25,6 +25,8 @@ def _book(ts_ms: int, bid: float, ask: float, *, line: int) -> dict:
         "capacity_usd": 1_000.0,
         "source_line": line,
         "causal_observation": True,
+        "connection_id": "fixture-ws-1",
+        "l2_gap_epoch": 0,
     }
 
 

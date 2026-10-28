@@ -20,6 +20,15 @@ RESERVE_BYTES = 1024 ** 3
 MAX_SINGLE_FILE_BYTES = (1 << 32) - 1
 
 
+def _windows_io_path(path: Path) -> Path:
+    """Reuse the restore layer's extended-path handling for every corpus file."""
+    try:
+        from tools.restore_alina import _windows_io_path as normalize
+    except ModuleNotFoundError:
+        from restore_alina import _windows_io_path as normalize
+    return normalize(Path(path))
+
+
 class SafeUnpackError(RuntimeError):
     pass
 
@@ -102,7 +111,11 @@ def _catalog_safe_bytes(
 def expand_safe_corpus(
     destination: Path, *, catalog_sha256: str, catalog_path: Path,
 ) -> dict:
-    destination = Path(destination).resolve()
+    destination_display = Path(destination).resolve()
+    destination = _windows_io_path(destination_display)
+    catalog_path = _windows_io_path(Path(catalog_path).absolute())
+    # All paths derived from destination now retain the extended Windows
+    # prefix, including deeply nested immutable Release and dataset names.
     # Invalidate any prior success before every validation, including missing
     # or mismatched RESTORE_REPORT/catalog. No stale green report may survive.
     _json_atomic(destination / "UNPACK_REPORT.json", {
@@ -321,7 +334,7 @@ def expand_safe_corpus(
         "quarantined_unsealed_outputs": quarantined_unsealed,
         "new_uncompressed_bytes": written_bytes,
         "compressed_safe_retained": True,
-        "unpacked_directory": str(outroot),
+        "unpacked_directory": str(destination_display / "usable" / "unpacked"),
     }
     _json_atomic(destination / "UNPACK_REPORT.json", result)
     return result

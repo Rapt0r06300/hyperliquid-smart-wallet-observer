@@ -82,6 +82,11 @@ def require_campaign_economic_scope(m: CampaignManifest) -> str | None:
         )
     return canonical
 
+
+def _require_mutable_manifest(m: CampaignManifest) -> None:
+    if m.schema_version == SCHEMA_VERSION_V1:
+        raise ValueError("V1 manifest is immutable; historical evidence is read-only")
+
 @dataclass(frozen=True)
 class StopLimits:
     max_attempts: int = 12
@@ -209,6 +214,7 @@ def validate_manifest(m: CampaignManifest) -> None:
 
 
 def transition(m: CampaignManifest, target: str, reason: str, *, now: str | None = None) -> CampaignManifest:
+    _require_mutable_manifest(m)
     validate_manifest(m)
     if m.status in TERMINAL_STATES:
         raise ValueError("terminal manifest is immutable")
@@ -228,6 +234,7 @@ def work_unit_id(m: CampaignManifest, partition: Mapping[str, Any]) -> str:
 
 
 def complete_work_unit(m: CampaignManifest, unit_id: str, result_sha256: str, result: Mapping[str, Any]) -> bool:
+    _require_mutable_manifest(m)
     prior = m.completed_units.get(unit_id)
     if prior:
         if prior.get("sha256") != result_sha256:
@@ -249,10 +256,8 @@ def acquire_lease(
 ) -> str:
     current = _parse_ts(now or _now())
 
-    # V1 manifests remain readable as historical evidence, but cannot acquire
-    # a lease or mutate durable campaign state after the V2 cutover.
-    if m.schema_version == SCHEMA_VERSION_V1:
-        raise ValueError("V1 manifest is immutable; migrate to V2 before execution")
+    # V1 manifests remain readable as historical evidence but cannot be executed.
+    _require_mutable_manifest(m)
 
     require_campaign_economic_scope(m)
 
@@ -287,6 +292,7 @@ def verify_lease(m: CampaignManifest, token: str, *, now: str | None = None) -> 
 
 
 def release_lease(m: CampaignManifest, token: str) -> None:
+    _require_mutable_manifest(m)
     if not verify_lease(m, token):
         raise ValueError("stale lease")
     m.lease = None
@@ -307,6 +313,7 @@ def mark_continuation(
     checkpoint: Mapping[str, Any] | None = None,
     now: str | None = None,
 ) -> CampaignManifest:
+    _require_mutable_manifest(m)
     limits = StopLimits(**m.limits)
     current = _parse_ts(now or _now())
     m.chunk_index += 1
@@ -346,6 +353,7 @@ def mark_continuation(
 
 
 def mark_terminal(m: CampaignManifest, status: str, reason: str, terminal_digest: str | None = None) -> CampaignManifest:
+    _require_mutable_manifest(m)
     if status not in TERMINAL_STATES:
         raise ValueError("not terminal")
     m.lease = None

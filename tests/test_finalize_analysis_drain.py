@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.finalize_analysis_drain import finalize
+from tools.seal_collection_cutoff import atomic_write
 
 
 def _write(path: Path, value: object) -> None:
@@ -53,6 +54,7 @@ def test_finalize_expired_drain_without_checkpoint_is_unavailable(tmp_path: Path
 
     saved = json.loads(manifest.read_text(encoding="utf-8"))
     assert result["changed"] == 1
+    assert b"\r" not in manifest.read_bytes()
     assert saved["status"] == "UNAVAILABLE"
     assert saved["lease"] is None
     assert len(saved["terminal_evidence_digest"]) == 64
@@ -169,4 +171,14 @@ def test_predeadline_inactive_source_campaign_keeps_checkpoint_as_partial(tmp_pa
     assert result["remaining_active"] == 0
     assert saved["status"] == "PARTIAL"
     assert saved["status_reason"] == "analysis_drain_inactive_lease_with_checkpoint"
+
+
+def test_campaign_cutoff_writer_emits_exact_lf_bytes(tmp_path: Path) -> None:
+    manifest = tmp_path / "catalog" / "campaigns" / "campaign.json"
+    manifest.parent.mkdir(parents=True)
+
+    atomic_write(manifest, {"campaign_id": "campaign", "status": "UNAVAILABLE"})
+
+    payload = manifest.read_bytes()
+    assert payload == b'{\n  "campaign_id": "campaign",\n  "status": "UNAVAILABLE"\n}\n'
 

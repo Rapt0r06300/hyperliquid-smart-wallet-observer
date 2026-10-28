@@ -3320,6 +3320,52 @@ def test_replay_ready_staging_cleanup_is_idempotent_after_sha_receipt(
             "safe-one.jsonl.gz").read_bytes() == payload
 
 
+@pytest.mark.parametrize(
+    "tamper", ("missing_receipt", "outer_sha256", "stale_rows", "materialized_bytes"),
+)
+def test_staged_materialization_rejects_missing_stale_or_tampered_receipts(
+    tmp_path, tamper,
+):
+    module = _module()
+    payload = gzip.compress(b'{"trade_id":"receipt-bound"}\n', mtime=0)
+    digest = hashlib.sha256(payload).hexdigest()
+    tag = "data-v2-staged-receipt-integrity"
+    asset = _asset("safe.jsonl.gz", "https://example.invalid/safe", payload)
+    row = {
+        "dataset_id": "safe-receipt-bound",
+        "release_tag": tag,
+        "bytes": len(payload),
+        "sha256": digest,
+    }
+    destination = tmp_path / "restore"
+    target = module._materialized_row_target(destination, row)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(payload)
+    receipt_path = module._write_staged_asset_receipt(
+        destination, "owner/repo", tag, asset, [row],
+    )
+    assert module._staged_materialized_asset_ok(
+        destination, "owner/repo", tag, asset, [row],
+    )
+
+    if tamper == "missing_receipt":
+        receipt_path.unlink()
+    elif tamper == "outer_sha256":
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["asset_sha256"] = "0" * 64
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    elif tamper == "stale_rows":
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["rows"][0]["dataset_id"] = "superseded-dataset"
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    elif tamper == "materialized_bytes":
+        target.write_bytes(payload + b"tampered")
+
+    assert not module._staged_materialized_asset_ok(
+        destination, "owner/repo", tag, asset, [row],
+    )
+
+
 def test_staged_receipt_verification_uses_bounded_parallel_workers(
     tmp_path, monkeypatch,
 ):

@@ -315,10 +315,19 @@ def execute_paper_intent(
         )
 
     reservation = None
+    timestamp_refusal = (
+        market.execution_truth.timestamp_refusal_reason(
+            decision_ts_ms=market.decision_ts_ms,
+            max_age_ms=max_book_age_ms,
+        )
+        if market.execution_truth is not None
+        else None
+    )
     if (
         liquidity_ledger is not None
         and market.execution_truth is not None
         and not is_maker
+        and timestamp_refusal is None
     ):
         outcome = liquidity_ledger.execute_once(
             plan_id=plan.plan_id,

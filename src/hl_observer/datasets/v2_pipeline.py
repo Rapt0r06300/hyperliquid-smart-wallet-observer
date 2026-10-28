@@ -63,6 +63,16 @@ def infer_reconciliation_status(manifest: Mapping[str, Any]) -> str:
         )
 
     family = str(manifest.get("family") or "").lower()
+    if family.startswith("copy_vault_") and copy_vault_heartbeat_reason(manifest) is not None:
+        return "UNVERIFIED"
+    if family == "copy_vault_snapshot" and transports.intersection(_WS_TRANSPORTS):
+        semantics = {
+            str(value).lower()
+            for value in (provenance.get("timestamp_semantics") or [])
+        } if isinstance(provenance, Mapping) else set()
+        if connection_count == 1 and clean and "causal_event_availability" in semantics:
+            return "SNAPSHOT_VERIFIED"
+        return "UNVERIFIED"
     if transports and transports.issubset({"https", "http"}) and family in _SNAPSHOT_CHANNELS:
         if family in {"copy_vault_positions", "copy_vault_selection"}:
             semantics = {
@@ -88,6 +98,7 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     """Classify a V2 shard. SAFE is deliberately hard to obtain."""
     reasons: list[str] = []
     severe: list[str] = []
+    family = str(manifest.get("family") or "").lower()
 
     event_count = _int(manifest.get("event_count"))
     size = _int(manifest.get("bytes"))
@@ -169,6 +180,10 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             connection_count = _int(synchronization.get("connection_count")) or 0
             if connection_count != 1:
                 reasons.append("NOT_SINGLE_CONNECTION_EPOCH")
+    if family.startswith("copy_vault_"):
+        heartbeat_reason = copy_vault_heartbeat_reason(manifest)
+        if heartbeat_reason is not None:
+            reasons.append(heartbeat_reason)
 
     reconciliation = manifest.get("reconciliation")
     reconciliation_status = ""
@@ -179,7 +194,6 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         "SOURCE_CONTINUITY_VERIFIED",
         "SNAPSHOT_VERIFIED",
     }
-    family = str(manifest.get("family") or "").lower()
     if family in _MATCHED_RECONCILIATION_FAMILIES:
         if reconciliation_status in {"MATCHED", "SOURCE_CONTINUITY_VERIFIED"}:
             pass
@@ -259,6 +273,81 @@ def finalize_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def copy_vault_heartbeat_reason(manifest: Mapping[str, Any]) -> str | None:
+    """Require a replied application heartbeat tied to this shard's WS epoch."""
+    family = str(manifest.get("family") or "").lower()
+    if not family.startswith("copy_vault_"):
+        return None
+    provenance = manifest.get("provenance")
+    raw_transports = (
+        provenance.get("transports")
+        if isinstance(provenance, Mapping)
+        else None
+    )
+    if raw_transports is None or raw_transports == []:
+        return "TRANSPORT_EVIDENCE_MISSING"
+    if not isinstance(raw_transports, list):
+        return "TRANSPORT_EVIDENCE_INVALID"
+    if any(type(value) is not str or not value.strip() for value in raw_transports):
+        return "TRANSPORT_EVIDENCE_INVALID"
+    transports = {value.lower() for value in raw_transports}
+    if not transports.issubset({"http", "https", "websocket"}):
+        return "TRANSPORT_EVIDENCE_INVALID"
+    if not transports.intersection(_WS_TRANSPORTS):
+        return None
+    if family == "copy_vault_snapshot":
+        # The initial userFills snapshot is a discrete point-in-time response;
+        # its own event timestamp/connection are the causal evidence.
+        return None
+
+    synchronization = manifest.get("synchronization")
+    heartbeat = (
+        synchronization.get("heartbeat")
+        if isinstance(synchronization, Mapping)
+        else None
+    )
+    if not isinstance(heartbeat, Mapping):
+        return "HEARTBEAT_EVIDENCE_MISSING"
+
+    connection_ids = synchronization.get("connection_ids")
+    if (
+        not isinstance(connection_ids, list)
+        or len(connection_ids) != 1
+        or str(heartbeat.get("connection_id") or "") != str(connection_ids[0])
+    ):
+        return "HEARTBEAT_EVIDENCE_INVALID"
+
+    counters = (
+        heartbeat.get("sent_count"),
+        heartbeat.get("received_count"),
+        heartbeat.get("unmatched_pong_count"),
+    )
+    if any(type(value) is not int or value < 0 for value in counters):
+        return "HEARTBEAT_EVIDENCE_INVALID"
+    sent, received, unmatched = counters
+    if sent == 0 or received == 0 or received > sent or unmatched:
+        return "HEARTBEAT_REPLY_MISSING"
+    if received != sent:
+        return "HEARTBEAT_REPLY_MISSING"
+
+    first = heartbeat.get("first_received_at_ms")
+    last = heartbeat.get("last_received_at_ms")
+    start = _int(manifest.get("start_ts_ms"))
+    end = _int(manifest.get("end_ts_ms"))
+    if (
+        type(first) is not int
+        or type(last) is not int
+        or first <= 0
+        or last < first
+        or start is None
+        or end is None
+        or last < start
+        or first > end
+    ):
+        return "HEARTBEAT_EVIDENCE_INVALID"
+    return None
+
+
 def locally_replay_admissible(manifest: Mapping[str, Any]) -> bool:
     """Pre-publication verdict, independent of remote SHA verification."""
     if manifest.get("replay_compatible") is not True:
@@ -316,9 +405,11 @@ def attach_reconciliation(
         == (_int(report.get("matched_count")) or 0)
         + (_int(report.get("live_only")) or 0)
     )
-    if reference_status == "UNAVAILABLE" or reference_is_live_subset:
-        if locally_proven == "SOURCE_CONTINUITY_VERIFIED":
-            status = locally_proven
+    if (
+        (reference_status == "UNAVAILABLE" or reference_is_live_subset)
+        and locally_proven == "SOURCE_CONTINUITY_VERIFIED"
+    ):
+        status = locally_proven
     result["reconciliation"] = {
         "status": status,
         "reference_status": reference_status,
@@ -606,6 +697,7 @@ __all__ = [
     "assess_manifest",
     "attach_reconciliation",
     "build_bundle",
+    "copy_vault_heartbeat_reason",
     "finalize_manifest",
     "infer_reconciliation_status",
     "locally_replay_admissible",

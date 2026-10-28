@@ -174,6 +174,34 @@ class _PagedClient:
             return [{"time": index} for index in range(1, 501)]
         return []
 
+    async def _iter_user_fills_by_time_windows(
+        self,
+        wallet,
+        start_time,
+        end_time,
+        *,
+        page_window_ms,
+        max_pages,
+        aggregate_by_time,
+        audit,
+    ):
+        first_end = min(end_time, start_time + 500)
+        page = await self.user_fills_by_time(
+            wallet, start_time, first_end, aggregate_by_time=aggregate_by_time
+        )
+        audit.update({"status": "IN_PROGRESS", "subrequests": []})
+        audit["subrequests"].append(
+            {"start_ms": start_time, "end_ms": first_end, "outcome": "ACCEPTED"}
+        )
+        yield page, start_time, first_end
+        next_start = first_end + 1
+        if next_start <= end_time:
+            self.starts.append(next_start)
+            audit["subrequests"].append(
+                {"start_ms": next_start, "end_ms": end_time, "outcome": "EMPTY"}
+            )
+        audit.update({"status": "COMPLETE", "next_windows": []})
+
 
 def test_wallet_backfill_uses_500_item_timestamp_cursor():
     client = _PagedClient()

@@ -197,6 +197,7 @@ class FakeTestnetExchangeAdapter:
             request=request,
             average_price=mark,
             filled_size=size,
+            realized_pnl_usdc=0.0,
             unrealized_pnl_usdc=position.unrealized_pnl_usdc,
             external_ref=f"fake-fill-{uuid4().hex[:12]}",
         )

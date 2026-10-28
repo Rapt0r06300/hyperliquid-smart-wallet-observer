@@ -36,6 +36,15 @@ def decimal_sum(values: Iterable[object]) -> Decimal | None:
         return sum(parsed, Decimal(0))
 
 
+def decimal_difference(left: object, right: object) -> Decimal | None:
+    """Subtract finite Decimal evidence without unary-minus context rounding."""
+    left_value = decimal_value(left)
+    right_value = decimal_value(right)
+    if left_value is None or right_value is None:
+        return None
+    return decimal_sum((left_value, right_value.copy_negate()))
+
+
 def float_not_above(value: Decimal) -> float | None:
     """Convert Decimal to float while never rounding PnL upward."""
     return _conservative_float(value, upward=False)
@@ -55,7 +64,10 @@ def _conservative_float(value: Decimal, *, upward: bool) -> float | None:
         return None
     if not math.isfinite(converted):
         return None
-    converted_decimal = Decimal(str(converted))
+    # Compare the exact binary64 value. Decimal(str(...)) is only a shortest
+    # round-trip display representation and can hide that 0.1 as a float is
+    # slightly greater than the exact Decimal("0.1").
+    converted_decimal = Decimal.from_float(converted)
     if upward and converted_decimal < value:
         converted = math.nextafter(converted, math.inf)
     elif not upward and converted_decimal > value:

@@ -112,6 +112,10 @@ def _valid_completed_control_receipt(status, intent_path: Path) -> bool:
         and receipt.get("paper_only") is True
         and receipt.get("read_only") is True
         and receipt.get("real_execution") is False
+        and (
+            intent.get("intent") not in {"pause", "resume"}
+            or receipt.get("campaign_lease_effect") == "PRESERVE_ACTIVE_LEASES"
+        )
         and status.get("control_receipt_sha256") == receipt_digest
     )
 

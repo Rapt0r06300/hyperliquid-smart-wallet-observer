@@ -1,8 +1,8 @@
 # Alina SmartFlow — état courant autoritatif
 
-Dernière mise à jour : **2026-09-10**.
+Dernière mise à jour : **2026-10-28**.
 
-État technique et runtime revalidé contre le SHA exact **`c40263c8a5188fb6c39d5a92b149635243c6155e`**. Cette ancre désigne le code effectivement audité au moment de cette mise à jour ; un commit ultérieur purement documentaire ne doit pas être interprété comme une nouvelle certification du code.
+L'ancre **`c40263c8a5188fb6c39d5a92b149635243c6155e`** est un audit historique du 2026-09-10, pas une certification du HEAD actuel. Le scope Copy-Vault-only a été recontrôlé dans le checkout local au HEAD de base **`755441d3b442c9c981d2876d07bf71f9459e1ad5`** ; la copie de travail est modifiée et cette vérification ciblée ne vaut pas validation globale.
 
 Ce document est la **source de vérité lisible actuelle** pour l'état du projet. Il ne remplace pas les contrats exécutables : en cas de divergence, le code, les tests, les gates CI et les registres machine gagnent toujours.
 
@@ -62,7 +62,7 @@ Pour cette roadmap technique :
 
 - un macro-lot est `Done` lorsque ses exigences techniques sont implémentées ou explicitement classées (`déjà-implémenté`, `corrigé`, `SUPERSEDED`, `DUPLICATE`, `KILLED`, `HISTORICAL`, `REJECTED` ou `BLOCKED`) avec preuves adaptées ;
 - une stratégie peut rester `KILL`, `MORE_DATA`, négative ou non certifiée économiquement sans empêcher la fermeture d'un lot technique correctement réalisé ;
-- **+4 USD, 3×4 USD, PnL positif ou toute autre cible de profit ne sont jamais des critères de Done de cette roadmap technique** ;
+- **Aucune cible de profit ou PnL positif n'est un critère de Done de cette roadmap technique** ;
 - les coûts, l'OOS, le forward, la liquidatabilité, la causalité et les autres invariants scientifiques restent obligatoires lorsqu'un lot touche ces surfaces ;
 - aucune idée V5/776+ ne peut disparaître silencieusement : toute exigence doit garder une disposition traçable.
 
@@ -72,13 +72,17 @@ Cette séparation ne modifie pas la mission économique du produit : elle empêc
 
 Aucune cible économique ne doit être déclarée atteinte sans preuve **LIQUIDATABLE_NET**, coûts complets, OOS, forward, placebo et échantillon suffisant.
 
-Au gel de certification du 12/08/2026, les verdicts documentés étaient :
+Au gel de certification du 12/08/2026, sous un ancien périmètre multi-familles, les verdicts historiques documentés étaient :
 
 - Copy-Vault : `MORE_DATA` ;
 - Lead-Lag : `MORE_DATA` ;
 - Cross-Venue v2 : `KILL`.
 
-Les campagnes et infrastructures ajoutées depuis peuvent produire de nouvelles preuves, mais **un résultat exploratoire, train, synthétique ou observé n'est pas automatiquement un PnL prouvé**. La cible +4 USD par famille ne doit être annoncée que par la gate économique canonique.
+Ces verdicts ne décrivent pas l'état économique actuel. La cible active est
+Copy-Vault seul : **au moins +5 USD nets/jour sur 200 USD paper**, à mesurer
+uniquement après réparations techniques et preuves OOS/forward complètes.
+Un résultat exploratoire, TRAIN, synthétique ou simplement observé n'est pas
+une preuve de PnL ; le statut actuel doit venir du dernier rapport valide.
 
 Un verdict économique `KILL`, `MORE_DATA` ou négatif n'empêche pas le logiciel d'être techniquement parfait : au contraire, refuser honnêtement une stratégie non prouvée fait partie de la qualité attendue.
 
@@ -111,7 +115,8 @@ Le workflow redondant `.github/workflows/security-quality.yml` publie son propre
 
 S'il manque l'un des statuts obligatoires ou s'il est rouge, il est interdit de dire « PARFAIT / TOUT VERT » pour ce SHA.
 
-Cette certification ne prétend jamais que les trois familles gagnent de l'argent. La preuve économique garde ses propres gates et ses propres verdicts.
+Cette certification technique ne prétend jamais que Copy-Vault gagne de
+l'argent. La preuve économique garde ses propres gates et son propre verdict.
 
 ## 6. Contrat Git : main-only
 

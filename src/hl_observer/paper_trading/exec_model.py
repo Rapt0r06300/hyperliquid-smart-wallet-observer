@@ -101,13 +101,17 @@ def estimate_slippage_bps(
     requested = _finite_positive(notional_usdc, "notional_usdc")
     half_spread = _finite_non_negative(cfg.half_spread_bps, "half_spread_bps")
     if top_depth_usdc is None:
-        return half_spread + _finite_non_negative(
+        result = half_spread + _finite_non_negative(
             cfg.unknown_depth_impact_bps,
             "unknown_depth_impact_bps",
         )
-    depth = _finite_positive(top_depth_usdc, "top_depth_usdc")
-    impact = _finite_non_negative(cfg.impact_coef_bps, "impact_coef_bps")
-    return half_spread + impact * requested / depth
+    else:
+        depth = _finite_positive(top_depth_usdc, "top_depth_usdc")
+        impact = _finite_non_negative(cfg.impact_coef_bps, "impact_coef_bps")
+        result = half_spread + impact * requested / depth
+    if not math.isfinite(result):
+        raise ValueError("NUMERIC_OVERFLOW_SLIPPAGE")
+    return result
 
 
 def simulate_execution(
@@ -158,18 +162,31 @@ def simulate_execution(
     if execution_truth is not None:
         if decision_ts_ms is None:
             raise ValueError("decision_ts_ms is required with execution_truth")
-        if not execution_truth.is_fresh(
+        timestamp_refusal = execution_truth.timestamp_refusal_reason(
             decision_ts_ms=decision_ts_ms,
-            max_age_ms=max(0, int(max_book_age_ms)),
-        ):
+            max_age_ms=max_book_age_ms,
+        )
+        if timestamp_refusal is not None:
             return _no_fill_result(
                 requested=requested,
                 is_maker=is_maker,
-                reason="STALE_EXECUTION_BOOK",
+                reason=timestamp_refusal,
                 snapshot_id=execution_truth.snapshot_id,
                 cost_status="UNMEASURABLE",
             )
-        reference_mid = execution_truth.mid_price
+        try:
+            reference_mid = execution_truth.mid_price
+            _ = execution_truth.spread_bps
+            execution_truth.visible_notional("BUY")
+            execution_truth.visible_notional("SELL")
+        except (TypeError, ValueError, OverflowError):
+            return _no_fill_result(
+                requested=requested,
+                is_maker=is_maker,
+                reason="NUMERIC_OVERFLOW",
+                snapshot_id=execution_truth.snapshot_id,
+                cost_status="UNMEASURABLE",
+            )
     elif strict_book:
         return _no_fill_result(
             requested=requested,
@@ -211,14 +228,38 @@ def simulate_execution(
                 cost_status="MEASURED",
             )
         fee_bps = _finite_non_negative(cfg.taker_fee_bps, "taker_fee_bps")
-        all_in_fill = _apply_price(
-            depth_result.average_fill_price,
-            normalized_side,
-            fee_bps + latency_bps,
-        )
+        total_cost_bps = fee_bps + latency_bps
+        all_in_fill = _apply_price(depth_result.average_fill_price, normalized_side, total_cost_bps)
         net_cost = _directional_cost_bps(all_in_fill, reference_mid, normalized_side)
+        if (
+            not all(
+                math.isfinite(value)
+                for value in (
+                    total_cost_bps,
+                    all_in_fill,
+                    net_cost,
+                    depth_result.slippage_bps,
+                    depth_result.filled_notional_usdc,
+                    depth_result.fill_ratio,
+                    depth_result.filled_quantity,
+                )
+            )
+            or all_in_fill <= 0.0
+        ):
+            return _numeric_overflow_result(
+                requested,
+                is_maker=False,
+                snapshot_id=execution_truth.snapshot_id,
+            )
+        rounded_fill = round(all_in_fill, 10)
+        if rounded_fill <= 0.0:
+            return _numeric_overflow_result(
+                requested,
+                is_maker=False,
+                snapshot_id=execution_truth.snapshot_id,
+            )
         return ExecResult(
-            fill_price=round(all_in_fill, 10),
+            fill_price=rounded_fill,
             slippage_bps=depth_result.slippage_bps,
             fee_bps=fee_bps,
             latency_bps=latency_bps,
@@ -242,12 +283,36 @@ def simulate_execution(
 
     # Legacy/replay approximation. It is intentionally marked and is rejected
     # by the strict PaperEngine.
-    slippage_bps = estimate_slippage_bps(requested, top_depth_usdc, config=cfg)
+    try:
+        slippage_bps = estimate_slippage_bps(requested, top_depth_usdc, config=cfg)
+    except ValueError as exc:
+        if "NUMERIC_OVERFLOW_SLIPPAGE" in str(exc):
+            return _numeric_overflow_result(requested, is_maker=False)
+        raise
     fee_bps = _finite_non_negative(cfg.taker_fee_bps, "taker_fee_bps")
     net_cost_bps = slippage_bps + fee_bps + latency_bps
     fill_price = _apply_price(reference_mid, normalized_side, net_cost_bps)
+    filled_quantity = requested / fill_price
+    if (
+        not all(
+            math.isfinite(value)
+            for value in (
+                slippage_bps,
+                fee_bps,
+                latency_bps,
+                net_cost_bps,
+                fill_price,
+                filled_quantity,
+            )
+        )
+        or fill_price <= 0.0
+    ):
+        return _numeric_overflow_result(requested, is_maker=False)
+    rounded_fill = round(fill_price, 10)
+    if rounded_fill <= 0.0:
+        return _numeric_overflow_result(requested, is_maker=False)
     return ExecResult(
-        fill_price=round(fill_price, 10),
+        fill_price=rounded_fill,
         slippage_bps=slippage_bps,
         fee_bps=fee_bps,
         latency_bps=latency_bps,
@@ -261,7 +326,7 @@ def simulate_execution(
         fill_ratio=1.0,
         reason="FILLED_APPROXIMATE",
         cost_status="APPROXIMATE",
-        filled_quantity=round(requested / fill_price, 12),
+        filled_quantity=round(filled_quantity, 12),
     )
 
 
@@ -283,6 +348,12 @@ def _simulate_maker(
     if depth is None and top_depth_usdc is not None:
         depth = _finite_positive(top_depth_usdc, "top_depth_usdc")
     queue_ratio = None if depth is None else queue_ahead / depth
+    if queue_ratio is not None and not math.isfinite(queue_ratio):
+        return _numeric_overflow_result(
+            requested,
+            is_maker=True,
+            snapshot_id=execution_truth.snapshot_id if execution_truth else None,
+        )
 
     depletion = _optional_non_negative(queue_depletion_usdc, "queue_depletion_usdc")
     traded = _optional_non_negative(traded_through_usdc, "traded_through_usdc")
@@ -317,10 +388,24 @@ def _simulate_maker(
     )
     base_fill = _maker_base_price(execution_truth, side, reference_mid)
     base_slippage = _directional_cost_bps(base_fill, reference_mid, side)
+    if not math.isfinite(base_slippage) or base_fill <= 0.0:
+        return _numeric_overflow_result(
+            requested,
+            is_maker=True,
+            snapshot_id=execution_truth.snapshot_id if execution_truth else None,
+        )
     partial = filled < requested - 1e-9
     if adverse is None:
+        rounded_fill = round(base_fill, 10)
+        filled_quantity = filled / base_fill
+        if rounded_fill <= 0.0 or not math.isfinite(filled_quantity):
+            return _numeric_overflow_result(
+                requested,
+                is_maker=True,
+                snapshot_id=execution_truth.snapshot_id if execution_truth else None,
+            )
         return ExecResult(
-            fill_price=round(base_fill, 10),
+            fill_price=rounded_fill,
             slippage_bps=round(base_slippage, 8),
             fee_bps=fee_bps,
             latency_bps=latency_bps,
@@ -338,13 +423,34 @@ def _simulate_maker(
             cost_status="UNMEASURABLE",
             adverse_selection_bps=None,
             execution_snapshot_id=execution_truth.snapshot_id if execution_truth else None,
-            filled_quantity=round(filled / base_fill, 12),
+            filled_quantity=round(filled_quantity, 12),
         )
 
-    all_in_fill = _apply_price(base_fill, side, fee_bps + latency_bps + adverse)
+    total_cost_bps = fee_bps + latency_bps + adverse
+    all_in_fill = _apply_price(base_fill, side, total_cost_bps)
     net_cost = _directional_cost_bps(all_in_fill, reference_mid, side)
+    if (
+        not all(
+            math.isfinite(value)
+            for value in (total_cost_bps, all_in_fill, net_cost, filled, requested)
+        )
+        or all_in_fill <= 0.0
+    ):
+        return _numeric_overflow_result(
+            requested,
+            is_maker=True,
+            snapshot_id=execution_truth.snapshot_id if execution_truth else None,
+        )
+    rounded_fill = round(all_in_fill, 10)
+    filled_quantity = filled / all_in_fill
+    if rounded_fill <= 0.0 or not math.isfinite(filled_quantity):
+        return _numeric_overflow_result(
+            requested,
+            is_maker=True,
+            snapshot_id=execution_truth.snapshot_id if execution_truth else None,
+        )
     return ExecResult(
-        fill_price=round(all_in_fill, 10),
+        fill_price=rounded_fill,
         slippage_bps=round(base_slippage, 8),
         fee_bps=fee_bps,
         latency_bps=latency_bps,
@@ -362,7 +468,7 @@ def _simulate_maker(
         cost_status="MEASURED" if execution_truth else "APPROXIMATE",
         adverse_selection_bps=adverse,
         execution_snapshot_id=execution_truth.snapshot_id if execution_truth else None,
-        filled_quantity=round(filled / all_in_fill, 12),
+        filled_quantity=round(filled_quantity, 12),
     )
 
 
@@ -401,6 +507,8 @@ def simulate_depth_execution(
     level_fills: list[BookLevelFill] = []
     for level in levels:
         available_notional = level.price * level.size
+        if not math.isfinite(available_notional) or available_notional <= 0.0:
+            return _numeric_overflow_depth_result(requested)
         take_notional = min(remaining, available_notional)
         if take_notional <= 0:
             continue
@@ -408,6 +516,11 @@ def simulate_depth_execution(
         filled_notional += take_notional
         filled_qty += take_quantity
         remaining -= take_notional
+        if not all(
+            math.isfinite(value)
+            for value in (take_notional, take_quantity, filled_notional, filled_qty, remaining)
+        ):
+            return _numeric_overflow_depth_result(requested)
         level_fills.append(
             BookLevelFill(
                 price=round(level.price, 12),
@@ -442,6 +555,8 @@ def simulate_depth_execution(
         slippage = max(0.0, (average / mid - 1.0) * 10_000.0)
     else:
         slippage = max(0.0, (1.0 - average / mid) * 10_000.0)
+    if not all(math.isfinite(value) for value in (average, fill_ratio, slippage)):
+        return _numeric_overflow_depth_result(requested)
     return DepthExecutionResult(
         requested_notional_usdc=round(requested, 8),
         filled_notional_usdc=round(filled_notional, 8),
@@ -475,13 +590,21 @@ def book_notional_for_quantity(
     requested_quantity = _finite_positive(quantity, "quantity")
     reference_price = _finite_positive(fallback_price, "fallback_price")
     if execution_truth is None:
-        return requested_quantity * reference_price
+        result = requested_quantity * reference_price
+        if not math.isfinite(result) or result <= 0.0:
+            raise ValueError("NUMERIC_OVERFLOW_BOOK_NOTIONAL")
+        return result
 
     remaining = requested_quantity
     quote_notional = 0.0
     for price, available_quantity in execution_truth.levels_for_side(side):
         take_quantity = min(remaining, available_quantity)
-        quote_notional += take_quantity * price
+        level_notional = take_quantity * price
+        if not math.isfinite(level_notional) or level_notional <= 0.0:
+            raise ValueError("NUMERIC_OVERFLOW_BOOK_NOTIONAL")
+        quote_notional += level_notional
+        if not math.isfinite(quote_notional):
+            raise ValueError("NUMERIC_OVERFLOW_BOOK_NOTIONAL")
         remaining -= take_quantity
         if remaining <= 1e-12:
             break
@@ -531,6 +654,37 @@ def _invalid_depth_result() -> DepthExecutionResult:
         levels_consumed=0,
         reason="INVALID_REQUEST",
         filled_quantity=0.0,
+    )
+
+
+def _numeric_overflow_depth_result(requested: float) -> DepthExecutionResult:
+    return DepthExecutionResult(
+        requested_notional_usdc=requested,
+        filled_notional_usdc=0.0,
+        missed_notional_usdc=requested,
+        average_fill_price=None,
+        fill_ratio=0.0,
+        partial=False,
+        missed=True,
+        slippage_bps=0.0,
+        levels_consumed=0,
+        reason="NUMERIC_OVERFLOW",
+        filled_quantity=0.0,
+    )
+
+
+def _numeric_overflow_result(
+    requested: float,
+    *,
+    is_maker: bool,
+    snapshot_id: str | None = None,
+) -> ExecResult:
+    return _no_fill_result(
+        requested=requested,
+        is_maker=is_maker,
+        reason="NUMERIC_OVERFLOW",
+        cost_status="UNMEASURABLE",
+        snapshot_id=snapshot_id,
     )
 
 

@@ -4,9 +4,19 @@ import math
 import uuid
 from copy import copy
 from dataclasses import asdict, dataclass, field, replace
+from decimal import Decimal, localcontext
 from enum import Enum
 from hashlib import sha256
 
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_difference,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
+    float_not_below,
+)
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.simulation.accounting_truth import first_not_none, named_roi_metrics
 from hl_observer.simulation.capital_accounting import (
     CapitalAccountingSnapshot,
@@ -18,7 +28,6 @@ from hl_observer.simulation.ledger_integrity import GENESIS_HASH, seal_event, ve
 from hl_observer.simulation.paper_event import PaperEvent, PaperEventType
 from hl_observer.simulation.pnl_ledger_audit import audit_paper_ledger
 from hl_observer.simulation.pnl_reconciliation import PnlReconciliation, reconcile_pnl
-from hl_observer.instrument_identity import preserve_native_instrument_symbol
 
 
 @dataclass(slots=True)
@@ -87,6 +96,11 @@ class PaperLedger:
     funding_settlement_ids: set[str] = field(default_factory=set, repr=False)
     last_missing_mark_position_ids: tuple[str, ...] = ()
     capital_tracker: CapitalAccountingTracker = field(init=False, repr=False)
+    _cash_balance_exact: Decimal = field(init=False, repr=False)
+    _fees_paid_exact: Decimal = field(init=False, repr=False)
+    _realized_pnl_exact: Decimal = field(init=False, repr=False)
+    _funding_net_exact: Decimal = field(init=False, repr=False)
+    _turnover_exact: Decimal = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not _finite_positive(self.starting_balance_usdc):
@@ -99,6 +113,18 @@ class PaperLedger:
             self.cash_balance_usdc = float(self.starting_balance_usdc)
         if self.high_water_equity_usdc is None:
             self.high_water_equity_usdc = float(self.starting_balance_usdc)
+        exact_values = {
+            "_cash_balance_exact": self.cash_balance_usdc,
+            "_fees_paid_exact": self.fees_paid_usdc,
+            "_realized_pnl_exact": self.realized_pnl_usdc,
+            "_funding_net_exact": self.funding_net_usdc,
+            "_turnover_exact": self.turnover_usdc,
+        }
+        for name, value in exact_values.items():
+            exact = decimal_value(value)
+            if exact is None:
+                raise ValueError(f"{name.removeprefix('_')} must be finite")
+            setattr(self, name, exact)
         self.capital_tracker = CapitalAccountingTracker(
             starting_equity_usd=self.starting_balance_usdc
         )
@@ -106,8 +132,11 @@ class PaperLedger:
 
     @property
     def equity_usdc(self) -> float:
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        return round(float(cash) + self.unrealized_pnl_usdc, 10)
+        exact_equity = decimal_sum(
+            (self._cash_balance_exact, decimal_value(self.unrealized_pnl_usdc))
+        )
+        value = _finite_decimal_float(exact_equity)
+        return math.inf if value is None else value
 
     def open_position(
         self,
@@ -143,11 +172,10 @@ class PaperLedger:
             else float(notional_usdc) / float(fill_price)
         )
         filled_notional = abs(qty * float(fill_price))
-        if quantity is not None and not math.isclose(
-            filled_notional,
-            float(notional_usdc),
-            rel_tol=1e-8,
-            abs_tol=1e-8,
+        if quantity is not None and not _notional_matches(
+            quantity=quantity,
+            fill_price=fill_price,
+            notional_usdc=notional_usdc,
         ):
             return self.no_trade(
                 coin=coin,
@@ -199,13 +227,29 @@ class PaperLedger:
                 timestamp_ms=timestamp_ms,
                 refs=refs,
             )
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        cash_after_fee = round(float(cash) - fee, 10)
-        fees_after = round(self.fees_paid_usdc + fee, 10)
-        turnover_after = round(
-            self.turnover_usdc + sum(new_leg_notional),
-            10,
+        exact_fee = decimal_value(fee)
+        turnover_increment = decimal_sum(new_leg_notional)
+        cash_after_exact = decimal_difference(self._cash_balance_exact, exact_fee)
+        fees_after_exact = (
+            decimal_sum((self._fees_paid_exact, exact_fee))
+            if exact_fee is not None
+            else None
         )
+        turnover_after_exact = (
+            decimal_sum((self._turnover_exact, turnover_increment))
+            if turnover_increment is not None
+            else None
+        )
+        cash_after_fee = _finite_decimal_float(cash_after_exact)
+        fees_after = _finite_decimal_float(fees_after_exact)
+        turnover_after = _finite_decimal_float(turnover_after_exact)
+        if cash_after_fee is None or fees_after is None or turnover_after is None:
+            return self.no_trade(
+                coin=coin,
+                reason="OPEN_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={"accounting_component": "EXACT_ACCUMULATOR"},
+            )
         if not all(
             math.isfinite(value)
             for value in (fee, cash_after_fee, fees_after, turnover_after)
@@ -381,6 +425,7 @@ class PaperLedger:
             )
 
         self.turnover_usdc = turnover_after
+        self._turnover_exact = turnover_after_exact
         fee_event = self._charge_fee(
             fee,
             coin=coin,
@@ -489,11 +534,28 @@ class PaperLedger:
                 timestamp_ms=timestamp_ms,
                 refs=refs,
             )
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        realized_after = round(self.realized_pnl_usdc + gross, 10)
-        cash_before_fee = round(float(cash) + gross, 10)
-        cash_after_fee = round(cash_before_fee - fee, 10)
-        fees_after = round(self.fees_paid_usdc + fee, 10)
+        exact_gross = decimal_value(gross)
+        exact_fee = decimal_value(fee)
+        realized_after_exact = (
+            decimal_sum((self._realized_pnl_exact, exact_gross))
+            if exact_gross is not None
+            else None
+        )
+        cash_before_fee_exact = (
+            decimal_sum((self._cash_balance_exact, exact_gross))
+            if exact_gross is not None
+            else None
+        )
+        cash_after_fee_exact = decimal_difference(cash_before_fee_exact, exact_fee)
+        fees_after_exact = (
+            decimal_sum((self._fees_paid_exact, exact_fee))
+            if exact_fee is not None
+            else None
+        )
+        realized_after = _finite_decimal_float(realized_after_exact)
+        cash_before_fee = _finite_decimal_float(cash_before_fee_exact)
+        cash_after_fee = _finite_decimal_float(cash_after_fee_exact)
+        fees_after = _finite_decimal_float(fees_after_exact)
         original_quantity = pos.quantity
         remaining_quantity = original_quantity - close_qty
         close_fraction = min(1.0, close_qty / max(original_quantity, 1e-12))
@@ -503,8 +565,28 @@ class PaperLedger:
             max(0.0, value - closed)
             for value, closed in zip(current_legs, closed_leg_notional, strict=True)
         )
-        turnover_after = round(self.turnover_usdc + sum(closed_leg_notional), 10)
-        if not all(
+        turnover_increment = decimal_sum(closed_leg_notional)
+        turnover_after_exact = (
+            decimal_sum((self._turnover_exact, turnover_increment))
+            if turnover_increment is not None
+            else None
+        )
+        turnover_after = _finite_decimal_float(turnover_after_exact)
+        if any(
+            value is None
+            for value in (
+                realized_after,
+                cash_before_fee,
+                cash_after_fee,
+                fees_after,
+                turnover_after,
+                realized_after_exact,
+                cash_before_fee_exact,
+                cash_after_fee_exact,
+                fees_after_exact,
+                turnover_after_exact,
+            )
+        ) or not all(
             math.isfinite(value)
             for value in (
                 realized_after,
@@ -533,8 +615,11 @@ class PaperLedger:
         }
         staged.capital_tracker = copy(self.capital_tracker)
         staged.realized_pnl_usdc = realized_after
+        staged._realized_pnl_exact = realized_after_exact
         staged.cash_balance_usdc = cash_before_fee
+        staged._cash_balance_exact = cash_before_fee_exact
         staged.turnover_usdc = turnover_after
+        staged._turnover_exact = turnover_after_exact
         staged_position = staged.positions[key]
         staged_position.quantity = remaining_quantity
         staged_position.last_mark_price = float(fill_price)
@@ -591,10 +676,14 @@ class PaperLedger:
             )
 
         self.realized_pnl_usdc = staged.realized_pnl_usdc
+        self._realized_pnl_exact = staged._realized_pnl_exact
         self.unrealized_pnl_usdc = staged.unrealized_pnl_usdc
         self.cash_balance_usdc = staged.cash_balance_usdc
+        self._cash_balance_exact = staged._cash_balance_exact
         self.fees_paid_usdc = staged.fees_paid_usdc
+        self._fees_paid_exact = staged._fees_paid_exact
         self.turnover_usdc = staged.turnover_usdc
+        self._turnover_exact = staged._turnover_exact
         for current_key in tuple(self.positions):
             if current_key not in staged.positions:
                 del self.positions[current_key]
@@ -707,9 +796,12 @@ class PaperLedger:
             total = math.fsum(unrealized_values)
         except OverflowError:
             total = math.inf
-        unrealized_total = round(total, 10) if math.isfinite(total) else total
+        unrealized_total = total
         cash = float(first_not_none(self.cash_balance_usdc, 0.0))
-        equity = cash + unrealized_total
+        try:
+            equity = math.fsum((cash, unrealized_total))
+        except OverflowError:
+            equity = math.inf
         high_water = first_not_none(self.high_water_equity_usdc, equity)
         candidate_high_water = max(float(high_water), equity)
         drawdown = max(0.0, candidate_high_water - equity)
@@ -723,7 +815,7 @@ class PaperLedger:
                 timestamp_ms=timestamp_ms,
                 refs={"mark_input_status": "REJECTED_NON_FINITE_EQUITY"},
             )
-        drawdown_total = round(drawdown, 10)
+        drawdown_total = drawdown
         candidate_tracker = copy(self.capital_tracker)
         try:
             candidate_tracker.observe(
@@ -832,15 +924,25 @@ class PaperLedger:
                 settlement_id=settlement_id,
             )
         try:
-            cash = float(first_not_none(self.cash_balance_usdc, 0.0))
-            funding_after = self.funding_net_usdc + funding_amount
-            cash_after = cash + funding_amount
+            exact_funding = decimal_value(funding_amount)
+            funding_after_exact = (
+                decimal_sum((self._funding_net_exact, exact_funding))
+                if exact_funding is not None
+                else None
+            )
+            cash_after_exact = (
+                decimal_sum((self._cash_balance_exact, exact_funding))
+                if exact_funding is not None
+                else None
+            )
+            funding_after = _finite_decimal_float(funding_after_exact)
+            cash_after = _finite_decimal_float(cash_after_exact)
         except (TypeError, ValueError, OverflowError):
             return reject(
                 "FUNDING_ACCOUNTING_NON_FINITE",
                 settlement_id=settlement_id,
             )
-        if not math.isfinite(funding_after) or not math.isfinite(cash_after):
+        if funding_after is None or cash_after is None:
             return reject(
                 "FUNDING_ACCOUNTING_NON_FINITE",
                 settlement_id=settlement_id,
@@ -851,7 +953,9 @@ class PaperLedger:
         staged.funding_settlement_ids = set(self.funding_settlement_ids)
         staged.capital_tracker = copy(self.capital_tracker)
         staged.funding_net_usdc = funding_after
+        staged._funding_net_exact = funding_after_exact
         staged.cash_balance_usdc = cash_after
+        staged._cash_balance_exact = cash_after_exact
         if settlement_id is None:
             # Retain the amount for legacy/diagnostic continuity, but never let
             # an unidentified cash flow certify economic PnL.
@@ -883,7 +987,9 @@ class PaperLedger:
             )
 
         self.funding_net_usdc = staged.funding_net_usdc
+        self._funding_net_exact = staged._funding_net_exact
         self.cash_balance_usdc = staged.cash_balance_usdc
+        self._cash_balance_exact = staged._cash_balance_exact
         self.funding_evidence_complete = staged.funding_evidence_complete
         self.funding_settlement_ids.update(staged.funding_settlement_ids)
         self.capital_tracker = staged.capital_tracker
@@ -908,7 +1014,11 @@ class PaperLedger:
             )
         )
 
-    def reconciliation(self, *, tolerance_usdc: float = 0.0001) -> PnlReconciliation:
+    def reconciliation(
+        self,
+        *,
+        tolerance_usdc: float = float(USD_RECONCILIATION_ABS_TOLERANCE),
+    ) -> PnlReconciliation:
         return reconcile_pnl(
             starting_balance_usdc=self.starting_balance_usdc,
             realized_pnl_usdc=self.realized_pnl_usdc,
@@ -926,15 +1036,17 @@ class PaperLedger:
             initial_capital_usdc=self.starting_balance_usdc,
         )
         payload: dict[str, object] = {
-            "starting_balance_usdc": round(self.starting_balance_usdc, 10),
-            "cash_balance_usdc": round(float(first_not_none(self.cash_balance_usdc, 0.0)), 10),
-            "realized_pnl_usdc": round(self.realized_pnl_usdc, 10),
-            "unrealized_pnl_usdc": round(self.unrealized_pnl_usdc, 10),
-            "fees_paid_usdc": round(self.fees_paid_usdc, 10),
-            "funding_net_usdc": round(self.funding_net_usdc, 10),
-            "equity_usdc": self.equity_usdc,
-            "drawdown_usdc": self.drawdown_usdc,
-            "turnover_usdc": round(self.turnover_usdc, 10),
+            "starting_balance_usdc": _display_pnl(
+                decimal_value(self.starting_balance_usdc)
+            ),
+            "cash_balance_usdc": _display_pnl(self._cash_balance_exact),
+            "realized_pnl_usdc": _display_pnl(self._realized_pnl_exact),
+            "unrealized_pnl_usdc": _display_pnl(self.unrealized_pnl_usdc),
+            "fees_paid_usdc": _display_cost(self._fees_paid_exact),
+            "funding_net_usdc": _display_pnl(self._funding_net_exact),
+            "equity_usdc": _display_pnl(self.equity_usdc),
+            "drawdown_usdc": _display_risk(self.drawdown_usdc),
+            "turnover_usdc": _display_cost(self._turnover_exact),
             "economic_evidence": {
                 "mark_evidence_complete": self.mark_evidence_complete,
                 "mark_evidence_gap_count": self.mark_evidence_gap_count,
@@ -950,9 +1062,9 @@ class PaperLedger:
                     "quantity": round(pos.quantity, 10),
                     "average_entry_price": round(pos.average_entry_price, 10),
                     "last_mark_price": round(pos.last_mark_price, 10),
-                    "unrealized_pnl_usdc": round(pos.unrealized(), 10),
+                    "unrealized_pnl_usdc": _display_pnl(pos.unrealized()),
                     "liquidatable_pnl_usdc": (
-                        round(pos.liquidatable_unrealized(), 10)
+                        _display_pnl(pos.liquidatable_unrealized())
                         if pos.liquidatable_unrealized() is not None
                         else None
                     ),
@@ -1025,10 +1137,39 @@ class PaperLedger:
         timestamp_ms: int,
         position_id: str,
     ) -> PaperEvent:
-        fee = max(0.0, float(fee_usdc))
-        self.fees_paid_usdc = round(self.fees_paid_usdc + fee, 10)
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        self.cash_balance_usdc = round(float(cash) - fee, 10)
+        if not _finite_nonnegative(fee_usdc):
+            return self.no_trade(
+                coin=coin,
+                reason="FEE_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={"position_id": position_id},
+            )
+        fee = float(fee_usdc)
+        exact_fee = decimal_value(fee)
+        fees_after_exact = (
+            decimal_sum((self._fees_paid_exact, exact_fee))
+            if exact_fee is not None
+            else None
+        )
+        cash_after_exact = decimal_difference(self._cash_balance_exact, exact_fee)
+        fees_after = _finite_decimal_float(fees_after_exact)
+        cash_after = _finite_decimal_float(cash_after_exact)
+        if (
+            fees_after is None
+            or cash_after is None
+            or fees_after_exact is None
+            or cash_after_exact is None
+        ):
+            return self.no_trade(
+                coin=coin,
+                reason="FEE_ACCOUNTING_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={"position_id": position_id},
+            )
+        self._fees_paid_exact = fees_after_exact
+        self.fees_paid_usdc = fees_after
+        self._cash_balance_exact = cash_after_exact
+        self.cash_balance_usdc = cash_after
         return self._append(
             PaperEvent.create(
                 PaperEventType.FEE_CHARGED,
@@ -1140,6 +1281,8 @@ def _funding_settlement_id(refs: dict[str, object]) -> str | None:
 
 
 def _finite_positive(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
     try:
         parsed = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -1148,11 +1291,59 @@ def _finite_positive(value: object) -> bool:
 
 
 def _finite_nonnegative(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
     try:
         parsed = float(value)
     except (TypeError, ValueError, OverflowError):
         return False
     return math.isfinite(parsed) and parsed >= 0
+
+
+def _notional_matches(
+    *, quantity: object, fill_price: object, notional_usdc: object
+) -> bool:
+    exact_quantity = decimal_value(quantity)
+    exact_price = decimal_value(fill_price)
+    exact_notional = decimal_value(notional_usdc)
+    if exact_quantity is None or exact_price is None or exact_notional is None:
+        return False
+    with localcontext() as context:
+        context.prec = 80
+        actual_notional = exact_quantity * exact_price
+    discrepancy = decimal_difference(actual_notional, exact_notional)
+    return (
+        discrepancy is not None
+        and discrepancy.copy_abs() <= USD_RECONCILIATION_ABS_TOLERANCE
+    )
+
+
+def _finite_decimal_float(value: Decimal | None) -> float | None:
+    if value is None or not value.is_finite():
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _display_pnl(value: object) -> float | None:
+    exact = decimal_value(value)
+    if exact is None:
+        return None
+    return float_not_above(exact)
+
+
+def _display_cost(value: object) -> float | None:
+    exact = decimal_value(value)
+    if exact is None:
+        return None
+    return float_not_below(exact)
+
+
+def _display_risk(value: float) -> float | None:
+    return _display_cost(value)
 
 
 def _combine_leg_notionals(
