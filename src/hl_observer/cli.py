@@ -9,17 +9,32 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
 import typer
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
+from hl_observer.analysis.closing_detector import detect_closings_from_deltas
+from hl_observer.analysis.methodology_profiler import build_methodology_profile
+from hl_observer.analysis.negative_pnl_auditor import (
+    build_negative_pnl_audit,
+    format_negative_pnl_audit,
+    write_negative_pnl_audit,
+)
+from hl_observer.analysis.opening_detector import detect_openings_from_deltas
+from hl_observer.analysis.opening_patterns import compute_opening_pattern_stats
+from hl_observer.analysis.trader_playbook import generate_trader_playbook
+from hl_observer.analysis.v19_repo_matrix import format_repo_fusion_matrix
 from hl_observer.autoscan import format_autoscan_report, run_autoscan
+from hl_observer.calibration.ledger_pnl_calibration import (
+    build_ledger_pnl_calibration_report,
+    format_ledger_pnl_calibration_report,
+)
+from hl_observer.collection.coin_universe import note_coins
 from hl_observer.collection.collector import (
     InvalidWalletAddress,
     build_default_collection_plan,
     run_collection_once,
     validate_wallet_address,
 )
-from hl_observer.collection.coin_universe import note_coins
 from hl_observer.collection.weight_budgeter import (
     ReadOnlyBudgetRequest,
     format_budget_plan,
@@ -27,25 +42,55 @@ from hl_observer.collection.weight_budgeter import (
 )
 from hl_observer.config.loader import load_settings
 from hl_observer.config.settings import ExecutionEnvironment, Settings
-from hl_observer.copying.leaderboard_autoselect import (
-    CopyLeaderAutoSelectConfig,
-    select_copy_leaders,
-)
 from hl_observer.copying.consensus_leader_selector import (
     ConsensusLeaderSelectionReport,
     format_consensus_leader_report,
     select_consensus_leaders_from_deltas,
 )
+from hl_observer.copying.leaderboard_autoselect import (
+    CopyLeaderAutoSelectConfig,
+    select_copy_leaders,
+)
+from hl_observer.copying.realtime_magic_score import RealtimeCopyRiskConfig
 from hl_observer.copying.reports import (
     format_copy_run_report,
     format_copy_status_report,
 )
-from hl_observer.copying.realtime_magic_score import RealtimeCopyRiskConfig
 from hl_observer.copying.signal_detector import CopySourceMode, detect_copy_signals_from_deltas
-from hl_observer.simulation.live_filters import DEFAULT_SIMULATION_MIN_EDGE_BPS, calibrated_float_env
 from hl_observer.dashboard_truth.dashboard_truth_audit import (
     format_dashboard_truth_audit,
     run_dashboard_truth_audit,
+)
+from hl_observer.data_sources.acquisition_engine import (
+    DataQualityConfig,
+    DataQualityGate,
+    FetchRequest,
+    FetchResult,
+    RequestBudgetManager,
+    format_data_quality_assessment,
+)
+from hl_observer.data_sources.fresh_data_plan import (
+    FreshDataPlanRequest,
+    build_fresh_data_plan,
+    format_fresh_data_plan,
+)
+from hl_observer.data_sources.historical_backfill_engine import (
+    HistoricalBackfillConfig,
+    HistoricalBackfillEngine,
+    TtlPageCache,
+    format_historical_backfill_result,
+)
+from hl_observer.data_sources.market_backfill import (
+    BackfillRequest,
+    HistoricalBackfillHub,
+    HistoricalDataType,
+    HistoricalRecord,
+    build_official_adapters,
+)
+from hl_observer.data_sources.provider_registry import provider_registry_report
+from hl_observer.data_sources.warehouse_coverage import (
+    build_warehouse_coverage_report,
+    format_warehouse_coverage_report,
 )
 from hl_observer.edge.edge_remaining import compute_edge_remaining
 from hl_observer.explorer.explorer_revalidation import revalidate_explorer_wallets
@@ -56,35 +101,27 @@ from hl_observer.explorer.explorer_source import (
     scrape_explorer,
 )
 from hl_observer.explorer.explorer_transaction_tape import format_explorer_tape, get_explorer_tape
+from hl_observer.following.follow_decision_engine import decide_follow_signal
+from hl_observer.following.follow_signal_builder import build_follow_signal_from_opening
+from hl_observer.following.paper_follow import create_paper_follow_orders
 from hl_observer.hyperliquid.endpoints import info_url_for_settings
 from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, RiskDecision, SignalDecision
-from hl_observer.data_sources.provider_registry import provider_registry_report
-from hl_observer.data_sources.acquisition_engine import (
-    DataQualityConfig,
-    DataQualityGate,
-    FetchRequest,
-    FetchResult,
-    RequestBudgetManager,
-    format_data_quality_assessment,
-)
-from hl_observer.data_sources.historical_backfill_engine import (
-    HistoricalBackfillConfig,
-    HistoricalBackfillEngine,
-    TtlPageCache,
-    format_historical_backfill_result,
-)
-from hl_observer.data_sources.fresh_data_plan import (
-    FreshDataPlanRequest,
-    build_fresh_data_plan,
-    format_fresh_data_plan,
-)
-from hl_observer.data_sources.warehouse_coverage import (
-    build_warehouse_coverage_report,
-    format_warehouse_coverage_report,
-)
 from hl_observer.local_index.index_benchmark import format_benchmark_report, run_local_scan_benchmark
 from hl_observer.local_index.query_engine import scan_wallet_index
-from hl_observer.local_index.wallet_index import WalletLocalIndex, fake_wallet  # fake-data-scan: allow benchmark-only import (scan-local research command)
+from hl_observer.local_index.wallet_index import (  # fake-data-scan: allow benchmark-only import (scan-local research command)
+    WalletLocalIndex,
+    fake_wallet,
+)
+from hl_observer.loops.candidate_factory import (
+    build_signal_candidates_from_observation,
+    build_signal_candidates_from_position_deltas,
+)
+from hl_observer.loops.dashboard_payload import build_loop_dashboard_payload
+from hl_observer.loops.engine import LoopEngineeringRunner, load_signal_candidates
+from hl_observer.loops.input_diagnostics import build_loop_input_diagnostics, write_loop_input_diagnostics
+from hl_observer.loops.memory import LoopMemoryStore, default_loop_memory_dir
+from hl_observer.mainnet_readonly_observer.observer import MainnetObservation, MainnetReadOnlyObserver
+from hl_observer.markets.ccxt_universe import NATIVE_VENUES, CCXTUniverseScout
 from hl_observer.markets.scanner import (
     MarketDiscoveryPlan,
     MarketScanPlan,
@@ -93,50 +130,28 @@ from hl_observer.markets.scanner import (
     run_discover_markets,
     run_scan_markets,
 )
-from hl_observer.markets.ccxt_universe import CCXTUniverseScout, NATIVE_VENUES
-from hl_observer.data_sources.market_backfill import (
-    BackfillRequest,
-    HistoricalBackfillHub,
-    HistoricalDataType,
-    HistoricalRecord,
-    build_official_adapters,
-)
 from hl_observer.markets.universal_registry import UniversalMarketRegistry
-from hl_observer.replay.data_quality import determine_replay_quality
+from hl_observer.metagraph.metagraph_export import export_metagraph_from_logs, format_metagraph_export
 from hl_observer.opportunities.fresh_opportunity import (
     find_fresh_opportunities,
     format_fresh_opportunity_report,
 )
-from hl_observer.paper.paper_executor import PaperExecutor
-from hl_observer.risk.gates import RiskContext
-from hl_observer.risk.risk_engine import RiskEngine
-from hl_observer.runtime.hygiene import format_runtime_hygiene_report, scan_runtime_hygiene
-from hl_observer.runtime.write_diagnostics import (
-    check_runtime_write_readiness,
-    format_runtime_write_readiness,
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+from hl_observer.optimization.closed_ledger_replay import (
+    format_closed_ledger_replay_report,
+    run_closed_ledger_replay,
+    write_closed_ledger_replay_reports,
 )
-from hl_observer.runtime.session_logs import (
-    format_prepared_session_logs,
-    format_purged_logs,
-    prepare_fresh_simulation_logs,
-    purge_stale_top_level_logs,
+from hl_observer.optimization.profit_optimizer import (
+    format_optimization_report,
+    run_strategy_tournament,
+    write_optimization_reports,
 )
-from hl_observer.scanner.missed_opportunity_logger import write_missed_opportunity_reports
-from hl_observer.scanner.priority_queue import select_wallets_for_warm_scan
-from hl_observer.scanner.scan_budget import evaluate_warm_scan_budget
-from hl_observer.scanner.scanner_models import ScanBudget, WalletPriorityInput
-from hl_observer.scanner.throughput_planner import (
-    ThroughputRequest,
-    format_throughput_plan,
-    plan_safe_high_throughput_scan,
+from hl_observer.realtime.freshness_diagnostics import (
+    build_freshness_diagnostics,
+    format_freshness_diagnostics,
 )
-from hl_observer.scanner.fresh_scan_strategy import (
-    FreshScanStrategyRequest,
-    format_fresh_scan_strategy,
-    plan_fresh_scan_strategy,
-)
-from hl_observer.scanner.wallet_priority import score_wallet_priority
-from hl_observer.realtime_monitor.hot_watch_rotation import rotate_hot_watch
+from hl_observer.realtime.latency_report import build_latency_report, format_latency_report
 from hl_observer.realtime.realtime_health import check_realtime_health, format_realtime_health
 from hl_observer.realtime.recovery_engine import (
     RealtimeRecoveryEngine,
@@ -145,13 +160,16 @@ from hl_observer.realtime.recovery_engine import (
     WatchStreamEvent,
     format_recovery_decision,
 )
-from hl_observer.realtime.latency_report import build_latency_report, format_latency_report
 from hl_observer.realtime.replay import format_replay_result, replay_events_from_logs
-from hl_observer.realtime.freshness_diagnostics import (
-    build_freshness_diagnostics,
-    format_freshness_diagnostics,
+from hl_observer.realtime_monitor.hot_watch_rotation import rotate_hot_watch
+from hl_observer.release.closeout import write_closeout_report
+from hl_observer.release.prompt_coverage import (
+    evaluate_prompt_coverage,
+    format_coverage_summary,
+    verify_non_deletion,
 )
-from hl_observer.metagraph.metagraph_export import export_metagraph_from_logs, format_metagraph_export
+from hl_observer.release.quality_gates import format_quality_gates, run_quality_gates
+from hl_observer.replay.data_quality import determine_replay_quality
 from hl_observer.research.manual_research_classifier import (
     classify_manual_research,
     format_classified_research,
@@ -163,29 +181,39 @@ from hl_observer.research.manual_research_importer import (
     import_manual_research,
     write_manual_research_template,
 )
-from hl_observer.release.closeout import write_closeout_report
-from hl_observer.release.prompt_coverage import (
-    evaluate_prompt_coverage,
-    format_coverage_summary,
-    verify_non_deletion,
+from hl_observer.risk.gates import RiskContext
+from hl_observer.risk.risk_engine import RiskEngine
+from hl_observer.runtime.hygiene import format_runtime_hygiene_report, scan_runtime_hygiene
+from hl_observer.runtime.session_logs import (
+    format_prepared_session_logs,
+    format_purged_logs,
+    prepare_fresh_simulation_logs,
+    purge_stale_top_level_logs,
 )
-from hl_observer.release.quality_gates import format_quality_gates, run_quality_gates
+from hl_observer.runtime.write_diagnostics import (
+    check_runtime_write_readiness,
+    format_runtime_write_readiness,
+)
+from hl_observer.scanner.fresh_scan_strategy import (
+    FreshScanStrategyRequest,
+    format_fresh_scan_strategy,
+    plan_fresh_scan_strategy,
+)
+from hl_observer.scanner.missed_opportunity_logger import write_missed_opportunity_reports
+from hl_observer.scanner.priority_queue import select_wallets_for_warm_scan
+from hl_observer.scanner.scan_budget import evaluate_warm_scan_budget
+from hl_observer.scanner.scanner_models import ScanBudget, WalletPriorityInput
+from hl_observer.scanner.throughput_planner import (
+    ThroughputRequest,
+    format_throughput_plan,
+    plan_safe_high_throughput_scan,
+)
+from hl_observer.scanner.wallet_priority import score_wallet_priority
 from hl_observer.security.mainnet_guard import assert_mainnet_execution_disabled
 from hl_observer.security.safety_audit import run_safety_audit
-from hl_observer.loops.candidate_factory import (
-    build_signal_candidates_from_observation,
-    build_signal_candidates_from_position_deltas,
-)
-from hl_observer.loops.dashboard_payload import build_loop_dashboard_payload
-from hl_observer.loops.engine import LoopEngineeringRunner, load_signal_candidates
-from hl_observer.loops.input_diagnostics import build_loop_input_diagnostics, write_loop_input_diagnostics
-from hl_observer.loops.memory import LoopMemoryStore, default_loop_memory_dir
-from hl_observer.mainnet_readonly_observer.observer import MainnetObservation, MainnetReadOnlyObserver
 from hl_observer.simulation.decision_replay_analyzer import (
-    analyze_decision_logs,
     analyze_decision_logs_summary,
     default_logs_to_send_dir,
-    format_replay_analysis,
     load_recent_decision_events,
 )
 from hl_observer.simulation.diagnostic_reports import (
@@ -202,17 +230,12 @@ from hl_observer.simulation.diagnostic_reports import (
     build_wallet_loss_diagnostics,
     format_diagnostic_report,
 )
+from hl_observer.simulation.live_filters import DEFAULT_SIMULATION_MIN_EDGE_BPS, calibrated_float_env
 from hl_observer.simulation.log_metrics import analyze_logs_streaming, format_logs_analysis
 from hl_observer.simulation.loss_attribution import (
     build_loss_attribution_report,
     format_loss_attribution_report,
 )
-from hl_observer.analysis.negative_pnl_auditor import (
-    build_negative_pnl_audit,
-    format_negative_pnl_audit,
-    write_negative_pnl_audit,
-)
-from hl_observer.analysis.v19_repo_matrix import format_repo_fusion_matrix
 from hl_observer.simulation.readiness import (
     build_simulation_readiness_report,
     format_simulation_readiness,
@@ -221,22 +244,8 @@ from hl_observer.simulation.tuning_report import (
     build_simulation_tuning_report,
     format_simulation_tuning_report,
 )
-from hl_observer.calibration.ledger_pnl_calibration import (
-    build_ledger_pnl_calibration_report,
-    format_ledger_pnl_calibration_report,
-)
-from hl_observer.optimization.profit_optimizer import (
-    format_optimization_report,
-    run_strategy_tournament,
-    write_optimization_reports,
-)
-from hl_observer.optimization.closed_ledger_replay import (
-    format_closed_ledger_replay_report,
-    run_closed_ledger_replay,
-    write_closed_ledger_replay_reports,
-)
-from hl_observer.storage.database import init_db as initialize_database
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine
+from hl_observer.storage.database import init_db as initialize_database
 from hl_observer.storage.models import (
     FollowDecision,
     FollowSignal,
@@ -253,10 +262,10 @@ from hl_observer.storage.models import (
     WalletOpeningPatternStats,
     WalletPlaybook,
 )
-from hl_observer.testnet.testnet_order_builder import build_testnet_order_intent
-from hl_observer.testnet.testnet_executor_locked import LockedTestnetExecutor
-from hl_observer.testnet.testnet_safety_gates import TestnetLocked
 from hl_observer.testnet.commands import build_testnet_status, run_testnet_command
+from hl_observer.testnet.testnet_executor_locked import LockedTestnetExecutor
+from hl_observer.testnet.testnet_order_builder import build_testnet_order_intent
+from hl_observer.testnet.testnet_safety_gates import TestnetLocked
 from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.persistent_state import reset_simulation_state, simulation_state_path
 from hl_observer.utils.logging import configure_logging
@@ -276,36 +285,26 @@ from hl_observer.wallets.discovery import (
 from hl_observer.wallets.leaderboard_import import (
     format_leaderboard_report,
     import_leaderboard_file,
-    store_leaderboard_result,
 )
 from hl_observer.wallets.leaderboard_models import LeaderboardCandidate
 from hl_observer.wallets.leaderboard_source import scrape_leaderboard
-from hl_observer.wallets.leaderboard_validation import validate_leaderboard_wallet_address
 from hl_observer.wallets.public_trades_live import (
     format_public_trade_scan_report,
     normalize_coin_list,
     scan_public_trades_ws,
     store_public_trade_scan,
 )
+from hl_observer.wallets.scan_queue import format_scan_queue_report, scan_wallet_queue
+from hl_observer.wallets.snapshot_service import record_robust_snapshot
+from hl_observer.wallets.top500_bootstrap import bootstrap_top_wallets, format_top500_report
 from hl_observer.wallets.user_fills_live import (
     format_user_fills_live_report,
     scan_user_fills_ws,
     store_user_fills_live_result,
     stream_user_fills_ws,
 )
-from hl_observer.wallets.snapshot_service import record_robust_snapshot
-from hl_observer.wallets.top500_bootstrap import bootstrap_top_wallets, format_top500_report
-from hl_observer.wallets.scan_queue import format_scan_queue_report, scan_wallet_queue
-from hl_observer.analysis.opening_detector import detect_openings_from_deltas
-from hl_observer.analysis.closing_detector import detect_closings_from_deltas
-from hl_observer.analysis.opening_patterns import compute_opening_pattern_stats
-from hl_observer.analysis.methodology_profiler import build_methodology_profile
-from hl_observer.analysis.trader_playbook import generate_trader_playbook
-from hl_observer.following.follow_decision_engine import decide_follow_signal
-from hl_observer.following.follow_signal_builder import build_follow_signal_from_opening
-from hl_observer.following.paper_follow import create_paper_follow_orders
-from hyper_smart_observer.audit.archive_audit import write_archive_audit_report
 from hyper_smart_observer.app.config import load_config as load_hypersmart_config
+from hyper_smart_observer.audit.archive_audit import write_archive_audit_report
 from hyper_smart_observer.copy_mode.preflight import (
     format_copy_preflight_report,
     run_copy_preflight,
@@ -313,7 +312,6 @@ from hyper_smart_observer.copy_mode.preflight import (
 )
 from hyper_smart_observer.dashboard.exporter import export_dashboard as export_hypersmart_dashboard
 from hyper_smart_observer.runtime.archive import create_clean_archive
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 app = typer.Typer(
     name="hl_observer",
@@ -730,7 +728,9 @@ def live_user_fills_stream(
     import asyncio as _asyncio
     import threading as _threading
     import time as _time
+
     from sqlalchemy import select as _select
+
     from hl_observer.storage.models import TopWallet as _TopWallet
 
     settings = _settings()
@@ -1755,19 +1755,23 @@ def refactor_fusion_run_command(
     output_data_dir: Path = typer.Option(Path("data/reports"), "--output-data-dir", help="Runtime JSON payload directory."),
     output_docs_dir: Path = typer.Option(Path("docs/reports"), "--output-docs-dir", help="Markdown report directory."),
 ) -> None:
-    """Run wallet-copy + arbitrage fusion E2E in local paper mode only."""
+    """Refuse the retired multi-family engine; Copy-Vault has one canonical runtime."""
     _settings()
     if not dry_run:
         typer.echo("refactor-fusion-run refused: only --dry-run paper simulation is supported.")
         raise typer.Exit(1)
     from hl_observer.refactor_fusion.runner import format_refactor_fusion_run, run_refactor_fusion
 
-    result = run_refactor_fusion(
-        log_dir=from_logs,
-        dry_run=True,
-        output_data_dir=output_data_dir,
-        output_docs_dir=output_docs_dir,
-    )
+    try:
+        result = run_refactor_fusion(
+            log_dir=from_logs,
+            dry_run=True,
+            output_data_dir=output_data_dir,
+            output_docs_dir=output_docs_dir,
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
     typer.echo(format_refactor_fusion_run(result))
 
 
@@ -2589,7 +2593,7 @@ def discover_wallets(
         )
     if json_output:
         typer.echo(discovery_result_json(result))
-    elif report or True:
+    else:
         typer.echo(format_discovery_report(result))
 
 
@@ -2649,7 +2653,7 @@ def import_leaderboard_command(
         import json
 
         typer.echo(json.dumps(result.model_dump(), indent=2, default=str))
-    elif report or True:
+    else:
         typer.echo(format_leaderboard_report(result))
 
 
@@ -3505,7 +3509,6 @@ def paper_run() -> None:
         signal_age_ms=100,
     )
     decision = RiskEngine(settings).evaluate(context)
-    PaperExecutor().orders
     typer.echo(f"paper-run smoke decision={decision.decision.value} allowed={decision.allowed}")
 
 

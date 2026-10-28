@@ -8,8 +8,8 @@ lanceur. Un signal introuvable est compté 0 (deny-by-default), jamais supposé 
     python tools/bot_ready.py            # imprime le bloc BOT-READY
     python tools/bot_ready.py --ecrire   # + l'ajoute à BOT_READY.md à la racine
 
-Lecture seule, aucun réseau, aucun ordre. Un score n'autorise jamais rien : le plafond de
-l'échelle est le testnet verrouillé ; le trading réel est hors échelle (voir loop_readiness).
+Lecture seule, aucun réseau, aucun ordre. Un score n'autorise jamais rien : le plafond est
+PAPER/read-only ; aucun chemin testnet ou réel n'est autorisé (voir loop_readiness).
 """
 from __future__ import annotations
 
@@ -40,8 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     non_prouves = [c for c in ("pnl_reconcilie", "portes_cout_actives", "kill_switch_cable")
                    if rap.dimensions.get(c, {}).get("score", 0) == 0]
     if non_prouves:
-        print("\n_Signaux non prouvés depuis le seul RECAP (comptés 0, deny-by-default) : %s._"
-              % ", ".join(non_prouves))
+        print(
+            f"\n_Signaux non prouvés depuis le seul RECAP (comptés 0, deny-by-default) : {', '.join(non_prouves)}._"
+        )
     if a.ecrire:
         (racine / "BOT_READY.md").write_text(bloc + "\n", encoding="utf-8")
         print("\n-> BOT_READY.md écrit.")

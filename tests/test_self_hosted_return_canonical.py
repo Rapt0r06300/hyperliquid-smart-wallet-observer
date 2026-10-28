@@ -12,10 +12,10 @@ from hl_observer.economics.families import (
     build_lead_lag_contract,
 )
 from hl_observer.ops import self_hosted_return
+from hl_observer.ops.daily_economic_certification import certify_daily_workspace
 from hl_observer.ops.final_economic_certification import certify_workspace
-from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.economic_objective import CANONICAL_FAMILIES, evaluate_objective
 from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
-
 
 FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 
@@ -77,18 +77,18 @@ def _campaign(family: str) -> dict:
         "dataset_provenance": {"dataset_fingerprint": "d" * 64},
         "opened_positions": 2,
         "closed_positions": 2,
-        "gross_pnl_usd": 5.0,
-        "fees_usd": 0.1,
-        "spread_cost_usd": 0.1,
-        "slippage_cost_usd": 0.1,
-        "latency_cost_usd": 0.1,
-        "net_pnl_usd": 4.6,
+        "gross_pnl_usd": 6.0,
+        "fees_usd": 0.2,
+        "spread_cost_usd": 0.2,
+        "slippage_cost_usd": 0.2,
+        "latency_cost_usd": 0.2,
+        "net_pnl_usd": 5.2,
         "liquidatable_net": True,
         "duplicate_trade_ids": 0,
         "trade_ids_count": 2,
         "trade_ids_sha256": "a" * 64,
-        "oos": _segment(net=2.1, hash_char="b", no_lookahead=True),
-        "forward": _segment(net=2.1, hash_char="c", post_freeze=True, no_lookahead=True),
+        "oos": _segment(net=2.6, hash_char="b", no_lookahead=True),
+        "forward": _segment(net=2.6, hash_char="c", post_freeze=True, no_lookahead=True),
         "placebos": {"beaten": True},
     }
     if family == "copy_vault":
@@ -153,7 +153,11 @@ def _campaign(family: str) -> dict:
         "placebo_complete": True,
     }
     row.update(evaluate_objective(row))
-    assert row["objective_status"] == "ATTEINT"
+    if family in CANONICAL_FAMILIES:
+        assert row["objective_status"] == "ATTEINT"
+    else:
+        assert row["objective_status"] == "NON_ATTEINT"
+        assert "DISABLED_BY_SCOPE" in row["objective_reasons"]
     return row
 
 
@@ -270,17 +274,23 @@ def test_alina_return_est_strictement_derive_de_la_certification_canonique(
     _write_job_result(result_dir, workspace, project_sha=project_sha)
     monkeypatch.setattr(self_hosted_return, "build_decision", lambda _root: {})
 
-    canonical = certify_workspace(workspace)
+    base = certify_workspace(workspace)
+    canonical = certify_daily_workspace(workspace)
     returned = self_hosted_return.build_return(result_dir)
 
     assert returned["technical_status"] == "SUCCESS"
     assert returned["completion_ready"] is True
     assert returned["project_sha"] == project_sha
-    assert returned["economic_certification"] == canonical
-    assert returned["economic_certification"]["all_families_certified"] is True
-    for family in FAMILIES:
+    assert returned["economic_certification"] == base
+    assert returned["daily_target_assessment"] == canonical
+    assert base["all_families_certified"] is True
+    assert returned["daily_target_assessment"]["all_families_certified"] is False
+    assert returned["daily_target_assessment"]["families"]["copy_vault"]["daily_target_reached"] is False
+    assert "FORWARD_OBSERVATION_DURATION_MISSING" in returned["daily_target_assessment"]["families"]["copy_vault"]["reasons"]
+    assert set(canonical["families"]) == set(CANONICAL_FAMILIES)
+    for family in CANONICAL_FAMILIES:
         certification = returned["economic_certification"]["families"][family]
-        assert certification == canonical["families"][family]
+        assert certification == base["families"][family]
         assert certification["proof_provenance"]["dataset_fingerprint"] == "d" * 64
         assert certification["proof_provenance"]["parameters_sha256"] == "e" * 64
         assert certification["proof_provenance"]["campaign_id"] == f"freeze-{family}"
@@ -310,6 +320,11 @@ def test_alina_return_refuse_toute_certification_avant_completion_guard(
     )
     monkeypatch.setattr(
         self_hosted_return,
+        "certify_daily_workspace",
+        lambda _root: (_ for _ in ()).throw(AssertionError("daily assessment called before completion")),
+    )
+    monkeypatch.setattr(
+        self_hosted_return,
         "build_decision",
         lambda _root: (_ for _ in ()).throw(AssertionError("brain called before completion")),
     )
@@ -319,6 +334,7 @@ def test_alina_return_refuse_toute_certification_avant_completion_guard(
     assert returned["technical_status"] == "SUCCESS"
     assert returned["completion_ready"] is False
     assert returned["economic_certification"] is None
+    assert returned["daily_target_assessment"] is None
     assert returned["brain_decision"] is None
     assert returned["paper_only"] is True
     assert returned["real_execution"] is False
@@ -330,7 +346,7 @@ def test_alina_return_ne_surclasse_jamais_un_more_data_ou_kill(
 ) -> None:
     workspace = tmp_path / "workspace"
     result_dir = tmp_path / "result"
-    _write_workspace(workspace, weak_family="lead_lag")
+    _write_workspace(workspace, weak_family="copy_vault")
     _write_job_result(result_dir, workspace, project_sha="2" * 40)
     monkeypatch.setattr(self_hosted_return, "build_decision", lambda _root: {})
 
@@ -341,6 +357,7 @@ def test_alina_return_ne_surclasse_jamais_un_more_data_ou_kill(
     assert returned["completion_ready"] is True
     assert returned["economic_certification"] == canonical
     assert returned["economic_certification"]["all_families_certified"] is False
-    assert returned["economic_certification"]["families"]["lead_lag"]["certified"] is False
+    assert returned["daily_target_assessment"]["all_families_certified"] is False
+    assert returned["economic_certification"]["families"]["copy_vault"]["certified"] is False
     assert returned["message_fr"].startswith("Retour compact prêt")
     assert _contains_forbidden_raw_key(returned) is False

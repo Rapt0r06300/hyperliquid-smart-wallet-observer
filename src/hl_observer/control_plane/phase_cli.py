@@ -5,9 +5,8 @@ import argparse
 import json
 import os
 import re
-import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from hl_observer.control_plane.phase_controller import PhaseController
 from hl_observer.control_plane.resumable_campaign import (
@@ -71,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--receipt-dir", default="control/phase-receipts")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    p_status = subparsers.add_parser("status", help="Show current phase state")
+    subparsers.add_parser("status", help="Show current phase state")
     p_collect = subparsers.add_parser("collect", help="Transition to COLLECT")
     _request_args(p_collect)
     p_analyze = subparsers.add_parser("analyze", help="Transition to ANALYZE")

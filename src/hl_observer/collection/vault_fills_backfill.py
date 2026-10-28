@@ -20,8 +20,50 @@ from collections.abc import Mapping
 from typing import Any
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
+from hl_observer.wallets.position_delta_engine import fill_direction_validation, fill_side_sign
 
 MS_PAR_HEURE = 3_600_000
+_AUDIT_FILL_FIELDS = (
+    "time", "coin", "px", "sz", "side", "dir", "startPosition", "tid", "oid", "hash",
+)
+
+
+def _audit_value(value: Any, *, depth: int = 0) -> Any:
+    """Bound and JSON-sanitize an untrusted value kept only for rejection diagnostics."""
+    if value is None or type(value) is bool:
+        return value
+    if type(value) is int:
+        return value if value.bit_length() <= 256 else {"type": "int", "repr": str(value)[:128]}
+    if type(value) is float:
+        return value if math.isfinite(value) else {"type": "float", "repr": repr(value)}
+    if isinstance(value, str):
+        return value if len(value) <= 256 else {"type": "str", "prefix": value[:256], "truncated": True}
+    if depth >= 3:
+        return {"type": type(value).__name__, "truncated": True}
+    if isinstance(value, Mapping):
+        result = {
+            str(key)[:80]: _audit_value(item, depth=depth + 1)
+            for key, item in list(value.items())[:32]
+        }
+        if len(value) > 32:
+            result["_truncated_fields"] = len(value) - 32
+        return result
+    if isinstance(value, (list, tuple)):
+        result = [_audit_value(item, depth=depth + 1) for item in value[:32]]
+        if len(value) > 32:
+            result.append({"_truncated_items": len(value) - 32})
+        return result
+    return {"type": type(value).__name__, "repr": repr(value)[:256]}
+
+
+def _audit_raw_fill(fill: Any) -> Any:
+    if not isinstance(fill, Mapping):
+        return _audit_value(fill)
+    return {
+        key: _audit_value(fill[key])
+        for key in _AUDIT_FILL_FIELDS
+        if key in fill
+    }
 
 
 def normaliser_vault(vault: Any) -> str:
@@ -69,39 +111,138 @@ def split_inclusive_window(start_ms: int, end_ms: int) -> tuple[tuple[int, int],
 def parser_fills(
     rep: Any, *, vault: str = "", include_raw: bool = False,
 ) -> list[dict]:
-    """Normalise une réponse userFills(ByTime) → fills propres. Champs HL : time, coin, px, sz, side
-    ('B'/'A'), dir ('Open Long'/'Close Short'/…), startPosition, oid, hash. Illisible → ignoré."""
+    """Compatibilité : retourne les lignes admises par le parseur audité."""
+    return parser_fills_with_audit(rep, vault=vault, include_raw=include_raw)[0]
+
+
+def _position_direction(size: float | None) -> str | None:
+    if size is None:
+        return None
+    if size > 0:
+        return "LONG"
+    if size < 0:
+        return "SHORT"
+    return "FLAT"
+
+
+def parser_fills_with_audit(
+    rep: Any, *, vault: str = "", include_raw: bool = False,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Parse fills from economic ``side`` and preserve display ``dir`` independently.
+
+    A recognized, contradictory ``dir`` quarantines the row. Unknown labels remain
+    visible but never override the direction derived from ``side``.
+    """
     out: list[dict] = []
+    rejected_by_reason: dict[str, int] = {}
+    rejected_sample: list[dict[str, Any]] = []
+    unknown_dir_label_count = 0
     vault_id = str(vault or "").strip()
-    for f in (rep or []):
+    rows = rep if isinstance(rep, (list, tuple)) else []
+
+    def reject(index: int, reason: str, fill: Any) -> None:
+        rejected_by_reason[reason] = rejected_by_reason.get(reason, 0) + 1
+        if len(rejected_sample) < 20:
+            sample: dict[str, Any] = {"index": index, "reason": reason}
+            if isinstance(fill, dict):
+                sample.update({
+                    "time": fill.get("time"),
+                    "coin": fill.get("coin"),
+                    "native_id": fill.get("tid") or fill.get("hash"),
+                })
+            sample["raw_payload"] = _audit_raw_fill(fill)
+            rejected_sample.append(sample)
+
+    for index, f in enumerate(rows):
+        if not isinstance(f, dict):
+            reject(index, "FILL_ROW_INVALID", f)
+            continue
+        raw_ts = f.get("time")
+        if type(raw_ts) is not int or raw_ts <= 0:
+            reject(index, "FILL_CAUSAL_TIMESTAMP_INVALID", f)
+            continue
+        if isinstance(f.get("px"), bool) or isinstance(f.get("sz"), bool):
+            reject(index, "FILL_EXECUTION_VALUE_INVALID", f)
+            continue
         try:
             coin = preserve_native_instrument_symbol(f["coin"])
             px = float(f["px"])
             sz = float(f["sz"])
-            ts = int(f["time"])
         except (KeyError, TypeError, ValueError, OverflowError):
+            reject(index, "FILL_REQUIRED_FIELD_INVALID", f)
             continue
+        ts = raw_ts
         if (
-            not coin or ts <= 0
+            not coin
             or not math.isfinite(px) or px <= 0
             or not math.isfinite(sz) or sz <= 0
         ):
+            reject(index, "FILL_EXECUTION_VALUE_INVALID", f)
             continue
-        side = str(f.get("side") or "").upper()                    # 'B' = achat, 'A' = vente
+        side_raw = f.get("side")
+        side = str(side_raw or "").strip().upper()
         if side not in {"A", "B"}:
+            reject(index, "FILL_SIDE_INVALID", f)
             continue
-        signe = 1 if side == "B" else (-1 if side == "A" else 0)
-        try:
-            start_pos = float(f.get("startPosition"))
-        except (TypeError, ValueError):
+        raw_start = f.get("startPosition")
+        if "startPosition" not in f:
             start_pos = None
-        parsed = {"vault": vault_id, "ts_ms": ts, "coin": coin, "px": px, "sz": sz, "signe": signe,
-                  "dir": str(f.get("dir") or ""), "start_position": start_pos,
-                  "tid": f.get("tid"), "oid": f.get("oid"), "hash": f.get("hash")}
+        elif raw_start is None or isinstance(raw_start, bool):
+            reject(index, "FILL_START_POSITION_INVALID", f)
+            continue
+        else:
+            try:
+                start_pos = float(raw_start)
+            except (TypeError, ValueError, OverflowError):
+                reject(index, "FILL_START_POSITION_INVALID", f)
+                continue
+            if not math.isfinite(start_pos):
+                reject(index, "FILL_START_POSITION_INVALID", f)
+                continue
+
+        direction_validation = fill_direction_validation(f)
+        if direction_validation == "FILL_SIDE_DIR_CONTRADICTION":
+            reject(index, direction_validation, f)
+            continue
+        if direction_validation == "UNKNOWN_DIR_LABEL":
+            unknown_dir_label_count += 1
+        signe = fill_side_sign(f)
+        if signe is None:
+            reject(index, "FILL_SIDE_INVALID", f)
+            continue
+        resulting_position = start_pos + signe * sz if start_pos is not None else None
+        parsed = {
+            "vault": vault_id,
+            "ts_ms": ts,
+            "coin": coin,
+            "px": px,
+            "sz": sz,
+            "side_raw": side_raw,
+            "fill_side": "BUY" if signe > 0 else "SELL",
+            "signe": signe,
+            "dir": str(f.get("dir") or ""),
+            "dir_raw": f.get("dir"),
+            "start_position_raw": raw_start,
+            "start_position": start_pos,
+            "position_direction_before": _position_direction(start_pos),
+            "position_direction_after": _position_direction(resulting_position),
+            "direction_validation": direction_validation,
+            "tid": f.get("tid"),
+            "oid": f.get("oid"),
+            "hash": f.get("hash"),
+        }
         if include_raw:
             parsed["raw_fill"] = dict(f)
         out.append(parsed)
-    return out
+    audit = {
+        "input_count": len(rows),
+        "accepted_count": len(out),
+        "rejected_count": sum(rejected_by_reason.values()),
+        "rejected_by_reason": dict(sorted(rejected_by_reason.items())),
+        "rejected_sample": rejected_sample,
+        "unknown_dir_label_count": unknown_dir_label_count,
+    }
+    return out, audit
 
 
 def fill_identity(fill: dict) -> tuple:
@@ -282,6 +423,15 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
                     "direction": int(direction), "taille_usd": round(taille_usd, 2),
                     "pos_avant": round(composant_avant, 8), "pos_apres": round(composant_apres, 8),
                     "px": source_fill["px"], "sz": abs(float(component_sz)), "dir": label,
+                    "side_raw": source_fill.get("side_raw", source_fill.get("side")),
+                    "fill_side": source_fill.get("fill_side"),
+                    "fill_sign": source_fill.get("signe"),
+                    "dir_raw": source_fill.get("dir_raw", source_fill.get("dir")),
+                    "start_position_raw": source_fill.get(
+                        "start_position_raw", source_fill.get("startPosition")
+                    ),
+                    "position_direction_before": _position_direction(composant_avant),
+                    "position_direction_after": _position_direction(composant_apres),
                     "leader_dir": source_fill.get("dir"), "tid": source_fill.get("tid"),
                     "oid": source_fill.get("oid"), "hash": source_fill.get("hash"),
                     "fill_id": event_fill_id,
@@ -444,6 +594,6 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
             "par_vault": vaults}
 
 
-__all__ = ["plan_de_requetes", "split_inclusive_window", "parser_fills", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
+__all__ = ["plan_de_requetes", "split_inclusive_window", "parser_fills", "parser_fills_with_audit", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
            "reconstruire_episodes", "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture",
            "CAP_USERFILLS", "RETENTION_USERFILLS", "MS_PAR_HEURE"]

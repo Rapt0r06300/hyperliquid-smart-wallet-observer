@@ -12,7 +12,10 @@ from typer.testing import CliRunner
 from hl_observer.cli import app
 from hl_observer.config.loader import load_settings
 from hl_observer.hyperliquid.rest_info_client import HyperliquidInfoClient
-from hl_observer.signals.position_delta_detector import reconstruct_position_deltas_from_fills
+from hl_observer.signals.position_delta_detector import (
+    reconstruct_position_deltas_from_fills,
+    signed_fill_size,
+)
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import (
     CollectionRun,
@@ -409,6 +412,12 @@ def test_position_delta_reconstruction_without_start_position_is_medium_confiden
 
     assert [delta.current_size for delta in deltas] == [1.0, 0.75]
     assert {delta.confidence for delta in deltas} == {"medium"}
+
+
+def test_signal_fill_direction_comes_from_side_and_rejects_conflicting_dir():
+    assert signed_fill_size({"dir": "Open Long", "sz": "1"}) is None
+    assert signed_fill_size({"side": "B", "dir": "Close Long", "sz": "1"}) is None
+    assert signed_fill_size({"side": "B", "dir": "Unknown", "sz": "1"}) == 1.0
 
 
 def test_position_delta_reconstruction_keeps_case_distinct_native_symbols():

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import math
+
 try:
     from enum import StrEnum
 except ImportError:
     from enum import Enum
-    class StrEnum(str, Enum): pass
+
+    class StrEnum(str, Enum):
+        pass
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -101,26 +105,56 @@ def fill_size(fill: dict[str, Any]) -> float | None:
 
 
 def start_position(fill: dict[str, Any]) -> float | None:
-    return safe_float(first_present(fill, "startPosition", "start_position"))
+    value = safe_float(first_present(fill, "startPosition", "start_position"))
+    return value if value is not None and math.isfinite(value) else None
+
+
+_FILL_SIDE_SIGNS = {
+    "b": 1, "buy": 1, "bid": 1,
+    "a": -1, "s": -1, "sell": -1, "ask": -1,
+}
+_DIR_FILL_SIGNS = {
+    "open long": 1,
+    "close short": 1,
+    "reduce short": 1,
+    "liquidated short": 1,
+    "open short": -1,
+    "close long": -1,
+    "reduce long": -1,
+    "liquidated long": -1,
+}
+
+
+def fill_side_sign(fill: dict[str, Any]) -> int | None:
+    """Return signed movement from the venue's economic ``side`` field only."""
+
+    side = str(first_present(fill, "side") or "").strip().casefold()
+    return _FILL_SIDE_SIGNS.get(side)
+
+
+def fill_direction_validation(fill: dict[str, Any]) -> str:
+    """Check display ``dir`` against ``side``; never derive trade side from its label."""
+
+    sign = fill_side_sign(fill)
+    if sign is None:
+        return "FILL_SIDE_INVALID"
+    label = " ".join(str(first_present(fill, "dir", "direction") or "").casefold().split())
+    if not label:
+        return "DIR_LABEL_MISSING"
+    expected_sign = _DIR_FILL_SIGNS.get(label)
+    if expected_sign is None:
+        return "UNKNOWN_DIR_LABEL"
+    return "CONSISTENT" if sign == expected_sign else "FILL_SIDE_DIR_CONTRADICTION"
 
 
 def signed_fill_size(fill: dict[str, Any]) -> float | None:
     size = fill_size(fill)
-    if size is None:
+    if size is None or not math.isfinite(size) or size <= 0:
         return None
-
-    side = str(first_present(fill, "side") or "").strip().lower()
-    if side in {"b", "buy", "bid"}:
-        return abs(size)
-    if side in {"a", "s", "sell", "ask"}:
-        return -abs(size)
-
-    direction = str(first_present(fill, "dir", "direction") or "").strip().lower()
-    if "open long" in direction or "close short" in direction:
-        return abs(size)
-    if "open short" in direction or "close long" in direction:
-        return -abs(size)
-    return None
+    sign = fill_side_sign(fill)
+    if sign is None or fill_direction_validation(fill) == "FILL_SIDE_DIR_CONTRADICTION":
+        return None
+    return sign * size
 
 
 def classify_action(previous_size: float, new_size: float, *, direction_unclear: bool = False) -> PositionAction:
@@ -209,7 +243,9 @@ def build_position_delta_from_fill(
     start = start_position(fill)
     has_start = start is not None
     signed_size = signed_fill_size(fill)
-    direction_unclear = signed_size is None
+    raw_start = first_present(fill, "startPosition", "start_position")
+    invalid_start = raw_start is not None and start is None
+    direction_unclear = signed_size is None or invalid_start
 
     if has_start:
         effective_previous = start
@@ -218,15 +254,32 @@ def build_position_delta_from_fill(
     else:
         effective_previous = 0.0
 
-    effective_new = effective_previous if signed_size is None else effective_previous + signed_size
+    effective_new = (
+        effective_previous
+        if direction_unclear
+        else effective_previous + signed_size
+    )
     price = fill_price(fill)
     size = abs(signed_size) if signed_size is not None else fill_size(fill)
-    delta_notional = abs(effective_new - effective_previous) * price if price is not None else None
+    delta_notional = (
+        abs(signed_size) * price
+        if not direction_unclear and signed_size is not None and price is not None
+        else None
+    )
     confidence_score, notes = confidence_for_fill(
         fill,
         direction_unclear=direction_unclear,
         has_start_position=has_start,
     )
+    if invalid_start:
+        notes.append("start_position_invalid")
+    direction_validation = fill_direction_validation(fill)
+    if direction_validation == "FILL_SIDE_DIR_CONTRADICTION":
+        notes.append("side_dir_contradiction")
+    elif direction_validation == "FILL_SIDE_INVALID":
+        notes.append("fill_side_invalid")
+    elif direction_validation == "UNKNOWN_DIR_LABEL":
+        notes.append("unknown_dir_label_side_used")
     source = str(first_present(fill, "_hypersmart_source") or "user_fills")
     if source != "user_fills":
         notes.append(f"source:{source}")

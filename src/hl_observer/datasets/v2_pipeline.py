@@ -329,6 +329,8 @@ def copy_vault_heartbeat_reason(manifest: Mapping[str, Any]) -> str | None:
         return "HEARTBEAT_REPLY_MISSING"
     if received != sent:
         return "HEARTBEAT_REPLY_MISSING"
+    if heartbeat.get("status") != "HEALTHY":
+        return "HEARTBEAT_REPLY_MISSING"
 
     first = heartbeat.get("first_received_at_ms")
     last = heartbeat.get("last_received_at_ms")

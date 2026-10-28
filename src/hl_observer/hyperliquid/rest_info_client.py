@@ -5,7 +5,7 @@ import copy
 import hashlib
 import json
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -105,6 +105,30 @@ def _ensure_read_only_payload(payload: dict[str, Any]) -> None:
     request_type = payload.get("type")
     if request_type not in READ_ONLY_INFO_TYPES:
         raise HyperliquidInfoError(f"Unsupported read-only info type: {request_type!r}")
+
+
+def _audit_safe_value(value: Any, *, depth: int = 0) -> Any:
+    """Bound and sanitize a raw API sample before storing it in a coverage receipt."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value if not isinstance(value, str) or len(value) <= 500 else value[:500]
+    if isinstance(value, float):
+        if value not in (float("inf"), float("-inf")) and value == value:
+            return value
+        return {"type": "float", "repr": repr(value)}
+    if depth >= 5:
+        return {"type": type(value).__name__, "repr": repr(value)[:300]}
+    if isinstance(value, Mapping):
+        entries = list(value.items())[:64]
+        sample = {str(key)[:120]: _audit_safe_value(item, depth=depth + 1) for key, item in entries}
+        if len(value) > len(entries):
+            sample["_truncated_items"] = len(value) - len(entries)
+        return sample
+    if isinstance(value, (list, tuple)):
+        sample = [_audit_safe_value(item, depth=depth + 1) for item in value[:64]]
+        if len(value) > len(sample):
+            sample.append({"_truncated_items": len(value) - len(sample)})
+        return sample
+    return {"type": type(value).__name__, "repr": repr(value)[:300]}
 
 
 def stable_json_hash(payload: Any) -> str:
@@ -507,6 +531,8 @@ class HyperliquidInfoClient:
                 "request_count": 0,
                 "received_count": 0,
                 "accepted_count": 0,
+                "invalid_timestamp_count": 0,
+                "invalid_timestamp_samples": [],
                 "subrequests": [],
                 "next_windows": [],
                 "last_observed_boundary_ms": None,
@@ -578,30 +604,58 @@ class HyperliquidInfoClient:
                 attempt["outcome"] = "EMPTY"
                 continue
 
-            try:
-                page_times = [int(fill["time"]) for fill in page]
-            except (KeyError, TypeError, ValueError) as exc:
-                attempt["outcome"] = "INVALID_TIMESTAMP"
+            page_times: list[int] = []
+            invalid_timestamp_samples: list[dict[str, Any]] = []
+            for row_index, fill in enumerate(page):
+                raw_timestamp = fill.get("time") if isinstance(fill, Mapping) else None
+                if type(raw_timestamp) is int and raw_timestamp > 0:
+                    page_times.append(raw_timestamp)
+                    continue
+                if len(invalid_timestamp_samples) < 20:
+                    invalid_timestamp_samples.append({
+                        "row_index": row_index,
+                        "reason_code": "FILL_CAUSAL_TIMESTAMP_INVALID",
+                        "raw_payload": _audit_safe_value(fill),
+                    })
+            if invalid_timestamp_samples:
+                # Keep valid rows from this page available to the fill parser, while
+                # permanently downgrading coverage so the batch cannot become SAFE.
+                invalid_count = sum(
+                    1 for fill in page
+                    if not isinstance(fill, Mapping)
+                    or type(fill.get("time")) is not int
+                    or fill.get("time") <= 0
+                )
+                attempt["invalid_timestamp_count"] = invalid_count
+                attempt["invalid_timestamp_samples"] = invalid_timestamp_samples
+                receipt["invalid_timestamp_count"] += invalid_count
+                receipt["invalid_timestamp_samples"].extend(invalid_timestamp_samples)
+                receipt["invalid_timestamp_samples"] = receipt["invalid_timestamp_samples"][:20]
                 receipt["status"] = "PARTIAL"
-                receipt["reason"] = "INVALID_TIMESTAMP"
-                receipt["next_windows"] = [
-                    {"start_ms": window_start, "end_ms": window_end},
-                    *(
-                        {"start_ms": left, "end_ms": right}
-                        for left, right in pending
-                    ),
-                ]
-                raise HyperliquidInfoError(
-                    "userFillsByTime returned a fill without a valid timestamp",
-                    coverage_receipt=receipt,
-                ) from exc
-            attempt["last_observed_boundary_ms"] = max(page_times)
-            last_boundary = receipt.get("last_observed_boundary_ms")
-            receipt["last_observed_boundary_ms"] = (
-                max(int(last_boundary), max(page_times))
-                if last_boundary is not None
-                else max(page_times)
-            )
+                receipt["reason"] = "INVALID_TIMESTAMP_ROWS"
+            if not page_times:
+                attempt["last_observed_boundary_ms"] = None
+                if len(page) >= int(response_cap):
+                    attempt["outcome"] = "INVALID_TIMESTAMP"
+                    receipt["next_windows"] = [
+                        {"start_ms": window_start, "end_ms": window_end},
+                        *(
+                            {"start_ms": left, "end_ms": right}
+                            for left, right in pending
+                        ),
+                    ]
+                    raise HyperliquidInfoError(
+                        "userFillsByTime returned a fill without a valid timestamp",
+                        coverage_receipt=receipt,
+                    )
+            else:
+                attempt["last_observed_boundary_ms"] = max(page_times)
+                last_boundary = receipt.get("last_observed_boundary_ms")
+                receipt["last_observed_boundary_ms"] = (
+                    max(int(last_boundary), max(page_times))
+                    if last_boundary is not None
+                    else max(page_times)
+                )
             if any(not window_start <= timestamp <= window_end for timestamp in page_times):
                 attempt["outcome"] = "OUT_OF_RANGE"
                 receipt["status"] = "PARTIAL"
@@ -665,28 +719,40 @@ class HyperliquidInfoClient:
                     coverage_receipt=receipt,
                 )
             seen_page_hashes.add(page_hash)
-            attempt["outcome"] = "ACCEPTED"
-            receipt["accepted_count"] += len(page)
-            horizon_start = receipt["usable_horizon_start_ms"]
-            horizon_end = receipt["usable_horizon_end_ms"]
-            receipt["usable_horizon_start_ms"] = (
-                min(int(horizon_start), min(page_times))
-                if horizon_start is not None
-                else min(page_times)
+            attempt["outcome"] = (
+                "ACCEPTED_INVALID_TIMESTAMP_ROWS"
+                if invalid_timestamp_samples else "ACCEPTED"
             )
-            receipt["usable_horizon_end_ms"] = (
-                max(int(horizon_end), max(page_times))
-                if horizon_end is not None
-                else max(page_times)
-            )
+            accepted_rows = len(page) - int(attempt.get("invalid_timestamp_count") or 0)
+            attempt["accepted_rows"] = accepted_rows
+            receipt["accepted_count"] += accepted_rows
+            if page_times:
+                horizon_start = receipt["usable_horizon_start_ms"]
+                horizon_end = receipt["usable_horizon_end_ms"]
+                receipt["usable_horizon_start_ms"] = (
+                    min(int(horizon_start), min(page_times))
+                    if horizon_start is not None
+                    else min(page_times)
+                )
+                receipt["usable_horizon_end_ms"] = (
+                    max(int(horizon_end), max(page_times))
+                    if horizon_end is not None
+                    else max(page_times)
+                )
             yield page, window_start, window_end
 
         receipt["historical_censored"] = (
             int(receipt["accepted_count"]) >= HYPERSMART_USER_FILLS_BY_TIME_MAX_RECENT
         )
-        receipt["status"] = "PARTIAL" if receipt["historical_censored"] else "COMPLETE"
+        receipt["status"] = (
+            "PARTIAL"
+            if receipt["historical_censored"] or receipt["invalid_timestamp_count"]
+            else "COMPLETE"
+        )
         receipt["reason"] = (
-            "PUBLIC_RETENTION_LIMIT_REACHED" if receipt["historical_censored"] else None
+            "PUBLIC_RETENTION_LIMIT_REACHED" if receipt["historical_censored"]
+            else "INVALID_TIMESTAMP_ROWS" if receipt["invalid_timestamp_count"]
+            else None
         )
         receipt["next_windows"] = []
         if receipt["historical_censored"]:

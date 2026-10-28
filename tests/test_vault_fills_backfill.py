@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from hl_observer.collection import vault_fills_backfill as VB
+from hl_observer.collection import userfills_live as UL
 from tools import backfill_vault_fills as BF
 
 
@@ -88,6 +89,28 @@ def test_backfill_cli_request_budget_preserves_next_inclusive_subwindows(monkeyp
     assert audit["window_attempts"][0]["outcome"] == "CAP_SPLIT"
 
 
+def test_backfill_rejected_side_dir_rows_make_coverage_partial_with_reason(monkeypatch):
+    monkeypatch.setattr(BF.time, "time", lambda: 86_410.0)
+
+    def poster(_vault: str, start_ms: int, _end_ms: int):
+        return [{
+            "time": start_ms, "coin": "BTC", "px": "100", "sz": "1",
+            "side": "B", "dir": "Close Long", "startPosition": "1", "tid": 9,
+        }]
+
+    fills, audit = BF.backfill_un_vault_avec_audit(
+        BF.Path("."), "0xABC", lookback_j=0,
+        limiteur=SimpleNamespace(attente=lambda: None), poster=poster,
+    )
+
+    assert fills == []
+    assert audit["complete"] is False
+    assert "INVALID_FILL_ROWS" in audit["partial_reasons"]
+    assert audit["fill_parse_audit"]["rejected_by_reason"] == {
+        "FILL_SIDE_DIR_CONTRADICTION": 1,
+    }
+
+
 def test_parser_et_dedup():
     brut = [{"time": 1000, "coin": "SOL", "px": "150", "sz": "10", "side": "B", "dir": "Open Long",
              "startPosition": "0", "tid": 7, "oid": 1},
@@ -96,6 +119,62 @@ def test_parser_et_dedup():
     fills = VB.dedupliquer(VB.parser_fills(brut, vault="0xA"))
     assert len(fills) == 1 and fills[0]["signe"] == 1 and fills[0]["coin"] == "SOL"
     assert fills[0]["tid"] == 7
+
+
+def test_parser_preserves_raw_fill_fields_and_separates_trade_and_position_direction():
+    raw = [
+        {"time": 1, "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+         "dir": "Open Long", "startPosition": "0", "tid": 1},
+        {"time": 2, "coin": "BTC", "px": "100", "sz": "1", "side": "A",
+         "dir": "Open Short", "startPosition": "0", "tid": 2},
+        {"time": 3, "coin": "BTC", "px": "100", "sz": "1", "side": "A",
+         "dir": "Reduce Long", "startPosition": "2", "tid": 3},
+        {"time": 4, "coin": "BTC", "px": "100", "sz": "1", "side": "A",
+         "dir": "Close Long", "startPosition": "1", "tid": 4},
+        {"time": 5, "coin": "BTC", "px": "100", "sz": "2", "side": "A",
+         "dir": "Open Short", "startPosition": "1", "tid": 5},
+    ]
+
+    fills, audit = VB.parser_fills_with_audit(raw, vault="0xA")
+
+    assert [fill["signe"] for fill in fills] == [1, -1, -1, -1, -1]
+    assert [fill["fill_side"] for fill in fills] == ["BUY", "SELL", "SELL", "SELL", "SELL"]
+    assert [fill["position_direction_before"] for fill in fills] == [
+        "FLAT", "FLAT", "LONG", "LONG", "LONG",
+    ]
+    assert [fill["position_direction_after"] for fill in fills] == [
+        "LONG", "SHORT", "LONG", "FLAT", "SHORT",
+    ]
+    assert fills[0]["side_raw"] == "B"
+    assert fills[0]["dir_raw"] == "Open Long"
+    assert fills[0]["start_position_raw"] == "0"
+    assert audit["accepted_count"] == 5
+    assert audit["rejected_count"] == 0
+
+
+def test_parser_quarantines_side_dir_contradictions_and_reports_unknown_labels():
+    fills, audit = VB.parser_fills_with_audit([
+        {"time": 1, "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+         "dir": "Close Long", "startPosition": "1", "tid": 1},
+        {"time": 2, "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+         "dir": "Venue label not mapped", "startPosition": "0", "tid": 2},
+        {"time": 3, "coin": "BTC", "px": "100", "sz": "1", "side": "?",
+         "dir": "Open Long", "startPosition": "0", "tid": 3},
+        {"time": 4, "coin": "BTC", "px": "100", "sz": "1", "side": "B",
+         "dir": "Open Long", "startPosition": "NaN", "tid": 4},
+    ], vault="0xA")
+
+    assert len(fills) == 1
+    assert fills[0]["dir_raw"] == "Venue label not mapped"
+    assert fills[0]["signe"] == 1
+    assert fills[0]["direction_validation"] == "UNKNOWN_DIR_LABEL"
+    assert audit["accepted_count"] == 1
+    assert audit["rejected_count"] == 3
+    assert audit["rejected_by_reason"] == {
+        "FILL_SIDE_DIR_CONTRADICTION": 1,
+        "FILL_SIDE_INVALID": 1,
+        "FILL_START_POSITION_INVALID": 1,
+    }
 
 
 @pytest.mark.parametrize(
@@ -110,6 +189,28 @@ def test_parser_rejette_prix_et_tailles_non_finis_ou_non_positifs(field, value):
     fill[field] = value
 
     assert VB.parser_fills([fill], vault="0xA") == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("time", True), ("time", 1_000.5), ("px", True), ("sz", False)],
+)
+def test_parser_audit_rejette_timestamps_non_entiers_et_booleens(field, value):
+    fill = {
+        "time": 1_000, "coin": "SOL", "px": "150", "sz": "1",
+        "side": "B", "tid": 7, "hash": "0xf",
+    }
+    fill[field] = value
+
+    accepted, audit = VB.parser_fills_with_audit([fill], vault="0xA")
+
+    assert accepted == []
+    assert audit["input_count"] == 1
+    assert audit["accepted_count"] == 0
+    assert audit["rejected_by_reason"] == {
+        "FILL_EXECUTION_VALUE_INVALID" if field != "time" else "FILL_CAUSAL_TIMESTAMP_INVALID": 1,
+    }
+    assert audit["rejected_sample"][0]["raw_payload"][field] == value
 
 
 def test_canonical_fill_id_est_source_independant_et_reproductible():
@@ -179,6 +280,8 @@ def test_reconstruire_open_add_reduce_close():
     assert all(e["direction"] == 1 for e in ev)                        # position longue tout du long
     assert len({e["fill_id"] for e in ev}) == 4
     assert all("tid" in e and "oid" in e and "hash" in e and "dir" in e for e in ev)
+    assert [e["side_raw"] for e in ev] == ["B", "B", "A", "A"]
+    assert [e["position_direction_after"] for e in ev] == ["LONG", "LONG", "LONG", "FLAT"]
     alpha = VB.entrees_alpha(VB.marquer_retraits(ev))
     assert [e["action"] for e in alpha] == ["OPEN", "ADD"]             # seules les entrées sont copiables
 
@@ -242,3 +345,61 @@ def test_couverture_garde_distincts_les_symboles_natifs_de_casse_differente():
 def test_userfills_response_cap_and_retention_are_distinct():
     assert VB.CAP_USERFILLS == 2_000
     assert VB.RETENTION_USERFILLS == 10_000
+
+
+def test_rest_isole_timestamp_non_fini_et_conserve_le_fill_valide_du_lot():
+    good = {
+        "time": 1_000, "coin": "SOL", "px": "150", "sz": "1",
+        "side": "B", "tid": 7, "hash": "0xf",
+    }
+    bad = {**good, "time": float("inf"), "tid": 8, "hash": "0xbad"}
+
+    fills, audit = VB.parser_fills_with_audit([good, bad], vault="0xA")
+
+    assert [row["tid"] for row in fills] == [7]
+    assert audit["accepted_count"] == 1
+    assert audit["rejected_by_reason"] == {"FILL_CAUSAL_TIMESTAMP_INVALID": 1}
+    assert audit["rejected_sample"][0]["raw_payload"]["time"] == {
+        "type": "float", "repr": "inf",
+    }
+
+
+def test_rest_et_websocket_produisent_les_memes_champs_economiques():
+    raw = {
+        "time": 1_000, "coin": "SOL", "px": "150", "sz": "1",
+        "side": "B", "dir": "Open Long", "startPosition": "0",
+        "tid": 7, "oid": 11, "hash": "0xf",
+    }
+    rest, _audit = VB.parser_fills_with_audit([raw], vault="0xA")
+    live = UL.parser_message_userfills(
+        {"channel": "userFills", "data": {"fills": [raw]}}, vault="0xA",
+    )
+    fields = ("vault", "ts_ms", "coin", "px", "sz", "signe", "dir", "tid", "oid", "start_position")
+
+    assert len(rest) == len(live) == 1
+    assert {key: rest[0].get(key) for key in fields} == {
+        key: live[0].get(key) for key in fields
+    }
+
+
+def test_backfill_invalide_le_receipt_si_un_fill_reste_hors_admission(monkeypatch):
+    now_ms = 1_700_000_000_000
+    good = {
+        "time": now_ms, "coin": "SOL", "px": "150", "sz": "1",
+        "side": "B", "tid": 7, "hash": "0xf",
+    }
+    bad = {**good, "time": float("inf"), "tid": 8, "hash": "0xbad"}
+    monkeypatch.setattr(BF.time, "time", lambda: now_ms / 1_000)
+
+    fills, audit = BF.backfill_un_vault_avec_audit(
+        BF.Path("."), "0xABC", lookback_j=0,
+        limiteur=SimpleNamespace(attente=lambda: None),
+        poster=lambda *_args: [good, bad], cap=10, fenetre_ms=0,
+        min_fenetre_ms=0, max_requests=10,
+    )
+
+    assert [row["tid"] for row in fills] == [7]
+    assert audit["fill_parse_audit"]["rejected_count"] == 1
+    assert audit["partial_reasons"] == ["INVALID_FILL_ROWS"]
+    assert audit["complete"] is False
+    assert audit["status"] == "PARTIAL"

@@ -6,7 +6,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.copy_vault.copy_intent_version_ref import creer_intent   # noqa: E402
+from hl_observer.copy_vault.copy_intent_version_ref import creer_intent  # noqa: E402
 
 
 def test_intent_avec_version():

@@ -108,6 +108,7 @@ def test_copy_vault_websocket_shard_requires_heartbeat_reply_on_same_connection(
         "sent_count": 1,
         "received_count": 1,
         "unmatched_pong_count": 0,
+        "status": "HEALTHY",
         "first_received_at_ms": 1_500,
     }
     manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat=heartbeat))
@@ -121,6 +122,18 @@ def test_copy_vault_websocket_shard_requires_heartbeat_reply_on_same_connection(
     assert manifest["quality_status"] == "PARTIAL"
     assert "HEARTBEAT_REPLY_MISSING" in manifest["quality_reasons"]
 
+    heartbeat["received_count"] = 1
+    heartbeat["unmatched_pong_count"] = 1
+    manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat=heartbeat))
+    assert manifest["quality_status"] == "PARTIAL"
+    assert "HEARTBEAT_REPLY_MISSING" in manifest["quality_reasons"]
+
+    heartbeat["unmatched_pong_count"] = 0
+    heartbeat["status"] = "PING_SEND_FAILED"
+    manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat=heartbeat))
+    assert manifest["quality_status"] == "PARTIAL"
+    assert "HEARTBEAT_REPLY_MISSING" in manifest["quality_reasons"]
+
 
 def test_copy_vault_websocket_shard_with_causal_heartbeat_can_be_safe():
     manifest = finalize_manifest(_copy_vault_ws_manifest(heartbeat={
@@ -128,6 +141,7 @@ def test_copy_vault_websocket_shard_with_causal_heartbeat_can_be_safe():
         "sent_count": 1,
         "received_count": 1,
         "unmatched_pong_count": 0,
+        "status": "HEALTHY",
         "first_received_at_ms": 1_500,
         "last_received_at_ms": 1_500,
     }))
@@ -170,6 +184,7 @@ def test_copy_vault_manifest_rejects_heartbeat_outside_shard_time_bounds():
         "sent_count": 1,
         "received_count": 1,
         "unmatched_pong_count": 0,
+        "status": "HEALTHY",
         "first_received_at_ms": 2_001,
         "last_received_at_ms": 2_001,
     })

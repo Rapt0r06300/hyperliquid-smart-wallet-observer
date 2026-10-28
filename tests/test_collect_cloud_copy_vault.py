@@ -689,7 +689,6 @@ def test_l2_collector_rejects_unknown_channels_and_recovers_after_disconnect(
 
     first = FakeSocket(
         [
-            {"channel": "pong"},
             {"channel": "unexpected", "data": {"coin": "BTC"}},
             valid,
             {
@@ -751,7 +750,11 @@ def test_l2_collector_rejects_unknown_channels_and_recovers_after_disconnect(
             assert state.get("reconnects") == 1
             assert state.get("rejected_by_reason", {}).get("wrong_channel") == 1
             assert state.get("rejected_by_reason", {}).get("subscription_not_active") == 1
-            assert state.get("heartbeats_received") == 1
+            assert state.get("heartbeats_received") == 0
+            assert all(
+                record["unmatched_pong_count"] == 0
+                for record in state["connection_heartbeats"].values()
+            )
             assert state.get("duplicates") == 1
             assert len(sink.envelopes) == 2
 
@@ -780,6 +783,358 @@ def test_l2_collector_rejects_unknown_channels_and_recovers_after_disconnect(
             json.dumps(diagnostics)
         finally:
             second.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_l2_collector_closes_socket_when_application_pong_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(C, "APP_HEARTBEAT_INTERVAL_S", 0.001)
+    monkeypatch.setattr(C, "APP_HEARTBEAT_PONG_TIMEOUT_S", 0.01)
+
+    class SilentSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+            self.sent: list[dict[str, object]] = []
+            self.close_calls: list[tuple[int, str]] = []
+
+        async def send(self, payload: str) -> None:
+            self.sent.append(json.loads(payload))
+
+        async def close(self, *, code: int, reason: str) -> None:
+            self.close_calls.append((code, reason))
+            self.release.set()
+
+        def __aiter__(self):
+            async def iterate():
+                await self.release.wait()
+                if False:
+                    yield ""
+
+            return iterate()
+
+    socket = SilentSocket()
+
+    class FakeConnection:
+        async def __aenter__(self) -> SilentSocket:
+            return socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(),
+    )
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(
+                object(),  # no market messages are expected in this case
+                asyncio.Queue(),
+                set(),
+                state,
+            )
+        )
+        try:
+            for _ in range(500):
+                if state.get("heartbeat_timeouts", 0):
+                    break
+                await asyncio.sleep(0.002)
+            assert state.get("heartbeat_timeouts") == 1
+            assert socket.sent == [{"method": "ping"}]
+            assert socket.close_calls == [(1011, "application pong timeout")]
+            record = next(iter(state["connection_heartbeats"].values()))
+            assert record["sent_count"] == 1
+            assert record["received_count"] == 0
+            assert record["status"] == "PONG_TIMEOUT"
+            assert record["heartbeat_timeout_count"] == 1
+            assert any(
+                event.get("event") == "heartbeat_timeout"
+                for event in state["connection_events"]
+            )
+            diagnostics = C._l2_diagnostics(
+                state,
+                end_ms=1_700_000_010_000,
+                requested_coins=set(),
+            )
+            assert diagnostics["heartbeat_timeouts"] == 1
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_l2_collector_closes_socket_and_marks_unmatched_pong_unhealthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InvalidPongSocket:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+            self.close_calls: list[tuple[int, str]] = []
+
+        async def send(self, _payload: str) -> None:
+            return None
+
+        async def close(self, *, code: int, reason: str) -> None:
+            self.close_calls.append((code, reason))
+            self.release.set()
+
+        def __aiter__(self):
+            async def iterate():
+                yield json.dumps({"channel": "pong"})
+                await self.release.wait()
+
+            return iterate()
+
+    socket = InvalidPongSocket()
+
+    class FakeConnection:
+        async def __aenter__(self) -> InvalidPongSocket:
+            return socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(),
+    )
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(
+                object(),
+                asyncio.Queue(),
+                set(),
+                state,
+            )
+        )
+        try:
+            for _ in range(300):
+                if state.get("heartbeat_invalid_pongs", 0):
+                    break
+                await asyncio.sleep(0.002)
+            assert state["heartbeat_invalid_pongs"] == 1
+            assert state["heartbeats_received"] == 0
+            assert socket.close_calls == [(1011, "unmatched application pong")]
+            record = next(iter(state["connection_heartbeats"].values()))
+            assert record["status"] == "UNMATCHED_PONG"
+            assert record["unmatched_pong_count"] == 1
+            assert record["received_count"] == 0
+            assert any(
+                event.get("event") == "invalid_pong"
+                for event in state["connection_events"]
+            )
+            diagnostics = C._l2_diagnostics(
+                state,
+                end_ms=1_700_000_010_000,
+                requested_coins=set(),
+            )
+            assert diagnostics["heartbeat_invalid_pongs"] == 1
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_l2_collector_correlates_pongs_and_keeps_healthy_socket_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert C.APP_HEARTBEAT_INTERVAL_S > 0
+    assert (
+        C.APP_HEARTBEAT_INTERVAL_S + C.APP_HEARTBEAT_PONG_TIMEOUT_S < 60.0
+    )
+    monkeypatch.setattr(C, "APP_HEARTBEAT_INTERVAL_S", 0.01)
+    monkeypatch.setattr(C, "APP_HEARTBEAT_PONG_TIMEOUT_S", 0.05)
+
+    class EchoSocket:
+        def __init__(self) -> None:
+            self.messages: asyncio.Queue[str | None] = asyncio.Queue()
+            self.sent: list[dict[str, object]] = []
+            self.closed = False
+
+        async def send(self, payload: str) -> None:
+            message = json.loads(payload)
+            self.sent.append(message)
+            if message == {"method": "ping"}:
+                await self.messages.put(json.dumps({"channel": "pong"}))
+
+        async def close(self, *, code: int, reason: str) -> None:
+            self.closed = True
+            await self.messages.put(None)
+
+        def __aiter__(self):
+            async def iterate():
+                while True:
+                    message = await self.messages.get()
+                    if message is None:
+                        return
+                    yield message
+
+            return iterate()
+
+    socket = EchoSocket()
+
+    class FakeConnection:
+        async def __aenter__(self) -> EchoSocket:
+            return socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(),
+    )
+
+    async def scenario() -> None:
+        state = C.new_l2_state()
+        task = asyncio.create_task(
+            C._dynamic_l2_collector(
+                object(),
+                asyncio.Queue(),
+                set(),
+                state,
+            )
+        )
+        try:
+            for _ in range(500):
+                if (
+                    state.get("heartbeats_received", 0) >= 2
+                    and state.get("heartbeats_received") == state.get("heartbeats")
+                ):
+                    break
+                await asyncio.sleep(0.002)
+            assert state["heartbeats"] >= 2
+            assert state["heartbeats_received"] == state["heartbeats"]
+            assert state["heartbeat_timeouts"] == 0
+            record = next(iter(state["connection_heartbeats"].values()))
+            assert record["status"] == "HEALTHY"
+            assert record["sent_count"] == record["received_count"]
+            assert record["unmatched_pong_count"] == 0
+            assert not socket.closed
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_user_stream_timeout_is_recorded_on_its_connection_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(C, "APP_HEARTBEAT_INTERVAL_S", 0.001)
+    monkeypatch.setattr(C, "APP_HEARTBEAT_PONG_TIMEOUT_S", 0.01)
+    address = "0x" + "a" * 40
+
+    class SilentUserSocket:
+        def __init__(self) -> None:
+            self.messages: asyncio.Queue[str | None] = asyncio.Queue()
+            self.release = asyncio.Event()
+            self.pings = 0
+
+        async def send(self, payload: str) -> None:
+            message = json.loads(payload)
+            if message.get("method") == "subscribe":
+                await self.messages.put(
+                    json.dumps(
+                        {
+                            "channel": "subscriptionResponse",
+                            "data": {
+                                "method": "subscribe",
+                                "subscription": message["subscription"],
+                            },
+                        }
+                    )
+                )
+            elif message.get("method") == "ping":
+                self.pings += 1
+
+        async def close(self, *, code: int, reason: str) -> None:
+            assert (code, reason) == (1011, "application pong timeout")
+            self.release.set()
+            await self.messages.put(None)
+
+        def __aiter__(self):
+            async def iterate():
+                while True:
+                    message = await self.messages.get()
+                    if message is None:
+                        return
+                    yield message
+
+            return iterate()
+
+    socket = SilentUserSocket()
+
+    class FakeConnection:
+        async def __aenter__(self) -> SilentUserSocket:
+            return socket
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        C.websockets,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(),
+    )
+
+    class Sink:
+        async def emit_async(self, _envelope: C.TickEnvelope) -> None:
+            raise AssertionError("silent socket must emit no market events")
+
+    async def scenario() -> None:
+        starts: dict[str, int] = {}
+        attempts: dict[str, list[dict[str, object]]] = {}
+        diagnostics: dict[str, int] = {}
+        connection_heartbeats: dict[str, dict[str, object]] = {}
+        task = asyncio.create_task(
+            C._socket_group(
+                [address],
+                Sink(),
+                observation_start_ms=starts,
+                live_ids={address: set()},
+                live_fill_counts={address: 0},
+                unclassified_fill_counts={address: 0},
+                reconnect_counts={address: 0},
+                l2_request_queue=asyncio.Queue(),
+                l2_known_coins=set(),
+                subscription_attempts=attempts,
+                subscription_attempts_dropped={},
+                subscription_diagnostics=diagnostics,
+                connection_heartbeats=connection_heartbeats,
+            )
+        )
+        try:
+            for _ in range(1_000):
+                if diagnostics.get("heartbeat_timeouts"):
+                    break
+                await asyncio.sleep(0.002)
+            assert diagnostics.get("heartbeat_timeouts") == 1
+            assert socket.pings == 1
+            assert diagnostics["acknowledged"] == 1
+            assert diagnostics["userFundings_acknowledged"] == 1
+            assert diagnostics["userNonFundingLedgerUpdates_acknowledged"] == 1
+            record = next(iter(connection_heartbeats.values()))
+            assert record["status"] == "PONG_TIMEOUT"
+            assert record["sent_count"] == 1
+            assert record["received_count"] == 0
+            assert diagnostics.get("heartbeats_received", 0) == 0
+        finally:
+            socket.release.set()
+            await socket.messages.put(None)
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
@@ -1340,6 +1695,7 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
                 "sent_count": 1,
                 "received_count": 1,
                 "unmatched_pong_count": 0,
+                "status": "HEALTHY",
                 "first_received_at_ms": 10_010,
                 "last_received_at_ms": 10_010,
             }
@@ -1361,14 +1717,70 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
 def test_connection_heartbeat_ledger_rejects_unmatched_pong_and_counts_reply() -> None:
     ledger: dict[str, object] = {}
     record = C._heartbeat_connection(ledger, "ws-heartbeat-test")
-    C._heartbeat_received(record, 1_000)
+    assert not C._heartbeat_received(record, 1_000)
     assert record["unmatched_pong_count"] == 1
     assert record["received_count"] == 0
+    assert record["status"] == "UNMATCHED_PONG"
 
     C._heartbeat_sent(record, 1_100)
-    C._heartbeat_received(record, 1_120)
+    assert C._heartbeat_received(record, 1_120)
     assert record["sent_count"] == record["received_count"] == 1
     assert record["first_received_at_ms"] == 1_120
+
+
+def test_heartbeat_ping_send_failure_is_logged_and_closes_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(C, "APP_HEARTBEAT_INTERVAL_S", 0.001)
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.close_calls: list[tuple[int, str]] = []
+
+        async def close(self, *, code: int, reason: str) -> None:
+            self.close_calls.append((code, reason))
+
+    async def scenario() -> None:
+        socket = FakeSocket()
+        record = C._heartbeat_connection({}, "ws-send-failure")
+        pong_event = asyncio.Event()
+        send_failures: list[str] = []
+        l2_state = C.new_l2_state()
+
+        async def fail_send(_payload: dict[str, str]) -> None:
+            raise ConnectionError("simulated ping send failure")
+
+        await C._application_heartbeat_loop(
+            socket,
+            fail_send,
+            record,
+            pong_event,
+            on_sent=lambda: pytest.fail("failed ping must not count as sent"),
+            on_timeout=lambda: pytest.fail("failed send is not a pong timeout"),
+            on_send_failure=lambda error_type: (
+                send_failures.append(error_type),
+                C._record_l2_heartbeat_send_failure(
+                    l2_state,
+                    "ws-send-failure",
+                    {"BTC"},
+                    error_type,
+                ),
+            ),
+        )
+
+        assert record["status"] == "PING_SEND_FAILED"
+        assert record["sent_count"] == record["received_count"] == 0
+        assert record["last_send_error_type"] == "ConnectionError"
+        assert record["ping_in_flight"] is False
+        assert send_failures == ["ConnectionError"]
+        assert socket.close_calls == [(1011, "application ping send failed")]
+        assert l2_state["heartbeat_send_failures"] == 1
+        assert l2_state["connection_events"][-1]["event"] == "heartbeat_send_failure"
+        assert l2_state["markets"]["BTC"]["gaps"][-1]["reason"] == (
+            "application_ping_send_failed"
+        )
+
+    asyncio.run(scenario())
 
 
 def test_copy_vault_bundle_excludes_ws_shard_without_connection_heartbeat(tmp_path: Path) -> None:
@@ -1506,6 +1918,7 @@ def test_market_context_bundle_is_safe_but_never_pnl_proof(tmp_path: Path) -> No
                 "sent_count": 1,
                 "received_count": 1,
                 "unmatched_pong_count": 0,
+                "status": "HEALTHY",
                 "first_received_at_ms": received,
                 "last_received_at_ms": received,
             }

@@ -4,8 +4,8 @@ from pathlib import Path
 
 from hl_observer.ops.entrypoint_topology import ENTRYPOINT_ROLES, EntrypointRole
 from hl_observer.ops.scope_flag_inventory import (
-    FlagDisposition,
     SCOPE_FLAG_RECORDS,
+    FlagDisposition,
     audit_scope_flag_inventory,
     classified_entrypoints,
     discover_scope_relevant_defaults,
@@ -71,6 +71,9 @@ def test_entrypoint_topology_maps_to_v5_dispositions_without_ambiguity() -> None
         if role in {
             EntrypointRole.OFFICIAL_RUNTIME,
             EntrypointRole.OFFICIAL_ANALYSIS,
+            EntrypointRole.OFFICIAL_COLLECTION,
+            EntrypointRole.OFFICIAL_GIT_SYNC,
+            EntrypointRole.OFFICIAL_DATA_SYNC,
             EntrypointRole.OFFICIAL_RESEARCH,
         }:
             assert mapped[name] is FlagDisposition.ACTIVE

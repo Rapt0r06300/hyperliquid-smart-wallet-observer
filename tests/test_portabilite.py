@@ -29,10 +29,17 @@ def test_aucun_chemin_utilisateur_en_dur():
         txt = (RACINE / rel).read_text(encoding="utf-8", errors="ignore")
         for ln in _lignes_commandes(txt):
             bas = ln.lower()
-            assert "c:\\users\\flo" not in bas and "users\\flo" not in bas, "%s :: %r" % (rel, ln)
-            assert "c:/users/flo" not in bas, "%s :: %r" % (rel, ln)
-            assert "appdata" not in bas and "programdata" not in bas, "%s :: %r" % (rel, ln)
-            assert "hkey_" not in bas and "reg add" not in bas and "reg query" not in bas, "%s :: %r" % (rel, ln)
+            assert (
+                "c:\\users\\flo" not in bas and "users\\flo" not in bas
+            ), f"{rel} :: {ln!r}"
+            assert "c:/users/flo" not in bas, f"{rel} :: {ln!r}"
+            env_derived = bas.replace("%localappdata%", "").replace("%programdata%", "")
+            assert (
+                "appdata" not in env_derived and "programdata" not in env_derived
+            ), f"{rel} :: {ln!r}"
+            assert (
+                "hkey_" not in bas and "reg add" not in bas and "reg query" not in bas
+            ), f"{rel} :: {ln!r}"
 
 
 def test_aucune_lettre_de_disque_codee_en_dur_dans_les_commandes():
@@ -44,7 +51,7 @@ def test_aucune_lettre_de_disque_codee_en_dur_dans_les_commandes():
             # tolere les exemples entre guillemets d'aide ; on vise les vraies commandes de chemin.
             if "%~dp0" in ln or "%HYPERSMART" in ln:
                 continue
-            assert not motif.search(ln), "chemin absolu machine-specifique: %r (%s)" % (ln, rel)
+            assert not motif.search(ln), f"chemin absolu machine-spécifique: {ln!r} ({rel})"
 
 
 def test_les_lanceurs_ancrent_leur_racine_independamment_du_cwd():

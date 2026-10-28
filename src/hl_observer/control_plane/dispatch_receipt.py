@@ -1,18 +1,15 @@
 """Deterministic cross-repository dispatch receipts for Alina SmartFlow."""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
-import hashlib
-import json
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+from typing import Any
 
+from hl_observer.control_plane.phase_state import parse_iso_utc, sha256_json
 
 DISPATCH_STATUSES = frozenset({"DISPATCHED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
 TERMINAL_DISPATCH_STATUSES = frozenset({"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
-
-from hl_observer.control_plane.phase_state import sha256_json, parse_iso_utc
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")

@@ -534,6 +534,44 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
         assert b"\r" not in path.read_bytes(), path.relative_to(ROOT)
 
 
+def test_git_checkout_autocrlf_true_preserves_manifest_bound_source_bytes(tmp_path):
+    import subprocess
+
+    relative = Path("docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md")
+    expected = (ROOT / relative).read_bytes()
+    manifest = json.loads(
+        (ROOT / "docs" / "PRE_RUN_775_CANONICAL_STATUS.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    expected_sha = manifest["thematic_requirements_sha256"]
+    assert hashlib.sha256(expected).hexdigest() == expected_sha
+
+    checkout = tmp_path / "autocrlf-checkout"
+    checkout.mkdir()
+    (checkout / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
+    target = checkout / relative
+    target.parent.mkdir(parents=True)
+    target.write_bytes(expected)
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=checkout, check=True, capture_output=True)
+
+    git("init", "--quiet")
+    git("config", "core.autocrlf", "true")
+    git("config", "user.name", "Copy-Vault line-ending test")
+    git("config", "user.email", "copy-vault-line-endings@example.invalid")
+    git("add", "--", ".gitattributes", relative.as_posix())
+    git("commit", "--quiet", "-m", "canonical LF fixture")
+
+    target.unlink()
+    git("checkout", "HEAD", "--", relative.as_posix())
+
+    restored = target.read_bytes()
+    assert restored == expected
+    assert hashlib.sha256(restored).hexdigest() == expected_sha
+
+
 def test_recovery_contract_sparse_checkout_includes_replay_catalog_metadata():
     import yaml
 

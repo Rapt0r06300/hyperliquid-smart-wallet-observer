@@ -17,6 +17,47 @@ from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.realtime.event_identity import canonicalize_frame
 
 _EPS = 1e-12
+_AUDIT_FILL_FIELDS = (
+    "time", "coin", "px", "sz", "side", "dir", "startPosition", "tid", "oid", "hash",
+)
+
+
+def _audit_value(value: Any, *, depth: int = 0) -> Any:
+    """Bound and JSON-sanitize an untrusted fill value for rejection diagnostics."""
+    if value is None or type(value) is bool:
+        return value
+    if type(value) is int:
+        return value if value.bit_length() <= 256 else {"type": "int", "repr": str(value)[:128]}
+    if type(value) is float:
+        return value if math.isfinite(value) else {"type": "float", "repr": repr(value)}
+    if isinstance(value, str):
+        return value if len(value) <= 256 else {"type": "str", "prefix": value[:256], "truncated": True}
+    if depth >= 3:
+        return {"type": type(value).__name__, "truncated": True}
+    if isinstance(value, Mapping):
+        result = {
+            str(key)[:80]: _audit_value(item, depth=depth + 1)
+            for key, item in list(value.items())[:32]
+        }
+        if len(value) > 32:
+            result["_truncated_fields"] = len(value) - 32
+        return result
+    if isinstance(value, (list, tuple)):
+        result = [_audit_value(item, depth=depth + 1) for item in value[:32]]
+        if len(value) > 32:
+            result.append({"_truncated_items": len(value) - 32})
+        return result
+    return {"type": type(value).__name__, "repr": repr(value)[:256]}
+
+
+def _audit_raw_fill(fill: Any) -> Any:
+    if not isinstance(fill, Mapping):
+        return _audit_value(fill)
+    return {
+        key: _audit_value(fill[key])
+        for key in _AUDIT_FILL_FIELDS
+        if key in fill
+    }
 
 
 def userfill_required_fields_reason(
@@ -41,6 +82,8 @@ def userfill_required_fields_reason(
         or timestamp > received_at_ms
     ):
         return "FILL_CAUSAL_TIMESTAMP_INVALID"
+    if isinstance(fill.get("px"), bool) or isinstance(fill.get("sz"), bool):
+        return "FILL_EXECUTION_VALUE_INVALID"
     try:
         price = float(fill.get("px"))
         size = float(fill.get("sz"))
@@ -48,6 +91,16 @@ def userfill_required_fields_reason(
         return "FILL_EXECUTION_VALUE_INVALID"
     if not math.isfinite(price) or price <= 0 or not math.isfinite(size) or size <= 0:
         return "FILL_EXECUTION_VALUE_INVALID"
+    if "startPosition" in fill:
+        raw_start = fill.get("startPosition")
+        if raw_start is None or isinstance(raw_start, bool):
+            return "FILL_START_POSITION_INVALID"
+        try:
+            start_position = float(raw_start)
+        except (TypeError, ValueError, OverflowError):
+            return "FILL_START_POSITION_INVALID"
+        if not math.isfinite(start_position):
+            return "FILL_START_POSITION_INVALID"
     if str(fill.get("side") or "").upper() not in {"A", "B"}:
         return "FILL_SIDE_INVALID"
     native_hash = fill.get("hash")
@@ -84,13 +137,20 @@ def appliquer_fill(positions: dict[str, dict], fill: dict) -> dict[str, dict]:
     c = preserve_native_instrument_symbol(fill.get("coin"))
     if not c:
         return positions
+    raw_sign = fill.get("signe")
+    if isinstance(raw_sign, bool):
+        return positions
     try:
-        sz = abs(float(fill.get("sz") or 0.0))
-        signe = int(fill.get("signe") or 0)
-        px = float(fill.get("px") or 0.0)
+        sz = float(fill.get("sz"))
+        signe = int(raw_sign)
+        px = float(fill.get("px"))
     except (TypeError, ValueError, OverflowError):
         return positions
-    if sz <= _EPS or signe not in (-1, 1):
+    if (
+        not math.isfinite(sz) or sz <= _EPS
+        or not math.isfinite(px) or px <= 0.0
+        or signe not in (-1, 1)
+    ):
         return positions
 
     cur = positions.setdefault(c, {"szi": 0.0, "entryPx": px})
@@ -137,6 +197,7 @@ def parser_message_userfills(
     received_at_ms: int | None = None,
     receive_mono_ns: int | None = None,
     connection_id: str | None = None,
+    audit: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Normalise un message WS userFills en conservant DEUX horloges distinctes.
 
@@ -158,16 +219,52 @@ def parser_message_userfills(
         sequence_raw = data.get("sequence", data.get("seq"))
     try:
         frame_sequence = int(sequence_raw) if sequence_raw is not None else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         frame_sequence = None
     frame_received_at_ms: int | None = None
     if isinstance(received_at_ms, int) and not isinstance(received_at_ms, bool):
         frame_received_at_ms = received_at_ms if received_at_ms > 0 else None
     elif isinstance(received_at_ms, str) and received_at_ms.strip().isdecimal():
-        parsed_received_at_ms = int(received_at_ms.strip())
+        try:
+            parsed_received_at_ms = int(received_at_ms.strip())
+        except (ValueError, OverflowError):
+            parsed_received_at_ms = 0
         frame_received_at_ms = parsed_received_at_ms if parsed_received_at_ms > 0 else None
 
-    raw_fills = [item for item in (fills or []) if isinstance(item, dict)]
+    rejected_by_reason: dict[str, int] = {}
+    rejected_samples: list[dict[str, Any]] = []
+
+    def reject(index: int | None, reason: str, raw_fill: Any) -> None:
+        rejected_by_reason[reason] = rejected_by_reason.get(reason, 0) + 1
+        if len(rejected_samples) < 20:
+            rejected_samples.append({
+                "index": index,
+                "reason_code": reason,
+                "source": "LIVE_WS",
+                "received_at_ms": frame_received_at_ms,
+                "connection_id": connection_id,
+                "frame_sequence": frame_sequence,
+                "raw_payload": _audit_raw_fill(raw_fill),
+            })
+
+    raw_fill_count: int | None = len(fills) if isinstance(fills, list) else None
+    raw_fills: list[Mapping[str, Any]] = []
+    source_indexes: list[int] = []
+    if not isinstance(fills, list):
+        reject(None, "USERFILLS_LIST_INVALID", fills)
+    else:
+        for index, item in enumerate(fills):
+            if not isinstance(item, Mapping):
+                reject(index, "FILL_ROW_NOT_OBJECT", item)
+                continue
+            reason = userfill_required_fields_reason(
+                item, received_at_ms=frame_received_at_ms,
+            )
+            if reason is not None:
+                reject(index, reason, item)
+                continue
+            raw_fills.append(item)
+            source_indexes.append(index)
     frame_events = canonicalize_frame(
         raw_fills,
         source="LIVE_WS",
@@ -178,10 +275,13 @@ def parser_message_userfills(
     out: list[dict] = []
     for frame_event in frame_events:
         f = frame_event.payload
-        if userfill_required_fields_reason(
+        reason = userfill_required_fields_reason(
             f,
             received_at_ms=frame_event.received_at_ms,
-        ) is not None:
+        )
+        original_index = source_indexes[frame_event.event_index_in_frame]
+        if reason is not None:
+            reject(original_index, reason, f)
             continue
         try:
             coin = preserve_native_instrument_symbol(f["coin"])
@@ -193,7 +293,7 @@ def parser_message_userfills(
         side = str(f.get("side") or "").upper()
         try:
             start_pos = float(f.get("startPosition"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             start_pos = None
         entry = {"vault": vault, "coin": coin, "px": px, "sz": sz,
                  "signe": 1 if side == "B" else (-1 if side == "A" else 0),
@@ -203,7 +303,9 @@ def parser_message_userfills(
                  "start_position": start_pos, "isSnapshot": est_snapshot,
                  "source": "LIVE_WS",
                  "recv_mono_ns": (
-                     int(receive_mono_ns) if receive_mono_ns is not None else None
+                     receive_mono_ns
+                     if type(receive_mono_ns) is int and receive_mono_ns > 0
+                     else None
                  ),
                  "connection_id": str(connection_id) if connection_id else None,
                  "frame_sequence": frame_event.frame_sequence,
@@ -213,6 +315,18 @@ def parser_message_userfills(
         if liq:
             entry["liquidation"] = liq
         out.append(entry)
+    if audit is not None:
+        audit.clear()
+        audit.update({
+            "input_count": raw_fill_count,
+            "accepted_count": len(out),
+            "rejected_count": sum(rejected_by_reason.values()),
+            "rejected_by_reason": dict(sorted(rejected_by_reason.items())),
+            "rejected_samples": rejected_samples,
+            "frame_sequence": frame_sequence,
+            "received_at_ms": frame_received_at_ms,
+            "connection_id": connection_id,
+        })
     return out
 
 

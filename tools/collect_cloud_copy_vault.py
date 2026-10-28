@@ -24,6 +24,7 @@ import uuid
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,8 @@ from hl_observer.realtime.feed_quality import FeedEventKind  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 INFO_URL = "https://api.hyperliquid.xyz/info"
+APP_HEARTBEAT_INTERVAL_S = 30.0
+APP_HEARTBEAT_PONG_TIMEOUT_S = 15.0
 MAX_SUBSCRIPTIONS_PER_SOCKET = 5
 MAX_UNIQUE_USERS_PER_IP = 10
 MAX_RECONCILIATION_REQUESTS_PER_VAULT = 512
@@ -500,6 +503,9 @@ def new_l2_state() -> dict[str, Any]:
         "reconnects": 0,
         "heartbeats": 0,
         "heartbeats_received": 0,
+        "heartbeat_timeouts": 0,
+        "heartbeat_invalid_pongs": 0,
+        "heartbeat_send_failures": 0,
         "connection_heartbeats": {},
         "subscription_ack_mismatches": 0,
         "invalid_subscription_acks": 0,
@@ -535,6 +541,9 @@ def _heartbeat_connection(
         "sent_count": 0,
         "received_count": 0,
         "unmatched_pong_count": 0,
+        "heartbeat_timeout_count": 0,
+        "ping_in_flight": False,
+        "status": "CONNECTED",
         "first_received_at_ms": None,
         "last_received_at_ms": None,
     }
@@ -547,17 +556,140 @@ def _heartbeat_sent(record: dict[str, Any], at_ms: int) -> None:
     record["last_sent_at_ms"] = int(at_ms)
 
 
-def _heartbeat_received(record: dict[str, Any], at_ms: int) -> None:
+def _heartbeat_received(record: dict[str, Any], at_ms: int) -> bool:
     received_at_ms = int(at_ms)
-    if int(record.get("received_count", 0)) >= int(record.get("sent_count", 0)):
+    if (
+        int(record.get("received_count", 0)) >= int(record.get("sent_count", 0))
+        and record.get("ping_in_flight") is not True
+    ):
         record["unmatched_pong_count"] = int(
             record.get("unmatched_pong_count", 0)
         ) + 1
-        return
+        record["status"] = "UNMATCHED_PONG"
+        record["last_unmatched_pong_at_ms"] = received_at_ms
+        return False
     record["received_count"] = int(record.get("received_count", 0)) + 1
     if record.get("first_received_at_ms") is None:
         record["first_received_at_ms"] = received_at_ms
     record["last_received_at_ms"] = received_at_ms
+    return True
+
+
+def _record_heartbeat_timeout(record: dict[str, Any], at_ms: int) -> None:
+    record["status"] = "PONG_TIMEOUT"
+    record["heartbeat_timeout_count"] = int(
+        record.get("heartbeat_timeout_count", 0)
+    ) + 1
+    record["last_timeout_at_ms"] = int(at_ms)
+
+
+def _record_l2_heartbeat_timeout(
+    state: dict[str, Any], connection_id: str, requested: set[str]
+) -> None:
+    state["heartbeat_timeouts"] = int(state.get("heartbeat_timeouts", 0)) + 1
+    at_ms = int(time.time() * 1_000)
+    _append_l2_history(
+        state,
+        "connection_events",
+        {
+            "event": "heartbeat_timeout",
+            "time_ms": at_ms,
+            "connection_id": connection_id,
+            "markets": sorted(requested),
+            "reason": "application_pong_timeout",
+        },
+    )
+    for coin in requested:
+        _open_l2_gap(
+            state,
+            coin,
+            reason="application_pong_timeout",
+            at_ms=at_ms,
+            connection_id=connection_id,
+        )
+
+
+def _record_l2_heartbeat_send_failure(
+    state: dict[str, Any],
+    connection_id: str,
+    requested: set[str],
+    error_type: str,
+) -> None:
+    state["heartbeat_send_failures"] = int(
+        state.get("heartbeat_send_failures", 0)
+    ) + 1
+    at_ms = int(time.time() * 1_000)
+    _append_l2_history(
+        state,
+        "connection_events",
+        {
+            "event": "heartbeat_send_failure",
+            "time_ms": at_ms,
+            "connection_id": connection_id,
+            "markets": sorted(requested),
+            "error_type": error_type,
+        },
+    )
+    for coin in requested:
+        _open_l2_gap(
+            state,
+            coin,
+            reason="application_ping_send_failed",
+            at_ms=at_ms,
+            connection_id=connection_id,
+        )
+
+
+def _increment_state_counter(state: dict[str, Any], key: str) -> None:
+    state[key] = int(state.get(key, 0)) + 1
+
+
+async def _application_heartbeat_loop(
+    socket: Any,
+    send_json: Any,
+    heartbeat_record: dict[str, Any],
+    pong_event: asyncio.Event,
+    *,
+    on_sent: Any,
+    on_timeout: Any,
+    on_send_failure: Any,
+) -> None:
+    """Send one app ping at a time and close fail-closed when its pong is late."""
+    while True:
+        await asyncio.sleep(APP_HEARTBEAT_INTERVAL_S)
+        pong_event.clear()
+        heartbeat_record["ping_in_flight"] = True
+        heartbeat_record["status"] = "SENDING_PING"
+        try:
+            await send_json({"method": "ping"})
+        except asyncio.CancelledError:
+            heartbeat_record["ping_in_flight"] = False
+            heartbeat_record["status"] = "PING_INTERRUPTED"
+            raise
+        except Exception as exc:
+            heartbeat_record["ping_in_flight"] = False
+            heartbeat_record["status"] = "PING_SEND_FAILED"
+            heartbeat_record["last_send_failed_at_ms"] = int(time.time() * 1_000)
+            heartbeat_record["last_send_error_type"] = type(exc).__name__
+            on_send_failure(type(exc).__name__)
+            await socket.close(code=1011, reason="application ping send failed")
+            return
+        _heartbeat_sent(heartbeat_record, int(time.time() * 1_000))
+        heartbeat_record["ping_in_flight"] = False
+        heartbeat_record["status"] = "AWAITING_PONG"
+        on_sent()
+        try:
+            await asyncio.wait_for(
+                pong_event.wait(), timeout=APP_HEARTBEAT_PONG_TIMEOUT_S
+            )
+        except TimeoutError:
+            _record_heartbeat_timeout(
+                heartbeat_record, int(time.time() * 1_000)
+            )
+            on_timeout()
+            await socket.close(code=1011, reason="application pong timeout")
+            return
+        heartbeat_record["status"] = "HEALTHY"
 
 
 def _append_l2_history(
@@ -1074,6 +1206,9 @@ def _l2_diagnostics(
         "reconnects": counter("reconnects"),
         "heartbeats_sent": counter("heartbeats"),
         "heartbeats_received": counter("heartbeats_received"),
+        "heartbeat_timeouts": counter("heartbeat_timeouts"),
+        "heartbeat_invalid_pongs": counter("heartbeat_invalid_pongs"),
+        "heartbeat_send_failures": counter("heartbeat_send_failures"),
         "heartbeat_connections": {
             str(connection_id): dict(record)
             for connection_id, record in state.get("connection_heartbeats", {}).items()
@@ -1556,6 +1691,7 @@ async def _dynamic_l2_collector(
                 heartbeat_record = _heartbeat_connection(
                     state.setdefault("connection_heartbeats", {}), connection_id
                 )
+                pong_event = asyncio.Event()
                 connection_started_ms = int(time.time() * 1_000)
                 _append_l2_history(
                     state,
@@ -1694,24 +1830,33 @@ async def _dynamic_l2_collector(
                         finally:
                             _request_queue.task_done()
 
-                async def heartbeat(
-                    *,
-                    _send_json: Any = send_json,
-                    _heartbeat_record: dict[str, Any] = heartbeat_record,
-                ) -> None:
-                    while True:
-                        await asyncio.sleep(30.0)
-                        _heartbeat_sent(
-                            _heartbeat_record, int(time.time() * 1_000)
-                        )
-                        await _send_json({"method": "ping"})
-                        state["heartbeats"] = state.get("heartbeats", 0) + 1
-
                 sender_task: asyncio.Task[Any] | None = None
                 heartbeat_task: asyncio.Task[Any] | None = None
                 try:
                     sender_task = asyncio.create_task(sender())
-                    heartbeat_task = asyncio.create_task(heartbeat())
+                    heartbeat_task = asyncio.create_task(
+                        _application_heartbeat_loop(
+                            socket,
+                            send_json,
+                            heartbeat_record,
+                            pong_event,
+                            on_sent=partial(
+                                _increment_state_counter, state, "heartbeats"
+                            ),
+                            on_timeout=partial(
+                                _record_l2_heartbeat_timeout,
+                                state,
+                                connection_id,
+                                requested,
+                            ),
+                            on_send_failure=partial(
+                                _record_l2_heartbeat_send_failure,
+                                state,
+                                connection_id,
+                                requested,
+                            ),
+                        )
+                    )
                     watchdog_task = asyncio.create_task(
                         _subscription_timeout_watchdog(
                             attempts, stop_watchdog, on_subscription_timeout
@@ -1730,10 +1875,30 @@ async def _dynamic_l2_collector(
                             channel = str(raw_message.get("channel") or "")
                             if channel == "pong":
                                 _record_l2_ignored(state, "pong")
-                                _heartbeat_received(heartbeat_record, wall)
-                                state["heartbeats_received"] = int(
-                                    state.get("heartbeats_received", 0)
-                                ) + 1
+                                if _heartbeat_received(heartbeat_record, wall):
+                                    heartbeat_record["status"] = "HEALTHY"
+                                    pong_event.set()
+                                    state["heartbeats_received"] = int(
+                                        state.get("heartbeats_received", 0)
+                                    ) + 1
+                                else:
+                                    state["heartbeat_invalid_pongs"] = int(
+                                        state.get("heartbeat_invalid_pongs", 0)
+                                    ) + 1
+                                    _append_l2_history(
+                                        state,
+                                        "connection_events",
+                                        {
+                                            "event": "invalid_pong",
+                                            "time_ms": wall,
+                                            "connection_id": connection_id,
+                                            "reason": "unmatched_application_pong",
+                                        },
+                                    )
+                                    await socket.close(
+                                        code=1011,
+                                        reason="unmatched application pong",
+                                    )
                                 continue
                             if channel == "subscriptionResponse":
                                 ack = classify_subscription_ack(raw_message)
@@ -2455,6 +2620,7 @@ async def _socket_group(
                     connection_heartbeats if connection_heartbeats is not None else {},
                     connection_id,
                 )
+                pong_event = asyncio.Event()
 
                 async def send_json(
                     payload: Mapping[str, Any],
@@ -2543,15 +2709,39 @@ async def _socket_group(
 
                 async def heartbeat(
                     *,
+                    _socket: Any = socket,
                     _heartbeat_record: dict[str, Any] = heartbeat_record,
                     _send_json: Any = send_json,
+                    _pong_event: asyncio.Event = pong_event,
                 ) -> None:
-                    while True:
-                        await asyncio.sleep(30.0)
-                        _heartbeat_sent(
-                            _heartbeat_record, int(time.time() * 1_000)
+                    def on_sent() -> None:
+                        subscription_diagnostics["heartbeats_sent"] = (
+                            subscription_diagnostics.get("heartbeats_sent", 0) + 1
                         )
-                        await _send_json({"method": "ping"})
+
+                    def on_timeout() -> None:
+                        subscription_diagnostics["heartbeat_timeouts"] = (
+                            subscription_diagnostics.get("heartbeat_timeouts", 0)
+                            + 1
+                        )
+
+                    def on_send_failure(error_type: str) -> None:
+                        subscription_diagnostics["heartbeat_send_failures"] = (
+                            subscription_diagnostics.get(
+                                "heartbeat_send_failures", 0
+                            )
+                            + 1
+                        )
+
+                    await _application_heartbeat_loop(
+                        _socket,
+                        _send_json,
+                        _heartbeat_record,
+                        _pong_event,
+                        on_sent=on_sent,
+                        on_timeout=on_timeout,
+                        on_send_failure=on_send_failure,
+                    )
 
                 attempt = 0
                 try:
@@ -2572,7 +2762,29 @@ async def _socket_group(
                             continue
                         channel = str(message.get("channel") or "")
                         if channel == "pong":
-                            _heartbeat_received(heartbeat_record, wall)
+                            if _heartbeat_received(heartbeat_record, wall):
+                                heartbeat_record["status"] = "HEALTHY"
+                                pong_event.set()
+                                subscription_diagnostics["heartbeats_received"] = (
+                                    subscription_diagnostics.get(
+                                        "heartbeats_received", 0
+                                    ) + 1
+                                )
+                            else:
+                                subscription_diagnostics[
+                                    "unmatched_pongs"
+                                ] = subscription_diagnostics.get(
+                                    "unmatched_pongs", 0
+                                ) + 1
+                                subscription_diagnostics[
+                                    "heartbeat_invalid_pongs"
+                                ] = subscription_diagnostics.get(
+                                    "heartbeat_invalid_pongs", 0
+                                ) + 1
+                                await socket.close(
+                                    code=1011,
+                                    reason="unmatched application pong",
+                                )
                             continue
                         if channel == "subscriptionResponse":
                             ack = classify_subscription_ack(message)

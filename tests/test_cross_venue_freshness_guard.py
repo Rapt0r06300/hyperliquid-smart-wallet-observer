@@ -84,7 +84,8 @@ def test_cross_venue_rejects_stale_entry_book_fail_closed() -> None:
 
     assert report.base.transitions[-1].state is CrossVenueExecutionState.REJECTED
     assert report.base.leg1_execution["accepted"] is False
-    assert report.base.leg1_execution["execution"]["reason"] == "STALE_EXECUTION_BOOK"
+    # The source clock is the first stale timestamp, so the rejection names that precise cause.
+    assert report.base.leg1_execution["execution"]["reason"] == "STALE_SOURCE_TIMESTAMP"
     assert report.base.leg1_execution["execution"]["cost_status"] == "UNMEASURABLE"
     assert report.base.leg2_execution is None
     assert report.base.strict_result is False

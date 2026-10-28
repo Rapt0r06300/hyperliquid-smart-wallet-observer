@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import os
 import shutil
-
-import pytest
 import subprocess
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_LAUNCHER = ROOT / "POUSSER-GITHUB-FORCE.cmd"
@@ -90,7 +89,8 @@ def test_portable_git_installer_is_pinned_and_hash_verified() -> None:
     assert "04F937E1F0918B17B9BE6F2294CB2BB66E96E1D9832D1C298E2DE088A1D0E668" in installer
     assert "Get-FileHash" in installer
     assert "cmd\\git.exe" in installer
-    assert 'cd /d "%~dp0"' in bootstrap
+    assert r'for %%I in ("%~dp0..\..")' in bootstrap
+    assert 'cd /d "%ALINA_PROJECT_ROOT%"' in bootstrap
     assert "install_portable_git.ps1" in bootstrap
 
 
@@ -162,12 +162,16 @@ def test_safe_push_reconciles_remote_and_keeps_bundles_out_of_main(tmp_path: Pat
         cwd=local,
     )
 
-    assert "[INTEGRATION] Historiques divergents" in result.stdout
+    assert "[INTEGRATION LINEAIRE] Rejeu de " in result.stdout
     assert "SHA local = SHA GitHub; synchronisation verifiee." in result.stdout
-    remote_main = _git(local, "rev-parse", "refs/remotes/origin/main")
+    # A successful push does not promise to refresh the local remote-tracking ref.
+    remote_main = _git(local, "ls-remote", "origin", "refs/heads/main").split()[0]
     assert _git(local, "rev-parse", "main") == remote_main
     assert _git(local, "merge-base", "--is-ancestor", remote_work_sha, remote_main) == ""
-    assert _git(local, "merge-base", "--is-ancestor", local_work_sha, remote_main) == ""
+    # Rebase changes the local commit SHA; prove its content survives instead.
+    assert _git(local, "show", f"{remote_main}:local.txt").strip() == _git(
+        local, "show", f"{local_work_sha}:local.txt"
+    ).strip()
     assert divergent_sha not in _git(local, "rev-list", "main").splitlines()
     assert (local / stale_bundle.name).is_file()
     assert (local / divergent_bundle.name).is_file()

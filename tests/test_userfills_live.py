@@ -146,3 +146,98 @@ def test_parser_rejects_fill_missing_native_identity_or_causal_fields(changes):
     assert UL.parser_message_userfills(
         message, vault="0xA", received_at_ms=1_010
     ) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("startPosition", "NaN", "FILL_START_POSITION_INVALID"),
+        ("startPosition", float("inf"), "FILL_START_POSITION_INVALID"),
+        ("startPosition", None, "FILL_START_POSITION_INVALID"),
+        ("px", True, "FILL_EXECUTION_VALUE_INVALID"),
+        ("time", 1_000.5, "FILL_CAUSAL_TIMESTAMP_INVALID"),
+    ],
+)
+def test_parser_rejette_champs_malformes_et_conserve_le_diagnostic_brut(field, value, reason):
+    fill = {
+        "coin": "SOL", "px": "150", "sz": "1", "side": "B",
+        "time": 1_000, "tid": 7, "hash": "0xf", field: value,
+    }
+    audit = {}
+
+    parsed = UL.parser_message_userfills(
+        {"channel": "userFills", "sequence": 42, "data": {"fills": [fill]}},
+        vault="0xA", received_at_ms=1_010, connection_id="sock-1", audit=audit,
+    )
+
+    assert parsed == []
+    assert audit["input_count"] == 1
+    assert audit["rejected_by_reason"] == {reason: 1}
+    sample = audit["rejected_samples"][0]
+    assert sample["index"] == 0
+    assert sample["connection_id"] == "sock-1"
+    expected_raw = {"type": "float", "repr": "inf"} if value == float("inf") else value
+    assert sample["raw_payload"][field] == expected_raw
+
+
+def test_parser_audit_malformed_rows_without_dropping_other_valid_fills():
+    good = {
+        "coin": "SOL", "px": "150", "sz": "1", "side": "B",
+        "time": 1_000, "tid": 7, "hash": "0xf",
+    }
+    audit = {}
+
+    parsed = UL.parser_message_userfills(
+        {"channel": "userFills", "data": {"fills": [good, "not-a-fill"]}},
+        vault="0xA", received_at_ms=1_010, audit=audit,
+    )
+
+    assert len(parsed) == 1 and parsed[0]["tid"] == 7
+    assert audit["input_count"] == 2
+    assert audit["accepted_count"] == 1
+    assert audit["rejected_by_reason"] == {"FILL_ROW_NOT_OBJECT": 1}
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("time", float("inf"), "FILL_CAUSAL_TIMESTAMP_INVALID"),
+        ("px", float("nan"), "FILL_EXECUTION_VALUE_INVALID"),
+        ("sz", float("inf"), "FILL_EXECUTION_VALUE_INVALID"),
+    ],
+)
+def test_parser_isole_une_ligne_non_finie_et_preserve_les_fills_valides(field, value, reason):
+    good = {
+        "coin": "SOL", "px": "150", "sz": "1", "side": "B",
+        "time": 1_000, "tid": 7, "hash": "0xf",
+    }
+    bad = {**good, "tid": 8, "hash": "0xbad", field: value}
+    audit = {}
+
+    parsed = UL.parser_message_userfills(
+        {"channel": "userFills", "sequence": 42, "data": {"fills": [good, bad]}},
+        vault="0xA", received_at_ms=1_010, audit=audit,
+    )
+
+    assert [row["tid"] for row in parsed] == [7]
+    assert audit["accepted_count"] == 1
+    assert audit["rejected_count"] == 1
+    assert audit["rejected_by_reason"] == {reason: 1}
+    assert audit["rejected_samples"][0]["raw_payload"][field] == {
+        "type": "float", "repr": repr(value),
+    }
+
+
+@pytest.mark.parametrize("field,value", [
+    ("px", float("nan")), ("px", float("inf")), ("px", 0.0),
+    ("sz", float("nan")), ("sz", float("inf")), ("sz", -1.0),
+])
+def test_appliquer_fill_invalide_ne_mutate_pas_les_positions_existantes(field, value):
+    positions = {"BTC": {"szi": 2.0, "entryPx": 100.0}}
+    before = {coin: dict(state) for coin, state in positions.items()}
+
+    UL.appliquer_fill(positions, {
+        "coin": "BTC", "px": 101.0, "sz": 1.0, "signe": 1, field: value,
+    })
+
+    assert positions == before

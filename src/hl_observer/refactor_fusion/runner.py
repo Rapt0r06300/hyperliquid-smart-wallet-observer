@@ -11,39 +11,39 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hl_observer.arbitrage.dual_venue_hedge_sim import simulate_dual_venue_hedge
-from hl_observer.arbitrage.triangular_graph import TriangularEdge, build_triangular_cycles
-from hl_observer.arbitrage.triangular_opportunity_detector import detect_triangular_opportunities
-from hl_observer.arbitrage.ws_price_discrepancy_detector import detect_ws_price_discrepancies
 from hl_observer.analysis.negative_pnl_auditor import (
     V19NegativePnlAudit,
     audit_to_dict,
     build_negative_pnl_audit,
 )
+from hl_observer.arbitrage.dual_venue_hedge_sim import simulate_dual_venue_hedge
 from hl_observer.arbitrage.hyperliquid_cex_spread_scanner import (
     CrossExchangeOpportunity,
     scan_hyperliquid_cex_spread,
 )
 from hl_observer.arbitrage.orderbook_snapshot import OrderBookSnapshot
+from hl_observer.arbitrage.triangular_graph import TriangularEdge, build_triangular_cycles
+from hl_observer.arbitrage.triangular_opportunity_detector import detect_triangular_opportunities
+from hl_observer.arbitrage.ws_price_discrepancy_detector import detect_ws_price_discrepancies
 from hl_observer.backtesting.wallet_following_simulator import simulate_wallet_following
+from hl_observer.connectors.paper_execution_connector import LocalPaperExecutionConnector
+from hl_observer.connectors.standard import PaperOrderRequest
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote, resolve_copy_conflict
 from hl_observer.copy_wallet.copy_latency_profiler import profile_copy_latency
 from hl_observer.copy_wallet.copy_session_controller import start_copy_session
 from hl_observer.copy_wallet.proportional_sizer import ProportionalSizingConfig
 from hl_observer.copy_wallet.wallet_mirror_runtime import MirrorPipelineResult, run_wallet_mirror_pipeline
-from hl_observer.connectors.paper_execution_connector import LocalPaperExecutionConnector
-from hl_observer.connectors.standard import PaperOrderRequest
 from hl_observer.dashboard.arbitrage_panel import build_arbitrage_panel
 from hl_observer.dashboard.copy_wallet_panel import build_copy_wallet_panel
 from hl_observer.dashboard.funding_panel import build_funding_panel
 from hl_observer.dashboard.loss_attribution_panel import build_loss_attribution_panel
 from hl_observer.dashboard.refactor_fusion_panel import build_refactor_fusion_dashboard_payload
 from hl_observer.funding.funding_rate_scanner import scan_funding_rates
+from hl_observer.position_lifecycle.reconstructor import LifecycleAction
+from hl_observer.realtime.multi_source_price_stream import PriceEvent
 from hl_observer.risk.concentration_risk_detector import detect_concentration_risk
 from hl_observer.risk.liquidity_cliff_detector import detect_liquidity_cliff
 from hl_observer.risk.risk_engine_v3 import SessionEntryRiskContext
-from hl_observer.position_lifecycle.reconstructor import LifecycleAction
-from hl_observer.realtime.multi_source_price_stream import PriceEvent
 from hl_observer.signals.leader_delta import LeaderDelta
 from hl_observer.strategies.fusion_runtime import FusionRuntimeInput, run_fusion_strategy_runtime
 
@@ -78,6 +78,10 @@ def run_refactor_fusion(
 ) -> RefactorFusionRunResult:
     if not dry_run:
         raise ValueError("refactor-fusion-run is paper/dry-run only")
+    raise ValueError(
+        "DISABLED_BY_SCOPE: legacy multi-family fusion is retired; "
+        "use the canonical Copy-Vault runtime and replay laboratory."
+    )
     data_dir = output_data_dir or Path("data") / "reports"
     docs_dir = output_docs_dir or Path("docs") / "reports"
     data_dir.mkdir(parents=True, exist_ok=True)

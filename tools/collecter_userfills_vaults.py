@@ -87,6 +87,7 @@ WS_KEYS_CAP = 6000                          # borne par vault (couvre très larg
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
                  "persisted_fills": 0, "acknowledged_userfills": set(),
+                 "invalid_fill_rows": 0,
                  "invalid_subscription_acks": 0, "pre_ack_userfills_frames": 0,
                  "invalid_json_frames": 0, "unexpected_userfills_channels": 0,
                  "receive_clock_rejections": 0,
@@ -1368,6 +1369,10 @@ def _journal_userfills_integrity(root: Path, event: dict) -> None:
         _HEARTBEAT_WS["native_identity_conflicts"] = int(
             _HEARTBEAT_WS.get("native_identity_conflicts") or 0
         ) + 1
+    elif reason == "USERFILLS_FILL_ROWS_REJECTED":
+        _HEARTBEAT_WS["invalid_fill_rows"] = int(
+            _HEARTBEAT_WS.get("invalid_fill_rows") or 0
+        ) + max(1, int(event.get("count") or 1))
     elif reason in {
         "LATE_FILL_BEHIND_CURSOR_UNRECONCILED",
         "LEGACY_CURSOR_BOUNDARY_EXCLUDED",
@@ -1406,6 +1411,47 @@ def _journal_userfills_integrity(root: Path, event: dict) -> None:
             f"reason={reason} error={type(exc).__name__}",
             flush=True,
         )
+
+
+def _parse_userfills_frame(
+    root: Path,
+    message: Any,
+    *,
+    vault: str,
+    received_at_ms: int | None,
+    receive_mono_ns: int | None,
+    connection_id: str | None,
+) -> list[dict]:
+    """Parse valid fills while durably recording bounded diagnostics for rejected rows."""
+    audit: dict[str, Any] = {}
+    fills = UL.parser_message_userfills(
+        message,
+        vault=vault,
+        received_at_ms=received_at_ms,
+        receive_mono_ns=receive_mono_ns,
+        connection_id=connection_id,
+        audit=audit,
+    )
+    rejected_count = int(audit.get("rejected_count") or 0)
+    if rejected_count:
+        failures_before = int(_HEARTBEAT_WS.get("integrity_diagnostic_write_failures") or 0)
+        _journal_userfills_integrity(root, {
+            "reason_code": "USERFILLS_FILL_ROWS_REJECTED",
+            "vault": str(vault or "")[:80],
+            "connection_id": connection_id,
+            "count": rejected_count,
+            "details": {
+                "frame_sequence": audit.get("frame_sequence"),
+                "received_at_ms": audit.get("received_at_ms"),
+                "input_count": audit.get("input_count"),
+                "accepted_count": audit.get("accepted_count"),
+                "rejected_by_reason": audit.get("rejected_by_reason", {}),
+                "rejected_samples": audit.get("rejected_samples", []),
+            },
+        })
+        if int(_HEARTBEAT_WS.get("integrity_diagnostic_write_failures") or 0) > failures_before:
+            return []
+    return fills
 
 
 async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, socket_id: str = "A") -> None:
@@ -1554,7 +1600,8 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                             _HEARTBEAT_WS["dernier_exchange_ts"] = max(
                                 max(timestamps), _HEARTBEAT_WS["dernier_exchange_ts"] or 0
                             )
-                    fills = UL.parser_message_userfills(
+                    fills = _parse_userfills_frame(
+                        root,
                         msg,
                         vault=vault,
                         received_at_ms=recv_wall_ms,
@@ -1739,6 +1786,7 @@ def _gaps_critiques_userfills() -> int:
     counters = (
         "drops",
         "tape_drops",
+        "invalid_fill_rows",
         "unreconciled_gaps",
         "native_identity_conflicts",
         "invalid_subscription_acks",

@@ -129,7 +129,14 @@ def discover_scope_relevant_defaults(path: Path) -> dict[str, str]:
 def classified_entrypoints() -> dict[str, FlagDisposition]:
     mapping: dict[str, FlagDisposition] = {}
     for name, role in ENTRYPOINT_ROLES.items():
-        if role in {EntrypointRole.OFFICIAL_RUNTIME, EntrypointRole.OFFICIAL_ANALYSIS, EntrypointRole.OFFICIAL_RESEARCH}:
+        if role in {
+            EntrypointRole.OFFICIAL_RUNTIME,
+            EntrypointRole.OFFICIAL_ANALYSIS,
+            EntrypointRole.OFFICIAL_COLLECTION,
+            EntrypointRole.OFFICIAL_GIT_SYNC,
+            EntrypointRole.OFFICIAL_DATA_SYNC,
+            EntrypointRole.OFFICIAL_RESEARCH,
+        }:
             disposition = FlagDisposition.ACTIVE
         elif role in {EntrypointRole.MAINTENANCE, EntrypointRole.COMPAT}:
             disposition = FlagDisposition.LEGACY_COMPAT

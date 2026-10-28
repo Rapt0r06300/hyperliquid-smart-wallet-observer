@@ -11,11 +11,10 @@ CE QU'ON PORTE, ET CE QU'ON REFUSE
 On refuse le framework npm (STATE.md/LOOP.md/gate.yaml : une 3ᵉ architecture, du code non
 audité). On porte l'IDÉE, dans notre idiome, avec une lentille TRADING :
 
-  * leur échelle L0-L3 devient NOTRE ladder de sécurité (addendum 2026-07-04) :
-        N0 OBSERVE (mainnet lecture seule)  →  N1 PAPER (décision locale + simulation)
-        →  N2 TESTNET (fausse monnaie, tous verrous).
-  * le RÉEL n'est **jamais** un niveau atteignable. Il n'existe aucune constante « N3 » ici :
-    la fonction ne PEUT PAS l'émettre. Le plafond est codé en dur.
+   * notre échelle opérationnelle s'arrête à N1 PAPER (décision locale + simulation).
+     Testnet et réel sont désactivés par scope et ne sont jamais autorisés par ce module.
+   * le RÉEL n'est **jamais** un niveau atteignable. Il n'existe aucune constante « N3 » ici :
+     la fonction ne PEUT PAS l'émettre. Le plafond paper/read-only est codé en dur.
   * `no_real_trade` n'est pas une dimension pondérée parmi d'autres : c'est un **GATE DUR**.
     La moindre brèche force le grade F et le niveau N0, quels que soient les autres signaux.
 
@@ -41,7 +40,7 @@ from typing import Any
 # ── L'échelle d'autonomie : NOTRE ladder, pas la leur. Le réel n'y figure PAS. ──────────────
 NIVEAU_OBSERVE = "N0_OBSERVE"                 # mainnet lecture seule — le plancher, toujours atteint
 NIVEAU_PAPER = "N1_PAPER_DECIDE"              # décision locale + simulation paper (où vit le bot)
-NIVEAU_TESTNET = "N2_TESTNET_VERROUILLE"      # testnet fausse monnaie, tous les verrous posés
+NIVEAU_TESTNET = "N2_TESTNET_DISABLED"         # compatibilité historique; jamais émis
 #: Il n'existe volontairement AUCUN "N3_REEL". Un niveau qu'on ne nomme pas ne peut être émis.
 
 MOTIF_BREACHE = "NO_REAL_TRADE_COMPROMIS_PLAFOND_N0"
@@ -81,7 +80,7 @@ def _s(signaux: dict, cle: str) -> float | None:
 class RapportReadiness:
     score_0_100: float
     grade: str                                # A..F
-    niveau_autonomie: str                     # N0 / N1 / N2 (jamais réel)
+    niveau_autonomie: str                     # N0 / N1 uniquement (jamais testnet ou réel)
     maillon_faible: str
     no_real_trade_intact: bool
     dimensions: dict[str, dict] = field(default_factory=dict)
@@ -94,7 +93,7 @@ class RapportReadiness:
             "niveau_autonomie": self.niveau_autonomie, "maillon_faible": self.maillon_faible,
             "no_real_trade_intact": self.no_real_trade_intact,
             "dimensions": self.dimensions, "drapeaux_rouges": self.drapeaux_rouges,
-            "real_execution": False, "plafond": "N2_TESTNET_VERROUILLE (le RÉEL est hors échelle)",
+            "real_execution": False, "plafond": "N1_PAPER_MAX (testnet et réel désactivés par scope)",
         }
 
 
@@ -107,9 +106,8 @@ def evaluer(signaux: dict[str, Any], *, verrous_testnet: bool | None = None) -> 
     """Le SCORE de maturité + le niveau d'autonomie permis, deny-by-default.
 
     `signaux` : un dict des clés de `DIMENSIONS` (bool ou fraction). Toute clé absente compte
-    comme 0 (non prouvé = non prêt) et lève un drapeau. `verrous_testnet` : les verrous du
-    ladder testnet (REAL_MAINNET_TRADING=false, TESTNET_ONLY=true…) — requis pour AUTORISER N2,
-    jamais pour le réel.
+    comme 0 (non prouvé = non prêt) et lève un drapeau. `verrous_testnet` est conservé pour
+    compatibilité d'interface ; sa valeur ne peut jamais autoriser une activité testnet.
     """
     dims: dict[str, dict] = {}
     drapeaux: list[str] = []
@@ -117,7 +115,7 @@ def evaluer(signaux: dict[str, Any], *, verrous_testnet: bool | None = None) -> 
     for cle, poids, desc in DIMENSIONS:
         s = _s(signaux, cle)
         if s is None:
-            drapeaux.append("évidence ABSENTE : %s (compté 0 — deny-by-default)" % cle)
+            drapeaux.append(f"évidence ABSENTE : {cle} (compté 0 — deny-by-default)")
             s = 0.0
         contrib = poids * s
         score += contrib
@@ -138,8 +136,9 @@ def evaluer(signaux: dict[str, Any], *, verrous_testnet: bool | None = None) -> 
     if _s(signaux, "pnl_reconcilie") not in (None, 1.0):
         drapeaux.append("PnL dashboard != audit : la vérité du PnL est cassée")
     if (_s(signaux, "donnees_fraiches") or 0.0) < SEUIL_DONNEES_FRAICHES:
-        drapeaux.append("données trop vieilles (< %d%% frais) : régime NO_TRADE"
-                        % int(SEUIL_DONNEES_FRAICHES * 100))
+        drapeaux.append(
+            f"données trop vieilles (< {int(SEUIL_DONNEES_FRAICHES * 100)}% frais) : régime NO_TRADE"
+        )
     if _s(signaux, "tests_verts") not in (None, 1.0):
         drapeaux.append("tests rouges : une mesure ment peut-être — réparer avant d'avancer")
 
@@ -150,15 +149,8 @@ def evaluer(signaux: dict[str, Any], *, verrous_testnet: bool | None = None) -> 
     niveau = NIVEAU_OBSERVE
     if tests_ok and pnl_ok and data_ok:
         niveau = NIVEAU_PAPER
-        cout_ok = _s(signaux, "portes_cout_actives") == 1.0
-        halt_ok = _s(signaux, "kill_switch_cable") == 1.0
-        obs_ok = _s(signaux, "journal_present") == 1.0
-        vt = bool(verrous_testnet)
-        if cout_ok and halt_ok and obs_ok and vt:
-            niveau = NIVEAU_TESTNET
-        elif not vt:
-            drapeaux.append("N2 testnet refusé : verrous testnet non prouvés "
-                            "(REAL_MAINNET_TRADING=false, TESTNET_ONLY=true, caps)")
+        if verrous_testnet is True:
+            drapeaux.append("N2_TESTNET_DISABLED_BY_SCOPE: paper/read-only Copy-Vault only")
 
     maillon = max(DIMENSIONS, key=lambda d: dims[d[0]]["manque_points"])[0]
     return RapportReadiness(round(score, 1), _grade(score), niveau, maillon,
@@ -167,20 +159,18 @@ def evaluer(signaux: dict[str, Any], *, verrous_testnet: bool | None = None) -> 
 
 def markdown(rap: RapportReadiness) -> str:
     """Le bloc BOT-READY pour le RECAP / le rapport — dérivé, jamais inventé."""
-    lignes = ["## 🤖 BOT-READY — %.0f/100 (%s) · autonomie sûre : %s"
-              % (rap.score_0_100, rap.grade, rap.niveau_autonomie),
+    lignes = [f"## 🤖 BOT-READY — {rap.score_0_100:.0f}/100 ({rap.grade}) · autonomie sûre : {rap.niveau_autonomie}",
               "",
-              "_Plafond codé en dur : **N2 testnet verrouillé**. Le trading RÉEL est hors "
-              "échelle — ce score ne peut jamais l'autoriser._",
+              "_Plafond codé en dur : **N1 paper/read-only**. Testnet et trading réel sont désactivés._",
               "",
-              "- maillon faible : **%s**" % rap.maillon_faible,
-              "- no-real-trade intact : **%s**" % ("oui" if rap.no_real_trade_intact else "NON")]
+              f"- maillon faible : **{rap.maillon_faible}**",
+              f"- no-real-trade intact : **{'oui' if rap.no_real_trade_intact else 'NON'}**"]
     if rap.drapeaux_rouges:
         lignes.append("- drapeaux : " + " · ".join(rap.drapeaux_rouges[:4]))
     lignes += ["", "| dimension | points | /max |", "|---|---:|---:|"]
     for cle, poids, _desc in DIMENSIONS:
         d = rap.dimensions.get(cle, {})
-        lignes.append("| %s | %.1f | %.0f |" % (cle, d.get("points", 0.0), poids))
+        lignes.append(f"| {cle} | {d.get('points', 0.0):.1f} | {poids:.0f} |")
     return "\n".join(lignes)
 
 

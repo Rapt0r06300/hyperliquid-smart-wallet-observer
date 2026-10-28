@@ -33,19 +33,17 @@ def test_securite_ABSENTE_est_traitee_comme_une_breche_deny_by_default():
 
 # ─────────────── le RÉEL est hors échelle (plafond codé en dur) ───────────────
 
-def test_le_niveau_maximal_atteignable_est_le_testnet_verrouille_jamais_le_reel():
-    # tout parfait + verrous testnet => on PLAFONNE a N2, il n'existe pas de N3.
+def test_verrous_testnet_ne_peuvent_pas_elever_au_dessus_du_paper():
     r = LR.evaluer(_tout_vert(), verrous_testnet=True)
-    assert r.niveau_autonomie == LR.NIVEAU_TESTNET
-    # aucune constante de niveau "réel" n'existe dans le module
+    assert r.niveau_autonomie == LR.NIVEAU_PAPER
+    assert any("N2_TESTNET_DISABLED_BY_SCOPE" in d for d in r.drapeaux_rouges)
     assert not any("REEL" in n or "MAINNET" in n for n in LR.__all__)
-    assert "N2" in LR.NIVEAU_TESTNET and r.real_execution is False
+    assert r.real_execution is False
 
 
-def test_N2_testnet_exige_les_verrous_sinon_on_reste_a_N1():
+def test_absence_de_verrous_ne_change_pas_le_plafond_paper():
     r = LR.evaluer(_tout_vert(), verrous_testnet=False)
-    assert r.niveau_autonomie == LR.NIVEAU_PAPER            # pas N2 sans les verrous
-    assert any("verrous testnet" in d.lower() for d in r.drapeaux_rouges)
+    assert r.niveau_autonomie == LR.NIVEAU_PAPER
 
 
 # ─────────────── deny-by-default & score ───────────────
@@ -106,7 +104,7 @@ def test_depuis_etapes_mappe_les_statuts_du_lanceur():
               "kill_switch_cable": True, "journal_present": True}
     r = LR.depuis_etapes(etapes, verrous_testnet=True)
     assert r.no_real_trade_intact is True
-    assert r.niveau_autonomie == LR.NIVEAU_TESTNET
+    assert r.niveau_autonomie == LR.NIVEAU_PAPER
 
 
 def test_depuis_etapes_securite_en_echec_plafonne():
@@ -119,4 +117,4 @@ def test_le_markdown_montre_le_score_et_le_plafond():
     r = LR.evaluer(_tout_vert(), verrous_testnet=True)
     md = LR.markdown(r)
     assert "BOT-READY" in md and "100/100" in md
-    assert "testnet" in md.lower() and "hors" in md.lower()   # le réel est hors échelle
+    assert "testnet" in md.lower() and "désactivés" in md.lower()

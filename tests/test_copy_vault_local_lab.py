@@ -16,12 +16,43 @@ from hl_observer.backtesting.copy_vault_local_lab import (
     _checkpoint_resume_state,
     _historical_train_proxy,
     _signal_coverage,
+    _train_active_day_mean,
     _trial_with_receipt_chain,
     load_improvement_history,
     materialize_safe_workspace,
     record_frozen_candidate,
     run_historical_trade_replay,
 )
+
+
+def test_train_active_day_mean_uses_exact_daily_pnl_values() -> None:
+    train = {
+        "active_day_mean_net_pnl_usd": 999.0,
+        "statistics": {
+            "distinct_days": 2,
+            "daily_net_pnl_usd_exact_decimal": ["0.3", "0.6"],
+        },
+    }
+
+    assert _train_active_day_mean(train) == Decimal("0.45")
+
+
+@pytest.mark.parametrize(
+    ("exact_values", "distinct_days"),
+    [(["0.3"], 2), (["invalid", "0.4"], 2), ([], 0), ("0.3", 1)],
+)
+def test_train_active_day_mean_rejects_malformed_exact_pnl_instead_of_falling_back(
+    exact_values: object, distinct_days: int,
+) -> None:
+    train = {
+        "active_day_mean_net_pnl_usd": 999.0,
+        "statistics": {
+            "distinct_days": distinct_days,
+            "daily_net_pnl_usd_exact_decimal": exact_values,
+        },
+    }
+
+    assert _train_active_day_mean(train) is None
 
 
 def _bind_fixture_safe_asset(manifest: dict) -> dict:
@@ -255,17 +286,18 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
         calls["count"] += 1
         if calls["count"] == 2 and calls["interrupt_trial_once"]:
             raise KeyboardInterrupt
+        pnl_mean = {4: 1.0, 5: 1.5, 6: 0.5}.get(calls["count"], 0.0)
         return {
             "eligible": False,
             "reasons": ["fixture only"],
             "candidate_count": 0,
-            "daily_mean_net_pnl_usd": 0.0,
-            "active_day_mean_net_pnl_usd": 0.0,
+            "daily_mean_net_pnl_usd": pnl_mean,
+            "active_day_mean_net_pnl_usd": pnl_mean,
             "statistics": {
                 "sample_count": 1,
                 "distinct_days": 1,
-                "daily_net_pnl_usd": [0.0],
-                "daily_net_pnl_usd_exact_decimal": ["0"],
+                "daily_net_pnl_usd": [pnl_mean],
+                "daily_net_pnl_usd_exact_decimal": [str(pnl_mean)],
             },
         }
 
@@ -293,22 +325,22 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     calls["interrupt_trial_once"] = False
     updates = []
 
-    def stop_continuous_search_after_two_trials(update):
+    def stop_continuous_search_after_three_trials(update):
         updates.append(update)
-        if len(updates) == 2:
+        if len(updates) == 3:
             raise KeyboardInterrupt
 
     resumed = local_lab.run_local_campaign(
         workspace,
         repository_root=repository_root,
         continuous=True,
-        on_update=stop_continuous_search_after_two_trials,
+        on_update=stop_continuous_search_after_three_trials,
     )
     assert resumed["status"] == "INTERRUPTED"
-    assert resumed["candidates_tested"] == 2
-    assert resumed["campaign_attempts"] == 3
+    assert resumed["candidates_tested"] == 3
+    assert resumed["campaign_attempts"] == 4
     assert resumed["freeze_created"] is False
-    assert [update["campaign_attempts"] for update in updates] == [2, 3]
+    assert [update["campaign_attempts"] for update in updates] == [2, 3, 4]
     assert all(update["last_attempt_receipt_sha256"] for update in updates)
     trials = local_lab._load_campaign_trials(
         campaign_root / "TRIALS.jsonl", manifest["selection_digest"]
@@ -317,11 +349,13 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
         attempts_path, manifest["selection_digest"]
     )
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-    assert len(trials) == 2
-    assert len(attempts) == 3
-    assert [row["sequence_index"] for row in trials] == [2, 3]
-    assert [row["sequence_index"] for row in attempts] == [1, 2, 3]
-    assert [row["trial_number"] for row in trials] == [2, 3]
+    assert len(trials) == 3
+    assert len(attempts) == 4
+    assert resumed["freeze_created"] is False
+    assert resumed["pnl_uplift_freeze_count"] == 3
+    assert [row["sequence_index"] for row in trials] == [2, 3, 4]
+    assert [row["sequence_index"] for row in attempts] == [1, 2, 3, 4]
+    assert [row["trial_number"] for row in trials] == [2, 3, 4]
     assert [
         row["attempt_receipt_sha256"] for row in trials
     ] == [row["attempt_receipt_sha256"] for row in attempts[1:]]
@@ -347,11 +381,32 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
         and trial["temporal_windows"] == attempt["temporal_windows"]
         for trial, attempt in zip(trials, attempts[1:], strict=True)
     )
-    assert checkpoint["campaign_trials"] == 2
-    assert checkpoint["campaign_attempts"] == 3
+    assert checkpoint["campaign_trials"] == 3
+    assert checkpoint["campaign_attempts"] == 4
+    assert [row["new_train_pnl_high"] for row in trials] == [True, True, False]
+    assert all(row["train_pnl_improved_vs_baseline"] is True for row in trials)
+    assert all(row["frozen_record"]["economically_proven"] is False for row in trials)
+    assert [row["frozen_record"]["improvement_usd_per_day"] for row in trials] == [1.0, 1.5, 0.5]
+    assert [row["daily_mean_exact_decimal"] for row in trials] == ["1.0", "1.5", "0.5"]
+    assert [
+        row["frozen_record"]["comparison"]["pnl_mean_improvement_over_baseline_exact_decimal"]
+        for row in trials
+    ] == ["1.0", "1.5", "0.5"]
     assert evaluated_segments and set(evaluated_segments) == {"train"}
     assert evaluated_input_counts
     assert set(evaluated_input_counts) == {len(metaorders)}
+    persisted_improvements = load_improvement_history(repository_root)
+    assert [row["run_id"] for row in persisted_improvements] == [
+        row["frozen_record"]["run_id"] for row in trials
+    ]
+    assert [row["candidate_daily_net_usd"] for row in persisted_improvements] == [
+        1.0, 1.5, 0.5,
+    ]
+    assert all(row["economically_proven"] is False for row in persisted_improvements)
+    assert not (
+        repository_root
+        / "runtime/codex_research/copy_vault_improvements/CURRENT_CHAMPION.json"
+    ).exists()
 
 
 def test_market_context_materializer_rechecks_clock_identity_and_read_only_source() -> None:
@@ -694,6 +749,254 @@ def test_safe_catalog_audit_discloses_copy_vault_snapshots_outside_replay_inputs
         "copy_vault_positions": 1,
         "copy_vault_selection": 1,
     }
+
+
+def test_campagne_e2e_materialisee_separe_snapshot_historique_du_flux_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery = tmp_path / "runtime" / "recovery" / "full"
+    recovery.mkdir(parents=True)
+    tag = "copy-vault-e2e-fixture"
+    connection_ids = {
+        "copy_vault_fills": "userfills-connection",
+        "copy_vault_l2": "l2-connection",
+    }
+
+    def write_envelope(
+        dataset_id: str,
+        family: str,
+        message: dict,
+        *,
+        source_id: str,
+        instrument: str,
+        exchange_ts_ms: int,
+        received_ts_ms: int,
+        transport: str,
+    ) -> dict:
+        raw = json.dumps(message, sort_keys=True, separators=(",", ":"))
+        connection_id = connection_ids.get(family)
+        wrapper = {
+            "schema_version": "hypersmart.tick.v1",
+            "source_id": source_id,
+            "channel": family,
+            "instrument": instrument,
+            "exchange_ts_ms": exchange_ts_ms,
+            "received_ts_ms": received_ts_ms,
+            "local_monotonic_ns": received_ts_ms * 1_000_000,
+            "connection_id": connection_id,
+            "gap_count": 0 if connection_id else None,
+            "parsed_summary": {"l2_gap_epoch": 0} if family == "copy_vault_l2" else {},
+            "read_only": True,
+            "real_execution": False,
+            "raw_payload": raw,
+            "raw_sha256": hashlib.sha256(raw.encode()).hexdigest(),
+            "provenance": {
+                "access": "read_only", "authenticated": False,
+                "transport": transport,
+                **({
+                    "historical_only": True,
+                    "forward_evidence_allowed": False,
+                } if family == "copy_vault_snapshot" else {}),
+            },
+        }
+        asset_name = f"{dataset_id}.jsonl.gz"
+        path = recovery / "usable" / "shards" / tag / asset_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = (json.dumps(wrapper, sort_keys=True) + "\n").encode()
+        with gzip.open(path, "wb") as handle:
+            handle.write(payload)
+        manifest_path = f"datasets/sharded/safe/{dataset_id}.manifest.json"
+        synchronization = None
+        if connection_id is not None:
+            synchronization = {
+                "connection_ids": [connection_id],
+                "connection_count": 1,
+                "reconnect_delta": 0,
+                "max_reconnect_count": 0,
+                "heartbeat": {
+                    "connection_id": connection_id,
+                    "sent_count": 1,
+                    "received_count": 1,
+                    "unmatched_pong_count": 0,
+                    "status": "HEALTHY",
+                    "first_received_at_ms": received_ts_ms,
+                    "last_received_at_ms": received_ts_ms,
+                },
+            }
+        manifest = {
+            "schema": "alina.shard_manifest.v2",
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "asset_verified": True,
+            "validation_allowed": True,
+            "proof_of_pnl_allowed": False,
+            "dataset_id": dataset_id,
+            "family": family,
+            "release_tag": tag,
+            "release_asset": asset_name,
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "event_count": 1,
+            "record_count": 1,
+            "integrity": {
+                "gap_count": 0,
+                "regression_count": 0,
+                "desync_count": 0,
+                "duplicate_count": 0,
+                "missing_timestamp_count": 0,
+                "missing_monotonic_count": 0,
+            },
+            "start_ts_ms": received_ts_ms,
+            "end_ts_ms": received_ts_ms,
+            "provenance": {"transports": [transport]},
+            **({"synchronization": synchronization} if synchronization else {}),
+            **({
+                "historical_fill_observation_count": 1,
+                "historical_fill_observation_count_exact": True,
+            } if family == "copy_vault_snapshot" else {}),
+        }
+        manifest_file = recovery.parents[2] / manifest_path
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+        return {
+            "path": path,
+            "asset": {
+                "dataset_id": dataset_id,
+                "family": family,
+                "release_tag": tag,
+                "release_asset": asset_name,
+                "manifest_path": manifest_path,
+                "bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            },
+        }
+
+    day_ms = 86_400_000
+    base_ts_ms = 1_800_000_000_000
+    snapshot_fill = {
+        "time": base_ts_ms + 5_000, "coin": "BTC", "px": "100", "sz": "1",
+        "side": "B", "fee": "0.1", "dir": "Open Long",
+        "startPosition": "0", "oid": 1, "tid": 1, "hash": "snapshot-fill",
+    }
+    rows = [
+        write_envelope(
+            "snapshot", "copy_vault_snapshot",
+            {"channel": "userFills", "data": {
+                "user": "0xabc", "isSnapshot": True, "fills": [snapshot_fill],
+            }},
+            source_id="hyperliquid_public_userfills_backfill", instrument="0xabc",
+            exchange_ts_ms=base_ts_ms + 5_000,
+            received_ts_ms=base_ts_ms + 5_010, transport="https",
+        ),
+    ]
+    levels = [[{"px": "99", "sz": "5"}], [{"px": "101", "sz": "5"}]]
+    for day in range(1, 9):
+        signal_ts_ms = base_ts_ms + day * day_ms + 5_000
+        live_fill = {
+            **snapshot_fill,
+            "time": signal_ts_ms,
+            "dir": "Open Long",
+            "startPosition": str(day),
+            "oid": day + 1,
+            "tid": day + 1,
+            "hash": f"live-fill-{day}",
+        }
+        connection_ids["copy_vault_fills"] = f"userfills-connection-{day}"
+        rows.append(write_envelope(
+            f"live-{day}", "copy_vault_fills",
+            {"channel": "userFills", "data": {
+                "user": "0xabc", "isSnapshot": False, "fills": [live_fill],
+            }},
+            source_id="hyperliquid_public_userfills", instrument="0xabc",
+            exchange_ts_ms=signal_ts_ms,
+            received_ts_ms=signal_ts_ms + 20, transport="websocket",
+        ))
+        connection_ids["copy_vault_l2"] = f"l2-connection-{day}"
+        book_ts_ms = signal_ts_ms - 1_000
+        rows.append(write_envelope(
+            f"book-{day}", "copy_vault_l2",
+            {"channel": "l2Book", "data": {
+                "coin": "BTC", "time": book_ts_ms, "levels": levels,
+            }},
+            source_id="hyperliquid_public_copy_l2", instrument="BTC",
+            exchange_ts_ms=book_ts_ms,
+            received_ts_ms=signal_ts_ms - 500, transport="websocket",
+        ))
+    catalog_file = recovery.parents[2] / "catalog" / "DATA_INDEX.json"
+    catalog_file.parent.mkdir(parents=True, exist_ok=True)
+    catalog_file.write_text(json.dumps({
+        "schema": "alina.data_index.v2",
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "shards": [
+            {
+                **row["asset"],
+                "quality_status": "SAFE",
+                "replay_compatible": True,
+                "validation_allowed": True,
+            }
+            for row in rows
+        ],
+    }), encoding="utf-8")
+
+    workspace = tmp_path / "workspace"
+    manifest = materialize_safe_workspace(recovery, workspace)
+    assert manifest["status"] == "MORE_DATA"
+    assert manifest["safe_catalog_status"] == "SAFE_COMPLETE"
+    assert manifest["verified_assets"] == len(rows)
+    assert manifest["source_asset_inventory_complete"] is True
+    assert manifest["historical_fill_observations"] == 1
+    assert manifest["historical_unique_fills"] == 1
+    assert manifest["incremental_unique_fills"] == 8
+    assert manifest["historical_fills_train_only"] is True
+    assert manifest["snapshots_forward_evidence_allowed"] is False
+    historical_tape = [
+        json.loads(line)
+        for line in (workspace / "runtime" / "data" / "vault_fills.jsonl")
+        .read_text(encoding="utf-8").splitlines()
+    ]
+    live_tape = [
+        json.loads(line)
+        for line in (workspace / "runtime" / "data" / "vault_fills_live.jsonl")
+        .read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(historical_tape) == 1 and historical_tape[0]["isSnapshot"] is True
+    assert len(live_tape) == 8
+    assert all(row["isSnapshot"] is False and row["source"] == "LIVE_WS" for row in live_tape)
+
+    campaign_root = tmp_path / "campaign"
+    campaign_args = {
+        "max_trials": 1,
+        "repository_root": tmp_path,
+        "campaign_root": campaign_root,
+    }
+    first = local_lab.run_local_campaign(workspace, **campaign_args)
+    assert first.get("checkpoint_path"), json.dumps({
+        key: first.get(key)
+        for key in (
+            "status", "reason", "entries", "metaorders", "book_rows",
+            "temporally_aligned_add_signals", "signal_coverage", "input_audit",
+        )
+    }, sort_keys=True)
+    first_checkpoint = json.loads(
+        Path(first["checkpoint_path"]).read_text(encoding="utf-8")
+    )
+    second = local_lab.run_local_campaign(workspace, **campaign_args)
+    assert first["status"] == second["status"] == "SEARCH_RUNNING"
+    assert first["historical_fill_rows"] == second["historical_fill_rows"] == 1
+    assert first["live_fill_rows"] == second["live_fill_rows"] == 8
+    assert first["causal_live_fill_rows"] == second["causal_live_fill_rows"] == 8
+    assert first["candidates_tested"] == 1
+    assert second["candidates_tested"] == 2
+    assert first["selection_digest"] == second["selection_digest"] == manifest["selection_digest"]
+    assert first["campaign_config_sha256"] == second["campaign_config_sha256"]
+    checkpoint = json.loads(Path(second["checkpoint_path"]).read_text(encoding="utf-8"))
+    assert checkpoint["campaign_config_sha256"] == first["campaign_config_sha256"]
+    assert (
+        checkpoint["campaign_config"]["temporal_windows"]
+        == first_checkpoint["campaign_config"]["temporal_windows"]
+    )
+    assert second["freeze_created"] is False
+    assert second["economically_proven"] is False
 
 
 def test_auxiliary_safe_inventory_distinguishes_local_presence_from_hash_verification(
@@ -1053,6 +1356,7 @@ def test_materialize_safe_workspace_unwraps_verified_copy_vault_assets(
                         "sent_count": 1,
                         "received_count": 1,
                         "unmatched_pong_count": 0,
+                            "status": "HEALTHY",
                         "first_received_at_ms": 2_010,
                         "last_received_at_ms": 2_010,
                     },
@@ -1468,6 +1772,27 @@ def test_champion_requires_full_proof_and_never_downgrades(tmp_path: Path) -> No
     forged.pop("paper_read_only")
     record_frozen_candidate(tmp_path, "forged", forged, current)
     assert json.loads(champion_path.read_text(encoding="utf-8"))["run_id"] == "proven-1"
+
+
+def test_unproven_candidate_is_archived_without_creating_a_champion(tmp_path: Path) -> None:
+    candidate = {
+        "freeze_created": True,
+        "economically_proven": False,
+        "status": "PROMISING",
+        "selected_candidate": {"freeze": {"campaign_id": "unproven-1"}},
+        "comparison": {"improvement": 0.4, "trial_count": 17},
+    }
+
+    saved = record_frozen_candidate(tmp_path, "unproven-1", candidate, {})
+
+    assert saved is not None
+    assert saved["economically_proven"] is False
+    assert saved["candidate_status"] == "PROMISING"
+    assert saved["classification"] != "ECONOMICALLY_PROVEN_IMPROVEMENT"
+    assert load_improvement_history(tmp_path) == [saved]
+    assert not (
+        tmp_path / "runtime/codex_research/copy_vault_improvements/CURRENT_CHAMPION.json"
+    ).exists()
 
 
 def test_record_frozen_candidate_rejects_unsafe_run_id_before_writing(tmp_path: Path) -> None:

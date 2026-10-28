@@ -658,7 +658,10 @@ def test_live_report_bundle_includes_safe_coverage_and_payload_rejections(tmp_pa
         "run_id": "run-test",
         "head": "a" * 40,
         "status": "UNMEASURABLE",
-        "economic_result": {"status": "UNMEASURABLE", "candidates_tested": 0},
+        "economic_result": {
+            "status": "UNMEASURABLE", "candidates_tested": 3,
+            "freeze_created": False, "pnl_uplift_freeze_count": 2,
+        },
         "safe_inputs": {
             "verified_assets": 0,
             "expected_safe_shards": 2,
@@ -680,4 +683,8 @@ def test_live_report_bundle_includes_safe_coverage_and_payload_rejections(tmp_pa
     markdown = (tmp_path / "RAPPORT.md").read_text(encoding="utf-8")
     assert "Audit de backfill historique" in markdown
     assert "carnets L2 invalides ou non causaux" in markdown
+    assert "hausses PnL TRAIN gelées : 2 (exploratoires)" in markdown
     assert html_path.is_file()
+    dashboard = html_path.read_text(encoding="utf-8")
+    assert "Hausses mesurées du PnL moyen TRAIN gelées :</b> 2" in dashboard
+    assert "exploratoires; le champion reste inchangé sans preuve indépendante" in dashboard

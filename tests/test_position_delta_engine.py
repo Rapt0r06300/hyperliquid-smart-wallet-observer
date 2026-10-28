@@ -75,6 +75,48 @@ def test_position_delta_unknown_when_direction_unclear():
     assert "direction_unclear" in delta.notes
 
 
+def test_position_delta_does_not_fall_back_to_dir_when_side_is_missing():
+    delta = build_position_delta_from_fill(
+        VALID_WALLET,
+        {"coin": "BTC", "time": 1, "dir": "Open Long", "px": "100", "sz": "1"},
+        previous_size=0,
+    )
+
+    assert delta.action == PositionAction.UNKNOWN
+    assert delta.new_side == PositionSide.UNKNOWN
+    assert delta.delta_notional_usdc is None
+
+
+def test_position_delta_rejects_side_dir_contradiction():
+    delta = build_position_delta_from_fill(
+        VALID_WALLET,
+        {
+            "coin": "BTC", "time": 1, "side": "B", "dir": "Close Long",
+            "startPosition": "1", "px": "100", "sz": "1",
+        },
+    )
+
+    assert delta.action == PositionAction.UNKNOWN
+    assert delta.new_side == PositionSide.UNKNOWN
+    assert delta.delta_notional_usdc is None
+    assert "side_dir_contradiction" in delta.notes
+
+
+def test_position_delta_rejects_non_finite_explicit_start_position():
+    delta = build_position_delta_from_fill(
+        VALID_WALLET,
+        {
+            "coin": "BTC", "time": 1, "side": "B", "dir": "Open Long",
+            "startPosition": "NaN", "px": "100", "sz": "1",
+        },
+    )
+
+    assert delta.action == PositionAction.UNKNOWN
+    assert delta.new_side == PositionSide.UNKNOWN
+    assert delta.delta_notional_usdc is None
+    assert "start_position_invalid" in delta.notes
+
+
 def test_position_delta_confidence_low_when_missing_fields():
     delta = build_position_delta_from_fill(
         VALID_WALLET,

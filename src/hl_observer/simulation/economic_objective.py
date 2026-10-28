@@ -642,6 +642,23 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
             else:
                 proof_economics["trade_ids_count"] = proof_economics["sample_count"]
                 proof_economics["trade_ids_sha256"] = hashlib.sha256((str(oos_economics["trade_ids_sha256"]) + "\n" + str(forward_economics["trade_ids_sha256"])).encode("utf-8")).hexdigest()
+        proof_sample_count = oos_economics["sample_count"] + forward_economics["sample_count"]
+        if closed is not None and proof_sample_count > closed:
+            issues.append("PROOF_SAMPLE_COUNT_EXCEEDS_CAMPAIGN_CLOSED")
+        elif closed is not None and proof_sample_count == closed:
+            proof_totals = {
+                **exact_totals,
+                "net_pnl_usd": proof_net_decimal,
+            }
+            for key in _ECONOMIC_KEYS:
+                campaign_value = metrics[key]
+                proof_value = proof_totals.get(key)
+                difference = decimal_difference(campaign_value, proof_value)
+                if (
+                    difference is not None
+                    and difference.copy_abs() > USD_RECONCILIATION_ABS_TOLERANCE
+                ):
+                    issues.append(f"PROOF_CAMPAIGN_TOTAL_MISMATCH:{key}")
     target_decimal = decimal_value(target_net_usd)
     if target_decimal is None:
         issues.append("INVALID_TARGET_NET_USD")

@@ -45,20 +45,25 @@ def _valid_receipt(row: dict, receipt: object) -> bool:
     )
 
 
-def _phase_state_matches_receipt(phase_path: Path, row: dict, receipt: dict) -> bool:
+def _phase_state_receipt_status(
+    phase_path: Path, row: dict, receipt: dict
+) -> str:
     try:
         state = json.loads(phase_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return False
-    digest = hashlib.sha256(
-        json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    return (
+        return "STATE_UNAVAILABLE"
+    if not isinstance(state, dict):
+        return "STATE_UNAVAILABLE"
+    if not (
         state.get("phase") == row.get("phase")
         and state.get("epoch") == receipt.get("new_epoch")
         and state.get("request_id") == row.get("request_id")
-        and digest == receipt.get("state_digest")
-    )
+    ):
+        return "STALE"
+    digest = hashlib.sha256(
+        json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return "MATCH" if digest == receipt.get("state_digest") else "DIGEST_MISMATCH"
 
 
 def main() -> int:
@@ -109,13 +114,23 @@ def main() -> int:
             receipt_data = json.loads(receipt.read_text(encoding="utf-8"))
             if not _valid_receipt(row, receipt_data):
                 raise SystemExit(f"{receipt}: phase receipt does not match its immutable request")
-            if row["phase"] == "ANALYZE" and _phase_state_matches_receipt(
-                Path(args.phase_path), row, receipt_data
-            ):
-                subprocess.run(
-                    [sys.executable, "tools/seal_collection_cutoff.py", "--phase-path", args.phase_path],
-                    check=True,
+            if row["phase"] == "ANALYZE":
+                receipt_status = _phase_state_receipt_status(
+                    Path(args.phase_path), row, receipt_data
                 )
+                if receipt_status == "DIGEST_MISMATCH":
+                    raise SystemExit(
+                        f"{receipt}: phase state digest does not match the receipt"
+                    )
+                if receipt_status == "STATE_UNAVAILABLE":
+                    raise SystemExit(
+                        f"{receipt}: current phase state is unavailable for receipt validation"
+                    )
+                if receipt_status == "MATCH":
+                    subprocess.run(
+                        [sys.executable, "tools/seal_collection_cutoff.py", "--phase-path", args.phase_path],
+                        check=True,
+                    )
             skipped.append(request_id)
             continue
         if row.get("schema") != "alina.phase_request.v2":

@@ -145,6 +145,18 @@ def test_canonical_capital_contract_is_200_usd_and_five_usd_per_day():
     assert "INVALID_STARTING_CAPITAL" in rejected["objective_reasons"]
 
 
+def test_equal_campaign_and_proof_sample_counts_must_reconcile_economics():
+    result = evaluate_objective(_proof(gross_pnl_usd=10.5, net_pnl_usd=9.6))
+    assert "PROOF_CAMPAIGN_TOTAL_MISMATCH:gross_pnl_usd" in result["objective_reasons"]
+    assert result["eligible_net_pnl_usd"] is None
+
+
+def test_oos_forward_proof_cannot_claim_more_trades_than_campaign():
+    result = evaluate_objective(_proof(closed_positions=3, opened_positions=3))
+    assert "PROOF_SAMPLE_COUNT_EXCEEDS_CAMPAIGN_CLOSED" in result["objective_reasons"]
+    assert result["eligible_net_pnl_usd"] is None
+
+
 def test_paused_families_cannot_receive_simulation_objective_proof():
     for family in ("lead_lag", "cross_venue_dislocation_v2", "arbitrage"):
         result = evaluate_objective(_proof(family=family))

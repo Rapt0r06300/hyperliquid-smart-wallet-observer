@@ -23,6 +23,12 @@ def _segment(*, net: float = 2.6, count: int = 2, hash_char: str = "b", **overri
     return row
 
 
+def _assert_conservative_usd(actual: float, expected: float) -> None:
+    # PnL is serialized conservatively: binary64 conversion may step down by one ULP.
+    assert actual <= expected
+    assert math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+
+
 def _proof(**overrides):
     row = {
         "family": "copy_vault",
@@ -32,11 +38,11 @@ def _proof(**overrides):
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,
-        "gross_pnl_usd": 6.4,
-        "fees_usd": 0.3,
-        "spread_cost_usd": 0.3,
-        "slippage_cost_usd": 0.3,
-        "latency_cost_usd": 0.3,
+        "gross_pnl_usd": 6.0,
+        "fees_usd": 0.2,
+        "spread_cost_usd": 0.2,
+        "slippage_cost_usd": 0.2,
+        "latency_cost_usd": 0.2,
         "net_pnl_usd": 5.2,
         "liquidatable_net": True,
         "duplicate_trade_ids": 0,
@@ -148,12 +154,13 @@ def test_top_level_contract_rejects_unknown_family_capital_positions_and_freeze(
 
 
 def test_historical_inactive_family_keeps_visible_but_ineligible_proof() -> None:
-    result = objective.evaluate_objective(_proof(family="lead_lag"))
+    for family in ("lead_lag", "cross_venue_dislocation_v2"):
+        result = objective.evaluate_objective(_proof(family=family))
 
-    assert "DISABLED_BY_SCOPE" in result["objective_reasons"]
-    assert result["proof_net_pnl_usd"] == 5.2
-    assert result["eligible_net_pnl_usd"] is None
-    assert result["objective_status"] == "NON_ATTEINT"
+        assert "DISABLED_BY_SCOPE" in result["objective_reasons"]
+        _assert_conservative_usd(result["proof_net_pnl_usd"], 5.2)
+        assert result["eligible_net_pnl_usd"] is None
+        assert result["objective_status"] == "NON_ATTEINT"
 
 
 def test_copy_generalisation_requires_measured_positive_heldout_net() -> None:
@@ -214,11 +221,17 @@ def test_forward_failure_modes_cover_missing_negative_and_post_freeze() -> None:
 def test_placebo_and_target_threshold_fail_closed_without_hiding_proof_net() -> None:
     placebo = objective.evaluate_objective(_proof(placebos={"beaten": False}))
     assert "PLACEBO_NOT_BEATEN" in placebo["objective_reasons"]
-    assert placebo["proof_net_pnl_usd"] == 5.2
+    _assert_conservative_usd(placebo["proof_net_pnl_usd"], 5.2)
     assert placebo["eligible_net_pnl_usd"] is None
 
     below = objective.evaluate_objective(
         _proof(
+            gross_pnl_usd=4.7,
+            fees_usd=0.2,
+            spread_cost_usd=0.2,
+            slippage_cost_usd=0.2,
+            latency_cost_usd=0.2,
+            net_pnl_usd=3.9,
             oos=_segment(net=1.9, gross_pnl_usd=2.3, hash_char="d", no_lookahead=True),
             forward=_segment(net=2.0, gross_pnl_usd=2.4, hash_char="e", post_freeze=True),
         )
@@ -228,6 +241,12 @@ def test_placebo_and_target_threshold_fail_closed_without_hiding_proof_net() -> 
 
     exact = objective.evaluate_objective(
         _proof(
+            gross_pnl_usd=5.8,
+            fees_usd=0.2,
+            spread_cost_usd=0.2,
+            slippage_cost_usd=0.2,
+            latency_cost_usd=0.2,
+            net_pnl_usd=5.0,
             oos=_segment(net=2.5, gross_pnl_usd=2.9, hash_char="f", no_lookahead=True),
             forward=_segment(net=2.5, gross_pnl_usd=2.9, hash_char="0", post_freeze=True),
         )

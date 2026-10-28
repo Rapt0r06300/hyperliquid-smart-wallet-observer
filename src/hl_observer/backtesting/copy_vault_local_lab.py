@@ -51,7 +51,7 @@ _SAFE_FAMILIES = {
 }
 _CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 _MATERIALIZED_TAPE_NAMES = (
-    "vault_fills.jsonl", "copy_vault_l2_tape.jsonl",
+    "vault_fills.jsonl", "vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl",
     "copy_vault_bbo_tape.jsonl", "copy_vault_trades_tape.jsonl",
     "copy_vault_active_asset_ctx_tape.jsonl",
     "copy_vault_funding_tape.jsonl", "copy_vault_ledger_tape.jsonl",
@@ -1404,7 +1404,12 @@ def materialize_safe_workspace(
         ledger_rows.values(),
         key=lambda row: (row.get("exchange_ts_ms") or row["received_at_ms"], row["vault"]),
     )
-    historical_unique_fills = sum(bool(row.get("isSnapshot")) for row in fill_rows)
+    historical_fill_rows = [row for row in fill_rows if row.get("isSnapshot") is True]
+    live_fill_rows = [
+        row for row in fill_rows
+        if row.get("isSnapshot") is False and row.get("source") == "LIVE_WS"
+    ]
+    historical_unique_fills = len(historical_fill_rows)
     verified_source_assets = [
         {
             "dataset_id": asset.get("dataset_id"),
@@ -1444,7 +1449,8 @@ def materialize_safe_workspace(
     })
     materialized_tapes: dict[str, dict[str, Any]] = {}
     for name, rows in (
-        ("vault_fills.jsonl", fill_rows),
+        ("vault_fills.jsonl", historical_fill_rows),
+        ("vault_fills_live.jsonl", live_fill_rows),
         ("copy_vault_l2_tape.jsonl", book_rows),
         ("copy_vault_bbo_tape.jsonl", bbo_tape_rows),
         ("copy_vault_trades_tape.jsonl", market_trade_tape_rows),
@@ -1508,6 +1514,8 @@ def materialize_safe_workspace(
         "payload_rejected_records": sum(payload_audit.values()),
         "raw_frames": raw_frames,
         "unique_fills": len(fill_rows),
+        "materialized_historical_fill_rows": len(historical_fill_rows),
+        "materialized_live_fill_rows": len(live_fill_rows),
         "historical_snapshot_shards": historical_snapshot_shards,
         "historical_fill_observations": historical_fill_observations,
         "historical_unique_fills": historical_unique_fills,
@@ -2233,6 +2241,45 @@ def _daily_lcb_rank(summary: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _train_active_day_mean(train: object) -> Decimal | None:
+    if not isinstance(train, Mapping):
+        return None
+    statistics = train.get("statistics")
+    statistics = statistics if isinstance(statistics, Mapping) else {}
+    exact_values = statistics.get("daily_net_pnl_usd_exact_decimal")
+    distinct_days = statistics.get("distinct_days")
+    if "daily_net_pnl_usd_exact_decimal" in statistics:
+        if (
+            not isinstance(exact_values, list)
+            or not exact_values
+            or type(distinct_days) is not int
+            or distinct_days != len(exact_values)
+        ):
+            return None
+        values = [decimal_value(value) for value in exact_values]
+        if not all(value is not None for value in values):
+            return None
+        total = decimal_sum(values)
+        if total is None:
+            return None
+        return total / Decimal(len(values))
+    mean = train.get("active_day_mean_net_pnl_usd")
+    if mean is None:
+        mean = statistics.get("mean_net_pnl_usd_per_active_day")
+    return decimal_value(mean)
+
+
+def _pnl_uplift_freeze_count(rows: Sequence[Mapping[str, Any]]) -> int:
+    return sum(
+        (
+            row.get("train_pnl_improved_vs_baseline") is True
+            or row.get("new_train_pnl_high") is True
+        )
+        and isinstance(row.get("frozen_record"), Mapping)
+        for row in rows
+    )
+
+
 def _campaign_lock(path: Path) -> SingleWriterFileLock:
     lock = SingleWriterFileLock(path)
     try:
@@ -2407,6 +2454,7 @@ def run_local_campaign(
         "paper_read_only": True, "real_execution": False,
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
         "paper_capital_usd": PAPER_CAPITAL_USD,
+        "pnl_uplift_freeze_count": 0,
         "selection_digest": selection_digest,
         "source_asset_inventory_sha256": input_manifest.get(
             "source_asset_inventory_sha256"
@@ -2683,6 +2731,21 @@ def run_local_campaign(
         )
         if best_days is None and isinstance(best, dict):
             best_days = (best.get("train") or {}).get("daily_net_pnl_usd")
+        baseline_mean = _train_active_day_mean(baseline_train)
+        pnl_comparison_floor = baseline_mean
+        if baseline_mean is not None:
+            for row in history_rows:
+                if (
+                    row.get("engine_source_sha256") == engine_source_sha
+                    and row.get("campaign_config_sha256") == campaign_config_sha
+                ):
+                    prior_mean = decimal_value(row.get("daily_mean_exact_decimal"))
+                    if prior_mean is None:
+                        prior_mean = decimal_value(
+                            row.get("daily_mean_usd_per_active_day")
+                        )
+                    if prior_mean is not None and prior_mean > pnl_comparison_floor:
+                        pnl_comparison_floor = prior_mean
         status = "SEARCH_RUNNING"
         reason = "TRAIN_ONLY_SEARCH_CONTINUES_UNTIL_CTRL_C" if continuous else "BOUNDED_TRAIN_SEARCH_BATCH_COMPLETE"
 
@@ -2847,6 +2910,29 @@ def run_local_campaign(
                 and comparison_rank_resolved
                 and prior_count_known
             )
+            candidate_mean = _train_active_day_mean(train)
+            candidate_sample_count = _number(stats.get("sample_count") or 0)
+            candidate_active_day_count = _number(stats.get("distinct_days") or 0)
+            pnl_comparison_floor_before_trial = pnl_comparison_floor
+            pnl_improvement = (
+                candidate_mean is not None
+                and pnl_comparison_floor_before_trial is not None
+                and candidate_sample_count > 0
+                and candidate_active_day_count > 0
+                and candidate_mean > pnl_comparison_floor_before_trial
+            )
+            pnl_uplift_vs_baseline = (
+                candidate_mean is not None
+                and baseline_mean is not None
+                and candidate_sample_count > 0
+                and candidate_active_day_count > 0
+                and candidate_mean > baseline_mean
+            )
+            pnl_improvement_vs_baseline = (
+                decimal_difference(candidate_mean, baseline_mean)
+                if candidate_mean is not None and baseline_mean is not None
+                else None
+            )
             trial = {
                 "schema": "hypersmart.copy_vault_local_trial.v2",
                 "selection_digest": selection_digest,
@@ -2870,6 +2956,29 @@ def run_local_campaign(
                 "closed_trade_count": int(stats.get("sample_count") or 0),
                 "active_day_count": int(stats.get("distinct_days") or 0),
                 "daily_mean_usd_per_active_day": train.get("active_day_mean_net_pnl_usd"),
+                "daily_mean_exact_decimal": (
+                    format(candidate_mean, "f") if candidate_mean is not None else None
+                ),
+                "baseline_mean_usd_per_active_day": (
+                    float_not_above(baseline_mean) if baseline_mean is not None else None
+                ),
+                "baseline_mean_exact_decimal": (
+                    format(baseline_mean, "f") if baseline_mean is not None else None
+                ),
+                "pnl_improvement_vs_baseline_usd_per_active_day": (
+                    float_not_above(pnl_improvement_vs_baseline)
+                    if pnl_improvement_vs_baseline is not None else None
+                ),
+                "pnl_improvement_vs_baseline_exact_decimal": (
+                    format(pnl_improvement_vs_baseline, "f")
+                    if pnl_improvement_vs_baseline is not None else None
+                ),
+                "new_train_pnl_high": bool(pnl_improvement),
+                "train_pnl_improved_vs_baseline": bool(pnl_uplift_vs_baseline),
+                "pnl_uplift_comparison_floor_exact_decimal": (
+                    format(pnl_comparison_floor_before_trial, "f")
+                    if pnl_comparison_floor_before_trial is not None else None
+                ),
                 "daily_lcb_usd_per_active_day": candidate_score_display,
                 "daily_lcb_usd_per_active_day_exact_decimal": (
                     format(candidate_score, "f") if candidate_score is not None else None
@@ -2892,11 +3001,19 @@ def run_local_campaign(
                 "real_execution": False,
             }
             frozen_record = None
-            if improvement:
+            if improvement or pnl_uplift_vs_baseline:
                 frozen_result = {
                     "freeze_created": True,
                     "economically_proven": False,
-                    "status": "CANDIDATE_FROZEN_TRAIN_ONLY" if input_manifest.get("data_complete") is True else "CANDIDATE_FROZEN_INCOMPLETE_SAFE_CORPUS",
+                    "status": (
+                        "CANDIDATE_FROZEN_TRAIN_ONLY"
+                        if improvement and input_manifest.get("data_complete") is True
+                        else "CANDIDATE_FROZEN_INCOMPLETE_SAFE_CORPUS"
+                        if improvement
+                        else "CANDIDATE_FROZEN_TRAIN_PNL_UPLIFT_EXPLORATORY"
+                        if input_manifest.get("data_complete") is True
+                        else "CANDIDATE_FROZEN_TRAIN_PNL_UPLIFT_INCOMPLETE_SAFE_CORPUS"
+                    ),
                     "selected_candidate": freeze,
                     "train": train,
                     "comparison": {
@@ -2916,6 +3033,22 @@ def run_local_campaign(
                         ),
                         "baseline_daily_mean": baseline_train.get("active_day_mean_net_pnl_usd") if baseline_train else None,
                         "candidate_daily_mean": train.get("active_day_mean_net_pnl_usd"),
+                        "baseline_daily_mean_exact_decimal": (
+                            format(baseline_mean, "f") if baseline_mean is not None else None
+                        ),
+                        "candidate_daily_mean_exact_decimal": (
+                            format(candidate_mean, "f") if candidate_mean is not None else None
+                        ),
+                        "pnl_mean_improvement_over_baseline": (
+                            float_not_above(pnl_improvement_vs_baseline)
+                            if pnl_improvement_vs_baseline is not None else None
+                        ),
+                        "pnl_mean_improvement_over_baseline_exact_decimal": (
+                            format(pnl_improvement_vs_baseline, "f")
+                            if pnl_improvement_vs_baseline is not None else None
+                        ),
+                        "train_pnl_improved_vs_baseline": bool(pnl_uplift_vs_baseline),
+                        "new_train_pnl_high": bool(pnl_improvement),
                         "prior_best_score": incumbent_score_display,
                         "prior_best_score_exact_decimal": (
                             format(incumbent_score, "f") if incumbent_score is not None else None
@@ -2951,6 +3084,7 @@ def run_local_campaign(
                 frozen_record = record_frozen_candidate(
                     repository_root, candidate_id, frozen_result, current_for_record
                 )
+            if improvement:
                 best = {
                     "candidate_id": candidate_id,
                     "candidate": freeze,
@@ -2971,12 +3105,24 @@ def run_local_campaign(
                 }
                 best_days = daily_exact_values
                 say(f"CANDIDAT GELÉ · {candidate_id} · amélioration conservative {improvement_display:+.6f} USD/jour actif TRAIN")
+            elif pnl_uplift_vs_baseline:
+                uplift_display = (
+                    float_not_above(pnl_improvement_vs_baseline)
+                    if pnl_improvement_vs_baseline is not None else None
+                )
+                say(
+                    f"HAUSSE PNL TRAIN GELÉE POUR COMPARAISON · {candidate_id} · "
+                    f"{uplift_display:+.6f} USD/jour actif vs baseline · "
+                    "exploratoire, non promue"
+                )
             trial["frozen_record"] = frozen_record
             trial["campaign_config"] = campaign_config
             trial = _trial_with_receipt_chain(trial, trial_chain)
             _append_jsonl(trial_path, trial)
             history_rows.append(trial)
             trial_chain = trial["trial_receipt_sha256"]
+            if pnl_improvement and candidate_mean is not None:
+                pnl_comparison_floor = candidate_mean
             seen.add(signature)
             completed_this_run += 1
             persist_checkpoint(status)
@@ -2994,6 +3140,7 @@ def run_local_campaign(
                 "last_trial": trial,
                 "last_attempt_receipt_sha256": trial["attempt_receipt_sha256"],
                 "freeze_created": best is not None,
+                "pnl_uplift_freeze_count": _pnl_uplift_freeze_count(history_rows),
                 "economically_proven": False,
                 "heldout_evaluated": False,
                 "candidate_history_path": str(trial_path),
@@ -3025,6 +3172,7 @@ def run_local_campaign(
             "train": final_best_train,
             "baseline_train": baseline_train,
             "freeze_created": best is not None,
+            "pnl_uplift_freeze_count": _pnl_uplift_freeze_count(history_rows),
             "economically_proven": False,
             "heldout_evaluated": False,
             "candidate_history_path": str(trial_path),
@@ -3117,6 +3265,7 @@ def run_local_campaign(
             "selected_candidate": best.get("candidate")
             if isinstance(best, dict) else None,
             "freeze_created": isinstance(best, dict),
+            "pnl_uplift_freeze_count": _pnl_uplift_freeze_count(durable_rows),
             "economically_proven": False,
             "heldout_evaluated": False,
             "candidate_history_path": str(trial_path),
@@ -3130,6 +3279,9 @@ def run_local_campaign(
             **base, "status": "TECHNICAL_FAILURE", "reason": f"{type(exc).__name__}:{exc}",
             "candidates_tested": len(locals().get("history_rows", [])),
             "freeze_created": bool(locals().get("best")), "economically_proven": False,
+            "pnl_uplift_freeze_count": _pnl_uplift_freeze_count(
+                locals().get("history_rows", [])
+            ),
         }
     finally:
         campaign_lock.release()
@@ -3419,7 +3571,7 @@ def record_frozen_candidate(
     economic_result: Mapping[str, Any],
     current_copy_vault: Mapping[str, Any],
 ) -> dict[str, Any] | None:
-    """Persist every selected candidate without ever overwriting an older one."""
+    """Persist each explicitly frozen candidate without overwriting older records."""
     if economic_result.get("freeze_created") is not True:
         return None
     if not isinstance(run_id, str) or _IMPROVEMENT_RUN_ID_RE.fullmatch(run_id) is None:

@@ -5,6 +5,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
+from hl_observer.wallets.position_delta_engine import (
+    signed_fill_size as canonical_signed_fill_size,
+)
+from hl_observer.wallets.position_delta_engine import (
+    start_position as canonical_start_position,
+)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -28,22 +34,7 @@ def _fill_time(fill: dict[str, Any]) -> int:
 
 
 def signed_fill_size(fill: dict[str, Any]) -> float | None:
-    size = _safe_float(fill.get("sz") or fill.get("size"))
-    if size is None:
-        return None
-
-    side = str(fill.get("side") or "").strip().lower()
-    if side in {"b", "buy", "bid"}:
-        return abs(size)
-    if side in {"a", "s", "sell", "ask"}:
-        return -abs(size)
-
-    direction = str(fill.get("dir") or "").strip().lower()
-    if "open long" in direction or "close short" in direction:
-        return abs(size)
-    if "open short" in direction or "close long" in direction:
-        return -abs(size)
-    return None
+    return canonical_signed_fill_size(fill)
 
 
 def classify_delta(previous_size: float, current_size: float) -> str:
@@ -119,7 +110,10 @@ def reconstruct_position_deltas_from_fills(
         if signed_size is None:
             continue
 
-        start_position = _safe_float(_first_present(fill, "startPosition", "start_position"))
+        raw_start_position = _first_present(fill, "startPosition", "start_position")
+        start_position = canonical_start_position(fill)
+        if raw_start_position is not None and start_position is None:
+            continue
         if start_position is None:
             previous_size = cumulative_by_coin.get(coin, 0.0)
             confidence = "medium"

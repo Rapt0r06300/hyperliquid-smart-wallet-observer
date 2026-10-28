@@ -151,6 +151,96 @@ def test_malformed_receipt_does_not_mark_legacy_request_applied(
         apply_phase_requests.main()
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"schema": "unknown.receipt.v9"},
+        {"request_id": "d" * 64},
+        {"new_phase": "COLLECT"},
+        {"previous_phase": "INVALID"},
+        {"previous_epoch": True},
+        {"new_epoch": 6},
+        {"state_digest": "not-a-sha256"},
+        {"transitioned_at_utc": "not-utc"},
+        {"paper_only": False},
+        {"read_only": False},
+        {"real_execution": True},
+    ],
+    ids=[
+        "schema",
+        "request-id",
+        "target-phase",
+        "previous-phase",
+        "previous-epoch-type",
+        "new-epoch",
+        "state-digest-format",
+        "utc-timestamp",
+        "paper-guard",
+        "read-only-guard",
+        "execution-guard",
+    ],
+)
+def test_receipt_with_invalid_identity_or_safety_field_fails_closed(
+    tmp_path: Path, monkeypatch, mutation: dict[str, object]
+) -> None:
+    request_dir, receipt_dir, phase_path = _case(
+        tmp_path, "IDLE", with_receipt=True
+    )
+    receipt_path = receipt_dir / f"{REQUEST_ID}.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt.update(mutation)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    def unexpected_call(*_args, **_kwargs):
+        pytest.fail("an invalid phase receipt must not trigger a subprocess")
+
+    _run_applier(
+        monkeypatch,
+        request_dir=request_dir,
+        receipt_dir=receipt_dir,
+        phase_path=phase_path,
+        run=unexpected_call,
+    )
+    with pytest.raises(SystemExit, match="receipt"):
+        apply_phase_requests.main()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("expected_phase", "IDLE"), ("expected_epoch", 9)],
+)
+def test_v2_receipt_must_match_expected_phase_and_epoch(
+    tmp_path: Path, monkeypatch, field: str, value: object
+) -> None:
+    request_dir, receipt_dir, phase_path = _case(
+        tmp_path,
+        "ANALYZE",
+        with_receipt=True,
+        schema="alina.phase_request.v2",
+    )
+    request_path = request_dir / f"{REQUEST_ID}.json"
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    request[field] = value
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    receipt_path = receipt_dir / f"{REQUEST_ID}.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt.update(previous_phase="COLLECT", previous_epoch=8, new_epoch=9)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    def unexpected_call(*_args, **_kwargs):
+        pytest.fail("a stale V2 receipt must not be accepted")
+
+    _run_applier(
+        monkeypatch,
+        request_dir=request_dir,
+        receipt_dir=receipt_dir,
+        phase_path=phase_path,
+        run=unexpected_call,
+    )
+    with pytest.raises(SystemExit, match="receipt"):
+        apply_phase_requests.main()
+
+
 def test_historical_analyze_receipt_does_not_seal_a_later_collection_cycle(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -174,6 +264,56 @@ def test_historical_analyze_receipt_does_not_seal_a_later_collection_cycle(
 
     assert result == 0
     assert command_calls == []
+
+
+def test_analyze_receipt_with_current_identity_but_wrong_state_digest_is_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    request_dir, receipt_dir, phase_path = _case(
+        tmp_path, "ANALYZE", with_receipt=True
+    )
+    receipt_path = receipt_dir / f"{REQUEST_ID}.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt.update(previous_epoch=8, new_epoch=9)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    phase_state = json.loads(phase_path.read_text(encoding="utf-8"))
+    phase_state.update(phase="ANALYZE", epoch=9, request_id=REQUEST_ID)
+    phase_path.write_text(json.dumps(phase_state), encoding="utf-8")
+
+    def unexpected_call(*_args, **_kwargs):
+        pytest.fail("a receipt with a mismatched state digest must not be sealed")
+
+    _run_applier(
+        monkeypatch,
+        request_dir=request_dir,
+        receipt_dir=receipt_dir,
+        phase_path=phase_path,
+        run=unexpected_call,
+    )
+    with pytest.raises(SystemExit, match="digest"):
+        apply_phase_requests.main()
+
+
+def test_analyze_receipt_with_non_object_phase_state_fails_closed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    request_dir, receipt_dir, phase_path = _case(
+        tmp_path, "ANALYZE", with_receipt=True
+    )
+    phase_path.write_text("[]", encoding="utf-8")
+
+    def unexpected_call(*_args, **_kwargs):
+        pytest.fail("unreadable phase state must not reach cutoff sealing")
+
+    _run_applier(
+        monkeypatch,
+        request_dir=request_dir,
+        receipt_dir=receipt_dir,
+        phase_path=phase_path,
+        run=unexpected_call,
+    )
+    with pytest.raises(SystemExit, match="state is unavailable"):
+        apply_phase_requests.main()
 
 
 def test_v2_phase_request_applies_only_at_its_expected_phase_epoch(

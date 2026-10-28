@@ -1,8 +1,8 @@
-"""AUD-110 / AUD-111 — chaine UNIFIEE : chaque famille active -> PaperIntent CANONIQUE -> executeur.
+"""AUD-110 / AUD-111 — chaîne unifiée Copy-Vault -> PaperIntent CANONIQUE -> exécuteur.
 
 Le repo avait trois representations d'intent. Ce module fixe UN point d'unification : toute famille
-active passe par le PaperIntent CANONIQUE (ops.paper_canonique), converti en ORDRE paper puis en
-enregistrement de FILL/ledger. Prouve la chaine de bout en bout pour les 3 familles actives.
+Copy-Vault passe par le PaperIntent CANONIQUE (ops.paper_canonique), converti en ORDRE paper puis en
+enregistrement de FILL/ledger. Les autres familles restent hors scope et sont refusées par cette chaîne.
 Paper only : real_execution=False partout, aucun ordre reel.
 """
 from __future__ import annotations
@@ -18,14 +18,10 @@ def intent_canonique(*, strategy: str, coin: str, side: int, notional_usd: float
     """Point d'unification UNIQUE : construit LE PaperIntent canonique (valide le scope actif)."""
     options = dict(kw)
     if not options.get("intent_id"):
-        seed = "%s|%s|%s|%s|%s|%s|%s" % (
-            strategy,
-            str(coin).upper(),
-            int(side),
-            float(notional_usd),
-            int(signal_observable_at_ms),
-            options.get("venue", "HL"),
-            options.get("cohort", "STRICT"),
+        seed = (
+            f"{strategy}|{str(coin).upper()}|{int(side)}|{float(notional_usd)}|"
+            f"{int(signal_observable_at_ms)}|{options.get('venue', 'HL')}|"
+            f"{options.get('cohort', 'STRICT')}"
         )
         options["intent_id"] = "paper-intent:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
     return PaperIntent(strategy=strategy, coin=coin, side=side, notional_usd=notional_usd,
@@ -35,8 +31,9 @@ def intent_canonique(*, strategy: str, coin: str, side: int, notional_usd: float
 def intent_vers_ordre_paper(intent: PaperIntent) -> dict:
     """PaperIntent canonique -> ORDRE paper (dict connecteur). real_execution TOUJOURS False."""
     d = intent.as_dict()
-    order_seed = "%s|%s|%s|%s|%s" % (
-        d["strategy"], d["coin"], d["side"], d["notional_usd"], d["signal_observable_at_ms"]
+    order_seed = (
+        f"{d['strategy']}|{d['coin']}|{d['side']}|{d['notional_usd']}|"
+        f"{d['signal_observable_at_ms']}"
     )
     return {"order_id": "paper-order:" + hashlib.sha256(order_seed.encode("utf-8")).hexdigest()[:20],
             "intent_id": d["intent_id"],
@@ -48,7 +45,7 @@ def intent_vers_ordre_paper(intent: PaperIntent) -> dict:
 
 def ordre_vers_fill_ledger(ordre: dict, *, prix: float) -> dict:
     """ORDRE paper -> enregistrement de FILL pour le ledger (paper)."""
-    position_seed = "%s|%s|%s" % (ordre["order_id"], ordre["coin"], ordre["side"])
+    position_seed = f"{ordre['order_id']}|{ordre['coin']}|{ordre['side']}"
     position_id = "paper-position:" + hashlib.sha256(position_seed.encode("utf-8")).hexdigest()[:20]
     return {"fill_id": "paper-fill:" + ordre["order_id"].split(":", 1)[-1],
             "intent_id": ordre["intent_id"], "order_id": ordre["order_id"], "position_id": position_id,

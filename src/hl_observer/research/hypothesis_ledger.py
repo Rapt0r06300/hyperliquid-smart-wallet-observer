@@ -423,9 +423,9 @@ def rediscovery_required(history: Iterable[Mapping[str, Any]], hypothesis_id: st
         for item in lineage
         if item["stage"] in {"TOURNAMENT", "EXPLOIT", "REJECTED", "BLOCKED"}
     ]
-    if len(evaluated) >= 2 and all(_nonpositive_or_rejected(item) for item in evaluated[-2:]):
-        return True
-    return False
+    return len(evaluated) >= 2 and all(
+        _nonpositive_or_rejected(item) for item in evaluated[-2:]
+    )
 
 
 def challenger_required(history: Iterable[Mapping[str, Any]], hypothesis_id: str) -> bool:

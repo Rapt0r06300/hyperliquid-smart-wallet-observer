@@ -154,6 +154,10 @@ def apply_daily_gate(
         and rate >= float(target_net_usd_per_day)
     )
     certified = bool(result.get("certified") is True and daily_target_reached)
+    if not certified:
+        # A positive pooled OOS+forward total is diagnostic only when the
+        # independent forward daily-rate gate has not passed.
+        result["eligible_net_pnl_usd"] = None
     result.update(
         {
             "status": "CERTIFIED" if certified else "NO_GO",

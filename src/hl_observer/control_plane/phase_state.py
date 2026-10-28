@@ -1,11 +1,12 @@
 """Authoritative Phase State Schema (Version 1) for Alina SmartFlow."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
-import json
 import hashlib
-from typing import Any, Mapping
+import json
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Any
 
 SCHEMA_VERSION = 1
 VALID_PHASES = frozenset({"IDLE", "COLLECT", "ANALYZE"})

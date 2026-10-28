@@ -213,6 +213,36 @@ def test_gap_rest_ws_non_reconcilie_est_journalise_et_compte(tmp_path, monkeypat
     assert C._gaps_critiques_userfills() >= initial + 2
 
 
+def test_parseur_live_journalise_les_fills_invalides_sans_perdre_les_valides(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    initial = int(C._HEARTBEAT_WS.get("invalid_fill_rows") or 0)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "invalid_fill_rows", initial)
+    message = {
+        "channel": "userFills", "sequence": 42,
+        "data": {"fills": [
+            {"coin": "SOL", "px": "150", "sz": "1", "side": "B",
+             "time": 1_000, "tid": 7, "startPosition": "0"},
+            {"coin": "SOL", "px": "150", "sz": "1", "side": "B",
+             "time": 1_001, "tid": 8, "startPosition": "NaN"},
+        ]},
+    }
+
+    fills = C._parse_userfills_frame(
+        tmp_path, message, vault="0xV", received_at_ms=1_010,
+        receive_mono_ns=2_000, connection_id="socket-A",
+    )
+
+    assert len(fills) == 1 and fills[0]["tid"] == 7
+    saved = json.loads((tmp_path / C.FILLS_INTEGRITY).read_text(encoding="utf-8"))
+    assert saved["reason_code"] == "USERFILLS_FILL_ROWS_REJECTED"
+    assert saved["count"] == 1
+    assert saved["connection_id"] == "socket-A"
+    sample = saved["details"]["rejected_samples"][0]
+    assert sample["reason_code"] == "FILL_START_POSITION_INVALID"
+    assert sample["raw_payload"]["startPosition"] == "NaN"
+    assert C._HEARTBEAT_WS["invalid_fill_rows"] == initial + 1
+
+
 def test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur():
     cur = {}
     assert C.fills_a_traiter("0xV", [_f(100, snap=None)], cur) == []

@@ -17,7 +17,6 @@ from typing import Any
 
 from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
-from hl_observer.strategies.active_scope import require_active_strategy
 from hl_observer.simulation.economic_campaign_provenance import (
     dataset_provenance,
     find_oldest_parameter_freeze,
@@ -26,6 +25,7 @@ from hl_observer.simulation.economic_campaign_provenance import (
     freeze_train_selected_parameters,
     merge_sources_with_frozen_provenance,
 )
+from hl_observer.strategies.active_scope import require_active_strategy
 
 from .economic_objective import (
     STARTING_CAPITAL_USD,
@@ -191,7 +191,11 @@ def _trade_rows(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     direct = payload.get("trades")
     if isinstance(direct, list):
         return [dict(item) for item in direct if isinstance(item, Mapping)]
-    for container_key in ("walk_forward", "executable_campaign"):
+    for container_key in (
+        "walk_forward",
+        "executable_campaign",
+        "simulation_paper_oos",
+    ):
         container = payload.get(container_key)
         if not isinstance(container, Mapping):
             continue

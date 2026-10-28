@@ -1,15 +1,10 @@
 """Unit tests for Phase State and Phase Controller (Block 1 & 2 of spec)."""
-import json
 from pathlib import Path
+
 import pytest
 
-from hl_observer.control_plane.phase_state import (
-    AlinaPhaseState,
-    validate_phase_state,
-    parse_iso_utc,
-)
 from hl_observer.control_plane.phase_controller import PhaseController
-
+from hl_observer.control_plane.phase_state import AlinaPhaseState
 
 REQ_1 = "1" * 64
 REQ_2 = "2" * 64

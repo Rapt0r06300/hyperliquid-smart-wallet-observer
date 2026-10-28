@@ -1018,8 +1018,16 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
             "</tr>"
         )
     proven = economic.get("economically_proven") is True
+    pnl_uplift_freeze_count = int(
+        live.get(
+            "pnl_uplift_freeze_count",
+            economic.get("pnl_uplift_freeze_count", 0),
+        )
+        or 0
+    )
     frozen = (
         economic.get("freeze_created") is True
+        or pnl_uplift_freeze_count > 0
         or historical.get("improvement_found") is True
     )
     last_trial = live.get("last_trial") if isinstance(live.get("last_trial"), Mapping) else {}
@@ -1119,6 +1127,8 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"<section class='hero'><p class='status {status_class}'>VERDICT : {html.escape(status)}</p>"
         f"<p class='answer'><b>Stratégie économiquement prouvée :</b> {'OUI' if proven else 'NON'}</p>"
         f"<p><b>Candidat gelé pour comparaison suivante :</b> {'OUI' if frozen else 'NON'}</p>"
+        f"<p><b>Hausses mesurées du PnL moyen TRAIN gelées :</b> {pnl_uplift_freeze_count} · "
+        "exploratoires; le champion reste inchangé sans preuve indépendante.</p>"
         f"<p><b>Objectif :</b> {OBJECTIVE_USD_PER_DAY:.2f} USD nets/jour avec {PAPER_CAPITAL_USD:.0f} USD paper.</p>"
         f"<p><b>Pourquoi :</b> {html.escape(reason_display)}</p></section>"
         "<h2>Comparaison avec le Copy‑Vault actuel</h2><section class='grid'>"
@@ -1214,9 +1224,10 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
         f"- Revues leader : {review_history.get('status', 'UNKNOWN')} · "
         f"{review_history.get('receipt_count', 0)} reçus · "
         f"{review_history.get('incident_count', 0)} incidents/questions.",
-        f"- Essais uniques : {economic.get('candidates_tested', 0)} · candidat gelé : "
+        f"- Essais uniques : {economic.get('candidates_tested', 0)} · candidat retenu par le score conservateur (LCB) et gelé : "
         f"{'oui' if economic.get('freeze_created') else 'non'} · preuve économique : "
-        f"{'oui' if economic.get('economically_proven') else 'non'}.",
+        f"{'oui' if economic.get('economically_proven') else 'non'} · hausses PnL TRAIN gelées : "
+        f"{economic.get('pnl_uplift_freeze_count', 0)} (exploratoires).",
         "- Toute la recherche est PAPER / READ-ONLY; aucune collecte réseau ni aucun ordre.",
         "",
         "Le score TRAIN sert à la recherche uniquement. Une amélioration TRAIN gelée reste exploratoire "
@@ -1787,10 +1798,19 @@ def run_economic_lab(
                         {"train": {"daily_mean_net_pnl_usd": baseline.get("daily_net_pnl_usd")}},
                     )
 
+    pnl_uplift_freeze_count = int(economic_result.get("pnl_uplift_freeze_count") or 0)
     if economic_result.get("economically_proven") is True:
         freeze_verdict = "Une amélioration a passé TRAIN, VALIDATION, OOS et FORWARD à au moins +5 USD nets/jour."
     elif economic_result.get("freeze_created") is True:
-        freeze_verdict = "Un candidat TRAIN a été gelé pour comparaison, mais il n'est PAS économiquement prouvé."
+        freeze_verdict = (
+            f"Un candidat TRAIN est gelé pour comparaison; {pnl_uplift_freeze_count} hausse(s) du PnL moyen "
+            "TRAIN sont archivées. Rien n'est économiquement prouvé."
+        )
+    elif pnl_uplift_freeze_count > 0:
+        freeze_verdict = (
+            f"{pnl_uplift_freeze_count} nouvelle(s) hausse(s) du PnL moyen net TRAIN ont été gelées "
+            "pour comparaison. Elles restent exploratoires; le champion n'a pas changé."
+        )
     elif historical_replay.get("improvement_found") is True:
         freeze_verdict = (
             "Une amélioration exploratoire du replay historique TRAIN a été gelée de façon "
@@ -1844,7 +1864,8 @@ def run_economic_lab(
         f"- Fills / carnets uniques : **{safe_inputs.get('unique_fills', 0)} / {safe_inputs.get('unique_books', 0)}**.",
         f"- Configurations réellement rejouées : **{economic_result.get('candidates_tested', 0)}**.",
         f"- Objectif : **{OBJECTIVE_USD_PER_DAY} USD nets/jour** avec **{PAPER_CAPITAL_USD} USD paper**.",
-        f"- Candidat gelé : **{'OUI' if economic_result.get('freeze_created') else 'NON'}**.",
+        f"- Candidat retenu par le score conservateur (LCB) et gelé : **{'OUI' if economic_result.get('freeze_created') else 'NON'}**.",
+        f"- Hausses mesurées du PnL moyen TRAIN gelées : **{pnl_uplift_freeze_count}** (exploratoires).",
         f"- Économiquement prouvé : **{'OUI' if economic_result.get('economically_proven') else 'NON'}**.",
         "",
         "## Revues de leaders et incidents",

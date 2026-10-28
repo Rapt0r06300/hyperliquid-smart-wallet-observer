@@ -163,6 +163,7 @@ def cluster_metaorders(
                 "vault": row["vault"],
                 "coin": row["coin"],
                 "direction": row["direction"],
+                "action": row["action"],
                 "first_fill_ts_ms": row["ts_ms"],
                 "signal_ts_ms": (
                     row["observed_at_ms"]

@@ -249,7 +249,6 @@ def test_bridge_keeps_historical_snapshot_fills_separate_from_forward(tmp_path: 
     assert provenance["snapshot_fills_train_only"] is True
     assert provenance["snapshot_fills_excluded_from_forward"] is True
 
-
 def test_bridge_rejects_corrupted_extracted_data(tmp_path: Path) -> None:
     recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
     plain = recovery / "usable" / "unpacked" / "test-release" / "safe-0.jsonl"

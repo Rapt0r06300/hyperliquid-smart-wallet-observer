@@ -519,7 +519,7 @@ def test_fill_iterator_marks_10000_recent_fill_limit_as_censored(monkeypatch) ->
         count = 5 if start_time == 10 else 1_999
         page = []
         for _ in range(count):
-            page.append({"time": start_time, "tid": str(sequence)})
+            page.append({"time": max(start_time, 1), "tid": str(sequence)})
             sequence += 1
         return page
 
@@ -541,6 +541,6 @@ def test_fill_iterator_marks_10000_recent_fill_limit_as_censored(monkeypatch) ->
     assert receipt["api_history_limit"] == 10_000
     assert receipt["request_count"] == 6
     assert receipt["received_count"] == receipt["accepted_count"] == 10_000
-    assert receipt["usable_horizon_start_ms"] == 0
+    assert receipt["usable_horizon_start_ms"] == 1
     assert receipt["usable_horizon_end_ms"] == 10
     assert audit == receipt

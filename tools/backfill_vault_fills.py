@@ -243,8 +243,8 @@ def backfill_un_vault_avec_audit(
             )
         receipt["pagination_error"] = str(exc)[:300]
 
-    parsed_pages = VB.parser_fills(raw_pages, vault=vault_id)
-    invalid_fill_count = len(raw_pages) - len(parsed_pages)
+    parsed_pages, fill_parse_audit = VB.parser_fills_with_audit(raw_pages, vault=vault_id)
+    invalid_fill_count = fill_parse_audit["rejected_count"]
     fills = VB.dedupliquer(parsed_pages)
     attempts = list(receipt.get("subrequests") or [])
     failed_windows = [item for item in attempts if item.get("outcome") == "FAILED"]
@@ -292,6 +292,7 @@ def backfill_un_vault_avec_audit(
         "api_response_cap": cap,
         "window_attempts": attempts,
         "received_count": int(receipt.get("received_count") or 0),
+        "fill_parse_audit": fill_parse_audit,
         "last_observed_boundary_ms": receipt.get("last_observed_boundary_ms"),
         "pending_windows": len(next_windows),
         "pending_window_ranges": next_windows,

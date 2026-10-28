@@ -21,12 +21,14 @@ from hl_observer.ops.canonical_paper_intent_chain import (
     intent_vers_ordre_paper,
     ordre_vers_fill_ledger,
 )
+from hl_observer.ops.paper_canonique import STRATEGIES_ACTIVES
+from hl_observer.strategies.active_scope import strategy_scope_refusal
 
 MODE = "EXPERIMENTAL_PAPER"
 VERSION = "v2"
-LEDGER_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_ledger.jsonl" % VERSION)
-POSITIONS_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_positions.json" % VERSION)
-STATUS_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_status.json" % VERSION)
+LEDGER_RELPATH = Path("runtime") / "data" / f"experimental_paper_{VERSION}_ledger.jsonl"
+POSITIONS_RELPATH = Path("runtime") / "data" / f"experimental_paper_{VERSION}_positions.json"
+STATUS_RELPATH = Path("runtime") / "data" / f"experimental_paper_{VERSION}_status.json"
 SESSION_POINTER_RELPATH = Path("runtime") / "data" / "sessions" / "COURANTE.json"
 
 BUDGET_TOTAL_USD = 100.0
@@ -40,6 +42,16 @@ LIMITES: dict[str, dict[str, float]] = {
     "copy_vault": {"max_positions": 4, "max_notional_usd": 100.0, "notional_usd": 50.0},
 }
 MOTEURS = tuple(LIMITES)
+STRATEGIE_PAR_MOTEUR = {
+    "cross_venue": "cross_venue_dislocation",
+    "lead_lag": "lead_lag",
+    "copy_vault": "copy_vault",
+}
+
+
+def moteurs_actifs() -> tuple[str, ...]:
+    """Return only economic engines whose canonical strategy family is active."""
+    return tuple(moteur for moteur in MOTEURS if STRATEGIE_PAR_MOTEUR[moteur] in STRATEGIES_ACTIVES)
 
 
 @dataclass
@@ -154,6 +166,9 @@ CLOCK_SKEW_TOL_MS = 2_000.0
 def admettre(sig: Signal, store: dict, *, now_ms: float, mode: str = "experimental_paper") -> tuple[bool, str | None]:
     if sig.moteur not in LIMITES:
         return False, "MOTEUR_INCONNU"
+    strategy = STRATEGIE_PAR_MOTEUR[sig.moteur]
+    if strategy not in STRATEGIES_ACTIVES:
+        return False, strategy_scope_refusal(strategy)
     ok_num, motif_num = INV.valider_signal(sig)
     if not ok_num:
         return False, motif_num
@@ -179,7 +194,7 @@ def admettre(sig: Signal, store: dict, *, now_ms: float, mode: str = "experiment
         return False, "SENS_INVALIDE"
     lim = LIMITES[sig.moteur]
     ouvertes = _positions_moteur(store, sig.moteur)
-    cle = "%s:%s" % (sig.moteur, sig.coin.upper())
+    cle = f"{sig.moteur}:{sig.coin.upper()}"
     if cle in store["ouvertes"]:
         return False, "DEJA_OUVERT"
     if len(ouvertes) >= int(lim["max_positions"]):
@@ -194,19 +209,15 @@ def admettre(sig: Signal, store: dict, *, now_ms: float, mode: str = "experiment
 
 def _nouveau_position_id(moteur: str, coin: str, now_ms: float) -> str:
     import uuid
-    return "%s:%s:%d:%s" % (moteur, coin.upper(), int(now_ms), uuid.uuid4().hex[:8])
+    return f"{moteur}:{coin.upper()}:{int(now_ms):d}:{uuid.uuid4().hex[:8]}"
 
 
 def ouvrir(sig: Signal, store: dict, root: str | Path, *, now_ms: float) -> dict:
-    cle = "%s:%s" % (sig.moteur, sig.coin.upper())
+    cle = f"{sig.moteur}:{sig.coin.upper()}"
     notional0 = float(sig.notional_usd)
     gross0 = _gross_exposure_for_signal(sig)
     cout_entree_usd = round(_cout_usd(sig.cout_entree_bps, notional0), 6)
-    strategie_canonique = {
-        "cross_venue": "cross_venue_dislocation",
-        "lead_lag": "lead_lag",
-        "copy_vault": "copy_vault",
-    }[sig.moteur]
+    strategie_canonique = STRATEGIE_PAR_MOTEUR[sig.moteur]
     intent = intent_canonique(
         strategy=strategie_canonique,
         coin=sig.coin,
@@ -421,9 +432,9 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
     realized_lifetime = 0.0
     realized_session = 0.0
     try:
-        for l in _p(root, LEDGER_RELPATH).read_text(encoding="utf-8").splitlines():
+        for line in _p(root, LEDGER_RELPATH).read_text(encoding="utf-8").splitlines():
             try:
-                r = json.loads(l)
+                r = json.loads(line)
             except ValueError:
                 continue
             if r.get("kind") not in ("CLOSE", "REDUCE"):

@@ -61,6 +61,7 @@ def test_daily_gate_refuses_below_five_dollars_per_day() -> None:
     result = apply_daily_gate(_base_certified(), _payload(net=120.0, seconds=30 * 86_400.0))
     assert result["forward_net_pnl_usd_per_day"] == 4.0
     assert result["certified"] is False
+    assert result["eligible_net_pnl_usd"] is None
     assert "TARGET_NET_USD_PER_DAY_NOT_REACHED" in result["reasons"]
 
 

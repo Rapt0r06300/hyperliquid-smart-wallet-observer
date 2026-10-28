@@ -1,4 +1,5 @@
-"""RUNNER EXPERIMENTAL_PAPER — un tick complet : collecte les signaux des 3 moteurs, ADMET (fraîcheur +
+"""RUNNER EXPERIMENTAL_PAPER — un tick complet pour les familles économiques actives uniquement :
+collecte Copy-Vault, ADMET (fraîcheur +
 exécutable + edge > 0, jamais prouve_oos), OUVRE, puis GÈRE et SORT les positions ouvertes au bid/ask.
 
 Écrit un statut (`experimental_paper_status.json`) : positions par moteur, 1er signal, refus par motif.
@@ -12,11 +13,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from hl_observer.alerts.local_alerts import LocalAlerts
 from hl_observer.experimental import moteur_paper as MP
 from hl_observer.experimental.signaux import COLLECTEURS
-from hl_observer.alerts.local_alerts import LocalAlerts
 from hl_observer.market_data.live_l2_service import LiveL2Service
 from hl_observer.signals.all_signals_zero_alert import evaluer_signaux_tous_a_zero
+from hl_observer.strategies.active_scope import strategy_scope_refusal
 
 STATUS_RELPATH = MP.STATUS_RELPATH  # versionné (v2) : la v1 reste en quarantaine
 LEAD_LAG_EXPERIMENTAL_LANE = "LEAD_LAG_EXP_CALIBRATION"
@@ -52,9 +54,9 @@ def _marks_hl_mid(root: Path, coins: set[str], *, max_lignes: int = 40000) -> di
     if not p.exists():
         return {}
     out: dict[str, float] = {}
-    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
         try:
-            d = json.loads(l)
+            d = json.loads(line)
         except ValueError:
             continue
         c = str(d.get("coin") or "").upper()
@@ -70,9 +72,9 @@ def _marks_hl_bidask(root: Path, coins: set[str], *, max_lignes: int = 40000) ->
     if not p.exists():
         return {}
     out: dict[str, dict] = {}
-    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
         try:
-            d = json.loads(l)
+            d = json.loads(line)
         except ValueError:
             continue
         c = str(d.get("coin") or "").upper()
@@ -129,7 +131,11 @@ def _raison_sortie_dislocation(pos: dict, car: dict | None, *, now_ms: float) ->
 
     if not car:
         return None, 0.0
-    gap_ent = float((pos.get("meta") or {}).get("gap_entree_bps") or 0.0)
+    gap_ent = float(
+        (pos.get("meta") or {}).get("gap_entree_bps")
+        or pos.get("base_entree_bps")
+        or 0.0
+    )
     gap_cur = _gap_courant_bps(car, int(pos.get("sens") or 1))
     age_min = (now_ms - float(pos.get("ts_ouverture_ms") or now_ms)) / 60000.0
     if (now_ms / 1000.0 - float(car.get("collecte_ts") or 0.0)) > CARNET_AGE_MAX_S:
@@ -153,6 +159,7 @@ def _etat_leader(pos: dict, root: Path, *, now_ms: float) -> dict:
     """État du leader copy-vault depuis un snapshot complet, frais et postérieur à l'entrée."""
     import hashlib
     import json as _j
+
     from hl_observer.experimental import execution_paper as EP
 
     meta = pos.get("meta") or {}
@@ -179,13 +186,13 @@ def _etat_leader(pos: dict, root: Path, *, now_ms: float) -> dict:
         out["motif"] = "PAS_DE_SNAPSHOTS"
         return out
     dernier, brut = None, ""
-    for l in reversed(lignes[-8000:]):
+    for line in reversed(lignes[-8000:]):
         try:
-            d = _j.loads(l)
+            d = _j.loads(line)
         except ValueError:
             continue
         if d.get("vault") == vault:
-            dernier, brut = d, l
+            dernier, brut = d, line
             break
     if not dernier:
         out["motif"] = "AUCUN_SNAPSHOT_VAULT"
@@ -310,9 +317,6 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                 pos["ts_derniere_donnee_ms"] = now_ms
                 pos.pop("liquidation_status", None)
                 pos.pop("liquidation_reason", None)
-            gap_ent = float(
-                (pos.get("meta") or {}).get("gap_entree_bps") or pos.get("base_entree_bps") or 0.0
-            )
             raison, _gap_cur = _raison_sortie_dislocation(pos, car, now_ms=now_ms)
             if not raison and not car:
                 dm = EP.politique_data_missing(pos, now_ms=now_ms)
@@ -467,7 +471,7 @@ def _gerer_sorties(store: dict, root: Path, *, now_ms: float) -> list[dict]:
                     pos["last_leader_szi_applied"] = et["current_szi"]
                     continue
             if ferme_complet:
-                raison = "HORIZON_ATTEINT" if horizon_atteint else "LEADER_%s" % action_leader
+                raison = "HORIZON_ATTEINT" if horizon_atteint else f"LEADER_{action_leader}"
                 fermetures.append(
                     MP.sortir(
                         pos,
@@ -505,7 +509,16 @@ def tick(
         "PaperIntent", "PaperFill", "POSITION",
     )}
     l2_reader = lecteur_l2 or LiveL2Service(root).as_legacy_reader()
-    for m in moteurs or MP.MOTEURS:
+    moteurs_actifs = set(MP.moteurs_actifs())
+    moteurs_demandes = MP.moteurs_actifs() if moteurs is None else tuple(moteurs)
+    for m in moteurs_demandes:
+        if m not in moteurs_actifs:
+            strategy = MP.STRATEGIE_PAR_MOTEUR.get(m)
+            refus.append({
+                "moteur": m,
+                "motif": "MOTEUR_INCONNU" if strategy is None else strategy_scope_refusal(strategy),
+            })
+            continue
         adaptateur = COLLECTEURS.get(m)
         if not adaptateur:
             continue
@@ -684,7 +697,7 @@ def tick(
     elif all_zero["tous_a_zero"]:
         zero_position_reason = "TOUS_LES_CANDIDATS_DIMENSIONNES_A_ZERO"
     elif top_no_trade:
-        zero_position_reason = "TOUS_REFUSES:%s" % top_no_trade[0]["reason"]
+        zero_position_reason = f"TOUS_REFUSES:{top_no_trade[0]['reason']}"
     else:
         zero_position_reason = "AUCUNE_POSITION_APRES_CHAINE_PAPER"
 

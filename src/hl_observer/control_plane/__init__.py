@@ -5,6 +5,11 @@ mapping objects that satisfy an allowlisted event contract can reach a
 controller or writer.
 """
 
+from hl_observer.control_plane.dispatch_receipt import (
+    DispatchReceipt,
+    generate_request_id,
+    validate_dispatch_receipt,
+)
 from hl_observer.control_plane.typed_events import (
     CONTROL_EVENT_SCHEMA,
     ControlEventError,
@@ -21,10 +26,7 @@ __all__ = [
     "TypedControlEvent",
     "build_typed_control_event",
     "validate_typed_control_event",
+    "DispatchReceipt",
+    "generate_request_id",
+    "validate_dispatch_receipt",
 ]
-
-from hl_observer.control_plane.dispatch_receipt import (
-    DispatchReceipt,
-    generate_request_id,
-    validate_dispatch_receipt,
-)

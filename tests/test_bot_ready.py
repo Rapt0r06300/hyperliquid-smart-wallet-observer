@@ -11,7 +11,7 @@ RACINE = Path(__file__).resolve().parents[1]
 
 
 def _mod(nom: str):
-    chemin = RACINE / "tools" / ("%s.py" % nom)
+    chemin = RACINE / "tools" / f"{nom}.py"
     spec = importlib.util.spec_from_file_location(nom, chemin)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
@@ -34,17 +34,19 @@ _RECAP_VERT = """## Étapes
 
 
 def _ecrire(tmp_path, recap: str, *, verrous=True):
-    (tmp_path / "RECAP-COMPLET.md").write_text(recap, encoding="utf-8")
+    recap_path = tmp_path / "runtime" / "reports" / "legacy" / "RECAP-COMPLET.md"
+    recap_path.parent.mkdir(parents=True, exist_ok=True)
+    recap_path.write_text(recap, encoding="utf-8")
     if verrous:
         (tmp_path / ".env.example").write_text(
             "REAL_MAINNET_TRADING=false\nTESTNET_ONLY=true\n", encoding="utf-8")
 
 
-def test_recap_tout_vert_avec_verrous_donne_A_et_N2(tmp_path):
+def test_recap_tout_vert_avec_verrous_reste_paper_seulement(tmp_path):
     _ecrire(tmp_path, _RECAP_VERT)
     r = BR.collecter(tmp_path)
     assert r.grade == "A" and r.no_real_trade_intact is True
-    assert r.niveau_autonomie == BR.LR.NIVEAU_TESTNET      # testnet, JAMAIS le réel
+    assert r.niveau_autonomie == BR.LR.NIVEAU_PAPER
     assert r.real_execution is False
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.ops.autonomous_research_brain import build_decision
+from hl_observer.ops.daily_economic_certification import certify_daily_workspace
 from hl_observer.ops.final_economic_certification import certify_workspace
 from hl_observer.simulation.economic_objective import CANONICAL_FAMILIES
 
@@ -162,7 +163,7 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
     result_path = Path(result_dir).resolve()
     job_result = _load_object(result_path / "JOB_RESULT.json")
     if job_result is None:
-        return {"schema": SCHEMA, "status": "RESULT_MISSING", "technical_status": "NO_GO", "job_id": None, "project_sha": None, "suite": None, "mode": None, "family_summaries": {family: None for family in CANONICAL_FAMILIES}, "economic_certification": None, "brain_decision": None, "next_recommended_job": None, "vnext_research": None, "lead_lag_causal_diagnostic": None, "paper_only": True, "real_execution": False, "message_fr": "JOB_RESULT.json est absent; aucune conclusion économique ne doit être tirée."}
+        return {"schema": SCHEMA, "status": "RESULT_MISSING", "technical_status": "NO_GO", "job_id": None, "project_sha": None, "suite": None, "mode": None, "family_summaries": {family: None for family in CANONICAL_FAMILIES}, "economic_certification": None, "daily_target_assessment": None, "brain_decision": None, "next_recommended_job": None, "vnext_research": None, "lead_lag_causal_diagnostic": None, "paper_only": True, "real_execution": False, "message_fr": "JOB_RESULT.json est absent; aucune conclusion économique ne doit être tirée."}
     raw_workspace = job_result.get("workspace")
     workspace = Path(str(raw_workspace)).resolve() if raw_workspace else None
     workspace_exists = bool(workspace and workspace.is_dir())
@@ -171,6 +172,7 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
     completion_ready = _completion_ready(job_result)
     certification_allowed = completion_ready and workspace_exists and any(value is not None for value in families.values())
     economic_certification = certify_workspace(workspace) if certification_allowed else None
+    daily_target_assessment = certify_daily_workspace(workspace) if certification_allowed else None
     brain: dict[str, Any] | None = None
     if certification_allowed:
         try:
@@ -179,7 +181,39 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
             brain = None
     next_job = brain.get("next_recommended_job") if isinstance(brain, Mapping) else None
     all_certified = bool(isinstance(economic_certification, Mapping) and economic_certification.get("all_families_certified") is True)
-    return {"schema": SCHEMA, "status": "READY_FOR_ANALYSIS", "technical_status": job_result.get("status"), "completion_ready": completion_ready, "job_id": job_result.get("job_id"), "project_sha": job_result.get("project_sha"), "request_digest": job_result.get("request_digest"), "suite": job_result.get("suite"), "mode": job_result.get("mode"), "exit_code": job_result.get("exit_code"), "workspace_available": workspace_exists, "family_summaries": families, "economic_certification": economic_certification, "brain_decision": brain, "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None, "vnext_research": _load_vnext_summary(usable_workspace), "lead_lag_causal_diagnostic": None, "paper_only": True, "real_execution": False, "message_fr": "CopyVault est certifié avec la gate économique canonique." if all_certified else "Retour compact prêt. La certification économique CopyVault reste fail-closed tant que toutes ses preuves ne sont pas complètes."}
+    daily_target_met = bool(
+        isinstance(daily_target_assessment, Mapping)
+        and daily_target_assessment.get("all_families_certified") is True
+    )
+    if all_certified and daily_target_met:
+        message = "Preuve CopyVault certifiée; le repère forward de +5 USD nets/jour est également atteint."
+    elif all_certified:
+        message = "Preuve économique CopyVault certifiée; le repère forward de +5 USD/jour n'est pas encore établi."
+    else:
+        message = "Retour compact prêt. La preuve économique CopyVault reste fail-closed tant que ses preuves ne sont pas complètes."
+    return {
+        "schema": SCHEMA,
+        "status": "READY_FOR_ANALYSIS",
+        "technical_status": job_result.get("status"),
+        "completion_ready": completion_ready,
+        "job_id": job_result.get("job_id"),
+        "project_sha": job_result.get("project_sha"),
+        "request_digest": job_result.get("request_digest"),
+        "suite": job_result.get("suite"),
+        "mode": job_result.get("mode"),
+        "exit_code": job_result.get("exit_code"),
+        "workspace_available": workspace_exists,
+        "family_summaries": families,
+        "economic_certification": economic_certification,
+        "daily_target_assessment": daily_target_assessment,
+        "brain_decision": brain,
+        "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None,
+        "vnext_research": _load_vnext_summary(usable_workspace),
+        "lead_lag_causal_diagnostic": None,
+        "paper_only": True,
+        "real_execution": False,
+        "message_fr": message,
+    }
 
 
 def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Path, Path]:
@@ -190,17 +224,21 @@ def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Pa
     json_path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     certification = payload.get("economic_certification")
     all_certified = isinstance(certification, Mapping) and certification.get("all_families_certified") is True
-    lines = ["# Alina SmartFlow — retour compact du gros run", "", f"- Job : `{payload.get('job_id')}`", f"- Statut technique : **{payload.get('technical_status')}**", f"- Suite : `{payload.get('suite')}`", f"- Mode : `{payload.get('mode')}`", f"- SHA : `{payload.get('project_sha')}`", "- Trading réel : **NON**", f"- Certification économique CopyVault 1/1 : **{'OUI' if all_certified else 'NON'}**", "- Scope : **COPY_VAULT_ONLY**", "", "## Familles économiques", "", "| Famille | Certification | Objectif | Net éligible USD | LIQUIDATABLE_NET | OOS+ | Forward+ post-freeze | Placebo battu |", "|---|---|---|---:|---|---|---|---|"]
+    daily = payload.get("daily_target_assessment")
+    daily_certified = isinstance(daily, Mapping) and daily.get("all_families_certified") is True
+    lines = ["# Alina SmartFlow — retour compact du gros run", "", f"- Job : `{payload.get('job_id')}`", f"- Statut technique : **{payload.get('technical_status')}**", f"- Suite : `{payload.get('suite')}`", f"- Mode : `{payload.get('mode')}`", f"- SHA : `{payload.get('project_sha')}`", "- Trading réel : **NON**", f"- Preuve économique OOS/forward CopyVault : **{'CERTIFIÉE' if all_certified else 'NON CERTIFIÉE'}**", f"- Repère forward +5 USD nets/jour : **{'ATTEINT' if daily_certified else 'NON ÉTABLI'}** (indicateur séparé)", "- Scope : **COPY_VAULT_ONLY**", "", "## Familles économiques", "", "| Famille | Certification | Objectif | Net éligible USD | Forward net/jour | LIQUIDATABLE_NET | OOS+ | Forward+ post-freeze | Placebo battu |", "|---|---|---|---:|---:|---|---|---|---|"]
     families = payload.get("family_summaries")
     cert_rows = certification.get("families") if isinstance(certification, Mapping) else {}
     if isinstance(families, Mapping):
         for family in CANONICAL_FAMILIES:
             row = families.get(family)
             cert = cert_rows.get(family) if isinstance(cert_rows, Mapping) else None
+            daily_rows = daily.get("families") if isinstance(daily, Mapping) else None
+            daily_row = daily_rows.get(family) if isinstance(daily_rows, Mapping) else None
             if isinstance(row, Mapping):
-                lines.append(f"| `{family}` | `{cert.get('status') if isinstance(cert, Mapping) else 'NO_GO'}` | `{row.get('objective_status')}` | {row.get('eligible_net_pnl_usd')} | {cert.get('liquidatable_net') if isinstance(cert, Mapping) else False} | {cert.get('oos_positive') if isinstance(cert, Mapping) else False} | {(cert.get('forward_positive') is True and cert.get('forward_post_freeze') is True) if isinstance(cert, Mapping) else False} | {cert.get('placebo_beaten') if isinstance(cert, Mapping) else False} |")
+                lines.append(f"| `{family}` | `{cert.get('status') if isinstance(cert, Mapping) else 'NO_GO'}` | `{row.get('objective_status')}` | {cert.get('eligible_net_pnl_usd') if isinstance(cert, Mapping) else None} | {daily_row.get('forward_net_pnl_usd_per_day') if isinstance(daily_row, Mapping) else None} | {cert.get('liquidatable_net') if isinstance(cert, Mapping) else False} | {cert.get('oos_positive') if isinstance(cert, Mapping) else False} | {(cert.get('forward_positive') is True and cert.get('forward_post_freeze') is True) if isinstance(cert, Mapping) else False} | {cert.get('placebo_beaten') if isinstance(cert, Mapping) else False} |")
             else:
-                lines.append(f"| `{family}` | `NO_GO` | `NON_MESURE` | - | False | False | False | False |")
+                lines.append(f"| `{family}` | `NO_GO` | `NON_MESURE` | - | - | False | False | False | False |")
     vnext = payload.get("vnext_research")
     lines.extend(["", "## Recherche vNext TRAIN-only", ""])
     if isinstance(vnext, Mapping):

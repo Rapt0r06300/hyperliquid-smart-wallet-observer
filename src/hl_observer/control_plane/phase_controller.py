@@ -1,19 +1,17 @@
 """Atomic, fail-closed Phase Controller for Alina SmartFlow."""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 import json
 import os
 import tempfile
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from hl_observer.control_plane.phase_state import (
     AlinaPhaseState,
-    validate_phase_state,
     _now,
-    sha256_json,
+    validate_phase_state,
 )
 
 
@@ -54,7 +52,7 @@ class PhaseController:
     def _load_from_disk(self) -> AlinaPhaseState:
         if not self.state_file_path or not self.state_file_path.exists():
             raise FileNotFoundError("Phase state file does not exist")
-        with open(self.state_file_path, "r", encoding="utf-8") as f:
+        with open(self.state_file_path, encoding="utf-8") as f:
             data = json.load(f)
         return AlinaPhaseState.from_dict(data)
 

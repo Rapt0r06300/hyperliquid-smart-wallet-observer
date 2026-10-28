@@ -1,18 +1,19 @@
 """SAFE-only independent module paper-PnL proof."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass
+from typing import Any
 
+from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
 from hl_observer.strategies.active_scope import (
     active_strategy_families,
     canonical_strategy_family,
     strategy_can_materialize,
 )
-from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
 
 MODULES = tuple(sorted(active_strategy_families()))
 
