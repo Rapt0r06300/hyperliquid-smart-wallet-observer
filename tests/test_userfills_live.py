@@ -241,3 +241,26 @@ def test_appliquer_fill_invalide_ne_mutate_pas_les_positions_existantes(field, v
     })
 
     assert positions == before
+
+
+def test_fill_websocket_invalide_ne_mutate_pas_une_position_existante():
+    positions = {"SOL": {"szi": 2.0, "entryPx": 150.0}}
+    before = {coin: dict(state) for coin, state in positions.items()}
+    audit = {}
+    message = {
+        "channel": "userFills",
+        "data": {"fills": [{
+            "coin": "SOL", "px": "NaN", "sz": "1", "side": "B",
+            "time": 1_000, "tid": 7, "hash": "0xf",
+        }]},
+    }
+
+    fills = UL.parser_message_userfills(
+        message, vault="0xA", received_at_ms=1_010, audit=audit,
+    )
+    for fill in fills:
+        UL.appliquer_fill(positions, fill)
+
+    assert fills == []
+    assert audit["rejected_by_reason"] == {"FILL_EXECUTION_VALUE_INVALID": 1}
+    assert positions == before
