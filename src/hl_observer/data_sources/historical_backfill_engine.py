@@ -10,7 +10,8 @@ try:
     from enum import StrEnum
 except ImportError:
     from enum import Enum
-    class StrEnum(str, Enum): pass
+    class StrEnum(str, Enum):
+        pass
 from typing import Any
 
 from hl_observer.data_sources.acquisition_engine import (

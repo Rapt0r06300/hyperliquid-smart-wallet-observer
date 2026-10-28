@@ -14,7 +14,6 @@ from hl_observer.data_sources.historical_backfill_engine import (
     TtlPageCache,
 )
 
-
 WALLET = "0x" + "1" * 40
 
 

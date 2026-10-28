@@ -10,7 +10,7 @@ RACINE = Path(__file__).resolve().parents[1]
 
 
 def _mod(nom: str):
-    spec = importlib.util.spec_from_file_location(nom, RACINE / "tools" / ("%s.py" % nom))
+    spec = importlib.util.spec_from_file_location(nom, RACINE / "tools" / f"{nom}.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
