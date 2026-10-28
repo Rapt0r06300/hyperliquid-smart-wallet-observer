@@ -534,6 +534,28 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
         assert b"\r" not in path.read_bytes(), path.relative_to(ROOT)
 
 
+def test_recovery_contract_sparse_checkout_includes_replay_catalog_metadata():
+    import yaml
+
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "recovery-contract.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    checkout = next(
+        step
+        for step in workflow["jobs"]["verify"]["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    sparse_paths = {
+        line.strip()
+        for line in checkout["with"]["sparse-checkout"].splitlines()
+        if line.strip()
+    }
+
+    assert "catalog/campaigns" in sparse_paths
+
+
 def _write_catalog_budget_fixture(tmp_path, rows):
     index = tmp_path / "catalog" / "DATA_INDEX.json"
     index.parent.mkdir(parents=True, exist_ok=True)
