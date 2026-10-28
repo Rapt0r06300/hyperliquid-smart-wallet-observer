@@ -11,10 +11,11 @@ import hashlib
 import json
 import subprocess
 import tempfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Any
 
 FACETS = (
     "CONTRACT",
@@ -203,13 +204,16 @@ def _anti_probes(root: Path) -> dict[str, Probe]:
     def forward_pos() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "forward.jsonl")
-            f = ForwardFrozen(path); seal = f.promouvoir("candidate", {"x": 1}); f.observer("candidate", {"net_bps": 2.0})
+            f = ForwardFrozen(path)
+            seal = f.promouvoir("candidate", {"x": 1})
+            f.observer("candidate", {"net_bps": 2.0})
             g = ForwardFrozen(path)
             return seal["scelle"] is True and g.etat("candidate")["n_observations"] == 1
 
     def forward_neg() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
-            f = ForwardFrozen(str(Path(tmp) / "forward.jsonl")); f.promouvoir("candidate", {"x": 1})
+            f = ForwardFrozen(str(Path(tmp) / "forward.jsonl"))
+            f.promouvoir("candidate", {"x": 1})
             try:
                 f.promouvoir("candidate", {"x": 2})
             except ValueError:
@@ -245,13 +249,15 @@ def _anti_probes(root: Path) -> dict[str, Probe]:
     def neighbor_pos() -> bool:
         def sc(x: float):
             return SimpleNamespace(sl_bps=x * 130, tp_bps=x * 420, trailing_stop_bps=x * 220, horizon_min=x * 480, min_edge_bps=x * 60)
-        center = sc(0.5); peers = [(center, 5.0)] + [(sc(0.5 + i * 0.001), 1.0) for i in range(1, 15)]
+        center = sc(0.5)
+        peers = [(center, 5.0)] + [(sc(0.5 + i * 0.001), 1.0) for i in range(1, 15)]
         return _plateau_flag(center, peers) is True
 
     def neighbor_neg() -> bool:
         def sc(x: float):
             return SimpleNamespace(sl_bps=x * 130, tp_bps=x * 420, trailing_stop_bps=x * 220, horizon_min=x * 480, min_edge_bps=x * 60)
-        center = sc(0.5); peers = [(center, 5.0)] + [(sc(0.5 + i * 0.001), -1.0) for i in range(1, 15)]
+        center = sc(0.5)
+        peers = [(center, 5.0)] + [(sc(0.5 + i * 0.001), -1.0) for i in range(1, 15)]
         return _plateau_flag(center, peers) is False
 
     def stress_pos() -> bool:
@@ -310,7 +316,11 @@ def _anti_probes(root: Path) -> dict[str, Probe]:
 
 
 def _maxdata_probes(root: Path) -> dict[str, Probe]:
-    from hl_observer.datasets.economic_memory import EconomicMemoryError, load_exact_proof, record_certified_proof
+    from hl_observer.datasets.economic_memory import (
+        EconomicMemoryError,
+        load_exact_proof,
+        record_certified_proof,
+    )
     from hl_observer.datasets.max_data_policy import (
         TARGET_NET_USD_PER_DAY,
         choose_max_data_job,
@@ -328,7 +338,9 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
     def completed_registry_probe() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
-            rootp = Path(tmp); ws = rootp / "workspace"; ws.mkdir()
+            rootp = Path(tmp)
+            ws = rootp / "workspace"
+            ws.mkdir()
             good = rootp / "good.json"
             good.write_text(json.dumps({
                 "schema": "alina.autonomous_research_result.v1", "status": "SUCCESS", "exit_code": 0,
@@ -342,7 +354,9 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
     def completed_registry_negative() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
-            rootp = Path(tmp); ws = rootp / "workspace"; ws.mkdir()
+            rootp = Path(tmp)
+            ws = rootp / "workspace"
+            ws.mkdir()
             bad = rootp / "bad.json"
             bad.write_text(json.dumps({
                 "schema": "alina.autonomous_research_result.v1", "status": "SUCCESS",
@@ -420,8 +434,8 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
 
 def _determinism_probes(root: Path) -> dict[str, Probe]:
-    from hl_observer.datasets.max_data_router import choose_max_data_job as routed_choose
     from hl_observer.datasets.experiment_contract import calculate_contract_digest
+    from hl_observer.datasets.max_data_router import choose_max_data_job as routed_choose
     from hl_observer.ops import autonomous_research_job as canonical_job
     from hl_observer.ops.autonomous_research_job_router import validate_request as routed_validate
 
@@ -451,7 +465,8 @@ def _determinism_probes(root: Path) -> dict[str, Probe]:
             "download": True, "max_download_gib": 20.0, "stage_timeout_seconds": 3600,
             "cross_budget_s": 20.0, "lead_history_sources": 8,
         }
-        a = routed_validate(raw); b = routed_validate(raw)
+        a = routed_validate(raw)
+        b = routed_validate(raw)
         return a == b and set(canonical_job.ECONOMIC_SUITES) == before
 
     family_decisions = [
@@ -508,7 +523,10 @@ def _github_hosted_probes(root: Path) -> dict[str, Probe]:
     )
 
     def attack_negative() -> bool:
-        from hl_observer.datasets.dataset_untrusted_guard import DatasetUntrustedError, validate_relative_member
+        from hl_observer.datasets.dataset_untrusted_guard import (
+            DatasetUntrustedError,
+            validate_relative_member,
+        )
         from hl_observer.datasets.github_release_bridge import DatasetBridgeError, _safe_destination
         good = validate_relative_member("runtime/data/book.jsonl") == "runtime/data/book.jsonl"
         bad = 0
@@ -611,7 +629,9 @@ def _observability_probes(root: Path) -> dict[str, Probe]:
 
 
 def _docs_probes(root: Path) -> dict[str, Probe]:
-    readme = "README.md"; completion = "docs/PRE_RUN_775_TECHNICAL_COMPLETION.md"; source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
+    readme = "README.md"
+    completion = "docs/PRE_RUN_775_TECHNICAL_COMPLETION.md"
+    source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
     readme_text = _read(root, readme)
     completion_text = _read(root, completion)
     core = all(token in readme_text for token in ("Alina Smart Flow", "Copy-Vault", "Lead-Lag", "Cross-Venue", "paper"))
@@ -621,8 +641,15 @@ def _docs_probes(root: Path) -> dict[str, Probe]:
 
 
 def _rehearsal_probes(root: Path) -> dict[str, Probe]:
-    from hl_observer.ops.pre_full_rehearsal import FINAL_GO_FLAGS, ORDERED_STAGES, SCHEMA, evaluate_final_go, evaluate_rehearsals
-    module = "src/hl_observer/ops/pre_full_rehearsal.py"; source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
+    from hl_observer.ops.pre_full_rehearsal import (
+        FINAL_GO_FLAGS,
+        ORDERED_STAGES,
+        SCHEMA,
+        evaluate_final_go,
+        evaluate_rehearsals,
+    )
+    module = "src/hl_observer/ops/pre_full_rehearsal.py"
+    source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
 
     def complete_payload(hosted_only: bool) -> dict[str, Any]:
         return {
