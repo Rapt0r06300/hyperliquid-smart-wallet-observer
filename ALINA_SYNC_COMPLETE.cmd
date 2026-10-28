@@ -7,10 +7,11 @@ cd /d "%~dp0" || (
 set "GIT_LFS_SKIP_SMUDGE=1"
 rem Double-click / no arguments is an explicit SAFE hydration entrypoint.
 rem Passing any arguments preserves the Python CLI choices (including --help).
-rem Replay/backtest readers stream gzip shards directly, avoiding multi-TB expansion.
+rem Existing verified gzip files are reused; existing verified JSONL outputs are reused.
+rem Unpack is disk-guarded and leaves certified compressed shards intact.
 if "%~1"=="" (
-  echo ALINA_SYNC_MODE=DOWNLOAD_ALL_SAFE_GZIP
-  set "ALINA_SYNC_ARGS=--download-safe --all-safe"
+  echo ALINA_SYNC_MODE=DOWNLOAD_AND_UNPACK_ALL_SAFE
+  set "ALINA_SYNC_ARGS=--download-safe --all-safe --unpack-safe"
 ) else (
   set "ALINA_SYNC_ARGS=%*"
 )
