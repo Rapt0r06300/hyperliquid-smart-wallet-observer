@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -82,8 +83,13 @@ def test_powershell_compatibility_layer_delegates_to_single_python_engine() -> N
 
 def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> None:
     launcher = (ROOT / "POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8-sig")
+    engine = (ROOT / "tools" / "alina_git_code_sync.py").read_text(encoding="utf-8")
+    engine_build = re.search(
+        r'^GIT_SYNC_ENGINE_BUILD = "([^"]+)"$', engine, re.MULTILINE
+    )
 
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-linear-safe-relocation-v2" in launcher
+    assert engine_build is not None
+    assert f'ALINA_ENGINE_REQUIRED_BUILD={engine_build.group(1)}' in launcher
     assert 'call :download_source "tools/alina_git_code_sync.py"' in launcher
     assert '"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%' in launcher
     assert 'SYNC_OPTION=--dry-run' in launcher
