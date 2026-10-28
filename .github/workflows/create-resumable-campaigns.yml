@@ -30,6 +30,23 @@ on:
       - 'src/hl_observer/collection/bitget_market_data.py'
       - 'src/hl_observer/collection/bybit_market_data.py'
       - 'src/hl_observer/collection/okx_market_data.py'
+      - 'src/hl_observer/collection/feed_integrity.py'
+      - 'src/hl_observer/collection/window_quality.py'
+      - 'src/hl_observer/collection/reconciliation.py'
+      - 'src/hl_observer/collection/shard_writer.py'
+      - 'src/hl_observer/collection/tick_dataset.py'
+      - 'src/hl_observer/collection/partitioned_tick_dataset.py'
+      - 'src/hl_observer/collection/binance_depth_book.py'
+      - 'src/hl_observer/collection/binance_depth_orchestrator.py'
+      - 'src/hl_observer/collection/hyperliquid_clock_sync.py'
+      - 'src/hl_observer/collection/binance_clock_sync.py'
+      - 'src/hl_observer/collection/native_venue_market.py'
+      - 'src/hl_observer/collection/native_venue_coordinator.py'
+      - 'src/hl_observer/collection/userfills_live.py'
+      - 'tools/collect_official_archive_backfill.py'
+      - 'tools/collect_cloud_copy_vault.py'
+      - 'tools/collecter_native_venues.py'
+      - 'tools/collecter_bbo.py'
       - 'src/hl_observer/collection/native_market_tape.py'
       - 'src/hl_observer/collection/depth_capacity.py'
       - 'src/hl_observer/collection/native_funding_history.py'
@@ -230,6 +247,23 @@ jobs:
               src/hl_observer/collection/bitget_market_data.py \
               src/hl_observer/collection/bybit_market_data.py \
               src/hl_observer/collection/okx_market_data.py \
+              src/hl_observer/collection/feed_integrity.py \
+              src/hl_observer/collection/window_quality.py \
+              src/hl_observer/collection/reconciliation.py \
+              src/hl_observer/collection/shard_writer.py \
+              src/hl_observer/collection/tick_dataset.py \
+              src/hl_observer/collection/partitioned_tick_dataset.py \
+              src/hl_observer/collection/binance_depth_book.py \
+              src/hl_observer/collection/binance_depth_orchestrator.py \
+              src/hl_observer/collection/hyperliquid_clock_sync.py \
+              src/hl_observer/collection/binance_clock_sync.py \
+              src/hl_observer/collection/native_venue_market.py \
+              src/hl_observer/collection/native_venue_coordinator.py \
+              src/hl_observer/collection/userfills_live.py \
+              tools/collect_official_archive_backfill.py \
+              tools/collect_cloud_copy_vault.py \
+              tools/collecter_native_venues.py \
+              tools/collecter_bbo.py \
               src/hl_observer/collection/native_market_tape.py \
               src/hl_observer/collection/depth_capacity.py \
               src/hl_observer/collection/binance_depth_live.py \
