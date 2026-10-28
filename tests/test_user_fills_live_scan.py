@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import pytest
+
 from hl_observer.config.loader import load_settings
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import Fill, PositionDeltaModel
@@ -144,11 +146,28 @@ def test_user_fills_live_scan_ignores_stale_updates_even_when_snapshot_flag_miss
         assert session.query(PositionDeltaModel).count() == 0
 
 
-def test_store_quarantines_fill_without_receive_timestamp(tmp_path):
+@pytest.mark.parametrize("receive_offset_ms", [None, -1_000])
+def test_store_quarantines_fill_without_causal_receive_time(tmp_path, receive_offset_ms):
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'userfills_missing_receive.sqlite3'}"
     init_db(settings.database_url)
     session_factory = create_session_factory(create_sqlite_engine(settings.database_url))
+    source_time_ms = now_ms()
+    fill = {
+        "coin": "BTC",
+        "dir": "Open Long",
+        "px": "100",
+        "sz": "1",
+        "fee": "0.01",
+        "time": source_time_ms if receive_offset_ms is None else source_time_ms + 1_000,
+        "hash": "0xmissing-receive" if receive_offset_ms is None else "0ximpossible-chronology",
+        "tid": 99,
+        "oid": 100,
+        "startPosition": "0",
+        "_hypersmart_source": "hyperliquid_ws:userFills",
+    }
+    if receive_offset_ms is not None:
+        fill["_hypersmart_ws_received_at_ms"] = source_time_ms + receive_offset_ms
     result = UserFillsLiveResult(
         wallets=[WALLET],
         duration_seconds=1,
@@ -156,21 +175,7 @@ def test_store_quarantines_fill_without_receive_timestamp(tmp_path):
         fills_seen=1,
         stopped_reason="duration_elapsed",
         wallet_fills={
-            WALLET: [
-                {
-                    "coin": "BTC",
-                    "dir": "Open Long",
-                    "px": "100",
-                    "sz": "1",
-                    "fee": "0.01",
-                    "time": now_ms(),
-                    "hash": "0xmissing-receive",
-                    "tid": 99,
-                    "oid": 100,
-                    "startPosition": "0",
-                    "_hypersmart_source": "hyperliquid_ws:userFills",
-                }
-            ]
+            WALLET: [fill]
         },
     )
 
@@ -182,4 +187,4 @@ def test_store_quarantines_fill_without_receive_timestamp(tmp_path):
         assert result.deltas_stored == 0
         assert session.query(Fill).count() == 0
         assert session.query(PositionDeltaModel).count() == 0
-    assert any("receive timestamp" in warning for warning in result.warnings)
+    assert any("timestamp" in warning for warning in result.warnings)

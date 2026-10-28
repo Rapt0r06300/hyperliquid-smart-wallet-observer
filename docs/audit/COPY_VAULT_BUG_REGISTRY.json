@@ -1,0 +1,171 @@
+{
+  "schema": "alina.copy_vault_bug_registry.v1",
+  "updated_at": "2026-10-28",
+  "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "runtime": "src/hl_observer",
+  "economic_scope": "copy_vault_only",
+  "policy": "Keep every confirmed defect and its evidence. A local green is not a GitHub exact-SHA pass. Do not mark an entry verified until its fix SHA has passing hosted evidence.",
+  "entries": [
+    {
+      "id": "CVB-2026-001",
+      "title": "Persistence fabricated a receive time when a userFills fill lacked one",
+      "priority": "P1",
+      "kind": "runtime_data_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "a555992e92787e4fde7c53847a2a52f6c81ce053",
+      "component_paths": ["src/hl_observer/wallets/user_fills_live.py"],
+      "root_cause": "store_user_fills_live_result used now_ms() as a fallback for a missing or invalid internal WebSocket receive timestamp, so the stale/casuality gate could accept a fill without receive-time evidence.",
+      "red_evidence": {
+        "test": "tests/test_user_fills_live_scan.py::test_store_quarantines_fill_without_causal_receive_time",
+        "result": "Before the fix, the missing-receive case was stored (fills_stored=1); removing the chronology guard reproduced storage of a receive-before-source fill (fills_stored=1)."
+      },
+      "fix_sha": "2e7035a7647b45376c6b17f08f8338d4f9d082b6",
+      "fix_summary": "Quarantine missing/invalid receive timestamps and impossible source/receive chronology; emit an explicit warning.",
+      "green_evidence": "tests/test_user_fills_live_scan.py and tests/test_userfills_live.py: 24 passed; targeted Ruff and git diff --check passed.",
+      "anti_regression_tests": ["tests/test_user_fills_live_scan.py::test_store_quarantines_fill_without_causal_receive_time"],
+      "github_validation": {
+        "target_sha": "2e7035a7647b45376c6b17f08f8338d4f9d082b6",
+        "state": "PENDING",
+        "run_ids": [40686010559]
+      }
+    },
+    {
+      "id": "CVB-2026-002",
+      "title": "The userFills parser invented receive timestamps for absent or invalid input",
+      "priority": "P1",
+      "kind": "runtime_data_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "aec0f65a7447bd9ad9a40cfd43a4e2fa4b95ffdd",
+      "component_paths": ["src/hl_observer/collection/userfills_live.py", "src/hl_observer/realtime/event_identity.py"],
+      "root_cause": "The parser substituted a current wall-clock timestamp when received_at_ms was absent or invalid, fabricating latency and causal evidence.",
+      "red_evidence": {
+        "test": "tests/test_userfills_live.py::test_parser_never_invents_a_receive_timestamp",
+        "result": "Four absent/invalid receive-time cases failed before the fix."
+      },
+      "fix_sha": "52b2809fc6002bcaf200adca3a7b2677c89fc87c",
+      "fix_summary": "Preserve an unknown receive timestamp instead of manufacturing one; reject it from causal admission.",
+      "green_evidence": "The recorded targeted regression group passed 67 tests and Ruff passed.",
+      "anti_regression_tests": ["tests/test_userfills_live.py::test_parser_never_invents_a_receive_timestamp"],
+      "github_validation": {
+        "target_sha": "52b2809fc6002bcaf200adca3a7b2677c89fc87c",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      }
+    },
+    {
+      "id": "CVB-2026-003",
+      "title": "SAFE replay verifier unpacked four values from a three-value plan",
+      "priority": "P1",
+      "kind": "replay_contract",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "039db0833ada066397f47df15df99b4a81790539",
+      "component_paths": ["tools/verify_safe_corpus_partition.py"],
+      "root_cause": "_load_specs expected four return values although _load_replay_ready_plan returns proof, rows, and required.",
+      "red_evidence": {
+        "test": "tests/test_verify_safe_corpus_partition.py::test_load_specs_matches_canonical_three_value_restore_contract",
+        "result": "GitHub run 40423849261 failed on the incompatible tuple contract."
+      },
+      "fix_sha": "31acd490e639499ba53ccb35d6ef90221e2ebe3d",
+      "fix_summary": "Match the canonical three-value restore contract and add a regression assertion.",
+      "green_evidence": "The recorded local SAFE/replay regression group passed 212 tests with 7 environment-limited skips; Ruff F/UP037 and git diff --check passed.",
+      "anti_regression_tests": ["tests/test_verify_safe_corpus_partition.py::test_load_specs_matches_canonical_three_value_restore_contract"],
+      "github_validation": {
+        "target_sha": "31acd490e639499ba53ccb35d6ef90221e2ebe3d",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      }
+    },
+    {
+      "id": "CVB-2026-004",
+      "title": "Windows campaign lock treated os.kill(pid, 0) as a portable process-existence probe",
+      "priority": "P0",
+      "kind": "runtime_safety_and_concurrency",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "7a218f228575456e4ee266bd5f9230ff681ecb4d",
+      "component_paths": ["src/hl_observer/backtesting/copy_vault_local_lab.py"],
+      "root_cause": "The campaign lock used os.kill(pid, 0), whose signal-zero semantics are not portable to Windows and can be interpreted as a console Ctrl-C event.",
+      "red_evidence": {
+        "test": "H-T97 reproduction recorded 2026-10-26; three campaign-lock regression cases",
+        "result": "All three targeted cases failed before replacing the probe; no shard was touched and no signal was sent by the tests."
+      },
+      "fix_sha": "6b5bb85d12d04a6c2ce3b4adcda7889f9c5d6d19",
+      "fix_summary": "Use the existing cross-platform SingleWriterFileLock implementation for Copy-Vault campaign ownership.",
+      "green_evidence": "The recorded Windows lock regression group later passed 46 tests; targeted Ruff passed.",
+      "anti_regression_tests": ["tests/test_aucun_ctrl_c_deguise_en_test_d_existence.py::test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_ZERO"],
+      "github_validation": {
+        "target_sha": "6b5bb85d12d04a6c2ce3b4adcda7889f9c5d6d19",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      }
+    },
+    {
+      "id": "CVB-2026-005",
+      "title": "Concurrent phase requests could commit against the same phase epoch",
+      "priority": "P1",
+      "kind": "control_plane_race",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "7a218f228575456e4ee266bd5f9230ff681ecb4d",
+      "component_paths": ["src/hl_observer/control_plane/phase_controller.py", "src/hl_observer/control_plane/phase_state.py"],
+      "root_cause": "Phase mutation and analysis-stage advancement did not share one interprocess critical section, allowing two writers to act on the same observed epoch.",
+      "red_evidence": {
+        "test": "tests/test_set_phase_atomic.py::test_competing_phase_requests_cannot_both_commit_same_epoch",
+        "result": "The race was reproduced with competing requests from one phase/epoch; only one transition may commit."
+      },
+      "fix_sha": "6b5bb85d12d04a6c2ce3b4adcda7889f9c5d6d19",
+      "fix_summary": "Serialize phase mutation and stage advancement through the shared writer lock and validate the epoch before commit.",
+      "green_evidence": "The recorded phase-atomic regression group passed 58 tests; targeted Ruff passed.",
+      "anti_regression_tests": ["tests/test_set_phase_atomic.py::test_competing_phase_requests_cannot_both_commit_same_epoch", "tests/test_analysis_stage_lock.py::test_phase_transition_cannot_be_overwritten_by_concurrent_stage_advance"],
+      "github_validation": {
+        "target_sha": "6b5bb85d12d04a6c2ce3b4adcda7889f9c5d6d19",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      }
+    },
+    {
+      "id": "CVB-2026-006",
+      "title": "A Windows CMD regression test pinned an obsolete Git-sync build marker",
+      "priority": "P2",
+      "kind": "test_contract",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "d269fb04d11b077ed58db6eb6806e0eed5db2fbc",
+      "component_paths": ["tests/test_push_github_safe_contract.py"],
+      "root_cause": "The test expected linear-safe-relocation-v2 while the launcher and canonical engine had advanced to build v3.",
+      "red_evidence": {
+        "test": "Alina SAFE restore regression run 40679983201; Windows offline restore regression suite",
+        "result": "One stale marker assertion failed while 144 tests passed."
+      },
+      "fix_sha": "b7a7464ff35556282d7bdd774463eb63a7cc6fbf",
+      "fix_summary": "Compare the CMD-required build to the canonical GIT_SYNC_ENGINE_BUILD constant instead of hardcoding a version.",
+      "green_evidence": "Windows targeted suite passed 138 tests with 7 environment-limited skips; workflow contract passed 3 tests; Ruff and git diff --check passed.",
+      "anti_regression_tests": ["tests/test_push_github_safe_contract.py::test_double_click_launcher_runs_canonical_engine_and_never_forces_git"],
+      "github_validation": {
+        "target_sha": "b7a7464ff35556282d7bdd774463eb63a7cc6fbf",
+        "state": "PENDING",
+        "run_ids": [40682144113]
+      }
+    },
+    {
+      "id": "CVB-2026-007",
+      "title": "PnL semantic-audit test conflated arithmetic trust with strict settlement proof",
+      "priority": "P2",
+      "kind": "test_contract",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "21768604abdddab7ca50549f27dfaae5a3f8fd71",
+      "component_paths": ["tests/test_pnl_ledger_semantic_audit.py"],
+      "root_cause": "The test applied funding without a settlement ID but expected strict PnL eligibility, contradicting the ledger's explicit incomplete-proof guard.",
+      "red_evidence": {
+        "test": "tests/test_pnl_ledger_semantic_audit.py::test_semantic_audit_reconciles_open_add_reduce_close_costs_and_funding",
+        "result": "The test expectation disagreed with PaperLedger.apply_funding; the production strict-proof guard was correct."
+      },
+      "fix_sha": "24a12f49486c4de1a1932c5cfe80ca7ba01641cc",
+      "fix_summary": "Separate the arithmetic TRUSTED audit assertion from strict proof and add a settled-funding counterpart.",
+      "green_evidence": "The corrected semantic-audit tests passed locally; the original guard was not weakened.",
+      "anti_regression_tests": ["tests/test_pnl_ledger_semantic_audit.py::test_semantic_audit_reconciles_open_add_reduce_close_costs_and_funding"],
+      "github_validation": {
+        "target_sha": "24a12f49486c4de1a1932c5cfe80ca7ba01641cc",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      }
+    }
+  ]
+}
