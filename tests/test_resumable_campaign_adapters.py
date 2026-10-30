@@ -21,6 +21,13 @@ def _endswith_tool(path: object, suffix: str) -> bool:
 
 
 def context(kind: str, **partition):
+    if kind in {"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"}:
+        partition = {
+            "dataset_selection_id": "c" * 64,
+            "collection_cutoff_at_utc": "2026-10-29T13:45:00Z",
+            "source_collection_epoch": 7,
+            **partition,
+        }
     return AdapterContext(
         campaign_id="c1",
         kind=kind,
@@ -94,7 +101,27 @@ def test_backtest_command_targets_economic_runner(tmp_path):
     )
     assert _endswith_tool(cmd[1], "tools/run_economic_objective_campaigns.py")
     assert "--no-start-collection" in cmd
+    assert cmd[cmd.index("--dataset-selection-id") + 1] == "c" * 64
+    assert cmd[cmd.index("--collection-cutoff-at-utc") + 1] == "2026-10-29T13:45:00Z"
+    assert cmd[cmd.index("--source-collection-epoch") + 1] == "7"
     assert output == tmp_path
+
+
+def test_economic_adapter_fails_closed_before_materialization_without_binding(tmp_path):
+    calls = []
+    ctx = AdapterContext(
+        campaign_id="c1",
+        kind="backtest",
+        unit_id="u1",
+        soft_deadline_epoch=time.time() + 60,
+        partition={"workspace_root": str(tmp_path)},
+    )
+
+    out = run_one_unit(ctx, runner=lambda *args, **kwargs: calls.append(args))
+
+    assert out.status == "FAILED"
+    assert out.payload["reason"] == "invalid_campaign_binding"
+    assert calls == []
 
 
 def test_soft_deadline_refuses_work():
@@ -253,6 +280,11 @@ def test_economic_run_materializes_then_backtests_in_same_unit(tmp_path):
     assert len(calls) == 2
     assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
     assert _endswith_tool(calls[1][1], "tools/run_economic_objective_campaigns.py")
+    assert calls[1][calls[1].index("--dataset-selection-id") + 1] == "c" * 64
+    assert calls[1][calls[1].index("--collection-cutoff-at-utc") + 1] == (
+        "2026-10-29T13:45:00Z"
+    )
+    assert calls[1][calls[1].index("--source-collection-epoch") + 1] == "7"
     assert out.payload["safe_workspace"] == str(tmp_path)
 
 
@@ -824,6 +856,75 @@ def test_invalid_copy_vault_subscription_receipt_values_remain_unknown(tmp_path)
     assert receipt["l2_diagnostics"] is None
 
 
+@pytest.mark.parametrize(
+    ("phase_status", "accepted", "failed", "expected_proof", "expected_reason"),
+    [
+        ("COMPLETE", 1, 0, True, None),
+        ("PARTIAL", 0, 1, False, "POSITION_SNAPSHOT_ANCHOR_MISSING_OR_FAILED"),
+    ],
+)
+def test_copy_vault_position_snapshot_gate_reaches_collection_receipt(
+    tmp_path, phase_status, accepted, failed, expected_proof, expected_reason
+):
+    address = "0x" + "c" * 40
+
+    def phase_row(phase):
+        row_status = "VALID_EMPTY" if accepted else "TIMEOUT"
+        return {
+            "status": phase_status,
+            "expected_wallets": 1,
+            "valid_snapshots_accepted_for_storage": accepted,
+            "failed_or_unverified_wallets": failed,
+            "outcomes_by_status": {row_status: 1},
+            "by_wallet": [{
+                "vault": address,
+                "phase": phase,
+                "status": row_status,
+                "reason": None if accepted else "REQUEST_TIMEOUT",
+                "request_send_wall_ms": 10,
+                "request_receive_wall_ms": 11 if accepted else None,
+                "failure_observed_wall_ms": None if accepted else 12,
+                "http_status": None,
+                "position_count": 0 if accepted else None,
+                "accepted_for_storage": accepted == 1,
+                "error_type": None,
+            }],
+        }
+
+    summary = {
+        "schema": "alina.copy_vault_cloud_window.v2",
+        "position_snapshot_coverage": {
+            "status": phase_status,
+            "requested_wallets": 1,
+            "missing_or_failed_is_not_empty": True,
+            "phases": {"START": phase_row("START"), "END": phase_row("END")},
+        },
+    }
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps(summary), encoding="utf-8"
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps({
+            "manifests": [],
+            "shard_count": 0,
+            "safe_count": 0,
+            "partial_count": 0,
+            "reject_count": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    receipt = metrics["copy_vault_position_snapshots"]
+    assert receipt["status"] == phase_status
+    assert receipt["proof_eligible"] is expected_proof
+    assert receipt["proof_blocked"] is (not expected_proof)
+    assert receipt["proof_block_reason"] == expected_reason
+    assert metrics["position_snapshot_proof_blocked"] is (not expected_proof)
+    assert receipt["phases"]["START"]["by_wallet"][0]["vault"] == address
+
+
 def test_collection_checkpoint_metrics_certify_complete_frame_sources(tmp_path):
     summary = {
         "started_at_ms": 1000,
@@ -1002,3 +1103,4 @@ def test_collection_checkpoint_metrics_preserve_historical_backfill_audit(tmp_pa
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+
