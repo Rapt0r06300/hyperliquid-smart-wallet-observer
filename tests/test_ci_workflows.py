@@ -30,7 +30,7 @@ def test_fix55_ci_couvre_toutes_les_dimensions_observables():
         "push:", "branches: [main]",      # déclenché sur push main => observable au HEAD
     ]
     for b in besoins:
-        assert b in txt, "dimension CI manquante dans ci.yml: %s" % b
+        assert b in txt, f"dimension CI manquante dans ci.yml: {b}"
     assert txt.count("timeout-minutes") >= 4          # un timeout par job (aucun job sans borne)
 
 
@@ -39,13 +39,13 @@ def test_fix55_job_runtime_replay_reference_des_preuves_reelles():
     preuves = ["test_paper_pipeline_e2e.py", "test_producer_consumer.py",
                "test_market_truth_replay_stage.py", "test_forward_causal_parity_bloc17.py"]
     for f in preuves:
-        assert f in txt, "le job runtime-replay ne cite pas %s" % f
-        assert (RACINE / "tests" / f).exists(), "job runtime-replay fantôme : %s absent du dépôt" % f
+        assert f in txt, f"le job runtime-replay ne cite pas {f}"
+        assert (RACINE / "tests" / f).exists(), f"job runtime-replay fantôme : {f} absent du dépôt"
 
 
 def test_fix55_factory_observable_linux_et_windows():
     txt = _texte("alpha-factory.yml")
     for b in ["ubuntu-latest", "windows-latest", "timeout-minutes", "--junitxml",
               "actions/upload-artifact", "test_run_factory.py", "test_factory_coverage.py"]:
-        assert b in txt, "dimension Factory manquante dans alpha-factory.yml: %s" % b
+        assert b in txt, f"dimension Factory manquante dans alpha-factory.yml: {b}"
     assert "push:" in txt and "branches: [main]" in txt      # Factory aussi observable au HEAD
