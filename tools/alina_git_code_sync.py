@@ -70,7 +70,7 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # to finish instead of repeatedly replaying the same expensive history.
 REBASE_TIMEOUT_SECONDS = 300
 REBASE_ABORT_TIMEOUT_SECONDS = 8
-GIT_SYNC_ENGINE_BUILD = "2026-10-30-verified-remote-receipt-v6"
+GIT_SYNC_ENGINE_BUILD = "2026-10-30-verified-remote-receipt-v7"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -865,6 +865,11 @@ class Synchronizer:
         every publishable path, checks the protected-data contract, verifies
         the remote twice around the local-change check, and returns only when
         both the code and the remote are still unchanged.
+
+        When GitHub is ahead but local ``main`` is clean, the same proof can
+        safely finish with one fetch and a fast-forward.  Keeping that lane
+        here avoids the later checkpoint/syntax/reconcile loop while retaining
+        the ignored-data guard and the final remote SHA verification.
         """
         staged, tracked, untracked = self._inventory()
         eligible = self._check_candidates(
@@ -876,7 +881,74 @@ class Synchronizer:
         local = str(self.report.get("head_before") or self.text("rev-parse", "HEAD"))
         observed_remote = self.remote_sha()
         if observed_remote != local:
-            return False
+            self.command(
+                "fetch", "--progress", "--no-tags", "origin",
+                "refs/heads/main:refs/remotes/origin/main",
+            )
+            self._inventory_cache = None
+            fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
+            if fetched_remote == local or self.command(
+                "merge-base", "--is-ancestor", local, fetched_remote,
+                check=False,
+            ).returncode:
+                return False
+
+            self._protect_ignored_files(fetched_remote)
+            self._assert_no_new_code_changes()
+            with self._preserve_local_protected_index():
+                self.command("merge", "--ff-only", fetched_remote)
+            merged_local = self.text("rev-parse", "HEAD")
+            verified_remote = self.remote_sha()
+            if merged_local != fetched_remote or verified_remote != merged_local:
+                return False
+
+            counts = self.text(
+                "rev-list", "--left-right", "--count",
+                f"{local}...{verified_remote}",
+            ).split()
+            if len(counts) != 2 or any(not value.isdecimal() for value in counts):
+                return False
+            ahead, behind = (int(value) for value in counts)
+            staged, tracked, untracked = self._inventory()
+            self.report["preflight"] = {
+                "captured_at_utc": datetime.now(UTC).isoformat(),
+                "local_head": local,
+                "remote_head_observed": observed_remote,
+                "remote_head_fetched": fetched_remote,
+                "ahead_commits": ahead,
+                "behind_commits": behind,
+                "comparison_status": "EXACT_FOR_FETCHED_REMOTE_HEAD",
+                "inventory": {
+                    "staged": {"count": len(staged), "paths": sorted(set(staged))},
+                    "tracked_changes": {
+                        "count": len(tracked), "paths": sorted(set(tracked)),
+                    },
+                    "untracked": {
+                        "count": len(untracked), "paths": sorted(set(untracked)),
+                    },
+                    "protected_observed_paths": sorted({
+                        path for path in staged + tracked + untracked if _protected(path)
+                    }),
+                    "excluded_untracked_patterns": self._excluded_untracked_patterns(),
+                },
+                "publishable_paths": [],
+                "inventory_status": "VALIDATED",
+            }
+            self.report["remote_sha_observed"] = verified_remote
+            self.report["fast_path"] = "CLEAN_REMOTE_FAST_FORWARD"
+            self.report["local_syntax_check"] = "NO_PYTHON_CHANGED"
+            self.report["status"] = "SYNCHRONIZED"
+            self.report["head_after"] = merged_local
+            self.report["checkpoint_sha_after_reconcile"] = merged_local
+            self.say(
+                "[RACCOURCI] Depot propre; avance rapide GitHub integree et "
+                "SHA distant reverifiee, sans rebase ni push."
+            )
+            return True
+
+        # The exact-match path below deliberately rechecks the remote around
+        # the local-change assertion, because GitHub may advance during this
+        # short read-only window.
 
         inventory = {
             "staged": {"count": len(staged), "paths": sorted(set(staged))},

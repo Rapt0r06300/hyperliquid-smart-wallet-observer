@@ -572,6 +572,7 @@ def test_cloud_fast_forward_without_local_changes(repos):
     assert not receipt["local_commit_created"]
     assert receipt["merge_commits_created"] == 0
     assert receipt["rebases_performed"] == 0
+    assert receipt["fast_path"] == "CLEAN_REMOTE_FAST_FORWARD"
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
     assert receipt["remote_sha_observed"] == git(origin, "rev-parse", "main")
 
@@ -753,7 +754,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-verified-remote-receipt-v6' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-verified-remote-receipt-v7' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
