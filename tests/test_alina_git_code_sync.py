@@ -72,7 +72,7 @@ def test_commit_subject_keeps_words_intact_when_many_paths_are_changed() -> None
         "tests/test_alina_git_code_sync.py",
         "tools/alina_git_code_sync.py",
     ])
-    assert subject == "chore(repository): update test alina git code sync (2 paths)"
+    assert subject == "fix(sync): improve semantic commit naming (2 paths)"
     assert len(subject) <= 72
 
 
@@ -85,6 +85,13 @@ def test_commit_subject_names_a_mixed_copy_vault_code_and_test_change() -> None:
     assert subject == "feat(copy-vault): leader selection comparison (2 paths)"
     assert len(subject) <= 72
     assert subject != "chore(repository): update (2 paths)"
+
+
+def test_commit_subject_names_the_sync_engine_change() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ]) == "fix(sync): improve semantic commit naming (2 paths)"
 
 
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:

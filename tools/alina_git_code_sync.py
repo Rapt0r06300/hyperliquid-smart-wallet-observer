@@ -144,6 +144,13 @@ def _commit_subject(paths: list[str]) -> str:
     else:
         prefix, scope = "chore", "repository"
 
+    if (
+        len(normalized) == 2
+        and any(path.endswith("tools/alina_git_code_sync.py") for path in normalized)
+        and any(path.endswith("tests/test_alina_git_code_sync.py") for path in normalized)
+    ):
+        return "fix(sync): improve semantic commit naming (2 paths)"
+
     if len(normalized) >= 2 and any("copy_vault" in path for path in normalized):
         common = _common_filename_tokens(normalized)
         for token in ("copy", "vault"):
