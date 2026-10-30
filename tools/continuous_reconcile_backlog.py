@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Checkpoint more than one complete historical batch per hosted runner."""
 from __future__ import annotations
+
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 try:
     from tools.partitioned_data_index import read_index
