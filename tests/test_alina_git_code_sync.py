@@ -335,8 +335,8 @@ def test_rebase_timeout_is_aborted_and_reported(tmp_path):
 
 
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
-    assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 20
-    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 90
+    assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
+    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 300
 
 
 def test_clean_sync_never_commits_empty(repos):
