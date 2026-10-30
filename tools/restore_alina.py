@@ -26,6 +26,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 import zipfile
@@ -45,6 +46,25 @@ USER_AGENT = "alina-smartflow-disaster-restore/1"
 SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
 _LOGICAL_PROCESSORS = max(1, os.cpu_count() or 1)
 VERIFY_WORKERS = min(8, max(1, _LOGICAL_PROCESSORS // 2))
+
+# Archive resource limits are part of the restore contract.  They bound the
+# *compressed* input, the declared expanded payload and the amount of metadata
+# that can be inspected on a hosted runner.  They are deliberately versioned
+# so that a receipt can be reproduced with the exact policy that admitted it.
+ARCHIVE_LIMITS_SCHEMA = "alina.safe_restore_limits.v1"
+MAX_ARCHIVE_BYTES = 1_000_000_000
+MAX_ARCHIVE_MEMBERS = 200_000
+MAX_ARCHIVE_MEMBER_BYTES = 8 * 1024 * 1024 * 1024
+MAX_ARCHIVE_DECLARED_BYTES = 16 * 1024 * 1024 * 1024
+MAX_ARCHIVE_EXPANSION_RATIO = 1000
+MAX_ARCHIVE_MEMBER_PATH_DEPTH = 64
+MAX_ARCHIVE_SCAN_SECONDS = 300.0
+MAX_ARCHIVE_NESTING_DEPTH = 1
+_ARCHIVE_COPY_CHUNK_BYTES = 8 * 1024 * 1024
+_NESTED_ARCHIVE_SUFFIXES = (
+    ".zip", ".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2",
+    ".tar.xz", ".txz", ".7z", ".rar",
+)
 _T = TypeVar("_T")
 _R = TypeVar("_R")
 
@@ -830,6 +850,213 @@ def _clone_lfs_sources(
     return verified
 
 
+def _archive_member_key(member: str, *, archive_label: str) -> tuple[str, str]:
+    """Validate a portable archive member before any destination is touched."""
+    raw = str(member)
+    relative = raw[:-1] if raw.endswith("/") else raw
+    components = relative.split("/")
+    windows_reserved = {
+        "CON", "PRN", "AUX", "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
+    if (
+        not relative
+        or raw.startswith(("/", "\\"))
+        or "\\" in raw
+        or ":" in relative
+        or any(ord(ch) < 32 for ch in raw)
+        or any(part in ("", "..") for part in components)
+    ):
+        raise RestoreError(f"unsafe archive member in {archive_label}: {raw!r}")
+    # GNU tar commonly emits ``./file`` for an archive rooted at ``.``.
+    # Dot segments are harmless after canonicalisation; parent segments and
+    # empty segments were rejected above and can never escape the destination.
+    cleaned = [part for part in components if part != "."]
+    if not cleaned or any(
+        part.endswith((" ", "."))
+        or part.split(".", 1)[0].upper() in windows_reserved
+        for part in cleaned
+    ):
+        raise RestoreError(f"unsafe archive member in {archive_label}: {raw!r}")
+    normalized = unicodedata.normalize("NFC", "/".join(cleaned))
+    return normalized, normalized.casefold()
+
+
+def _archive_limits_receipt() -> dict[str, Any]:
+    """Return the exact resource policy bound to a restore receipt."""
+    return {
+        "schema": ARCHIVE_LIMITS_SCHEMA,
+        "max_archive_bytes": MAX_ARCHIVE_BYTES,
+        "max_members": MAX_ARCHIVE_MEMBERS,
+        "max_member_bytes": MAX_ARCHIVE_MEMBER_BYTES,
+        "max_declared_bytes": MAX_ARCHIVE_DECLARED_BYTES,
+        "max_expansion_ratio": MAX_ARCHIVE_EXPANSION_RATIO,
+        "max_member_path_depth": MAX_ARCHIVE_MEMBER_PATH_DEPTH,
+        "max_scan_seconds": MAX_ARCHIVE_SCAN_SECONDS,
+        "max_nesting_depth": MAX_ARCHIVE_NESTING_DEPTH,
+        "copy_chunk_bytes": _ARCHIVE_COPY_CHUNK_BYTES,
+    }
+
+
+def _archive_scan_start(path: Path, archive_label: str) -> tuple[int, float]:
+    """Validate the compressed input before any archive parser opens it."""
+    try:
+        compressed_bytes = path.stat().st_size
+    except OSError as exc:
+        raise RestoreError(f"cannot stat archive before bounded restore: {archive_label}") from exc
+    if compressed_bytes < 0 or compressed_bytes > MAX_ARCHIVE_BYTES:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"compressed_bytes={compressed_bytes} max={MAX_ARCHIVE_BYTES} "
+            f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+    return compressed_bytes, time.monotonic()
+
+
+def _check_archive_scan_time(started_at: float, archive_label: str) -> None:
+    elapsed = time.monotonic() - started_at
+    if elapsed > MAX_ARCHIVE_SCAN_SECONDS:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"scan_seconds={elapsed:.3f} max={MAX_ARCHIVE_SCAN_SECONDS} "
+            f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+
+
+def _check_archive_member_limits(
+    *,
+    archive_label: str,
+    member_name: str,
+    member_count: int,
+    member_bytes: int,
+    declared_bytes: int,
+    compressed_bytes: int,
+    member_compressed_bytes: int | None,
+    path_depth: int,
+    started_at: float,
+) -> None:
+    """Apply all per-member and aggregate limits before reading payload bytes."""
+    _check_archive_scan_time(started_at, archive_label)
+    if member_count > MAX_ARCHIVE_MEMBERS:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"member_count={member_count} max={MAX_ARCHIVE_MEMBERS} "
+            f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+    if member_bytes < 0 or member_bytes > MAX_ARCHIVE_MEMBER_BYTES:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"member_bytes={member_bytes} max={MAX_ARCHIVE_MEMBER_BYTES} "
+            f"member={member_name!r} archive={archive_label} "
+            f"policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+    if declared_bytes < 0 or declared_bytes > MAX_ARCHIVE_DECLARED_BYTES:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"declared_bytes={declared_bytes} max={MAX_ARCHIVE_DECLARED_BYTES} "
+            f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+    if path_depth > MAX_ARCHIVE_MEMBER_PATH_DEPTH:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"member_path_depth={path_depth} max={MAX_ARCHIVE_MEMBER_PATH_DEPTH} "
+            f"member={member_name!r} archive={archive_label} "
+            f"policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+    denominator = max(1, compressed_bytes)
+    if declared_bytes > denominator * MAX_ARCHIVE_EXPANSION_RATIO:
+        raise RestoreError(
+            "SAFE_RESTORE_LIMIT_EXCEEDED: "
+            f"expansion_ratio>{MAX_ARCHIVE_EXPANSION_RATIO} "
+            f"declared_bytes={declared_bytes} compressed_bytes={compressed_bytes} "
+            f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+        )
+    if member_compressed_bytes is not None:
+        if member_compressed_bytes < 0:
+            raise RestoreError(
+                f"invalid compressed member size in {archive_label}: {member_name!r}"
+            )
+        if member_bytes > max(1, member_compressed_bytes) * MAX_ARCHIVE_EXPANSION_RATIO:
+            raise RestoreError(
+                "SAFE_RESTORE_LIMIT_EXCEEDED: "
+                f"member_expansion_ratio>{MAX_ARCHIVE_EXPANSION_RATIO} "
+                f"member={member_name!r} archive={archive_label} "
+                f"policy={ARCHIVE_LIMITS_SCHEMA}"
+            )
+
+
+def _is_nested_archive_member(name: str) -> bool:
+    lowered = name.casefold()
+    return lowered.endswith(_NESTED_ARCHIVE_SUFFIXES)
+
+
+def _consume_archive_member(
+    source: Any,
+    *,
+    expected_bytes: int,
+    member_name: str,
+    archive_label: str,
+    started_at: float,
+) -> int:
+    """Drain a member with a hard byte bound, never retaining its payload."""
+    if type(expected_bytes) is not int or expected_bytes < 0:
+        raise RestoreError(f"invalid declared member size: {member_name!r}")
+    actual = 0
+    while True:
+        _check_archive_scan_time(started_at, archive_label)
+        chunk = source.read(min(_ARCHIVE_COPY_CHUNK_BYTES, expected_bytes - actual + 1))
+        if not chunk:
+            break
+        actual += len(chunk)
+        if actual > expected_bytes or actual > MAX_ARCHIVE_MEMBER_BYTES:
+            raise RestoreError(
+                "SAFE_RESTORE_LIMIT_EXCEEDED: "
+                f"member_bytes>{expected_bytes} member={member_name!r} "
+                f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+            )
+    if actual != expected_bytes:
+        raise RestoreError(
+            f"truncated archive member: {member_name!r} in {archive_label} "
+            f"expected={expected_bytes} actual={actual}"
+        )
+    return actual
+
+
+def _copy_archive_member(
+    source: Any,
+    output: Any,
+    *,
+    expected_bytes: int,
+    member_name: str,
+    archive_label: str,
+    started_at: float,
+) -> int:
+    """Copy one member to a temporary file while enforcing its declared size."""
+    if type(expected_bytes) is not int or expected_bytes < 0:
+        raise RestoreError(f"invalid declared member size: {member_name!r}")
+    actual = 0
+    while True:
+        _check_archive_scan_time(started_at, archive_label)
+        chunk = source.read(min(_ARCHIVE_COPY_CHUNK_BYTES, expected_bytes - actual + 1))
+        if not chunk:
+            break
+        actual += len(chunk)
+        if actual > expected_bytes or actual > MAX_ARCHIVE_MEMBER_BYTES:
+            raise RestoreError(
+                "SAFE_RESTORE_LIMIT_EXCEEDED: "
+                f"member_bytes>{expected_bytes} member={member_name!r} "
+                f"archive={archive_label} policy={ARCHIVE_LIMITS_SCHEMA}"
+            )
+        output.write(chunk)
+    if actual != expected_bytes:
+        raise RestoreError(
+            f"truncated archive member: {member_name!r} in {archive_label} "
+            f"expected={expected_bytes} actual={actual}"
+        )
+    return actual
+
+
 def _verify_zip_archive(path: Path, name: str) -> None:
     """Refuse ambiguous or unsafe members even in a SHA-verified Release ZIP.
 
@@ -838,51 +1065,64 @@ def _verify_zip_archive(path: Path, name: str) -> None:
     """
     if not name.lower().endswith(".zip"):
         return
-    windows_reserved = {
-        "CON", "PRN", "AUX", "NUL",
-        *(f"COM{i}" for i in range(1, 10)),
-        *(f"LPT{i}" for i in range(1, 10)),
-    }
     try:
+        compressed_bytes, started_at = _archive_scan_start(path, name)
         with zipfile.ZipFile(path) as archive:
             seen: set[str] = set()
-            for info in archive.infolist():
+            declared_bytes = 0
+            infos = archive.infolist()
+            for member_count, info in enumerate(infos, 1):
                 member = info.filename
-                relative = member[:-1] if member.endswith("/") else member
-                components = relative.split("/")
-                if (
-                    not relative
-                    or member.startswith(("/", "\\"))
-                    or "\\" in member
-                    or ":" in relative
-                    or any(ord(ch) < 32 for ch in member)
-                    or any(
-                        part in ("", ".", "..")
-                        or part.endswith((" ", "."))
-                        or part.split(".", 1)[0].upper() in windows_reserved
-                        for part in components
+                try:
+                    relative, normalized = _archive_member_key(
+                        member, archive_label=f"ZIP {name}"
                     )
-                ):
-                    raise RestoreError(f"unsafe ZIP member in {name}: {member!r}")
-                # Windows targets are case-insensitive by default.
-                normalized = relative.casefold()
+                except RestoreError as exc:
+                    raise RestoreError(str(exc).replace(
+                        "unsafe archive member", "unsafe ZIP member", 1
+                    )) from exc
                 if normalized in seen:
                     raise RestoreError(f"ambiguous duplicate ZIP members: {name}")
                 seen.add(normalized)
+                if _is_nested_archive_member(relative):
+                    raise RestoreError(
+                        "SAFE_RESTORE_LIMIT_EXCEEDED: "
+                        f"archive_nesting_depth=2 max={MAX_ARCHIVE_NESTING_DEPTH} "
+                        f"member={member!r} archive={name} policy={ARCHIVE_LIMITS_SCHEMA}"
+                    )
+                declared_bytes += int(info.file_size)
+                _check_archive_member_limits(
+                    archive_label=name,
+                    member_name=member,
+                    member_count=member_count,
+                    member_bytes=int(info.file_size),
+                    declared_bytes=declared_bytes,
+                    compressed_bytes=compressed_bytes,
+                    member_compressed_bytes=int(info.compress_size),
+                    path_depth=len(PurePosixPath(relative).parts),
+                    started_at=started_at,
+                )
                 mode = (info.external_attr >> 16) & 0xFFFF
                 kind = stat.S_IFMT(mode)
                 if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
                     raise RestoreError(f"unsafe ZIP member type in {name}: {member!r}")
                 if info.flag_bits & 1:
                     raise RestoreError(f"encrypted ZIP member in {name}: {member!r}")
-            corrupt_member = archive.testzip()
+                if not info.is_dir():
+                    with archive.open(info) as source:
+                        _consume_archive_member(
+                            source,
+                            expected_bytes=int(info.file_size),
+                            member_name=member,
+                            archive_label=name,
+                            started_at=started_at,
+                        )
+            _check_archive_scan_time(started_at, name)
     except RestoreError:
         # Preserve explicit unsafe-member and duplicate-member diagnostics.
         raise
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         raise RestoreError(f"invalid ZIP archive: {name}") from exc
-    if corrupt_member is not None:
-        raise RestoreError(f"corrupt ZIP member in {name}: {corrupt_member}")
 
 
 def download_asset(
@@ -1464,22 +1704,67 @@ def materialize_analysis_evidence(
     members: list[dict[str, Any]] = []
     seen: set[str] = set()
     try:
-        with tarfile.open(archive_path, "r:*") as archive:
-            for member in archive.getmembers():
+        compressed_bytes, started_at = _archive_scan_start(
+            archive_path, f"analysis evidence TAR {archive_path.name}"
+        )
+        declared_bytes = 0
+        with tarfile.open(archive_path, "r|*") as archive:
+            for member_count, member in enumerate(archive, 1):
                 pure = PurePosixPath(member.name)
                 normalized = str(pure)
+                member_bytes = int(member.size)
+                declared_bytes += member_bytes
                 # GNU tar emits an explicit root directory for `tar -C DIR .`.
                 # It carries no bytes; descendants remain independently checked.
                 if member.isdir() and normalized == ".":
+                    _check_archive_member_limits(
+                        archive_label=f"analysis evidence TAR {archive_path.name}",
+                        member_name=member.name,
+                        member_count=member_count,
+                        member_bytes=member_bytes,
+                        declared_bytes=declared_bytes,
+                        compressed_bytes=compressed_bytes,
+                        member_compressed_bytes=None,
+                        path_depth=1,
+                        started_at=started_at,
+                    )
                     continue
+                try:
+                    normalized, member_key = _archive_member_key(
+                        member.name, archive_label="analysis evidence TAR"
+                    )
+                except RestoreError as exc:
+                    raise RestoreError(str(exc).replace(
+                        "unsafe archive member",
+                        "unsafe analysis evidence member",
+                        1,
+                    )) from exc
+                if _is_nested_archive_member(normalized):
+                    raise RestoreError(
+                        "SAFE_RESTORE_LIMIT_EXCEEDED: "
+                        f"archive_nesting_depth=2 max={MAX_ARCHIVE_NESTING_DEPTH} "
+                        f"member={member.name!r} archive={archive_path.name} "
+                        f"policy={ARCHIVE_LIMITS_SCHEMA}"
+                    )
+                _check_archive_member_limits(
+                    archive_label=f"analysis evidence TAR {archive_path.name}",
+                    member_name=member.name,
+                    member_count=member_count,
+                    member_bytes=member_bytes,
+                    declared_bytes=declared_bytes,
+                    compressed_bytes=compressed_bytes,
+                    member_compressed_bytes=None,
+                    path_depth=len(PurePosixPath(normalized).parts),
+                    started_at=started_at,
+                )
                 if (
-                    pure.is_absolute() or ".." in pure.parts or not pure.parts
-                    or member.issym() or member.islnk()
+                    member.issym() or member.islnk()
                     or not (member.isfile() or member.isdir())
-                    or normalized.casefold() in seen
+                    or member_key in seen
                 ):
                     raise RestoreError(f"unsafe analysis evidence member: {member.name}")
-                seen.add(normalized.casefold())
+                seen.add(member_key)
+                pure = PurePosixPath(normalized)
                 target = temporary.joinpath(*pure.parts)
                 if member.isdir():
                     target.mkdir(parents=True, exist_ok=True)
@@ -1489,7 +1774,14 @@ def materialize_analysis_evidence(
                 if source is None:
                     raise RestoreError(f"unreadable analysis evidence member: {member.name}")
                 with source, target.open("wb") as output:
-                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                    _copy_archive_member(
+                        source,
+                        output,
+                        expected_bytes=member_bytes,
+                        member_name=member.name,
+                        archive_label=f"analysis evidence TAR {archive_path.name}",
+                        started_at=started_at,
+                    )
                 members.append({
                     "path": normalized,
                     "bytes": target.stat().st_size,
@@ -1550,6 +1842,7 @@ def materialize_analysis_evidence(
             "code_sha": receipt.get("code_sha"),
             "manifest_sha256": receipt.get("manifest_sha256"),
             "archive_sha256": _sha256(archive_path),
+            "archive_limits": _archive_limits_receipt(),
             "receipt_binding": receipt_binding,
             "members": sorted(members, key=lambda row: row["path"]),
             "economic_result": economic_result,
@@ -2189,12 +2482,21 @@ def _materialize_catalog_safe_shards(
             if row.get("release_container_asset"):
                 if Path(member).name != member or not source.is_file():
                     raise RestoreError("unsafe or missing ZIP member")
+                _verify_zip_archive(source, source.name)
                 with zipfile.ZipFile(source) as archive:
                     matches = [info for info in archive.infolist() if info.filename == member]
                     if len(matches) != 1 or matches[0].file_size != row["bytes"]:
                         raise RestoreError("ZIP member identity/size does not match catalog")
+                    _, extraction_started = _archive_scan_start(source, source.name)
                     with archive.open(matches[0]) as inp, tmp.open("wb") as out:
-                        shutil.copyfileobj(inp, out, length=8 * 1024 * 1024)
+                        _copy_archive_member(
+                            inp,
+                            out,
+                            expected_bytes=int(row["bytes"]),
+                            member_name=member,
+                            archive_label=source.name,
+                            started_at=extraction_started,
+                        )
                 report["verified_zip_members"] += 1
             else:
                 if not source.is_file():
@@ -2478,6 +2780,7 @@ def _materialize_classified_shards(
                         or not source.is_file()
                     ):
                         raise RestoreError("unsafe or missing ZIP member")
+                    _verify_zip_archive(source, source.name)
                     with zipfile.ZipFile(source) as archive:
                         info = archive.getinfo(member_name)
                         expected_size = row.get("bytes")
@@ -2487,8 +2790,16 @@ def _materialize_classified_shards(
                             or info.file_size != expected_size
                         ):
                             raise RestoreError("ZIP member size does not match manifest")
+                        _, extraction_started = _archive_scan_start(source, source.name)
                         with archive.open(member_name) as member, tmp.open("wb") as output:
-                            shutil.copyfileobj(member, output, length=8 * 1024 * 1024)
+                            _copy_archive_member(
+                                member,
+                                output,
+                                expected_bytes=int(expected_size),
+                                member_name=member_name,
+                                archive_label=source.name,
+                                started_at=extraction_started,
+                            )
                     report["verified_zip_members"] += 1
                 else:
                     if not source.is_file():
@@ -2632,6 +2943,7 @@ def _verify_run_manifests(
                 try:
                     digest = hashlib.sha256()
                     member_size = 0
+                    _verify_zip_archive(path, path.name)
                     with zipfile.ZipFile(path) as archive, archive.open(member_name) as source:
                         for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
                             digest.update(chunk)
