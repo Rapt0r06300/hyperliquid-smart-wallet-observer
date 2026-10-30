@@ -65,7 +65,10 @@ HISTORY_DEEPEN_STEPS = (512,)
 HISTORY_FETCH_FILTER = "--filter=tree:0"
 HISTORY_FETCH_TIMEOUT_SECONDS = 90
 MERGE_TREE_TIMEOUT_SECONDS = 30
-REBASE_TIMEOUT_SECONDS = 30
+# A rebase is bounded, but 30s is shorter than a normal hosted-sized
+# history replay on this repository.  Keep the guard finite while avoiding a
+# false NO_GO that leaves the caller retrying the same expensive operation.
+REBASE_TIMEOUT_SECONDS = 90
 REBASE_ABORT_TIMEOUT_SECONDS = 8
 GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v3"
 # A single historical registry was moved out of the repository root. It is
