@@ -274,6 +274,7 @@ def test_converges_without_losing_either_author(repos):
     assert receipt["rebases_performed"] == 1
     assert git(origin, "rev-list", "--merges", "main") == ""
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+    assert receipt["remote_sha_observed"] == receipt["pushed_head"]
     assert git(origin, "show", "main:docs/cloud.md") == "cloud"
     assert git(origin, "show", "main:tools/local.py") == "local = 1"
     assert (local / "docs/cloud.md").read_text() == "cloud\n"

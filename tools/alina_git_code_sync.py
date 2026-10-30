@@ -391,6 +391,7 @@ class Synchronizer:
             "push_attempts": 0,
             "local_syntax_check": "NOT_RUN",
             "fast_path": None,
+            "remote_sha_observed": None,
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -761,6 +762,7 @@ class Synchronizer:
             "behind_commits": behind,
             "comparison_status": "EXACT_FOR_FETCHED_REMOTE_HEAD",
         })
+        self.report["remote_sha_observed"] = fetched_remote
         self.say(
             f"[PREFLIGHT RECEIPT] local={local_head[:12]} | "
             f"GitHub snapshot={fetched_remote[:12]} | ahead={ahead} | "
@@ -1728,7 +1730,9 @@ class Synchronizer:
             if pushed.returncode == 0:
                 self.report["push_completed"] = True
                 self.report["pushed_head"] = local
-                if self.remote_sha() == local:
+                verified_remote = self.remote_sha()
+                self.report["remote_sha_observed"] = verified_remote
+                if verified_remote == local:
                     self.report["status"] = "SYNCHRONIZED"
                     self.report["head_after"] = local
                     self.report["checkpoint_sha_after_reconcile"] = local
