@@ -94,6 +94,15 @@ def test_commit_subject_names_the_sync_engine_change() -> None:
     ]) == "fix(sync): verify final GitHub SHA in receipt (2 paths)"
 
 
+def test_commit_subject_names_auth_prompt_guard_from_staged_diff() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "GIT_TERMINAL_PROMPT GCM_INTERACTIVE") == (
+        "fix(sync): fail fast on Git auth prompts (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_and_launcher_change() -> None:
     assert _commit_subject([
         "POUSSER-GITHUB-FORCE.cmd",
@@ -438,6 +447,34 @@ def test_rebase_timeout_handler_cannot_leave_an_unbound_outcome(
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 300
+
+
+def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 1234
+        returncode = 0
+        stdout = None
+        stderr = None
+
+        def communicate(self, input=None, timeout=None):
+            return b"", b""
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(command, **kwargs):
+        captured.update(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(sync_module.subprocess, "Popen", fake_popen)
+    result = sync_module._run_git(tmp_path, "git", ["status"])
+
+    assert result.returncode == 0
+    env = captured["env"]
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GCM_INTERACTIVE"] == "Never"
 
 
 def test_clean_sync_never_commits_empty(repos):

@@ -113,14 +113,16 @@ def _common_filename_tokens(paths: list[str]) -> list[str]:
     return [token for token in token_lists[0] if token in common]
 
 
-def _commit_subject(paths: list[str]) -> str:
+def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     """Build a deterministic semantic subject from the staged code paths.
 
     The sync helper must never invent a product claim from a diff it cannot
-    understand. It uses repository areas and filenames only, so the subject
-    stays useful while remaining honest for arbitrary local edits.
+    understand. It uses repository areas, filenames, and a bounded staged-diff
+    signal, so the subject stays useful while remaining honest for arbitrary
+    local edits.
     """
     normalized = sorted(set(path.replace("\\", "/") for path in paths))
+    diff_signal = diff_text.casefold()
     if not normalized:
         return "chore(sync): checkpoint code changes"
 
@@ -144,10 +146,23 @@ def _commit_subject(paths: list[str]) -> str:
     else:
         prefix, scope = "chore", "repository"
 
-    if (
+    sync_engine_paths = (
         2 <= len(normalized) <= 3
         and any(path.endswith("tools/alina_git_code_sync.py") for path in normalized)
         and any(path.endswith("tests/test_alina_git_code_sync.py") for path in normalized)
+    )
+    if sync_engine_paths and any(
+        marker in diff_signal
+        for marker in ("git_terminal_prompt", "gcm_interactive", "credential manager")
+    ):
+        return (
+            "fix(sync): fail fast on Git auth prompts "
+            f"({len(normalized)} paths)"
+        )
+
+    if sync_engine_paths and (
+        not diff_signal
+        or any(marker in diff_signal for marker in ("remote_sha", "github sha", "pushed_head"))
     ):
         return (
             "fix(sync): verify final GitHub SHA in receipt "
@@ -371,6 +386,11 @@ def _run_git(
 ) -> subprocess.CompletedProcess[bytes]:
     env = dict(os.environ)
     env["GIT_LFS_SKIP_SMUDGE"] = "1"
+    # A double-clicked launcher must never wait for a hidden terminal or
+    # Credential Manager prompt.  Authentication failures stay explicit and
+    # fail closed instead of looking like a hung Git synchronization.
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "Never"
     env["GIT_OPTIONAL_LOCKS"] = (
         "0" if args and args[0] in {"ls-files", "status", "diff"} else "1"
     )
@@ -1292,7 +1312,10 @@ class Synchronizer:
         if diff.returncode not in (0, 1):
             raise SyncBlocked("Verification de l'index Git impossible.")
         if diff.returncode == 1:
-            commit_message = _commit_subject(eligible)
+            staged_diff = self.command(
+                "diff", "--cached", "--no-ext-diff", "--unified=0",
+            ).stdout.decode("utf-8", errors="replace")
+            commit_message = _commit_subject(eligible, staged_diff)
             self.report["commit_message"] = commit_message
             self.say(f"Commit semantique du code admissible: {commit_message}")
             self.command(
