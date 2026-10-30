@@ -18,7 +18,6 @@ from tools import alina_git_code_sync as sync_module
 from tools.alina_git_code_sync import (
     SyncBlocked,
     Synchronizer,
-    _commit_subject,
     _status_paths,
 )
 
