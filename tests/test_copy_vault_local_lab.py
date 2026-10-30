@@ -1714,6 +1714,8 @@ def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
     assert snapshot["candidate_freeze"]["freeze"]["parameters_sha256"] == local_lab.parameter_hash(
         {"core_notional_usd": 20.0}
     )
+    assert len(snapshot["artifacts_sha256"]["ledger"]) == 64
+    assert len(snapshot["artifacts_sha256"]["report"]) == 64
     assert len(snapshot["restoration_snapshot_sha256"]) == 64
 
 
@@ -1731,6 +1733,43 @@ def test_restoration_snapshot_stays_unmeasurable_when_evidence_is_missing() -> N
     assert snapshot["restoration_status"] == "UNMEASURABLE"
     assert "LEDGER" in snapshot["restoration_missing_requirements"]
     assert "REPORT" in snapshot["restoration_missing_requirements"]
+
+
+def test_restoration_snapshot_rejects_noncanonical_artifacts() -> None:
+    result = {
+        "selection_digest": "0" * 64,
+        "engine_source_sha256": "a" * 64,
+        "campaign_config_sha256": "b" * 64,
+        "source_catalog_sha256": "c" * 64,
+        "source_asset_inventory_sha256": "d" * 64,
+        "source_asset_inventory_count": 1,
+        "proposal_seed": 0,
+        "paper_capital_usd": 200.0,
+        "global_trial_count": 1,
+        "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
+        "trial_number": 1,
+        "selected_candidate": {
+            "freeze": {
+                "parameters": {"core_notional_usd": 20.0},
+                "parameters_sha256": local_lab.parameter_hash({"core_notional_usd": 20.0}),
+            }
+        },
+        "attempt_receipt_sha256": "e" * 64,
+        "trial_receipt_sha256": "f" * 64,
+        "ledger": [{"time_ms": 10, "delta_usd": "1.25"}],
+        "equity": [{"time_ms": 10, "equity_usd": "201.25"}],
+        "costs": {"fees_usd": "0.10"},
+        "metrics": {"daily_mean_net_pnl_usd": float("nan")},
+        "tests": {"pytest": "1 passed"},
+        "report": {"path": "report.json"},
+        "restoration_receipt": {"status": "RESTORABLE"},
+    }
+
+    snapshot = local_lab._build_restoration_snapshot(result)
+
+    assert snapshot["restoration_status"] == "UNMEASURABLE"
+    assert "METRICS_NOT_CANONICAL" in snapshot["restoration_missing_requirements"]
+    assert "metrics" not in snapshot["artifacts_sha256"]
 
 
 def test_improvement_history_rejects_malformed_rows_instead_of_hiding_them(tmp_path: Path) -> None:

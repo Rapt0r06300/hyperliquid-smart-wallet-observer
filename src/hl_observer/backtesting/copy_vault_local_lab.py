@@ -3587,6 +3587,7 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
         missing.append("CANDIDATE_PARAMETER_FREEZE")
 
     artifacts: dict[str, Any] = {}
+    artifact_hashes: dict[str, str] = {}
     for field, requirement in (
         ("ledger", "LEDGER"),
         ("equity", "EQUITY"),
@@ -3600,6 +3601,11 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
         if value is None or value == {} or value == [] or value == "":
             missing.append(requirement)
         else:
+            try:
+                artifact_hashes[field] = _canonical_json_sha256(value)
+            except (TypeError, ValueError):
+                missing.append(f"{requirement}_NOT_CANONICAL")
+                continue
             artifacts[field] = value
 
     snapshot: dict[str, Any] = {
@@ -3630,6 +3636,7 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
         },
         "candidate_freeze": selected_candidate,
         "artifacts": artifacts,
+        "artifacts_sha256": artifact_hashes,
         "paper_read_only": True,
         "real_execution": False,
         "restore_started": False,
