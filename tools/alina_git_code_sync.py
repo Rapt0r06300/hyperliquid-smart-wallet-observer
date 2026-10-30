@@ -166,11 +166,13 @@ def _commit_subject(paths: list[str]) -> str:
         return "fix(recovery): resume historical SAFE backlog (2 paths)"
 
     if (
-        len(normalized) == 2
-        and any(path.endswith("src/hl_observer/control_plane/campaign_adapters.py") for path in normalized)
+        any(path.endswith("src/hl_observer/control_plane/campaign_adapters.py") for path in normalized)
         and any(path.endswith("tests/test_campaign_adapter_diagnostics.py") for path in normalized)
     ):
-        return "fix(recovery): preserve timed-out adapter checkpoints (2 paths)"
+        return (
+            "fix(recovery): preserve timed-out adapter checkpoints "
+            f"({len(normalized)} paths)"
+        )
 
     if any(
         token in path

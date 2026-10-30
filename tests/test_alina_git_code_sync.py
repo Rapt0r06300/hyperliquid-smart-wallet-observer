@@ -115,6 +115,15 @@ def test_commit_subject_names_timed_out_adapter_checkpoint_change() -> None:
     ]) == "fix(recovery): preserve timed-out adapter checkpoints (2 paths)"
 
 
+def test_commit_subject_keeps_adapter_theme_when_sync_engine_is_included() -> None:
+    assert _commit_subject([
+        "src/hl_observer/control_plane/campaign_adapters.py",
+        "tests/test_alina_git_code_sync.py",
+        "tests/test_campaign_adapter_diagnostics.py",
+        "tools/alina_git_code_sync.py",
+    ]) == "fix(recovery): preserve timed-out adapter checkpoints (4 paths)"
+
+
 def test_commit_subject_names_the_l4_and_entity_provenance_guard() -> None:
     assert _commit_subject([
         "src/hl_observer/collection/l4_capture.py",
