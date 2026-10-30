@@ -334,6 +334,24 @@ def test_rebase_timeout_is_aborted_and_reported(tmp_path):
     assert task.report["rebase_timeout_count"] == 1
 
 
+def test_rebase_timeout_handler_cannot_leave_an_unbound_outcome(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    task = Synchronizer(tmp_path)
+
+    def timed_out_command(*args: str, **kwargs):
+        raise subprocess.TimeoutExpired(
+            ["git", *args], sync_module.REBASE_TIMEOUT_SECONDS,
+        )
+
+    monkeypatch.setattr(task, "command", timed_out_command)
+    monkeypatch.setattr(task, "_abort_rebase_after_timeout", lambda _timeout: None)
+
+    with pytest.raises(SyncBlocked, match="timeout handler"):
+        task._run_rebase("refs/remotes/origin/main")
+
+
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 300
@@ -630,7 +648,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-27-linear-safe-relocation-v3' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-rebase-timeout-receipt-v4' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source

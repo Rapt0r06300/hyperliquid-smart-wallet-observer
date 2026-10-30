@@ -70,7 +70,7 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # to finish instead of repeatedly replaying the same expensive history.
 REBASE_TIMEOUT_SECONDS = 300
 REBASE_ABORT_TIMEOUT_SECONDS = 8
-GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v3"
+GIT_SYNC_ENGINE_BUILD = "2026-10-30-rebase-timeout-receipt-v4"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -1455,6 +1455,27 @@ class Synchronizer:
             f"{REBASE_TIMEOUT_SECONDS}s; rebase annulee proprement."
         ) from timeout
 
+    def _run_rebase(self, remote: str) -> subprocess.CompletedProcess[bytes]:
+        """Run the bounded rebase without ever returning an unbound outcome.
+
+        The timeout handler normally raises ``SyncBlocked`` after confirming
+        ``git rebase --abort``.  Keeping the raise here as an explicit safety
+        net matters because a test double, an interrupted interpreter, or a
+        future handler change must never let ``reconcile`` continue with a
+        result that was never produced.
+        """
+        try:
+            return self.command(
+                "rebase", "--no-autostash", remote, check=False,
+                timeout=REBASE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as timeout:
+            self._abort_rebase_after_timeout(timeout)
+            raise SyncBlocked(
+                "Rebase timeout handler returned without a confirmed abort; "
+                "aucun push force."
+            ) from timeout
+
     def reconcile(self) -> None:
         self.say(
             "[MOTEUR 5/5] Recuperation de main depuis GitHub "
@@ -1530,13 +1551,7 @@ class Synchronizer:
             )
         rebase_resolved = False
         with self._preserve_local_protected_index():
-            try:
-                outcome = self.command(
-                    "rebase", "--no-autostash", remote, check=False,
-                    timeout=REBASE_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired as timeout:
-                self._abort_rebase_after_timeout(timeout)
+            outcome = self._run_rebase(remote)
             if outcome.returncode:
                 rebase_resolved = self._continue_rebase_after_known_ci_conflicts(
                     outcome,
@@ -1625,6 +1640,7 @@ class Synchronizer:
             if local == current_remote:
                 self.report["status"] = "SYNCHRONIZED"
                 self.report["head_after"] = local
+                self.report["checkpoint_sha_after_reconcile"] = local
                 self.say("GitHub et main local identiques; pas de commit vide.")
                 return
             if self.command(
@@ -1648,6 +1664,7 @@ class Synchronizer:
                 if self.remote_sha() == local:
                     self.report["status"] = "SYNCHRONIZED"
                     self.report["head_after"] = local
+                    self.report["checkpoint_sha_after_reconcile"] = local
                     self.say("SHA local = SHA GitHub; synchronisation verifiee.")
                     return
                 self.say("GitHub a de nouveau avance; fusion supplementaire.")
