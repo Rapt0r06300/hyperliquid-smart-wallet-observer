@@ -6,7 +6,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.collection import l4_capture as L4   # noqa: E402
+from hl_observer.collection import l4_capture as L4   # noqa: E402, I001
 
 
 def test_chantier4_capture_reconstruit_le_cycle(tmp_path):
@@ -29,3 +29,21 @@ def test_chantier4_capture_reconstruit_le_cycle(tmp_path):
 def test_chantier4_sans_flux_est_blocked_external():
     assert L4.capturer(None)["verdict"] == "BLOCKED_EXTERNAL"
     assert L4.event_canonique({"type": "NEW"}) is None        # order_id manquant -> jamais une intention fabriquée
+
+
+def test_chantier4_rejette_les_observations_incompletes_ou_non_causales():
+    assert L4.event_canonique({
+        "order_id": "o1", "type": "NEW", "coin": "BTC", "side": "BUY",
+        "px": 100.0, "sz": 1.0,
+    }) is None  # timestamp source absent
+    assert L4.event_canonique({
+        "order_id": "o1", "ts_ms": 1, "type": "NEW", "coin": "BTC",
+        "side": "BUY", "px": float("nan"), "sz": 1.0,
+    }) is None
+    result = L4.capturer([
+        {"order_id": "o1", "ts_ms": 10, "type": "MODIFY", "coin": "BTC",
+         "side": "BUY", "px": 100.0, "sz": 1.0},
+    ])
+    assert result["verdict"] == "UNMEASURABLE"
+    assert result["n_captures"] == 1 and result["quarantaine"] == 0
+    assert result["agrege"]["raison"] == "INVALID_CYCLE_PRESENT"

@@ -11,7 +11,10 @@ Schéma L4 attendu : {"order_id", "ts_ms", "type" ∈ {NEW,MODIFY,CANCEL,PARTIAL
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any
 
 from hl_observer.research.order_intent import BLOCKED, TYPES, experience_intent
@@ -21,11 +24,40 @@ _CHAMPS = ("order_id", "ts_ms", "type", "coin", "side", "px", "sz", "mid", "queu
 
 def event_canonique(e: Mapping[str, Any]) -> dict[str, Any] | None:
     """Parse un événement L4 brut → canonique. None si order_id/type manquant ou type inconnu (jamais supposé)."""
+    if not isinstance(e, Mapping):
+        return None
     oid = e.get("order_id", e.get("oid"))
     typ = str(e.get("type", "")).strip().upper()
-    if oid is None or typ not in TYPES:
+    if oid is None or not str(oid).strip() or typ not in TYPES:
         return None
-    return {k: e.get(k) for k in _CHAMPS} | {"order_id": str(oid), "type": typ}
+    ts_ms = e.get("ts_ms")
+    px = e.get("px")
+    sz = e.get("sz")
+    side = str(e.get("side", "")).strip().upper()
+    coin = str(e.get("coin", "")).strip()
+    numeric = (ts_ms, px, sz)
+    if (
+        not coin
+        or side not in {"BUY", "SELL"}
+        or any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(float(value)) for value in numeric)
+        or float(px) <= 0
+        or float(sz) <= 0
+    ):
+        return None
+    for field in ("mid", "queue_ahead"):
+        value = e.get(field)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or (field == "mid" and float(value) <= 0)
+            or (field == "queue_ahead" and float(value) < 0)
+        ):
+            return None
+    return {k: e.get(k) for k in _CHAMPS} | {
+        "order_id": str(oid), "type": typ, "coin": coin, "side": side,
+    }
 
 
 def capturer(events: Iterable[Mapping[str, Any]] | None, out_path: str | None = None) -> dict[str, Any]:
@@ -35,8 +67,11 @@ def capturer(events: Iterable[Mapping[str, Any]] | None, out_path: str | None = 
                 "real_execution": False}
     canon: list[dict[str, Any]] = []
     quarantaine = 0
-    fh = open(out_path, "a", encoding="utf-8") if out_path else None
-    try:
+    with ExitStack() as stack:
+        fh = (
+            stack.enter_context(Path(out_path).open("a", encoding="utf-8"))
+            if out_path else None
+        )
         for raw in events:
             ce = event_canonique(raw)
             if ce is None:                                # type inconnu / order_id absent -> quarantaine, jamais supposé
@@ -45,9 +80,6 @@ def capturer(events: Iterable[Mapping[str, Any]] | None, out_path: str | None = 
             canon.append(ce)
             if fh:
                 fh.write(json.dumps(ce, ensure_ascii=False) + "\n")
-    finally:
-        if fh:
-            fh.close()
     res = experience_intent(canon)
     res["n_captures"] = len(canon)
     res["quarantaine"] = quarantaine

@@ -165,6 +165,16 @@ def _commit_subject(paths: list[str]) -> str:
     ):
         return "fix(recovery): resume historical SAFE backlog (2 paths)"
 
+    if any(
+        token in path
+        for path in normalized
+        for token in ("l4_capture", "order_intent", "entity_resolution")
+    ):
+        return (
+            "fix(copy-vault): guard L4 intent and entity provenance "
+            f"({len(normalized)} paths)"
+        )
+
     if len(normalized) >= 2 and any("copy_vault" in path for path in normalized):
         common = _common_filename_tokens(normalized)
         for token in ("copy", "vault"):

@@ -108,6 +108,16 @@ def test_commit_subject_names_the_historical_backlog_recovery_change() -> None:
     ]) == "fix(recovery): resume historical SAFE backlog (2 paths)"
 
 
+def test_commit_subject_names_the_l4_and_entity_provenance_guard() -> None:
+    assert _commit_subject([
+        "src/hl_observer/collection/l4_capture.py",
+        "src/hl_observer/research/entity_resolution.py",
+        "src/hl_observer/research/order_intent.py",
+        "tests/test_entity_resolution.py",
+        "tests/test_l4_capture.py",
+    ]) == "fix(copy-vault): guard L4 intent and entity provenance (5 paths)"
+
+
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []

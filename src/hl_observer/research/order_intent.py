@@ -12,12 +12,71 @@ Schéma L4 attendu : `{"order_id", "ts_ms", "type" ∈ {NEW,MODIFY,CANCEL,PARTIA
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 UNMEASURABLE = "UNMEASURABLE"
 BLOCKED = "BLOCKED_EXTERNAL"
 TYPES = ("NEW", "MODIFY", "CANCEL", "PARTIAL", "FILL")
+SIDES = ("BUY", "SELL")
+
+
+def _finite_number(value: Any, *, positive: bool = False) -> bool:
+    """Accept only numeric observations that cannot fabricate a metric."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(float(value)):
+        return False
+    return not positive or float(value) > 0
+
+
+def _cycle_invalid_reason(states: Sequence[Mapping[str, Any]]) -> str | None:
+    """Return a fail-closed reason for an unusable L4 order cycle."""
+    if not states:
+        return "EMPTY_CYCLE"
+    if any(not isinstance(state, Mapping) for state in states):
+        return "NON_MAPPING_EVENT"
+    types = [str(state.get("type", "")).upper() for state in states]
+    if any(event_type not in TYPES for event_type in types):
+        return "UNKNOWN_EVENT_TYPE"
+    if types[0] != "NEW":
+        return "CYCLE_MUST_START_WITH_NEW"
+    if types.count("NEW") != 1:
+        return "MULTIPLE_NEW_EVENTS"
+    timestamps = [state.get("ts_ms") for state in states]
+    if any(not _finite_number(value) for value in timestamps):
+        return "MISSING_OR_INVALID_SOURCE_TIMESTAMP"
+    if any(left > right for left, right in zip(timestamps, timestamps[1:], strict=False)):
+        return "NON_MONOTONIC_SOURCE_TIMESTAMP"
+    coins = {str(state.get("coin", "")).strip() for state in states}
+    # Direct research fixtures historically omitted coin; the canonical L4
+    # adapter enforces it before reaching this module.  Do not break those
+    # fixtures, but reject a mixed missing/present or cross-coin cycle.
+    if ("" in coins and len(coins) > 1) or ("" not in coins and len(coins) != 1):
+        return "INCONSISTENT_OR_MISSING_COIN"
+    sides = {str(state.get("side", "")).upper() for state in states}
+    if sides != {next(iter(sides), "")} or next(iter(sides), "") not in SIDES:
+        return "INCONSISTENT_OR_MISSING_SIDE"
+    if any(not _finite_number(state.get("px"), positive=True) for state in states):
+        return "MISSING_OR_INVALID_PRICE"
+    if any(not _finite_number(state.get("sz"), positive=True) for state in states):
+        return "MISSING_OR_INVALID_SIZE"
+    for state in states:
+        for field in ("mid", "queue_ahead"):
+            if (
+                field in state
+                and state[field] is not None
+                and not _finite_number(state[field], positive=field == "mid")
+            ):
+                return f"INVALID_{field.upper()}"
+    terminal_seen = False
+    for event_type in types:
+        if terminal_seen:
+            return "EVENT_AFTER_TERMINAL_STATE"
+        if event_type in {"CANCEL", "FILL"}:
+            terminal_seen = True
+    return None
 
 
 def reconstruire_cycles(events: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -35,8 +94,9 @@ def reconstruire_cycles(events: Sequence[Mapping[str, Any]]) -> dict[str, list[d
 
 def cycle_features(states: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Features d'un cycle d'ordre unique (liste d'états triés)."""
-    if not states:
-        return {"statut": UNMEASURABLE}
+    invalid_reason = _cycle_invalid_reason(states)
+    if invalid_reason is not None:
+        return {"statut": UNMEASURABLE, "raison": invalid_reason}
     types = [str(s.get("type")) for s in states]
     ts = [s.get("ts_ms") for s in states if isinstance(s.get("ts_ms"), (int, float))]
     pxs = [s.get("px") for s in states if isinstance(s.get("px"), (int, float))]
@@ -67,6 +127,20 @@ def agreger_wallet(cycles: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[st
     n = len(cycles)
     if n == 0:
         return {"statut": UNMEASURABLE}
+    invalid = {
+        oid: reason
+        for oid, states in cycles.items()
+        if (reason := _cycle_invalid_reason(states)) is not None
+    }
+    if invalid:
+        return {
+            "n_ordres": n,
+            "n_mesurables": n - len(invalid),
+            "n_non_mesurables": len(invalid),
+            "statut": UNMEASURABLE,
+            "raison": "INVALID_CYCLE_PRESENT",
+            "cycles_non_mesurables": invalid,
+        }
     cancels = replaces = fills = 0
     for states in cycles.values():
         types = [str(s.get("type")) for s in states]
@@ -89,7 +163,8 @@ def experience_intent(events: Sequence[Mapping[str, Any]] | None) -> dict[str, A
     cycles = reconstruire_cycles(events)
     agg = agreger_wallet(cycles)
     feats = {oid: cycle_features(st) for oid, st in cycles.items()}
-    return {"verdict": "MEASURABLE", "n_cycles": len(cycles), "agrege": agg,
+    verdict = "MEASURABLE" if agg.get("statut") == "MEASURABLE" else UNMEASURABLE
+    return {"verdict": verdict, "n_cycles": len(cycles), "agrege": agg,
             "exemple_features": next(iter(feats.values()), None), "real_execution": False}
 
 
