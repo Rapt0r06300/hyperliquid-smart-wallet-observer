@@ -46,7 +46,7 @@ jobs:
       - name: Run hosted adapter and SAFE resource contracts
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check --no-input -e .
+          python -m pip install --disable-pip-version-check --no-input -e . pytest
           python -m pytest -q --tb=short \
             tests/test_campaign_adapter_diagnostics.py \
             tests/test_resumable_campaign_adapters.py \
