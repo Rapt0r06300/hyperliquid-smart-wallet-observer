@@ -471,6 +471,23 @@ def test_clean_sync_short_circuits_history_fetch_when_remote_matches(repos):
     assert git(local, "rev-parse", "HEAD") == before
 
 
+def test_local_ahead_reuses_fast_path_fetch_for_preflight(repos):
+    local, _, origin = repos
+    (local / "src" / "local.py").write_text("local = 1\n")
+    git(local, "add", ".")
+    git(local, "commit", "-m", "local change")
+    task = Synchronizer(local, allow_test_remote=True)
+    rc = task.run()
+    assert rc == 0
+    assert task.report["status"] == "SYNCHRONIZED"
+    assert task.report["push_completed"] is True
+    assert sum(
+        "Recevoir les objets Git de GitHub" in str(command["operation"])
+        for command in task.report["git_commands"]
+    ) == 1
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+
+
 def test_wip_can_be_saved_locally_without_upload(repos):
     local, _, origin = repos
     before = git(origin, "rev-parse", "main")

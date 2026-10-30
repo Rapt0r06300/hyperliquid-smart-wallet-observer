@@ -456,6 +456,7 @@ class Synchronizer:
         self.changed_python_paths: list[str] = []
         self._inventory_cache: tuple[list[str], list[str], list[str]] | None = None
         self._remote_snapshot_ready = False
+        self._remote_snapshot_sha: str | None = None
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
@@ -824,15 +825,25 @@ class Synchronizer:
             )
             return
 
-        self.command(
-            "fetch", "--progress", "--no-tags", "origin",
-            "refs/heads/main:refs/remotes/origin/main",
-        )
-        # A user/editor can change source files while fetch is in flight.
-        # Never reuse the pre-fetch snapshot for the publishable checkpoint.
-        self._inventory_cache = None
-        fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
-        self._remote_snapshot_ready = True
+        if self._remote_snapshot_ready:
+            fetched_remote = self._remote_snapshot_sha or self.text(
+                "rev-parse", "refs/remotes/origin/main"
+            )
+            self.say(
+                "[FETCH] Snapshot distant deja valide reutilise; "
+                "aucun second fetch identique."
+            )
+        else:
+            self.command(
+                "fetch", "--progress", "--no-tags", "origin",
+                "refs/heads/main:refs/remotes/origin/main",
+            )
+            # A user/editor can change source files while fetch is in flight.
+            # Never reuse the pre-fetch snapshot for the publishable checkpoint.
+            self._inventory_cache = None
+            fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
+            self._remote_snapshot_ready = True
+            self._remote_snapshot_sha = fetched_remote
         counts = self.text(
             "rev-list", "--left-right", "--count",
             f"{local_head}...{fetched_remote}",
@@ -887,6 +898,49 @@ class Synchronizer:
             )
             self._inventory_cache = None
             fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
+            self._remote_snapshot_ready = True
+            self._remote_snapshot_sha = fetched_remote
+            if fetched_remote == local:
+                self._assert_no_new_code_changes()
+                verified_remote = self.remote_sha()
+                if verified_remote != local:
+                    return False
+                self.report["preflight"] = {
+                    "captured_at_utc": datetime.now(UTC).isoformat(),
+                    "local_head": local,
+                    "remote_head_observed": observed_remote,
+                    "remote_head_fetched": fetched_remote,
+                    "ahead_commits": 0,
+                    "behind_commits": 0,
+                    "comparison_status": "EXACT_FOR_FETCHED_REMOTE_HEAD",
+                    "inventory": {
+                        "staged": {"count": len(staged), "paths": sorted(set(staged))},
+                        "tracked_changes": {
+                            "count": len(tracked), "paths": sorted(set(tracked)),
+                        },
+                        "untracked": {
+                            "count": len(untracked), "paths": sorted(set(untracked)),
+                        },
+                        "protected_observed_paths": sorted({
+                            path for path in staged + tracked + untracked
+                            if _protected(path)
+                        }),
+                        "excluded_untracked_patterns": self._excluded_untracked_patterns(),
+                    },
+                    "publishable_paths": [],
+                    "inventory_status": "VALIDATED",
+                }
+                self.report["remote_sha_observed"] = verified_remote
+                self.report["fast_path"] = "CLEAN_REMOTE_MATCH_AFTER_FETCH"
+                self.report["local_syntax_check"] = "NO_PYTHON_CHANGED"
+                self.report["status"] = "SYNCHRONIZED"
+                self.report["head_after"] = local
+                self.report["checkpoint_sha_after_reconcile"] = local
+                self.say(
+                    "[RACCOURCI] Fetch distant confirme le meme SHA; "
+                    "aucun checkpoint, rebase ni push necessaire."
+                )
+                return True
             if fetched_remote == local or self.command(
                 "merge-base", "--is-ancestor", local, fetched_remote,
                 check=False,
