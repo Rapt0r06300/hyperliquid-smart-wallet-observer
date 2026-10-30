@@ -37,6 +37,28 @@ def _sha256(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
+def _accepted_digest_start() -> tuple[Any, int]:
+    """Start the exact SHA-256 stream for a canonical JSON list."""
+    digest = hashlib.sha256()
+    digest.update(b"[")
+    return digest, 0
+
+
+def _accepted_digest_add(
+    digest: Any, count: int, payload: Mapping[str, Any],
+) -> int:
+    if count:
+        digest.update(b",")
+    digest.update(_canonical(payload))
+    return count + 1
+
+
+def _accepted_digest_finish(digest: Any) -> str:
+    finished = digest.copy()
+    finished.update(b"]")
+    return finished.hexdigest()
+
+
 def _is_sha256(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
@@ -85,14 +107,21 @@ def _checkpoint(
     cursor: int,
     accepted: Iterable[Mapping[str, Any]],
     duplicate_count: int,
+    accepted_count: int | None = None,
+    accepted_sha256: str | None = None,
 ) -> dict[str, Any]:
-    accepted_rows = list(accepted)
+    if accepted_sha256 is None:
+        accepted_rows = list(accepted)
+        accepted_count = len(accepted_rows)
+        accepted_sha256 = _sha256(accepted_rows)
+    elif accepted_count is None:
+        raise ValueError("SOAK_ACCEPTED_COUNT_REQUIRED")
     body = {
         "schema": "hypersmart.copy_vault_collector_soak_checkpoint.v2",
         "input_sha256": input_sha256,
         "cursor": cursor,
-        "accepted_count": len(accepted_rows),
-        "accepted_sha256": _sha256(accepted_rows),
+        "accepted_count": accepted_count,
+        "accepted_sha256": accepted_sha256,
         "duplicate_count": duplicate_count,
     }
     return body | {"checkpoint_sha256": _sha256(body)}
@@ -145,6 +174,7 @@ def run_soak(
 
     cursor = 0
     accepted: list[dict[str, Any]] = []
+    accepted_digest, accepted_count = _accepted_digest_start()
     seen: dict[str, str] = {}
     duplicates = 0
     queue_high_water = 0
@@ -173,7 +203,14 @@ def run_soak(
                 continue
             seen[event_id] = payload_sha256
             accepted.append(payload)
-        if len(accepted) != checkpoint.get("accepted_count") or _sha256(accepted) != checkpoint.get("accepted_sha256"):
+            accepted_count = _accepted_digest_add(
+                accepted_digest, accepted_count, payload,
+            )
+        if (
+            accepted_count != checkpoint.get("accepted_count")
+            or _accepted_digest_finish(accepted_digest)
+            != checkpoint.get("accepted_sha256")
+        ):
             raise ValueError("SOAK_CHECKPOINT_CONTENT_MISMATCH")
 
     while cursor < len(rows):
@@ -194,6 +231,9 @@ def run_soak(
                 continue
             seen[event_id] = payload_sha256
             accepted.append(payload)
+            accepted_count = _accepted_digest_add(
+                accepted_digest, accepted_count, payload,
+            )
         cursor = batch_end
         if checkpoint_file is not None:
             record = _checkpoint(
@@ -201,6 +241,8 @@ def run_soak(
                 cursor=cursor,
                 accepted=accepted,
                 duplicate_count=duplicates,
+                accepted_count=accepted_count,
+                accepted_sha256=_accepted_digest_finish(accepted_digest),
             )
             checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
             _validate_output_path(checkpoint_file, prefix="SOAK_CHECKPOINT")
@@ -220,14 +262,14 @@ def run_soak(
         "status": "COMPLETE" if complete else "CONTINUATION_REQUIRED",
         "input_count": len(rows),
         "processed_count": cursor,
-        "accepted_count": len(accepted),
+        "accepted_count": accepted_count,
         "duplicate_count": duplicates,
         "queue_high_water": queue_high_water,
         "queue_limit": queue_limit,
         "queue_drops": 0,
         "interrupted": interrupted,
         "input_sha256": input_sha256,
-        "accepted_sha256": _sha256(accepted),
+        "accepted_sha256": _accepted_digest_finish(accepted_digest),
         "checkpoint_path": str(checkpoint_file) if checkpoint_file is not None else None,
         "paper_read_only": True,
         "real_execution": False,

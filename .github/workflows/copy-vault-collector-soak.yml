@@ -10,6 +10,7 @@ on:
       - 'tools/partitioned_data_index.py'
       - 'tools/restore_alina.py'
       - 'tests/test_restore_resource_limits.py'
+      - 'tests/test_copy_vault_collector_soak.py'
       - 'tests/test_copy_vault_collector_soak_workflow.py'
   # Explicit diagnostic only.  The hosted soak is never triggered by a push
   # and never contacts an exchange or publishes SAFE data.
@@ -50,6 +51,7 @@ jobs:
             tests/test_campaign_adapter_diagnostics.py
             tests/test_resumable_campaign_adapters.py
             tests/test_restore_resource_limits.py
+            tests/test_copy_vault_collector_soak.py
             tools/copy_vault_collector_soak.py
             tools/partitioned_data_index.py
             tools/restore_alina.py
@@ -68,7 +70,8 @@ jobs:
           python -m pytest -q --tb=short \
             tests/test_campaign_adapter_diagnostics.py \
             tests/test_resumable_campaign_adapters.py \
-            tests/test_restore_resource_limits.py
+            tests/test_restore_resource_limits.py \
+            tests/test_copy_vault_collector_soak.py
 
       - name: Run bounded deterministic soak and write receipt
         id: soak
