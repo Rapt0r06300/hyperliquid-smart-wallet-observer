@@ -1,6 +1,6 @@
 {
   "schema": "alina.copy_vault_bug_registry.v1",
-  "updated_at": "2026-10-28",
+  "updated_at": "2026-10-30",
   "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "runtime": "src/hl_observer",
   "economic_scope": "copy_vault_only",
@@ -41,10 +41,14 @@
         "anti_regression_tests": [
           "tests/test_user_fills_live_scan.py::test_store_quarantines_fill_without_causal_receive_time"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "120 focused local Copy-Vault and registered anti-regression tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; artifact_sha256 binds every registered component and anti-regression test file byte-for-byte. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/wallets/user_fills_live.py": "13d5d556421ed2e2d9d430d579ace3094d572f4416873878e425b75d93400663",
+          "tests/test_user_fills_live_scan.py": "3208fecbc58007a399942d181df88ee206caaae1756a79e5c4c49b818eff39d5"
+        }
       }
     },
     {
@@ -52,7 +56,7 @@
       "title": "The userFills parser invented receive timestamps for absent or invalid input",
       "priority": "P1",
       "kind": "runtime_data_integrity",
-      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
       "first_seen_sha": "aec0f65a7447bd9ad9a40cfd43a4e2fa4b95ffdd",
       "component_paths": [
         "src/hl_observer/collection/userfills_live.py",
@@ -76,15 +80,20 @@
       },
       "fix_commit_reachable_from_validation_head": true,
       "local_validation": {
-        "state": "PASS",
+        "state": "NOT_RUN",
         "validated_at": "2026-10-28",
         "anti_regression_tests": [
           "tests/test_userfills_live.py::test_parser_never_invents_a_receive_timestamp"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "120 focused local Copy-Vault and registered anti-regression tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; artifact_sha256 binds every registered component and anti-regression test file byte-for-byte. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/userfills_live.py": "5c9929956bef77c3215e52b6b07cded133fe959625faa4be0a3b24aa2e219a78",
+          "src/hl_observer/realtime/event_identity.py": "8ef6dd4a4a49af58374b1f789c1fde46e4e39d131a27bc38bf32b8e4d0263822",
+          "tests/test_userfills_live.py": "cd9e6cdc8ec2f9359c954b1314b61fc19624817f182cd5c5393670b6655521a4"
+        }
       }
     },
     {
@@ -120,10 +129,14 @@
         "anti_regression_tests": [
           "tests/test_verify_safe_corpus_partition.py::test_load_specs_matches_canonical_three_value_restore_contract"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "120 focused local Copy-Vault and registered anti-regression tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; artifact_sha256 binds every registered component and anti-regression test file byte-for-byte. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tests/test_verify_safe_corpus_partition.py": "dd4447c9d136c0eb4e9ddccca1408d062c93dccd54aff262b4fa631240bb881a",
+          "tools/verify_safe_corpus_partition.py": "eae607d9bce597ab9f433d5d458725ed7736727924092af91f9388f76f740cb1"
+        }
       }
     },
     {
@@ -159,10 +172,14 @@
         "anti_regression_tests": [
           "tests/test_aucun_ctrl_c_deguise_en_test_d_existence.py::test_INVARIANT_aucun_module_de_production_n_appelle_os_kill_avec_le_signal_ZERO"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "158 focused local Copy-Vault and registered anti-regression tests passed under a Windows Job Object hard cap of 50% global CPU; all 16 logical processors remained available. Ruff, py_compile and git diff --check passed. The one-shot local lab verified 15,256/15,256 replay shards and 200/200 SAFE context shards by manifest and SHA-256; economic status remains MORE_DATA with 0 causal incremental fills and no PnL uplift freeze. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+        "src/hl_observer/backtesting/copy_vault_local_lab.py": "3bcbe96e548b5e77aa0bf56c520f6ea888101d86aab958161d569f020635ee2f",
+          "tests/test_aucun_ctrl_c_deguise_en_test_d_existence.py": "2d029f55efa98d674071ea8c3ce2060dd8ab9ddcdbe596172cdc8f78f9fe27cd"
+        }
       }
     },
     {
@@ -201,10 +218,16 @@
           "tests/test_set_phase_atomic.py::test_competing_phase_requests_cannot_both_commit_same_epoch",
           "tests/test_analysis_stage_lock.py::test_phase_transition_cannot_be_overwritten_by_concurrent_stage_advance"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "120 focused local Copy-Vault and registered anti-regression tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; artifact_sha256 binds every registered component and anti-regression test file byte-for-byte. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/control_plane/phase_controller.py": "10e1200489e406b47ee96414ab9ccd4dec3020b8af238ac7d2220bc122520691",
+          "src/hl_observer/control_plane/phase_state.py": "63e6d577b326bcf45fd85b1f1fcc6375cc87510f87d51b7234437d5b6db131f4",
+          "tests/test_analysis_stage_lock.py": "8c42cfd0151af56427b66f33e1d23156d7fe61c0e826899e6bea2b6d953a1cd6",
+          "tests/test_set_phase_atomic.py": "b4aba66f8b1133297797d1f6ef5999503cb6e28f2df142505d47c3cd4b297f4e"
+        }
       }
     },
     {
@@ -242,10 +265,13 @@
         "anti_regression_tests": [
           "tests/test_push_github_safe_contract.py::test_double_click_launcher_runs_canonical_engine_and_never_forces_git"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "120 focused local Copy-Vault and registered anti-regression tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; artifact_sha256 binds every registered component and anti-regression test file byte-for-byte. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tests/test_push_github_safe_contract.py": "b6127c36da8c06389544cfb0a31f4de30552ae2e02708b04bed695e49f665ad3"
+        }
       }
     },
     {
@@ -281,11 +307,2323 @@
         "anti_regression_tests": [
           "tests/test_pnl_ledger_semantic_audit.py::test_semantic_audit_reconciles_open_add_reduce_close_costs_and_funding"
         ],
-        "test_result": "12 passed across all registered anti-regression tests at the recorded local HEAD; no GitHub-hosted validation claimed.",
-        "base_head_sha": "d9c3bb92f67c8e3ad3a9ae94d211e6afb9b90918",
+        "test_result": "120 focused local Copy-Vault and registered anti-regression tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; artifact_sha256 binds every registered component and anti-regression test file byte-for-byte. No GitHub-hosted validation claimed.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
         "target": "DIRTY_LOCAL_WORKING_TREE",
-        "working_tree_clean": false
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tests/test_pnl_ledger_semantic_audit.py": "235e1db59e7942afae2c3cd9f3d2d3e5b5ea58a23ad77e938ab717ebc7ee16ce"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-008",
+      "title": "Crowding diagnostic leaked timestamp and entity-link validation exceptions",
+      "priority": "P1",
+      "kind": "research_input_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/backtesting/copy_vault_crowding.py"
+      ],
+      "root_cause": "Point-in-time crowding normalization called datetime.fromtimestamp without converting platform range errors, and malformed declared entity links reached Union-Find sorting. Both paths could raise instead of returning an explicit fail-closed diagnostic.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_crowding.py::test_out_of_range_timestamp_is_unmeasurable_not_an_exception and tests/test_copy_vault_crowding.py::test_malformed_entity_links_are_unmeasurable_not_an_exception",
+        "result": "Both new regression tests failed before the fix: OverflowError for a timestamp of 10**30 and TypeError while sorting a link containing None."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Convert timestamp range failures to TIMESTAMP_OUT_OF_RANGE, validate entity-link shape and non-empty string identities, and return UNMEASURABLE for invalid links.",
+      "green_evidence": "The crowding and entity-resolution regression group passed 8 tests; production remains observational-only and promotion remains disabled.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_crowding.py::test_out_of_range_timestamp_is_unmeasurable_not_an_exception",
+        "tests/test_copy_vault_crowding.py::test_malformed_entity_links_are_unmeasurable_not_an_exception"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_crowding.py::test_out_of_range_timestamp_is_unmeasurable_not_an_exception",
+          "tests/test_copy_vault_crowding.py::test_malformed_entity_links_are_unmeasurable_not_an_exception"
+        ],
+        "test_result": "8 focused local crowding/entity-resolution tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; the fix is recorded against the dirty local working tree and has no GitHub-hosted validation claim.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/backtesting/copy_vault_crowding.py": "2cb4db6d3d7b6fb2b9dd5cd1f8017189649aab66b2bd4ff176c99dcb8fa66911",
+          "tests/test_copy_vault_crowding.py": "d52744be925ef2bbb204818cf1cfe7ec9cc4800d1c10991684b7df50a55eeceb"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-009",
+      "title": "Leader-selection comparison trusted a non-paper baseline",
+      "priority": "P0",
+      "kind": "paper_safety_gate",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py"
+      ],
+      "root_cause": "The economic challenger comparator applied the PAPER/read-only proof gate only to the challenger. A baseline receipt marked real execution could still produce MEASURABLE output, while the result hardcoded paper flags without proving both inputs were paper-only.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_leader_selection_comparison.py::test_real_execution_on_baseline_is_fail_closed",
+        "result": "The new regression test returned MEASURABLE and allowed the comparison path to continue before the fix, despite baseline paper_read_only=false and real_execution=true."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Validate PAPER/read-only and no-real-execution proof for both baseline and challenger before marking the comparison measurable or promotion-eligible.",
+      "green_evidence": "The leader-selection comparison suite passed 5 tests, including the baseline real-execution fail-closed regression; no promotion path was relaxed.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_leader_selection_comparison.py::test_real_execution_on_baseline_is_fail_closed"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_leader_selection_comparison.py::test_real_execution_on_baseline_is_fail_closed"
+        ],
+        "test_result": "5 focused local leader-selection comparison tests passed at HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f; the fix is recorded against the dirty local working tree and has no GitHub-hosted validation claim.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py": "9ba3ff0fe06e5d65e898366f3d6c7fed1176010a0ecb4db7600c5e029a7ca8b9",
+          "tests/test_copy_vault_leader_selection_comparison.py": "01e11d7f0079a0c3ca45f1a9eef18ad3d10e06c6aed86ec665f0a082be54c1d2"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-010",
+      "title": "L'échec d'écriture du statut autonome était silencieux après un NO_GO",
+      "priority": "P1",
+      "kind": "observability_fail_closed",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/ops/autonomous_research_job.py"
+      ],
+      "root_cause": "Le handler fatal affichait bien ALINA_AUTONOMOUS_RESEARCH_NO_GO, mais avalait l'OSError de write_status avec pass ; le diagnostic de statut pouvait donc disparaître sans compteur ni trace structurée.",
+      "red_evidence": {
+        "test": "tests/test_echec_silencieux.py::test_echec_ecriture_statut_job_autonome_est_journalise",
+        "result": "Le test rouge reproduisant un execute_job en erreur et un write_status indisponible ne trouvait aucun site OSError avant correction."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Remplacer le pass du fallback de statut par une entrée _noter_echec dédiée, tout en conservant le NO_GO et le code retour 20.",
+      "green_evidence": "Le test de régression et le registre d'exceptions passent ; aucun chemin réel ou testnet n'est activé.",
+      "anti_regression_tests": [
+        "tests/test_echec_silencieux.py::test_echec_ecriture_statut_job_autonome_est_journalise",
+        "tests/test_echec_silencieux.py::test_AUCUN_except_pass_ne_revient"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_echec_silencieux.py::test_echec_ecriture_statut_job_autonome_est_journalise",
+          "tests/test_echec_silencieux.py::test_AUCUN_except_pass_ne_revient"
+        ],
+        "test_result": "10 tests du registre des échecs passent localement ; le correctif est lié à l'arbre de travail local, sans validation GitHub-hosted.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/ops/autonomous_research_job.py": "cb031baaae27d47073d006ea23ed470520c8897ffe0a2d900fa41b720a0b624f",
+          "tests/test_echec_silencieux.py": "baee20be3c3d4e57eb30843c32dd67f449358094bdd77255614946543db3c6e3"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-011",
+      "title": "La queue de checkpoints Copy-Vault masquait les erreurs d'entrée",
+      "priority": "P1",
+      "kind": "collector_observability",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/collection/copy_vault_checkpoint_tail.py"
+      ],
+      "root_cause": "Les erreurs OSError lors de l'ouverture ou de la lecture de vault_fills_live.jsonl retournaient zéro ligne sans compteur ni événement d'échec ; une interruption de collecte pouvait donc ressembler à une absence de fills.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_checkpoint_tail.py::test_erreur_ouverture_queue_est_comptee_et_visible",
+        "result": "Avant correction, le test reproduisant une queue indisponible retournait lines=0 mais le compteur input_open_errors n'existait pas."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Compter et journaliser les erreurs d'ouverture/lecture ; intégrer ces compteurs au collector_gap_count pour rendre replay_evidence_complete faux dès qu'un trou est observé.",
+      "green_evidence": "La suite checkpoint-tail et le registre d'échecs passent ; aucune donnée, fill ou PnL n'est fabriqué.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_checkpoint_tail.py::test_erreur_ouverture_queue_est_comptee_et_visible",
+        "tests/test_copy_vault_checkpoint_tail.py::test_close_et_contradiction_ne_programment_jamais_une_entree"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_checkpoint_tail.py::test_erreur_ouverture_queue_est_comptee_et_visible",
+          "tests/test_copy_vault_checkpoint_tail.py::test_close_et_contradiction_ne_programment_jamais_une_entree"
+        ],
+        "test_result": "27 tests checkpoint-tail et registre d'échecs passent localement ; le correctif est lié à l'arbre de travail local, sans validation GitHub-hosted.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/copy_vault_checkpoint_tail.py": "dd8e27bc3453d10d3b20c653e6a8f7ffac90aa70034b6e1fc33833e1515afad9",
+          "tests/test_copy_vault_checkpoint_tail.py": "f8e24b280b87e3897b294571ace1abc6d2e4124a616aa88eba0fc73c38e91ae3"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-012",
+      "title": "Les erreurs L2 réseau pouvaient rester invisibles et le loader divergeait du collecteur",
+      "priority": "P1",
+      "kind": "collector_observability_and_receipt_integrity",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/collection/copy_vault_checkpoint_tail.py",
+        "src/hl_observer/backtesting/copy_vault_book_loader.py"
+      ],
+      "root_cause": "Le fetcher L2 retournait None après une erreur réseau et _capture_due avalait aussi les exceptions du fetcher injecté sans compteur. Les nouveaux compteurs du writer n'étaient en outre pas tous repris par le loader, qui pouvait conserver un reçu propre alors que le writer avait observé un échec.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_checkpoint_tail.py::test_erreur_fetch_l2_est_comptee_journalisee_et_invalide_la_preuve",
+        "result": "Avant correction, le test rouge ne trouvait pas fetch_errors et le loader rapportait receipt_valid=true avec collector_gap_count=0 malgré l'échec L2."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Journaliser les erreurs réseau du fetcher officiel et des fetchers injectés, compter les erreurs/retours L2 invalides, propager ces compteurs au collector_gap_count et faire appliquer exactement les mêmes gaps par le loader de replay.",
+      "green_evidence": "Les erreurs restent PAPER/read-only, aucun carnet n'est inventé, les checkpoints restent en attente, et le reçu est fail-closed. 45 tests ciblés passent localement.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_checkpoint_tail.py::test_erreur_fetch_l2_est_comptee_journalisee_et_invalide_la_preuve",
+        "tests/test_copy_vault_checkpoint_tail.py::test_fetcher_hyperliquid_journalise_les_erreurs_reseau",
+        "tests/test_copy_vault_checkpoint_tail.py::test_pending_overflow_retains_existing_work_and_fails_closed"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_checkpoint_tail.py::test_erreur_fetch_l2_est_comptee_journalisee_et_invalide_la_preuve",
+          "tests/test_copy_vault_checkpoint_tail.py::test_fetcher_hyperliquid_journalise_les_erreurs_reseau",
+          "tests/test_copy_vault_checkpoint_tail.py::test_pending_overflow_retains_existing_work_and_fails_closed"
+        ],
+        "test_result": "45 tests checkpoint-tail, SAFE bridge et registre d'échecs passent localement à HEAD 39747a53d9ac8698f61065ac4a44919488c36e3f ; aucune validation GitHub-hosted revendiquée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/copy_vault_checkpoint_tail.py": "dd8e27bc3453d10d3b20c653e6a8f7ffac90aa70034b6e1fc33833e1515afad9",
+          "src/hl_observer/backtesting/copy_vault_book_loader.py": "3f381ff11e25273afa06d413d96e197134e5714f04e7547e95cefc9890341e51",
+          "tests/test_copy_vault_checkpoint_tail.py": "f8e24b280b87e3897b294571ace1abc6d2e4124a616aa88eba0fc73c38e91ae3"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-013",
+      "title": "Le nettoyage normal du fichier temporaire atomique était journalisé comme un échec",
+      "priority": "P2",
+      "kind": "collector_observability",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/collection/copy_vault_checkpoint_tail.py"
+      ],
+      "root_cause": "Après os.replace, le fichier temporaire n'existe plus par conception ; le finally appelait unlink() puis enregistrait systématiquement FileNotFoundError comme une panne, polluant le registre des échecs et masquant les diagnostics utiles.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_checkpoint_tail.py::test_ecriture_atomique_reussie_ne_journalise_pas_le_temp_deja_remplace",
+        "result": "Le test rouge observait un échec temporary_unlink sur une écriture atomique réussie avant le correctif."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Utiliser unlink(missing_ok=True) pour le nettoyage idempotent du temporaire, tout en conservant la journalisation des autres OSError de nettoyage.",
+      "green_evidence": "L'écriture atomique conserve son contenu et ne produit plus de faux échec ; les erreurs réelles de nettoyage restent journalisables.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_checkpoint_tail.py::test_ecriture_atomique_reussie_ne_journalise_pas_le_temp_deja_remplace"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_checkpoint_tail.py::test_ecriture_atomique_reussie_ne_journalise_pas_le_temp_deja_remplace"
+        ],
+        "test_result": "Le test anti-régression passe localement ; le correctif est enregistré dans l'arbre de travail local, sans validation GitHub-hosted.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/copy_vault_checkpoint_tail.py": "dd8e27bc3453d10d3b20c653e6a8f7ffac90aa70034b6e1fc33833e1515afad9",
+          "tests/test_copy_vault_checkpoint_tail.py": "f8e24b280b87e3897b294571ace1abc6d2e4124a616aa88eba0fc73c38e91ae3"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-014",
+      "title": "La reprise du backlog historique n'avait pas de reçu SHA-lié par vague",
+      "priority": "P1",
+      "kind": "historical_reconciliation_resume",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/continuous_reconcile_backlog.py"
+      ],
+      "root_cause": "La sélection d'une vague et sa publication étaient seulement visibles via stdout et l'état de l'index ; aucun reçu content-addressed ne liait explicitement le HEAD parent, les Releases sélectionnées et les octets exacts des RUN_MANIFEST.json avant le commit durable.",
+      "red_evidence": {
+        "test": "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_binds_sorted_manifest_hashes_and_is_idempotent",
+        "result": "Le test rouge ne pouvait pas construire ni restaurer un reçu de vague déterministe avant l'ajout des fonctions de checkpoint."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "fix_summary": "Créer un reçu JSON content-addressed par vague avec parent HEAD, tags triés et SHA-256 des manifests, l'écrire atomiquement avant indexation en état PREPARED, puis produire un reçu final en état PUBLISHED lié au SHA-1 Git blob de l'index et aux counts avant staging ; valider l'identité content-addressed et refuser les états publiés incomplets ; nettoyer seulement les reçus non suivis lors d'une nouvelle tentative.",
+        "green_evidence": "Les reçus sont idempotents, les entrées ambiguës sont refusées fail-closed, les reçus falsifiés ou publiés incomplets sont refusés, un arrêt avant le reçu final laisse seulement un reçu PREPARED sans SHA d'index ni counts, et le test de publication confirme que le checkpoint PUBLISHED est inclus dans git add catalog. Aucun shard n'est supprimé ni considéré SAFE sans la chaîne existante.",
+      "anti_regression_tests": [
+        "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_binds_sorted_manifest_hashes_and_is_idempotent",
+        "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_rejects_ambiguous_inputs",
+            "tests/test_continuous_reconcile_backlog.py::test_publish_stages_the_content_addressed_wave_checkpoint",
+            "tests/test_continuous_reconcile_backlog.py::test_publish_leaves_only_an_explicit_prepared_receipt_before_finalization",
+            "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_tampering_and_incomplete_publication"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_binds_sorted_manifest_hashes_and_is_idempotent",
+          "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_rejects_ambiguous_inputs",
+          "tests/test_continuous_reconcile_backlog.py::test_publish_stages_the_content_addressed_wave_checkpoint",
+          "tests/test_continuous_reconcile_backlog.py::test_publish_leaves_only_an_explicit_prepared_receipt_before_finalization",
+          "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_tampering_and_incomplete_publication"
+        ],
+          "test_result": "27 tests de reprise historique passent localement ; Ruff, compileall et git diff --check ciblés passent. La validation GitHub-hosted et l'interruption réelle du runner restent non exécutées.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+            "tools/continuous_reconcile_backlog.py": "b5c5d564982776c82eb7459ba774770c36f4e373bf4f18db4df02fbf5ed66902",
+            "tests/test_continuous_reconcile_backlog.py": "d5893f315008dba3514dd799254d431c81ecf8e370792ac7fb79979fe404555f"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-015",
+      "title": "L'évaluateur Discovery acceptait des entrées Copy-Vault absentes ou vides",
+      "priority": "P1",
+      "kind": "research_input_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/copy_vault_discovery_evaluator.py",
+        "tests/test_copy_vault_discovery_evaluator.py"
+      ],
+      "root_cause": "_load_rows appelait Path.stat() sans transformer l'absence, le JSON vide ou les lignes non valides du rapport canonique en état de recherche diagnostiqué; une campagne pouvait donc lever FileNotFoundError ou passer par une sélection TRAIN vide au lieu de rester PAPER, bloquée et sans résultat économique.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_discovery_evaluator.py::test_dataset_absent_echoue_ferme_avec_diagnostic",
+        "result": "Avant correction, le test rouge reproduisait FileNotFoundError sur un rapport brut absent; aucun verdict BLOCKED ni code DATASET_MISSING n'était produit."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Convertir les entrées manquantes, vides, sans lignes valides, sans TRAIN, illisibles ou JSON invalides en verdict BLOCKED diagnostiqué; conserver data_available=false, heldout_evaluated=false, aucun net_usd et aucune preuve économique fabriquée.",
+      "green_evidence": "La campagne locale réelle renvoie BLOCKED/DATASET_MISSING avec diagnostic et aucun PnL; un rapport présent mais vide renvoie BLOCKED/DATASET_EMPTY sans net_usd; une reconstruction des features indisponible renvoie BLOCKED/DATASET_FEATURES_UNAVAILABLE; les sept tests de l'évaluateur, Ruff et compileall passent.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_discovery_evaluator.py::test_dataset_absent_echoue_ferme_avec_diagnostic",
+        "tests/test_copy_vault_discovery_evaluator.py::test_dataset_present_mais_vide_echoue_ferme_sans_pnl_factice",
+        "tests/test_copy_vault_discovery_evaluator.py::test_reconstruction_features_indisponible_echoue_ferme_avec_diagnostic"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_discovery_evaluator.py::test_dataset_absent_echoue_ferme_avec_diagnostic",
+          "tests/test_copy_vault_discovery_evaluator.py::test_dataset_present_mais_vide_echoue_ferme_sans_pnl_factice",
+          "tests/test_copy_vault_discovery_evaluator.py::test_reconstruction_features_indisponible_echoue_ferme_avec_diagnostic"
+        ],
+        "test_result": "7 tests de l'évaluateur passent localement; Ruff et compileall passent. Vérification directe sur le chemin réel absent: BLOCKED/DATASET_MISSING, sample_count=0, aucun net_usd; rapport présent mais vide: BLOCKED/DATASET_EMPTY, aucun net_usd; reconstruction indisponible: BLOCKED/DATASET_FEATURES_UNAVAILABLE, aucun net_usd. Aucune validation GitHub-hosted revendiquée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/copy_vault_discovery_evaluator.py": "6d243e11f026d7bbf1afe6ef4d38dbd6cdbb319869fc896cb541be66bdb8f2e6",
+          "tests/test_copy_vault_discovery_evaluator.py": "11d10223a362959a011442c96a34a3504d1d1c4733601d53c7019a901e494c97"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-016",
+      "title": "Le laboratoire pouvait s'arrêter sur un caractère Unicode de la console Windows",
+      "priority": "P1",
+      "kind": "lab_runtime_observability",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/alina_quant_lab_console.py",
+        "tests/test_alina_quant_lab_console.py"
+      ],
+      "root_cause": "Le lanceur écrivait directement des messages de progression UTF-8 sur un flux Windows configuré en cp1252; un caractère comme la flèche de fenêtre temporelle levait UnicodeEncodeError après le scan SAFE et interrompait le laboratoire avant le replay.",
+      "red_evidence": {
+        "test": "tests/test_alina_quant_lab_console.py::test_console_streams_are_reconfigured_for_unicode_safe_windows_output",
+        "result": "Avant correction, le test échouait car le garde-fou de configuration des flux n'existait pas; le run réel s'est arrêté avec UnicodeEncodeError après 19 547 shards vérifiés."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Configurer stdout et stderr avant le parsing des arguments en UTF-8 avec errors=backslashreplace, puis conserver un repli lorsque l'hôte expose des flux immuables; les rapports restent écrits en UTF-8 et les erreurs de calcul restent visibles.",
+      "green_evidence": "Le test de configuration des flux et le test de neutralisation console passent; Ruff et compileall passent; le second run local a franchi intégralement le scan/replay SAFE et a produit EVIDENCE.json, RAPPORT.md, resultat.json et RAPPORT.html sans arrêt Unicode. Le verdict économique reste fail-closed car les fills admissibles sont absents.",
+      "anti_regression_tests": [
+        "tests/test_alina_quant_lab_console.py::test_console_streams_are_reconfigured_for_unicode_safe_windows_output",
+        "tests/test_alina_quant_lab_console.py::test_untrusted_console_text_neutralizes_ansi_controls_and_line_forgery"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_alina_quant_lab_console.py::test_console_streams_are_reconfigured_for_unicode_safe_windows_output",
+          "tests/test_alina_quant_lab_console.py::test_untrusted_console_text_neutralizes_ansi_controls_and_line_forgery"
+        ],
+        "test_result": "2 tests ciblés passent; Ruff et compileall passent. Le run réel once du 2026-10-30 a vérifié 19 547/19 713 shards locaux, reconstruit 50 170 carnets L2, écrit le bundle de preuves et terminé sans crash Unicode; il a correctement bloqué sur LOCAL_SAFE_SHARDS_MISSING_OR_REJECTED avec 0 fill admissible.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/alina_quant_lab_console.py": "3b1e91835ceb3d793282e2f53c8b09e170e8fb9a0dc92255290e1a84d9240524",
+          "tests/test_alina_quant_lab_console.py": "4830c5a7db9d220c924e814c57504ea01f2ae6dc1109b7aaa25f814974fcc694"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-017",
+      "title": "Le heartbeat BBO pouvait devenir stale pendant un flush durable lourd",
+      "priority": "P1",
+      "kind": "collector_liveness_observability",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/collecter_bbo.py",
+        "tests/test_collecter_bbo.py"
+      ],
+      "root_cause": "Le heartbeat canonique était écrit uniquement par la boucle qui attend aussi les flushs des lots bruts et des événements canoniques. Une opération disque ou de normalisation suffisamment longue pouvait donc laisser le processus vivant sans battement, et le watchdog le déclarait stale alors que la collecte continuait.",
+      "red_evidence": {
+        "test": "tests/test_collecter_bbo.py::test_bbo_supervisory_heartbeat_is_decoupled_from_durable_flushes",
+        "result": "Avant correction, aucune tâche de heartbeat indépendante n'existait et l'émission était placée après les flushs durables de la boucle d'écriture. Le run de collecte a effectivement observé un état DEGRADED/stale transitoire malgré un worker vivant et des flux reçus."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Émettre le heartbeat canonique depuis une tâche asyncio indépendante toutes les deux secondes, conserver un état NO_DATA/STALE explicite tant qu'aucune trame n'est reçue, ignorer les timestamps invalides et compter les erreurs d'écriture sans arrêter la collecte.",
+      "green_evidence": "Le helper de timestamps rejette None, booléens, valeurs invalides et négatives; le test vérifie la présence de la tâche indépendante et l'absence de l'ancien couplage au flush. Les tests BBO, compileall et Ruff passent localement. La campagne active reste PAPER/READ-ONLY; aucune donnée ni PnL n'est inventé.",
+      "anti_regression_tests": [
+        "tests/test_collecter_bbo.py::test_bbo_heartbeat_timestamps_ignore_invalid_feed_values",
+        "tests/test_collecter_bbo.py::test_bbo_supervisory_heartbeat_is_decoupled_from_durable_flushes"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_collecter_bbo.py::test_bbo_heartbeat_timestamps_ignore_invalid_feed_values",
+          "tests/test_collecter_bbo.py::test_bbo_supervisory_heartbeat_is_decoupled_from_durable_flushes"
+        ],
+        "test_result": "22 tests BBO passent localement en 1.25 s; compileall et Ruff passent. Le collecteur actif a produit des trames BBO/L2/trades et son heartbeat est redevenu frais; le redémarrage avec le nouveau code sera validé lors de la prochaine rotation contrôlée du lanceur.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/collecter_bbo.py": "db37ab799cd10bbb8586fea9b69ca0807848f72e0082622b1ee891e15f122430",
+          "tests/test_collecter_bbo.py": "3a6bb5b8c57abf3dc2ee92a03c8420540aeff293e1cd12f07f41640519aa6417"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-018",
+      "title": "Le renouvellement du bail pouvait échouer sur un remplacement Windows transitoirement verrouillé",
+      "priority": "P1",
+      "kind": "collector_lease_reliability",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/ops/bounded_collection.py",
+        "tests/test_collector_lease.py"
+      ],
+      "root_cause": "La primitive d'écriture atomique utilisée par le renouvellement de bail appelait os.replace une seule fois. Sous Windows, une lecture concurrente du fichier pouvait produire PermissionError WinError 5/32/33 et faire remonter un échec de renouvellement malgré une opération transitoirement récupérable.",
+      "red_evidence": {
+        "test": "tests/test_collector_lease.py::test_bounded_collection_replace_retries_transient_windows_file_lock",
+        "result": "Avant correction, le test rouge reproduisait PermissionError au premier remplacement verrouillé et aucun second essai n'était effectué."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Réessayer jusqu'à 20 fois avec 50 ms d'attente uniquement pour les codes Windows transitoires 5, 32 et 33; toute autre erreur ou l'épuisement des tentatives reste fail-closed et est relancé.",
+      "green_evidence": "Le test de reproduction passe après correction; la suite lease/watchdog passe intégralement localement. Le collecteur actif reste PAPER/READ-ONLY et aucune donnée ni preuve économique n'est fabriquée.",
+      "anti_regression_tests": [
+        "tests/test_collector_lease.py::test_bounded_collection_replace_retries_transient_windows_file_lock",
+        "tests/test_collector_lease.py::test_lease_replace_retries_transient_windows_file_lock"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_collector_lease.py::test_bounded_collection_replace_retries_transient_windows_file_lock",
+          "tests/test_collector_lease.py::test_lease_replace_retries_transient_windows_file_lock"
+        ],
+        "test_result": "34 tests lease/watchdog passent localement en 2.69 s; Ruff et compileall passent.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/ops/bounded_collection.py": "82004dc2dfc94d64ba7041df0129964a0309f1a2ec2d7c57ca29f4a54785d303",
+          "tests/test_collector_lease.py": "49bfb795f9c9d3c7a5120f4e9d16502db81849cb15664b4a03cf831f8db2201a"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-019",
+      "title": "Les fills userFills sans marqueur snapshot/live étaient seulement conservés en trame brute",
+      "priority": "P1",
+      "kind": "collector_data_completeness_and_provenance",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/collecter_userfills_vaults.py",
+        "tests/test_collecter_userfills_vaults.py"
+      ],
+      "root_cause": "Les frames réelles reçues contenaient des fills valides mais aucun data.isSnapshot. Le parseur les comptait comme parsed puis fills_a_traiter les refusait, ce qui produisait 0 persisted et ne laissait qu'une enveloppe brute; aucune ligne normalisée n'était disponible pour diagnostic ou réconciliation.",
+      "red_evidence": {
+        "observation": "Le heartbeat userfills-live du 2026-10-30 indiquait 2708 parsed et 0 persisted; le journal userfills_unclassified.jsonl contenait des fills réels avec tid, oid, hash, time, coin, px et sz mais isSnapshot absent.",
+        "test": "tests/test_collecter_userfills_vaults.py::test_fill_normalise_non_classe_est_conserve_hors_tape_economique",
+        "regression_contract": "tests/test_collecter_userfills_vaults.py::test_fill_normalise_non_classe_est_conserve_hors_tape_economique",
+        "result": "Avant le correctif, aucune fonction ne produisait une tape normalisée séparée pour ce cas; la donnée était seulement conservée en payload brut."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Conserver chaque fill normalisé au marqueur inconnu dans vault_fills_observed_unclassified.jsonl avec REAL_OBSERVED, snapshot_status=UNKNOWN, replay_admissible=false et causal_forward_eligible=false; enrichir le heartbeat avec observed-quarantined et compter les échecs d'écriture comme lacunes.",
+      "green_evidence": "102 tests userfills/heartbeat passent; la régression Copy-Vault complète passe avec 786 tests. Les contrôles E9/F et compileall ciblés passent. La tape économique live reste inchangée et fail-closed.",
+      "anti_regression_tests": [
+        "tests/test_collecter_userfills_vaults.py::test_fill_normalise_non_classe_est_conserve_hors_tape_economique",
+        "tests/test_collecter_userfills_vaults.py::test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_collecter_userfills_vaults.py::test_fill_normalise_non_classe_est_conserve_hors_tape_economique",
+          "tests/test_collecter_userfills_vaults.py::test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur"
+        ],
+        "test_result": "102 tests userfills/heartbeat passent en 3.31 s; 786 tests Copy-Vault passent en 117.08 s; ruff E9/F, compileall et git diff --check ciblé contrôlés. La collecte active n'a pas été redémarrée; le nouveau code sera pris en compte au prochain lancement contrôlé.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+        "tools/collecter_userfills_vaults.py": "9e9e3350edf69f0560ae65238168c453c38f2959b4bde019b142a8ffe7108b98",
+        "tests/test_collecter_userfills_vaults.py": "eeb7a0994041188a94f7ba1b230bc57424d61d19d1bca0746a3f8cf3ac87780f"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-020",
+      "title": "Les trames userFills historiques non classées n'étaient pas rattrapées en tape normalisée",
+      "priority": "P1",
+      "kind": "collector_quarantine_recovery",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/collecter_userfills_vaults.py",
+        "tests/test_collecter_userfills_vaults.py"
+      ],
+      "root_cause": "Le correctif de complétude normalisait les nouvelles trames userFills ambiguës, mais les lignes déjà présentes dans userfills_unclassified.jsonl restaient uniquement sous forme brute. Une reprise du collecteur pouvait donc laisser ces observations absentes de la quarantaine normalisée, sans que cela autorise pour autant leur admission économique.",
+      "red_evidence": {
+        "observation": "Le fichier local userfills_unclassified.jsonl contenait 180 lignes brutes avec le motif IS_SNAPSHOT_FLAG_MISSING_OR_INVALID, tandis que vault_fills_observed_unclassified.jsonl n'existait pas encore car le collecteur actif exécutait l'ancien code.",
+        "test": "tests/test_collecter_userfills_vaults.py::test_rattrapage_des_trames_brutes_produit_une_quarantaine_normalisee_idempotente",
+        "regression_contract": "tests/test_collecter_userfills_vaults.py::test_rattrapage_des_trames_brutes_produit_une_quarantaine_normalisee_idempotente",
+        "result": "Avant correction, aucun checkpoint ni convertisseur ne relisait les trames brutes historiques vers la tape normalisée séparée; une relance ne pouvait donc pas récupérer ces observations pour diagnostic ou réconciliation."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter au démarrage un rattrapage append-only des trames brutes: validation par le parseur canonique, checkpoint de préfixe, IDs déterministes par ligne et fill, reprise après interruption, et quarantaine explicite avec isSnapshot=null, snapshot_status=UNKNOWN, replay_admissible=false et causal_forward_eligible=false. Les erreurs d'entrée sont journalisées et aucun fichier live/PnL n'est touché.",
+      "green_evidence": "105 tests userfills/heartbeat passent en 3,44 s; le runner Copy-Vault canonique sélectionne les trois suites aval et passe 194 tests en 14,94 s; Ruff E9/F, compileall et le contrôle de sortie fail-closed passent. Une copie temporaire du corpus brut réel convertit 180 trames en 338 lignes normalisées sans créer de tape live. Le collecteur actif n'a pas été redémarré, donc le rattrapage sera appliqué à la prochaine rotation contrôlée.",
+      "anti_regression_tests": [
+        "tests/test_collecter_userfills_vaults.py::test_rattrapage_des_trames_brutes_produit_une_quarantaine_normalisee_idempotente",
+        "tests/test_collecter_userfills_vaults.py::test_rattrapage_brut_invalide_est_journalise_et_ne_devient_pas_un_fill",
+        "tests/test_collecter_userfills_vaults.py::test_rattrapage_resiste_a_une_exception_inattendue_du_parseur",
+        "tests/test_collecter_userfills_vaults.py::test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+        "tests/test_collecter_userfills_vaults.py::test_rattrapage_des_trames_brutes_produit_une_quarantaine_normalisee_idempotente",
+        "tests/test_collecter_userfills_vaults.py::test_rattrapage_brut_invalide_est_journalise_et_ne_devient_pas_un_fill",
+        "tests/test_collecter_userfills_vaults.py::test_rattrapage_resiste_a_une_exception_inattendue_du_parseur",
+          "tests/test_collecter_userfills_vaults.py::test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur"
+        ],
+        "test_result": "105 tests userfills/heartbeat passent en 3,44 s; 194 tests du runner Copy-Vault passent en 14,94 s; une copie temporaire du corpus réel convertit 180 trames en 338 lignes normalisées, sans tape live; les contrôles Ruff E9/F, compileall et git diff --check ciblé passent. Le code local est prêt pour la prochaine rotation, sans redémarrer la collecte active pendant cette modification.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+        "tools/collecter_userfills_vaults.py": "9e9e3350edf69f0560ae65238168c453c38f2959b4bde019b142a8ffe7108b98",
+        "tests/test_collecter_userfills_vaults.py": "eeb7a0994041188a94f7ba1b230bc57424d61d19d1bca0746a3f8cf3ac87780f"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-021",
+      "title": "La capture L4 réécrivait les mêmes événements après une reprise",
+      "priority": "P1",
+      "kind": "collector_idempotence",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/collection/l4_capture.py",
+        "tests/test_l4_capture.py"
+      ],
+      "root_cause": "capturer dédoublonnait seulement les événements reçus dans l'appel courant. Après un redémarrage ou une reprise, le même événement L4 déjà présent dans la tape append-only était donc ajouté une seconde fois, ce qui pouvait gonfler les cycles, les ratios et les diagnostics sans fabriquer directement un PnL.",
+      "red_evidence": {
+        "test": "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises",
+        "result": "Avant correction, deux appels successifs sur le même événement produisaient deux lignes dans la tape et n_captures=1 au second appel."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Lire uniquement les identités canoniques déjà persistées avant l'ajout, ignorer les doublons inter-reprises sans réécrire la tape et conserver les lignes historiques invalides intactes pour la couche de qualité.",
+      "green_evidence": "6 tests L4 passent; le scénario de reprise confirme une seule ligne persistée, un second appel sans nouvelle capture et un doublon explicitement compté; une queue devant négative est rejetée. Ruff E9/F, compileall et git diff --check ciblés passent.",
+      "anti_regression_tests": [
+        "tests/test_l4_capture.py::test_chantier4_capture_reconstruit_le_cycle",
+        "tests/test_l4_capture.py::test_chantier4_rejette_evenement_invalide_et_dedoublonne_sans_preuve",
+        "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_l4_capture.py::test_chantier4_capture_reconstruit_le_cycle",
+          "tests/test_l4_capture.py::test_chantier4_rejette_evenement_invalide_et_dedoublonne_sans_preuve",
+          "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises"
+        ],
+        "test_result": "6 tests L4 passent en 1,41 s; Ruff E9/F, compileall et git diff --check ciblés passent. Aucun flux L4 réel ni preuve économique n'a été inventé.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/l4_capture.py": "e3b01646d50f63908541584e6d74476b73e2305d7791520c8e10efa0660cb4d5",
+          "tests/test_l4_capture.py": "cfcb1278b8f31ee8bf86732a595a24b7f7bb781a9929075173a70d584b08a374"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-022",
+      "title": "Le runner de régressions Copy-Vault refusait le module L4 pourtant critique",
+      "priority": "P2",
+      "kind": "validation_harness_coverage",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/run_copy_vault_regressions.py",
+        "tests/test_copy_vault_regression_runner.py"
+      ],
+      "root_cause": "Le module critique src/hl_observer/collection/l4_capture.py était inclus dans CRITICAL_PREFIXES mais absent de MODULE_TESTS. Le runner canonique échouait donc en NO_GO avant de sélectionner les tests L4.",
+      "red_evidence": {
+        "test": "tools/run_copy_vault_regressions.py --path src/hl_observer/collection/l4_capture.py",
+        "result": "Le runner retournait COPY_VAULT_REGRESSION_NO_GO: no regression mapping for critical module(s): src/hl_observer/collection/l4_capture.py."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter la cartographie canonique L4 vers tests/test_l4_capture.py et tests/test_order_intent.py, avec une régression explicite du sélecteur.",
+      "green_evidence": "Le sélecteur local accepte désormais le module L4 et renvoie exactement les deux suites existantes; les tests L4 restent séparément verts. CI GitHub non exécutée.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_regression_runner.py::test_l4_capture_has_a_canonical_copy_vault_regression_mapping",
+        "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_regression_runner.py::test_l4_capture_has_a_canonical_copy_vault_regression_mapping",
+          "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises"
+        ],
+        "test_result": "Le sélecteur local et les 5 tests L4 passent; Ruff E9/F, compileall et git diff --check ciblés passent. Aucun test GitHub-hosted exécuté.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/run_copy_vault_regressions.py": "b2f0fdf7544f30611205e59eb99db5d1f97624f8fff2f50f7d9106e5c398dfec",
+          "tests/test_copy_vault_regression_runner.py": "b52afbefdb7843211a18f7af0816daabdbb2d1f60cfa434474eb7740df350465",
+          "tests/test_l4_capture.py": "cfcb1278b8f31ee8bf86732a595a24b7f7bb781a9929075173a70d584b08a374"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-023",
+      "title": "La capture L4 acceptait une taille de file devant négative",
+      "priority": "P1",
+      "kind": "collector_input_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/collection/l4_capture.py",
+        "tests/test_l4_capture.py"
+      ],
+      "root_cause": "event_canonique validait queue_ahead comme un nombre fini mais n'interdisait pas les valeurs négatives. Une donnée physiquement impossible pouvait donc entrer dans les features d'intention et contaminer un diagnostic de priorité de file.",
+      "red_evidence": {
+        "test": "tests/test_l4_capture.py::test_chantier4_rejette_une_queue_devant_negative",
+        "result": "Avant correction, queue_ahead=-0.1 était accepté et renvoyé dans l'événement canonique."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Refuser fail-closed toute queue_ahead non finie ou strictement négative; zéro reste autorisé comme valeur physique valide.",
+      "green_evidence": "6 tests L4 passent après correction; les valeurs négatives sont rejetées sans devenir une observation exploitable. Ruff E9/F, compileall et git diff --check ciblés passent.",
+      "anti_regression_tests": [
+        "tests/test_l4_capture.py::test_chantier4_rejette_une_queue_devant_negative",
+        "tests/test_l4_capture.py::test_chantier4_capture_reconstruit_le_cycle",
+        "tests/test_l4_capture.py::test_chantier4_rejette_evenement_invalide_et_dedoublonne_sans_preuve"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_l4_capture.py::test_chantier4_rejette_une_queue_devant_negative",
+          "tests/test_l4_capture.py::test_chantier4_capture_reconstruit_le_cycle",
+          "tests/test_l4_capture.py::test_chantier4_rejette_evenement_invalide_et_dedoublonne_sans_preuve"
+        ],
+        "test_result": "6 tests L4 passent; Ruff E9/F, compileall et git diff --check ciblés passent. Aucun flux L4 réel ni preuve économique n'a été inventé.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/l4_capture.py": "e3b01646d50f63908541584e6d74476b73e2305d7791520c8e10efa0660cb4d5",
+          "tests/test_l4_capture.py": "cfcb1278b8f31ee8bf86732a595a24b7f7bb781a9929075173a70d584b08a374"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-024",
+      "title": "Une socket userFills pouvait rester active avec des ACK incomplets",
+      "priority": "P1",
+      "kind": "collector_subscription_recovery",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/collecter_userfills_vaults.py",
+        "tests/test_collecter_userfills_vaults.py"
+      ],
+      "root_cause": "La boucle async for attendait indéfiniment la prochaine trame dès qu'au moins un ACK userFills manquait. Une connexion pouvait donc rester marquée active avec une couverture partielle, sans reconnexion ciblée ni cause durable, même si le serveur continuait à envoyer des trames non pertinentes.",
+      "red_evidence": {
+        "observation": "Le heartbeat actif du 2026-10-30 indiquait ACK 5/10 avec la collecte encore vivante; aucun délai de souscription n'existait dans la boucle userFills.",
+        "test": "tests/test_collecter_userfills_vaults.py::test_userfills_socket_reconnecte_si_les_acks_restent_incomplets",
+        "regression_contract": "tests/test_collecter_userfills_vaults.py::test_userfills_socket_reconnecte_si_les_acks_restent_incomplets",
+        "result": "Avant correction, le scénario d'une socket sans ACK restant suspendue n'avait ni deadline ni reconnexion ciblée démontrable."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Remplacer l'attente non bornée par une deadline absolue de 30 secondes après les souscriptions; journaliser les vaults manquants, exposer subscription_ack_timeouts dans le heartbeat, invalider les ACK du shard et laisser la boucle existante reconnecter uniquement ce shard. Une fois tous les ACK reçus, le flux reste sans timeout artificiel.",
+      "green_evidence": "La suite userFills complète passe (98 tests); le runner Copy-Vault sélectionne les trois suites aval et passe 195 tests en 14,04 s avec le budget CPU local à 50 % sur 16 processeurs logiques. Le test de reprise confirme la deadline, le diagnostic et la reconnexion ciblée. Aucun flux réseau actif n'a été redémarré.",
+      "anti_regression_tests": [
+        "tests/test_collecter_userfills_vaults.py::test_userfills_socket_reconnecte_si_les_acks_restent_incomplets",
+        "tests/test_collecter_userfills_vaults.py::test_userfills_ack_is_explicit_matched_and_required_for_every_vault",
+        "tests/test_collecter_userfills_vaults.py::test_userfills_socket_ignores_frames_until_matching_subscription_ack"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_collecter_userfills_vaults.py::test_userfills_socket_reconnecte_si_les_acks_restent_incomplets",
+          "tests/test_collecter_userfills_vaults.py::test_userfills_ack_is_explicit_matched_and_required_for_every_vault",
+          "tests/test_collecter_userfills_vaults.py::test_userfills_socket_ignores_frames_until_matching_subscription_ack"
+        ],
+        "test_result": "98 tests userFills passent en 2,24 s; le runner Copy-Vault passe 195 tests en 14,04 s; registre JSON, contrôle des hashes d'artefacts, Ruff E9/F, compileall et git diff --check ciblés passent. La collecte active n'a pas été redémarrée; le nouveau code sera pris en compte à la prochaine rotation contrôlée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/collecter_userfills_vaults.py": "9e9e3350edf69f0560ae65238168c453c38f2959b4bde019b142a8ffe7108b98",
+          "tests/test_collecter_userfills_vaults.py": "eeb7a0994041188a94f7ba1b230bc57424d61d19d1bca0746a3f8cf3ac87780f"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-025",
+      "title": "Un timeout d'adapter perdait le checkpoint vérifiable de output_root",
+      "priority": "P1",
+      "kind": "adapter_timeout_recovery",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "src/hl_observer/control_plane/campaign_adapters.py",
+        "tests/test_campaign_adapter_diagnostics.py"
+      ],
+      "root_cause": "Le chemin d'exception subprocess.TimeoutExpired appelait finish sans transmettre output_root. Lorsque le checkpoint durable se trouvait dans la sortie de l'unité et que workspace_root était différent, la vérification fail-closed ne pouvait pas reconnaître ce checkpoint pourtant présent et correctement hashé.",
+      "red_evidence": {
+        "observation": "Une unité copy_vault_collection avec checkpoint vérifié sous output_root retournait last_durable_checkpoint=null après TimeoutExpired; une reprise ne pouvait donc pas repartir de cette preuve.",
+        "test": "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_preserves_checkpoint_from_output_root",
+        "regression_contract": "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_preserves_checkpoint_from_output_root",
+        "result": "Le test était rouge avant le correctif: le timeout devenait CONTINUATION_REQUIRED mais le reçu perdait la référence du checkpoint durable."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Transmettre output_root à finish dans le chemin TimeoutExpired afin que la vérification d'identité, de confinement et de SHA-256 couvre la sortie réelle de l'unité. Le timeout reste non publié et nécessite toujours une continuation.",
+      "green_evidence": "Les tests diagnostics/resumable passent 40/40; le cas de timeout restitue désormais le checkpoint exact et conserve l'état TIMED_OUT. Aucun fragment partiel n'est promu en SAFE ou en complétion.",
+      "anti_regression_tests": [
+        "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_preserves_checkpoint_from_output_root",
+        "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_keeps_unit_unpublished",
+        "tests/test_campaign_adapter_diagnostics.py::test_interruption_after_verified_checkpoint_is_restartable"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_preserves_checkpoint_from_output_root",
+          "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_keeps_unit_unpublished",
+          "tests/test_campaign_adapter_diagnostics.py::test_interruption_after_verified_checkpoint_is_restartable"
+        ],
+        "test_result": "40 tests diagnostics/resumable passent en 2,02 s; la CI GitHub n'est pas exécutée. Le code reste local, PAPER/READ-ONLY/FAIL-CLOSED.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/control_plane/campaign_adapters.py": "cb6211fc9983a15a21162f095c0d649601bcf0988b359a07b20d50484f2398bd",
+          "tests/test_campaign_adapter_diagnostics.py": "8243cfc646465449f4a12d33f2927ebd464d2b51f17d3b8fbfba2e343aa0e3cc"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-026",
+      "title": "Le runner Copy-Vault ne lançait aucun test pour les adapters de campagne",
+      "priority": "P2",
+      "kind": "validation_harness_coverage",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/run_copy_vault_regressions.py",
+        "tests/test_copy_vault_regression_runner.py"
+      ],
+      "root_cause": "campaign_adapters.py n'était pas cartographié dans MODULE_TESTS et son dossier control_plane n'était pas un préfixe critique. Le runner renvoyait donc un succès sans tests sélectionnés pour une modification de la chaîne de reprise H-187.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_regression_runner.py::test_campaign_adapters_have_canonical_copy_vault_regression_mapping",
+        "result": "Avant correction, select_tests([src/hl_observer/control_plane/campaign_adapters.py]) renvoyait [] et la commande canonique affichait no mapped critical module changed; no tests selected."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter une cartographie explicite de campaign_adapters.py vers les deux suites de diagnostic et de reprise existantes, avec un test du sélecteur pour empêcher le retour silencieux à zéro test.",
+      "green_evidence": "Le sélecteur renvoie exactement tests/test_campaign_adapter_diagnostics.py et tests/test_resumable_campaign_adapters.py; le runner canonique exécute 40 tests et passe en 2,02 s avec le budget CPU local ENFORCED.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_regression_runner.py::test_campaign_adapters_have_canonical_copy_vault_regression_mapping",
+        "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_preserves_checkpoint_from_output_root"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_regression_runner.py::test_campaign_adapters_have_canonical_copy_vault_regression_mapping",
+          "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_preserves_checkpoint_from_output_root"
+        ],
+        "test_result": "Le mapping et les 40 tests adapters passent; la CI GitHub n'est pas exécutée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/run_copy_vault_regressions.py": "b2f0fdf7544f30611205e59eb99db5d1f97624f8fff2f50f7d9106e5c398dfec",
+          "tests/test_copy_vault_regression_runner.py": "b52afbefdb7843211a18f7af0816daabdbb2d1f60cfa434474eb7740df350465",
+          "tests/test_campaign_adapter_diagnostics.py": "8243cfc646465449f4a12d33f2927ebd464d2b51f17d3b8fbfba2e343aa0e3cc"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-027",
+      "title": "Le heartbeat commun supprimait silencieusement le compteur de timeouts ACK userFills",
+      "priority": "P1",
+      "kind": "collector_observability_integrity",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/heartbeat_collecteur.py",
+        "tests/test_launcher_core_heartbeat_bridge.py"
+      ],
+      "root_cause": "Le collecteur userFills incrementait subscription_ack_timeouts, mais la liste blanche du heartbeat partagé ne connaissait pas cette clé. Le compteur était donc supprimé lors de la persistance et le diagnostic de couverture ACK redevenait incomplet. La suite de bridge partageait en outre un dictionnaire global entre tests, ce qui rendait le résultat dépendant de l'ordre d'exécution.",
+      "red_evidence": {
+        "test": "tests/test_launcher_core_heartbeat_bridge.py::test_userfills_bridge_counts_only_persisted_fills_and_matched_ack",
+        "result": "Avant correction, l'état source contenait subscription_ack_timeouts=2 mais HB.lire(...) ne renvoyait pas cette clé (KeyError). Une seconde exécution révélait aussi un gaps_critiques contaminé par le compteur du test précédent."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter subscription_ack_timeouts à la liste blanche et à la normalisation entière du heartbeat, puis isoler l'état global userFills entre tests afin que les métriques de qualité soient persistées et déterministes.",
+      "green_evidence": "La suite du bridge passe 8/8; le compteur ACK timeout est désormais lisible dans le heartbeat et gaps_critiques n'est plus contaminé par l'ordre des tests. CI GitHub non exécutée.",
+      "anti_regression_tests": [
+        "tests/test_launcher_core_heartbeat_bridge.py::test_userfills_bridge_counts_only_persisted_fills_and_matched_ack",
+        "tests/test_launcher_core_heartbeat_bridge.py::test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_launcher_core_heartbeat_bridge.py::test_userfills_bridge_counts_only_persisted_fills_and_matched_ack",
+          "tests/test_launcher_core_heartbeat_bridge.py::test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2"
+        ],
+        "test_result": "8 tests heartbeat bridge passent en 1,67 s. La validation GitHub n'est pas exécutée; le collecteur actif n'a pas été redémarré.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/heartbeat_collecteur.py": "c4400275c39ec226629dd923c1c44f3c805f4d3bb9c32370465e1958c7d8fb98",
+          "tests/test_launcher_core_heartbeat_bridge.py": "cc602a16f9dc6880419a3d6c3a87326663ccb39e24d21270946e617f572e9e72"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-028",
+      "title": "Le runner Copy-Vault ignorait la reprise du backlog historique SAFE",
+      "priority": "P1",
+      "kind": "validation_harness_coverage",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/continuous_reconcile_backlog.py",
+        "tools/run_copy_vault_regressions.py",
+        "tests/test_continuous_reconcile_backlog.py",
+        "tests/test_copy_vault_regression_runner.py"
+      ],
+      "root_cause": "Le module de reprise historique SAFE n'était ni cartographié dans MODULE_TESTS ni couvert par CRITICAL_PREFIXES. La commande canonique pouvait donc répondre avec succès et aucun test sélectionné lorsqu'il était modifié, masquant une régression de checkpoint, de publication ou de reprise.",
+      "red_evidence": {
+        "test": "tools/run_copy_vault_regressions.py --path tools/continuous_reconcile_backlog.py",
+        "result": "Avant correction, le runner affichait COPY_VAULT_REGRESSION: no mapped critical module changed; no tests selected, sans exécuter tests/test_continuous_reconcile_backlog.py."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter la cartographie canonique du backlog historique vers sa suite de reprise, déclarer le préfixe critique pour empêcher les futurs modules continuous_reconcile d'être ignorés et ajouter un test explicite du sélecteur.",
+      "green_evidence": "Le runner sélectionne désormais la suite de backlog et l'exécute sous Job Object local à 50 % CPU avec les 16 processeurs logiques disponibles. Aucune CI GitHub n'a été exécutée.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_regression_runner.py::test_historical_backlog_reconcile_has_canonical_copy_vault_regression_mapping",
+        "tests/test_continuous_reconcile_backlog.py::test_publish_leaves_only_an_explicit_prepared_receipt_before_finalization",
+        "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_binds_sorted_manifest_hashes_and_is_idempotent"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_regression_runner.py::test_historical_backlog_reconcile_has_canonical_copy_vault_regression_mapping",
+          "tests/test_continuous_reconcile_backlog.py::test_publish_leaves_only_an_explicit_prepared_receipt_before_finalization",
+          "tests/test_continuous_reconcile_backlog.py::test_historical_wave_checkpoint_binds_sorted_manifest_hashes_and_is_idempotent"
+        ],
+        "test_result": "34 tests ciblés passent en 29,44 s; le runner canonique exécute 27 tests du backlog en 29,55 s avec CPU_BUDGET ENFORCED à 50 % et 16 processeurs logiques. Le collecteur actif n'a pas été redémarré.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/run_copy_vault_regressions.py": "b2f0fdf7544f30611205e59eb99db5d1f97624f8fff2f50f7d9106e5c398dfec",
+          "tests/test_copy_vault_regression_runner.py": "b52afbefdb7843211a18f7af0816daabdbb2d1f60cfa434474eb7740df350465",
+          "tools/continuous_reconcile_backlog.py": "b5c5d564982776c82eb7459ba774770c36f4e373bf4f18db4df02fbf5ed66902",
+          "tests/test_continuous_reconcile_backlog.py": "d5893f315008dba3514dd799254d431c81ecf8e370792ac7fb79979fe404555f"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-029",
+      "title": "Le runner Copy-Vault refusait de couvrir plusieurs modules critiques modifiés",
+      "priority": "P1",
+      "kind": "validation_harness_coverage",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/run_copy_vault_regressions.py",
+        "tests/test_copy_vault_regression_runner.py",
+        "src/hl_observer/backtesting/copy_vault_causal_alignment.py",
+        "src/hl_observer/backtesting/copy_vault_cpcv_purge.py",
+        "src/hl_observer/backtesting/copy_vault_crowding.py",
+        "src/hl_observer/backtesting/copy_vault_diagnostic_axes.py",
+        "src/hl_observer/backtesting/copy_vault_disagreement.py",
+        "src/hl_observer/backtesting/copy_vault_instrument_metadata.py",
+        "src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py",
+        "src/hl_observer/backtesting/copy_vault_maker_fill_bounds.py",
+        "src/hl_observer/backtesting/copy_vault_multifidelity.py",
+        "src/hl_observer/backtesting/copy_vault_multiple_testing.py",
+        "src/hl_observer/backtesting/copy_vault_paired_comparison.py",
+        "src/hl_observer/backtesting/copy_vault_regime_proof.py",
+        "src/hl_observer/backtesting/copy_vault_report_provenance.py",
+        "src/hl_observer/backtesting/copy_vault_trailing_audit.py",
+        "src/hl_observer/collection/collector.py",
+        "src/hl_observer/collection/copy_vault_checkpoint_tail.py",
+        "src/hl_observer/collection/feed_integrity.py",
+        "src/hl_observer/collection/hyperliquid_feed_contracts.py",
+        "src/hl_observer/collection/twap_collector.py",
+        "src/hl_observer/collection/userfills_live.py",
+        "src/hl_observer/collection/vault_fills_backfill.py",
+        "src/hl_observer/collection/ws_first_plan.py"
+      ],
+      "root_cause": "Ces modules étaient sous des préfixes Copy-Vault critiques mais absents de MODULE_TESTS. Le mode --changed s'arrêtait en NO_GO au lieu de sélectionner leurs suites contractuelles, ce qui bloquait la validation différentielle et pouvait masquer une régression locale.",
+      "red_evidence": {
+        "test": "tools/run_copy_vault_regressions.py --changed --list-only",
+        "result": "Avant correction, le runner refusait 22 modules critiques modifiés, dont copy_vault_causal_alignment.py, copy_vault_instrument_metadata.py, collector.py, userfills_live.py et ws_first_plan.py, avec COPY_VAULT_REGRESSION_NO_GO: no regression mapping for critical module(s)."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter les 22 cartographies explicites vers les suites de tests existantes, conserver le fail-closed pour tout futur module critique inconnu et ajouter un test de couverture de la matrice. Le mode --changed sélectionne désormais 88 suites locales au lieu de refuser silencieusement la campagne.",
+      "green_evidence": "La matrice de mapping passe 8 tests dédiés; --changed --list-only sélectionne 88 suites sans NO_GO et leur exécution canonique passe 1397 tests, 7 tests ignorés et 5 avertissements en 180,62 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Les preuves restent locales; aucune CI GitHub ni donnée SAFE n'est modifiée.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_regression_runner.py::test_changed_copy_vault_sources_have_canonical_mappings",
+        "tests/test_copy_vault_regression_runner.py::test_every_registered_regression_suite_exists"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_regression_runner.py::test_changed_copy_vault_sources_have_canonical_mappings",
+          "tests/test_copy_vault_regression_runner.py::test_every_registered_regression_suite_exists"
+        ],
+        "test_result": "8 tests du sélecteur passent en 1,17 s; --changed --list-only sélectionne 88 suites locales; le runner canonique passe 1397 tests, 7 ignorés et 5 avertissements en 180,62 s avec CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques; aucune CI GitHub exécutée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/run_copy_vault_regressions.py": "b2f0fdf7544f30611205e59eb99db5d1f97624f8fff2f50f7d9106e5c398dfec",
+          "tests/test_copy_vault_regression_runner.py": "b52afbefdb7843211a18f7af0816daabdbb2d1f60cfa434474eb7740df350465",
+          "src/hl_observer/backtesting/copy_vault_causal_alignment.py": "d067ae6c8599d82433bf54f6e60a543468a76eba82d4edc203311570b15cb79c",
+          "src/hl_observer/backtesting/copy_vault_cpcv_purge.py": "ca0ff944a47e762f0cef75336df5d74287b89dc6f6de9f4dde13b8810c375eb4",
+          "src/hl_observer/backtesting/copy_vault_crowding.py": "2cb4db6d3d7b6fb2b9dd5cd1f8017189649aab66b2bd4ff176c99dcb8fa66911",
+          "src/hl_observer/backtesting/copy_vault_diagnostic_axes.py": "c572a972d8c5b5f29a5cb6aac67397fcc40bb66599eea05dec349bbe3ab13adf",
+          "src/hl_observer/backtesting/copy_vault_disagreement.py": "9d1c5599c25b5b2bd18919463c7828f8fba439d6013148a36f5a196b25638846",
+          "src/hl_observer/backtesting/copy_vault_instrument_metadata.py": "84a3c176673b92013820599c8c1a1dc9336f3edb2a7f3d1207732f3283ac7523",
+          "src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py": "9ba3ff0fe06e5d65e898366f3d6c7fed1176010a0ecb4db7600c5e029a7ca8b9",
+          "src/hl_observer/backtesting/copy_vault_maker_fill_bounds.py": "d0b210bcd34d67ada5d6d50bc829960fb37461dae542238f8e35d46e1c0707e0",
+          "src/hl_observer/backtesting/copy_vault_multifidelity.py": "5f8d9fc655790ea0da948c85078fd4ab2d7cf989900b17d435d50f26f6a04b58",
+          "src/hl_observer/backtesting/copy_vault_multiple_testing.py": "fe3e25e95c77a67a80ff46c4ec0825044cd3963e0fa1151c8e7d5ceb689de93a",
+          "src/hl_observer/backtesting/copy_vault_paired_comparison.py": "2990a38eeec22186180729eb217cdd7bc4cda0f9649c6e5c3ecd2797d77ba757",
+          "src/hl_observer/backtesting/copy_vault_regime_proof.py": "3ea58a97bd012bea03983dd89253c402a62e29def868a5539f338c7419d7c27e",
+          "src/hl_observer/backtesting/copy_vault_report_provenance.py": "6ea453988bd8d07ecf228741b40c1742191c4267f771b49d9944737e8d0585c7",
+          "src/hl_observer/backtesting/copy_vault_trailing_audit.py": "b393cc337c736c20d93fa6579908222cdbbd15bbe3dd0ef6635d80d2aeed30ab",
+          "src/hl_observer/collection/collector.py": "12bd208a2a2f94ca99409f2e22d4a4add31166a12078ec6880f617385691d9b2",
+          "src/hl_observer/collection/copy_vault_checkpoint_tail.py": "dd8e27bc3453d10d3b20c653e6a8f7ffac90aa70034b6e1fc33833e1515afad9",
+          "src/hl_observer/collection/feed_integrity.py": "a608d3f6334b54ed0c48af93e172b7e7ecda9ffd6918b1f591f36eda2ed7badf",
+          "src/hl_observer/collection/hyperliquid_feed_contracts.py": "a05c302f655c18d55803bbf3fcf4cbb6cf5376254587749c506ba77996be87d4",
+          "src/hl_observer/collection/twap_collector.py": "7a28b96d2551bf9ec6900c8ca398d34afb247eb34748362178e6ce9a4de55f34",
+          "src/hl_observer/collection/userfills_live.py": "5c9929956bef77c3215e52b6b07cded133fe959625faa4be0a3b24aa2e219a78",
+          "src/hl_observer/collection/vault_fills_backfill.py": "b89783e0b3e12452590cb0839ac51e7531166a983384505e3bc34adcce73e549",
+          "src/hl_observer/collection/ws_first_plan.py": "6774aee78824a711afba74f79bd0cccd0c85ef6a2b4c5eedfa30e214c154738d"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-030",
+      "title": "Le runner Copy-Vault ne couvrait pas plusieurs modules économiques et de vérité du runtime",
+      "priority": "P1",
+      "kind": "validation_harness_coverage",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/run_copy_vault_regressions.py",
+        "tests/test_copy_vault_regression_runner.py",
+        "tools/audit_copy_vault_legacy_history.py",
+        "tools/audit_copy_vault_paths.py",
+        "tools/classify_copy_vault_campaigns.py",
+        "tools/copy_vault_collector_soak.py",
+        "tools/copy_vault_discovery_evaluator.py",
+        "tools/reconcile_copy_vault_historical_receipts.py",
+        "tools/verify_copy_vault_retention.py",
+        "src/hl_observer/copy_vault/attribution_after_netting.py",
+        "src/hl_observer/copy_vault/flip_as_two_operations.py",
+        "src/hl_observer/copy_vault/multi_vault_intent_netting.py",
+        "src/hl_observer/copy_vault/per_vault_replication_shortfall.py",
+        "src/hl_observer/copy_vault/position_epoch_id.py",
+        "src/hl_observer/datasets/copy_vault_campaign_completeness.py",
+        "src/hl_observer/datasets/copy_vault_coverage.py",
+        "src/hl_observer/datasets/copy_vault_historical_reconciliation.py",
+        "src/hl_observer/datasets/copy_vault_legacy_history_audit.py",
+        "src/hl_observer/economics/__init__.py",
+        "src/hl_observer/economics/copy_vault_metrics.py",
+        "src/hl_observer/economics/families.py",
+        "src/hl_observer/economics/hyperliquid_fees.py",
+        "src/hl_observer/following/wallet_scoring_shortlist.py",
+        "src/hl_observer/market_truth/__init__.py",
+        "src/hl_observer/market_truth/executable_replay.py",
+        "src/hl_observer/normalization/fills.py",
+        "src/hl_observer/normalization/l2_book.py",
+        "src/hl_observer/normalization/market_events.py",
+        "src/hl_observer/research/copy_vault_sequential_eprocess.py",
+        "src/hl_observer/research/copy_vault_venue_capability_matrix.py",
+        "src/hl_observer/simulation/wallet_day_robustness.py",
+        "src/hl_observer/wallet_identity.py",
+        "src/hl_observer/wallets/backfill.py",
+        "src/hl_observer/wallets/leaderboard_models.py",
+        "src/hl_observer/wallets/top_wallet_ranker.py",
+        "src/hl_observer/wallets/user_fills_multiplex.py",
+        "tests/test_copy_vault_simultaneous_netting.py",
+        "tests/test_copy_vault_metric_receipts.py",
+        "tests/test_market_truth_pipeline.py",
+        "tests/test_normalization_units.py",
+        "tests/test_copy_vault_path_audit.py"
+      ],
+      "root_cause": "Les répertoires copy_vault, economics, market_truth, normalization, wallets et plusieurs outils SAFE ne faisaient pas partie des préfixes critiques du runner. Une modification de ces modules pouvait donc produire un succès sans suite de régression sélectionnée, même si leurs consommateurs existaient.",
+      "red_evidence": {
+        "test": "tools/run_copy_vault_regressions.py --changed --list-only",
+        "result": "Avant correction, les modules copy_vault/attribution_after_netting.py, economics/copy_vault_metrics.py, market_truth/executable_replay.py, normalization/fills.py, wallets/leaderboard_models.py et plusieurs outils SAFE étaient hors matrice critique et n'étaient pas sélectionnés par le runner différentiel."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Ajouter les mappings explicites des modules économiques, de vérité, normalisation, sélection de wallets, dataset SAFE et outils de conservation; ajouter leurs préfixes critiques pour conserver le fail-closed lors des futurs ajouts; et couvrir la matrice par un test dédié.",
+      "green_evidence": "La matrice étendue passe 9 tests du sélecteur; --changed --list-only sélectionne désormais 144 suites. Après réconciliation des hashes du registre, la campagne --changed complète a exécuté 1766 tests passants, 7 ignorés et 1 avertissement en 244,80 s; les tests registre/sélecteur restent verts. Aucune CI GitHub, donnée SAFE ou collecte active n'a été modifiée.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_regression_runner.py::test_core_copy_vault_runtime_sources_have_canonical_mappings",
+        "tests/test_copy_vault_regression_runner.py::test_changed_copy_vault_sources_have_canonical_mappings",
+        "tests/test_copy_vault_simultaneous_netting.py::test_netting_is_exact_and_permutation_invariant_with_traceable_residuals"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_regression_runner.py::test_core_copy_vault_runtime_sources_have_canonical_mappings",
+          "tests/test_copy_vault_regression_runner.py::test_changed_copy_vault_sources_have_canonical_mappings",
+          "tests/test_copy_vault_simultaneous_netting.py::test_netting_is_exact_and_permutation_invariant_with_traceable_residuals"
+        ],
+        "test_result": "9 tests du sélecteur passent; --changed --list-only sélectionne 144 suites; la campagne canonique complète a exécuté 1766 tests passants, 7 ignorés et 1 avertissement en 244,80 s après réconciliation des hashes du registre. Les tests registre/sélecteur et la campagne ciblée collecteur restent verts. CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques; aucune CI GitHub exécutée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/run_copy_vault_regressions.py": "b2f0fdf7544f30611205e59eb99db5d1f97624f8fff2f50f7d9106e5c398dfec",
+          "tests/test_copy_vault_regression_runner.py": "b52afbefdb7843211a18f7af0816daabdbb2d1f60cfa434474eb7740df350465",
+          "tools/audit_copy_vault_legacy_history.py": "e1594e03406046babb56eb44876ee144948a32ba6dde01f6d3f837dcc6272bd1",
+          "tools/audit_copy_vault_paths.py": "33b2f4863e3afcae56782ebbd986043aa3c6ebd84587e4e55f823e186788840c",
+          "tools/classify_copy_vault_campaigns.py": "f4dc7a55e66033dd11b3f363a3f13850d474fbda3e9bb90f5fe132b062b46ad1",
+          "tools/copy_vault_collector_soak.py": "1a4aea7d80453733e37dec8e76f6d47be147ead7c3f983fc21f959917428401c",
+          "tools/copy_vault_discovery_evaluator.py": "6d243e11f026d7bbf1afe6ef4d38dbd6cdbb319869fc896cb541be66bdb8f2e6",
+          "tools/reconcile_copy_vault_historical_receipts.py": "16e8a32d52ef998382bf68e0ff73c56140a8ae9d5a560b8dd1d6ed0c602ca7f2",
+          "tools/verify_copy_vault_retention.py": "3d0bb3700cf95cb51dac0f76ef6f03bee9143386a61dc3d8774e87f773477fd8",
+          "src/hl_observer/copy_vault/attribution_after_netting.py": "6a28f9808bc390308c2279a93821d28fce22e4c075e4c53dc6ec2797db26edbf",
+          "src/hl_observer/copy_vault/flip_as_two_operations.py": "307be9026b3e938386537e5ed169bd3a8ccacd7ea0b4ffc8eed5f7ca4ac85c8e",
+          "src/hl_observer/copy_vault/multi_vault_intent_netting.py": "e965562b6e04e6eb61e68430856c2e4d560499011bd5167241921b16ac8512ef",
+          "src/hl_observer/copy_vault/per_vault_replication_shortfall.py": "0f369a977896a918d76e8fd845626a66e1707d3823ed6765b259cf02425a92fd",
+          "src/hl_observer/copy_vault/position_epoch_id.py": "547af45125ff8b52ee959f9de0b5fe74c55056a8163441a95926193d656cc7ec",
+          "src/hl_observer/datasets/copy_vault_campaign_completeness.py": "6dfd1f43cd779eb544bb734f532966845e6d964f4131e07302edbaceeeba2866",
+          "src/hl_observer/datasets/copy_vault_coverage.py": "3ac21f9dee7712e6c423d9e6ff4f2516e50f466dc644df6c440b6f0d8a2109a9",
+          "src/hl_observer/datasets/copy_vault_historical_reconciliation.py": "7fc4147a4d3ce2d7d1168aedef83f9906d403df701deca8d55896b0652fee839",
+          "src/hl_observer/datasets/copy_vault_legacy_history_audit.py": "b7437cacb8b79847e9e8c2852889afb370e40bff4891d519f7195bd1382e18e2",
+          "src/hl_observer/economics/__init__.py": "5e9a1081bcd8858266662122dc996b311f155190a4667571ebcfa25a040dcc64",
+          "src/hl_observer/economics/copy_vault_metrics.py": "277d2c047d0a2c36d1e79e9dab19acece7dcfd92b7aecdb2c6348375d0e41b91",
+          "src/hl_observer/economics/families.py": "5dcb9572e98069e540114a4506cf44a03e59f2a9eabe1f38df75b2717d68198d",
+          "src/hl_observer/economics/hyperliquid_fees.py": "2428a2f62311a4694e891157b153c0566619891e23898443f4b57d48a62aa34f",
+          "src/hl_observer/following/wallet_scoring_shortlist.py": "9fafbf04791cd475fd037fb1615659c171b104f92382406d20c8cacc56290050",
+          "src/hl_observer/market_truth/__init__.py": "b1911629f2ba82aa280ade138d82e879c3499e20e7ccfd64f715c8695fb65d6e",
+          "src/hl_observer/market_truth/executable_replay.py": "bceeea847e6ab69ac945989313a516caa2380d0a46661f0ce2af12ae7a8461e9",
+          "src/hl_observer/normalization/fills.py": "b26dd29bb962f71e37a761d6299e97934c0dd7283fd4d87b3b595b1610612ad8",
+          "src/hl_observer/normalization/l2_book.py": "83f030d070d83a646d8bae11e4502e13f09fbe3be69fbf34a17de14d5d74d6f4",
+          "src/hl_observer/normalization/market_events.py": "26b445abfaccaa82e8e379bec34b988113aefbe182fc33d5743a0815a6095787",
+          "src/hl_observer/research/copy_vault_sequential_eprocess.py": "edb5908e01f47d68ac876a2a33c0afce826d696464531e86221626cb481fa999",
+          "src/hl_observer/research/copy_vault_venue_capability_matrix.py": "4f16644325abae5fbad93813e9a04d997589bb1cc788184ef374b604edcea108",
+          "src/hl_observer/simulation/wallet_day_robustness.py": "d21cd9272fa5dbcf6ff09444b056cc5de59b654650a3f7d226e129b89ce1497f",
+          "src/hl_observer/wallet_identity.py": "abebe0cc494391f2c4bcfe909db5df4f21a1258f73f0cd02ffac043c127daa3b",
+          "src/hl_observer/wallets/backfill.py": "572e0f039e1d42b5928592ec991e622f1303693911785af1b2cfa83e47c616ee",
+          "src/hl_observer/wallets/leaderboard_models.py": "bbd0272ad4d9ec0cd0326e13688e87622de2d1eec6746882456df784d249c35f",
+          "src/hl_observer/wallets/top_wallet_ranker.py": "3b1c19f46ce58ec4547ae5a16862dacf4b36e590dce9a1c09ab7ec2f10599b0a",
+          "src/hl_observer/wallets/user_fills_multiplex.py": "36f228d47e7caa9e045620fdcc672c8c88169dab6f4c531b4255b65b91a4244e",
+          "tests/test_copy_vault_simultaneous_netting.py": "84a15f12f29f80669e935135624e39ba1ac06b6235c21d28cbb25457b2d7c1b1",
+          "tests/test_copy_vault_metric_receipts.py": "f648c86052f126cad5a5ff402f031a9a8af9d813d0c401bab6c6fbe61b138bdc",
+          "tests/test_market_truth_pipeline.py": "e667039ed19942664291eb68bbb6b61020b755b2996a8a07b305bf1d7cf58fc0",
+          "tests/test_normalization_units.py": "f12ef001f36d81ae7d038480cabf8618ebc766612d00b0d53e1a50ee158d325e",
+          "tests/test_copy_vault_path_audit.py": "fbdb63ca5c3976da51a4c6bcda1c4e923662d10957e3f1f4bd7d3ee71163bad3"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-031",
+      "title": "Les ACK userFills et les reconnexions L2 n'étaient pas diagnostiqués au niveau de leur shard",
+      "priority": "P1",
+      "kind": "collector_transport_observability",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/collecter_userfills_vaults.py",
+        "tests/test_collecter_userfills_vaults.py",
+        "tools/heartbeat_collecteur.py"
+      ],
+      "root_cause": "Le compteur ACK affiché utilisait l'ensemble global de la rotation alors que les abonnements étaient répartis sur des sockets indépendantes; un shard pouvait donc être masqué par l'autre. Les sockets L2 étaient aussi ouvertes lorsqu'aucune cible causale n'existait, ce qui provoquait des fermetures 1000/Inactive et des reconnexions inutiles.",
+      "red_evidence": {
+        "source": "runtime/logs/economic-userfills-live.log",
+        "test": "tests/test_collecter_userfills_vaults.py::test_userfills_ack_progress_is_isole_par_socket_et_visible_dans_heartbeat",
+        "result": "Les journaux affichaient successivement ACK 5/10 pour un shard qui avait pourtant reçu 5/5 ACK locaux, et répétaient L2 dyn reconnect (received 1000 (OK) Inactive) en absence de cible active. Le heartbeat restait ambigu sur le shard incomplet."
+      },
+      "fix_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "fix_summary": "Isoler les ACK par socket, afficher la progression locale et exposer subscription_ack_by_socket dans le heartbeat; ne pas ouvrir les WS L2/tape sans cible causale réelle et fermer proprement une connexion devenue vide.",
+      "green_evidence": "117 tests ciblés du collecteur, du heartbeat et du pont de métriques passent; les tests dédiés prouvent l'isolation ACK A/B, la persistance des seuls compteurs whitelisted et l'absence d'ouverture WS L2/tape sur univers vide. Compileall et diff --check passent. Le processus déjà actif n'a pas été redémarré; la correction s'appliquera à la prochaine rotation contrôlée.",
+      "anti_regression_tests": [
+        "tests/test_collecter_userfills_vaults.py::test_userfills_ack_progress_is_isole_par_socket_et_visible_dans_heartbeat",
+        "tests/test_collecter_userfills_vaults.py::test_l2_ws_ne_se_connecte_pas_sans_cible",
+        "tests/test_collecter_userfills_vaults.py::test_tape_l2_ws_ne_se_connecte_pas_sans_cible",
+        "tests/test_collecter_userfills_vaults.py::test_userfills_socket_reconnecte_si_les_acks_restent_incomplets"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_collecter_userfills_vaults.py::test_userfills_ack_progress_is_isole_par_socket_et_visible_dans_heartbeat",
+          "tests/test_collecter_userfills_vaults.py::test_l2_ws_ne_se_connecte_pas_sans_cible",
+          "tests/test_collecter_userfills_vaults.py::test_tape_l2_ws_ne_se_connecte_pas_sans_cible",
+          "tests/test_collecter_userfills_vaults.py::test_userfills_socket_reconnecte_si_les_acks_restent_incomplets"
+        ],
+        "test_result": "117 tests ciblés passent en 5,55 s; compileall et git diff --check passent; aucune CI GitHub exécutée et aucun collecteur actif interrompu.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/collecter_userfills_vaults.py": "9e9e3350edf69f0560ae65238168c453c38f2959b4bde019b142a8ffe7108b98",
+          "tests/test_collecter_userfills_vaults.py": "eeb7a0994041188a94f7ba1b230bc57424d61d19d1bca0746a3f8cf3ac87780f",
+          "tools/heartbeat_collecteur.py": "c4400275c39ec226629dd923c1c44f3c805f4d3bb9c32370465e1958c7d8fb98"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-032",
+      "title": "La reprise du soak ne restaurait pas le compteur de doublons du préfixe checkpointé",
+      "priority": "P1",
+      "kind": "collector_recovery_receipt_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+      "component_paths": [
+        "tools/copy_vault_collector_soak.py",
+        "tests/test_copy_vault_collector_soak.py"
+      ],
+      "root_cause": "Le checkpoint conservait le curseur et les lignes acceptées, mais pas le nombre de doublons déjà consommés. Après reprise, le contenu accepté restait identique mais le reçu économique/qualité rapportait un duplicate_count inférieur à l'exécution continue.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_collector_soak.py::test_soak_resume_matches_continuous_and_deduplicates",
+        "result": "Avant correction, continuous.duplicate_count et resumed.duplicate_count divergeaient lorsque des doublons se trouvaient avant le curseur d'interruption."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Versionner le checkpoint en v2, persister duplicate_count, le valider strictement et le restaurer avant le traitement du suffixe; ajouter l'assertion d'équivalence au test de reprise.",
+      "green_evidence": "Le runner canonique ciblé retourne 5 tests passants en 4,29 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Aucun collecteur actif, shard SAFE ou flux réseau n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_collector_soak.py::test_soak_resume_matches_continuous_and_deduplicates",
+        "tests/test_copy_vault_collector_soak.py::test_soak_checkpoint_is_rejected_when_input_changes",
+        "tests/test_copy_vault_collector_soak.py::test_soak_rejects_checkpoint_with_non_integer_duplicate_count"
+      ],
+      "github_validation": {
+        "target_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_collector_soak.py::test_soak_resume_matches_continuous_and_deduplicates",
+          "tests/test_copy_vault_collector_soak.py::test_soak_checkpoint_is_rejected_when_input_changes",
+          "tests/test_copy_vault_collector_soak.py::test_soak_rejects_checkpoint_with_non_integer_accepted_count",
+          "tests/test_copy_vault_collector_soak.py::test_soak_limits_are_explicit_and_cli_receipt_is_json"
+        ],
+        "test_result": "6 tests passants en 4,29 s; runner canonique, compileall, ruff E9/F et diff --check ciblés passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "39747a53d9ac8698f61065ac4a44919488c36e3f",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/copy_vault_collector_soak.py": "ae53086bb09efb2f2cc582ab99ef6969d7d62897d4abaa2fbe1c41960d9cea04",
+          "tests/test_copy_vault_collector_soak.py": "e096f461ff26459cc9ac498c5b8d91fc7c69842097ef73dcc239738897e9e7bc"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-033",
+      "title": "Un checkpoint de vague pouvait être remplacé par une course d'écrivains",
+      "priority": "P1",
+      "kind": "historical_reconcile_checkpoint_race",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "tools/continuous_reconcile_backlog.py",
+        "tests/test_continuous_reconcile_backlog.py"
+      ],
+      "root_cause": "Après un contrôle destination.exists(), deux runners pouvaient tous deux voir le nom absent puis le second os.replace() pouvait remplacer silencieusement le reçu publié par le premier. Cela rompait l'append-only attendu même si chaque payload était individuellement content-addressed.",
+      "red_evidence": {
+        "test": "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_is_creation_exclusive_when_a_racer_wins",
+        "result": "Le test injecte un gagnant concurrent entre le contrôle initial et la création; le writer refuse l'identité divergente et conserve octet pour octet le reçu du gagnant."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Écrire le temporaire fsyncé puis créer le chemin final par lien atomique création-exclusive; une collision est relue et acceptée seulement si elle est byte-for-byte identique, sinon elle lève historical wave checkpoint identity conflict sans écraser l'historique.",
+      "green_evidence": "Le runner canonique ciblé retourne 29 tests passants en 20,44 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. La vérification combinée du sélecteur et du backlog retourne 40 tests passants en 20,82 s; compileall, Ruff et git diff --check passent. Aucun collecteur actif, shard SAFE, flux réseau ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_refuses_to_overwrite_existing_identity",
+        "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_is_creation_exclusive_when_a_racer_wins",
+        "tests/test_continuous_reconcile_backlog.py::test_publish_leaves_only_an_explicit_prepared_receipt_before_finalization"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_refuses_to_overwrite_existing_identity",
+          "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_is_creation_exclusive_when_a_racer_wins",
+          "tests/test_continuous_reconcile_backlog.py::test_publish_leaves_only_an_explicit_prepared_receipt_before_finalization"
+        ],
+        "test_result": "Les preuves locales précédentes restent historiques mais leurs octets sont devenus obsolètes après le renforcement CVB-2026-051; revalidation exacte requise avant de les compter comme PASS. La suite actuelle retourne 30 tests passants et 1 ignoré; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/continuous_reconcile_backlog.py": "23aec591943ecb979d0b9b97e4e950378679374d9970239a3048888f238a93e2",
+          "tests/test_continuous_reconcile_backlog.py": "ec3eb31fdb98037006909396034045e51a86cf8cd71ddf38a6344fe6baf586b9"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-034",
+      "title": "Une feature causale absente était présentée comme un rejet à PnL nul",
+      "priority": "P1",
+      "kind": "discovery_missing_data_truthfulness",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "tools/copy_vault_discovery_evaluator.py",
+        "tests/test_copy_vault_discovery_evaluator.py"
+      ],
+      "root_cause": "Quand aucune valeur finie n'existait pour la feature causale demandée, evaluate_feature_rows() renvoyait REJECT avec net_usd=0.0 et pf=0.0. Ces zéros pouvaient être lus comme une mesure économique alors qu'aucun échantillon n'était disponible.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_discovery_evaluator.py::test_feature_absente_echoue_ferme",
+        "result": "Le cas de feature absente fournissait un verdict REJECT et des métriques zéro au lieu d'un état sans mesure; la nouvelle assertion impose l'absence de net_usd et de pf."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Renvoyer le blocage canonique FEATURE_UNAVAILABLE avec data_available=false, sample_count=0 et diagnostic, sans net_usd, pf ou autre PnL synthétique.",
+      "green_evidence": "Le runner canonique ciblé retourne 11 tests passants en 1,40 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. La vérification couvre aussi le trial accounting et les paramètres numériques malformés; aucune métrique PnL n'est produite avant validation des contrôles. Aucun shard SAFE, collecteur actif, flux réseau ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_discovery_evaluator.py::test_feature_absente_echoue_ferme",
+        "tests/test_copy_vault_discovery_evaluator.py::test_dataset_present_mais_vide_echoue_ferme_sans_pnl_factice",
+        "tests/test_copy_vault_discovery_evaluator.py::test_reconstruction_features_indisponible_echoue_ferme_avec_diagnostic"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_discovery_evaluator.py::test_feature_absente_echoue_ferme",
+          "tests/test_copy_vault_discovery_evaluator.py::test_dataset_present_mais_vide_echoue_ferme_sans_pnl_factice",
+          "tests/test_copy_vault_discovery_evaluator.py::test_reconstruction_features_indisponible_echoue_ferme_avec_diagnostic"
+        ],
+        "test_result": "11 tests passants dans le runner canonique; le contrôle couvre les protections de données absentes, le trial accounting invalide et les paramètres numériques malformés; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tools/copy_vault_discovery_evaluator.py": "b76882bf57208a8a7020dbe2aa20a2254c965d16dbf8cfd7a8b249dd9cebc9c6",
+          "tests/test_copy_vault_discovery_evaluator.py": "8308240f91a4ba8490d336ce9905c029804e4e3eb61b538374e7c3b0dae8382c"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-035",
+      "title": "Un état de continuation de replay malformé pouvait traverser la validation",
+      "priority": "P1",
+      "kind": "replay_continuation_integrity",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/backtesting/copy_vault_executable.py",
+        "tests/test_copy_vault_event_order.py"
+      ],
+      "root_cause": "La validation de CopyVaultReplayState était exprimée comme une chaîne de blocs imbriqués dont l'absence d'une condition pouvait laisser continuer un état malformé; le pass final ne signalait aucun rejet et certaines valeurs non conformes n'étaient pas contrôlées.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_event_order.py::test_malformed_replay_continuation_state_fails_closed_without_execution",
+        "result": "Les états contenant un timestamp de sortie invalide, un trade_id non textuel, un curseur sans événement ou des réservations désalignées devaient être rejetés avant toute exécution; avant la correction, la validation ne les rejetait pas explicitement."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Centraliser la validation fail-closed de l'état de continuation, vérifier curseur, séquences, réservations, Decimal finis, identifiants et alignement des sorties; refuser tout état invalide sans muter la continuation ni exécuter de metaorder.",
+      "green_evidence": "Le runner canonique Copy-Vault retourne 306 tests passants et 2 skips environnementaux en 17,21 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et git diff --check ciblés passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_event_order.py::test_malformed_replay_continuation_state_fails_closed_without_execution",
+        "tests/test_copy_vault_event_order.py::test_full_and_segmented_copy_vault_replays_preserve_open_exposure_and_ledger",
+        "tests/test_copy_vault_event_order.py::test_exact_duplicate_at_segment_edge_matches_full_replay"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_event_order.py::test_malformed_replay_continuation_state_fails_closed_without_execution",
+          "tests/test_copy_vault_event_order.py::test_full_and_segmented_copy_vault_replays_preserve_open_exposure_and_ledger",
+          "tests/test_copy_vault_event_order.py::test_exact_duplicate_at_segment_edge_matches_full_replay"
+        ],
+        "test_result": "306 tests passants et 2 skips environnementaux dans le runner canonique; compileall, Ruff E9/F et git diff --check ciblés passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/backtesting/copy_vault_executable.py": "df64f7ba42167c052a2d716a5114212194333e51233fe9c1415ffa5a685a921a",
+          "tests/test_copy_vault_event_order.py": "b8d6324ed1587103a8cf4e47e6ed894beaa56127a8eda469b830a23bcb98dfae"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-036",
+      "title": "Le témoin négatif de crowding pouvait être le follower candidat",
+      "priority": "P1",
+      "kind": "crowding_control_selection",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/backtesting/copy_vault_crowding.py",
+        "tests/test_copy_vault_crowding.py"
+      ],
+      "root_cause": "Le diagnostic choisissait un seul témoin par rotation alphabétique. Selon les noms de wallets, ce témoin pouvait être exactement le follower candidat; son taux de rapprochement était alors réutilisé comme contrôle négatif et annulait artificiellement le control_gap.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_crowding.py::test_negative_control_never_reuses_candidate_follower",
+        "result": "Avec l'ordre a-leader, b-follower, c-witness, le témoin par rotation sélectionnait b-follower et rejetait à tort le candidat malgré un témoin c-witness sans match; le test adversarial reproduit ce biais."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Évaluer tous les témoins déterministes disponibles, exclure le leader et tous les followers candidats du leader, puis calculer le contrôle uniquement sur des wallets indépendants du candidat évalué.",
+      "green_evidence": "Le runner canonique ciblé retourne 19 tests passants en 3,30 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et git diff --check ciblés passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_crowding.py::test_negative_control_never_reuses_candidate_follower",
+        "tests/test_copy_vault_crowding.py::test_repeated_cross_coin_cross_day_lag_is_needed_for_classification",
+        "tests/test_copy_vault_crowding.py::test_input_order_does_not_change_point_in_time_result"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_crowding.py::test_negative_control_never_reuses_candidate_follower",
+          "tests/test_copy_vault_crowding.py::test_repeated_cross_coin_cross_day_lag_is_needed_for_classification",
+          "tests/test_copy_vault_crowding.py::test_input_order_does_not_change_point_in_time_result"
+        ],
+        "test_result": "19 tests passants dans le runner canonique; compileall, Ruff E9/F et git diff --check ciblés passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/backtesting/copy_vault_crowding.py": "8d4cf95db4e9008b2e3c013885af1d9f886b23b82657232598386065259660d5",
+          "tests/test_copy_vault_crowding.py": "e7bf992f31de1f65c090a3b4ea87966c3cf4d119bb42e51d40de3685f7e74f45"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-037",
+      "title": "Le contrat Kronos levait une exception sur des paramètres de politique mal formés",
+      "priority": "P1",
+      "kind": "kronos_context_fail_closed",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/research/kronos_context_contract.py",
+        "tests/test_kronos_context_contract.py"
+      ],
+      "root_cause": "La fonction ajoutait bien KRONOS_CONTEXT_POLICY_INVALID pour un cutoff, une fréquence, un lookback, une limite ou une borne de pré-entraînement invalide, mais continuait ensuite à comparer ces valeurs et pouvait lever TypeError au lieu de retourner un verdict UNMEASURABLE.",
+      "red_evidence": {
+        "test": "tests/test_kronos_context_contract.py::test_invalid_policy_parameters_fail_closed_without_type_error",
+        "result": "Cinq paramètres mal formés (None ou chaîne) sont maintenant couverts; chacun retourne eligible=false et KRONOS_CONTEXT_POLICY_INVALID sans exception."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Garder des gardes de type explicites avant toutes les comparaisons de politique, de cutoff et de fréquence afin que toute entrée mal formée reste fail-closed.",
+      "green_evidence": "Le runner canonique ciblé retourne 12 tests passants en 1,51 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et le contrôle de diff ciblé passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_kronos_context_contract.py::test_invalid_policy_parameters_fail_closed_without_type_error",
+        "tests/test_kronos_context_contract.py::test_kronos_context_is_point_in_time_and_safe",
+        "tests/test_kronos_context_contract.py::test_kronos_sample_count_mean_and_dispersion_contract"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_kronos_context_contract.py::test_invalid_policy_parameters_fail_closed_without_type_error",
+          "tests/test_kronos_context_contract.py::test_kronos_context_is_point_in_time_and_safe",
+          "tests/test_kronos_context_contract.py::test_kronos_sample_count_mean_and_dispersion_contract"
+        ],
+        "test_result": "12 tests passants dans le runner canonique; compileall, Ruff E9/F et le contrôle de diff ciblé passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/research/kronos_context_contract.py": "9ddf2106eb3007e59a2439d3cde03adc15710c72ab42fbc338b2bd122929ece8",
+          "tests/test_kronos_context_contract.py": "a002b61d15a13c98feaf9873e626294e4fd6a90ef0260834fe873d0137331eac"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-038",
+      "title": "Les sorties Kronos pouvaient être mesurables avec timestamp absent ou prix invalide",
+      "priority": "P1",
+      "kind": "kronos_forecast_output_validation",
+      "status": "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/research/kronos_context_contract.py",
+        "tests/test_kronos_context_contract.py"
+      ],
+      "root_cause": "Le résumé contrôlait seulement que les timestamps étaient identiques entre trajectoires et que les closes étaient finis; None, bool, zéro ou des timestamps non croissants pouvaient donc passer dans une moyenne prétendument mesurable.",
+      "red_evidence": {
+        "test": "tests/test_kronos_context_contract.py::test_kronos_samples_reject_invalid_timestamp_or_price",
+        "result": "Les timestamp absents/non entiers, les prix nuls et les timestamps de trajectoire non croissants produisent désormais UNMEASURABLE sans moyenne ni dispersion publiées."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Exiger un timestamp entier strictement positif et croissant par trajectoire, ainsi qu'un close fini strictement positif, avant de calculer moyenne ou dispersion.",
+      "green_evidence": "Le runner canonique ciblé retourne 16 tests passants en 1,31 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et le contrôle de diff ciblé passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_kronos_context_contract.py::test_kronos_samples_reject_invalid_timestamp_or_price",
+        "tests/test_kronos_context_contract.py::test_kronos_samples_reject_non_monotonic_forecast_timestamps",
+        "tests/test_kronos_context_contract.py::test_kronos_sample_count_mean_and_dispersion_contract"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "NOT_RUN",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_kronos_context_contract.py::test_kronos_samples_reject_invalid_timestamp_or_price",
+          "tests/test_kronos_context_contract.py::test_kronos_samples_reject_non_monotonic_forecast_timestamps",
+          "tests/test_kronos_context_contract.py::test_kronos_sample_count_mean_and_dispersion_contract"
+        ],
+        "test_result": "16 tests passants dans le runner canonique; compileall, Ruff E9/F et le contrôle de diff ciblé passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/research/kronos_context_contract.py": "bd8ccfd1fd3134f72611866416b1a9840e308aecec16a89a8aee864c5704085f",
+          "tests/test_kronos_context_contract.py": "ba09a7a418b2523fef52f5812713127ef5c2aa18846b2a0d9a8988d368e76b4d"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-039",
+      "title": "Un générateur L4 vide contournait le garde de flux absent",
+      "priority": "P1",
+      "kind": "l4_empty_iterable_fail_closed",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/collection/l4_capture.py",
+        "tests/test_l4_capture.py"
+      ],
+      "root_cause": "capturer() utilisait la vérité Python de l'objet Iterable; un générateur vide est truthy, donc il atteignait experience_intent([]) au lieu de retourner BLOCKED_EXTERNAL comme une liste vide ou None.",
+      "red_evidence": {
+        "test": "tests/test_l4_capture.py::test_chantier4_sans_flux_est_blocked_external",
+        "result": "Un générateur L4 vide retourne maintenant BLOCKED_EXTERNAL, sans cycle, capture ou preuve synthétique."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Consommer le premier élément de l'itérable pour distinguer flux vide et flux présent, puis reconstruire l'itération avec itertools.chain sans matérialiser tout le flux.",
+  "green_evidence": "Le runner canonique L4 sélectionne tests/test_l4_capture.py et tests/test_order_intent.py et retourne 12 tests passants en 2,45 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et le contrôle de diff ciblé passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_l4_capture.py::test_chantier4_sans_flux_est_blocked_external",
+        "tests/test_l4_capture.py::test_chantier4_capture_reconstruit_le_cycle",
+        "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_l4_capture.py::test_chantier4_sans_flux_est_blocked_external",
+          "tests/test_l4_capture.py::test_chantier4_capture_reconstruit_le_cycle",
+          "tests/test_l4_capture.py::test_chantier4_ecriture_append_only_est_idempotente_entre_reprises"
+        ],
+    "test_result": "12 tests passants dans le runner canonique; compileall, Ruff E9/F et le contrôle de diff ciblé passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+      "src/hl_observer/collection/l4_capture.py": "c86064e69e5fc5942c0bf3da8bd23a5efc6715622c6ebab4bb74f3bb378055a8",
+      "tests/test_l4_capture.py": "6200dc97c1df0ee45731539c29fe7cabb60c77bfc59042b83b14c938c284ad42"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-040",
+      "title": "Le soak comptait comme doublon un event_id au contenu contradictoire",
+      "priority": "P1",
+      "kind": "collector_soak_event_identity_conflict",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "tools/copy_vault_collector_soak.py",
+        "tests/test_copy_vault_collector_soak.py"
+      ],
+      "root_cause": "Le harness conservait seulement un set d'event_id; un même identifiant avec un payload différent était donc absorbé comme doublon, ce qui pouvait masquer une divergence et fausser accepted_count/duplicate_count.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_collector_soak.py::test_soak_rejects_conflicting_payload_for_same_event_id",
+        "result": "Deux payloads différents pour fill-1 lèvent SOAK_EVENT_ID_CONFLICT au lieu d'être fusionnés silencieusement; le contrôle s'applique aussi pendant la reprise."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Mémoriser le hash du payload canonique par event_id, compter uniquement les duplications exactes et refuser toute collision de contenu avant d'avancer le checkpoint.",
+      "green_evidence": "Le runner canonique ciblé retourne 7 tests passants en 2,75 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et le contrôle de diff ciblé passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_collector_soak.py::test_soak_rejects_conflicting_payload_for_same_event_id",
+        "tests/test_copy_vault_collector_soak.py::test_soak_resume_matches_continuous_and_deduplicates",
+        "tests/test_copy_vault_collector_soak.py::test_soak_checkpoint_is_rejected_when_input_changes"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_collector_soak.py::test_soak_rejects_conflicting_payload_for_same_event_id",
+          "tests/test_copy_vault_collector_soak.py::test_soak_resume_matches_continuous_and_deduplicates",
+          "tests/test_copy_vault_collector_soak.py::test_soak_checkpoint_is_rejected_when_input_changes"
+        ],
+        "test_result": "7 tests passants dans le runner canonique; compileall, Ruff E9/F et le contrôle de diff ciblé passants; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+        "tools/copy_vault_collector_soak.py": "37d7b52fa07c5c148c83561f353c21a197dad6e53803738f706d6dbf1ac651dd",
+        "tests/test_copy_vault_collector_soak.py": "26a80bbfa08b261a80d73f66cdf48cccce0399c3605161aa675cdc20fb9e6ca4"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-041",
+      "title": "Un snapshot de positions incomplet pouvait fabriquer des zéros ou écraser une ligne native",
+      "priority": "P1",
+      "kind": "userfills_snapshot_seed_validation",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/collection/userfills_live.py",
+        "tests/test_userfills_live.py"
+      ],
+      "root_cause": "positions_depuis_snapshot() remplaçait les champs absents ou falsy par 0.0, acceptait les nombres non finis, ignorait les lignes non-objet et écrasait silencieusement deux positions après normalisation du coin.",
+      "red_evidence": {
+        "test": "tests/test_userfills_live.py::test_snapshot_invalide_est_rejete_sans_fabriquer_une_position",
+        "result": "Les snapshots sans positions, avec szi/entryPx absents ou non finis, et avec une ligne non-objet sont maintenant rejetés; aucune position partielle ni zéro synthétique n'est retourné."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Valider strictement la structure de positions, exiger szi et entryPx finis avec entryPx positif, préserver les valeurs natives et rejeter les coins normalisés en doublon avant de construire le seed live.",
+      "green_evidence": "Le runner canonique userfills sélectionne les suites collecter_userfills_vaults.py et test_userfills_live.py: 143 tests passants en 3,51 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_userfills_live.py::test_snapshot_invalide_est_rejete_sans_fabriquer_une_position",
+        "tests/test_userfills_live.py::test_snapshot_rejette_les_coins_normalises_en_double",
+        "tests/test_userfills_live.py::test_identite_instrument_native_est_preservee_dans_etat_snapshot_et_fill"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_userfills_live.py::test_snapshot_invalide_est_rejete_sans_fabriquer_une_position",
+          "tests/test_userfills_live.py::test_snapshot_rejette_les_coins_normalises_en_double",
+          "tests/test_userfills_live.py::test_identite_instrument_native_est_preservee_dans_etat_snapshot_et_fill"
+        ],
+        "test_result": "143 tests passants dans le runner canonique ciblé; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/collection/userfills_live.py": "b1b0b11cbc6a25a3d16dce760e707f8201e84c87953c3a2725926cf6d8bb453a",
+          "tests/test_userfills_live.py": "86367c171b1822458830863fa1221308a5c8a66bde28890b30b35d217e465d36"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-042",
+      "title": "Le validateur du registre rejetait les preuves honnêtes d'un working tree local modifié",
+      "priority": "P2",
+      "kind": "bug_registry_dirty_evidence_validation",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "tests/test_copy_vault_bug_registry.py"
+      ],
+      "root_cause": "Le test du registre exigeait un SHA-1 de commit pour first_seen_sha, fix_sha, target_sha et base_head_sha alors que les corrections locales non commitées sont explicitement représentées par DIRTY_LOCAL_WORKING_TREE; il signalait donc comme invalide une preuve qui ne prétendait pas être un commit.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_bug_registry.py::test_registry_allows_explicit_dirty_working_tree_evidence_without_calling_it_a_commit",
+        "result": "Le registre échouait dès qu'une entrée locale honnête utilisait DIRTY_LOCAL_WORKING_TREE; le validateur acceptait uniquement des SHA hexadécimaux et ne vérifiait pas la cohérence du marqueur dirty."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Accepter explicitement le marqueur dirty uniquement pour les preuves locales non commitées, exiger alors target dirty et working_tree_clean=false, et conserver l'interdiction de déclarer une validation GitHub PASSED.",
+      "green_evidence": "Le registre complet est maintenant validé par 5 tests passants; les entrées dirty sont contrôlées sans être présentées comme des commits. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_bug_registry.py::test_registry_allows_explicit_dirty_working_tree_evidence_without_calling_it_a_commit",
+        "tests/test_copy_vault_bug_registry.py::test_bug_registry_never_marks_unverified_fix_as_verified",
+        "tests/test_copy_vault_bug_registry.py::test_local_validation_does_not_claim_a_github_hosted_result"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_bug_registry.py::test_registry_allows_explicit_dirty_working_tree_evidence_without_calling_it_a_commit",
+          "tests/test_copy_vault_bug_registry.py::test_bug_registry_never_marks_unverified_fix_as_verified",
+          "tests/test_copy_vault_bug_registry.py::test_local_validation_does_not_claim_a_github_hosted_result"
+        ],
+        "test_result": "5 tests passants dans la validation du registre; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "tests/test_copy_vault_bug_registry.py": "f044bd18ff8f511f600e5885ffc215edca8984915e6145c001b1b169a66f4146"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-043",
+      "title": "Le crowding pouvait accepter un follower sans témoin négatif admissible",
+      "priority": "P1",
+      "kind": "crowding_negative_control_required",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/backtesting/copy_vault_crowding.py",
+        "tests/test_copy_vault_crowding.py"
+      ],
+      "root_cause": "Quand aucun témoin ne produisait de match, il n'était pas enregistré; le taux de contrôle par défaut devenait alors 0.0. Avec seulement leader et follower, l'écart de contrôle pouvait donc être suffisant par défaut et promouvoir à tort un diagnostic observationnel.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_crowding.py::test_missing_negative_control_never_classifies_a_follower",
+        "result": "Un dataset leader/follower sans troisième wallet produit maintenant une observation NOT_CLASSIFIED avec control_gap nul/inconnu et aucune paire acceptée; aucun témoin absent n'est transformé en taux zéro."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Enregistrer chaque témoin admissible, y compris à zéro match, et refuser toute classification lorsqu'aucun témoin négatif n'est disponible; conserver les contrôles zéro pour distinguer absence de suivi et absence de preuve.",
+      "green_evidence": "Le runner canonique crowding sélectionne 3 suites downstream et retourne 20 tests passants en 4,23 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_crowding.py::test_missing_negative_control_never_classifies_a_follower",
+        "tests/test_copy_vault_crowding.py::test_negative_control_never_reuses_candidate_follower",
+        "tests/test_copy_vault_crowding.py::test_repeated_cross_coin_cross_day_lag_is_needed_for_classification"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_crowding.py::test_missing_negative_control_never_classifies_a_follower",
+          "tests/test_copy_vault_crowding.py::test_negative_control_never_reuses_candidate_follower",
+          "tests/test_copy_vault_crowding.py::test_repeated_cross_coin_cross_day_lag_is_needed_for_classification"
+        ],
+        "test_result": "20 tests passants dans 3 suites downstream du runner canonique; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/backtesting/copy_vault_crowding.py": "7324be970eabb3301e77374dbb0b1ada23c10679108ce4091fe2a190f29d1924",
+          "tests/test_copy_vault_crowding.py": "1c18f015df419cbff7c2d692b56165e03b9deb4cd59247401c52598653d17bc7"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-044",
+      "title": "Le reçu de reproductibilité Kronos pouvait accepter des collections scalaires ou lever une exception de type",
+      "priority": "P1",
+      "kind": "research_receipt_fail_closed",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/research/kronos_context_contract.py",
+        "tests/test_kronos_context_contract.py"
+      ],
+      "root_cause": "build_reproducibility_receipt construisait list(dependencies) et dict(parameters) avant de vérifier les types. Une chaîne de dépendances était donc découpée en caractères, tandis qu'une chaîne de paramètres pouvait lever TypeError/ValueError au lieu de retourner une erreur contrôlée.",
+      "red_evidence": {
+        "test": "tests/test_kronos_context_contract.py::test_kronos_receipt_rejects_scalar_collections_without_type_error",
+        "result": "Avant correction, dependencies=\"torch==2.0\" pouvait être acceptée comme une liste de caractères et parameters=\"sample_count=1\" pouvait échouer pendant dict(parameters), avant le garde-fou. Les deux formes doivent rester explicitement non admissibles."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Valider les collections avant toute conversion, rejeter explicitement les chaînes/bytes comme dépendances et paramètres, puis construire le reçu uniquement à partir de collections vérifiées.",
+      "green_evidence": "Le runner canonique Kronos sélectionne 1 suite downstream et retourne 18 tests passants en 1,35 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Aucune donnée SAFE, aucun collecteur actif, GPU, worktree, agent multiple ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_kronos_context_contract.py::test_kronos_receipt_is_explicit_and_not_production_enabled",
+        "tests/test_kronos_context_contract.py::test_kronos_receipt_rejects_scalar_collections_without_type_error"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_kronos_context_contract.py::test_kronos_receipt_is_explicit_and_not_production_enabled",
+          "tests/test_kronos_context_contract.py::test_kronos_receipt_rejects_scalar_collections_without_type_error"
+        ],
+        "test_result": "18 tests passent dans la suite Kronos du runner canonique; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/research/kronos_context_contract.py": "c13ea530ca6fa4cce8e8f5289406b47643908e8ceab47e0be157753f069ff6b5",
+          "tests/test_kronos_context_contract.py": "2991b00157db01aa84ecc384489be544eb54c70326661bad6524a674e6582bf2"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-045",
+      "title": "Le replay événementiel Copy‑Vault acceptait une séquence vide comme replay complet",
+      "priority": "P1",
+      "kind": "replay_empty_input_fail_closed",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/backtesting/copy_vault_executable.py",
+        "tests/test_copy_vault_event_trace_parity.py"
+      ],
+      "root_cause": "Après conversion de la séquence d'événements, le replay ne distinguait pas un corpus vide d'un corpus entièrement rejoué. La liste ordonnée vide produisait status=REPLAYED et candidate_admission_allowed=true, sans observation ni preuve économique.",
+      "red_evidence": {
+        "test": "tests/test_copy_vault_event_trace_parity.py::test_event_replay_rejects_empty_sequence_without_candidate_admission",
+        "result": "Avant correction, replay_copy_vault_paper_events([]) parcourait zéro événement puis retournait un replay complet admissible, ce qui pouvait faire passer une absence de données pour une campagne réussie."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "Refuser immédiatement toute séquence d'événements vide avec un diagnostic contrôlé, avant la construction d'identité, du ledger et de l'admission du candidat.",
+      "green_evidence": "Le runner canonique sélectionne 6 suites downstream et retourne 307 tests passants, 2 ignorés en 18,00 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_event_trace_parity.py::test_event_replay_rejects_empty_sequence_without_candidate_admission",
+        "tests/test_copy_vault_golden_replay.py::test_golden_replay_monolithic_segmented_and_resume_match_independent_oracle",
+        "tests/test_copy_vault_event_trace_parity.py::test_event_replay_reports_ambiguous_concurrent_order_without_processing"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_copy_vault_event_trace_parity.py::test_event_replay_rejects_empty_sequence_without_candidate_admission",
+          "tests/test_copy_vault_golden_replay.py::test_golden_replay_monolithic_segmented_and_resume_match_independent_oracle",
+          "tests/test_copy_vault_event_trace_parity.py::test_event_replay_reports_ambiguous_concurrent_order_without_processing"
+        ],
+        "test_result": "307 tests passants et 2 ignorés dans 6 suites downstream du runner canonique; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+          "src/hl_observer/backtesting/copy_vault_executable.py": "310fc024fca501645ca8a97dcaa8686776718d049104d3e100644132c903ac20",
+          "tests/test_copy_vault_event_trace_parity.py": "e1ba1f311a2f559d128ba02144cf653d2b5fc51fc1b8cbc90c06afcb08f1f10e",
+          "tests/test_copy_vault_golden_replay.py": "1cee5725321483d0dc71252e505093f48afe9f4ecf5bd59b46b73c9a9071764b"
+        }
+      }
+    },
+    {
+      "id": "CVB-2026-046",
+      "title": "Un index de bundle sans shard_count levait TypeError pendant le diagnostic d'adapter",
+      "priority": "P1",
+      "kind": "adapter_metrics_fail_closed",
+      "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+      "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "component_paths": [
+        "src/hl_observer/control_plane/campaign_adapters.py",
+        "tests/test_campaign_adapter_diagnostics.py"
+      ],
+      "root_cause": "run_one_unit convertissait directement collection_metrics['shard_count'] en int pour distinguer EMPTY d'une collection non publiée. Lorsque BUNDLE_INDEX.json omettait ou invalidait ce compteur, le diagnostic levait TypeError au lieu de conserver un état PARTIAL fail-closed.",
+      "red_evidence": {
+        "test": "tests/test_campaign_adapter_diagnostics.py::test_missing_shard_count_is_partial_not_an_uncaught_type_error",
+        "result": "Un bundle avec manifeste et compteurs SAFE mais sans shard_count provoquait int(None), interrompait run_one_unit et ne produisait ni diagnostic durable ni raison de non-publication."
+      },
+      "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "fix_summary": "N'utiliser le garde EMPTY que pour des compteurs entiers explicitement observés et positifs/nuls; laisser les compteurs absents passer au gate de publication, qui expose shard_counts_unproven sans publier SAFE.",
+      "green_evidence": "Le runner canonique sélectionne 2 suites downstream et retourne 41 tests passants en 2,59 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques. Compileall, Ruff E9/F et la suite couvrant la reprise passent; aucun shard SAFE, collecteur actif, GPU ou CI GitHub n'a été touché.",
+      "anti_regression_tests": [
+        "tests/test_campaign_adapter_diagnostics.py::test_missing_shard_count_is_partial_not_an_uncaught_type_error",
+        "tests/test_campaign_adapter_diagnostics.py::test_partial_bundle_cannot_be_published_as_safe",
+        "tests/test_campaign_adapter_diagnostics.py::test_restart_reuses_the_same_unit_output_after_checkpoint"
+      ],
+      "github_validation": {
+        "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "state": "NOT_RECONCILED",
+        "run_ids": []
+      },
+      "fix_commit_reachable_from_validation_head": false,
+      "local_validation": {
+        "state": "PASS",
+        "validated_at": "2026-10-30",
+        "anti_regression_tests": [
+          "tests/test_campaign_adapter_diagnostics.py::test_missing_shard_count_is_partial_not_an_uncaught_type_error",
+          "tests/test_campaign_adapter_diagnostics.py::test_partial_bundle_cannot_be_published_as_safe",
+          "tests/test_campaign_adapter_diagnostics.py::test_restart_reuses_the_same_unit_output_after_checkpoint"
+        ],
+        "test_result": "41 tests passent dans les 2 suites downstream des adapters; aucune CI GitHub exécutée.",
+        "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+        "target": "DIRTY_LOCAL_WORKING_TREE",
+        "working_tree_clean": false,
+        "artifact_sha256": {
+        "src/hl_observer/control_plane/campaign_adapters.py": "df3de4e61862b1a6f8995e03e839a15b2b8619ea29d7aed3702aa63d9b38b28f",
+        "tests/test_campaign_adapter_diagnostics.py": "6c5a959536adfd7569141191b7d112b7f8952d36ace2a91d0874d5294228058f"
+        }
+      }
+  },
+  {
+    "id": "CVB-2026-047",
+    "title": "Un trial accounting malformé pouvait lever une exception ou être accepté par coercition",
+    "priority": "P1",
+    "kind": "discovery_invalid_trial_accounting_fail_closed",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "tools/copy_vault_discovery_evaluator.py",
+      "tests/test_copy_vault_discovery_evaluator.py"
+    ],
+    "root_cause": "evaluate() et evaluate_feature_rows() convertissaient directement family_trial_count avec int(). Une chaîne invalide pouvait lever ValueError, tandis qu'un booléen pouvait être accepté comme 1; un résultat d'évaluation devait échouer fermé avant toute lecture de données ou métrique.",
+    "red_evidence": {
+      "test": "tests/test_copy_vault_discovery_evaluator.py::test_trial_accounting_malforme_echoue_ferme_sans_coercition",
+      "result": "Avant correction, family_trial_count=\"oops\" levait une exception et family_trial_count=True était silencieusement converti en 1 au lieu de bloquer l'essai."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Valider explicitement un entier strictement positif, refuser booléens et valeurs non entières, puis retourner INVALID_TRIAL_ACCOUNTING sans lire le dataset ni fabriquer net_usd/pf.",
+      "green_evidence": "Le runner canonique Discovery retourne 11 tests passants en 1,40 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques; les cas chaîne invalide, booléen, keep_fraction malformé et budget non fini sont couverts sans exception ni métrique économique. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_copy_vault_discovery_evaluator.py::test_trial_accounting_malforme_echoue_ferme_sans_coercition",
+      "tests/test_copy_vault_discovery_evaluator.py::test_trial_accounting_bool_echoue_ferme_avant_lecture_dataset"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_discovery_evaluator.py::test_trial_accounting_malforme_echoue_ferme_sans_coercition",
+        "tests/test_copy_vault_discovery_evaluator.py::test_trial_accounting_bool_echoue_ferme_avant_lecture_dataset"
+      ],
+      "test_result": "11 tests passants dans le runner canonique Discovery; aucune CI GitHub exécutée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "tools/copy_vault_discovery_evaluator.py": "b76882bf57208a8a7020dbe2aa20a2254c965d16dbf8cfd7a8b249dd9cebc9c6",
+        "tests/test_copy_vault_discovery_evaluator.py": "8308240f91a4ba8490d336ce9905c029804e4e3eb61b538374e7c3b0dae8382c"
       }
     }
+  },
+  {
+    "id": "CVB-2026-048",
+    "title": "Des paramètres numériques malformés pouvaient interrompre l'évaluateur Discovery",
+    "priority": "P1",
+    "kind": "discovery_numeric_parameter_fail_closed",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "tools/copy_vault_discovery_evaluator.py",
+      "tests/test_copy_vault_discovery_evaluator.py"
+    ],
+    "root_cause": "evaluate() et evaluate_feature_rows() convertissaient directement budget et keep_fraction avec float(). Une chaîne non numérique, NaN ou valeur non finie pouvait lever une exception ou contaminer la sélection avant tout verdict fail-closed.",
+    "red_evidence": {
+      "test": "tests/test_copy_vault_discovery_evaluator.py::test_parametre_keep_fraction_malforme_echoue_ferme_sans_pnl",
+      "result": "Avant correction, keep_fraction=\"half\" levait ValueError et budget=NaN pouvait traverser la conversion jusqu'à une opération de sélection non mesurable."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Valider les contrôles numériques comme nombres finis stricts, rejeter les paramètres malformés avant lecture du dataset ou calcul de PnL, et retourner INVALID_EVALUATION_PARAMETER sans résultat économique.",
+    "green_evidence": "Le runner canonique Discovery retourne 11 tests passants en 1,40 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques; keep_fraction texte et budget NaN deviennent BLOCKED sans exception ni métrique économique. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_copy_vault_discovery_evaluator.py::test_parametre_keep_fraction_malforme_echoue_ferme_sans_pnl",
+      "tests/test_copy_vault_discovery_evaluator.py::test_budget_non_fini_echoue_ferme_avant_lecture_dataset"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_discovery_evaluator.py::test_parametre_keep_fraction_malforme_echoue_ferme_sans_pnl",
+        "tests/test_copy_vault_discovery_evaluator.py::test_budget_non_fini_echoue_ferme_avant_lecture_dataset"
+      ],
+      "test_result": "11 tests passants dans le runner canonique Discovery; aucune CI GitHub exécutée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "tools/copy_vault_discovery_evaluator.py": "b76882bf57208a8a7020dbe2aa20a2254c965d16dbf8cfd7a8b249dd9cebc9c6",
+        "tests/test_copy_vault_discovery_evaluator.py": "8308240f91a4ba8490d336ce9905c029804e4e3eb61b538374e7c3b0dae8382c"
+      }
+    }
+  },
+  {
+    "id": "CVB-2026-049",
+    "title": "Un chemin de sortie L4 invalide pouvait lever une exception ou suivre un lien symbolique",
+    "priority": "P1",
+    "kind": "l4_output_path_fail_closed",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "src/hl_observer/collection/l4_capture.py",
+      "tests/test_l4_capture.py"
+    ],
+    "root_cause": "capturer() ouvrait directement out_path après avoir traité les événements. Un répertoire, un parent manquant ou un lien symbolique pouvait donc produire une exception non contrôlée ou détourner l'écriture append-only vers une cible hors du périmètre attendu.",
+    "red_evidence": {
+      "test": "tests/test_l4_capture.py::test_chantier4_chemin_sortie_inutilisable_echoue_ferme",
+      "result": "Avant correction, un out_path dont le parent n'existait pas atteignait open(..., 'a') et levait FileNotFoundError au lieu de retourner un diagnostic fail-closed."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Valider le chemin de sortie avant toute itération, refuser parent absent, répertoire, lien symbolique ou parent symbolique, puis retourner BLOCKED_EXTERNAL sans écrire ni exécuter de traitement partiel.",
+    "green_evidence": "Le runner canonique L4 retourne 12 tests passants en 2,45 s sous CPU_BUDGET ENFORCED à 50 % sur 16 processeurs logiques; le chemin invalide est diagnostiqué sans exception et sans écriture. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_l4_capture.py::test_chantier4_chemin_sortie_inutilisable_echoue_ferme"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_l4_capture.py::test_chantier4_chemin_sortie_inutilisable_echoue_ferme"
+      ],
+      "test_result": "12 tests passants dans le runner canonique L4; compileall, Ruff E9/F et git diff --check passants; aucune CI GitHub executée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "src/hl_observer/collection/l4_capture.py": "c86064e69e5fc5942c0bf3da8bd23a5efc6715622c6ebab4bb74f3bb378055a8",
+        "tests/test_l4_capture.py": "6200dc97c1df0ee45731539c29fe7cabb60c77bfc59042b83b14c938c284ad42"
+      }
+    }
+  },
+  {
+    "id": "CVB-2026-050",
+    "title": "Le soak collector pouvait écrire via un checkpoint ou un temporaire non sûr",
+    "priority": "P1",
+    "kind": "collector_checkpoint_path_fail_closed",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "tools/copy_vault_collector_soak.py",
+      "tests/test_copy_vault_collector_soak.py"
+    ],
+    "root_cause": "run_soak() ne vérifiait que le lien symbolique du fichier checkpoint final. Un répertoire ou un parent symbolique pouvait donc provoquer une exception non contrôlée ou détourner l'écriture; le fichier temporaire .tmp n'était pas validé avant remplacement.",
+    "red_evidence": {
+      "test": "tests/test_copy_vault_collector_soak.py::test_soak_rejects_checkpoint_directory_before_processing",
+      "result": "Avant correction, un checkpoint qui était un répertoire atteignait la lecture/écriture du soak et pouvait lever une exception OS; un parent symbolique et un temporaire non fichier n'étaient pas rejetés par le contrat fail-closed."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Valider le checkpoint, ses parents et le temporaire avant chaque écriture/remplacement; normaliser l'erreur CLI en reçu BLOCKED_EXTERNAL et protéger aussi la sortie JSON.",
+    "green_evidence": "La suite ciblée du soak retourne 9 tests passants et 1 skip (symlink de répertoire indisponible dans l'environnement) en 3,45 s; la matrice Copy-Vault canonique --changed retourne ensuite 1 897 tests passants, 10 ignorés et 1 avertissement en 293,93 s. Compileall, Ruff et git diff --check passent. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_copy_vault_collector_soak.py::test_soak_rejects_checkpoint_directory_before_processing",
+      "tests/test_copy_vault_collector_soak.py::test_soak_rejects_existing_checkpoint_temp_directory_before_replace",
+      "tests/test_copy_vault_collector_soak.py::test_soak_rejects_symlinked_checkpoint_parent_when_supported"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_collector_soak.py::test_soak_rejects_checkpoint_directory_before_processing",
+        "tests/test_copy_vault_collector_soak.py::test_soak_rejects_existing_checkpoint_temp_directory_before_replace",
+        "tests/test_copy_vault_collector_soak.py::test_soak_rejects_symlinked_checkpoint_parent_when_supported"
+      ],
+      "test_result": "Suite ciblée du soak: 9 tests passants et 1 ignoré; matrice Copy-Vault canonique --changed: 1 897 tests passants, 10 ignorés et 1 avertissement en 293,93 s; aucune CI GitHub exécutée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "tools/copy_vault_collector_soak.py": "37d7b52fa07c5c148c83561f353c21a197dad6e53803738f706d6dbf1ac651dd",
+        "tests/test_copy_vault_collector_soak.py": "26a80bbfa08b261a80d73f66cdf48cccce0399c3605161aa675cdc20fb9e6ca4"
+      }
+    }
+  },
+  {
+    "id": "CVB-2026-051",
+    "title": "Le checkpoint historique pouvait suivre un parent symbolique ou une cible non fichier",
+    "priority": "P1",
+    "kind": "historical_checkpoint_path_fail_closed",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "tools/continuous_reconcile_backlog.py",
+      "tests/test_continuous_reconcile_backlog.py"
+    ],
+    "root_cause": "write_wave_checkpoint() créait le dossier puis écrivait le reçu via un chemin qui n'était contrôlé ni contre les parents symboliques ni contre une cible déjà répertoire; un runner interrompu ou un environnement hostile pouvait donc provoquer une exception non contrôlée ou sortir du répertoire de checkpoint.",
+    "red_evidence": {
+      "test": "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_checkpoint_directory",
+      "result": "Avant correction, une destination checkpoint déjà matérialisée comme répertoire n'était pas rejetée par le contrat de restauration fail-closed; les parents symboliques n'étaient pas contrôlés avant mkdir/link."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Contrôler la destination, ses parents et le temporaire avant/après création et avant le lien atomique; refuser les chemins symboliques ou non fichiers sans toucher aux archives historiques.",
+    "green_evidence": "La suite canonique de reprise historique retourne 30 tests passants et 1 ignoré en 20,72 s; les contrôles de chemin couvrent destination répertoire et parent symbolique lorsque les liens sont disponibles. Aucun shard SAFE, collecteur actif, flux réseau, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_checkpoint_directory",
+      "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_symbolic_parent_when_supported",
+      "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_is_creation_exclusive_when_a_racer_wins"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_checkpoint_directory",
+        "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_rejects_symbolic_parent_when_supported",
+        "tests/test_continuous_reconcile_backlog.py::test_wave_checkpoint_writer_is_creation_exclusive_when_a_racer_wins"
+      ],
+      "test_result": "30 tests passants et 1 ignoré dans la suite canonique de reprise historique; aucune CI GitHub exécutée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "tools/continuous_reconcile_backlog.py": "440ef63abe9181acb104b25c471e5c771936af1cb3afcc083d5014683da5380e",
+        "tests/test_continuous_reconcile_backlog.py": "72a009f52153b14647230cac919f9276afed3a03c15f49677be6de0e47d74ba1"
+      }
+    }
+  },
+  {
+    "id": "CVB-2026-052",
+    "title": "Le poller L2 absorbait une erreur de transport sans la journaliser",
+    "priority": "P1",
+    "kind": "l2_collection_error_observability",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "src/hl_observer/collection/l2_snapshot_cache.py",
+      "tests/test_copy_vault_execution_timestamp_guard.py"
+    ],
+    "root_cause": "poll_once() continuait correctement en fail-closed quand l'ouverture ou le décodage d'un carnet échouait, mais son except par coin ne passait pas par le compteur d'échecs; la collecte pouvait donc perdre une observation sans piste exploitable dans les diagnostics.",
+    "red_evidence": {
+      "test": "tests/test_copy_vault_execution_timestamp_guard.py::test_l2_poller_records_transport_failure_without_publishing",
+      "result": "Avant correction, l'opener pouvait lever OSError, poll_once() retournait zéro et aucun cache n'était publié, mais aucun site d'échec n'était enregistré."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Journaliser chaque échec par coin avec le compteur canonique, tout en conservant le comportement fail-closed: zéro mise à jour et aucun coût dérivé lors d'un échec de transport.",
+    "green_evidence": "La suite ciblée de garde temporelle et de couverture des échecs retourne 26 tests passants en 8,21 s; Ruff, compileall et git diff --check passent. Aucun shard SAFE, collecteur actif, flux réseau réel, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_copy_vault_execution_timestamp_guard.py::test_l2_poller_records_transport_failure_without_publishing",
+      "tests/test_copy_vault_execution_timestamp_guard.py::test_l2_poller_preserves_invalid_time_and_does_not_publish_derived_costs",
+      "tests/test_echec_silencieux.py::test_AUCUN_except_pass_ne_revient"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_copy_vault_execution_timestamp_guard.py::test_l2_poller_records_transport_failure_without_publishing",
+        "tests/test_copy_vault_execution_timestamp_guard.py::test_l2_poller_preserves_invalid_time_and_does_not_publish_derived_costs",
+        "tests/test_echec_silencieux.py::test_AUCUN_except_pass_ne_revient"
+      ],
+      "test_result": "26 tests passants; Ruff, compileall et git diff --check passants; aucune CI GitHub exécutée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "src/hl_observer/collection/l2_snapshot_cache.py": "ae2f6dca6164e5c792130ccb22bb4f8cdbcae7f8b2a286c81816d9256655aea4",
+        "tests/test_copy_vault_execution_timestamp_guard.py": "974c10f8a32028e6cc6f1228fc44023561950d7390f08fb2297addf376a9093e",
+        "tests/test_echec_silencieux.py": "baee20be3c3d4e57eb30843c32dd67f449358094bdd77255614946543db3c6e3"
+      }
+    }
+  },
+  {
+    "id": "CVB-2026-053",
+    "title": "Le collecteur de campagne ne diagnostiquait pas une racine de sortie indisponible",
+    "priority": "P1",
+    "kind": "campaign_output_root_fail_closed",
+    "status": "FIXED_CODE_LOCAL_TESTS_PASS",
+    "first_seen_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "component_paths": [
+      "src/hl_observer/control_plane/campaign_adapters.py",
+      "tests/test_campaign_adapter_diagnostics.py"
+    ],
+    "root_cause": "run_one_unit() créait la racine de sortie hors de son enveloppe diagnostique. Une racine déjà matérialisée comme fichier provoquait donc une FileExistsError non structurée avant le démarrage du runner.",
+    "red_evidence": {
+      "test": "tests/test_campaign_adapter_diagnostics.py::test_unavailable_output_root_is_a_fail_closed_diagnostic",
+      "result": "Avant correction, une racine de sortie indisponible pouvait interrompre l'adaptateur sans résultat FAILED structuré et sans empêcher explicitement le runner de démarrer."
+    },
+    "fix_sha": "DIRTY_LOCAL_WORKING_TREE",
+    "fix_summary": "Intercepter OSError/ValueError lors de la préparation de la racine de sortie et retourner un diagnostic FAILED avec failure_category OUTPUT_PATH et safe_publication_allowed false avant d'appeler le runner.",
+    "green_evidence": "La suite diagnostique ciblée retourne 10 tests passants en 12,78 s; le registre local est contrôlé par les hashes exacts. Aucun shard SAFE, collecteur actif, flux réseau réel, GPU ou CI GitHub n'a été touché.",
+    "anti_regression_tests": [
+      "tests/test_campaign_adapter_diagnostics.py::test_unavailable_output_root_is_a_fail_closed_diagnostic",
+      "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_keeps_unit_unpublished"
+    ],
+    "github_validation": {
+      "target_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "state": "NOT_RECONCILED",
+      "run_ids": []
+    },
+    "fix_commit_reachable_from_validation_head": false,
+    "local_validation": {
+      "state": "PASS",
+      "validated_at": "2026-10-30",
+      "anti_regression_tests": [
+        "tests/test_campaign_adapter_diagnostics.py::test_unavailable_output_root_is_a_fail_closed_diagnostic",
+        "tests/test_campaign_adapter_diagnostics.py::test_subprocess_timeout_keeps_unit_unpublished"
+      ],
+      "test_result": "10 tests passants en 12,78 s; aucune CI GitHub exécutée.",
+      "base_head_sha": "DIRTY_LOCAL_WORKING_TREE",
+      "target": "DIRTY_LOCAL_WORKING_TREE",
+      "working_tree_clean": false,
+      "artifact_sha256": {
+        "src/hl_observer/control_plane/campaign_adapters.py": "df3de4e61862b1a6f8995e03e839a15b2b8619ea29d7aed3702aa63d9b38b28f",
+        "tests/test_campaign_adapter_diagnostics.py": "6c5a959536adfd7569141191b7d112b7f8952d36ace2a91d0874d5294228058f"
+      }
+    }
+  }
   ]
 }

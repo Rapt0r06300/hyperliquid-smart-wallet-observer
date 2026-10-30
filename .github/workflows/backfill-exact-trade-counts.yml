@@ -53,9 +53,11 @@ jobs:
 
       - name: Scan immutable release assets exactly
         shell: bash
+        env:
+          INPUT_LIMIT: "${{ inputs.limit || '2000' }}"
         run: |
           set -euo pipefail
-          LIMIT="${{ inputs.limit || '2000' }}"
+          LIMIT="$INPUT_LIMIT"
           RESULT="$(python tools/backfill_exact_trade_counts.py --limit "$LIMIT")"
           printf '%s\n' "$RESULT"
           if printf '%s\n' "$RESULT" | python -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("updated")==0 and d.get("restored_from_patch")==0 else 1)'; then

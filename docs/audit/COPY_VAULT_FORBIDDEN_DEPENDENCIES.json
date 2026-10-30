@@ -1,0 +1,7082 @@
+{
+  "active_reachable_module_count": 321,
+  "active_reachable_modules": [
+    "hl_observer",
+    "hl_observer.alerts.durability",
+    "hl_observer.alerts.validation",
+    "hl_observer.arbitrage.cross_source_comparator",
+    "hl_observer.arbitrage.cross_venue_contract",
+    "hl_observer.arbitrage.executable_legs",
+    "hl_observer.arbitrage.multi_venue_execution",
+    "hl_observer.audit.dette_cablage",
+    "hl_observer.backtest.no_lookahead_guard",
+    "hl_observer.backtest.walk_forward",
+    "hl_observer.backtesting",
+    "hl_observer.backtesting.ab_flag_replay",
+    "hl_observer.backtesting.boucle_objectif_replay",
+    "hl_observer.backtesting.carry_scan_recorder",
+    "hl_observer.backtesting.copy_vault_book_loader",
+    "hl_observer.backtesting.copy_vault_causal_selection",
+    "hl_observer.backtesting.copy_vault_evidence",
+    "hl_observer.backtesting.copy_vault_executable",
+    "hl_observer.backtesting.copy_vault_execution_math",
+    "hl_observer.backtesting.copy_vault_generalization",
+    "hl_observer.backtesting.copy_vault_instrument_metadata",
+    "hl_observer.backtesting.copy_vault_local_lab",
+    "hl_observer.backtesting.copy_vault_protocol",
+    "hl_observer.backtesting.copy_vault_v21_frozen",
+    "hl_observer.backtesting.copy_vault_v4_train",
+    "hl_observer.backtesting.copy_vault_v5_lifecycle_train",
+    "hl_observer.backtesting.copy_vault_v6_balanced_train",
+    "hl_observer.backtesting.copy_vault_v8_entry_efficiency_train",
+    "hl_observer.backtesting.copy_vault_v9_online_leader_quality_train",
+    "hl_observer.backtesting.cost_model",
+    "hl_observer.backtesting.cross_validation",
+    "hl_observer.backtesting.cross_venue_certified",
+    "hl_observer.backtesting.execution_delay_model",
+    "hl_observer.backtesting.execution_models",
+    "hl_observer.backtesting.execution_sim",
+    "hl_observer.backtesting.experiment",
+    "hl_observer.backtesting.experiment_harness",
+    "hl_observer.backtesting.fee_model",
+    "hl_observer.backtesting.lead_lag_evidence",
+    "hl_observer.backtesting.lookahead_analysis",
+    "hl_observer.backtesting.lookahead_guard",
+    "hl_observer.backtesting.monte_carlo",
+    "hl_observer.backtesting.perf_metrics",
+    "hl_observer.backtesting.quant_methods",
+    "hl_observer.backtesting.recherche_arbitrage",
+    "hl_observer.backtesting.recherche_carry",
+    "hl_observer.backtesting.recherche_parallele",
+    "hl_observer.backtesting.recherche_scenario",
+    "hl_observer.backtesting.replay_doctor",
+    "hl_observer.backtesting.replay_engine",
+    "hl_observer.backtesting.reporting",
+    "hl_observer.backtesting.risk_sizing",
+    "hl_observer.backtesting.robustness",
+    "hl_observer.backtesting.stress_testing",
+    "hl_observer.backtesting.train_statistics",
+    "hl_observer.backtesting.validation_gates",
+    "hl_observer.backtesting.validation_methods",
+    "hl_observer.collection",
+    "hl_observer.collection.backoff",
+    "hl_observer.collection.binance_depth_book",
+    "hl_observer.collection.binance_depth_live",
+    "hl_observer.collection.binance_depth_orchestrator",
+    "hl_observer.collection.binance_funding_history",
+    "hl_observer.collection.binance_market_context",
+    "hl_observer.collection.bitget_market_data",
+    "hl_observer.collection.bybit_market_data",
+    "hl_observer.collection.circuit_breaker",
+    "hl_observer.collection.coin_universe",
+    "hl_observer.collection.collecte_fiable",
+    "hl_observer.collection.collector",
+    "hl_observer.collection.depth_capacity",
+    "hl_observer.collection.feed_integrity",
+    "hl_observer.collection.gate_market_data",
+    "hl_observer.collection.html_scraper",
+    "hl_observer.collection.hyperliquid_funding_history",
+    "hl_observer.collection.l2_snapshot_cache",
+    "hl_observer.collection.lead_lag_causal_checkpoints",
+    "hl_observer.collection.market_capture_tiers",
+    "hl_observer.collection.native_market_tape",
+    "hl_observer.collection.native_venue_coordinator",
+    "hl_observer.collection.native_venue_market",
+    "hl_observer.collection.okx_market_data",
+    "hl_observer.collection.partitioned_tick_dataset",
+    "hl_observer.collection.proxy_pool",
+    "hl_observer.collection.public_fetcher",
+    "hl_observer.collection.rate_limiter",
+    "hl_observer.collection.stockage_brut_borne",
+    "hl_observer.collection.tick_dataset",
+    "hl_observer.collection.userfills_live",
+    "hl_observer.collection.vault_fills_backfill",
+    "hl_observer.collection.weight_budgeter",
+    "hl_observer.collection.ws_first_plan",
+    "hl_observer.config.cross_venue_instruments",
+    "hl_observer.config.frais_venues",
+    "hl_observer.config.settings",
+    "hl_observer.copy_vault.attribution_after_netting",
+    "hl_observer.copy_vault.multi_vault_intent_netting",
+    "hl_observer.copy_wallet.leader_markout",
+    "hl_observer.copy_wallet.marks_source",
+    "hl_observer.copying.realtime_magic_score",
+    "hl_observer.core.causal_time",
+    "hl_observer.economics.assumptions",
+    "hl_observer.economics.copy_vault_metrics",
+    "hl_observer.economics.families",
+    "hl_observer.economics.hyperliquid_fees",
+    "hl_observer.economics.numeric",
+    "hl_observer.economics.proof_binding",
+    "hl_observer.edge.edge_calculator",
+    "hl_observer.edge.edge_source",
+    "hl_observer.edge.measured_edge_table",
+    "hl_observer.edge.signal_decay",
+    "hl_observer.edge.tier_cost_budget",
+    "hl_observer.evidence.decision_ledger",
+    "hl_observer.experimental",
+    "hl_observer.experimental.carry_deux_jambes",
+    "hl_observer.experimental.copy_edge_forward",
+    "hl_observer.experimental.copy_edge_oos",
+    "hl_observer.experimental.execution_paper",
+    "hl_observer.experimental.invariants",
+    "hl_observer.experimental.moteur_paper",
+    "hl_observer.experimental.roi_estimateur",
+    "hl_observer.experimental.signaux",
+    "hl_observer.features.funding",
+    "hl_observer.fees.hyperliquid_fees",
+    "hl_observer.following.scoring_robuste",
+    "hl_observer.freshness.signal_decay",
+    "hl_observer.funding",
+    "hl_observer.funding.arb_cout_all_in",
+    "hl_observer.funding.arb_executable",
+    "hl_observer.funding.arb_maker_study",
+    "hl_observer.funding.base_convergence",
+    "hl_observer.funding.carry_allocation_nette",
+    "hl_observer.funding.carry_anti_churn",
+    "hl_observer.funding.carry_benchmark_gate",
+    "hl_observer.funding.carry_economie_position",
+    "hl_observer.funding.carry_liquidation_risk",
+    "hl_observer.funding.carry_marge_dynamique",
+    "hl_observer.funding.carry_optimizer",
+    "hl_observer.funding.carry_ouverture_gates",
+    "hl_observer.funding.carry_position_lifecycle",
+    "hl_observer.funding.carry_positions_store",
+    "hl_observer.funding.carry_qualite_cross_venue",
+    "hl_observer.funding.carry_renfort",
+    "hl_observer.funding.carry_timing_reglement",
+    "hl_observer.funding.delta_neutral_carry",
+    "hl_observer.funding.funding_history_window",
+    "hl_observer.funding.funding_hors_plancher",
+    "hl_observer.funding.funding_persistence",
+    "hl_observer.funding.funding_poller",
+    "hl_observer.funding.funding_previsionnel",
+    "hl_observer.funding.funding_runtime_cache",
+    "hl_observer.funding.funding_times",
+    "hl_observer.funding.funding_zscore",
+    "hl_observer.funding.spike_detector",
+    "hl_observer.hyperliquid.endpoints",
+    "hl_observer.hyperliquid.rate_limits",
+    "hl_observer.hyperliquid.rate_weights",
+    "hl_observer.hyperliquid.rest_info_client",
+    "hl_observer.hyperliquid.schemas",
+    "hl_observer.instrument_identity",
+    "hl_observer.market.liquidation_map",
+    "hl_observer.market.liquidation_recorder",
+    "hl_observer.market.mapping_unit",
+    "hl_observer.market_data.live_l2_service",
+    "hl_observer.markets.ccxt_universe",
+    "hl_observer.markets.coin_metrics",
+    "hl_observer.markets.liquidity",
+    "hl_observer.markets.market_selector",
+    "hl_observer.markets.spread",
+    "hl_observer.markets.universe",
+    "hl_observer.models",
+    "hl_observer.models.common",
+    "hl_observer.normalization.instrument_identity",
+    "hl_observer.normalization.l2_book",
+    "hl_observer.normalization.market_events",
+    "hl_observer.ops",
+    "hl_observer.ops.bounded_collection",
+    "hl_observer.ops.canonical_paper_intent_chain",
+    "hl_observer.ops.clock_integrity",
+    "hl_observer.ops.collecteur_registry",
+    "hl_observer.ops.collector_lease",
+    "hl_observer.ops.decision_firehose",
+    "hl_observer.ops.echec_silencieux",
+    "hl_observer.ops.lecons_du_ledger",
+    "hl_observer.ops.marks_univers",
+    "hl_observer.ops.moniteur_sante",
+    "hl_observer.ops.paper_canonique",
+    "hl_observer.ops.port_owner",
+    "hl_observer.ops.portable_clone",
+    "hl_observer.ops.portable_clone_inventory",
+    "hl_observer.ops.portable_transfer_proof",
+    "hl_observer.ops.preflight_lanceur",
+    "hl_observer.ops.premier_lancement",
+    "hl_observer.ops.preuve_de_vie",
+    "hl_observer.ops.quota_stockage",
+    "hl_observer.ops.registre_pids",
+    "hl_observer.ops.runtime_contract",
+    "hl_observer.ops.session_harvest",
+    "hl_observer.ops.strategie_candidat",
+    "hl_observer.ops.superviseur_collecteurs",
+    "hl_observer.ops.tableau_sante_collecteurs",
+    "hl_observer.ops.verrou_lanceur",
+    "hl_observer.paper_trading.auto_unstuck",
+    "hl_observer.paper_trading.barrier_calibration",
+    "hl_observer.paper_trading.canonical_execution",
+    "hl_observer.paper_trading.delta_neutral_position",
+    "hl_observer.paper_trading.exec_model",
+    "hl_observer.paper_trading.execution_truth",
+    "hl_observer.paper_trading.funding_payment_tracker",
+    "hl_observer.paper_trading.funding_settlement",
+    "hl_observer.paper_trading.journal",
+    "hl_observer.paper_trading.liquidity_consumption",
+    "hl_observer.paper_trading.paper_engine",
+    "hl_observer.paper_trading.sl_tp",
+    "hl_observer.paper_trading.sltp_runtime",
+    "hl_observer.paper_trading.v26_exit_pipeline",
+    "hl_observer.paper_trading.vol_adjusted_barriers",
+    "hl_observer.position_lifecycle.reconstructor",
+    "hl_observer.realtime.event_identity",
+    "hl_observer.realtime.feed_quality",
+    "hl_observer.realtime.feed_quality_primitives",
+    "hl_observer.realtime.global_rest_budget",
+    "hl_observer.research",
+    "hl_observer.research.decision_explainer",
+    "hl_observer.research.differentiel",
+    "hl_observer.research.domaines",
+    "hl_observer.research.empirical_memory",
+    "hl_observer.research.frontiere",
+    "hl_observer.research.github_dossier",
+    "hl_observer.research.github_graph",
+    "hl_observer.research.github_scan_plan",
+    "hl_observer.research.github_signals",
+    "hl_observer.research.idee",
+    "hl_observer.research.jugement_plus",
+    "hl_observer.research.leader_review_ledger",
+    "hl_observer.research.lecture_profonde",
+    "hl_observer.research.lois_mesurees",
+    "hl_observer.research.mine_de_code",
+    "hl_observer.research.moissonneur_sujets",
+    "hl_observer.research.moteur",
+    "hl_observer.research.ollama_advisor",
+    "hl_observer.research.ollama_client",
+    "hl_observer.research.ollama_preflight",
+    "hl_observer.research.ollama_signal_rater",
+    "hl_observer.research.ollama_status",
+    "hl_observer.research.scan_resilience",
+    "hl_observer.research.semantique",
+    "hl_observer.research.sources",
+    "hl_observer.research.sources_plus",
+    "hl_observer.research.venue_capabilities",
+    "hl_observer.research.wallet_copy_edge",
+    "hl_observer.research.web_ouvert",
+    "hl_observer.research_parallel",
+    "hl_observer.research_parallel.plugins",
+    "hl_observer.risk.carry_risk_gates",
+    "hl_observer.risk.directional_exposure",
+    "hl_observer.risk.drawdown_scaling",
+    "hl_observer.risk.engine_risk_budget",
+    "hl_observer.risk.gates",
+    "hl_observer.risk.graded_halt",
+    "hl_observer.risk.interrupteurs",
+    "hl_observer.risk.kelly_leader_book",
+    "hl_observer.risk.kelly_sizing",
+    "hl_observer.risk.margin_reserve",
+    "hl_observer.risk.portfolio_correlation",
+    "hl_observer.risk.portfolio_risk_limits",
+    "hl_observer.risk.protections_v26",
+    "hl_observer.risk.risk_engine",
+    "hl_observer.risk.safety_gates_mm",
+    "hl_observer.risk.trade_budget",
+    "hl_observer.security.dependances",
+    "hl_observer.security.mainnet_guard",
+    "hl_observer.security.safety_audit",
+    "hl_observer.security.secrets",
+    "hl_observer.signals.leader_delta",
+    "hl_observer.signals.market_quality_score",
+    "hl_observer.signals.position_delta_detector",
+    "hl_observer.signals.signal_taxonomy",
+    "hl_observer.signals.v26_entry_vetos",
+    "hl_observer.simulation.accounting_truth",
+    "hl_observer.simulation.capital_accounting",
+    "hl_observer.simulation.economic_campaign_provenance",
+    "hl_observer.simulation.economic_campaigns",
+    "hl_observer.simulation.economic_freeze_registry",
+    "hl_observer.simulation.economic_objective",
+    "hl_observer.simulation.fee_model",
+    "hl_observer.simulation.ledger_integrity",
+    "hl_observer.simulation.liquidatable_marks",
+    "hl_observer.simulation.live_filters",
+    "hl_observer.simulation.paper_event",
+    "hl_observer.simulation.paper_ledger",
+    "hl_observer.simulation.pnl_ledger_audit",
+    "hl_observer.simulation.pnl_reconciliation",
+    "hl_observer.simulation.session_memory",
+    "hl_observer.sources.collection_recorder",
+    "hl_observer.sources.models",
+    "hl_observer.sources.registry",
+    "hl_observer.sources.shared_recorder",
+    "hl_observer.storage",
+    "hl_observer.storage.database",
+    "hl_observer.storage.models",
+    "hl_observer.storage.raw_store",
+    "hl_observer.storage.repositories",
+    "hl_observer.storage.run_context",
+    "hl_observer.strategies.active_scope",
+    "hl_observer.strategies.engine_pnl",
+    "hl_observer.strategies.strategy_mode",
+    "hl_observer.ui.fusion_persistent_adapter",
+    "hl_observer.ui.schemas",
+    "hl_observer.ui.state",
+    "hl_observer.utils.math",
+    "hl_observer.utils.time",
+    "hl_observer.wallets.activity_summary",
+    "hl_observer.wallets.auto_watchlist",
+    "hl_observer.wallets.discovery_scoring",
+    "hl_observer.wallets.discovery_sources",
+    "hl_observer.wallets.leaderboard_validation",
+    "hl_observer.wallets.per_coin_scoring",
+    "hl_observer.wallets.position_delta_engine",
+    "hl_observer.wallets.position_rebuilder",
+    "hl_observer.wallets.wallet_coin_profile"
+  ],
+  "canonical_configuration_findings": [],
+  "capability_findings": [],
+  "configuration_findings": [
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted-final-v1.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted-final-v1.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 19,
+      "path": ".github/workflows/github-hosted-runner-firewall.yml",
+      "text": "- name: Reject self-hosted runner targets"
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/hypersmart-runner-smoke-final-v1.yml",
+      "text": "echo \"Disabled permanently: no local PC, user-machine runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 17,
+      "path": ".github/workflows/local-readonly-observer.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/local-readonly-observer.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    }
+  ],
+  "direct_dependencies": [
+    {
+      "name": "aiohappyeyeballs",
+      "source": "requirements-portable.txt:4"
+    },
+    {
+      "name": "aiohttp",
+      "source": "requirements-portable.in:15"
+    },
+    {
+      "name": "aiohttp",
+      "source": "requirements-portable.txt:5"
+    },
+    {
+      "name": "aiosignal",
+      "source": "requirements-portable.txt:6"
+    },
+    {
+      "name": "alembic",
+      "source": "requirements-portable.txt:7"
+    },
+    {
+      "name": "annotated-doc",
+      "source": "requirements-portable.txt:8"
+    },
+    {
+      "name": "annotated-types",
+      "source": "requirements-portable.txt:9"
+    },
+    {
+      "name": "anyio",
+      "source": "requirements-portable.txt:10"
+    },
+    {
+      "name": "attrs",
+      "source": "requirements-portable.txt:11"
+    },
+    {
+      "name": "ccxt",
+      "source": "pyproject.toml:optional:discovery"
+    },
+    {
+      "name": "ccxt",
+      "source": "requirements.txt:10"
+    },
+    {
+      "name": "certifi",
+      "source": "requirements-portable.txt:12"
+    },
+    {
+      "name": "charset-normalizer",
+      "source": "requirements-portable.txt:13"
+    },
+    {
+      "name": "click",
+      "source": "requirements-portable.txt:14"
+    },
+    {
+      "name": "cmaes",
+      "source": "requirements-portable.in:22"
+    },
+    {
+      "name": "cmaes",
+      "source": "requirements-portable.txt:15"
+    },
+    {
+      "name": "cmaes",
+      "source": "requirements-recherche.txt:17"
+    },
+    {
+      "name": "colorama",
+      "source": "requirements-portable.txt:16"
+    },
+    {
+      "name": "colorlog",
+      "source": "requirements-portable.txt:17"
+    },
+    {
+      "name": "coverage",
+      "source": "requirements-ci-tools.txt:4"
+    },
+    {
+      "name": "coverage",
+      "source": "requirements-portable.in:26"
+    },
+    {
+      "name": "coverage",
+      "source": "requirements-portable.txt:18"
+    },
+    {
+      "name": "execnet",
+      "source": "requirements-portable.txt:19"
+    },
+    {
+      "name": "fastapi",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "fastapi",
+      "source": "requirements-portable.in:3"
+    },
+    {
+      "name": "fastapi",
+      "source": "requirements-portable.txt:20"
+    },
+    {
+      "name": "frozenlist",
+      "source": "requirements-portable.txt:21"
+    },
+    {
+      "name": "greenlet",
+      "source": "requirements-portable.txt:22"
+    },
+    {
+      "name": "h11",
+      "source": "requirements-portable.txt:23"
+    },
+    {
+      "name": "httpcore",
+      "source": "requirements-portable.txt:24"
+    },
+    {
+      "name": "httpx",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "httpx",
+      "source": "requirements-portable.in:4"
+    },
+    {
+      "name": "httpx",
+      "source": "requirements-portable.txt:25"
+    },
+    {
+      "name": "httpx",
+      "source": "requirements.txt:11"
+    },
+    {
+      "name": "hypothesis",
+      "source": "requirements-portable.in:27"
+    },
+    {
+      "name": "hypothesis",
+      "source": "requirements-portable.txt:26"
+    },
+    {
+      "name": "idna",
+      "source": "requirements-portable.txt:27"
+    },
+    {
+      "name": "iniconfig",
+      "source": "requirements-portable.txt:28"
+    },
+    {
+      "name": "librt",
+      "source": "requirements-portable.txt:29"
+    },
+    {
+      "name": "lz4",
+      "source": "requirements-portable.in:16"
+    },
+    {
+      "name": "lz4",
+      "source": "requirements-portable.txt:30"
+    },
+    {
+      "name": "lz4",
+      "source": "requirements-recherche.txt:23"
+    },
+    {
+      "name": "Mako",
+      "source": "requirements-portable.txt:31"
+    },
+    {
+      "name": "markdown-it-py",
+      "source": "requirements-portable.txt:32"
+    },
+    {
+      "name": "MarkupSafe",
+      "source": "requirements-portable.txt:33"
+    },
+    {
+      "name": "mdurl",
+      "source": "requirements-portable.txt:34"
+    },
+    {
+      "name": "multidict",
+      "source": "requirements-portable.txt:35"
+    },
+    {
+      "name": "mypy",
+      "source": "requirements-portable.in:29"
+    },
+    {
+      "name": "mypy",
+      "source": "requirements-portable.txt:37"
+    },
+    {
+      "name": "mypy_extensions",
+      "source": "requirements-portable.txt:36"
+    },
+    {
+      "name": "numpy",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "numpy",
+      "source": "requirements-portable.in:17"
+    },
+    {
+      "name": "numpy",
+      "source": "requirements-portable.txt:38"
+    },
+    {
+      "name": "numpy",
+      "source": "requirements-recherche.txt:20"
+    },
+    {
+      "name": "numpy",
+      "source": "requirements-recherche.txt:21"
+    },
+    {
+      "name": "optuna",
+      "source": "requirements-portable.in:21"
+    },
+    {
+      "name": "optuna",
+      "source": "requirements-portable.txt:39"
+    },
+    {
+      "name": "optuna",
+      "source": "requirements-recherche.txt:16"
+    },
+    {
+      "name": "packaging",
+      "source": "requirements-portable.txt:40"
+    },
+    {
+      "name": "pandas",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "pandas",
+      "source": "requirements-portable.in:19"
+    },
+    {
+      "name": "pandas",
+      "source": "requirements-portable.txt:41"
+    },
+    {
+      "name": "pathspec",
+      "source": "requirements-portable.txt:43"
+    },
+    {
+      "name": "pip",
+      "source": "requirements-ci-bootstrap.txt:3"
+    },
+    {
+      "name": "pip",
+      "source": "requirements-portable.txt:75"
+    },
+    {
+      "name": "pip-audit",
+      "source": "requirements-ci-tools.txt:5"
+    },
+    {
+      "name": "pluggy",
+      "source": "requirements-portable.txt:44"
+    },
+    {
+      "name": "propcache",
+      "source": "requirements-portable.txt:45"
+    },
+    {
+      "name": "psutil",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "psutil",
+      "source": "requirements-portable.in:12"
+    },
+    {
+      "name": "psutil",
+      "source": "requirements-portable.txt:46"
+    },
+    {
+      "name": "pyarrow",
+      "source": "requirements-portable.in:20"
+    },
+    {
+      "name": "pyarrow",
+      "source": "requirements-portable.txt:42"
+    },
+    {
+      "name": "pyarrow",
+      "source": "requirements-recherche.txt:22"
+    },
+    {
+      "name": "pydantic",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "pydantic",
+      "source": "requirements-portable.in:5"
+    },
+    {
+      "name": "pydantic",
+      "source": "requirements-portable.txt:48"
+    },
+    {
+      "name": "pydantic_core",
+      "source": "requirements-portable.txt:47"
+    },
+    {
+      "name": "Pygments",
+      "source": "requirements-portable.txt:49"
+    },
+    {
+      "name": "pytest",
+      "source": "pyproject.toml:optional:dev"
+    },
+    {
+      "name": "pytest",
+      "source": "requirements-ci-tools.txt:6"
+    },
+    {
+      "name": "pytest",
+      "source": "requirements-portable.in:23"
+    },
+    {
+      "name": "pytest",
+      "source": "requirements-portable.txt:50"
+    },
+    {
+      "name": "pytest",
+      "source": "requirements.txt:9"
+    },
+    {
+      "name": "pytest-timeout",
+      "source": "requirements-ci-tools.txt:7"
+    },
+    {
+      "name": "pytest-timeout",
+      "source": "requirements-portable.in:24"
+    },
+    {
+      "name": "pytest-timeout",
+      "source": "requirements-portable.txt:51"
+    },
+    {
+      "name": "pytest-xdist",
+      "source": "pyproject.toml:optional:dev"
+    },
+    {
+      "name": "pytest-xdist",
+      "source": "requirements-portable.in:25"
+    },
+    {
+      "name": "pytest-xdist",
+      "source": "requirements-portable.txt:52"
+    },
+    {
+      "name": "python-dateutil",
+      "source": "requirements-portable.txt:53"
+    },
+    {
+      "name": "pytz",
+      "source": "requirements-portable.txt:54"
+    },
+    {
+      "name": "PyYAML",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "PyYAML",
+      "source": "requirements-portable.in:6"
+    },
+    {
+      "name": "PyYAML",
+      "source": "requirements-portable.txt:55"
+    },
+    {
+      "name": "requests",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "requests",
+      "source": "requirements-portable.in:14"
+    },
+    {
+      "name": "requests",
+      "source": "requirements-portable.txt:56"
+    },
+    {
+      "name": "rich",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "rich",
+      "source": "requirements-portable.in:13"
+    },
+    {
+      "name": "rich",
+      "source": "requirements-portable.txt:57"
+    },
+    {
+      "name": "ruff",
+      "source": "pyproject.toml:optional:dev"
+    },
+    {
+      "name": "ruff",
+      "source": "requirements-portable.in:28"
+    },
+    {
+      "name": "ruff",
+      "source": "requirements-portable.txt:58"
+    },
+    {
+      "name": "scipy",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "scipy",
+      "source": "requirements-portable.in:18"
+    },
+    {
+      "name": "scipy",
+      "source": "requirements-portable.txt:59"
+    },
+    {
+      "name": "scipy",
+      "source": "requirements-recherche.txt:18"
+    },
+    {
+      "name": "scipy",
+      "source": "requirements-recherche.txt:19"
+    },
+    {
+      "name": "setuptools",
+      "source": "requirements-ci-tools.txt:8"
+    },
+    {
+      "name": "shellingham",
+      "source": "requirements-portable.txt:60"
+    },
+    {
+      "name": "six",
+      "source": "requirements-portable.txt:61"
+    },
+    {
+      "name": "sortedcontainers",
+      "source": "requirements-portable.txt:62"
+    },
+    {
+      "name": "SQLAlchemy",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "SQLAlchemy",
+      "source": "requirements-portable.in:7"
+    },
+    {
+      "name": "SQLAlchemy",
+      "source": "requirements-portable.txt:63"
+    },
+    {
+      "name": "starlette",
+      "source": "requirements-portable.txt:64"
+    },
+    {
+      "name": "tqdm",
+      "source": "requirements-portable.txt:65"
+    },
+    {
+      "name": "typer",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "typer",
+      "source": "requirements-portable.in:8"
+    },
+    {
+      "name": "typer",
+      "source": "requirements-portable.txt:66"
+    },
+    {
+      "name": "typing-inspection",
+      "source": "requirements-portable.txt:68"
+    },
+    {
+      "name": "typing_extensions",
+      "source": "requirements-portable.txt:67"
+    },
+    {
+      "name": "tzdata",
+      "source": "requirements-portable.txt:69"
+    },
+    {
+      "name": "urllib3",
+      "source": "requirements-portable.txt:70"
+    },
+    {
+      "name": "uvicorn",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "uvicorn",
+      "source": "requirements-portable.in:9"
+    },
+    {
+      "name": "uvicorn",
+      "source": "requirements-portable.txt:71"
+    },
+    {
+      "name": "websocket-client",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "websocket-client",
+      "source": "requirements-portable.in:10"
+    },
+    {
+      "name": "websocket-client",
+      "source": "requirements-portable.txt:72"
+    },
+    {
+      "name": "websockets",
+      "source": "pyproject.toml:project.dependencies"
+    },
+    {
+      "name": "websockets",
+      "source": "requirements-portable.in:11"
+    },
+    {
+      "name": "websockets",
+      "source": "requirements-portable.txt:73"
+    },
+    {
+      "name": "websockets",
+      "source": "requirements.txt:12"
+    },
+    {
+      "name": "yarl",
+      "source": "requirements-portable.txt:74"
+    }
+  ],
+  "fail_closed": true,
+  "git": {
+    "branch": "main",
+    "head": "39747a53d9ac8698f61065ac4a44919488c36e3f"
+  },
+  "guarded_capability_findings": [
+    {
+      "capability": "exchange order APIs",
+      "disposition": "GUARDED_DISCOVERY_ONLY",
+      "import": "ccxt",
+      "module": "hl_observer.markets.ccxt_universe",
+      "path": "src/hl_observer/markets/ccxt_universe.py",
+      "reason": "optional discovery-only adapter; no order/execution path"
+    }
+  ],
+  "historical_or_noncanonical_configuration_findings": [
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted-final-v1.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted-final-v1.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/alina-self-hosted.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 19,
+      "path": ".github/workflows/github-hosted-runner-firewall.yml",
+      "text": "- name: Reject self-hosted runner targets"
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/hypersmart-runner-smoke-final-v1.yml",
+      "text": "echo \"Disabled permanently: no local PC, user-machine runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "self_hosted_runner",
+      "line": 17,
+      "path": ".github/workflows/local-readonly-observer.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    },
+    {
+      "canonical": false,
+      "category": "ssh_transport",
+      "line": 17,
+      "path": ".github/workflows/local-readonly-observer.yml",
+      "text": "echo \"Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted.\""
+    }
+  ],
+  "invariants": {
+    "name_only_dependency_presence_is_not_reachability": true,
+    "no_install_or_network": true,
+    "no_orders_or_signatures": true,
+    "no_ssh_or_self_hosted_on_active_closure": true,
+    "paper_read_only": true
+  },
+  "locked_requirements": [
+    {
+      "hash_locked": true,
+      "line": 3,
+      "name": "pip",
+      "sha256": [
+        "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e"
+      ],
+      "source": "requirements-ci-bootstrap.txt",
+      "version": "26.2.1"
+    },
+    {
+      "hash_locked": false,
+      "line": 4,
+      "name": "coverage",
+      "sha256": [],
+      "source": "requirements-ci-tools.txt",
+      "version": "7.15.2"
+    },
+    {
+      "hash_locked": false,
+      "line": 5,
+      "name": "pip-audit",
+      "sha256": [],
+      "source": "requirements-ci-tools.txt",
+      "version": "2.10.1"
+    },
+    {
+      "hash_locked": false,
+      "line": 6,
+      "name": "pytest",
+      "sha256": [],
+      "source": "requirements-ci-tools.txt",
+      "version": "9.0.3"
+    },
+    {
+      "hash_locked": false,
+      "line": 7,
+      "name": "pytest-timeout",
+      "sha256": [],
+      "source": "requirements-ci-tools.txt",
+      "version": "2.4.0"
+    },
+    {
+      "hash_locked": false,
+      "line": 8,
+      "name": "setuptools",
+      "sha256": [],
+      "source": "requirements-ci-tools.txt",
+      "version": "84.2.1"
+    },
+    {
+      "hash_locked": false,
+      "line": 14,
+      "name": "requests",
+      "sha256": [],
+      "source": "requirements-portable.in",
+      "version": "2.32.5"
+    },
+    {
+      "hash_locked": true,
+      "line": 4,
+      "name": "aiohappyeyeballs",
+      "sha256": [
+        "9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.7.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 5,
+      "name": "aiohttp",
+      "sha256": [
+        "8b3b60de05f3dcb6f6a00f818bb2ec781cee4de0645f59ccaf99b1d1823b6100"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "3.14.3"
+    },
+    {
+      "hash_locked": true,
+      "line": 6,
+      "name": "aiosignal",
+      "sha256": [
+        "053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.4.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 7,
+      "name": "alembic",
+      "sha256": [
+        "06d8ba9d04558022f5395e9317de03d270f3dced49cee01f89fe7a13c26f14bc"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.18.5"
+    },
+    {
+      "hash_locked": true,
+      "line": 8,
+      "name": "annotated-doc",
+      "sha256": [
+        "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.0.5"
+    },
+    {
+      "hash_locked": true,
+      "line": 9,
+      "name": "annotated-types",
+      "sha256": [
+        "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.8.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 10,
+      "name": "anyio",
+      "sha256": [
+        "9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "4.14.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 11,
+      "name": "attrs",
+      "sha256": [
+        "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "26.1.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 12,
+      "name": "certifi",
+      "sha256": [
+        "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2026.7.22"
+    },
+    {
+      "hash_locked": true,
+      "line": 13,
+      "name": "charset-normalizer",
+      "sha256": [
+        "16b65ea0f2465b6fb52aa22de5eca612aa964ddfec00a912e26f4656cbef890b"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "3.4.9"
+    },
+    {
+      "hash_locked": true,
+      "line": 14,
+      "name": "click",
+      "sha256": [
+        "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "8.4.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 15,
+      "name": "cmaes",
+      "sha256": [
+        "ccf61c73d5792cf44b50672b63f28c590082d1c1f5ab5155e2dd6e5305427cad"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.13.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 16,
+      "name": "colorama",
+      "sha256": [
+        "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.4.6"
+    },
+    {
+      "hash_locked": true,
+      "line": 17,
+      "name": "colorlog",
+      "sha256": [
+        "30d392604e9110045a2c2aeefc27d7a017abbab63f3a8aee594eac0801df784e"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "6.12.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 18,
+      "name": "coverage",
+      "sha256": [
+        "9911f31aad8906abe337c271343485cf20df5e70df5d2f57f9f136e7b55f26bc"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "7.15.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 19,
+      "name": "execnet",
+      "sha256": [
+        "67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.1.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 20,
+      "name": "fastapi",
+      "sha256": [
+        "bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.141.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 21,
+      "name": "frozenlist",
+      "sha256": [
+        "3e0761f4d1a44f1d1a47996511752cf3dcec5bbdd9cc2b4fe595caf97754b7a0"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.8.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 22,
+      "name": "greenlet",
+      "sha256": [
+        "305f69e6c4523d7f6979ed001cff4e5853c063e5da04880296603aa0227e544c"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "3.5.4"
+    },
+    {
+      "hash_locked": true,
+      "line": 23,
+      "name": "h11",
+      "sha256": [
+        "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.16.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 24,
+      "name": "httpcore",
+      "sha256": [
+        "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.0.9"
+    },
+    {
+      "hash_locked": true,
+      "line": 25,
+      "name": "httpx",
+      "sha256": [
+        "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.28.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 26,
+      "name": "hypothesis",
+      "sha256": [
+        "0bbc39067ba06514fc0c934c34863492403ffc708a07d6a506b9460058550127"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "6.165.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 27,
+      "name": "idna",
+      "sha256": [
+        "7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "3.18"
+    },
+    {
+      "hash_locked": true,
+      "line": 28,
+      "name": "iniconfig",
+      "sha256": [
+        "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.3.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 29,
+      "name": "librt",
+      "sha256": [
+        "a3dfe4edf10e8ed7e55b026a8bfc2c2a8704218b659cd4bffdf604fab966dc39"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.13.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 30,
+      "name": "lz4",
+      "sha256": [
+        "92159782a4502858a21e0079d77cdcaade23e8a5d252ddf46b0652604300d7be"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "4.4.5"
+    },
+    {
+      "hash_locked": true,
+      "line": 31,
+      "name": "mako",
+      "sha256": [
+        "8f61569480282dbf557145ce441e4ba888be453c30989f879f0d652e39f53ea9"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.3.12"
+    },
+    {
+      "hash_locked": true,
+      "line": 32,
+      "name": "markdown-it-py",
+      "sha256": [
+        "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "4.2.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 33,
+      "name": "markupsafe",
+      "sha256": [
+        "bdc919ead48f234740ad807933cdf545180bfbe9342c2bb451556db2ed958581"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "3.0.3"
+    },
+    {
+      "hash_locked": true,
+      "line": 34,
+      "name": "mdurl",
+      "sha256": [
+        "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.1.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 35,
+      "name": "multidict",
+      "sha256": [
+        "5e01429a929600e7dab7b166062d9bb54a5eed752384c7384c968c2afab8f50f"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "6.7.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 36,
+      "name": "mypy-extensions",
+      "sha256": [
+        "1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.1.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 37,
+      "name": "mypy",
+      "sha256": [
+        "913485a03f1bcf5d279409a9d2b9ed565c151f61c09f29991e5faa14033da4c8"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.20.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 38,
+      "name": "numpy",
+      "sha256": [
+        "24d0eb82c0541d3415a33425db64ae439dffccd7b4dbcb30e7c35120205c506a"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.5.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 39,
+      "name": "optuna",
+      "sha256": [
+        "f52f3be6148654850c92a5860d398fd88ec6b2c84ab68d9c3d07dcff02e7afee"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "4.9.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 40,
+      "name": "packaging",
+      "sha256": [
+        "5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "26.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 41,
+      "name": "pandas",
+      "sha256": [
+        "1b07204a219b3b7350abaae088f451860223a52cfb8a6c53358e7948735158e5"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.3.3"
+    },
+    {
+      "hash_locked": true,
+      "line": 42,
+      "name": "pyarrow",
+      "sha256": [
+        "2e093efbecb5317372f819228fa4b4e6157eee48d3f0a7b0303705ebf81a7104"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "25.0.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 43,
+      "name": "pathspec",
+      "sha256": [
+        "a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.1.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 44,
+      "name": "pluggy",
+      "sha256": [
+        "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.6.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 45,
+      "name": "propcache",
+      "sha256": [
+        "81e3a30b0bb60caa22033dd0f8a3618d1d67356212514f62c57db75cb0ef410c"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.5.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 46,
+      "name": "psutil",
+      "sha256": [
+        "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "7.2.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 47,
+      "name": "pydantic-core",
+      "sha256": [
+        "811ff8e9c313ab425368bcbb36e5c4ebd7108c2bbf4e4089cfbb0b01eff63fac"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.46.4"
+    },
+    {
+      "hash_locked": true,
+      "line": 48,
+      "name": "pydantic",
+      "sha256": [
+        "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.13.4"
+    },
+    {
+      "hash_locked": true,
+      "line": 49,
+      "name": "pygments",
+      "sha256": [
+        "81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.20.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 50,
+      "name": "pytest",
+      "sha256": [
+        "2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "9.0.3"
+    },
+    {
+      "hash_locked": true,
+      "line": 51,
+      "name": "pytest-timeout",
+      "sha256": [
+        "c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.4.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 52,
+      "name": "pytest-xdist",
+      "sha256": [
+        "202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "3.8.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 53,
+      "name": "python-dateutil",
+      "sha256": [
+        "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.9.0.post0"
+    },
+    {
+      "hash_locked": true,
+      "line": 54,
+      "name": "pytz",
+      "sha256": [
+        "dd95840dd199baea12d9cc096a1d452caa6596a1c1e4b5f3dbd1541855d5e815"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2026.3.post1"
+    },
+    {
+      "hash_locked": true,
+      "line": 55,
+      "name": "pyyaml",
+      "sha256": [
+        "4a2e8cebe2ff6ab7d1050ecd59c25d4c8bd7e6f400f5f82b96557ac0abafd0ac"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "6.0.3"
+    },
+    {
+      "hash_locked": true,
+      "line": 56,
+      "name": "requests",
+      "sha256": [
+        "2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.32.5"
+    },
+    {
+      "hash_locked": true,
+      "line": 57,
+      "name": "rich",
+      "sha256": [
+        "07e7adb4690f68864777b1450859253bed81a99a31ac321ac1817b2313558952"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "14.3.4"
+    },
+    {
+      "hash_locked": true,
+      "line": 58,
+      "name": "ruff",
+      "sha256": [
+        "09b05e8b90c2cb06ad63464350e7a45e8e44a2dfe52072ebfba6666ca8d3f596"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.16.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 59,
+      "name": "scipy",
+      "sha256": [
+        "2d8bbdc6c817f5b4006a54d799d4f5bab6f910193cbb9a1ff310833d4d270f61"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.18.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 60,
+      "name": "shellingham",
+      "sha256": [
+        "7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.5.4"
+    },
+    {
+      "hash_locked": true,
+      "line": 61,
+      "name": "six",
+      "sha256": [
+        "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.17.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 62,
+      "name": "sortedcontainers",
+      "sha256": [
+        "a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.4.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 63,
+      "name": "sqlalchemy",
+      "sha256": [
+        "96747bfbadb055466e5b46d572618170046b45ce5a4879167f50d70a5319a499"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.0.51"
+    },
+    {
+      "hash_locked": true,
+      "line": 64,
+      "name": "starlette",
+      "sha256": [
+        "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.3.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 65,
+      "name": "tqdm",
+      "sha256": [
+        "7f585706bfddbdebf89daac705b2dfcc16890130727d3197ca62c732b4310953"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "4.70.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 66,
+      "name": "typer",
+      "sha256": [
+        "6f4b27631e47f077871b7dc30e933ec0131c1390fbe0e387ea5574b5bac9ccf1"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.27.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 67,
+      "name": "typing-extensions",
+      "sha256": [
+        "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "4.16.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 68,
+      "name": "typing-inspection",
+      "sha256": [
+        "4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.4.2"
+    },
+    {
+      "hash_locked": true,
+      "line": 69,
+      "name": "tzdata",
+      "sha256": [
+        "dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2026.3"
+    },
+    {
+      "hash_locked": true,
+      "line": 70,
+      "name": "urllib3",
+      "sha256": [
+        "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "2.7.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 71,
+      "name": "uvicorn",
+      "sha256": [
+        "e4403f9d93188cf9d1088e9f40e3acd12630e2df8675316704379a7fc20fff6a"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "0.52.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 72,
+      "name": "websocket-client",
+      "sha256": [
+        "af248a825037ef591efbf6ed20cc5faa03d3b47b9e5a2230a529eeee1c1fc3ef"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.9.0"
+    },
+    {
+      "hash_locked": true,
+      "line": 73,
+      "name": "websockets",
+      "sha256": [
+        "81ce19c6046ace11da7001781be7317bb1dc389f399af4b2ed962190f76f9add"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "17.0.1"
+    },
+    {
+      "hash_locked": true,
+      "line": 74,
+      "name": "yarl",
+      "sha256": [
+        "5ba4f78df2bcc19f764a4b26a8a4f5049c110090ad5825993aacb052bf8003ad"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "1.24.5"
+    },
+    {
+      "hash_locked": true,
+      "line": 75,
+      "name": "pip",
+      "sha256": [
+        "382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab"
+      ],
+      "source": "requirements-portable.txt",
+      "version": "26.1.2"
+    },
+    {
+      "hash_locked": false,
+      "line": 16,
+      "name": "optuna",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "4.9.0"
+    },
+    {
+      "hash_locked": false,
+      "line": 17,
+      "name": "cmaes",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "0.13.0"
+    },
+    {
+      "hash_locked": false,
+      "line": 18,
+      "name": "scipy",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "1.17.1"
+    },
+    {
+      "hash_locked": false,
+      "line": 19,
+      "name": "scipy",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "1.18.0"
+    },
+    {
+      "hash_locked": false,
+      "line": 20,
+      "name": "numpy",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "2.4.2"
+    },
+    {
+      "hash_locked": false,
+      "line": 21,
+      "name": "numpy",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "2.5.1"
+    },
+    {
+      "hash_locked": false,
+      "line": 22,
+      "name": "pyarrow",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "25.0.0"
+    },
+    {
+      "hash_locked": false,
+      "line": 23,
+      "name": "lz4",
+      "sha256": [],
+      "source": "requirements-recherche.txt",
+      "version": "4.4.5"
+    }
+  ],
+  "lockfile_digests": [
+    {
+      "path": "pyproject.toml",
+      "sha256": "daf3c2a18a1aa25679326d21dc60d51607255a6b104065d5aa5d527f7a97b1db",
+      "size": 1771
+    },
+    {
+      "path": "requirements-ci-bootstrap.txt",
+      "sha256": "d711616a3a21d7eff8d303611dc3b926b1d5c9dc5e86a80418454f668c8dad99",
+      "size": 266
+    },
+    {
+      "path": "requirements-ci-tools.txt",
+      "sha256": "050e76ef3d8396fab1981041052847fc1f329e9cde8fed0d7f010a88424e77b8",
+      "size": 288
+    },
+    {
+      "path": "requirements-portable.in",
+      "sha256": "349fe5b93ede7adac8e7dccb7471b449607199a05354df38d32d26f08bf5bade",
+      "size": 568
+    },
+    {
+      "path": "requirements-portable.txt",
+      "sha256": "7ae0745876ad93fecf19cc5ea3b3834f71470af3db5e9f42661f2ff03862ae5b",
+      "size": 7036
+    },
+    {
+      "path": "requirements-recherche.txt",
+      "sha256": "7c44494be33dfab8fd88259a03766363a3088a71e709534d0b45ae6f0c620e27",
+      "size": 1174
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "935c8fbf4682cd0817eb7ed6e849645a49a0edb8e9e09a00c6ec92e42edb7d17",
+      "size": 652
+    }
+  ],
+  "missing_resolved_dependencies": [
+    {
+      "name": "abi3audit",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "adbc-driver-postgresql",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "adbc-driver-sqlite",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "aiohappyeyeballs",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "aiohttp",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "aiomysql",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "aioodbc",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "aiosignal",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "aiosqlite",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "alembic",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "argcomplete",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "array-api-strict",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "asv",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "asyncmy",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "asyncpg",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "attrs",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "backports-zstd",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "beautifulsoup4",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "black",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "bottleneck",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "brotli",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "brotlicffi",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "ccxt",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "chardet",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "check-manifest",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "cmaes",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "colorlog",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "commonmark",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "coverage",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "cx-oracle",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "cymysql",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "cython",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "cython-lint",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "dataframe-api-compat",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "email-validator",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "exceptiongroup",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "fastapi-cli",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "fastar",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "fastparquet",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "filelock",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "frozenlist",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "fsspec",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "gcsfs",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "gmpy2",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "gprof2dot",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "greenlet",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "h2",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "hatch",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "html5lib",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "httptools",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "httpx2",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "hypothesis",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "intersphinx-registry",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "ipykernel",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "ipywidgets",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "itsdangerous",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "jinja2",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "jupyter-sphinx",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "jupyterlite-pyodide-kernel",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "jupyterlite-sphinx",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "jupytext",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "librt",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "linkify-it-py",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "lxml",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "lz4",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mako",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mariadb",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "markdown",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "markdown-it-pyrs",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "markupsafe",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "matplotlib",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mdit-py-plugins",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "meson",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mistletoe",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mistune",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mock",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mpmath",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mssql-python",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "multidict",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mypy",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mypy-extensions",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mysql-connector-python",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "mysqlclient",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "myst-nb",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "myst-parser",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "ninja",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "numba",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "numexpr",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "numpydoc",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "odfpy",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "openpyxl",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "opentelemetry-exporter-otlp-proto-http",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "opentelemetry-sdk",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "optuna",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "oracledb",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pandas-gbq",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "panflute",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pathspec",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pg8000",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pip",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pip-audit",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pooch",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pre-commit",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "propcache",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "psleak",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "psycopg",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "psycopg2",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "psycopg2-binary",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "psycopg2cffi",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pycodestyle",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pydantic-extra-types",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pydantic-settings",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pydata-sphinx-theme",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pylint",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pymssql",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pymysql",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pyodbc",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pyperf",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pypinfo",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pyqt5",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pyreadline3",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pyreadstat",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pysocks",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pytest-benchmark",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pytest-cov",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pytest-instafail",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pytest-regressions",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pytest-timeout",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "python-calamine",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "python-dotenv",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "python-multipart",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "python-socks",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pywin32",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "pyxlsb",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "qtpy",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "rstcheck",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "s3fs",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "scikit-umfpack",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "setproctitle",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "setuptools",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "socksio",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sortedcontainers",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sphinx",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sphinx-book-theme",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sphinx-copybutton",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sphinx-design",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sphinx-rtd-theme",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "spin",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "sqlcipher3-binary",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "tables",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "tabulate",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "threadpoolctl",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "toml-sort",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "tomli",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "tox",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "tqdm",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "trio",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "twine",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "ty",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "types-greenlet",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "types-psutil",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "uvloop",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "validate-pyproject",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "virtualenv",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "vulture",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "watchfiles",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "wheel",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "wmi",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "wsaccel",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "xarray",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "xlrd",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "xlsxwriter",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "xmlschema",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "yarl",
+      "reason": "not installed in the current environment"
+    },
+    {
+      "name": "zstandard",
+      "reason": "not installed in the current environment"
+    }
+  ],
+  "name_only_false_positives": [],
+  "no_dependency_mutation": true,
+  "no_install_or_network": true,
+  "read_only": true,
+  "repo": "C:\\Users\\flo\\Desktop\\Projet invest",
+  "resolved_dependency_graph": [
+    {
+      "name": "annotated-doc",
+      "requires": [],
+      "version": "0.0.5"
+    },
+    {
+      "name": "annotated-types",
+      "requires": [],
+      "version": "0.8.0"
+    },
+    {
+      "name": "anyio",
+      "requires": [
+        "exceptiongroup",
+        "idna",
+        "trio",
+        "typing-extensions"
+      ],
+      "version": "4.15.1"
+    },
+    {
+      "name": "certifi",
+      "requires": [],
+      "version": "2026.10.19"
+    },
+    {
+      "name": "charset-normalizer",
+      "requires": [],
+      "version": "3.5.2"
+    },
+    {
+      "name": "click",
+      "requires": [],
+      "version": "8.5.0"
+    },
+    {
+      "name": "colorama",
+      "requires": [],
+      "version": "0.4.6"
+    },
+    {
+      "name": "execnet",
+      "requires": [
+        "hatch",
+        "pre-commit",
+        "pytest",
+        "tox"
+      ],
+      "version": "2.1.2"
+    },
+    {
+      "name": "fastapi",
+      "requires": [
+        "annotated-doc",
+        "email-validator",
+        "fastapi-cli",
+        "fastar",
+        "httpx",
+        "httpx2",
+        "itsdangerous",
+        "jinja2",
+        "opentelemetry-api",
+        "opentelemetry-exporter-otlp-proto-http",
+        "opentelemetry-sdk",
+        "pydantic",
+        "pydantic-extra-types",
+        "pydantic-settings",
+        "python-multipart",
+        "pyyaml",
+        "starlette",
+        "typing-extensions",
+        "typing-inspection",
+        "uvicorn"
+      ],
+      "version": "0.161.0"
+    },
+    {
+      "name": "h11",
+      "requires": [],
+      "version": "0.16.0"
+    },
+    {
+      "name": "httpcore",
+      "requires": [
+        "anyio",
+        "certifi",
+        "h11",
+        "h2",
+        "socksio",
+        "trio"
+      ],
+      "version": "1.0.9"
+    },
+    {
+      "name": "httpx",
+      "requires": [
+        "anyio",
+        "brotli",
+        "brotlicffi",
+        "certifi",
+        "click",
+        "h2",
+        "httpcore",
+        "idna",
+        "pygments",
+        "rich",
+        "socksio",
+        "zstandard"
+      ],
+      "version": "0.28.1"
+    },
+    {
+      "name": "idna",
+      "requires": [
+        "coverage",
+        "hypothesis",
+        "mypy",
+        "pytest",
+        "ruff",
+        "ty"
+      ],
+      "version": "3.20"
+    },
+    {
+      "name": "iniconfig",
+      "requires": [],
+      "version": "2.3.1"
+    },
+    {
+      "name": "markdown-it-py",
+      "requires": [
+        "commonmark",
+        "coverage",
+        "gprof2dot",
+        "ipykernel",
+        "jupyter-sphinx",
+        "linkify-it-py",
+        "markdown",
+        "markdown-it-pyrs",
+        "mdit-py-plugins",
+        "mdurl",
+        "mistletoe",
+        "mistune",
+        "myst-parser",
+        "panflute",
+        "psutil",
+        "pytest",
+        "pytest-benchmark",
+        "pytest-cov",
+        "pytest-regressions",
+        "pytest-timeout",
+        "pyyaml",
+        "requests",
+        "sphinx",
+        "sphinx-book-theme",
+        "sphinx-copybutton",
+        "sphinx-design"
+      ],
+      "version": "4.2.0"
+    },
+    {
+      "name": "mdurl",
+      "requires": [],
+      "version": "0.1.2"
+    },
+    {
+      "name": "numpy",
+      "requires": [],
+      "version": "2.4.6"
+    },
+    {
+      "name": "opentelemetry-api",
+      "requires": [
+        "typing-extensions"
+      ],
+      "version": "1.45.1"
+    },
+    {
+      "name": "packaging",
+      "requires": [],
+      "version": "26.3"
+    },
+    {
+      "name": "pandas",
+      "requires": [
+        "adbc-driver-postgresql",
+        "adbc-driver-sqlite",
+        "beautifulsoup4",
+        "bottleneck",
+        "dataframe-api-compat",
+        "fastparquet",
+        "fsspec",
+        "gcsfs",
+        "html5lib",
+        "hypothesis",
+        "jinja2",
+        "lxml",
+        "matplotlib",
+        "numba",
+        "numexpr",
+        "numpy",
+        "odfpy",
+        "openpyxl",
+        "pandas-gbq",
+        "psycopg2",
+        "pyarrow",
+        "pymysql",
+        "pyqt5",
+        "pyreadstat",
+        "pytest",
+        "pytest-xdist",
+        "python-calamine",
+        "python-dateutil",
+        "pytz",
+        "pyxlsb",
+        "qtpy",
+        "s3fs",
+        "scipy",
+        "sqlalchemy",
+        "tables",
+        "tabulate",
+        "tzdata",
+        "xarray",
+        "xlrd",
+        "xlsxwriter",
+        "zstandard"
+      ],
+      "version": "2.3.3"
+    },
+    {
+      "name": "pluggy",
+      "requires": [],
+      "version": "1.7.0"
+    },
+    {
+      "name": "psutil",
+      "requires": [
+        "abi3audit",
+        "black",
+        "check-manifest",
+        "colorama",
+        "coverage",
+        "packaging",
+        "psleak",
+        "pylint",
+        "pyperf",
+        "pypinfo",
+        "pyreadline3",
+        "pytest",
+        "pytest-cov",
+        "pytest-instafail",
+        "pytest-xdist",
+        "pywin32",
+        "requests",
+        "rstcheck",
+        "ruff",
+        "setuptools",
+        "sphinx",
+        "sphinx-rtd-theme",
+        "toml-sort",
+        "twine",
+        "validate-pyproject",
+        "virtualenv",
+        "vulture",
+        "wheel",
+        "wmi"
+      ],
+      "version": "7.2.2"
+    },
+    {
+      "name": "pyarrow",
+      "requires": [],
+      "version": "25.0.0"
+    },
+    {
+      "name": "pydantic",
+      "requires": [
+        "annotated-types",
+        "email-validator",
+        "pydantic-core",
+        "typing-extensions",
+        "typing-inspection",
+        "tzdata"
+      ],
+      "version": "2.14.1"
+    },
+    {
+      "name": "pydantic-core",
+      "requires": [
+        "typing-extensions"
+      ],
+      "version": "2.50.1"
+    },
+    {
+      "name": "pygments",
+      "requires": [
+        "colorama"
+      ],
+      "version": "2.21.0"
+    },
+    {
+      "name": "pytest",
+      "requires": [
+        "argcomplete",
+        "attrs",
+        "colorama",
+        "exceptiongroup",
+        "hypothesis",
+        "iniconfig",
+        "mock",
+        "packaging",
+        "pluggy",
+        "pygments",
+        "requests",
+        "setuptools",
+        "tomli",
+        "xmlschema"
+      ],
+      "version": "9.1.1"
+    },
+    {
+      "name": "pytest-xdist",
+      "requires": [
+        "execnet",
+        "filelock",
+        "psutil",
+        "pytest",
+        "setproctitle"
+      ],
+      "version": "3.8.0"
+    },
+    {
+      "name": "python-dateutil",
+      "requires": [
+        "six",
+        "tzdata"
+      ],
+      "version": "3.0.0"
+    },
+    {
+      "name": "pytz",
+      "requires": [],
+      "version": "2026.5"
+    },
+    {
+      "name": "pyyaml",
+      "requires": [],
+      "version": "6.0.3"
+    },
+    {
+      "name": "requests",
+      "requires": [
+        "certifi",
+        "chardet",
+        "charset-normalizer",
+        "idna",
+        "pysocks",
+        "urllib3"
+      ],
+      "version": "2.34.2"
+    },
+    {
+      "name": "rich",
+      "requires": [
+        "ipywidgets",
+        "markdown-it-py",
+        "pygments"
+      ],
+      "version": "15.0.0"
+    },
+    {
+      "name": "ruff",
+      "requires": [],
+      "version": "0.17.2"
+    },
+    {
+      "name": "scipy",
+      "requires": [
+        "array-api-strict",
+        "asv",
+        "click",
+        "cython",
+        "cython-lint",
+        "gmpy2",
+        "hypothesis",
+        "intersphinx-registry",
+        "jupyterlite-pyodide-kernel",
+        "jupyterlite-sphinx",
+        "jupytext",
+        "linkify-it-py",
+        "matplotlib",
+        "meson",
+        "mpmath",
+        "mypy",
+        "myst-nb",
+        "ninja",
+        "numpy",
+        "numpydoc",
+        "pooch",
+        "pycodestyle",
+        "pydata-sphinx-theme",
+        "pytest",
+        "pytest-cov",
+        "pytest-timeout",
+        "pytest-xdist",
+        "ruff",
+        "scikit-umfpack",
+        "sphinx",
+        "sphinx-copybutton",
+        "sphinx-design",
+        "spin",
+        "tabulate",
+        "threadpoolctl",
+        "types-psutil",
+        "typing-extensions"
+      ],
+      "version": "1.17.1"
+    },
+    {
+      "name": "shellingham",
+      "requires": [],
+      "version": "1.5.4"
+    },
+    {
+      "name": "six",
+      "requires": [],
+      "version": "1.17.0"
+    },
+    {
+      "name": "sqlalchemy",
+      "requires": [
+        "aiomysql",
+        "aioodbc",
+        "aiosqlite",
+        "asyncmy",
+        "asyncpg",
+        "cx-oracle",
+        "cymysql",
+        "greenlet",
+        "mariadb",
+        "mssql-python",
+        "mypy",
+        "mysql-connector-python",
+        "mysqlclient",
+        "oracledb",
+        "pg8000",
+        "psycopg",
+        "psycopg2-binary",
+        "psycopg2cffi",
+        "pymssql",
+        "pymysql",
+        "pyodbc",
+        "sqlalchemy",
+        "sqlcipher3-binary",
+        "types-greenlet",
+        "typing-extensions"
+      ],
+      "version": "2.1.6"
+    },
+    {
+      "name": "starlette",
+      "requires": [
+        "anyio",
+        "httpx",
+        "httpx2",
+        "itsdangerous",
+        "jinja2",
+        "opentelemetry-api",
+        "python-multipart",
+        "pyyaml",
+        "typing-extensions"
+      ],
+      "version": "1.9.0"
+    },
+    {
+      "name": "typer",
+      "requires": [
+        "annotated-doc",
+        "colorama",
+        "rich",
+        "shellingham"
+      ],
+      "version": "0.27.3"
+    },
+    {
+      "name": "typing-extensions",
+      "requires": [],
+      "version": "4.16.0"
+    },
+    {
+      "name": "typing-inspection",
+      "requires": [
+        "typing-extensions"
+      ],
+      "version": "0.4.4"
+    },
+    {
+      "name": "tzdata",
+      "requires": [],
+      "version": "2026.5"
+    },
+    {
+      "name": "urllib3",
+      "requires": [
+        "backports-zstd",
+        "brotli",
+        "brotlicffi",
+        "h2",
+        "pysocks"
+      ],
+      "version": "2.8.0"
+    },
+    {
+      "name": "uvicorn",
+      "requires": [
+        "click",
+        "h11",
+        "httptools",
+        "python-dotenv",
+        "pyyaml",
+        "typing-extensions",
+        "uvloop",
+        "watchfiles",
+        "websockets"
+      ],
+      "version": "0.54.0"
+    },
+    {
+      "name": "websocket-client",
+      "requires": [
+        "myst-parser",
+        "pytest",
+        "python-socks",
+        "sphinx",
+        "sphinx-rtd-theme",
+        "websockets",
+        "wsaccel"
+      ],
+      "version": "1.9.2"
+    },
+    {
+      "name": "websockets",
+      "requires": [],
+      "version": "10.4"
+    }
+  ],
+  "schema": "copy-vault-forbidden-dependencies/v1",
+  "scope": "Copy-Vault canonical launcher closure only",
+  "source_imports": [
+    {
+      "imports": [],
+      "module": "hl_observer",
+      "path": "src/hl_observer/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "fcntl",
+        "hl_observer.alerts.validation",
+        "hl_observer.collection.collecte_fiable",
+        "json",
+        "msvcrt",
+        "os",
+        "pathlib",
+        "tempfile",
+        "typing"
+      ],
+      "module": "hl_observer.alerts.durability",
+      "path": "src/hl_observer/alerts/durability.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "json",
+        "math",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.alerts.validation",
+      "path": "src/hl_observer/alerts/validation.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.arbitrage.executable_legs"
+      ],
+      "module": "hl_observer.arbitrage.cross_source_comparator",
+      "path": "src/hl_observer/arbitrage/cross_source_comparator.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "enum"
+      ],
+      "module": "hl_observer.arbitrage.cross_venue_contract",
+      "path": "src/hl_observer/arbitrage/cross_venue_contract.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.arbitrage.executable_legs",
+      "path": "src/hl_observer/arbitrage/executable_legs.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.collection.native_venue_market",
+        "hl_observer.config.frais_venues",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.arbitrage.multi_venue_execution",
+      "path": "src/hl_observer/arbitrage/multi_venue_execution.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.audit.dette_cablage",
+      "path": "src/hl_observer/audit/dette_cablage.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.backtest.no_lookahead_guard",
+      "path": "src/hl_observer/backtest/no_lookahead_guard.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math"
+      ],
+      "module": "hl_observer.backtest.walk_forward",
+      "path": "src/hl_observer/backtest/walk_forward.py"
+    },
+    {
+      "imports": [
+        "hl_observer.backtesting",
+        "hl_observer.backtesting.experiment"
+      ],
+      "module": "hl_observer.backtesting",
+      "path": "src/hl_observer/backtesting/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "bisect",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.backtesting.validation_gates",
+        "hl_observer.paper_trading.sl_tp",
+        "hl_observer.paper_trading.vol_adjusted_barriers",
+        "hl_observer.signals.v26_entry_vetos",
+        "json",
+        "pathlib",
+        "sys"
+      ],
+      "module": "hl_observer.backtesting.ab_flag_replay",
+      "path": "src/hl_observer/backtesting/ab_flag_replay.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hashlib",
+        "hl_observer.ops.echec_silencieux",
+        "json",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.boucle_objectif_replay",
+      "path": "src/hl_observer/backtesting/boucle_objectif_replay.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.ops.echec_silencieux",
+        "json",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.carry_scan_recorder",
+      "path": "src/hl_observer/backtesting/carry_scan_recorder.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "collections",
+        "collections.abc",
+        "decimal",
+        "hashlib",
+        "hl_observer.backtesting.copy_vault_instrument_metadata",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.normalization.l2_book",
+        "hl_observer.paper_trading.execution_truth",
+        "json",
+        "math",
+        "pathlib",
+        "re",
+        "sqlite3",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_book_loader",
+      "path": "src/hl_observer/backtesting/copy_vault_book_loader.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "copy",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.backtesting.copy_vault_executable",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "math",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_causal_selection",
+      "path": "src/hl_observer/backtesting/copy_vault_causal_selection.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "contextlib",
+        "hashlib",
+        "hl_observer.economics.numeric",
+        "json",
+        "os",
+        "pathlib",
+        "re",
+        "tempfile",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_evidence",
+      "path": "src/hl_observer/backtesting/copy_vault_evidence.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "collections",
+        "collections.abc",
+        "copy",
+        "dataclasses",
+        "decimal",
+        "hashlib",
+        "hl_observer.backtesting.copy_vault_book_loader",
+        "hl_observer.backtesting.copy_vault_causal_selection",
+        "hl_observer.backtesting.copy_vault_evidence",
+        "hl_observer.backtesting.copy_vault_execution_math",
+        "hl_observer.backtesting.copy_vault_instrument_metadata",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.execution_delay_model",
+        "hl_observer.backtesting.execution_sim",
+        "hl_observer.backtesting.fee_model",
+        "hl_observer.backtesting.replay_engine",
+        "hl_observer.backtesting.reporting",
+        "hl_observer.config.settings",
+        "hl_observer.copy_vault.attribution_after_netting",
+        "hl_observer.copy_vault.multi_vault_intent_netting",
+        "hl_observer.economics.assumptions",
+        "hl_observer.economics.families",
+        "hl_observer.economics.numeric",
+        "hl_observer.funding.funding_times",
+        "hl_observer.normalization.l2_book",
+        "hl_observer.ops.paper_canonique",
+        "hl_observer.paper_trading.execution_truth",
+        "hl_observer.paper_trading.paper_engine",
+        "hl_observer.position_lifecycle.reconstructor",
+        "hl_observer.signals.leader_delta",
+        "hl_observer.simulation.economic_objective",
+        "hl_observer.simulation.paper_ledger",
+        "json",
+        "math",
+        "random",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_executable",
+      "path": "src/hl_observer/backtesting/copy_vault_executable.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "decimal",
+        "hl_observer.normalization.l2_book",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_execution_math",
+      "path": "src/hl_observer/backtesting/copy_vault_execution_math.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "decimal",
+        "hashlib",
+        "hl_observer.backtesting.monte_carlo",
+        "hl_observer.economics.numeric",
+        "hl_observer.instrument_identity",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_generalization",
+      "path": "src/hl_observer/backtesting/copy_vault_generalization.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "decimal",
+        "hashlib",
+        "json",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_instrument_metadata",
+      "path": "src/hl_observer/backtesting/copy_vault_instrument_metadata.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "base64",
+        "bisect",
+        "collections",
+        "collections.abc",
+        "concurrent.futures",
+        "contextlib",
+        "copy",
+        "datetime",
+        "decimal",
+        "gzip",
+        "hashlib",
+        "hl_observer.alerts.durability",
+        "hl_observer.backtesting",
+        "hl_observer.backtesting.copy_vault_causal_selection",
+        "hl_observer.backtesting.copy_vault_generalization",
+        "hl_observer.backtesting.copy_vault_instrument_metadata",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.copy_vault_v21_frozen",
+        "hl_observer.backtesting.copy_vault_v9_online_leader_quality_train",
+        "hl_observer.backtesting.train_statistics",
+        "hl_observer.collection.userfills_live",
+        "hl_observer.datasets.copy_vault_coverage",
+        "hl_observer.datasets.schema_compatibility",
+        "hl_observer.datasets.v2_pipeline",
+        "hl_observer.economics.hyperliquid_fees",
+        "hl_observer.economics.numeric",
+        "hl_observer.normalization.l2_book",
+        "hl_observer.research.leader_review_ledger",
+        "hl_observer.simulation.economic_freeze_registry",
+        "importlib.util",
+        "json",
+        "math",
+        "os",
+        "pathlib",
+        "psutil",
+        "random",
+        "re",
+        "resource",
+        "sqlite3",
+        "sys",
+        "tempfile",
+        "tools.copy_vault_continuity",
+        "tools.partitioned_data_index",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_local_lab",
+      "path": "src/hl_observer/backtesting/copy_vault_local_lab.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.economics.families",
+        "hl_observer.instrument_identity",
+        "json",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_protocol",
+      "path": "src/hl_observer/backtesting/copy_vault_protocol.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "collections",
+        "collections.abc",
+        "decimal",
+        "hl_observer.backtesting",
+        "hl_observer.backtesting.copy_vault_execution_math",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.copy_vault_v4_train",
+        "hl_observer.backtesting.train_statistics",
+        "hl_observer.config.frais_venues",
+        "hl_observer.economics.copy_vault_metrics",
+        "hl_observer.economics.numeric",
+        "hl_observer.funding.funding_times",
+        "hl_observer.normalization.l2_book",
+        "hl_observer.simulation.economic_freeze_registry",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_v21_frozen",
+      "path": "src/hl_observer/backtesting/copy_vault_v21_frozen.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "hl_observer.backtesting.copy_vault_executable",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.train_statistics",
+        "hl_observer.economics.numeric",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_v4_train",
+      "path": "src/hl_observer/backtesting/copy_vault_v4_train.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "collections",
+        "collections.abc",
+        "hl_observer.backtesting.copy_vault_executable",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.copy_vault_v4_train",
+        "hl_observer.backtesting.train_statistics",
+        "hl_observer.instrument_identity",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_v5_lifecycle_train",
+      "path": "src/hl_observer/backtesting/copy_vault_v5_lifecycle_train.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "hl_observer.backtesting.copy_vault_executable",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.copy_vault_v4_train",
+        "hl_observer.backtesting.copy_vault_v5_lifecycle_train",
+        "hl_observer.backtesting.train_statistics",
+        "hl_observer.instrument_identity",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_v6_balanced_train",
+      "path": "src/hl_observer/backtesting/copy_vault_v6_balanced_train.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.backtesting.copy_vault_executable",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.copy_vault_v4_train",
+        "hl_observer.backtesting.copy_vault_v5_lifecycle_train",
+        "hl_observer.backtesting.copy_vault_v6_balanced_train",
+        "hl_observer.backtesting.train_statistics",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_v8_entry_efficiency_train",
+      "path": "src/hl_observer/backtesting/copy_vault_v8_entry_efficiency_train.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.backtesting.copy_vault_executable",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.copy_vault_v4_train",
+        "hl_observer.backtesting.copy_vault_v5_lifecycle_train",
+        "hl_observer.backtesting.copy_vault_v6_balanced_train",
+        "hl_observer.backtesting.copy_vault_v8_entry_efficiency_train",
+        "hl_observer.backtesting.train_statistics",
+        "math",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.copy_vault_v9_online_leader_quality_train",
+      "path": "src/hl_observer/backtesting/copy_vault_v9_online_leader_quality_train.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.backtesting.cost_model",
+      "path": "src/hl_observer/backtesting/cost_model.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "itertools",
+        "random"
+      ],
+      "module": "hl_observer.backtesting.cross_validation",
+      "path": "src/hl_observer/backtesting/cross_validation.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.config.cross_venue_instruments",
+        "json",
+        "math",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.cross_venue_certified",
+      "path": "src/hl_observer/backtesting/cross_venue_certified.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "dataclasses",
+        "datetime",
+        "hashlib",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.execution_delay_model",
+      "path": "src/hl_observer/backtesting/execution_delay_model.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.backtesting.execution_models",
+      "path": "src/hl_observer/backtesting/execution_models.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "decimal",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.execution_sim",
+      "path": "src/hl_observer/backtesting/execution_sim.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.evidence.decision_ledger",
+        "hl_observer.paper_trading.paper_engine",
+        "hl_observer.signals.leader_delta"
+      ],
+      "module": "hl_observer.backtesting.experiment",
+      "path": "src/hl_observer/backtesting/experiment.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.backtesting",
+        "hl_observer.backtesting.quant_methods",
+        "random",
+        "statistics"
+      ],
+      "module": "hl_observer.backtesting.experiment_harness",
+      "path": "src/hl_observer/backtesting/experiment_harness.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "datetime",
+        "hashlib",
+        "hl_observer.economics.assumptions",
+        "json",
+        "math",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.fee_model",
+      "path": "src/hl_observer/backtesting/fee_model.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "json",
+        "math",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.lead_lag_evidence",
+      "path": "src/hl_observer/backtesting/lead_lag_evidence.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.backtest.no_lookahead_guard"
+      ],
+      "module": "hl_observer.backtesting.lookahead_analysis",
+      "path": "src/hl_observer/backtesting/lookahead_analysis.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "random"
+      ],
+      "module": "hl_observer.backtesting.lookahead_guard",
+      "path": "src/hl_observer/backtesting/lookahead_guard.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "hl_observer.backtesting.perf_metrics",
+        "hl_observer.economics.numeric",
+        "math",
+        "random",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.monte_carlo",
+      "path": "src/hl_observer/backtesting/monte_carlo.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.perf_metrics",
+      "path": "src/hl_observer/backtesting/perf_metrics.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math",
+        "random",
+        "statistics"
+      ],
+      "module": "hl_observer.backtesting.quant_methods",
+      "path": "src/hl_observer/backtesting/quant_methods.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.backtesting.ab_flag_replay",
+        "hl_observer.funding.arb_executable",
+        "hl_observer.ops.strategie_candidat",
+        "hl_observer.paper_trading.sl_tp",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.recherche_arbitrage",
+      "path": "src/hl_observer/backtesting/recherche_arbitrage.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "json",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.recherche_carry",
+      "path": "src/hl_observer/backtesting/recherche_carry.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "json",
+        "logging",
+        "pathlib",
+        "subprocess",
+        "sys",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.recherche_parallele",
+      "path": "src/hl_observer/backtesting/recherche_parallele.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "datetime",
+        "hl_observer.backtesting",
+        "hl_observer.backtesting.ab_flag_replay",
+        "hl_observer.backtesting.boucle_objectif_replay",
+        "hl_observer.backtesting.recherche_arbitrage",
+        "hl_observer.backtesting.recherche_carry",
+        "hl_observer.backtesting.recherche_parallele",
+        "hl_observer.funding.arb_maker_study",
+        "hl_observer.ops.strategie_candidat",
+        "hl_observer.paper_trading.sl_tp",
+        "hl_observer.research.lois_mesurees",
+        "json",
+        "os",
+        "pathlib",
+        "statistics",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.recherche_scenario",
+      "path": "src/hl_observer/backtesting/recherche_scenario.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "dataclasses",
+        "hl_observer.runtime.replay_recorder",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.replay_doctor",
+      "path": "src/hl_observer/backtesting/replay_doctor.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.backtesting.execution_delay_model"
+      ],
+      "module": "hl_observer.backtesting.replay_engine",
+      "path": "src/hl_observer/backtesting/replay_engine.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "csv",
+        "math",
+        "os"
+      ],
+      "module": "hl_observer.backtesting.reporting",
+      "path": "src/hl_observer/backtesting/reporting.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.backtesting.risk_sizing",
+      "path": "src/hl_observer/backtesting/risk_sizing.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "random",
+        "statistics"
+      ],
+      "module": "hl_observer.backtesting.robustness",
+      "path": "src/hl_observer/backtesting/robustness.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "random"
+      ],
+      "module": "hl_observer.backtesting.stress_testing",
+      "path": "src/hl_observer/backtesting/stress_testing.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "decimal",
+        "fractions",
+        "functools",
+        "hashlib",
+        "hl_observer.economics.numeric",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.train_statistics",
+      "path": "src/hl_observer/backtesting/train_statistics.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.backtest.walk_forward",
+        "hl_observer.backtesting.lookahead_analysis",
+        "math",
+        "random",
+        "typing"
+      ],
+      "module": "hl_observer.backtesting.validation_gates",
+      "path": "src/hl_observer/backtesting/validation_gates.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.backtesting.quant_methods",
+        "itertools",
+        "math",
+        "random"
+      ],
+      "module": "hl_observer.backtesting.validation_methods",
+      "path": "src/hl_observer/backtesting/validation_methods.py"
+    },
+    {
+      "imports": [
+        "hl_observer.collection.backoff",
+        "hl_observer.collection.bybit_market_data",
+        "hl_observer.collection.circuit_breaker",
+        "hl_observer.collection.collector",
+        "hl_observer.collection.html_scraper",
+        "hl_observer.collection.native_venue_coordinator",
+        "hl_observer.collection.native_venue_market",
+        "hl_observer.collection.okx_market_data",
+        "hl_observer.collection.proxy_pool",
+        "hl_observer.collection.public_fetcher",
+        "hl_observer.collection.rate_limiter",
+        "hl_observer.collection.weight_budgeter"
+      ],
+      "module": "hl_observer.collection",
+      "path": "src/hl_observer/collection/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.collection.backoff",
+      "path": "src/hl_observer/collection/backoff.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.collection.binance_depth_book",
+      "path": "src/hl_observer/collection/binance_depth_book.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "hl_observer.collection.binance_depth_book",
+        "hl_observer.collection.binance_depth_orchestrator",
+        "hl_observer.collection.depth_capacity",
+        "hl_observer.collection.feed_integrity",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.realtime.feed_quality",
+        "httpx",
+        "inspect",
+        "json",
+        "time",
+        "typing",
+        "uuid",
+        "websockets"
+      ],
+      "module": "hl_observer.collection.binance_depth_live",
+      "path": "src/hl_observer/collection/binance_depth_live.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.collection.binance_depth_book",
+        "typing"
+      ],
+      "module": "hl_observer.collection.binance_depth_orchestrator",
+      "path": "src/hl_observer/collection/binance_depth_orchestrator.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.realtime.feed_quality",
+        "httpx",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.binance_funding_history",
+      "path": "src/hl_observer/collection/binance_funding_history.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.realtime.feed_quality",
+        "httpx",
+        "inspect",
+        "json",
+        "time",
+        "typing",
+        "uuid",
+        "websockets"
+      ],
+      "module": "hl_observer.collection.binance_market_context",
+      "path": "src/hl_observer/collection/binance_market_context.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.collection.backoff",
+        "hl_observer.collection.feed_integrity",
+        "hl_observer.collection.market_capture_tiers",
+        "hl_observer.collection.native_venue_market",
+        "httpx",
+        "json",
+        "math",
+        "time",
+        "typing",
+        "uuid",
+        "websockets"
+      ],
+      "module": "hl_observer.collection.bitget_market_data",
+      "path": "src/hl_observer/collection/bitget_market_data.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.collection.backoff",
+        "hl_observer.collection.feed_integrity",
+        "hl_observer.collection.market_capture_tiers",
+        "hl_observer.collection.native_venue_market",
+        "httpx",
+        "json",
+        "math",
+        "time",
+        "uuid",
+        "websockets"
+      ],
+      "module": "hl_observer.collection.bybit_market_data",
+      "path": "src/hl_observer/collection/bybit_market_data.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.collection.circuit_breaker",
+      "path": "src/hl_observer/collection/circuit_breaker.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "threading",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.coin_universe",
+      "path": "src/hl_observer/collection/coin_universe.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hashlib",
+        "hl_observer.ops.echec_silencieux",
+        "json",
+        "os",
+        "pathlib",
+        "random",
+        "tempfile",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.collecte_fiable",
+      "path": "src/hl_observer/collection/collecte_fiable.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.ws_first_plan",
+        "hl_observer.config.settings",
+        "hl_observer.hyperliquid.endpoints",
+        "hl_observer.hyperliquid.rate_weights",
+        "hl_observer.hyperliquid.rest_info_client",
+        "hl_observer.markets.market_selector",
+        "hl_observer.markets.universe",
+        "hl_observer.realtime.global_rest_budget",
+        "hl_observer.sources.collection_recorder",
+        "hl_observer.sources.shared_recorder",
+        "hl_observer.storage.database",
+        "hl_observer.storage.repositories",
+        "hl_observer.utils.time",
+        "json",
+        "os",
+        "pydantic",
+        "re",
+        "sqlalchemy.orm",
+        "typing"
+      ],
+      "module": "hl_observer.collection.collector",
+      "path": "src/hl_observer/collection/collector.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.native_venue_market",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.realtime.feed_quality",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.collection.depth_capacity",
+      "path": "src/hl_observer/collection/depth_capacity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.collection.feed_integrity",
+      "path": "src/hl_observer/collection/feed_integrity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.collection.backoff",
+        "hl_observer.collection.feed_integrity",
+        "hl_observer.collection.market_capture_tiers",
+        "hl_observer.collection.native_venue_market",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.realtime.feed_quality",
+        "httpx",
+        "json",
+        "math",
+        "time",
+        "typing",
+        "uuid",
+        "websockets"
+      ],
+      "module": "hl_observer.collection.gate_market_data",
+      "path": "src/hl_observer/collection/gate_market_data.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "re"
+      ],
+      "module": "hl_observer.collection.html_scraper",
+      "path": "src/hl_observer/collection/html_scraper.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.realtime.feed_quality",
+        "httpx",
+        "json",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.hyperliquid_funding_history",
+      "path": "src/hl_observer/collection/hyperliquid_funding_history.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.collection",
+        "hl_observer.funding",
+        "hl_observer.instrument_identity",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.execution_truth",
+        "hl_observer.signals.v26_entry_vetos",
+        "json",
+        "logging",
+        "math",
+        "os",
+        "sys",
+        "threading",
+        "time",
+        "urllib.request"
+      ],
+      "module": "hl_observer.collection.l2_snapshot_cache",
+      "path": "src/hl_observer/collection/l2_snapshot_cache.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.collection.lead_lag_causal_checkpoints",
+      "path": "src/hl_observer/collection/lead_lag_causal_checkpoints.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "enum"
+      ],
+      "module": "hl_observer.collection.market_capture_tiers",
+      "path": "src/hl_observer/collection/market_capture_tiers.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.tick_dataset",
+        "json",
+        "typing"
+      ],
+      "module": "hl_observer.collection.native_market_tape",
+      "path": "src/hl_observer/collection/native_market_tape.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections",
+        "collections.abc",
+        "hl_observer.arbitrage.cross_source_comparator",
+        "hl_observer.arbitrage.multi_venue_execution",
+        "hl_observer.collection.bitget_market_data",
+        "hl_observer.collection.bybit_market_data",
+        "hl_observer.collection.coin_universe",
+        "hl_observer.collection.gate_market_data",
+        "hl_observer.collection.market_capture_tiers",
+        "hl_observer.collection.native_market_tape",
+        "hl_observer.collection.native_venue_market",
+        "hl_observer.collection.okx_market_data",
+        "hl_observer.markets.ccxt_universe",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.native_venue_coordinator",
+      "path": "src/hl_observer/collection/native_venue_coordinator.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.arbitrage.cross_source_comparator",
+        "itertools",
+        "math",
+        "time"
+      ],
+      "module": "hl_observer.collection.native_venue_market",
+      "path": "src/hl_observer/collection/native_venue_market.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.collection.backoff",
+        "hl_observer.collection.feed_integrity",
+        "hl_observer.collection.market_capture_tiers",
+        "hl_observer.collection.native_venue_market",
+        "httpx",
+        "json",
+        "math",
+        "time",
+        "uuid",
+        "websockets"
+      ],
+      "module": "hl_observer.collection.okx_market_data",
+      "path": "src/hl_observer/collection/okx_market_data.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.tick_dataset",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.collection.partitioned_tick_dataset",
+      "path": "src/hl_observer/collection/partitioned_tick_dataset.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib"
+      ],
+      "module": "hl_observer.collection.proxy_pool",
+      "path": "src/hl_observer/collection/proxy_pool.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.sources.models",
+        "hl_observer.sources.registry",
+        "hl_observer.storage.raw_store",
+        "hl_observer.storage.run_context",
+        "typing",
+        "urllib.parse"
+      ],
+      "module": "hl_observer.collection.public_fetcher",
+      "path": "src/hl_observer/collection/public_fetcher.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "dataclasses"
+      ],
+      "module": "hl_observer.collection.rate_limiter",
+      "path": "src/hl_observer/collection/rate_limiter.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.ops.quota_stockage",
+        "json",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.stockage_brut_borne",
+      "path": "src/hl_observer/collection/stockage_brut_borne.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "gzip",
+        "hashlib",
+        "hl_observer.realtime.feed_quality",
+        "json",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.tick_dataset",
+      "path": "src/hl_observer/collection/tick_dataset.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.instrument_identity",
+        "hl_observer.realtime.event_identity",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.collection.userfills_live",
+      "path": "src/hl_observer/collection/userfills_live.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.userfills_live",
+        "hl_observer.instrument_identity",
+        "hl_observer.wallets.position_delta_engine",
+        "json",
+        "math",
+        "os",
+        "pathlib",
+        "sqlite3",
+        "typing"
+      ],
+      "module": "hl_observer.collection.vault_fills_backfill",
+      "path": "src/hl_observer/collection/vault_fills_backfill.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.hyperliquid.rate_weights",
+        "math"
+      ],
+      "module": "hl_observer.collection.weight_budgeter",
+      "path": "src/hl_observer/collection/weight_budgeter.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.collection.weight_budgeter",
+        "hl_observer.hyperliquid.rate_weights",
+        "json",
+        "math",
+        "os",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.collection.ws_first_plan",
+      "path": "src/hl_observer/collection/ws_first_plan.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc"
+      ],
+      "module": "hl_observer.config.cross_venue_instruments",
+      "path": "src/hl_observer/config/cross_venue_instruments.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.economics.assumptions",
+        "math",
+        "os"
+      ],
+      "module": "hl_observer.config.frais_venues",
+      "path": "src/hl_observer/config/frais_venues.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "enum",
+        "pathlib",
+        "pydantic"
+      ],
+      "module": "hl_observer.config.settings",
+      "path": "src/hl_observer/config/settings.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "decimal",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.copy_vault.attribution_after_netting",
+      "path": "src/hl_observer/copy_vault/attribution_after_netting.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "decimal",
+        "typing"
+      ],
+      "module": "hl_observer.copy_vault.multi_vault_intent_netting",
+      "path": "src/hl_observer/copy_vault/multi_vault_intent_netting.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "typing"
+      ],
+      "module": "hl_observer.copy_wallet.leader_markout",
+      "path": "src/hl_observer/copy_wallet/leader_markout.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "hl_observer.backtesting.ab_flag_replay",
+        "hl_observer.backtesting.recherche_scenario",
+        "hl_observer.instrument_identity",
+        "json",
+        "math",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.copy_wallet.marks_source",
+      "path": "src/hl_observer/copy_wallet/marks_source.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.collection.l2_snapshot_cache",
+        "hl_observer.edge.edge_source",
+        "hl_observer.freshness.signal_decay",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.risk.kelly_leader_book",
+        "hl_observer.signals.v26_entry_vetos",
+        "hl_observer.simulation.live_filters",
+        "os"
+      ],
+      "module": "hl_observer.copying.realtime_magic_score",
+      "path": "src/hl_observer/copying/realtime_magic_score.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "typing"
+      ],
+      "module": "hl_observer.core.causal_time",
+      "path": "src/hl_observer/core/causal_time.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "enum",
+        "hashlib",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.economics.assumptions",
+      "path": "src/hl_observer/economics/assumptions.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.economics.copy_vault_metrics",
+      "path": "src/hl_observer/economics/copy_vault_metrics.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.config.frais_venues",
+        "hl_observer.economics.assumptions",
+        "hl_observer.economics.proof_binding",
+        "typing"
+      ],
+      "module": "hl_observer.economics.families",
+      "path": "src/hl_observer/economics/families.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "decimal",
+        "hl_observer.economics.numeric",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.economics.hyperliquid_fees",
+      "path": "src/hl_observer/economics/hyperliquid_fees.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "decimal",
+        "math"
+      ],
+      "module": "hl_observer.economics.numeric",
+      "path": "src/hl_observer/economics/numeric.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.economics.assumptions",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.economics.proof_binding",
+      "path": "src/hl_observer/economics/proof_binding.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.edge.signal_decay"
+      ],
+      "module": "hl_observer.edge.edge_calculator",
+      "path": "src/hl_observer/edge/edge_calculator.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.edge.measured_edge_table",
+        "hl_observer.signals.signal_taxonomy",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.edge.edge_source",
+      "path": "src/hl_observer/edge/edge_source.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.edge.measured_edge_table",
+      "path": "src/hl_observer/edge/measured_edge_table.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math"
+      ],
+      "module": "hl_observer.edge.signal_decay",
+      "path": "src/hl_observer/edge/signal_decay.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "os"
+      ],
+      "module": "hl_observer.edge.tier_cost_budget",
+      "path": "src/hl_observer/edge/tier_cost_budget.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.paper_trading.paper_engine",
+        "hl_observer.signals.leader_delta",
+        "typing"
+      ],
+      "module": "hl_observer.evidence.decision_ledger",
+      "path": "src/hl_observer/evidence/decision_ledger.py"
+    },
+    {
+      "imports": [],
+      "module": "hl_observer.experimental",
+      "path": "src/hl_observer/experimental/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.arbitrage.cross_venue_contract",
+        "json",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.experimental.carry_deux_jambes",
+      "path": "src/hl_observer/experimental/carry_deux_jambes.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "gzip",
+        "hl_observer.experimental.signaux",
+        "json",
+        "pathlib",
+        "random",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.experimental.copy_edge_forward",
+      "path": "src/hl_observer/experimental/copy_edge_forward.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "bisect",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.experimental.copy_edge_forward",
+        "json",
+        "math",
+        "random",
+        "typing"
+      ],
+      "module": "hl_observer.experimental.copy_edge_oos",
+      "path": "src/hl_observer/experimental/copy_edge_oos.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.experimental"
+      ],
+      "module": "hl_observer.experimental.execution_paper",
+      "path": "src/hl_observer/experimental/execution_paper.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math"
+      ],
+      "module": "hl_observer.experimental.invariants",
+      "path": "src/hl_observer/experimental/invariants.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.experimental",
+        "hl_observer.experimental.execution_paper",
+        "hl_observer.ops.canonical_paper_intent_chain",
+        "hl_observer.ops.paper_canonique",
+        "hl_observer.strategies.active_scope",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "time",
+        "typing",
+        "uuid"
+      ],
+      "module": "hl_observer.experimental.moteur_paper",
+      "path": "src/hl_observer/experimental/moteur_paper.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.experimental.invariants"
+      ],
+      "module": "hl_observer.experimental.roi_estimateur",
+      "path": "src/hl_observer/experimental/roi_estimateur.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.arbitrage.cross_venue_contract",
+        "hl_observer.backtesting.lead_lag_evidence",
+        "hl_observer.core.causal_time",
+        "hl_observer.experimental.carry_deux_jambes",
+        "hl_observer.experimental.copy_edge_forward",
+        "hl_observer.experimental.moteur_paper",
+        "hl_observer.experimental.roi_estimateur",
+        "hl_observer.market_data.live_l2_service",
+        "json",
+        "os",
+        "pathlib",
+        "statistics",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.experimental.signaux",
+      "path": "src/hl_observer/experimental/signaux.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.features.funding",
+      "path": "src/hl_observer/features/funding.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "typing"
+      ],
+      "module": "hl_observer.fees.hyperliquid_fees",
+      "path": "src/hl_observer/fees/hyperliquid_fees.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math",
+        "statistics",
+        "typing"
+      ],
+      "module": "hl_observer.following.scoring_robuste",
+      "path": "src/hl_observer/following/scoring_robuste.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "math"
+      ],
+      "module": "hl_observer.freshness.signal_decay",
+      "path": "src/hl_observer/freshness/signal_decay.py"
+    },
+    {
+      "imports": [
+        "hl_observer.funding.funding_history_window",
+        "hl_observer.funding.spike_detector"
+      ],
+      "module": "hl_observer.funding",
+      "path": "src/hl_observer/funding/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.funding.arb_cout_all_in",
+      "path": "src/hl_observer/funding/arb_cout_all_in.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.funding.arb_executable",
+      "path": "src/hl_observer/funding/arb_executable.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.arb_cout_all_in",
+        "typing"
+      ],
+      "module": "hl_observer.funding.arb_maker_study",
+      "path": "src/hl_observer/funding/arb_maker_study.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.funding.base_convergence",
+      "path": "src/hl_observer/funding/base_convergence.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.carry_marge_dynamique"
+      ],
+      "module": "hl_observer.funding.carry_allocation_nette",
+      "path": "src/hl_observer/funding/carry_allocation_nette.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_anti_churn",
+      "path": "src/hl_observer/funding/carry_anti_churn.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.delta_neutral_carry",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_benchmark_gate",
+      "path": "src/hl_observer/funding/carry_benchmark_gate.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.delta_neutral_carry",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_economie_position",
+      "path": "src/hl_observer/funding/carry_economie_position.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_liquidation_risk",
+      "path": "src/hl_observer/funding/carry_liquidation_risk.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.funding.carry_marge_dynamique",
+      "path": "src/hl_observer/funding/carry_marge_dynamique.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.funding_previsionnel"
+      ],
+      "module": "hl_observer.funding.carry_optimizer",
+      "path": "src/hl_observer/funding/carry_optimizer.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.carry_benchmark_gate",
+        "hl_observer.risk.carry_risk_gates",
+        "hl_observer.risk.drawdown_scaling",
+        "hl_observer.risk.kelly_sizing",
+        "hl_observer.risk.margin_reserve",
+        "hl_observer.risk.portfolio_risk_limits",
+        "hl_observer.risk.safety_gates_mm",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_ouverture_gates",
+      "path": "src/hl_observer/funding/carry_ouverture_gates.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.funding.base_convergence",
+        "hl_observer.funding.carry_anti_churn",
+        "hl_observer.funding.carry_economie_position",
+        "hl_observer.funding.carry_ouverture_gates",
+        "hl_observer.funding.carry_renfort",
+        "hl_observer.funding.carry_timing_reglement",
+        "hl_observer.funding.delta_neutral_carry",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.delta_neutral_position",
+        "hl_observer.paper_trading.funding_payment_tracker",
+        "hl_observer.paper_trading.journal",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_position_lifecycle",
+      "path": "src/hl_observer/funding/carry_position_lifecycle.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "hl_observer.funding.carry_allocation_nette",
+        "hl_observer.funding.carry_anti_churn",
+        "hl_observer.funding.carry_marge_dynamique",
+        "hl_observer.funding.carry_position_lifecycle",
+        "hl_observer.funding.carry_qualite_cross_venue",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.funding_settlement",
+        "hl_observer.runtime.session_identity",
+        "json",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_positions_store",
+      "path": "src/hl_observer/funding/carry_positions_store.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "json",
+        "pathlib"
+      ],
+      "module": "hl_observer.funding.carry_qualite_cross_venue",
+      "path": "src/hl_observer/funding/carry_qualite_cross_venue.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_renfort",
+      "path": "src/hl_observer/funding/carry_renfort.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.funding.carry_timing_reglement",
+      "path": "src/hl_observer/funding/carry_timing_reglement.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.fees.hyperliquid_fees",
+        "hl_observer.funding.carry_liquidation_risk",
+        "typing"
+      ],
+      "module": "hl_observer.funding.delta_neutral_carry",
+      "path": "src/hl_observer/funding/delta_neutral_carry.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "statistics"
+      ],
+      "module": "hl_observer.funding.funding_history_window",
+      "path": "src/hl_observer/funding/funding_history_window.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.funding_previsionnel",
+        "typing"
+      ],
+      "module": "hl_observer.funding.funding_hors_plancher",
+      "path": "src/hl_observer/funding/funding_hors_plancher.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.funding.delta_neutral_carry",
+        "statistics"
+      ],
+      "module": "hl_observer.funding.funding_persistence",
+      "path": "src/hl_observer/funding/funding_persistence.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.collection",
+        "hl_observer.funding.funding_runtime_cache",
+        "hl_observer.ops.echec_silencieux",
+        "json",
+        "os",
+        "threading",
+        "time",
+        "urllib.request"
+      ],
+      "module": "hl_observer.funding.funding_poller",
+      "path": "src/hl_observer/funding/funding_poller.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.funding.funding_previsionnel",
+      "path": "src/hl_observer/funding/funding_previsionnel.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "threading",
+        "time"
+      ],
+      "module": "hl_observer.funding.funding_runtime_cache",
+      "path": "src/hl_observer/funding/funding_runtime_cache.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.funding.funding_times",
+      "path": "src/hl_observer/funding/funding_times.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "statistics"
+      ],
+      "module": "hl_observer.funding.funding_zscore",
+      "path": "src/hl_observer/funding/funding_zscore.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.funding.funding_history_window"
+      ],
+      "module": "hl_observer.funding.spike_detector",
+      "path": "src/hl_observer/funding/spike_detector.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.config.settings"
+      ],
+      "module": "hl_observer.hyperliquid.endpoints",
+      "path": "src/hl_observer/hyperliquid/endpoints.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "dataclasses"
+      ],
+      "module": "hl_observer.hyperliquid.rate_limits",
+      "path": "src/hl_observer/hyperliquid/rate_limits.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math"
+      ],
+      "module": "hl_observer.hyperliquid.rate_weights",
+      "path": "src/hl_observer/hyperliquid/rate_weights.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "collections",
+        "collections.abc",
+        "copy",
+        "hashlib",
+        "hl_observer.collection.backoff",
+        "hl_observer.collection.vault_fills_backfill",
+        "hl_observer.hyperliquid.rate_limits",
+        "hl_observer.hyperliquid.rate_weights",
+        "hl_observer.hyperliquid.schemas",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.realtime.global_rest_budget",
+        "hl_observer.security.mainnet_guard",
+        "hl_observer.sources.collection_recorder",
+        "httpx",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.hyperliquid.rest_info_client",
+      "path": "src/hl_observer/hyperliquid/rest_info_client.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "enum",
+        "hl_observer.instrument_identity",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.hyperliquid.schemas",
+      "path": "src/hl_observer/hyperliquid/schemas.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.instrument_identity",
+      "path": "src/hl_observer/instrument_identity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "typing"
+      ],
+      "module": "hl_observer.market.liquidation_map",
+      "path": "src/hl_observer/market/liquidation_map.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "json",
+        "pathlib",
+        "sqlite3",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.market.liquidation_recorder",
+      "path": "src/hl_observer/market/liquidation_recorder.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.market.mapping_unit",
+      "path": "src/hl_observer/market/mapping_unit.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "decimal",
+        "hl_observer.paper_trading.execution_truth",
+        "json",
+        "math",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.market_data.live_l2_service",
+      "path": "src/hl_observer/market_data/live_l2_service.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "asyncio",
+        "ccxt",
+        "collections.abc",
+        "datetime",
+        "inspect",
+        "json",
+        "os",
+        "pathlib",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.markets.ccxt_universe",
+      "path": "src/hl_observer/markets/ccxt_universe.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.config.settings",
+        "hl_observer.markets.liquidity",
+        "hl_observer.markets.spread",
+        "hl_observer.utils.time",
+        "pydantic"
+      ],
+      "module": "hl_observer.markets.coin_metrics",
+      "path": "src/hl_observer/markets/coin_metrics.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.markets.spread",
+        "typing"
+      ],
+      "module": "hl_observer.markets.liquidity",
+      "path": "src/hl_observer/markets/liquidity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.config.settings",
+        "hl_observer.markets.universe",
+        "pydantic"
+      ],
+      "module": "hl_observer.markets.market_selector",
+      "path": "src/hl_observer/markets/market_selector.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.markets.spread",
+      "path": "src/hl_observer/markets/spread.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.config.settings",
+        "hl_observer.hyperliquid.endpoints",
+        "hl_observer.hyperliquid.rest_info_client",
+        "hl_observer.realtime.global_rest_budget",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.markets.universe",
+      "path": "src/hl_observer/markets/universe.py"
+    },
+    {
+      "imports": [
+        "hl_observer.models.common"
+      ],
+      "module": "hl_observer.models",
+      "path": "src/hl_observer/models/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "enum",
+        "hl_observer.instrument_identity",
+        "pydantic",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.models.common",
+      "path": "src/hl_observer/models/common.py"
+    },
+    {
+      "imports": [
+        "hl_observer.instrument_identity"
+      ],
+      "module": "hl_observer.normalization.instrument_identity",
+      "path": "src/hl_observer/normalization/instrument_identity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.normalization.l2_book",
+      "path": "src/hl_observer/normalization/l2_book.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.collection.tick_dataset",
+        "hl_observer.core.causal_time",
+        "json",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.normalization.market_events",
+      "path": "src/hl_observer/normalization/market_events.py"
+    },
+    {
+      "imports": [],
+      "module": "hl_observer.ops",
+      "path": "src/hl_observer/ops/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.ops.collecteur_registry",
+        "hl_observer.ops.collector_lease",
+        "hl_observer.ops.superviseur_collecteurs",
+        "json",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.ops.bounded_collection",
+      "path": "src/hl_observer/ops/bounded_collection.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hashlib",
+        "hl_observer.ops.paper_canonique",
+        "typing"
+      ],
+      "module": "hl_observer.ops.canonical_paper_intent_chain",
+      "path": "src/hl_observer/ops/canonical_paper_intent_chain.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.ops.clock_integrity",
+      "path": "src/hl_observer/ops/clock_integrity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.ops.collecteur_registry",
+      "path": "src/hl_observer/ops/collecteur_registry.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "json",
+        "os",
+        "pathlib",
+        "secrets",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.ops.collector_lease",
+      "path": "src/hl_observer/ops/collector_lease.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.runtime.replay_recorder",
+        "typing"
+      ],
+      "module": "hl_observer.ops.decision_firehose",
+      "path": "src/hl_observer/ops/decision_firehose.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "threading",
+        "typing"
+      ],
+      "module": "hl_observer.ops.echec_silencieux",
+      "path": "src/hl_observer/ops/echec_silencieux.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "json",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.ops.lecons_du_ledger",
+      "path": "src/hl_observer/ops/lecons_du_ledger.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.ops.decision_firehose",
+        "typing"
+      ],
+      "module": "hl_observer.ops.marks_univers",
+      "path": "src/hl_observer/ops/marks_univers.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "hl_observer.ops.preuve_de_vie",
+        "hl_observer.ops.registre_pids",
+        "hl_observer.ops.tableau_sante_collecteurs",
+        "logging",
+        "os",
+        "pathlib",
+        "sys",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.ops.moniteur_sante",
+      "path": "src/hl_observer/ops/moniteur_sante.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "decimal",
+        "hl_observer.economics.numeric",
+        "hl_observer.instrument_identity",
+        "hl_observer.strategies.active_scope",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.ops.paper_canonique",
+      "path": "src/hl_observer/ops/paper_canonique.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "dataclasses",
+        "hl_observer.ops.registre_pids",
+        "json",
+        "pathlib",
+        "psutil",
+        "typing"
+      ],
+      "module": "hl_observer.ops.port_owner",
+      "path": "src/hl_observer/ops/port_owner.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.ops",
+        "hl_observer.ops.portable_clone_inventory",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "platform",
+        "shutil",
+        "subprocess",
+        "sys",
+        "time",
+        "typing",
+        "uuid"
+      ],
+      "module": "hl_observer.ops.portable_clone",
+      "path": "src/hl_observer/ops/portable_clone.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.ops",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "platform",
+        "typing",
+        "uuid",
+        "winreg"
+      ],
+      "module": "hl_observer.ops.portable_clone_inventory",
+      "path": "src/hl_observer/ops/portable_clone_inventory.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "hl_observer.ops.portable_clone",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "subprocess",
+        "tempfile",
+        "time",
+        "typing",
+        "urllib.error",
+        "urllib.request"
+      ],
+      "module": "hl_observer.ops.portable_transfer_proof",
+      "path": "src/hl_observer/ops/portable_transfer_proof.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.hyperliquid.rate_weights",
+        "hl_observer.ops.clock_integrity",
+        "hl_observer.ops.runtime_contract",
+        "hl_observer.research.venue_capabilities",
+        "hl_observer.runtime.capability_reconciliation",
+        "hl_observer.runtime.protections",
+        "importlib.util",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "shutil",
+        "sys",
+        "time",
+        "typing",
+        "urllib.request"
+      ],
+      "module": "hl_observer.ops.preflight_lanceur",
+      "path": "src/hl_observer/ops/preflight_lanceur.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "certifi",
+        "hashlib",
+        "hl_observer.ops",
+        "hl_observer.ops.registre_pids",
+        "importlib",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "platform",
+        "shutil",
+        "socket",
+        "ssl",
+        "subprocess",
+        "time",
+        "typing",
+        "uuid",
+        "winreg"
+      ],
+      "module": "hl_observer.ops.premier_lancement",
+      "path": "src/hl_observer/ops/premier_lancement.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "ctypes",
+        "dataclasses",
+        "hl_observer.runtime.protections",
+        "os",
+        "pathlib",
+        "psutil",
+        "sys",
+        "time",
+        "tools.heartbeat_collecteur",
+        "typing"
+      ],
+      "module": "hl_observer.ops.preuve_de_vie",
+      "path": "src/hl_observer/ops/preuve_de_vie.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.ops.quota_stockage",
+      "path": "src/hl_observer/ops/quota_stockage.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.ops.superviseur_collecteurs",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "psutil",
+        "sys",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.ops.registre_pids",
+      "path": "src/hl_observer/ops/registre_pids.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "types",
+        "typing"
+      ],
+      "module": "hl_observer.ops.runtime_contract",
+      "path": "src/hl_observer/ops/runtime_contract.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "hl_observer.ops",
+        "hl_observer.ops.preuve_de_vie",
+        "hl_observer.ops.registre_pids",
+        "hl_observer.research.venue_capabilities",
+        "hl_observer.runtime.protections",
+        "json",
+        "os",
+        "pathlib",
+        "re",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.ops.session_harvest",
+      "path": "src/hl_observer/ops/session_harvest.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.ops.strategie_candidat",
+      "path": "src/hl_observer/ops/strategie_candidat.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.ops.collecteur_registry",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.ops.preuve_de_vie",
+        "json",
+        "logging",
+        "os",
+        "pathlib",
+        "psutil",
+        "subprocess",
+        "sys",
+        "time",
+        "tools.portable_runtime",
+        "typing"
+      ],
+      "module": "hl_observer.ops.superviseur_collecteurs",
+      "path": "src/hl_observer/ops/superviseur_collecteurs.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.ops.preuve_de_vie",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.ops.tableau_sante_collecteurs",
+      "path": "src/hl_observer/ops/tableau_sante_collecteurs.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "argparse",
+        "hl_observer.collection",
+        "logging",
+        "pathlib"
+      ],
+      "module": "hl_observer.ops.verrou_lanceur",
+      "path": "src/hl_observer/ops/verrou_lanceur.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.simulation.accounting_truth",
+        "hl_observer.strategies.strategy_mode",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.paper_trading.auto_unstuck",
+      "path": "src/hl_observer/paper_trading/auto_unstuck.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "json",
+        "statistics"
+      ],
+      "module": "hl_observer.paper_trading.barrier_calibration",
+      "path": "src/hl_observer/paper_trading/barrier_calibration.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "decimal",
+        "hashlib",
+        "hl_observer.instrument_identity",
+        "hl_observer.paper_trading.exec_model",
+        "hl_observer.paper_trading.execution_truth",
+        "hl_observer.paper_trading.liquidity_consumption",
+        "math"
+      ],
+      "module": "hl_observer.paper_trading.canonical_execution",
+      "path": "src/hl_observer/paper_trading/canonical_execution.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.paper_trading.delta_neutral_position",
+      "path": "src/hl_observer/paper_trading/delta_neutral_position.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "decimal",
+        "hl_observer.paper_trading.execution_truth",
+        "math",
+        "os"
+      ],
+      "module": "hl_observer.paper_trading.exec_model",
+      "path": "src/hl_observer/paper_trading/exec_model.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "decimal",
+        "hashlib",
+        "hl_observer.instrument_identity",
+        "math"
+      ],
+      "module": "hl_observer.paper_trading.execution_truth",
+      "path": "src/hl_observer/paper_trading/execution_truth.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.features.funding"
+      ],
+      "module": "hl_observer.paper_trading.funding_payment_tracker",
+      "path": "src/hl_observer/paper_trading/funding_payment_tracker.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.paper_trading.funding_settlement",
+      "path": "src/hl_observer/paper_trading/funding_settlement.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.paper_trading.journal",
+      "path": "src/hl_observer/paper_trading/journal.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.instrument_identity",
+        "hl_observer.paper_trading.execution_truth",
+        "threading",
+        "typing"
+      ],
+      "module": "hl_observer.paper_trading.liquidity_consumption",
+      "path": "src/hl_observer/paper_trading/liquidity_consumption.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.config.settings",
+        "hl_observer.hyperliquid.schemas",
+        "hl_observer.instrument_identity",
+        "hl_observer.paper_trading.canonical_execution",
+        "hl_observer.paper_trading.exec_model",
+        "hl_observer.paper_trading.execution_truth",
+        "hl_observer.paper_trading.liquidity_consumption",
+        "hl_observer.position_lifecycle.reconstructor",
+        "hl_observer.risk.gates",
+        "hl_observer.risk.risk_engine",
+        "hl_observer.signals.leader_delta",
+        "hl_observer.simulation.liquidatable_marks",
+        "hl_observer.simulation.paper_ledger",
+        "math",
+        "os"
+      ],
+      "module": "hl_observer.paper_trading.paper_engine",
+      "path": "src/hl_observer/paper_trading/paper_engine.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.paper_trading.sl_tp",
+      "path": "src/hl_observer/paper_trading/sl_tp.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.funding.funding_runtime_cache",
+        "hl_observer.paper_trading.sl_tp",
+        "hl_observer.simulation.accounting_truth",
+        "hl_observer.strategies.strategy_mode",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.paper_trading.sltp_runtime",
+      "path": "src/hl_observer/paper_trading/sltp_runtime.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.auto_unstuck",
+        "hl_observer.risk.graded_halt",
+        "hl_observer.risk.kelly_leader_book",
+        "hl_observer.risk.protections_v26",
+        "hl_observer.runtime.replay_recorder",
+        "hl_observer.signals.market_quality_score",
+        "json",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.paper_trading.v26_exit_pipeline",
+      "path": "src/hl_observer/paper_trading/v26_exit_pipeline.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "hl_observer.instrument_identity",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.sl_tp",
+        "hl_observer.paper_trading.sltp_runtime",
+        "hl_observer.paper_trading.v26_exit_pipeline",
+        "os",
+        "threading",
+        "time"
+      ],
+      "module": "hl_observer.paper_trading.vol_adjusted_barriers",
+      "path": "src/hl_observer/paper_trading/vol_adjusted_barriers.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "enum",
+        "hl_observer.models"
+      ],
+      "module": "hl_observer.position_lifecycle.reconstructor",
+      "path": "src/hl_observer/position_lifecycle/reconstructor.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "hashlib",
+        "json",
+        "typing"
+      ],
+      "module": "hl_observer.realtime.event_identity",
+      "path": "src/hl_observer/realtime/event_identity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "collections.abc",
+        "dataclasses",
+        "enum",
+        "hl_observer.realtime.event_identity",
+        "hl_observer.realtime.feed_quality_primitives",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.realtime.feed_quality",
+      "path": "src/hl_observer/realtime/feed_quality.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "json",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.realtime.feed_quality_primitives",
+      "path": "src/hl_observer/realtime/feed_quality_primitives.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "contextlib",
+        "dataclasses",
+        "fcntl",
+        "hashlib",
+        "hl_observer.hyperliquid.rate_weights",
+        "json",
+        "msvcrt",
+        "os",
+        "pathlib",
+        "time",
+        "typing",
+        "uuid"
+      ],
+      "module": "hl_observer.realtime.global_rest_budget",
+      "path": "src/hl_observer/realtime/global_rest_budget.py"
+    },
+    {
+      "imports": [
+        "hl_observer.research.ollama_advisor",
+        "hl_observer.research.ollama_preflight",
+        "hl_observer.research.ollama_signal_rater",
+        "hl_observer.research.ollama_status"
+      ],
+      "module": "hl_observer.research",
+      "path": "src/hl_observer/research/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.research.leader_review_ledger",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.decision_explainer",
+      "path": "src/hl_observer/research/decision_explainer.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.differentiel",
+      "path": "src/hl_observer/research/differentiel.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "typing"
+      ],
+      "module": "hl_observer.research.domaines",
+      "path": "src/hl_observer/research/domaines.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "datetime",
+        "enum",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.empirical_memory",
+      "path": "src/hl_observer/research/empirical_memory.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.domaines",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.frontiere",
+      "path": "src/hl_observer/research/frontiere.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.github_dossier",
+      "path": "src/hl_observer/research/github_dossier.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.ops.echec_silencieux",
+        "json",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.github_graph",
+      "path": "src/hl_observer/research/github_graph.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "datetime",
+        "typing"
+      ],
+      "module": "hl_observer.research.github_scan_plan",
+      "path": "src/hl_observer/research/github_scan_plan.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.github_signals",
+      "path": "src/hl_observer/research/github_signals.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.idee",
+      "path": "src/hl_observer/research/idee.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.jugement_plus",
+      "path": "src/hl_observer/research/jugement_plus.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "datetime",
+        "hashlib",
+        "hl_observer.alerts.durability",
+        "hl_observer.research.decision_explainer",
+        "json",
+        "os",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.leader_review_ledger",
+      "path": "src/hl_observer/research/leader_review_ledger.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "datetime",
+        "pathlib",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.lecture_profonde",
+      "path": "src/hl_observer/research/lecture_profonde.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.empirical_memory"
+      ],
+      "module": "hl_observer.research.lois_mesurees",
+      "path": "src/hl_observer/research/lois_mesurees.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.mine_de_code",
+      "path": "src/hl_observer/research/mine_de_code.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.research.domaines"
+      ],
+      "module": "hl_observer.research.moissonneur_sujets",
+      "path": "src/hl_observer/research/moissonneur_sujets.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "datetime",
+        "hashlib",
+        "json",
+        "math",
+        "pathlib",
+        "re",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.research.moteur",
+      "path": "src/hl_observer/research/moteur.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.ollama_client",
+        "json"
+      ],
+      "module": "hl_observer.research.ollama_advisor",
+      "path": "src/hl_observer/research/ollama_advisor.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "os",
+        "re",
+        "typing",
+        "urllib.error",
+        "urllib.request"
+      ],
+      "module": "hl_observer.research.ollama_client",
+      "path": "src/hl_observer/research/ollama_client.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.ollama_client"
+      ],
+      "module": "hl_observer.research.ollama_preflight",
+      "path": "src/hl_observer/research/ollama_preflight.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.ollama_client",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.research.ollama_signal_rater",
+      "path": "src/hl_observer/research/ollama_signal_rater.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.ollama_client"
+      ],
+      "module": "hl_observer.research.ollama_status",
+      "path": "src/hl_observer/research/ollama_status.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "random",
+        "typing"
+      ],
+      "module": "hl_observer.research.scan_resilience",
+      "path": "src/hl_observer/research/scan_resilience.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.ops.echec_silencieux",
+        "math",
+        "numpy",
+        "re",
+        "sentence_transformers",
+        "typing"
+      ],
+      "module": "hl_observer.research.semantique",
+      "path": "src/hl_observer/research/semantique.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.research.github_signals",
+        "re",
+        "typing"
+      ],
+      "module": "hl_observer.research.sources",
+      "path": "src/hl_observer/research/sources.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "re",
+        "typing",
+        "urllib.parse"
+      ],
+      "module": "hl_observer.research.sources_plus",
+      "path": "src/hl_observer/research/sources_plus.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.runtime.capability_reconciliation"
+      ],
+      "module": "hl_observer.research.venue_capabilities",
+      "path": "src/hl_observer/research/venue_capabilities.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.following.scoring_robuste",
+        "json",
+        "statistics",
+        "typing"
+      ],
+      "module": "hl_observer.research.wallet_copy_edge",
+      "path": "src/hl_observer/research/wallet_copy_edge.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "typing",
+        "urllib.parse"
+      ],
+      "module": "hl_observer.research.web_ouvert",
+      "path": "src/hl_observer/research/web_ouvert.py"
+    },
+    {
+      "imports": [],
+      "module": "hl_observer.research_parallel",
+      "path": "src/hl_observer/research_parallel/__init__.py"
+    },
+    {
+      "imports": [],
+      "module": "hl_observer.research_parallel.plugins",
+      "path": "src/hl_observer/research_parallel/plugins/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math"
+      ],
+      "module": "hl_observer.risk.carry_risk_gates",
+      "path": "src/hl_observer/risk/carry_risk_gates.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.instrument_identity",
+        "math",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.risk.directional_exposure",
+      "path": "src/hl_observer/risk/directional_exposure.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.risk.drawdown_scaling",
+      "path": "src/hl_observer/risk/drawdown_scaling.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.strategies.engine_pnl",
+        "hl_observer.strategies.strategy_mode",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.risk.engine_risk_budget",
+      "path": "src/hl_observer/risk/engine_risk_budget.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "pydantic"
+      ],
+      "module": "hl_observer.risk.gates",
+      "path": "src/hl_observer/risk/gates.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.strategies.strategy_mode",
+        "os",
+        "threading"
+      ],
+      "module": "hl_observer.risk.graded_halt",
+      "path": "src/hl_observer/risk/graded_halt.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "os"
+      ],
+      "module": "hl_observer.risk.interrupteurs",
+      "path": "src/hl_observer/risk/interrupteurs.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "os",
+        "threading"
+      ],
+      "module": "hl_observer.risk.kelly_leader_book",
+      "path": "src/hl_observer/risk/kelly_leader_book.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.risk.kelly_sizing",
+      "path": "src/hl_observer/risk/kelly_sizing.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.risk.margin_reserve",
+      "path": "src/hl_observer/risk/margin_reserve.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.instrument_identity"
+      ],
+      "module": "hl_observer.risk.portfolio_correlation",
+      "path": "src/hl_observer/risk/portfolio_correlation.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.risk.portfolio_risk_limits",
+      "path": "src/hl_observer/risk/portfolio_risk_limits.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "os",
+        "threading"
+      ],
+      "module": "hl_observer.risk.protections_v26",
+      "path": "src/hl_observer/risk/protections_v26.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.config.settings",
+        "hl_observer.hyperliquid.schemas",
+        "hl_observer.risk.gates"
+      ],
+      "module": "hl_observer.risk.risk_engine",
+      "path": "src/hl_observer/risk/risk_engine.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.risk.safety_gates_mm",
+      "path": "src/hl_observer/risk/safety_gates_mm.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.risk.trade_budget",
+      "path": "src/hl_observer/risk/trade_budget.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "importlib.metadata"
+      ],
+      "module": "hl_observer.security.dependances",
+      "path": "src/hl_observer/security/dependances.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.config.settings",
+        "hl_observer.hyperliquid.schemas"
+      ],
+      "module": "hl_observer.security.mainnet_guard",
+      "path": "src/hl_observer/security/mainnet_guard.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.security.dependances",
+        "hl_observer.security.secrets",
+        "os",
+        "pathlib",
+        "subprocess"
+      ],
+      "module": "hl_observer.security.safety_audit",
+      "path": "src/hl_observer/security/safety_audit.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "pathlib",
+        "re"
+      ],
+      "module": "hl_observer.security.secrets",
+      "path": "src/hl_observer/security/secrets.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.instrument_identity",
+        "hl_observer.position_lifecycle.reconstructor"
+      ],
+      "module": "hl_observer.signals.leader_delta",
+      "path": "src/hl_observer/signals/leader_delta.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.instrument_identity",
+        "os",
+        "threading",
+        "time"
+      ],
+      "module": "hl_observer.signals.market_quality_score",
+      "path": "src/hl_observer/signals/market_quality_score.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.instrument_identity",
+        "hl_observer.wallets.position_delta_engine",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.signals.position_delta_detector",
+      "path": "src/hl_observer/signals/position_delta_detector.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "module": "hl_observer.signals.signal_taxonomy",
+      "path": "src/hl_observer/signals/signal_taxonomy.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "hl_observer.collection.l2_snapshot_cache",
+        "hl_observer.edge.tier_cost_budget",
+        "hl_observer.funding.funding_poller",
+        "hl_observer.funding.funding_runtime_cache",
+        "hl_observer.funding.spike_detector",
+        "hl_observer.instrument_identity",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.vol_adjusted_barriers",
+        "hl_observer.risk.graded_halt",
+        "hl_observer.risk.protections_v26",
+        "hl_observer.runtime.replay_recorder",
+        "hl_observer.signals.market_quality_score",
+        "math",
+        "os",
+        "threading",
+        "time"
+      ],
+      "module": "hl_observer.signals.v26_entry_vetos",
+      "path": "src/hl_observer/signals/v26_entry_vetos.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "json",
+        "math",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.accounting_truth",
+      "path": "src/hl_observer/simulation/accounting_truth.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "math"
+      ],
+      "module": "hl_observer.simulation.capital_accounting",
+      "path": "src/hl_observer/simulation/capital_accounting.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.simulation.economic_objective",
+        "json",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.economic_campaign_provenance",
+      "path": "src/hl_observer/simulation/economic_campaign_provenance.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.economics.proof_binding",
+        "hl_observer.simulation.economic_campaign_provenance",
+        "hl_observer.simulation.economic_objective",
+        "hl_observer.strategies.active_scope",
+        "json",
+        "os",
+        "pathlib",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.economic_campaigns",
+      "path": "src/hl_observer/simulation/economic_campaigns.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hashlib",
+        "hl_observer.simulation.economic_campaigns",
+        "hl_observer.simulation.economic_objective",
+        "json",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.economic_freeze_registry",
+      "path": "src/hl_observer/simulation/economic_freeze_registry.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "datetime",
+        "decimal",
+        "hashlib",
+        "hl_observer.backtesting.copy_vault_protocol",
+        "hl_observer.backtesting.cross_venue_certified",
+        "hl_observer.economics.numeric",
+        "hl_observer.strategies.active_scope",
+        "math",
+        "statistics",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.economic_objective",
+      "path": "src/hl_observer/simulation/economic_objective.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "math"
+      ],
+      "module": "hl_observer.simulation.fee_model",
+      "path": "src/hl_observer/simulation/fee_model.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hashlib",
+        "json",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.ledger_integrity",
+      "path": "src/hl_observer/simulation/ledger_integrity.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "hl_observer.instrument_identity",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.liquidatable_marks",
+      "path": "src/hl_observer/simulation/liquidatable_marks.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hashlib",
+        "hl_observer.instrument_identity",
+        "hl_observer.markets.universe",
+        "hl_observer.storage.models",
+        "json",
+        "os",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.live_filters",
+      "path": "src/hl_observer/simulation/live_filters.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "enum",
+        "hashlib",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.paper_event",
+      "path": "src/hl_observer/simulation/paper_event.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "copy",
+        "dataclasses",
+        "decimal",
+        "enum",
+        "hashlib",
+        "hl_observer.economics.numeric",
+        "hl_observer.instrument_identity",
+        "hl_observer.simulation.accounting_truth",
+        "hl_observer.simulation.capital_accounting",
+        "hl_observer.simulation.fee_model",
+        "hl_observer.simulation.ledger_integrity",
+        "hl_observer.simulation.paper_event",
+        "hl_observer.simulation.pnl_ledger_audit",
+        "hl_observer.simulation.pnl_reconciliation",
+        "math",
+        "uuid"
+      ],
+      "module": "hl_observer.simulation.paper_ledger",
+      "path": "src/hl_observer/simulation/paper_ledger.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "hl_observer.instrument_identity",
+        "hl_observer.simulation.ledger_integrity",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.pnl_ledger_audit",
+      "path": "src/hl_observer/simulation/pnl_ledger_audit.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.economics.numeric",
+        "math"
+      ],
+      "module": "hl_observer.simulation.pnl_reconciliation",
+      "path": "src/hl_observer/simulation/pnl_reconciliation.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.instrument_identity",
+        "typing"
+      ],
+      "module": "hl_observer.simulation.session_memory",
+      "path": "src/hl_observer/simulation/session_memory.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.sources.models",
+        "hl_observer.sources.registry",
+        "hl_observer.storage.raw_store",
+        "hl_observer.storage.run_context",
+        "hl_observer.utils.time",
+        "os"
+      ],
+      "module": "hl_observer.sources.collection_recorder",
+      "path": "src/hl_observer/sources/collection_recorder.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "enum",
+        "math"
+      ],
+      "module": "hl_observer.sources.models",
+      "path": "src/hl_observer/sources/models.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "hl_observer.sources.models",
+        "math"
+      ],
+      "module": "hl_observer.sources.registry",
+      "path": "src/hl_observer/sources/registry.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.sources.collection_recorder",
+        "hl_observer.storage.run_context"
+      ],
+      "module": "hl_observer.sources.shared_recorder",
+      "path": "src/hl_observer/sources/shared_recorder.py"
+    },
+    {
+      "imports": [],
+      "module": "hl_observer.storage",
+      "path": "src/hl_observer/storage/__init__.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.storage",
+        "pathlib",
+        "sqlalchemy",
+        "sqlalchemy.engine",
+        "sqlalchemy.orm"
+      ],
+      "module": "hl_observer.storage.database",
+      "path": "src/hl_observer/storage/database.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "datetime",
+        "enum",
+        "hl_observer.storage.database",
+        "hl_observer.utils.time",
+        "sqlalchemy",
+        "sqlalchemy.orm"
+      ],
+      "module": "hl_observer.storage.models",
+      "path": "src/hl_observer/storage/models.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "dataclasses",
+        "hashlib",
+        "hl_observer.storage.run_context",
+        "json"
+      ],
+      "module": "hl_observer.storage.raw_store",
+      "path": "src/hl_observer/storage/raw_store.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hashlib",
+        "hl_observer.collection.stockage_brut_borne",
+        "hl_observer.markets.coin_metrics",
+        "hl_observer.markets.universe",
+        "hl_observer.signals.position_delta_detector",
+        "hl_observer.storage.models",
+        "hl_observer.utils.time",
+        "hl_observer.wallets.activity_summary",
+        "hl_observer.wallets.auto_watchlist",
+        "hl_observer.wallets.discovery_scoring",
+        "hl_observer.wallets.discovery_sources",
+        "hl_observer.wallets.per_coin_scoring",
+        "hl_observer.wallets.position_delta_engine",
+        "hl_observer.wallets.position_rebuilder",
+        "hl_observer.wallets.wallet_coin_profile",
+        "json",
+        "logging",
+        "os",
+        "sqlalchemy.orm",
+        "typing"
+      ],
+      "module": "hl_observer.storage.repositories",
+      "path": "src/hl_observer/storage/repositories.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "enum",
+        "hl_observer.utils.time"
+      ],
+      "module": "hl_observer.storage.run_context",
+      "path": "src/hl_observer/storage/run_context.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "enum"
+      ],
+      "module": "hl_observer.strategies.active_scope",
+      "path": "src/hl_observer/strategies/active_scope.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.strategies.strategy_mode",
+        "math",
+        "typing"
+      ],
+      "module": "hl_observer.strategies.engine_pnl",
+      "path": "src/hl_observer/strategies/engine_pnl.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "typing"
+      ],
+      "module": "hl_observer.strategies.strategy_mode",
+      "path": "src/hl_observer/strategies/strategy_mode.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.collection.l2_snapshot_cache",
+        "hl_observer.ops.echec_silencieux",
+        "hl_observer.paper_trading.barrier_calibration",
+        "hl_observer.paper_trading.exec_model",
+        "hl_observer.paper_trading.sltp_runtime",
+        "hl_observer.risk.directional_exposure",
+        "hl_observer.risk.engine_risk_budget",
+        "hl_observer.risk.interrupteurs",
+        "hl_observer.risk.portfolio_correlation",
+        "hl_observer.risk.trade_budget",
+        "hl_observer.simulation.accounting_truth",
+        "hl_observer.simulation.session_memory",
+        "hl_observer.strategies.strategy_mode",
+        "hl_observer.ui.state",
+        "math",
+        "os",
+        "time",
+        "typing"
+      ],
+      "module": "hl_observer.ui.fusion_persistent_adapter",
+      "path": "src/hl_observer/ui/fusion_persistent_adapter.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.ui.schemas",
+      "path": "src/hl_observer/ui/schemas.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "dataclasses",
+        "hl_observer.ui.schemas",
+        "hl_observer.utils.time",
+        "typing"
+      ],
+      "module": "hl_observer.ui.state",
+      "path": "src/hl_observer/ui/state.py"
+    },
+    {
+      "imports": [
+        "__future__"
+      ],
+      "module": "hl_observer.utils.math",
+      "path": "src/hl_observer/utils/math.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "datetime",
+        "time"
+      ],
+      "module": "hl_observer.utils.time",
+      "path": "src/hl_observer/utils/time.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.utils.time",
+        "hl_observer.wallets.position_delta_engine",
+        "pydantic"
+      ],
+      "module": "hl_observer.wallets.activity_summary",
+      "path": "src/hl_observer/wallets/activity_summary.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.storage.models",
+        "hl_observer.utils.time",
+        "sqlalchemy.orm"
+      ],
+      "module": "hl_observer.wallets.auto_watchlist",
+      "path": "src/hl_observer/wallets/auto_watchlist.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "enum",
+        "hl_observer.utils.math",
+        "pydantic"
+      ],
+      "module": "hl_observer.wallets.discovery_scoring",
+      "path": "src/hl_observer/wallets/discovery_scoring.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "abc",
+        "hl_observer.storage.models",
+        "hl_observer.utils.time",
+        "hl_observer.wallets.leaderboard_validation",
+        "pathlib",
+        "pydantic",
+        "re",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "typing",
+        "yaml"
+      ],
+      "module": "hl_observer.wallets.discovery_sources",
+      "path": "src/hl_observer/wallets/discovery_sources.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "enum",
+        "pydantic",
+        "re"
+      ],
+      "module": "hl_observer.wallets.leaderboard_validation",
+      "path": "src/hl_observer/wallets/leaderboard_validation.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.wallets.wallet_coin_profile",
+        "pydantic"
+      ],
+      "module": "hl_observer.wallets.per_coin_scoring",
+      "path": "src/hl_observer/wallets/per_coin_scoring.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "enum",
+        "math",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.wallets.position_delta_engine",
+      "path": "src/hl_observer/wallets/position_delta_engine.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "hl_observer.wallets.position_delta_engine",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.wallets.position_rebuilder",
+      "path": "src/hl_observer/wallets/position_rebuilder.py"
+    },
+    {
+      "imports": [
+        "__future__",
+        "collections",
+        "hl_observer.utils.time",
+        "pydantic",
+        "typing"
+      ],
+      "module": "hl_observer.wallets.wallet_coin_profile",
+      "path": "src/hl_observer/wallets/wallet_coin_profile.py"
+    }
+  ]
+}

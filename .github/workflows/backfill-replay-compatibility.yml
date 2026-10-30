@@ -104,9 +104,11 @@ jobs:
 
       - name: Verify immutable assets for replay
         shell: bash
+        env:
+          INPUT_LIMIT: "${{ inputs.per_family_limit || '36' }}"
         run: |
           set -euo pipefail
-          LIMIT="${{ inputs.per_family_limit || '36' }}"
+          LIMIT="$INPUT_LIMIT"
           # One SHA-bound scan and one compacted index rewrite instead of
           # seven full million-shard catalogue reloads per replay wave.
           # Retain every former family quota/order, including catch-all; a

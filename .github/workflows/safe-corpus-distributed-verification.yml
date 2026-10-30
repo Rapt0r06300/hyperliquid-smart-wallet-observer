@@ -97,13 +97,15 @@ jobs:
       - name: Download and verify assigned SAFE bytes
         env:
           GH_TOKEN: ${{ github.token }}
+          PARTITION_COUNT: "${{ needs.prepare.outputs.partition_count }}"
+          PARTITION: "${{ matrix.partition }}"
         run: |
           set -euo pipefail
           python tools/verify_safe_corpus_partition.py verify \
-            --partitions "${{ needs.prepare.outputs.partition_count }}" \
-            --partition "${{ matrix.partition }}" \
+            --partitions "$PARTITION_COUNT" \
+            --partition "$PARTITION" \
             --work-root "$RUNNER_TEMP/safe-verify-work" \
-            --output "$RUNNER_TEMP/safe-corpus-partition-${{ matrix.partition }}.json"
+            --output "$RUNNER_TEMP/safe-corpus-partition-$PARTITION.json"
       - name: Publish bounded partition receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -133,10 +135,12 @@ jobs:
           path: ${{ runner.temp }}/safe-partition-receipts
           merge-multiple: true
       - name: Prove exact full coverage and publish certificate
+        env:
+          PARTITION_COUNT: "${{ needs.prepare.outputs.partition_count }}"
         run: |
           set -euo pipefail
           python tools/verify_safe_corpus_partition.py aggregate \
-            --partitions "${{ needs.prepare.outputs.partition_count }}" \
+            --partitions "$PARTITION_COUNT" \
             --receipts "$RUNNER_TEMP/safe-partition-receipts" \
             --output "$RUNNER_TEMP/SAFE_DISTRIBUTED_CERTIFICATE.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -142,20 +142,24 @@ jobs:
             status_path.write_text(json.dumps(status,sort_keys=True,indent=2)+"\n")
           PY
       - name: Validate durable operator status
+        env:
+          REQUEST_ID: "${{ inputs.request_id }}"
         run: |
           set -euo pipefail
           python tools/validate_operator_status.py \
-            --intent "control/operator-intents/${{ inputs.request_id }}.json" \
-            --status "control/operator-status/${{ inputs.request_id }}.json"
+            --intent "control/operator-intents/$REQUEST_ID.json" \
+            --status "control/operator-status/$REQUEST_ID.json"
 
       - name: Publish operator intent
+        env:
+          COMMIT_REQUEST_ID: "${{ inputs.request_id }}"
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add control/operator-intents control/operator-status
           git diff --cached --quiet && exit 0
-          git commit -m "operator: persist intent ${{ inputs.request_id }}"
+          git commit -m "operator: persist intent $COMMIT_REQUEST_ID"
           gh auth setup-git
           python tools/publish_main_commit.py --remote origin --branch main
   dispatch-alina:

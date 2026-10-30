@@ -61,6 +61,8 @@ jobs:
           PY
 
       - name: Resume exact failed publications from recovery capsules
+        env:
+          REPOSITORY: "${{ github.repository }}"
         run: |
           set -euo pipefail
-          python tools/recover_dataset_v2_capsules.py             --repository "${{ github.repository }}"             --limit 2
+          python tools/recover_dataset_v2_capsules.py             --repository "$REPOSITORY"             --limit 2

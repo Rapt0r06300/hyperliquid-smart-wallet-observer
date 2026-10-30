@@ -62,8 +62,10 @@ jobs:
           python -m pip install -r requirements-recherche.txt
           python -m pip install -r requirements-ci-tools.txt
       - name: Exécuter le contrat isolé
+        env:
+          TEST_FILE: "${{ matrix.test }}"
         run: |
           python -m pytest -vv -s -p no:cacheprovider \
             -p tests.coverage_contract_cache_plugin \
             --tb=long --durations=0 --timeout=180 --timeout-method=signal \
-            "${{ matrix.test }}"
+            "$TEST_FILE"

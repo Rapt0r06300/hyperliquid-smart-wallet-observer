@@ -121,6 +121,8 @@ jobs:
 
       - name: Emit exact-head CI proof
         shell: pwsh
+        env:
+          RELEASE_DIRECTORY: "${{ steps.release.outputs.directory }}"
         run: |
           $proof = [ordered]@{
             schema = "hypersmart.ci_head_proof.v1"
@@ -131,7 +133,7 @@ jobs:
             run_attempt = $env:GITHUB_RUN_ATTEMPT
           }
           $proof | ConvertTo-Json -Depth 4 |
-            Set-Content -LiteralPath "${{ steps.release.outputs.directory }}\CI_HEAD_PROOF.json" -Encoding utf8
+            Set-Content -LiteralPath (Join-Path -Path "$env:RELEASE_DIRECTORY" -ChildPath "CI_HEAD_PROOF.json") -Encoding utf8
 
       - name: Attest ZIP and SBOM provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be

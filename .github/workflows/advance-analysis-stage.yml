@@ -49,25 +49,32 @@ jobs:
 
       - name: Advance one fail-closed stage
         shell: bash
+        env:
+          STAGE: "${{ inputs.stage }}"
+          REQUEST_ID: "${{ inputs.request_id }}"
+          EXPECTED_EPOCH: "${{ inputs.expected_epoch }}"
         run: |
           set -euo pipefail
-          python tools/advance_analysis_stage.py             --stage "${{ inputs.stage }}"             --request-id "${{ inputs.request_id }}"             --expected-epoch "${{ inputs.expected_epoch }}"
+          python tools/advance_analysis_stage.py             --stage "$STAGE"             --request-id "$REQUEST_ID"             --expected-epoch "$EXPECTED_EPOCH"
           python tools/phase_gate.py read
 
       - name: Persist stage state and receipt
         shell: bash
+        env:
+          COMMIT_STAGE: "${{ inputs.stage }}"
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add control/alina-phase.json control/phase-receipts
           git diff --cached --quiet && exit 0
-          git commit -m "phase: advance analysis stage to ${{ inputs.stage }}"
+          git commit -m "phase: advance analysis stage to $COMMIT_STAGE"
           python tools/publish_main_commit.py --remote origin --branch main
       - name: Materialize next stage campaigns
         env:
           GH_TOKEN: "${{ github.token }}"
+          REPOSITORY: "${{ github.repository }}"
         run: |
           set -euo pipefail
-          gh workflow run create-resumable-campaigns.yml --repo "${{ github.repository }}" --ref main
-          gh workflow run resumable-campaign-controller.yml --repo "${{ github.repository }}" --ref main
+          gh workflow run create-resumable-campaigns.yml --repo "$REPOSITORY" --ref main
+          gh workflow run resumable-campaign-controller.yml --repo "$REPOSITORY" --ref main

@@ -137,11 +137,13 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
       - name: pytest shard ${{ matrix.shard }}/6
+        env:
+          SHARD: "${{ matrix.shard }}"
         run: |
-          FICHIERS=$(python tools/ci_shard.py ${{ matrix.shard }} 6)
+          FICHIERS=$(python tools/ci_shard.py "$SHARD" 6)
           if [ -z "$FICHIERS" ]; then echo "shard vide"; exit 0; fi
           python -m pytest -q -p no:cacheprovider \
-            --junitxml=junit-shard-${{ matrix.shard }}.xml $FICHIERS
+            --junitxml=junit-shard-$SHARD.xml $FICHIERS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

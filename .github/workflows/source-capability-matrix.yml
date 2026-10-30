@@ -139,13 +139,16 @@ jobs:
           exit 1
       - name: Fail closed on collector smoke crashes
         if: always()
+        env:
+          NATIVE_SMOKE_OUTCOME: "${{ steps.native_smoke.outcome }}"
+          BBO_SMOKE_OUTCOME: "${{ steps.bbo_smoke.outcome }}"
         run: |
           status=0
-          if [ "${{ steps.native_smoke.outcome }}" = "failure" ]; then
+          if [ "$NATIVE_SMOKE_OUTCOME" = "failure" ]; then
             echo "Native venue collector smoke crashed; runtime evidence was preserved." >&2
             status=1
           fi
-          if [ "${{ steps.bbo_smoke.outcome }}" = "failure" ]; then
+          if [ "$BBO_SMOKE_OUTCOME" = "failure" ]; then
             echo "HL/Binance collector smoke crashed; runtime evidence was preserved." >&2
             status=1
           fi

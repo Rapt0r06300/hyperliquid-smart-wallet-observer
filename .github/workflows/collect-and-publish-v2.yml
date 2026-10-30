@@ -76,9 +76,12 @@ jobs:
 
       - name: Resolve bounded collection window
         shell: bash
+        env:
+          INPUT_DURATION_MINUTES: "${{ github.event.inputs.duration_minutes || '230' }}"
+          COLLECTOR: "${{ matrix.collector }}"
         run: |
           set -euo pipefail
-          MINUTES="${{ github.event.inputs.duration_minutes || '230' }}"
+          MINUTES="$INPUT_DURATION_MINUTES"
           case "$MINUTES" in
             ''|*[!0-9]*) echo "invalid duration_minutes"; exit 2 ;;
           esac
@@ -87,7 +90,7 @@ jobs:
             exit 2
           fi
           echo "COLLECT_SECONDS=$((MINUTES * 60))" >> "$GITHUB_ENV"
-          ROOT="$RUNNER_TEMP/alina-v2-${{ matrix.collector }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ROOT="$RUNNER_TEMP/alina-v2-$COLLECTOR-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir -p "$ROOT"
           echo "COLLECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
@@ -96,9 +99,11 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: alina/src:alina/tools:alina
+          COLLECTOR: "${{ matrix.collector }}"
+          INPUT_MAX_NATIVE_SYMBOLS: "${{ github.event.inputs.max_native_symbols || '100' }}"
         run: |
           set +e
-          if [ "${{ matrix.collector }}" = "bbo" ]; then
+          if [ "$COLLECTOR" = "bbo" ]; then
             python alina/tools/collecter_bbo.py \
               --root "$COLLECT_ROOT" \
               --coins AUTO \
@@ -106,13 +111,13 @@ jobs:
             STATUS=$?
             BUNDLE="$COLLECT_ROOT/runtime/data/dataset_v2_bundle/bbo"
           else
-            MAX_SYMBOLS="${{ github.event.inputs.max_native_symbols || '100' }}"
-            case "${{ matrix.collector }}" in
+            MAX_SYMBOLS="$INPUT_MAX_NATIVE_SYMBOLS"
+            case "$COLLECTOR" in
               native-bybit-0) VENUE="bybit"; SHARD_INDEX=0 ;;
               native-bybit-1) VENUE="bybit"; SHARD_INDEX=1 ;;
               native-okx-0) VENUE="okx"; SHARD_INDEX=0 ;;
               native-okx-1) VENUE="okx"; SHARD_INDEX=1 ;;
-              *) echo "unknown collector lane: ${{ matrix.collector }}"; exit 2 ;;
+              *) echo "unknown collector lane: $COLLECTOR"; exit 2 ;;
             esac
             python alina/tools/collecter_native_venues.py \
               --root "$COLLECT_ROOT" \
@@ -178,16 +183,19 @@ jobs:
         shell: bash
         env:
           BUNDLE: ${{ steps.collection.outputs.bundle }}
+          COLLECTOR: "${{ matrix.collector }}"
         run: |
           set -euo pipefail
-          TAG="data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.collector }}"
-          PYTHONPATH=current-publisher/src python current-publisher/tools/publish_dataset_v2_release.py             "$BUNDLE"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina dataset V2 ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT} ${{ matrix.collector }}"
+          TAG="data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$COLLECTOR"
+          PYTHONPATH=current-publisher/src python current-publisher/tools/publish_dataset_v2_release.py             "$BUNDLE"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina dataset V2 ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT} $COLLECTOR"
 
       - name: Fail closed if collector itself failed
         if: always()
         shell: bash
+        env:
+          COLLECTOR_STATUS: "${{ steps.collection.outputs.status }}"
         run: |
-          STATUS="${{ steps.collection.outputs.status }}"
+          STATUS="$COLLECTOR_STATUS"
           if [ -n "$STATUS" ] && [ "$STATUS" != "0" ]; then
             echo "Collector exited with status $STATUS after preserving any bundle it produced."
             exit "$STATUS"

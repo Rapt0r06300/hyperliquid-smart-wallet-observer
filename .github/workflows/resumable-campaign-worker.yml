@@ -141,6 +141,9 @@ jobs:
       - id: claim
         name: Claim durable campaign lease
         shell: bash
+        env:
+          PHASE: "${{ steps.pin.outputs.phase }}"
+          PHASE_EPOCH: "${{ steps.pin.outputs.phase_epoch }}"
         run: |
           set -euo pipefail
           M="catalog/campaigns/$CAMPAIGN_ID.json"
@@ -177,7 +180,7 @@ jobs:
           # Lease/checkpoint state belongs to the current main control plane.
           # The collection unit below remains pinned to its historical code SHA.
           DIGEST="$(PYTHONPATH=src python tools/resumable_campaign.py validate "$M")"
-          CLAIM="$(PYTHONPATH=src python tools/resumable_campaign.py start "$M"             --owner "$GITHUB_RUN_ID" --ttl-s 20700 --expected-digest "$DIGEST"             --expected-phase "${{ steps.pin.outputs.phase }}"             --expected-epoch "${{ steps.pin.outputs.phase_epoch }}")"
+          CLAIM="$(PYTHONPATH=src python tools/resumable_campaign.py start "$M"             --owner "$GITHUB_RUN_ID" --ttl-s 20700 --expected-digest "$DIGEST"             --expected-phase "$PHASE"             --expected-epoch "$PHASE_EPOCH")"
           TOKEN="$(printf '%s\n' "$CLAIM" | sed -n 's/^lease_token=//p' | tail -1)"
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
@@ -360,10 +363,13 @@ jobs:
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
         continue-on-error: true
         shell: bash
+        env:
+          UNIT_KIND: "${{ steps.unit.outputs.kind }}"
+          UNIT_ID: "${{ steps.unit.outputs.unit }}"
         run: |
           set -euo pipefail
-          KIND="${{ steps.unit.outputs.kind }}"
-          UNIT="${{ steps.unit.outputs.unit }}"
+          KIND="$UNIT_KIND"
+          UNIT="$UNIT_ID"
           RESULT="$RUNNER_TEMP/result.json"
           STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RESULT")"
           if [ "$STATUS" != "COMPLETE" ]; then
@@ -561,11 +567,13 @@ jobs:
           PHASE_EPOCH: "${{ steps.pin.outputs.phase_epoch }}"
           RELEASE_TAG: "${{ steps.durable.outputs.release_tag }}"
           EVIDENCE_TAG: "${{ steps.durable.outputs.evidence_tag }}"
+          UNIT_KIND: "${{ steps.unit.outputs.kind }}"
+          UNIT_ID: "${{ steps.unit.outputs.unit }}"
         run: |
           set -euo pipefail
           M="catalog/campaigns/$CAMPAIGN_ID.json"
-          KIND="${{ steps.unit.outputs.kind }}"
-          UNIT="${{ steps.unit.outputs.unit }}"
+          KIND="$UNIT_KIND"
+          UNIT="$UNIT_ID"
           CODE_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_sha"])' "$M")"
           GENERATION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["dataset_generation"])' "$M")"
           SOURCE_EPOCH="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source_collection_epoch") or "")' "$M")"
@@ -751,11 +759,13 @@ jobs:
           PHASE_EPOCH: "${{ steps.pin.outputs.phase_epoch }}"
           RELEASE_TAG: "${{ steps.durable.outputs.release_tag }}"
           EVIDENCE_TAG: "${{ steps.durable.outputs.evidence_tag }}"
+          UNIT_KIND: "${{ steps.unit.outputs.kind }}"
+          UNIT_ID: "${{ steps.unit.outputs.unit }}"
         run: |
           set -euo pipefail
           M="catalog/campaigns/$CAMPAIGN_ID.json"
-          KIND="${{ steps.unit.outputs.kind }}"
-          UNIT="${{ steps.unit.outputs.unit }}"
+          KIND="$UNIT_KIND"
+          UNIT="$UNIT_ID"
           CODE_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_sha"])' "$M")"
           GENERATION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["dataset_generation"])' "$M")"
           SOURCE_EPOCH="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source_collection_epoch") or "")' "$M")"
