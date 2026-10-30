@@ -124,6 +124,13 @@ def test_commit_subject_keeps_adapter_theme_when_sync_engine_is_included() -> No
     ]) == "fix(recovery): preserve timed-out adapter checkpoints (4 paths)"
 
 
+def test_commit_subject_names_consensus_input_guard() -> None:
+    assert _commit_subject([
+        "src/hl_observer/copying/consensus_leader_selector.py",
+        "tests/test_consensus_leader_selector.py",
+    ]) == "fix(copy-vault): guard non-finite consensus inputs (2 paths)"
+
+
 def test_commit_subject_names_the_l4_and_entity_provenance_guard() -> None:
     assert _commit_subject([
         "src/hl_observer/collection/l4_capture.py",

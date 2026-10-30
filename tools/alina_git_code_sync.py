@@ -174,6 +174,15 @@ def _commit_subject(paths: list[str]) -> str:
             f"({len(normalized)} paths)"
         )
 
+    if (
+        any(path.endswith("src/hl_observer/copying/consensus_leader_selector.py") for path in normalized)
+        and any(path.endswith("tests/test_consensus_leader_selector.py") for path in normalized)
+    ):
+        return (
+            "fix(copy-vault): guard non-finite consensus inputs "
+            f"({len(normalized)} paths)"
+        )
+
     if any(
         token in path
         for path in normalized
