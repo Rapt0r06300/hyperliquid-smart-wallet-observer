@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ECONOMIC_KINDS = frozenset({"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"})
 HISTORICAL_BACKFILL_AUDIT_SCHEMA = "alina.copy_vault.historical_backfill_audit.v1"
 MAX_DURABLE_HISTORY_AUDIT_BYTES = 1_048_576
+ADAPTER_DIAGNOSTIC_SCHEMA = "alina.copy_vault.adapter_unit_diagnostic.v1"
 ANALYSIS_STAGE_BY_KIND = {
     "replay": "REPLAY",
     "backtest": "BACKTEST",
@@ -561,6 +562,124 @@ def _copy_vault_subscription_receipt(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _copy_vault_position_snapshot_receipt(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """Carry the position-anchor gate into the durable campaign receipt.
+
+    A collection summary may contain valid empty snapshots, but it must never
+    turn a missing/failed START or END anchor into an empty position set.  The
+    collector owns the detailed per-wallet rows; this adapter only validates
+    and carries the compact gate needed by downstream proof stages.
+    """
+    raw = summary.get("position_snapshot_coverage")
+    is_copy_vault_summary = str(summary.get("schema") or "").startswith(
+        "alina.copy_vault_cloud_window."
+    )
+    if raw is None and not is_copy_vault_summary:
+        return None
+    if not isinstance(raw, Mapping):
+        return {
+            "status": "MISSING_RECEIPT",
+            "requested_wallets": None,
+            "proof_eligible": False,
+            "proof_blocked": True,
+            "proof_block_reason": "POSITION_SNAPSHOT_COVERAGE_MISSING",
+            "phases": None,
+            "source": "collection_summary.json",
+        }
+
+    status = raw.get("status")
+    requested_wallets = _exact_nonnegative_int(raw.get("requested_wallets"))
+    phases_raw = raw.get("phases")
+    phase_receipts: dict[str, Any] = {}
+    valid = (
+        status in {"UNMEASURABLE_NO_WALLETS", "COMPLETE", "PARTIAL"}
+        and requested_wallets is not None
+        and raw.get("missing_or_failed_is_not_empty") is True
+        and isinstance(phases_raw, Mapping)
+    )
+    for phase in ("START", "END"):
+        phase_raw = phases_raw.get(phase) if isinstance(phases_raw, Mapping) else None
+        if not isinstance(phase_raw, Mapping):
+            valid = False
+            phase_receipts[phase] = None
+            continue
+        expected = _exact_nonnegative_int(phase_raw.get("expected_wallets"))
+        accepted = _exact_nonnegative_int(
+            phase_raw.get("valid_snapshots_accepted_for_storage")
+        )
+        failed = _exact_nonnegative_int(
+            phase_raw.get("failed_or_unverified_wallets")
+        )
+        by_wallet = phase_raw.get("by_wallet")
+        phase_status = phase_raw.get("status")
+        phase_valid = (
+            phase_status in {"UNMEASURABLE_NO_WALLETS", "COMPLETE", "PARTIAL"}
+            and expected is not None
+            and accepted is not None
+            and failed is not None
+            and accepted + failed == expected
+            and expected == requested_wallets
+            and isinstance(by_wallet, list)
+            and len(by_wallet) == expected
+        )
+        if phase_valid:
+            seen_vaults: set[str] = set()
+            for row in by_wallet:
+                if not isinstance(row, Mapping):
+                    phase_valid = False
+                    break
+                vault = str(row.get("vault") or "").strip().lower()
+                row_status = row.get("status")
+                if (
+                    not vault
+                    or vault in seen_vaults
+                    or row_status not in {
+                        "NOT_SENT",
+                        "HTTP_ERROR",
+                        "TIMEOUT",
+                        "REQUEST_ERROR",
+                        "INVALID_RESPONSE",
+                        "VALID_EMPTY",
+                        "VALID_WITH_POSITIONS",
+                        "PERSISTENCE_UNVERIFIED",
+                    }
+                    or type(row.get("accepted_for_storage")) is not bool
+                ):
+                    phase_valid = False
+                    break
+                seen_vaults.add(vault)
+        valid = valid and phase_valid
+        phase_receipts[phase] = {
+            "status": phase_status,
+            "expected_wallets": expected,
+            "valid_snapshots_accepted_for_storage": accepted,
+            "failed_or_unverified_wallets": failed,
+            "outcomes_by_status": (
+                dict(phase_raw.get("outcomes_by_status"))
+                if isinstance(phase_raw.get("outcomes_by_status"), Mapping)
+                else None
+            ),
+            "by_wallet": by_wallet if phase_valid else None,
+        }
+
+    proof_eligible = valid and status == "COMPLETE" and requested_wallets > 0
+    if not valid:
+        proof_block_reason = "POSITION_SNAPSHOT_COVERAGE_INVALID"
+    elif not proof_eligible:
+        proof_block_reason = "POSITION_SNAPSHOT_ANCHOR_MISSING_OR_FAILED"
+    else:
+        proof_block_reason = None
+    return {
+        "status": status if valid else "INVALID_RECEIPT",
+        "requested_wallets": requested_wallets,
+        "proof_eligible": proof_eligible,
+        "proof_blocked": not proof_eligible,
+        "proof_block_reason": proof_block_reason,
+        "phases": phase_receipts,
+        "source": "collection_summary.json",
+    }
+
+
 def _output_root(ctx: AdapterContext) -> Path:
     configured = ctx.partition.get("output_root")
     root = Path(str(configured)) if configured else Path.cwd() / "campaign-output"
@@ -583,6 +702,31 @@ def _cutoff_ts_ms(value: Any) -> int | None:
         return int(parsed.timestamp() * 1000)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _economic_campaign_binding_args(ctx: AdapterContext) -> list[str]:
+    """Require the exact frozen SAFE selection identity for economic runs."""
+    selection_id = ctx.partition.get("dataset_selection_id")
+    if (
+        not isinstance(selection_id, str)
+        or len(selection_id) != 64
+        or any(char not in "0123456789abcdef" for char in selection_id)
+    ):
+        raise ValueError("economic campaign requires a SHA-256 dataset_selection_id")
+
+    cutoff = ctx.partition.get("collection_cutoff_at_utc")
+    if not isinstance(cutoff, str) or not cutoff.endswith("Z") or _cutoff_ts_ms(cutoff) is None:
+        raise ValueError("economic campaign requires a valid UTC collection_cutoff_at_utc ending in Z")
+
+    epoch = ctx.partition.get("source_collection_epoch")
+    if type(epoch) is not int or epoch < 1:
+        raise ValueError("economic campaign requires a positive integer source_collection_epoch")
+
+    return [
+        "--dataset-selection-id", selection_id,
+        "--collection-cutoff-at-utc", cutoff,
+        "--source-collection-epoch", str(epoch),
+    ]
 
 
 def _selection_args(ctx: AdapterContext) -> list[str]:
@@ -875,6 +1019,7 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
         return _materialize_command(ctx, workspace), workspace
 
     if ctx.kind in ECONOMIC_KINDS:
+        binding_args = _economic_campaign_binding_args(ctx)
         return [
             py,
             str(ROOT / "tools" / "run_economic_objective_campaigns.py"),
@@ -883,6 +1028,7 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             "--no-start-collection",
             "--analysis-stage",
             _analysis_stage(ctx.kind) or str(ctx.kind).upper(),
+            *binding_args,
         ], workspace
 
     raise ValueError(f"unsupported campaign kind: {ctx.kind}")
@@ -909,9 +1055,18 @@ def _run(
     )
 
 
+def _text_tail(value: Any, limit: int = 8000) -> str:
+    """Normalize captured subprocess output without allowing unbounded growth."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")[-limit:]
+    return str(value)[-limit:]
+
+
 def _failure_payload(cmd: list[str], cp: Any) -> dict[str, Any]:
-    stdout = str(getattr(cp, "stdout", "") or "")[-8000:]
-    stderr = str(getattr(cp, "stderr", "") or "")[-8000:]
+    stdout = _text_tail(getattr(cp, "stdout", ""))
+    stderr = _text_tail(getattr(cp, "stderr", ""))
     combined = (stdout + "\n" + stderr).lower()
     category = (
         "TEMPORARY_EXTERNAL"
@@ -1176,6 +1331,14 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         metrics["copy_vault_subscription"] = _copy_vault_subscription_receipt(
             summary
         )
+    position_snapshot_receipt = _copy_vault_position_snapshot_receipt(summary)
+    if position_snapshot_receipt is not None:
+        metrics["copy_vault_position_snapshots"] = position_snapshot_receipt
+        # This is deliberately a separate gate from frame/shard coverage:
+        # market data can be complete while the wallet state anchor is not.
+        metrics["position_snapshot_proof_blocked"] = (
+            position_snapshot_receipt["proof_blocked"] is True
+        )
     if "historical_backfill" in index:
         raw_reports = index.get("historical_backfill")
         audit: dict[str, Any] = {
@@ -1209,6 +1372,153 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     return metrics
 
 
+def _exact_count_from_sources(
+    sources: list[Any],
+    keys: tuple[str, ...],
+) -> int | None:
+    """Return a count only when an authoritative source gives an exact integer."""
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key in keys:
+            if key not in source:
+                continue
+            value = _exact_nonnegative_int(source.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _checkpoint_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verified_durable_checkpoint(
+    ctx: AdapterContext,
+    output_root: Path | None,
+) -> dict[str, Any] | None:
+    """Expose a checkpoint only when its durable identity is verifiable.
+
+    A timeout must never turn an in-memory cursor into a resume claim.  The
+    adapter may receive a checkpoint receipt from the orchestrator or a path
+    plus expected SHA-256 in the partition.  A path is accepted only inside
+    the unit workspace/output and only when the bytes match the expected hash.
+    """
+    partition = ctx.partition
+    raw = partition.get("last_durable_checkpoint")
+    if raw is None:
+        raw = partition.get("durable_checkpoint")
+    if raw is None and partition.get("checkpoint_path") is not None:
+        raw = {
+            "id": partition.get("checkpoint_id"),
+            "path": partition.get("checkpoint_path"),
+            "sha256": partition.get("checkpoint_sha256"),
+        }
+
+    if isinstance(raw, Mapping):
+        checkpoint_id = raw.get("id", raw.get("checkpoint_id"))
+        expected = raw.get("sha256", raw.get("checkpoint_sha256"))
+        path_value = raw.get("path", raw.get("checkpoint_path"))
+        if (
+            raw.get("verified") is True
+            and isinstance(checkpoint_id, str)
+            and checkpoint_id
+            and isinstance(expected, str)
+            and len(expected) == 64
+            and all(char in "0123456789abcdef" for char in expected.lower())
+            and path_value is None
+        ):
+            return {
+                "id": checkpoint_id,
+                "path": str(path_value) if isinstance(path_value, str) else None,
+                "sha256": expected.lower(),
+                "verified": True,
+            }
+
+    if not isinstance(raw, Mapping):
+        return None
+    checkpoint_id = raw.get("id", raw.get("checkpoint_id"))
+    expected = raw.get("sha256", raw.get("checkpoint_sha256"))
+    path_value = raw.get("path", raw.get("checkpoint_path"))
+    if (
+        not isinstance(checkpoint_id, str)
+        or not checkpoint_id
+        or not isinstance(expected, str)
+        or len(expected) != 64
+        or any(char not in "0123456789abcdef" for char in expected.lower())
+        or not isinstance(path_value, str)
+        or not path_value
+    ):
+        return None
+
+    allowed_roots = [root for root in (output_root, _workspace(ctx)) if root is not None]
+    candidate = Path(path_value)
+    try:
+        resolved = candidate.resolve() if candidate.is_absolute() else None
+        if resolved is None:
+            for root in allowed_roots:
+                possible = (root / candidate).resolve()
+                try:
+                    possible.relative_to(root.resolve())
+                except ValueError:
+                    continue
+                resolved = possible
+                break
+        if resolved is None or not resolved.is_file():
+            return None
+        if not any(
+            resolved == root.resolve() or resolved.is_relative_to(root.resolve())
+            for root in allowed_roots
+        ):
+            return None
+        actual = _checkpoint_sha256(resolved)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if actual != expected.lower():
+        return None
+    return {
+        "id": checkpoint_id,
+        "path": str(resolved),
+        "sha256": actual,
+        "verified": True,
+    }
+
+
+def _collection_completion_reasons(metrics: Mapping[str, Any]) -> list[str]:
+    """Return explicit reasons why a collection cannot publish a SAFE bundle."""
+    reasons: list[str] = []
+    if metrics.get("manifest_inventory_complete") is not True:
+        reasons.append("manifest_inventory_incomplete")
+    if metrics.get("frame_metrics_complete") is not True:
+        reasons.append("frame_metrics_incomplete")
+    shard_count = _exact_nonnegative_int(metrics.get("shard_count"))
+    safe_count = _exact_nonnegative_int(metrics.get("safe_count"))
+    partial_count = _exact_nonnegative_int(metrics.get("partial_count"))
+    reject_count = _exact_nonnegative_int(metrics.get("reject_count"))
+    if shard_count is None or safe_count is None:
+        reasons.append("shard_counts_unproven")
+    elif safe_count != shard_count:
+        reasons.append("not_all_shards_safe")
+    if partial_count is None:
+        reasons.append("partial_count_unproven")
+    elif partial_count != 0:
+        reasons.append("partial_shards_present")
+    if reject_count is None:
+        reasons.append("reject_count_unproven")
+    elif reject_count != 0:
+        reasons.append("rejected_shards_present")
+    queue_drops = _exact_nonnegative_int(metrics.get("queue_drops"))
+    if queue_drops is None:
+        reasons.append("queue_drops_unproven")
+    elif queue_drops != 0:
+        reasons.append("queue_drops_present")
+    return reasons
+
+
 def run_one_unit(
     ctx: AdapterContext,
     runner: Callable[..., Any] = subprocess.run,
@@ -1219,13 +1529,101 @@ def run_one_unit(
     then run the economic campaign in the same GitHub-hosted job. This avoids
     relying on ephemeral runner state across continuations.
     """
+    started_at_epoch_ms = int(time.time() * 1000)
+    started_monotonic = time.monotonic()
+
+    def finish(
+        status: str,
+        payload: dict[str, Any],
+        progressed: bool,
+        *,
+        state: str | None = None,
+        reason: str | None = None,
+        deadline_exceeded: bool = False,
+        output_root: Path | None = None,
+        counts_source: Mapping[str, Any] | None = None,
+    ) -> AdapterResult:
+        enriched = dict(payload)
+        ended_at_epoch_ms = int(time.time() * 1000)
+        deadline_epoch_ms = (
+            int(ctx.soft_deadline_epoch * 1000)
+            if math.isfinite(float(ctx.soft_deadline_epoch))
+            else None
+        )
+        partition = ctx.partition
+        checkpoint = _verified_durable_checkpoint(ctx, output_root)
+        sources = [enriched, counts_source, partition]
+        counts = {
+            "selected_count": _exact_count_from_sources(
+                sources, ("selected_count", "selected_units", "units_selected")
+            ),
+            "completed_count": _exact_count_from_sources(
+                sources, ("completed_count", "completed_units", "units_completed")
+            ),
+            "published_count": _exact_count_from_sources(
+                sources, ("published_count", "published_units", "units_published")
+            ),
+            "safe_qualified_count": _exact_count_from_sources(
+                sources,
+                ("safe_qualified_count", "safe_count", "safe_shards", "qualified_safe_count"),
+            ),
+        }
+        attempt = _exact_count_from_sources(
+            [partition], ("attempt", "attempt_number", "attempt_count")
+        )
+        diagnostic_state = state or {
+            "COMPLETE": "COMPLETE",
+            "CONTINUATION_REQUIRED": "CHECKPOINTED",
+            "UNAVAILABLE": "UNAVAILABLE",
+            "PARTIAL": "PARTIAL",
+            "FAILED": "FAILED",
+        }.get(status, status)
+        diagnostic_reason = reason or str(enriched.get("reason") or status.lower())
+        enriched["counts"] = counts
+        enriched["last_durable_checkpoint"] = checkpoint
+        enriched["unit_diagnostic"] = {
+            "schema": ADAPTER_DIAGNOSTIC_SCHEMA,
+            "campaign_id": ctx.campaign_id,
+            "kind": ctx.kind,
+            "unit_id": ctx.unit_id,
+            "state": diagnostic_state,
+            "reason": diagnostic_reason,
+            "status": status,
+            "started_at_epoch_ms": started_at_epoch_ms,
+            "ended_at_epoch_ms": ended_at_epoch_ms,
+            "duration_ms": max(0, int((time.monotonic() - started_monotonic) * 1000)),
+            "deadline_epoch_ms": deadline_epoch_ms,
+            "deadline_exceeded": bool(deadline_exceeded),
+            "attempt": attempt,
+            "last_durable_checkpoint": checkpoint,
+            "counts": counts,
+            "safe_publication_allowed": status == "COMPLETE" and diagnostic_state == "COMPLETE",
+        }
+        return AdapterResult(status, _digest(enriched), enriched, progressed)
+
     remaining = ctx.soft_deadline_epoch - time.time()
     if remaining <= 5:
         payload = {"status": "CONTINUATION_REQUIRED", "reason": "soft_deadline"}
-        return AdapterResult(payload["status"], _digest(payload), payload, False)
+        return finish(
+            payload["status"],
+            payload,
+            False,
+            state="TIMED_OUT",
+            reason="soft_deadline",
+            deadline_exceeded=True,
+        )
 
     commands: list[tuple[list[str], Path | None, str]]
     if ctx.kind in ECONOMIC_KINDS:
+        try:
+            binding_args = _economic_campaign_binding_args(ctx)
+        except ValueError as exc:
+            payload = {
+                "status": "FAILED",
+                "reason": "invalid_campaign_binding",
+                "detail": str(exc),
+            }
+            return finish("FAILED", payload, False, reason="invalid_campaign_binding")
         workspace = _workspace(ctx)
         commands = [
             (_materialize_command(ctx, workspace), workspace, "materialize_safe_v2"),
@@ -1238,6 +1636,7 @@ def run_one_unit(
                     "--no-start-collection",
                     "--analysis-stage",
                     _analysis_stage(ctx.kind) or str(ctx.kind).upper(),
+                    *binding_args,
                 ],
                 workspace,
                 "economic_campaign",
@@ -1265,7 +1664,7 @@ def run_one_unit(
                 "reason": "invalid_partition",
                 "detail": str(exc),
             }
-            return AdapterResult("FAILED", _digest(payload), payload, False)
+            return finish("FAILED", payload, False, reason="invalid_partition")
         commands = [(cmd, output_root, "unit")]
 
     phases: list[dict[str, Any]] = []
@@ -1278,34 +1677,77 @@ def run_one_unit(
                 "reason": "soft_deadline",
                 "phases": phases,
             }
-            return AdapterResult(
+            return finish(
                 "CONTINUATION_REQUIRED",
-                _digest(payload),
                 payload,
                 bool(phases),
+                state="TIMED_OUT",
+                reason="soft_deadline",
+                deadline_exceeded=True,
             )
 
         if output_root is not None:
-            output_root.mkdir(parents=True, exist_ok=True)
+            try:
+                output_root.mkdir(parents=True, exist_ok=True)
+            except (OSError, ValueError) as exc:
+                payload = {
+                    "status": "FAILED",
+                    "reason": "output_root_unavailable",
+                    "failure_category": "OUTPUT_PATH",
+                    "phase": phase_name,
+                    "detail": str(exc)[:1000],
+                    "phases": phases,
+                }
+                return finish(
+                    "FAILED",
+                    payload,
+                    False,
+                    state="FAILED",
+                    reason="output_root_unavailable",
+                )
         try:
             cp = _run(runner, cmd, timeout=max(1, int(remaining - 5)), analysis_stage=_analysis_stage(ctx.kind))
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             payload = {
                 "status": "CONTINUATION_REQUIRED",
                 "reason": "adapter_timeout",
                 "phase": phase_name,
                 "command": cmd[:4],
+                "partial_stdout": _text_tail(exc.stdout),
+                "partial_stderr": _text_tail(exc.stderr),
                 "phases": phases,
             }
-            return AdapterResult(
+            return finish(
                 "CONTINUATION_REQUIRED",
-                _digest(payload),
                 payload,
                 bool(phases),
+                state="TIMED_OUT",
+                reason="adapter_timeout",
+                deadline_exceeded=True,
+                output_root=output_root,
+            )
+        except Exception as exc:
+            checkpoint = _verified_durable_checkpoint(ctx, output_root)
+            payload = {
+                "status": "CONTINUATION_REQUIRED" if checkpoint is not None else "FAILED",
+                "reason": "adapter_interrupted",
+                "failure_category": "ADAPTER_EXCEPTION",
+                "phase": phase_name,
+                "exception_type": type(exc).__name__,
+                "detail": str(exc)[:1000],
+                "phases": phases,
+            }
+            return finish(
+                payload["status"],
+                payload,
+                checkpoint is not None,
+                state="INTERRUPTED",
+                reason="adapter_interrupted",
+                output_root=output_root,
             )
 
-        stdout = str(getattr(cp, "stdout", "") or "")[-8000:]
-        stderr = str(getattr(cp, "stderr", "") or "")[-8000:]
+        stdout = _text_tail(getattr(cp, "stdout", ""))
+        stderr = _text_tail(getattr(cp, "stderr", ""))
         returncode = int(getattr(cp, "returncode", 1) or 0)
         phases.append(
             {
@@ -1342,12 +1784,12 @@ def run_one_unit(
                 payload["failure_category"] = "DATA_AVAILABILITY"
                 payload["phase"] = phase_name
                 payload["phases"] = phases
-                return AdapterResult("UNAVAILABLE", _digest(payload), payload, False)
+                return finish("UNAVAILABLE", payload, False, reason="no_safe_dataset_v2")
             if phase_name == "materialize_safe_v2":
                 payload["reason"] = "dataset_materialization_failed"
             payload["phase"] = phase_name
             payload["phases"] = phases
-            return AdapterResult("FAILED", _digest(payload), payload, False)
+            return finish("FAILED", payload, False, reason=str(payload.get("reason")))
 
     if (
         ctx.kind == "replay"
@@ -1365,11 +1807,12 @@ def run_one_unit(
             "resume_proof": True,
             "next_unit": 1,
         }
-        return AdapterResult(
+        return finish(
             "CONTINUATION_REQUIRED",
-            _digest(payload),
             payload,
             True,
+            state="CHECKPOINTED",
+            reason="resume_proof_selection_checkpoint",
         )
 
     last_cmd, output_root, _ = commands[-1]
@@ -1390,9 +1833,19 @@ def run_one_unit(
         _collection_checkpoint_metrics(output_root)
         if ctx.kind in collection_kinds and output_root is not None else None
     )
+    if collection_metrics is not None:
+        observed_records = _exact_nonnegative_int(
+            collection_metrics.get("record_count_observed")
+        )
+        observed_shards = _exact_nonnegative_int(
+            collection_metrics.get("shard_count")
+        )
+    else:
+        observed_records = None
+        observed_shards = None
     if collection_metrics is not None and (
-        int(collection_metrics["record_count_observed"]) <= 0
-        or int(collection_metrics["shard_count"]) <= 0
+        (observed_records is not None and observed_records <= 0)
+        or (observed_shards is not None and observed_shards <= 0)
     ):
         unavailable = {
             "status": "UNAVAILABLE",
@@ -1402,7 +1855,36 @@ def run_one_unit(
             "collection_metrics": collection_metrics,
             "phases": phases,
         }
-        return AdapterResult("UNAVAILABLE", _digest(unavailable), unavailable, False)
+        return finish(
+            "UNAVAILABLE",
+            unavailable,
+            False,
+            state="EMPTY",
+            reason="no_durable_collection_events",
+            output_root=output_root,
+            counts_source=collection_metrics,
+        )
+    if collection_metrics is not None:
+        publication_reasons = _collection_completion_reasons(collection_metrics)
+        if publication_reasons:
+            partial = {
+                "status": "PARTIAL",
+                "reason": "collection_publication_unproven",
+                "failure_category": "QUALITY",
+                "publication_blockers": publication_reasons,
+                "output_root": str(output_root),
+                "collection_metrics": collection_metrics,
+                "phases": phases,
+            }
+            return finish(
+                "PARTIAL",
+                partial,
+                bool(phases),
+                state="PARTIAL",
+                reason="collection_publication_unproven",
+                output_root=output_root,
+                counts_source=collection_metrics,
+            )
     payload = {
         "status": "COMPLETE",
         "analysis_stage": (
@@ -1432,4 +1914,13 @@ def run_one_unit(
     if ctx.kind == "module_pnl_proof":
         payload["economic_proof_status"] = economic_proof_status
         payload["economic_proof_certifying"] = economic_proof_status == "PASS"
-    return AdapterResult("COMPLETE", _digest(payload), payload, True)
+    return finish(
+        "COMPLETE",
+        payload,
+        True,
+        state="COMPLETE",
+        reason="completed",
+        output_root=output_root,
+        counts_source=collection_metrics,
+    )
+
