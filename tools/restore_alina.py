@@ -1466,13 +1466,27 @@ class _SafeShardRegistry:
             raise RestoreError(f"cannot update SAFE shard database: {exc}") from exc
         self._pending_writes.clear()
 
-    def finalize(self, catalog_sha256: str) -> None:
+    def finalize(
+        self,
+        catalog_sha256: str,
+        active_keys: set[tuple[str, str]],
+    ) -> None:
         try:
             self._flush()
+            # A filtered Copy-Vault restore must activate only the exact
+            # dataset/release rows selected by this pass.  Matching the
+            # catalog SHA alone can re-admit cached shards from another
+            # family or from a previous broader restore.
             self.connection.execute(
-                "UPDATE safe_shards SET catalog_active = "
-                "CASE WHEN catalog_sha256 = ? THEN 1 ELSE 0 END",
-                (catalog_sha256,),
+                "UPDATE safe_shards SET catalog_active = 0"
+            )
+            self.connection.executemany(
+                "UPDATE safe_shards SET catalog_active = 1 "
+                "WHERE catalog_sha256 = ? AND dataset_id = ? AND release_tag = ?",
+                [
+                    (catalog_sha256, dataset_id, release_tag)
+                    for dataset_id, release_tag in sorted(active_keys)
+                ],
             )
             self.connection.executemany(
                 """
@@ -2575,7 +2589,13 @@ def _materialize_catalog_safe_shards(
     )
     if report["materialization_complete"]:
         if authoritative_registry:
-            registry.finalize(catalog_sha256)
+            registry.finalize(
+                catalog_sha256,
+                {
+                    (str(row.get("dataset_id") or ""), str(row.get("release_tag") or ""))
+                    for row in rows
+                },
+            )
         else:
             registry.commit_cache()
     else:

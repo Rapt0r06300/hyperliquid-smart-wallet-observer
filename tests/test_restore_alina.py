@@ -1746,6 +1746,70 @@ def test_alinasync_registry_never_reuses_a_changed_shard(tmp_path, monkeypatch):
     assert target.read_bytes() == payload
 
 
+def test_scoped_catalog_restore_deactivates_cached_unselected_rows(tmp_path):
+    import sqlite3
+
+    module = _module()
+    payload_a = gzip.compress(b'{"trade_id":"safe-a"}\n', mtime=0)
+    payload_b = gzip.compress(b'{"trade_id":"safe-b"}\n', mtime=0)
+    catalog_sha = "f" * 64
+    tag = "data-v2-scoped-registry"
+    rows = [
+        {
+            "dataset_id": "safe-a",
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "validation_allowed": True,
+            "asset_verified": True,
+            "release_tag": tag,
+            "release_asset": "safe-a.jsonl.gz",
+            "bytes": len(payload_a),
+            "sha256": hashlib.sha256(payload_a).hexdigest(),
+        },
+        {
+            "dataset_id": "safe-b",
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "validation_allowed": True,
+            "asset_verified": True,
+            "release_tag": tag,
+            "release_asset": "safe-b.jsonl.gz",
+            "bytes": len(payload_b),
+            "sha256": hashlib.sha256(payload_b).hexdigest(),
+        },
+    ]
+    destination = tmp_path / "restore"
+    source_root = tmp_path / "releases" / tag
+    source_root.mkdir(parents=True)
+    (source_root / rows[0]["release_asset"]).write_bytes(payload_a)
+    (source_root / rows[1]["release_asset"]).write_bytes(payload_b)
+
+    first = module._materialize_catalog_safe_shards(
+        rows, tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert first["materialization_complete"] is True
+
+    second = module._materialize_catalog_safe_shards(
+        [rows[0]], tmp_path / "releases", destination,
+        prune_stale=False, catalog_sha256=catalog_sha,
+    )
+    assert second["materialization_complete"] is True
+
+    with sqlite3.connect(destination / "SAFE_SHARDS.sqlite3") as connection:
+        active = connection.execute(
+            "SELECT dataset_id, catalog_active FROM safe_shards "
+            "WHERE release_tag = ? ORDER BY dataset_id",
+            (tag,),
+        ).fetchall()
+        current_count = connection.execute(
+            "SELECT COUNT(*) FROM current_safe_shards"
+        ).fetchone()[0]
+    assert active == [("safe-a", 1), ("safe-b", 0)]
+    assert current_count == 1
+    assert (destination / "usable/shards" / tag / "safe-b.jsonl.gz").is_file()
+
+
 def test_alinasync_registry_hides_safe_rows_during_incomplete_revalidation(tmp_path):
     import sqlite3
 
