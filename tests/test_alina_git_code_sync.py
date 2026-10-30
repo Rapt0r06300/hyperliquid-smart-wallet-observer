@@ -72,7 +72,7 @@ def test_commit_subject_keeps_words_intact_when_many_paths_are_changed() -> None
         "tests/test_alina_git_code_sync.py",
         "tools/alina_git_code_sync.py",
     ])
-    assert subject == "fix(sync): improve semantic commit naming (2 paths)"
+    assert subject == "fix(sync): verify final GitHub SHA in receipt (2 paths)"
     assert len(subject) <= 72
 
 
@@ -91,7 +91,15 @@ def test_commit_subject_names_the_sync_engine_change() -> None:
     assert _commit_subject([
         "tools/alina_git_code_sync.py",
         "tests/test_alina_git_code_sync.py",
-    ]) == "fix(sync): improve semantic commit naming (2 paths)"
+    ]) == "fix(sync): verify final GitHub SHA in receipt (2 paths)"
+
+
+def test_commit_subject_names_the_sync_engine_and_launcher_change() -> None:
+    assert _commit_subject([
+        "POUSSER-GITHUB-FORCE.cmd",
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ]) == "fix(sync): verify final GitHub SHA in receipt (3 paths)"
 
 
 def test_commit_subject_names_the_filtered_safe_restore_change() -> None:
@@ -565,6 +573,7 @@ def test_cloud_fast_forward_without_local_changes(repos):
     assert receipt["merge_commits_created"] == 0
     assert receipt["rebases_performed"] == 0
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+    assert receipt["remote_sha_observed"] == git(origin, "rev-parse", "main")
 
 
 def test_ignored_data_collision_refused(repos):
@@ -744,7 +753,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-clean-fast-path-receipt-v5' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-verified-remote-receipt-v6' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source

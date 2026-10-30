@@ -70,7 +70,7 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # to finish instead of repeatedly replaying the same expensive history.
 REBASE_TIMEOUT_SECONDS = 300
 REBASE_ABORT_TIMEOUT_SECONDS = 8
-GIT_SYNC_ENGINE_BUILD = "2026-10-30-clean-fast-path-receipt-v5"
+GIT_SYNC_ENGINE_BUILD = "2026-10-30-verified-remote-receipt-v6"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -145,11 +145,14 @@ def _commit_subject(paths: list[str]) -> str:
         prefix, scope = "chore", "repository"
 
     if (
-        len(normalized) == 2
+        2 <= len(normalized) <= 3
         and any(path.endswith("tools/alina_git_code_sync.py") for path in normalized)
         and any(path.endswith("tests/test_alina_git_code_sync.py") for path in normalized)
     ):
-        return "fix(sync): improve semantic commit naming (2 paths)"
+        return (
+            "fix(sync): verify final GitHub SHA in receipt "
+            f"({len(normalized)} paths)"
+        )
 
     if (
         len(normalized) == 2
@@ -1788,6 +1791,11 @@ class Synchronizer:
             local = self.text("rev-parse", "HEAD")
             current_remote = self.remote_sha()
             if local == current_remote:
+                # ``reconcile`` may have fast-forwarded local main while
+                # GitHub advanced again during the same run.  The final
+                # success receipt must describe the SHA just verified here,
+                # never the older preflight snapshot.
+                self.report["remote_sha_observed"] = current_remote
                 self.report["status"] = "SYNCHRONIZED"
                 self.report["head_after"] = local
                 self.report["checkpoint_sha_after_reconcile"] = local
