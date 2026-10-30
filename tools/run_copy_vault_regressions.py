@@ -34,11 +34,15 @@ CRITICAL_PREFIXES = (
     "src/hl_observer/control_plane/",
     "src/hl_observer/collection/",
     "tools/",
+    ".github/workflows/",
 )
 
 
 def _normalize(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
 
 
 def select_tests(paths: list[str]) -> list[str]:
@@ -74,7 +78,7 @@ def changed_paths() -> list[str]:
     untracked = subprocess.run(
         [
             "git", "ls-files", "--others", "--exclude-standard", "--",
-            "src/hl_observer", "tools",
+            "src/hl_observer", "tools", ".github/workflows",
         ],
         cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout.splitlines()

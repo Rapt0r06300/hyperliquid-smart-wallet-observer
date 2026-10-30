@@ -32,3 +32,24 @@ def test_missing_mapped_suite_fails_closed(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="mapped regression suite"):
         runner.select_tests(["src/hl_observer/backtesting/fake.py"])
+
+
+def test_unmapped_workflow_change_fails_closed() -> None:
+    with pytest.raises(ValueError, match="no regression mapping"):
+        runner.select_tests([".github/workflows/new-copy-vault-gate.yml"])
+
+
+def test_changed_paths_includes_workflows(monkeypatch) -> None:
+    class Result:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return Result(".github/workflows/copy-vault.yml\n")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    assert runner.changed_paths() == [".github/workflows/copy-vault.yml"]
+    assert calls[1][-1] == ".github/workflows"
