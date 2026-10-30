@@ -65,8 +65,8 @@ HISTORY_DEEPEN_STEPS = (512,)
 HISTORY_FETCH_FILTER = "--filter=tree:0"
 HISTORY_FETCH_TIMEOUT_SECONDS = 90
 MERGE_TREE_TIMEOUT_SECONDS = 30
-REBASE_TIMEOUT_SECONDS = 45
-REBASE_ABORT_TIMEOUT_SECONDS = 15
+REBASE_TIMEOUT_SECONDS = 30
+REBASE_ABORT_TIMEOUT_SECONDS = 8
 GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v3"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
@@ -251,6 +251,27 @@ def _git_operation_label(args: list[str]) -> str:
     return "Commande Git de controle"
 
 
+def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+    """Stop a timed-out Git process and descendants without leaking pipes."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        process.kill()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=1)
+
+
 def _run_git(
     root: Path,
     git: str,
@@ -280,8 +301,19 @@ def _run_git(
         elapsed = time.monotonic() - started
         remaining = timeout - elapsed
         if remaining <= 0:
-            process.kill()
-            stdout, stderr = process.communicate()
+            _terminate_process_tree(process)
+            try:
+                stdout, stderr = process.communicate(timeout=2)
+            except subprocess.TimeoutExpired as communicate_timeout:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+                raise subprocess.TimeoutExpired(
+                    command,
+                    timeout,
+                    output=communicate_timeout.output,
+                    stderr=communicate_timeout.stderr,
+                ) from communicate_timeout
             raise subprocess.TimeoutExpired(
                 command, timeout, output=stdout, stderr=stderr,
             )

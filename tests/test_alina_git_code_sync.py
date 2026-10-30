@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,40 @@ from tools.alina_git_code_sync import (
     _commit_subject,
     _status_paths,
 )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree contract")
+def test_terminate_process_tree_kills_descendant_process(tmp_path: Path) -> None:
+    child_code = "import time; time.sleep(60)"
+    parent_code = (
+        "import subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', sys.argv[1]]); "
+        "print(child.pid, flush=True); time.sleep(60)"
+    )
+    parent = subprocess.Popen(
+        [sys.executable, "-c", parent_code, child_code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    child_pid = int(parent.stdout.readline().strip())
+    started = time.monotonic()
+    try:
+        sync_module._terminate_process_tree(parent)
+        parent.wait(timeout=3)
+        assert time.monotonic() - started < 3
+        assert subprocess.run(
+            ["tasklist", "/FI", f"PID eq {child_pid}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.find(str(child_pid)) == -1
+    finally:
+        subprocess.run(
+            ["taskkill", "/PID", str(parent.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
 
 
 def test_status_paths_parse_spaces_and_rename_records():
@@ -287,7 +323,8 @@ def test_rebase_timeout_is_aborted_and_reported(tmp_path):
 
     task.command = fake_command  # type: ignore[method-assign]
     timeout = subprocess.TimeoutExpired(
-        ["git", "rebase", "--no-autostash", "origin/main"], 45,
+        ["git", "rebase", "--no-autostash", "origin/main"],
+        sync_module.REBASE_TIMEOUT_SECONDS,
     )
 
     with pytest.raises(SyncBlocked, match="Rebase depassee"):
@@ -295,6 +332,11 @@ def test_rebase_timeout_is_aborted_and_reported(tmp_path):
 
     assert ("rebase", "--abort") in commands
     assert task.report["rebase_timeout_count"] == 1
+
+
+def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
+    assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 10
+    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 30
 
 
 def test_clean_sync_never_commits_empty(repos):
@@ -611,8 +653,10 @@ def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
             if args and args[0] == "fetch":
-                self.fetch_count += 1
-            if self.fetch_count == 2 and not self.wrote:
+                (local / "src" / "seed.py").write_text(
+                    "seed = True\n", encoding="utf-8"
+                )
+            if args and args[0] == "commit" and not self.wrote:
                 self.wrote = True
                 (local / "src" / "added_during_fetch.py").write_text(
                     "late = True\n", encoding="utf-8"
@@ -642,8 +686,10 @@ def test_late_invalid_python_saved_locally_never_pushed(repos):
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
             if args and args[0] == "fetch":
-                self.fetch_count += 1
-            if self.fetch_count == 2 and not self.wrote:
+                (local / "src" / "seed.py").write_text(
+                    "seed = True\n", encoding="utf-8"
+                )
+            if args and args[0] == "commit" and not self.wrote:
                 self.wrote = True
                 (local / "src" / "incomplete.py").write_text(
                     "def broken(:\n", encoding="utf-8"
@@ -671,8 +717,13 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
             result = super().command(*args, **kwargs)
             if args and args[0] == "fetch":
                 self.fetch_count += 1
-                if self.fetch_count >= 2:
+                if self.fetch_count == 1:
                     self.n += 1
+                    (local / "src" / f"concurrent_{self.n}.py").write_text(
+                        f"value = {self.n}\n", encoding="utf-8"
+                    )
+            if args and args[0] == "commit":
+                self.n += 1
                 (local / "src" / f"concurrent_{self.n}.py").write_text(
                     f"value = {self.n}\n", encoding="utf-8"
                 )
@@ -683,7 +734,7 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
     assert task.report["status"] == "NO_GO"
     assert task.report["push_attempts"] == 0
     assert task.report["late_checkpoint_attempts"] == 3
-    assert "src/concurrent_4.py" in task.report["late_local_paths"]
+    assert "src/concurrent_5.py" in task.report["late_local_paths"]
     assert "change encore" in task.report["error"]
     assert git(origin, "rev-parse", "main") == before
     for i in range(1, 4):
