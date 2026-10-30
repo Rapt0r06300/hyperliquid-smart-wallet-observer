@@ -45,6 +45,33 @@ def test_git_pack_failure_not_confused_with_concurrent_main_update() -> None:
     assert not PACK.search("! [rejected] HEAD -> main (fetch first)")
 
 
+def test_hosted_exit_143_without_cause_remains_unknown() -> None:
+    from tools.continuous_reconcile_backlog import classify_hosted_termination
+
+    assert classify_hosted_termination(
+        returncode=143, status="completed", conclusion="failure",
+    ) == "UNKNOWN"
+
+
+def test_hosted_termination_uses_explicit_metadata_only() -> None:
+    from tools.continuous_reconcile_backlog import classify_hosted_termination
+
+    assert classify_hosted_termination(
+        returncode=1, status="completed", conclusion="cancelled",
+    ) == "CANCELLED"
+    assert classify_hosted_termination(
+        returncode=1, status="completed", conclusion="failure",
+        log_text="Job exceeded maximum execution time",
+    ) == "TIMEOUT"
+    assert classify_hosted_termination(
+        returncode=143, status="completed", conclusion="failure",
+        log_text="The hosted runner was shut down by infrastructure",
+    ) == "INFRASTRUCTURE_STOP"
+    assert classify_hosted_termination(
+        returncode=0, status="completed", conclusion="success",
+    ) == "COMPLETE"
+
+
 def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
     import subprocess
 

@@ -26,6 +26,51 @@ TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PACK = re.compile(r"remote unpack failed|index-pack failed|tree.{0,80}too large|pack exceeds|pack.{0,80}too large|unpacker error", re.I)
 
 
+def classify_hosted_termination(
+    *,
+    returncode: int | None,
+    status: str | None,
+    conclusion: str | None,
+    log_text: str = "",
+) -> str:
+    """Classify a hosted interruption without guessing from exit 143 alone.
+
+    GitHub runner shutdowns, explicit cancellation and timeouts can all leave
+    partial logs and a non-zero process code.  A bare ``143`` is therefore
+    deliberately ``UNKNOWN``; only explicit metadata or an unambiguous log
+    marker may identify the cause.  The result is diagnostic only and never
+    authorizes publication or SAFE admission.
+    """
+    normalized_status = (status or "").strip().lower().replace("-", "_")
+    normalized_conclusion = (conclusion or "").strip().lower().replace("-", "_")
+    normalized_log = log_text.strip().lower()
+    if normalized_conclusion in {"cancelled", "canceled"} or normalized_status in {
+        "cancelled", "canceled",
+    }:
+        return "CANCELLED"
+    if normalized_conclusion in {"timed_out", "timeout"} or normalized_status in {
+        "timed_out", "timeout",
+    } or "job exceeded maximum execution time" in normalized_log:
+        return "TIMEOUT"
+    if any(
+        marker in normalized_log
+        for marker in (
+            "runner shutdown",
+            "runner was shut down",
+            "runner is shutting down",
+            "hosted runner stopped",
+            "infrastructure shutdown",
+        )
+    ):
+        return "INFRASTRUCTURE_STOP"
+    if normalized_conclusion in {"success", "completed"} and returncode == 0:
+        return "COMPLETE"
+    if returncode == 0 and not normalized_conclusion and not normalized_status:
+        return "UNKNOWN"
+    # SIGTERM/143 without a causal GitHub marker is intentionally ambiguous.
+    return "UNKNOWN"
+
+
 def pending(inventory: str, index: dict, quarantine: set[str]) -> list[str]:
     aliases = index.get("run_manifest_release_tags_by_release") or {}
     if not isinstance(aliases, dict):
