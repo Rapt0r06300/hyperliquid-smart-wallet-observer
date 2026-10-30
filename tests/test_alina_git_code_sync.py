@@ -154,6 +154,15 @@ def test_commit_subject_names_noninteractive_rebase_guard_from_staged_diff() -> 
     )
 
 
+def test_commit_subject_names_the_mutex_collision_guard_from_staged_diff() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "MUTEX_WAIT_SECONDS _lock_mutex_handle") == (
+        "fix(sync): wait for concurrent launcher safely (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_and_launcher_change() -> None:
     assert _commit_subject([
         "POUSSER-GITHUB-FORCE.cmd",

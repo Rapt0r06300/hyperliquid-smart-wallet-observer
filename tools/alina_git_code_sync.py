@@ -174,6 +174,15 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    if sync_engine_paths and any(marker in diff_signal for marker in (
+        "mutex_wait_seconds", "mutex_poll_seconds", "_lock_mutex_handle",
+        "transient second invocation",
+    )):
+        return (
+            "fix(sync): wait for concurrent launcher safely "
+            f"({len(normalized)} paths)"
+        )
+
     if sync_engine_paths and (
         not diff_signal
         or any(marker in diff_signal for marker in ("remote_sha", "github sha", "pushed_head"))
