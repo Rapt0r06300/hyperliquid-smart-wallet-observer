@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from hl_observer.following.entity_consensus import entity_consensus_gate
@@ -62,11 +63,15 @@ def select_consensus_leaders_from_deltas(
     consensus_window_ms = max(1_000, int(consensus_window_ms))
     active_window_ms = max(consensus_window_ms, int(active_window_ms))
     min_wallets = max(2, int(min_wallets))
-    score_by_wallet = {
-        str(row.wallet_address or "").lower(): float(row.score or 0.0)
-        for row in top_wallets
-        if str(row.wallet_address or "").strip()
-    }
+    score_by_wallet: dict[str, float] = {}
+    for row in top_wallets:
+        wallet = str(row.wallet_address or "").strip().lower()
+        try:
+            score = float(row.score or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if wallet and math.isfinite(score):
+            score_by_wallet[wallet] = score
     rejected: dict[str, int] = {}
     entries: list[PositionDeltaModel] = []
     cutoff = now_timestamp_ms - active_window_ms
@@ -77,6 +82,18 @@ def select_consensus_leaders_from_deltas(
             continue
         if event_ms < cutoff:
             _count(rejected, "stale_outside_active_window")
+            continue
+        wallet = str(row.wallet_address or "").strip().lower()
+        coin = str(row.coin or "").strip()
+        if not wallet or not coin:
+            _count(rejected, "identity_missing")
+            continue
+        try:
+            notional = float(row.delta_notional_usdc or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            notional = math.nan
+        if not math.isfinite(notional):
+            _count(rejected, "non_finite_notional")
             continue
         action = copy_delta_action(row)
         direction = copy_delta_direction(row, action)
@@ -104,7 +121,20 @@ def select_consensus_leaders_from_deltas(
             if len(wallets) < min_wallets:
                 _count(rejected, "cluster_below_min_wallets")
                 continue
-            total_notional = sum(abs(float(row.delta_notional_usdc or 0.0)) for row in cluster_rows)
+            total_notionals = []
+            for row in cluster_rows:
+                try:
+                    row_notional = float(row.delta_notional_usdc or 0.0)
+                except (TypeError, ValueError, OverflowError):
+                    row_notional = math.nan
+                if not math.isfinite(row_notional):
+                    _count(rejected, "non_finite_notional")
+                    total_notionals = []
+                    break
+                total_notionals.append(abs(row_notional))
+            if not total_notionals:
+                continue
+            total_notional = sum(total_notionals)
             if total_notional < min_notional_usdc:
                 _count(rejected, "cluster_below_min_notional")
                 continue

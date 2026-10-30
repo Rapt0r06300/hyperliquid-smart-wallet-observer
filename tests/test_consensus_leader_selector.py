@@ -133,3 +133,41 @@ def test_consensus_groups_do_not_merge_case_distinct_symbols():
 
     assert {group.coin for group in report.groups} == {"kPEPE", "KPEPE"}
     assert all(group.wallet_count == 2 for group in report.groups)
+
+
+def test_consensus_rejects_non_finite_notional_fail_closed():
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    report = select_consensus_leaders_from_deltas(
+        [
+            _delta(wallet_a, ms=10_000, notional=float("nan")),
+            _delta(wallet_b, ms=10_100, notional=25_000.0),
+        ],
+        [_leader(wallet_a, 98), _leader(wallet_b, 92)],
+        now_timestamp_ms=11_000,
+        max_leaders=2,
+        min_wallets=2,
+    )
+
+    assert report.selected_wallets == []
+    assert report.groups_seen == 0
+    assert report.rejected_reasons["non_finite_notional"] == 1
+
+
+def test_consensus_ignores_non_finite_leader_score_without_inventing_score():
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    report = select_consensus_leaders_from_deltas(
+        [
+            _delta(wallet_a, ms=10_000),
+            _delta(wallet_b, ms=10_100),
+        ],
+        [_leader(wallet_a, float("inf")), _leader(wallet_b, 92)],
+        now_timestamp_ms=11_000,
+        max_leaders=2,
+        min_wallets=2,
+    )
+
+    assert report.groups_seen == 1
+    assert report.groups[0].average_leader_score == 71.0
+    assert report.selected_wallets == [wallet_b, wallet_a]
