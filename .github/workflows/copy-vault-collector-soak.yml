@@ -1,0 +1,96 @@
+name: copy-vault-collector-soak
+
+on:
+  # Explicit diagnostic only.  The hosted soak is never triggered by a push
+  # and never contacts an exchange or publishes SAFE data.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copy-vault-collector-soak
+  cancel-in-progress: false
+
+jobs:
+  deterministic-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      HL_ENABLE_MAINNET_EXECUTION: "0"
+      REAL_MAINNET_TRADING: "false"
+      HYPERSMART_ENABLE_REAL_ORDERS: "0"
+      ENABLE_REAL_ORDERS: "0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Run bounded deterministic soak and write receipt
+        id: soak
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/copy-vault-collector-soak"
+          mkdir -p "$output"
+          start_ns="$(date +%s%N)"
+          python tools/copy_vault_collector_soak.py \
+            --events 100000 \
+            --batch-size 257 \
+            --queue-limit 512 \
+            --interrupt-after 514 \
+            --checkpoint "$output/checkpoint.json" \
+            --json "$output/soak-receipt.json" \
+            | tee "$output/soak-log.json"
+          end_ns="$(date +%s%N)"
+          START_NS="$start_ns" END_NS="$end_ns" OUTPUT="$output" \
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path(os.environ["OUTPUT"])
+          receipt = json.loads((output / "soak-receipt.json").read_text(encoding="utf-8"))
+          duration_ms = (int(os.environ["END_NS"]) - int(os.environ["START_NS"])) // 1_000_000
+          metrics = {
+              "schema": "hypersmart.copy_vault_collector_soak_metrics.v1",
+              "status": receipt.get("status"),
+              "duration_ms": duration_ms,
+              "input_count": receipt.get("continuous", {}).get("input_count"),
+              "processed_count": receipt.get("resumed", {}).get("processed_count"),
+              "accepted_count": receipt.get("resumed", {}).get("accepted_count"),
+              "duplicate_count": receipt.get("resumed", {}).get("duplicate_count"),
+              "queue_high_water": receipt.get("resumed", {}).get("queue_high_water"),
+              "queue_drops": receipt.get("resumed", {}).get("queue_drops"),
+              "peak_memory_bytes": receipt.get("peak_memory_bytes"),
+              "same_result_after_resume": receipt.get("same_result_after_resume"),
+              "bounded": receipt.get("bounded"),
+              "paper_read_only": receipt.get("paper_read_only"),
+              "real_execution": receipt.get("real_execution"),
+              "safe_publication": receipt.get("safe_publication"),
+          }
+          (output / "soak-metrics.json").write_text(
+              json.dumps(metrics, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Publish hosted soak logs, metrics, checkpoint and receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: copy-vault-collector-soak-${{ github.run_id }}
+          path: ${{ runner.temp }}/copy-vault-collector-soak
+          if-no-files-found: warn
+          retention-days: 14
+
