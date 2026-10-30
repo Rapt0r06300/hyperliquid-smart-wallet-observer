@@ -158,6 +158,13 @@ def _commit_subject(paths: list[str]) -> str:
     ):
         return "fix(copy-vault): restore filtered SAFE registry (2 paths)"
 
+    if (
+        len(normalized) == 2
+        and any(path.endswith("tools/continuous_reconcile_backlog.py") for path in normalized)
+        and any(path.endswith("tests/test_continuous_reconcile_backlog.py") for path in normalized)
+    ):
+        return "fix(recovery): resume historical SAFE backlog (2 paths)"
+
     if len(normalized) >= 2 and any("copy_vault" in path for path in normalized):
         common = _common_filename_tokens(normalized)
         for token in ("copy", "vault"):

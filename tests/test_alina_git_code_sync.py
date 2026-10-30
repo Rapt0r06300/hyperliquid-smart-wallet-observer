@@ -101,6 +101,13 @@ def test_commit_subject_names_the_filtered_safe_restore_change() -> None:
     ]) == "fix(copy-vault): restore filtered SAFE registry (2 paths)"
 
 
+def test_commit_subject_names_the_historical_backlog_recovery_change() -> None:
+    assert _commit_subject([
+        "tools/continuous_reconcile_backlog.py",
+        "tests/test_continuous_reconcile_backlog.py",
+    ]) == "fix(recovery): resume historical SAFE backlog (2 paths)"
+
+
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []
