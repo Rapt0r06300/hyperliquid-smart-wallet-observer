@@ -1,12 +1,6 @@
 name: copy-vault-collector-soak
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/copy-vault-collector-soak.yml'
-      - 'tools/copy_vault_collector_soak.py'
-      - 'tests/test_copy_vault_collector_soak_workflow.py'
   # Explicit diagnostic only.  The hosted soak is never triggered by a push
   # and never contacts an exchange or publishes SAFE data.
   workflow_dispatch:
@@ -89,6 +83,18 @@ jobs:
               json.dumps(metrics, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
               encoding="utf-8",
           )
+          if metrics["status"] != "PASS":
+              raise SystemExit(f"collector soak did not pass: {metrics['status']!r}")
+          if metrics["same_result_after_resume"] is not True:
+              raise SystemExit("collector resume is not deterministic")
+          if metrics["bounded"] is not True or metrics["paper_read_only"] is not True:
+              raise SystemExit("collector soak violated bounded PAPER/read-only contract")
+          if metrics["real_execution"] is not False or metrics["safe_publication"] is not False:
+              raise SystemExit("collector soak exposed an execution or publication path")
+          if int(metrics["duration_ms"] or 0) > 120_000:
+              raise SystemExit(f"collector soak exceeded duration bound: {metrics['duration_ms']}")
+          if int(metrics["peak_memory_bytes"] or 0) > 256 * 1024 * 1024:
+              raise SystemExit(f"collector soak exceeded memory bound: {metrics['peak_memory_bytes']}")
           PY
 
       - name: Publish hosted soak logs, metrics, checkpoint and receipt
