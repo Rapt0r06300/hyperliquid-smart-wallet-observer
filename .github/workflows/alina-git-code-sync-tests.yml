@@ -16,7 +16,10 @@ permissions:
 
 concurrency:
   group: alina-git-sync-tests-${{ github.ref }}
-  cancel-in-progress: false
+  # This workflow is read-only and SHA-bound.  A newer push supersedes an
+  # older queued validation instead of making every local retry wait behind
+  # obsolete sync checks.
+  cancel-in-progress: true
 
 jobs:
   no-loss-sync-contracts:
