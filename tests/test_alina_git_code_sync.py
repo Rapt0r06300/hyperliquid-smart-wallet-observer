@@ -94,6 +94,13 @@ def test_commit_subject_names_the_sync_engine_change() -> None:
     ]) == "fix(sync): improve semantic commit naming (2 paths)"
 
 
+def test_commit_subject_names_the_filtered_safe_restore_change() -> None:
+    assert _commit_subject([
+        "tools/restore_alina.py",
+        "tests/test_restore_alina.py",
+    ]) == "fix(copy-vault): restore filtered SAFE registry (2 paths)"
+
+
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []
