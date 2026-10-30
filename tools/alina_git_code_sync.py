@@ -70,6 +70,11 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # to finish instead of repeatedly replaying the same expensive history.
 REBASE_TIMEOUT_SECONDS = 300
 REBASE_ABORT_TIMEOUT_SECONDS = 8
+# A second double-click should wait for a short, bounded hand-off instead of
+# forcing the user to rerun the launcher after a transient collision.  The
+# bound remains fail-closed when the first synchronisation is slow or stuck.
+MUTEX_WAIT_SECONDS = 20.0
+MUTEX_POLL_SECONDS = 0.25
 GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v8"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
@@ -447,32 +452,55 @@ def _run_git(
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
+def _lock_mutex_handle(handle) -> None:
+    """Acquire the process mutex without touching Git's own lock files."""
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_mutex_handle(handle) -> None:
+    """Release the process mutex acquired by :func:`_lock_mutex_handle`."""
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 @contextlib.contextmanager
 def _mutex(git_dir: Path):
-    """Operating-system mutex releases after a crash; never delete Git locks."""
+    """Use an OS mutex; wait briefly for a transient second invocation."""
     with (git_dir / "alina-sync.mutex").open("a+b") as handle:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
             handle.write(b"0")
             handle.flush()
-        handle.seek(0)
-        try:
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            raise SyncBlocked("Une autre synchronisation Alina est active.") from exc
+        deadline = time.monotonic() + MUTEX_WAIT_SECONDS
+        last_error: OSError | None = None
+        while True:
+            handle.seek(0)
+            try:
+                _lock_mutex_handle(handle)
+                break
+            except OSError as exc:
+                last_error = exc
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SyncBlocked(
+                        "Une autre synchronisation Alina est active; "
+                        f"attente bornee de {MUTEX_WAIT_SECONDS:.1f}s depassee."
+                    ) from last_error
+                time.sleep(min(MUTEX_POLL_SECONDS, remaining))
         try:
             yield
         finally:
             handle.seek(0)
-            if os.name == "nt":
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            _unlock_mutex_handle(handle)
 
 
 class Synchronizer:

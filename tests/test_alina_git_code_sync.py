@@ -19,6 +19,7 @@ from tools.alina_git_code_sync import (
     SyncBlocked,
     Synchronizer,
     _commit_subject,
+    _mutex,
     _status_paths,
 )
 
@@ -74,6 +75,47 @@ def test_commit_subject_keeps_words_intact_when_many_paths_are_changed() -> None
     ])
     assert subject == "fix(sync): verify final GitHub SHA in receipt (2 paths)"
     assert len(subject) <= 72
+
+
+def test_mutex_retries_a_transient_collision_before_entering(tmp_path, monkeypatch):
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+    attempts = 0
+    released = []
+
+    def lock(_handle):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise OSError("busy")
+
+    monkeypatch.setattr(sync_module, "_lock_mutex_handle", lock)
+    monkeypatch.setattr(
+        sync_module, "_unlock_mutex_handle", lambda _handle: released.append(True)
+    )
+    monkeypatch.setattr(sync_module, "MUTEX_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(sync_module, "MUTEX_POLL_SECONDS", 0.001)
+
+    with _mutex(git_dir):
+        pass
+
+    assert attempts == 3
+    assert released == [True]
+
+
+def test_mutex_timeout_remains_fail_closed(tmp_path, monkeypatch):
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+    monkeypatch.setattr(
+        sync_module, "_lock_mutex_handle", lambda _handle: (_ for _ in ()).throw(
+            OSError("busy")
+        )
+    )
+    monkeypatch.setattr(sync_module, "MUTEX_WAIT_SECONDS", 0.001)
+    monkeypatch.setattr(sync_module, "MUTEX_POLL_SECONDS", 0.001)
+
+    with pytest.raises(SyncBlocked, match="attente bornee"), _mutex(git_dir):
+        pass
 
 
 def test_commit_subject_names_a_mixed_copy_vault_code_and_test_change() -> None:
