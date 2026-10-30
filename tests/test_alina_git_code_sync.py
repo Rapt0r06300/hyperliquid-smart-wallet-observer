@@ -18,6 +18,7 @@ from tools import alina_git_code_sync as sync_module
 from tools.alina_git_code_sync import (
     SyncBlocked,
     Synchronizer,
+    _commit_subject,
     _status_paths,
 )
 
@@ -64,6 +65,15 @@ def test_status_paths_parse_spaces_and_rename_records():
     assert _status_paths(raw) == [
         "src/file with space.py", "docs/new name.md", "docs/old name.md",
     ]
+
+
+def test_commit_subject_keeps_words_intact_when_many_paths_are_changed() -> None:
+    subject = _commit_subject([
+        "tests/test_alina_git_code_sync.py",
+        "tools/alina_git_code_sync.py",
+    ])
+    assert subject == "chore(repository): update test alina git code sync (2 paths)"
+    assert len(subject) <= 72
 
 
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:

@@ -136,7 +136,14 @@ def _commit_subject(paths: list[str]) -> str:
     else:
         detail = f"{labels[0]}, {labels[1]} and {len(labels) - 2} other files"
     subject = f"{prefix}({scope}): update {detail}"
-    return subject[:72].rstrip()
+    if len(subject) > 72:
+        subject = (
+            f"{prefix}({scope}): update {labels[0]} "
+            f"({len(normalized)} paths)"
+        )
+    if len(subject) > 72:
+        subject = f"{prefix}({scope}): update ({len(normalized)} paths)"
+    return subject
 
 
 class SyncBlocked(RuntimeError):
