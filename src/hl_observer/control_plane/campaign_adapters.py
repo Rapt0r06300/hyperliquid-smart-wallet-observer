@@ -1708,6 +1708,13 @@ def run_one_unit(
         try:
             cp = _run(runner, cmd, timeout=max(1, int(remaining - 5)), analysis_stage=_analysis_stage(ctx.kind))
         except subprocess.TimeoutExpired as exc:
+            # A timeout may happen after the worker has durably flushed a
+            # checkpoint but before this adapter receives a completed phase.
+            # Preserve that evidence as progress so the controller schedules
+            # the same unit for continuation instead of treating it as an
+            # unprogressed retry.  ``finish`` verifies the checkpoint again
+            # and never exposes an unverified cursor.
+            checkpoint = _verified_durable_checkpoint(ctx, output_root)
             payload = {
                 "status": "CONTINUATION_REQUIRED",
                 "reason": "adapter_timeout",
@@ -1720,7 +1727,7 @@ def run_one_unit(
             return finish(
                 "CONTINUATION_REQUIRED",
                 payload,
-                bool(phases),
+                bool(phases) or checkpoint is not None,
                 state="TIMED_OUT",
                 reason="adapter_timeout",
                 deadline_exceeded=True,

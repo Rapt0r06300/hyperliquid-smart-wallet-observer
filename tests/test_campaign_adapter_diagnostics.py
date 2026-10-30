@@ -167,6 +167,32 @@ def test_subprocess_timeout_preserves_checkpoint_from_output_root(tmp_path: Path
     )
 
 
+def test_timeout_with_durable_checkpoint_counts_as_progress(tmp_path: Path) -> None:
+    output = tmp_path / "diagnostic-campaign" / "unit-001"
+    checkpoint = output / "checkpoint.json"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_text('{"cursor": 11}\n', encoding="utf-8")
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+
+    result = run_one_unit(
+        _context(
+            tmp_path,
+            last_durable_checkpoint={
+                "id": "checkpoint-11",
+                "path": str(checkpoint),
+                "sha256": digest,
+            },
+        ),
+        runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(["adapter"], 1)
+        ),
+    )
+
+    assert result.status == "CONTINUATION_REQUIRED"
+    assert result.progressed is True
+    assert result.payload["last_durable_checkpoint"]["id"] == "checkpoint-11"
+
+
 def test_subprocess_timeout_preserves_partial_output_for_diagnosis(
     tmp_path: Path,
 ) -> None:

@@ -108,6 +108,13 @@ def test_commit_subject_names_the_historical_backlog_recovery_change() -> None:
     ]) == "fix(recovery): resume historical SAFE backlog (2 paths)"
 
 
+def test_commit_subject_names_timed_out_adapter_checkpoint_change() -> None:
+    assert _commit_subject([
+        "src/hl_observer/control_plane/campaign_adapters.py",
+        "tests/test_campaign_adapter_diagnostics.py",
+    ]) == "fix(recovery): preserve timed-out adapter checkpoints (2 paths)"
+
+
 def test_commit_subject_names_the_l4_and_entity_provenance_guard() -> None:
     assert _commit_subject([
         "src/hl_observer/collection/l4_capture.py",
