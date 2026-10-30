@@ -39,6 +39,16 @@ jobs:
           filter: blob:none
           fetch-tags: false
           show-progress: false
+          sparse-checkout: |
+            .github/workflows/copy-vault-collector-soak.yml
+            pyproject.toml
+            README.md
+            src
+            tests/test_campaign_adapter_diagnostics.py
+            tests/test_resumable_campaign_adapters.py
+            tests/test_restore_resource_limits.py
+            tools/copy_vault_collector_soak.py
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Set up Python
