@@ -3532,6 +3532,7 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
     component is supplied by the canonical campaign result.
     """
     digest_keys = (
+        "selection_digest",
         "engine_source_sha256",
         "campaign_config_sha256",
         "source_catalog_sha256",
@@ -3560,6 +3561,30 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
     trial_number = result.get("trial_number")
     if type(trial_number) is not int or trial_number <= 0:
         missing.append("TRIAL_NUMBER")
+    global_trial_count = result.get("global_trial_count")
+    if type(global_trial_count) is not int or global_trial_count <= 0:
+        missing.append("GLOBAL_TRIAL_COUNT")
+    paper_capital = result.get("paper_capital_usd")
+    if decimal_value(paper_capital) != Decimal(str(PAPER_CAPITAL_USD)):
+        missing.append("PAPER_CAPITAL_USD")
+
+    selected_candidate = result.get("selected_candidate")
+    candidate_freeze = (
+        selected_candidate.get("freeze")
+        if isinstance(selected_candidate, Mapping)
+        else None
+    )
+    candidate_parameters = (
+        candidate_freeze.get("parameters")
+        if isinstance(candidate_freeze, Mapping)
+        else None
+    )
+    if (
+        not isinstance(candidate_freeze, Mapping)
+        or not isinstance(candidate_parameters, Mapping)
+        or candidate_freeze.get("parameters_sha256") != parameter_hash(candidate_parameters)
+    ):
+        missing.append("CANDIDATE_PARAMETER_FREEZE")
 
     artifacts: dict[str, Any] = {}
     for field, requirement in (
@@ -3584,6 +3609,7 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
         "lineage": {
             key: result.get(key)
             for key in (
+                "selection_digest",
                 "engine_source_sha256",
                 "campaign_config_sha256",
                 "source_catalog_sha256",
@@ -3594,12 +3620,15 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
         "search": {
             "proposal_seed": seed,
             "temporal_windows": windows,
+            "paper_capital_usd": paper_capital,
+            "global_trial_count": global_trial_count,
         },
         "trial_accounting": {
             "trial_number": trial_number,
             "attempt_receipt_sha256": result.get("attempt_receipt_sha256"),
             "trial_receipt_sha256": result.get("trial_receipt_sha256"),
         },
+        "candidate_freeze": selected_candidate,
         "artifacts": artifacts,
         "paper_read_only": True,
         "real_execution": False,

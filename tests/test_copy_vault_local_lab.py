@@ -1674,14 +1674,24 @@ def test_frozen_candidate_history_is_append_only_and_idempotent(tmp_path: Path) 
 
 def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
     complete = {
+        "selection_digest": "0" * 64,
         "engine_source_sha256": "a" * 64,
         "campaign_config_sha256": "b" * 64,
         "source_catalog_sha256": "c" * 64,
         "source_asset_inventory_sha256": "d" * 64,
         "source_asset_inventory_count": 2,
         "proposal_seed": 0,
+        "paper_capital_usd": 200.0,
+        "global_trial_count": 7,
         "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
         "trial_number": 7,
+        "selected_candidate": {
+            "freeze": {
+                "campaign_id": "candidate-1",
+                "parameters": {"core_notional_usd": 20.0},
+                "parameters_sha256": local_lab.parameter_hash({"core_notional_usd": 20.0}),
+            }
+        },
         "attempt_receipt_sha256": "e" * 64,
         "trial_receipt_sha256": "f" * 64,
         "ledger": [{"time_ms": 10, "delta_usd": "1.25"}],
@@ -1698,7 +1708,12 @@ def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
     assert snapshot["restoration_status"] == "READY"
     assert snapshot["restoration_missing_requirements"] == []
     assert snapshot["lineage"]["engine_source_sha256"] == "a" * 64
+    assert snapshot["lineage"]["selection_digest"] == "0" * 64
     assert snapshot["trial_accounting"]["trial_number"] == 7
+    assert snapshot["search"]["global_trial_count"] == 7
+    assert snapshot["candidate_freeze"]["freeze"]["parameters_sha256"] == local_lab.parameter_hash(
+        {"core_notional_usd": 20.0}
+    )
     assert len(snapshot["restoration_snapshot_sha256"]) == 64
 
 
