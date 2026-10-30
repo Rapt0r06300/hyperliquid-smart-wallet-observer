@@ -6,14 +6,20 @@ from hl_observer.research.kronos_context_contract import (
     build_context_receipt,
     preregister_comparison,
     summarize_forecast_rows,
+    validate_causal_context_rows,
 )
 
 
 def _metadata() -> dict:
     return {
         "repository": "vendor/kronos",
+        "repository_commit": "a" * 40,
         "article": "doi:example",
         "model": "kronos-v1",
+        "model_revision": "model-revision-1",
+        "tokenizer_revision": "tokenizer-revision-1",
+        "model_sha256": "b" * 64,
+        "tokenizer_sha256": "c" * 64,
         "license": "Apache-2.0",
         "dependencies": {"python": "3.12", "numpy": "2.0"},
         "training_cutoff": "2026-01-01T00:00:00Z",
@@ -43,6 +49,26 @@ def test_context_receipt_is_unmeasurable_when_provenance_is_missing() -> None:
 
     assert receipt["status"] == "UNMEASURABLE"
     assert receipt["missing_evidence"] == ["license"]
+
+
+def test_context_receipt_requires_reproducible_model_and_tokenizer_hashes() -> None:
+    metadata = _metadata()
+    metadata["model_sha256"] = "not-a-sha"
+
+    receipt = build_context_receipt(metadata)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["MODEL_SHA256_INVALID"]
+
+
+def test_context_receipt_requires_exact_repository_commit() -> None:
+    metadata = _metadata()
+    metadata["repository_commit"] = "main"
+
+    receipt = build_context_receipt(metadata)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["REPOSITORY_COMMIT_INVALID"]
 
 
 def test_forecast_summary_uses_observed_sample_count_and_mean() -> None:
@@ -90,3 +116,35 @@ def test_preregistered_comparison_fails_closed_on_forbidden_tuning() -> None:
 
     assert result["status"] == "UNMEASURABLE"
     assert result["reasons"] == ["OOS_TUNING_FORBIDDEN"]
+
+
+def test_causal_context_requires_regular_post_cutoff_safe_rows() -> None:
+    result = validate_causal_context_rows(
+        [
+            {"timestamp_ms": 1010, "safe": True, "open": "10", "high": "12", "low": "9", "close": "11", "volume": "2"},
+            {"timestamp_ms": 1020, "safe": True, "open": "11", "high": "13", "low": "10", "close": "12", "volume": "3"},
+        ],
+        decision_cutoff_ms=1020,
+        training_cutoff_ms=1000,
+        interval_ms=10,
+    )
+
+    assert result["status"] == "READY"
+    assert result["reasons"] == []
+    assert result["row_count"] == 2
+    assert len(result["validation_sha256"]) == 64
+
+
+def test_causal_context_rejects_lookahead_gap_and_non_safe_rows() -> None:
+    result = validate_causal_context_rows(
+        [
+            {"timestamp_ms": 1010, "safe": True, "open": "10", "high": "12", "low": "9", "close": "11"},
+            {"timestamp_ms": 1030, "safe": False, "open": "11", "high": "13", "low": "10", "close": "12"},
+        ],
+        decision_cutoff_ms=1020,
+        training_cutoff_ms=1000,
+        interval_ms=10,
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reasons"] == ["LOOKAHEAD_TIMESTAMP", "SAFE_PROVENANCE_REQUIRED", "TIMESTAMP_GAP"]

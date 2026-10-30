@@ -15,8 +15,13 @@ from typing import Any
 
 _REQUIRED_PROVENANCE = (
     "repository",
+    "repository_commit",
     "article",
     "model",
+    "model_revision",
+    "tokenizer_revision",
+    "model_sha256",
+    "tokenizer_sha256",
     "license",
     "dependencies",
     "training_cutoff",
@@ -40,6 +45,22 @@ def _decimal(value: object) -> Decimal | None:
     return parsed if parsed.is_finite() else None
 
 
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value.lower())
+    )
+
+
+def _is_sha1(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(char in "0123456789abcdef" for char in value.lower())
+    )
+
+
 def build_context_receipt(
     metadata: Mapping[str, Any],
     *,
@@ -50,6 +71,11 @@ def build_context_receipt(
         key for key in _REQUIRED_PROVENANCE
         if metadata.get(key) in (None, "", {}, [])
     ]
+    for key in ("model_sha256", "tokenizer_sha256"):
+        if key not in missing and not _is_sha256(metadata.get(key)):
+            missing.append(f"{key.upper()}_INVALID")
+    if "repository_commit" not in missing and not _is_sha1(metadata.get("repository_commit")):
+        missing.append("REPOSITORY_COMMIT_INVALID")
     file_hashes: dict[str, str] = {}
     for name, raw_path in (source_files or {}).items():
         path = Path(raw_path)
@@ -71,6 +97,86 @@ def build_context_receipt(
     payload["missing_evidence"] = sorted(set(missing))
     payload["receipt_sha256"] = _digest(payload)
     return payload
+
+
+def validate_causal_context_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    decision_cutoff_ms: int,
+    training_cutoff_ms: int,
+    interval_ms: int,
+) -> dict[str, Any]:
+    """Validate a point-in-time SAFE OHLC context without forecasting it.
+
+    The validator is deliberately stricter than a parser: timestamps must be
+    strictly regular, post-training and no later than the decision cutoff.
+    Missing SAFE provenance, look-ahead, gaps, non-finite prices or invalid
+    OHLC relationships return ``UNMEASURABLE`` and never substitute a value.
+    """
+    reasons: list[str] = []
+    if (
+        not isinstance(decision_cutoff_ms, int)
+        or isinstance(decision_cutoff_ms, bool)
+        or not isinstance(training_cutoff_ms, int)
+        or isinstance(training_cutoff_ms, bool)
+        or not isinstance(interval_ms, int)
+        or isinstance(interval_ms, bool)
+        or interval_ms <= 0
+        or decision_cutoff_ms <= training_cutoff_ms
+    ):
+        reasons.append("CAUSAL_CONTEXT_POLICY_INVALID")
+    previous_ts: int | None = None
+    first_ts: int | None = None
+    last_ts: int | None = None
+    for row in rows:
+        if not isinstance(row, Mapping):
+            reasons.append("ROW_INVALID")
+            continue
+        timestamp = row.get("timestamp_ms")
+        if not isinstance(timestamp, int) or isinstance(timestamp, bool):
+            reasons.append("TIMESTAMP_INVALID")
+            continue
+        if first_ts is None:
+            first_ts = timestamp
+        last_ts = timestamp
+        if timestamp <= training_cutoff_ms:
+            reasons.append("TRAINING_CUTOFF_VIOLATION")
+        if timestamp > decision_cutoff_ms:
+            reasons.append("LOOKAHEAD_TIMESTAMP")
+        if previous_ts is not None:
+            if timestamp <= previous_ts:
+                reasons.append("TIMESTAMP_NOT_STRICTLY_INCREASING")
+            elif timestamp - previous_ts != interval_ms:
+                reasons.append("TIMESTAMP_GAP")
+        previous_ts = timestamp
+        if row.get("safe") is not True:
+            reasons.append("SAFE_PROVENANCE_REQUIRED")
+        prices = [_decimal(row.get(key)) for key in ("open", "high", "low", "close")]
+        if any(value is None for value in prices):
+            reasons.append("OHLC_VALUE_INVALID")
+        elif not (prices[2] <= prices[0] <= prices[1] and prices[2] <= prices[3] <= prices[1]):
+            reasons.append("OHLC_RELATION_INVALID")
+        if "volume" in row:
+            volume = _decimal(row.get("volume"))
+            if volume is None or volume < 0:
+                reasons.append("VOLUME_INVALID")
+    if not rows:
+        reasons.append("CAUSAL_CONTEXT_EMPTY")
+    result = {
+        "schema": "alina.kronos_causal_context_validation.v1",
+        "status": "READY" if not reasons else "UNMEASURABLE",
+        "reasons": sorted(set(reasons)),
+        "row_count": len(rows),
+        "first_timestamp_ms": first_ts,
+        "last_timestamp_ms": last_ts,
+        "decision_cutoff_ms": decision_cutoff_ms,
+        "training_cutoff_ms": training_cutoff_ms,
+        "interval_ms": interval_ms,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    result["validation_sha256"] = _digest(result)
+    return result
 
 
 def summarize_forecast_rows(
@@ -151,4 +257,9 @@ def preregister_comparison(
     return result
 
 
-__all__ = ["build_context_receipt", "preregister_comparison", "summarize_forecast_rows"]
+__all__ = [
+    "build_context_receipt",
+    "preregister_comparison",
+    "summarize_forecast_rows",
+    "validate_causal_context_rows",
+]
