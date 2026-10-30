@@ -13,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from tools import alina_git_code_sync as sync_module
-from tools.alina_git_code_sync import Synchronizer, _status_paths
+from tools.alina_git_code_sync import (
+    SyncBlocked,
+    Synchronizer,
+    _commit_subject,
+    _status_paths,
+)
 
 
 def test_status_paths_parse_spaces_and_rename_records():
@@ -264,6 +269,32 @@ def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
     assert task._continue_rebase_after_known_ci_conflicts(empty) is True
     assert task.report["empty_rebase_commits_skipped"] == 1
     assert ("rebase", "--skip") in commands
+
+
+def test_rebase_timeout_is_aborted_and_reported(tmp_path):
+    task = Synchronizer(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **kwargs):
+        commands.append(args)
+        if args[:2] == ("rebase", "--abort"):
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if args[:3] == ("rev-parse", "--absolute-git-dir"):
+            return subprocess.CompletedProcess(
+                args, 0, str(tmp_path / ".git").encode(), b""
+            )
+        raise AssertionError(f"unexpected command: {args!r} {kwargs!r}")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    timeout = subprocess.TimeoutExpired(
+        ["git", "rebase", "--no-autostash", "origin/main"], 45,
+    )
+
+    with pytest.raises(SyncBlocked, match="Rebase depassee"):
+        task._abort_rebase_after_timeout(timeout)
+
+    assert ("rebase", "--abort") in commands
+    assert task.report["rebase_timeout_count"] == 1
 
 
 def test_clean_sync_never_commits_empty(repos):

@@ -65,6 +65,8 @@ HISTORY_DEEPEN_STEPS = (512,)
 HISTORY_FETCH_FILTER = "--filter=tree:0"
 HISTORY_FETCH_TIMEOUT_SECONDS = 90
 MERGE_TREE_TIMEOUT_SECONDS = 30
+REBASE_TIMEOUT_SECONDS = 45
+REBASE_ABORT_TIMEOUT_SECONDS = 15
 GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v3"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
@@ -1368,6 +1370,56 @@ class Synchronizer:
             else:
                 os.environ["GIT_EDITOR"] = previous_editor
 
+    def _abort_rebase_after_timeout(
+        self, timeout: subprocess.TimeoutExpired,
+    ) -> None:
+        """Abort a timed-out rebase without leaving Git half-open.
+
+        A killed ``git rebase`` can leave its state machine active.  Letting
+        the outer error handler return in that state makes the next launcher
+        invocation fail on a stale rebase and can hold the user in a long
+        recovery loop.  The abort is itself bounded and never deletes a Git
+        lock; if Git cannot prove the abort completed, fail closed.
+        """
+        self.report["rebase_timeout_seconds"] = REBASE_TIMEOUT_SECONDS
+        self.report["rebase_timeout_count"] = (
+            int(self.report.get("rebase_timeout_count", 0)) + 1
+        )
+        try:
+            aborted = self.command(
+                "rebase", "--abort", check=False,
+                timeout=REBASE_ABORT_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as abort_timeout:
+            raise SyncBlocked(
+                "Rebase depassee apres "
+                f"{REBASE_TIMEOUT_SECONDS}s; git rebase --abort a aussi "
+                f"depasse {REBASE_ABORT_TIMEOUT_SECONDS}s. Intervention "
+                "manuelle requise; aucun push force."
+            ) from abort_timeout
+
+        gitdir = Path(self.text("rev-parse", "--absolute-git-dir"))
+        markers = tuple(
+            gitdir / marker for marker in ("rebase-merge", "rebase-apply")
+        )
+        if aborted.returncode or any(marker.exists() for marker in markers):
+            detail = (aborted.stderr or b"").decode(
+                "utf-8", errors="replace",
+            ).strip()
+            raise SyncBlocked(
+                "Rebase depassee et abort Git non confirme; "
+                "intervention manuelle requise; "
+                + (detail[:600] if detail else "aucun detail Git")
+            ) from timeout
+        self.say(
+            "[REBASE TIMEOUT] Rebase arretee et abort Git confirme; "
+            "aucun push force."
+        )
+        raise SyncBlocked(
+            "Rebase depassee apres "
+            f"{REBASE_TIMEOUT_SECONDS}s; rebase annulee proprement."
+        ) from timeout
+
     def reconcile(self) -> None:
         self.say(
             "[MOTEUR 5/5] Recuperation de main depuis GitHub "
@@ -1443,9 +1495,13 @@ class Synchronizer:
             )
         rebase_resolved = False
         with self._preserve_local_protected_index():
-            outcome = self.command(
-                "rebase", "--no-autostash", remote, check=False
-            )
+            try:
+                outcome = self.command(
+                    "rebase", "--no-autostash", remote, check=False,
+                    timeout=REBASE_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired as timeout:
+                self._abort_rebase_after_timeout(timeout)
             if outcome.returncode:
                 rebase_resolved = self._continue_rebase_after_known_ci_conflicts(
                     outcome,
