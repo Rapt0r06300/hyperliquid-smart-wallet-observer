@@ -70,7 +70,7 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # to finish instead of repeatedly replaying the same expensive history.
 REBASE_TIMEOUT_SECONDS = 300
 REBASE_ABORT_TIMEOUT_SECONDS = 8
-GIT_SYNC_ENGINE_BUILD = "2026-10-30-verified-remote-receipt-v7"
+GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v8"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -1766,6 +1766,17 @@ class Synchronizer:
         future handler change must never let ``reconcile`` continue with a
         result that was never produced.
         """
+        previous_editor = os.environ.get("GIT_EDITOR")
+        previous_sequence_editor = os.environ.get("GIT_SEQUENCE_EDITOR")
+        previous_merge_autoedit = os.environ.get("GIT_MERGE_AUTOEDIT")
+        # A double-clicked launcher has no reliable interactive terminal.  A
+        # rebase that reaches a commit-message step must therefore finish
+        # non-interactively instead of looking hung until the timeout.  This
+        # does not bypass conflict validation: unresolved conflicts still
+        # return to the fail-closed resolver below.
+        os.environ["GIT_EDITOR"] = "true"
+        os.environ["GIT_SEQUENCE_EDITOR"] = "true"
+        os.environ["GIT_MERGE_AUTOEDIT"] = "no"
         try:
             return self.command(
                 "rebase", "--no-autostash", remote, check=False,
@@ -1777,6 +1788,19 @@ class Synchronizer:
                 "Rebase timeout handler returned without a confirmed abort; "
                 "aucun push force."
             ) from timeout
+        finally:
+            if previous_editor is None:
+                os.environ.pop("GIT_EDITOR", None)
+            else:
+                os.environ["GIT_EDITOR"] = previous_editor
+            if previous_sequence_editor is None:
+                os.environ.pop("GIT_SEQUENCE_EDITOR", None)
+            else:
+                os.environ["GIT_SEQUENCE_EDITOR"] = previous_sequence_editor
+            if previous_merge_autoedit is None:
+                os.environ.pop("GIT_MERGE_AUTOEDIT", None)
+            else:
+                os.environ["GIT_MERGE_AUTOEDIT"] = previous_merge_autoedit
 
     def reconcile(self) -> None:
         self.say(

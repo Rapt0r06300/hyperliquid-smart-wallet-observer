@@ -444,6 +444,38 @@ def test_rebase_timeout_handler_cannot_leave_an_unbound_outcome(
         task._run_rebase("refs/remotes/origin/main")
 
 
+def test_rebase_disables_interactive_editors_and_restores_environment(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    task = Synchronizer(tmp_path)
+    captured: dict[str, str | None] = {}
+
+    def fake_command(*args: str, **kwargs):
+        captured.update({
+            "editor": os.environ.get("GIT_EDITOR"),
+            "sequence_editor": os.environ.get("GIT_SEQUENCE_EDITOR"),
+            "merge_autoedit": os.environ.get("GIT_MERGE_AUTOEDIT"),
+        })
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setenv("GIT_EDITOR", "external-editor")
+    monkeypatch.delenv("GIT_SEQUENCE_EDITOR", raising=False)
+    monkeypatch.setenv("GIT_MERGE_AUTOEDIT", "yes")
+    monkeypatch.setattr(task, "command", fake_command)
+
+    result = task._run_rebase("refs/remotes/origin/main")
+
+    assert result.returncode == 0
+    assert captured == {
+        "editor": "true",
+        "sequence_editor": "true",
+        "merge_autoedit": "no",
+    }
+    assert os.environ["GIT_EDITOR"] == "external-editor"
+    assert "GIT_SEQUENCE_EDITOR" not in os.environ
+    assert os.environ["GIT_MERGE_AUTOEDIT"] == "yes"
+
+
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 300
@@ -808,7 +840,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-verified-remote-receipt-v7' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v8' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
