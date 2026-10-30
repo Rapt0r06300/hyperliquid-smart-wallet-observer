@@ -103,6 +103,15 @@ def test_commit_subject_names_auth_prompt_guard_from_staged_diff() -> None:
     )
 
 
+def test_commit_subject_names_noninteractive_rebase_guard_from_staged_diff() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "GIT_SEQUENCE_EDITOR GIT_MERGE_AUTOEDIT") == (
+        "fix(sync): prevent interactive rebase stalls (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_and_launcher_change() -> None:
     assert _commit_subject([
         "POUSSER-GITHUB-FORCE.cmd",

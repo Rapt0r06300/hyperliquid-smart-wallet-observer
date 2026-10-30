@@ -160,6 +160,15 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    if sync_engine_paths and any(marker in diff_signal for marker in (
+        "git_editor", "git_sequence_editor", "git_merge_autoedit",
+        "rebase_timeout", "rebase timeout", "verified-remote-receipt-v",
+    )):
+        return (
+            "fix(sync): prevent interactive rebase stalls "
+            f"({len(normalized)} paths)"
+        )
+
     if sync_engine_paths and (
         not diff_signal
         or any(marker in diff_signal for marker in ("remote_sha", "github sha", "pushed_head"))
