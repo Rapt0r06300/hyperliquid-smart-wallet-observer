@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -24,6 +25,7 @@ INITIAL_RELEASE_WINDOW = 24
 MAX_RELEASE_WINDOW = 96
 TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PACK = re.compile(r"remote unpack failed|index-pack failed|tree.{0,80}too large|pack exceeds|pack.{0,80}too large|unpacker error", re.I)
+HISTORICAL_CHECKPOINT_DIR = Path("catalog/historical-reconcile-checkpoints")
 
 
 def classify_hosted_termination(
@@ -122,6 +124,96 @@ def remote_contains_head() -> bool:
     ).returncode == 0
 
 
+def _manifest_fingerprint(path: Path) -> dict[str, int | str]:
+    """Return an exact, bounded identity for one immutable Release manifest."""
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"historical manifest is not a regular file: {path}")
+    payload = path.read_bytes()
+    return {
+        "release_tag": path.parent.name,
+        "filename": path.name,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def historical_wave_checkpoint(
+    manifests: list[Path],
+    *,
+    index_blob_sha: str,
+    index_counts: dict[str, int],
+) -> dict[str, object]:
+    """Build the durable identity of one complete historical publication wave.
+
+    The checkpoint is intentionally derived only from Release manifests and the
+    tracked catalog index.  It is not a claim that the remote push succeeded;
+    that claim is made separately by ``remote_contains_head`` against the Git
+    ancestry.  Keeping these two proofs separate prevents an interrupted
+    runner from publishing a receipt that only existed locally.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", index_blob_sha):
+        raise RuntimeError("invalid historical index blob identity")
+    if any(
+        not isinstance(value, int) or value < 0
+        for value in index_counts.values()
+    ):
+        raise RuntimeError("invalid historical checkpoint counts")
+    fingerprints = sorted(
+        (_manifest_fingerprint(path) for path in manifests),
+        key=lambda item: str(item["release_tag"]),
+    )
+    tags = [str(item["release_tag"]) for item in fingerprints]
+    if not tags or len(tags) != len(set(tags)):
+        raise RuntimeError("historical checkpoint release identities are not unique")
+    payload: dict[str, object] = {
+        "schema": "alina.historical_reconcile_checkpoint.v1",
+        "checkpoint_status": "DURABLE_WAVE_COMMIT_INPUTS_VERIFIED",
+        "release_tags": tags,
+        "manifest_fingerprints": fingerprints,
+        "index_blob_sha": index_blob_sha,
+        "counts": {
+            **index_counts,
+            "selected_release_count": len(tags),
+            "selected_manifest_count": len(fingerprints),
+        },
+        "paper_read_only": True,
+        "real_execution": False,
+        "shards_read": False,
+        "remote_push_verified": False,
+    }
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    payload["checkpoint_id"] = hashlib.sha256(canonical).hexdigest()
+    return payload
+
+
+def write_historical_wave_checkpoint(
+    checkpoint: dict[str, object], *, root: Path | str = Path(".")
+) -> Path:
+    """Persist a wave checkpoint without overwriting a different receipt."""
+    root = Path(root)
+    relative = HISTORICAL_CHECKPOINT_DIR / (
+        str(checkpoint.get("checkpoint_id")) + ".json"
+    )
+    target = root / relative
+    for parent in (root / "catalog", root / HISTORICAL_CHECKPOINT_DIR):
+        if parent.is_symlink():
+            raise RuntimeError(f"historical checkpoint path is symlinked: {parent}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(
+        checkpoint, ensure_ascii=False, sort_keys=True, indent=2,
+    ) + "\n"
+    if target.exists():
+        if target.is_symlink() or target.read_text(encoding="utf-8") != encoded:
+            raise RuntimeError(f"historical checkpoint conflict: {relative}")
+        return target
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.partial")
+    temporary.write_text(encoded, encoding="utf-8", newline="\n")
+    os.replace(temporary, target)
+    return target
+
+
 def try_disjoint_campaign_rebase() -> tuple[bool, bool]:
     """Retry only across previously proven, non-overlapping campaign paths.
 
@@ -157,6 +249,24 @@ def publish(paths: list[Path]) -> int:
         # receipts without materializing millions of unchanged receipt files.
         run("python", "tools/check_dataset_quality.py", "--catalog-only")
         run("python", "-c", "from tools.build_catalog_metrics import verify_metrics_source; verify_metrics_source()")
+        catalog = json.loads(Path("catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
+        if not isinstance(catalog, dict):
+            raise RuntimeError("invalid catalog index for historical checkpoint")
+        checkpoint = historical_wave_checkpoint(
+            candidates,
+            index_blob_sha=run(
+                "git", "hash-object", "catalog/DATA_INDEX.json",
+            ).stdout.strip(),
+            index_counts={
+                "catalog_shard_row_count": len(catalog.get("shards", [])),
+                "catalog_release_count": len({
+                    str(row.get("release_tag"))
+                    for row in catalog.get("shards", [])
+                    if isinstance(row, dict) and row.get("release_tag")
+                }),
+            },
+        )
+        write_historical_wave_checkpoint(checkpoint)
         run("git", "add", "--sparse", "catalog", "datasets")
         if run("git", "diff", "--cached", "--quiet", check=False).returncode == 0:
             raise RuntimeError("empty catalog publication, no checkpoint possible")

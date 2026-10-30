@@ -1,4 +1,6 @@
 """Fail-closed inventory and Git error classification for continuous Release waves."""
+import json
+
 import pytest
 
 from tools.continuous_reconcile_backlog import PACK, pending
@@ -90,6 +92,60 @@ def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
     assert module.remote_contains_head()
     assert ("git", "fetch", "origin", "main") in seen
     assert ("git", "merge-base", "--is-ancestor", "a" * 40, "origin/main") in seen
+
+
+def test_historical_wave_checkpoint_is_deterministic_and_idempotent(tmp_path):
+    import tools.continuous_reconcile_backlog as module
+
+    first = tmp_path / "first" / "RUN_MANIFEST.json"
+    second = tmp_path / "second" / "RUN_MANIFEST.json"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text('{"release":"first"}\n', encoding="utf-8")
+    second.write_text('{"release":"second"}\n', encoding="utf-8")
+    checkpoint = module.historical_wave_checkpoint(
+        [second, first],
+        index_blob_sha="a" * 40,
+        index_counts={"catalog_shard_row_count": 12, "catalog_release_count": 2},
+    )
+    assert checkpoint["release_tags"] == ["first", "second"]
+    assert checkpoint["counts"] == {
+        "catalog_shard_row_count": 12,
+        "catalog_release_count": 2,
+        "selected_release_count": 2,
+        "selected_manifest_count": 2,
+    }
+    target = module.write_historical_wave_checkpoint(checkpoint, root=tmp_path)
+    original = target.read_text(encoding="utf-8")
+    assert module.write_historical_wave_checkpoint(checkpoint, root=tmp_path) == target
+    assert target.read_text(encoding="utf-8") == original
+    assert json.loads(original)["remote_push_verified"] is False
+
+
+def test_historical_wave_checkpoint_rejects_duplicate_or_unsafe_manifest(tmp_path):
+    import tools.continuous_reconcile_backlog as module
+
+    manifest = tmp_path / "same" / "RUN_MANIFEST.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="release identities are not unique"):
+        module.historical_wave_checkpoint(
+            [manifest, manifest], index_blob_sha="a" * 40,
+            index_counts={"catalog_shard_row_count": 1},
+        )
+    link = tmp_path / "link" / "RUN_MANIFEST.json"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(manifest)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("symlink privilege unavailable on this Windows runner")
+        raise
+    with pytest.raises(RuntimeError, match="not a regular file"):
+        module.historical_wave_checkpoint(
+            [link], index_blob_sha="a" * 40,
+            index_counts={"catalog_shard_row_count": 1},
+        )
 
 
 def test_disjoint_rebase_refusal_does_not_force_or_retry_push(monkeypatch):
