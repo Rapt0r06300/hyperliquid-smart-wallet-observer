@@ -70,7 +70,7 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # to finish instead of repeatedly replaying the same expensive history.
 REBASE_TIMEOUT_SECONDS = 300
 REBASE_ABORT_TIMEOUT_SECONDS = 8
-GIT_SYNC_ENGINE_BUILD = "2026-10-30-rebase-timeout-receipt-v4"
+GIT_SYNC_ENGINE_BUILD = "2026-10-30-clean-fast-path-receipt-v5"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -390,6 +390,7 @@ class Synchronizer:
             "rebases_performed": 0,
             "push_attempts": 0,
             "local_syntax_check": "NOT_RUN",
+            "fast_path": None,
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -766,6 +767,72 @@ class Synchronizer:
             f"behind={behind} | staged={len(staged)} | suivis={len(tracked)} | "
             f"nouveaux={len(untracked)} | chemins proteges={len(inventory['protected_observed_paths'])}."
         )
+
+    def _fast_path_if_clean(self) -> bool:
+        """Finish a provably clean run without fetching Git history.
+
+        A clean repository whose local HEAD already equals the current
+        ``ls-remote`` SHA has nothing to reconcile.  The old path still ran a
+        shallow-history check and a full fetch before discovering that fact,
+        which made a harmless double-click spend tens of seconds in GitHub
+        traffic.  This shortcut is deliberately narrow: it first inventories
+        every publishable path, checks the protected-data contract, verifies
+        the remote twice around the local-change check, and returns only when
+        both the code and the remote are still unchanged.
+        """
+        staged, tracked, untracked = self._inventory()
+        eligible = self._check_candidates(
+            staged, tracked, untracked, allow_protected_local=False,
+        )
+        if eligible:
+            return False
+
+        local = str(self.report.get("head_before") or self.text("rev-parse", "HEAD"))
+        observed_remote = self.remote_sha()
+        if observed_remote != local:
+            return False
+
+        inventory = {
+            "staged": {"count": len(staged), "paths": sorted(set(staged))},
+            "tracked_changes": {
+                "count": len(tracked), "paths": sorted(set(tracked)),
+            },
+            "untracked": {
+                "count": len(untracked), "paths": sorted(set(untracked)),
+            },
+            "protected_observed_paths": sorted({
+                path for path in staged + tracked + untracked if _protected(path)
+            }),
+            "excluded_untracked_patterns": self._excluded_untracked_patterns(),
+        }
+        self.report["preflight"] = {
+            "captured_at_utc": datetime.now(UTC).isoformat(),
+            "local_head": local,
+            "remote_head_observed": observed_remote,
+            "remote_head_fetched": None,
+            "ahead_commits": 0,
+            "behind_commits": 0,
+            "comparison_status": "EXACT_REMOTE_SHA_EQUALS_LOCAL",
+            "inventory": inventory,
+            "publishable_paths": [],
+            "inventory_status": "VALIDATED",
+        }
+        self._assert_no_new_code_changes()
+        verified_remote = self.remote_sha()
+        if verified_remote != local:
+            return False
+
+        self.report["remote_sha_observed"] = verified_remote
+        self.report["fast_path"] = "CLEAN_REMOTE_MATCH"
+        self.report["local_syntax_check"] = "NO_PYTHON_CHANGED"
+        self.report["status"] = "SYNCHRONIZED"
+        self.report["head_after"] = local
+        self.report["checkpoint_sha_after_reconcile"] = local
+        self.say(
+            "[RACCOURCI] Depot propre et SHA GitHub identique; "
+            "aucun fetch, commit, rebase ou push necessaire."
+        )
+        return True
 
     def _historical_head_blob(self, source: str) -> bytes:
         result = self.command("show", f"HEAD:{source}", check=False)
@@ -1726,12 +1793,18 @@ class Synchronizer:
             # fetch and therefore remain read-only.
             gitdir = self.preflight(allow_shallow=True)
             with _mutex(gitdir):
+                fast_path = False
                 if not self.dry_run and not wip_only:
-                    self._ensure_full_history()
-                self.capture_preflight(
-                    fetch_remote=not self.dry_run and not wip_only,
-                )
-                self.checkpoint()
+                    fast_path = self._fast_path_if_clean()
+                if fast_path:
+                    pass
+                else:
+                    if not self.dry_run and not wip_only:
+                        self._ensure_full_history()
+                    self.capture_preflight(
+                        fetch_remote=not self.dry_run and not wip_only,
+                    )
+                    self.checkpoint()
                 if self.dry_run:
                     remote_sha = self.remote_sha()
                     self.report["remote_sha_observed"] = remote_sha
@@ -1760,7 +1833,7 @@ class Synchronizer:
                         "[CHECKPOINT LOCAL TERMINE] Travail conserve sur main; "
                         "aucun acces GitHub ni push."
                     )
-                else:
+                elif not fast_path:
                     self._syntax_gate()
                     self.publish()
                     self._assert_no_new_code_changes()

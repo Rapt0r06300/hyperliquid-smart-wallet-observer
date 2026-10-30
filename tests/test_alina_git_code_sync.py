@@ -366,6 +366,27 @@ def test_clean_sync_never_commits_empty(repos):
     assert git(local, "rev-parse", "HEAD") == before
 
 
+def test_clean_sync_short_circuits_history_fetch_when_remote_matches(repos):
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+
+    class FastCleanSync(Synchronizer):
+        def command(self, *args, **kwargs):
+            if args and args[0] == "fetch":
+                raise AssertionError("un fetch est inutile pour un depot propre")
+            return super().command(*args, **kwargs)
+
+    task = FastCleanSync(local, allow_test_remote=True)
+    assert task.run() == 0
+    assert task.report["status"] == "SYNCHRONIZED"
+    assert task.report["fast_path"] == "CLEAN_REMOTE_MATCH"
+    assert task.report["push_attempts"] == 0
+    assert task.report["local_commit_created"] is False
+    assert task.report["shard_downloads"] is False
+    assert task.report["force_push"] is False
+    assert git(local, "rev-parse", "HEAD") == before
+
+
 def test_wip_can_be_saved_locally_without_upload(repos):
     local, _, origin = repos
     before = git(origin, "rev-parse", "main")
@@ -647,7 +668,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-rebase-timeout-receipt-v4' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-30-clean-fast-path-receipt-v5' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
@@ -666,6 +687,9 @@ def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
     class LateEdit(Synchronizer):
         wrote = False
         fetch_count = 0
+
+        def _fast_path_if_clean(self):
+            return False
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
@@ -700,6 +724,9 @@ def test_late_invalid_python_saved_locally_never_pushed(repos):
         wrote = False
         fetch_count = 0
 
+        def _fast_path_if_clean(self):
+            return False
+
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
             if args and args[0] == "fetch":
@@ -729,6 +756,9 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
     class AlwaysChanging(Synchronizer):
         n = 0
         fetch_count = 0
+
+        def _fast_path_if_clean(self):
+            return False
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
