@@ -1,6 +1,12 @@
 name: copy-vault-collector-soak
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/copy-vault-collector-soak.yml'
+      - 'tools/copy_vault_collector_soak.py'
+      - 'tests/test_copy_vault_collector_soak_workflow.py'
   # Explicit diagnostic only.  The hosted soak is never triggered by a push
   # and never contacts an exchange or publishes SAFE data.
   workflow_dispatch:
