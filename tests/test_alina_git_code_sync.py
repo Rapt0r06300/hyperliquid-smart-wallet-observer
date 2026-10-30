@@ -76,6 +76,17 @@ def test_commit_subject_keeps_words_intact_when_many_paths_are_changed() -> None
     assert len(subject) <= 72
 
 
+def test_commit_subject_names_a_mixed_copy_vault_code_and_test_change() -> None:
+    subject = _commit_subject([
+        "src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py",
+        "tests/test_copy_vault_leader_selection_comparison.py",
+    ])
+
+    assert subject == "feat(copy-vault): leader selection comparison (2 paths)"
+    assert len(subject) <= 72
+    assert subject != "chore(repository): update (2 paths)"
+
+
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []

@@ -97,6 +97,22 @@ def _human_path_label(path: str) -> str:
     return name or "code changes"
 
 
+def _common_filename_tokens(paths: list[str]) -> list[str]:
+    """Return stable filename tokens shared by a small mixed code/test change."""
+    token_lists: list[list[str]] = []
+    for path in paths:
+        stem = PurePosixPath(path).stem.lower()
+        tokens = re.findall(r"[a-z0-9]+", stem)
+        tokens = [token for token in tokens if token not in {"test", "tests", "py"}]
+        if not tokens:
+            return []
+        token_lists.append(tokens)
+    common = set(token_lists[0])
+    for tokens in token_lists[1:]:
+        common.intersection_update(tokens)
+    return [token for token in token_lists[0] if token in common]
+
+
 def _commit_subject(paths: list[str]) -> str:
     """Build a deterministic semantic subject from the staged code paths.
 
@@ -127,6 +143,15 @@ def _commit_subject(paths: list[str]) -> str:
         prefix, scope = "chore", "tooling"
     else:
         prefix, scope = "chore", "repository"
+
+    if len(normalized) >= 2 and any("copy_vault" in path for path in normalized):
+        common = _common_filename_tokens(normalized)
+        for token in ("copy", "vault"):
+            common = [item for item in common if item != token]
+        if common:
+            subject = f"feat(copy-vault): {' '.join(common)} ({len(normalized)} paths)"
+            if len(subject) <= 72:
+                return subject
 
     labels = [_human_path_label(path) for path in normalized]
     if len(labels) == 1:
