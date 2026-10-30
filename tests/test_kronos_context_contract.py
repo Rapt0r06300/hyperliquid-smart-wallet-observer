@@ -71,6 +71,26 @@ def test_context_receipt_requires_exact_repository_commit() -> None:
     assert receipt["missing_evidence"] == ["REPOSITORY_COMMIT_INVALID"]
 
 
+def test_context_receipt_fails_closed_on_noncanonical_metadata() -> None:
+    metadata = _metadata()
+    metadata["parameters"] = {"temperature": float("nan")}
+
+    receipt = build_context_receipt(metadata)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["PARAMETERS_NOT_CANONICAL"]
+    assert receipt["provenance"]["parameters"] is None
+    assert len(receipt["receipt_sha256"]) == 64
+
+
+def test_context_receipt_fails_closed_on_invalid_metadata_container() -> None:
+    receipt = build_context_receipt(None)  # type: ignore[arg-type]
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert "METADATA_INVALID" in receipt["missing_evidence"]
+    assert all(value is None for value in receipt["provenance"].values())
+
+
 def test_forecast_summary_uses_observed_sample_count_and_mean() -> None:
     result = summarize_forecast_rows([
         {"forecast_error": "1.0"},

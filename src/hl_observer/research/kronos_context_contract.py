@@ -37,6 +37,17 @@ def _digest(value: object) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _is_canonical_json(value: object) -> bool:
+    try:
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _decimal(value: object) -> Decimal | None:
     try:
         parsed = Decimal(str(value))
@@ -67,28 +78,46 @@ def build_context_receipt(
     source_files: Mapping[str, str | Path] | None = None,
 ) -> dict[str, Any]:
     """Freeze available Kronos provenance and report missing proof explicitly."""
-    missing = [
-        key for key in _REQUIRED_PROVENANCE
-        if metadata.get(key) in (None, "", {}, [])
-    ]
+    if isinstance(metadata, Mapping):
+        metadata_map: Mapping[str, Any] = metadata
+        missing: list[str] = []
+    else:
+        metadata_map = {}
+        missing = ["METADATA_INVALID"]
+
+    provenance: dict[str, Any] = {}
+    for key in _REQUIRED_PROVENANCE:
+        value = metadata_map.get(key)
+        if value in (None, "", {}, []):
+            missing.append(key)
+            provenance[key] = None
+        elif not _is_canonical_json(value):
+            missing.append(f"{key.upper()}_NOT_CANONICAL")
+            provenance[key] = None
+        else:
+            provenance[key] = value
+
     for key in ("model_sha256", "tokenizer_sha256"):
-        if key not in missing and not _is_sha256(metadata.get(key)):
+        if key not in missing and not _is_sha256(provenance.get(key)):
             missing.append(f"{key.upper()}_INVALID")
-    if "repository_commit" not in missing and not _is_sha1(metadata.get("repository_commit")):
+    if (
+        "repository_commit" not in missing
+        and not _is_sha1(provenance.get("repository_commit"))
+    ):
         missing.append("REPOSITORY_COMMIT_INVALID")
     file_hashes: dict[str, str] = {}
     for name, raw_path in (source_files or {}).items():
-        path = Path(raw_path)
         try:
+            path = Path(raw_path)
             if not path.is_file():
                 missing.append(f"SOURCE_FILE_MISSING:{name}")
                 continue
             file_hashes[str(name)] = hashlib.sha256(path.read_bytes()).hexdigest()
-        except OSError:
+        except (OSError, TypeError, ValueError):
             missing.append(f"SOURCE_FILE_UNREADABLE:{name}")
     payload = {
         "schema": "alina.kronos_context_receipt.v1",
-        "provenance": {key: metadata.get(key) for key in _REQUIRED_PROVENANCE},
+        "provenance": provenance,
         "source_file_sha256": file_hashes,
         "paper_read_only": True,
         "real_execution": False,
