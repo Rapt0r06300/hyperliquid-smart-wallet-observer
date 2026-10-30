@@ -36,6 +36,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 1
+          filter: blob:none
+          fetch-tags: false
+          show-progress: false
           persist-credentials: false
 
       - name: Set up Python
@@ -121,4 +124,3 @@ jobs:
           path: ${{ runner.temp }}/copy-vault-collector-soak
           if-no-files-found: warn
           retention-days: 14
-
