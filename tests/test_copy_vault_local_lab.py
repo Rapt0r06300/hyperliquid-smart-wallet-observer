@@ -1672,6 +1672,52 @@ def test_frozen_candidate_history_is_append_only_and_idempotent(tmp_path: Path) 
     assert immutable.is_file()
 
 
+def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
+    complete = {
+        "engine_source_sha256": "a" * 64,
+        "campaign_config_sha256": "b" * 64,
+        "source_catalog_sha256": "c" * 64,
+        "source_asset_inventory_sha256": "d" * 64,
+        "source_asset_inventory_count": 2,
+        "proposal_seed": 0,
+        "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
+        "trial_number": 7,
+        "attempt_receipt_sha256": "e" * 64,
+        "trial_receipt_sha256": "f" * 64,
+        "ledger": [{"time_ms": 10, "delta_usd": "1.25"}],
+        "equity": [{"time_ms": 10, "equity_usd": "201.25"}],
+        "costs": {"fees_usd": "0.10", "spread_usd": "0.05"},
+        "metrics": {"daily_mean_net_pnl_usd": "1.10"},
+        "tests": {"pytest": "209 passed"},
+        "report": {"path": "runtime/reports/candidate.json", "sha256": "1" * 64},
+        "restoration_receipt": {"status": "RESTORABLE", "sha256": "2" * 64},
+    }
+
+    snapshot = local_lab._build_restoration_snapshot(complete)
+
+    assert snapshot["restoration_status"] == "READY"
+    assert snapshot["restoration_missing_requirements"] == []
+    assert snapshot["lineage"]["engine_source_sha256"] == "a" * 64
+    assert snapshot["trial_accounting"]["trial_number"] == 7
+    assert len(snapshot["restoration_snapshot_sha256"]) == 64
+
+
+def test_restoration_snapshot_stays_unmeasurable_when_evidence_is_missing() -> None:
+    snapshot = local_lab._build_restoration_snapshot({
+        "engine_source_sha256": "a" * 64,
+        "campaign_config_sha256": "b" * 64,
+        "source_catalog_sha256": "c" * 64,
+        "source_asset_inventory_sha256": "d" * 64,
+        "proposal_seed": 0,
+        "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
+        "trial_number": 7,
+    })
+
+    assert snapshot["restoration_status"] == "UNMEASURABLE"
+    assert "LEDGER" in snapshot["restoration_missing_requirements"]
+    assert "REPORT" in snapshot["restoration_missing_requirements"]
+
+
 def test_improvement_history_rejects_malformed_rows_instead_of_hiding_them(tmp_path: Path) -> None:
     ledger = tmp_path / "runtime/codex_research/copy_vault_improvements/HISTORY.jsonl"
     ledger.parent.mkdir(parents=True)

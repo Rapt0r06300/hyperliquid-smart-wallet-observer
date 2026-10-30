@@ -3522,6 +3522,94 @@ def load_improvement_history(root: str | Path) -> list[dict[str, Any]]:
         raise ValueError("COPY_VAULT_IMPROVEMENT_HISTORY_LOCK_BUSY") from exc
 
 
+def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a fail-closed, immutable restoration contract for a candidate.
+
+    A candidate record may be useful for comparison while still being
+    unrestorable.  Keep that distinction explicit: this helper never fills
+    missing lineage, ledger, cost, metric, test or report evidence with
+    defaults.  A snapshot is ``READY`` only when every required evidence
+    component is supplied by the canonical campaign result.
+    """
+    digest_keys = (
+        "engine_source_sha256",
+        "campaign_config_sha256",
+        "source_catalog_sha256",
+        "source_asset_inventory_sha256",
+        "attempt_receipt_sha256",
+        "trial_receipt_sha256",
+    )
+    missing: list[str] = []
+    for key in digest_keys:
+        value = result.get(key)
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+        ):
+            missing.append(key.upper())
+    count = result.get("source_asset_inventory_count")
+    if type(count) is not int or count < 0:
+        missing.append("SOURCE_ASSET_INVENTORY_COUNT")
+    seed = result.get("proposal_seed")
+    if type(seed) is not int or seed < 0:
+        missing.append("SEARCH_SEED")
+    windows = result.get("temporal_windows")
+    if not isinstance(windows, Mapping) or not windows:
+        missing.append("TEMPORAL_SPLIT_WINDOWS")
+    trial_number = result.get("trial_number")
+    if type(trial_number) is not int or trial_number <= 0:
+        missing.append("TRIAL_NUMBER")
+
+    artifacts: dict[str, Any] = {}
+    for field, requirement in (
+        ("ledger", "LEDGER"),
+        ("equity", "EQUITY"),
+        ("costs", "COSTS"),
+        ("metrics", "METRICS"),
+        ("tests", "TESTS"),
+        ("report", "REPORT"),
+        ("restoration_receipt", "RESTORATION_RECEIPT"),
+    ):
+        value = result.get(field)
+        if value is None or value == {} or value == [] or value == "":
+            missing.append(requirement)
+        else:
+            artifacts[field] = value
+
+    snapshot: dict[str, Any] = {
+        "schema_version": "hypersmart.copy_vault_restoration_snapshot.v1",
+        "restoration_status": "READY" if not missing else "UNMEASURABLE",
+        "restoration_missing_requirements": sorted(set(missing)),
+        "lineage": {
+            key: result.get(key)
+            for key in (
+                "engine_source_sha256",
+                "campaign_config_sha256",
+                "source_catalog_sha256",
+                "source_asset_inventory_sha256",
+                "source_asset_inventory_count",
+            )
+        },
+        "search": {
+            "proposal_seed": seed,
+            "temporal_windows": windows,
+        },
+        "trial_accounting": {
+            "trial_number": trial_number,
+            "attempt_receipt_sha256": result.get("attempt_receipt_sha256"),
+            "trial_receipt_sha256": result.get("trial_receipt_sha256"),
+        },
+        "artifacts": artifacts,
+        "paper_read_only": True,
+        "real_execution": False,
+        "restore_started": False,
+        "source_untouched": True,
+    }
+    snapshot["restoration_snapshot_sha256"] = _canonical_json_sha256(snapshot)
+    return snapshot
+
+
 def _has_complete_economic_proof(result: Mapping[str, Any]) -> bool:
     if (
         result.get("economically_proven") is not True
@@ -3645,6 +3733,7 @@ def record_frozen_candidate(
         "attempt_history_path": economic_result.get("attempt_history_path"),
         "checkpoint_path": economic_result.get("checkpoint_path"),
         "restoration_receipt": economic_result.get("restoration_receipt"),
+        "restoration_snapshot": _build_restoration_snapshot(economic_result),
         "paper_capital_usd": economic_result.get("paper_capital_usd"),
         "data_complete": economic_result.get("data_complete") is True,
         "heldout_evaluated": economic_result.get("heldout_evaluated") is True,
