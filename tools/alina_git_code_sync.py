@@ -30,7 +30,7 @@ ALLOWED_ORIGINS = {
     f"ssh://git@github.com/{CANONICAL}.git",
 }
 PROTECTED_DIRS = {
-    "runtime", "logs", "data", "datasets", "archive", "archives",
+    "runtime", "logs", "data", "datasets", "catalog", "archive", "archives",
     "wheelhouse", "dist", "build", ".idea", ".vscode", ".claude",
     ".git", ".venv", "venv", "node_modules", ".pytest_cache",
     ".mypy_cache", ".ruff_cache", "__pycache__", ".tox",
@@ -48,12 +48,90 @@ SENSITIVE_PARTS = {
 MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
+PROTECTED_PATH_BATCH_SIZE = 128
+# A shallow checkout only needs enough history to prove a common ancestor
+# with the canonical main.  Fetching the entire repository can transfer
+# millions of objects even when the two tips diverged by a handful of
+# commits, so deepen progressively and stop as soon as reconciliation is
+# provably possible.
+# One bounded request is enough for the current main divergence and avoids a
+# staircase of repeated network transfers.  If the common ancestor is older
+# than this budget, fail closed and let the next run make an explicit choice.
+HISTORY_DEEPEN_STEPS = (512,)
+# Tree filtering is stricter than blob:none: it transfers commit ancestry
+# without hydrating historical file trees or their blobs.  The worktree's
+# current code remains local; any missing object required by Git can be
+# fetched explicitly by Git itself, while SAFE/shard data is never bulk-read.
+HISTORY_FETCH_FILTER = "--filter=tree:0"
+HISTORY_FETCH_TIMEOUT_SECONDS = 90
+MERGE_TREE_TIMEOUT_SECONDS = 30
 GIT_SYNC_ENGINE_BUILD = "2026-10-27-linear-safe-relocation-v3"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
     "CLAUDE_TASKS.jsonl": "docs/archive/root-history/CLAUDE_TASKS.jsonl",
 }
+AUTO_RESOLVABLE_CI_CONFLICTS = {
+    ".github/workflows/alina-restore-safe-regression.yml",
+    ".github/workflows/copy-vault-collector-soak.yml",
+}
+FORBIDDEN_HOSTED_CI_MARKERS = (
+    "runs-on: self-hosted",
+    'HL_ENABLE_MAINNET_EXECUTION: "1"',
+    'REAL_MAINNET_TRADING: "true"',
+    'HYPERSMART_ENABLE_REAL_ORDERS: "1"',
+    'ENABLE_REAL_ORDERS: "1"',
+)
+
+
+def _human_path_label(path: str) -> str:
+    """Turn one publishable path into a short, truthful commit noun."""
+    name = PurePosixPath(path).stem.replace("-", " ").replace("_", " ")
+    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    name = re.sub(r"\s+", " ", name).strip().lower()
+    return name or "code changes"
+
+
+def _commit_subject(paths: list[str]) -> str:
+    """Build a deterministic semantic subject from the staged code paths.
+
+    The sync helper must never invent a product claim from a diff it cannot
+    understand. It uses repository areas and filenames only, so the subject
+    stays useful while remaining honest for arbitrary local edits.
+    """
+    normalized = sorted(set(path.replace("\\", "/") for path in paths))
+    if not normalized:
+        return "chore(sync): checkpoint code changes"
+
+    if all(path.startswith(".github/workflows/") for path in normalized):
+        prefix, scope = "ci", "github"
+    elif all(path.startswith("tests/") for path in normalized):
+        prefix, scope = "test", "validation"
+    elif all(path.startswith("docs/") for path in normalized):
+        prefix, scope = "docs", "project"
+    elif all(path.startswith("src/") for path in normalized):
+        prefix = "feat" if any(
+            "/copy_vault/" in f"/{path}/" or "copy_vault" in path
+            for path in normalized
+        ) else "chore"
+        scope = (
+            "copy-vault" if any("copy_vault" in path for path in normalized)
+            else "runtime"
+        )
+    elif all(path.startswith("tools/") for path in normalized):
+        prefix, scope = "chore", "tooling"
+    else:
+        prefix, scope = "chore", "repository"
+
+    labels = [_human_path_label(path) for path in normalized]
+    if len(labels) == 1:
+        detail = labels[0]
+    elif len(labels) == 2:
+        detail = f"{labels[0]} and {labels[1]}"
+    else:
+        detail = f"{labels[0]}, {labels[1]} and {len(labels) - 2} other files"
+    subject = f"{prefix}({scope}): update {detail}"
+    return subject[:72].rstrip()
 
 
 class SyncBlocked(RuntimeError):
@@ -255,6 +333,8 @@ class Synchronizer:
         self.dry_run = dry_run
         self.allow_test_remote = allow_test_remote
         self.changed_python_paths: list[str] = []
+        self._inventory_cache: tuple[list[str], list[str], list[str]] | None = None
+        self._remote_snapshot_ready = False
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
@@ -263,7 +343,12 @@ class Synchronizer:
             "shard_downloads": False,
             "force_push": False,
             "reset_or_clean": False,
+            "shallow_repository": None,
+            "history_expanded": False,
+            "history_mode": None,
+            "history_deepen_steps": [],
             "local_commit_created": False,
+            "commit_message": None,
             "merge_commits_created": 0,
             "rebases_performed": 0,
             "push_attempts": 0,
@@ -273,7 +358,8 @@ class Synchronizer:
         }
 
     def command(self, *args: str, input_bytes: bytes | None = None,
-                check: bool = True) -> subprocess.CompletedProcess[bytes]:
+                check: bool = True, timeout: int = 300
+                ) -> subprocess.CompletedProcess[bytes]:
         git_args = list(args)
         label = _git_operation_label(git_args)
         self._command_count += 1
@@ -291,6 +377,7 @@ class Synchronizer:
                 self.git,
                 git_args,
                 input_bytes=input_bytes,
+                timeout=timeout,
                 live_stderr=live_stderr,
                 on_progress=progress,
             )
@@ -352,7 +439,7 @@ class Synchronizer:
         stamp = datetime.now().astimezone().strftime("%H:%M:%S")
         print(f"[{stamp}] {message}", flush=True)
 
-    def preflight(self) -> Path:
+    def preflight(self, *, allow_shallow: bool = False) -> Path:
         self.say("[MOTEUR 1/5] Controle du depot, de main et du remote autorise.")
         top = Path(self.text("rev-parse", "--show-toplevel")).resolve()
         if top != self.root:
@@ -360,8 +447,15 @@ class Synchronizer:
         branch = self.text("branch", "--show-current")
         if branch != "main":
             raise SyncBlocked("Seule main est autorisee; aucun checkout automatique.")
-        if self.text("rev-parse", "--is-shallow-repository") == "true":
+        shallow = self.text("rev-parse", "--is-shallow-repository") == "true"
+        self.report["shallow_repository"] = shallow
+        if shallow and not allow_shallow:
             raise SyncBlocked("Clone shallow: historique insuffisant pour fusionner.")
+        if shallow:
+            self.say(
+                "[PREFLIGHT] Clone shallow detecte; lecture seule/checkpoint "
+                "autorise, synchronisation completee apres extension non destructive."
+            )
         remote = self.text("remote", "get-url", "origin")
         if remote not in ALLOWED_ORIGINS and not (
             self.allow_test_remote
@@ -387,7 +481,143 @@ class Synchronizer:
         )
         return gitdir
 
-    def _inventory(self) -> tuple[list[str], list[str], list[str]]:
+    def _ensure_full_history(self) -> None:
+        """Deepen only until local and remote history have a common ancestor.
+
+        This is intentionally bounded.  A complete unshallow fetch is both
+        unnecessary for normal main reconciliation and catastrophically slow
+        for this repository's large historical object graph.  If the common
+        ancestor is still unavailable after the bounded steps, fail closed
+        instead of silently turning a code push into a repository download.
+        """
+        if self.text("rev-parse", "--is-shallow-repository") != "true":
+            self.report["history_mode"] = "FULL"
+            return
+        local_head = self.text("rev-parse", "HEAD")
+        existing_remote = self.command(
+            "rev-parse", "refs/remotes/origin/main", check=False,
+        )
+        if existing_remote.returncode == 0:
+            remote_head = existing_remote.stdout.decode(
+                "ascii", errors="replace"
+            ).strip()
+            if remote_head and self.command(
+                "merge-base", local_head, remote_head, check=False,
+            ).returncode == 0:
+                self.report["history_mode"] = "EXISTING_SHALLOW_BASE"
+                self.say(
+                    "[HISTORIQUE] Base commune deja prouvee dans le clone "
+                    "shallow; aucun fetch supplementaire."
+                )
+                return
+        steps = self.report["history_deepen_steps"]
+        if not isinstance(steps, list):
+            steps = []
+            self.report["history_deepen_steps"] = steps
+
+        for deepen in HISTORY_DEEPEN_STEPS:
+            self.say(
+                f"[HISTORIQUE] Approfondissement borne +{deepen} commits; "
+                "arret des que la base commune est prouvee..."
+            )
+            fetch_args = [
+                "fetch", "--progress", "--no-tags", HISTORY_FETCH_FILTER,
+                f"--deepen={deepen}", "origin",
+                "refs/heads/main:refs/remotes/origin/main",
+            ]
+            filtered = self.command(
+                *fetch_args, check=False, timeout=HISTORY_FETCH_TIMEOUT_SECONDS,
+            )
+            if filtered.returncode:
+                detail = (filtered.stderr or b"").decode(
+                    "utf-8", errors="replace"
+                ).lower()
+                if "filter" not in detail and "partial" not in detail:
+                    raise SyncBlocked(
+                        "Extension Git bornee echouee; aucun fallback non filtre: "
+                        + detail[:900]
+                    )
+                self.say(
+                    "[HISTORIQUE] Serveur sans filtre blob:none; fallback borne "
+                    "sans blobs exclus impossible, reprise controlee."
+                )
+                self.command(
+                    *[arg for arg in fetch_args if arg != HISTORY_FETCH_FILTER],
+                    timeout=HISTORY_FETCH_TIMEOUT_SECONDS,
+                )
+            steps.append(deepen)
+            remote_head = self.text("rev-parse", "refs/remotes/origin/main")
+            common = self.command(
+                "merge-base", local_head, remote_head, check=False,
+            )
+            if common.returncode == 0:
+                self.report["history_expanded"] = True
+                self.report["history_mode"] = "BOUNDED_DEEPEN"
+                return
+            if self.text("rev-parse", "--is-shallow-repository") != "true":
+                raise SyncBlocked(
+                    "Historique Git complet mais sans base commune avec origin/main; "
+                    "fusion refusee."
+                )
+
+        raise SyncBlocked(
+            "Historique Git shallow sans base commune apres approfondissement "
+            "borne; aucun telechargement complet ni push."
+        )
+
+    def _predict_merge_conflicts(self, remote: str, local: str) -> list[str]:
+        """Detect conflicts without touching the index or worktree.
+
+        A real rebase can replay many local commits before it reaches the
+        first unsupported conflict.  `merge-tree` computes the same three-way
+        merge decision against the two tips without mutating Git state, so an
+        unsupported conflict can fail closed in milliseconds instead of
+        spending minutes replaying commits that will be discarded.
+        """
+        outcome = self.command(
+            "merge-tree", "--write-tree", remote, local,
+            check=False, timeout=MERGE_TREE_TIMEOUT_SECONDS,
+        )
+        payload = b"\n".join(
+            part for part in (outcome.stdout or b"", outcome.stderr or b"")
+            if part
+        ).decode("utf-8", errors="replace")
+        if outcome.returncode == 0:
+            self.report["predicted_conflicts"] = []
+            return []
+        conflicts = sorted({
+            match.group(1).strip()
+            for match in re.finditer(
+                r"^CONFLICT .*?: Merge conflict in (.+)$",
+                payload,
+                flags=re.MULTILINE,
+            )
+            if match.group(1).strip()
+        })
+        if not conflicts:
+            raise SyncBlocked(
+                "Precontrole merge-tree impossible; rebase non lance. "
+                + payload[:900].strip()
+            )
+        self.report["predicted_conflicts"] = conflicts
+        return conflicts
+
+    @staticmethod
+    def _preflight_auto_resolvable_conflict(path: str) -> bool:
+        """Return whether the existing post-rebase resolver may inspect it."""
+        if path in AUTO_RESOLVABLE_CI_CONFLICTS:
+            return True
+        return (
+            path.startswith(("src/", "tools/", "tests/"))
+            and path.endswith(".py")
+        )
+
+    def _inventory(
+        self, *, refresh: bool = False,
+    ) -> tuple[list[str], list[str], list[str]]:
+        if self._inventory_cache is not None and not refresh:
+            self.say("[INVENTAIRE] reutilisation du cache Git local stable.")
+            return self._inventory_cache
         self.say(
             "[MOTEUR 2/5] Inventaire des changements de code; les dossiers "
             "de donnees restent exclus."
@@ -410,7 +640,8 @@ class Synchronizer:
             f"[INVENTAIRE] deja stages={len(staged)} | suivis modifies="
             f"{len(tracked)} | nouveaux={len(untracked)}."
         )
-        return staged, tracked, untracked
+        self._inventory_cache = (staged, tracked, untracked)
+        return self._inventory_cache
 
     @staticmethod
     def _excluded_untracked_patterns() -> list[str]:
@@ -454,7 +685,9 @@ class Synchronizer:
             observed_remote = self.remote_sha()
             snapshot["remote_head_observed"] = observed_remote
 
-        eligible = self._check_candidates(staged, tracked, untracked)
+        eligible = self._check_candidates(
+            staged, tracked, untracked, allow_protected_local=fetch_remote,
+        )
         snapshot["publishable_paths"] = eligible
         snapshot["inventory_status"] = "VALIDATED"
 
@@ -472,7 +705,11 @@ class Synchronizer:
             "fetch", "--progress", "--no-tags", "origin",
             "refs/heads/main:refs/remotes/origin/main",
         )
+        # A user/editor can change source files while fetch is in flight.
+        # Never reuse the pre-fetch snapshot for the publishable checkpoint.
+        self._inventory_cache = None
         fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
+        self._remote_snapshot_ready = True
         counts = self.text(
             "rev-list", "--left-right", "--count",
             f"{local_head}...{fetched_remote}",
@@ -625,7 +862,8 @@ class Synchronizer:
         return allowed
 
     def _check_candidates(
-        self, staged: list[str], tracked: list[str], untracked: list[str]
+        self, staged: list[str], tracked: list[str], untracked: list[str],
+        *, allow_protected_local: bool = False,
     ) -> list[str]:
         staged_protected = [p for p in staged if _protected(p)]
         if staged_protected:
@@ -636,11 +874,17 @@ class Synchronizer:
         tracked_protected = [
             p for p in tracked if _protected(p) and p not in safe_moves
         ]
-        if tracked_protected:
+        if tracked_protected and not allow_protected_local:
             raise SyncBlocked(
                 "Donnees Git suivies mais modifiees localement : "
                 + ", ".join(tracked_protected[:8])
                 + ". Les proteger avant toute fusion."
+            )
+        if tracked_protected:
+            self.report["protected_local_changes"] = sorted(tracked_protected)
+            self.say(
+                "[GARDE DONNEES] Modifications locales protegees conservees hors "
+                "du commit; elles seront refusees si GitHub touche ces chemins."
             )
         eligible = sorted(
             p for p in set(staged + tracked + untracked)
@@ -695,7 +939,16 @@ class Synchronizer:
 
     def checkpoint(self) -> None:
         staged, tracked, untracked = self._inventory()
-        eligible = self._check_candidates(staged, tracked, untracked)
+        snapshot = self.report.get("preflight")
+        allow_protected_local = (
+            isinstance(snapshot, dict)
+            and snapshot.get("remote_head_fetched")
+            and snapshot.get("local_head") != snapshot.get("remote_head_fetched")
+        )
+        eligible = self._check_candidates(
+            staged, tracked, untracked,
+            allow_protected_local=bool(allow_protected_local),
+        )
         self.report["publishable_paths_seen"] = len(eligible)
         self.changed_python_paths = [
             p for p in eligible
@@ -723,10 +976,12 @@ class Synchronizer:
         if diff.returncode not in (0, 1):
             raise SyncBlocked("Verification de l'index Git impossible.")
         if diff.returncode == 1:
-            self.say("Commit de sauvegarde du code Codex/Claude (WIP inclus)...")
+            commit_message = _commit_subject(eligible)
+            self.report["commit_message"] = commit_message
+            self.say(f"Commit semantique du code admissible: {commit_message}")
             self.command(
                 "commit", "-m",
-                "chore(local-sync): sauvegarde des modifications Codex Claude WIP",
+                commit_message,
             )
             self.report["local_commit_created"] = True
             self.report["checkpoint_sha"] = self.text("rev-parse", "HEAD")
@@ -760,8 +1015,10 @@ class Synchronizer:
         self.say("[SYNTAXE OK] Tous les fichiers Python admissibles compilent.")
 
     def _assert_no_new_code_changes(self) -> None:
-        staged, tracked, untracked = self._inventory()
-        eligible = self._check_candidates(staged, tracked, untracked)
+        staged, tracked, untracked = self._inventory(refresh=True)
+        eligible = self._check_candidates(
+            staged, tracked, untracked, allow_protected_local=True,
+        )
         if eligible:
             self.report["late_local_paths"] = eligible[:100]
             self.report["late_local_count"] = len(eligible)
@@ -791,23 +1048,91 @@ class Synchronizer:
         changed = _paths(
             self.command("diff", "--name-only", "-z", "HEAD", remote).stdout
         )
+        protected_changes = [path for path in changed if _protected(path)]
         self.say(
-            f"[GARDE DONNEES] Inspection de {len(changed)} chemin(s) distant(s) "
-            "susceptibles d'affecter des fichiers locaux proteges."
+            f"[GARDE DONNEES] Inspection en lot de {len(protected_changes)} "
+            f"chemin(s) protege(s) sur {len(changed)} chemin(s) distant(s)."
         )
-        for path in changed:
-            if not _protected(path):
-                continue
+        if not protected_changes:
+            return
+
+        # Resolve tracking state in small path batches instead of starting
+        # multiple Git processes for every remote path.  The old O(n) loop
+        # turned a 1,350-path remote diff into thousands of subprocesses.
+        tracked_paths: set[str] = set()
+        for start in range(0, len(protected_changes), PROTECTED_PATH_BATCH_SIZE):
+            batch = protected_changes[start:start + PROTECTED_PATH_BATCH_SIZE]
+            tracked_paths.update(_paths(
+                self.command("ls-files", "-z", "--", *batch).stdout
+            ))
+
+        local_changed = set(_paths(
+            self.command("diff", "--name-only", "-z", "HEAD").stdout
+        ))
+        for path in protected_changes:
             local_path = self.root / path
             if not (local_path.exists() or local_path.is_symlink()):
                 continue
-            if self.command(
-                "ls-files", "--error-unmatch", "--", path, check=False
-            ).returncode:
-                raise SyncBlocked(
-                    f"GitHub toucherait un fichier local protege non suivi: {path}. "
-                    "Fusion interdite pour proteger les donnees."
+            if path in tracked_paths:
+                if path in local_changed:
+                    raise SyncBlocked(
+                        f"GitHub toucherait un fichier protege modifie localement: {path}. "
+                        "Fusion interdite pour proteger les donnees."
+                    )
+                continue
+            raise SyncBlocked(
+                f"GitHub toucherait un fichier local protege non suivi: {path}. "
+                "Fusion interdite pour proteger les donnees."
+            )
+
+    @contextlib.contextmanager
+    def _preserve_local_protected_index(self):
+        """Let Git rebase code while preserving unrelated local SAFE bytes."""
+        paths = [
+            path for path in self.report.get("protected_local_changes", [])
+            if isinstance(path, str)
+        ]
+        if not paths:
+            yield
+            return
+
+        assumed: list[str] = []
+        try:
+            for path in paths:
+                # A generated file can be byte-identical to HEAD while its
+                # filesystem stat is stale.  Git checkout then reports it as
+                # dirty even though there is no local data change.  Refresh
+                # only that exact index entry with its existing blob; this
+                # never stages or rewrites the protected worktree file.
+                entry = self.command("ls-files", "-s", "--", path).stdout
+                fields = entry.decode("utf-8", errors="replace").split()
+                if len(fields) < 3:
+                    raise SyncBlocked(
+                        "Entree d'index protegee introuvable pour " + path
+                    )
+                self.command(
+                    "update-index", "--cacheinfo",
+                    f"{fields[0]},{fields[1]},{path}",
                 )
+                # `skip-worktree` is the index contract Git checkout/rebase
+                # honors when the worktree intentionally contains a local
+                # protected file that must not be replaced by code replay.
+                # `assume-unchanged` only suppresses stat checks and still
+                # lets checkout reject the path as dirty.
+                self.command("update-index", "--skip-worktree", "--", path)
+                assumed.append(path)
+            yield
+        finally:
+            for path in reversed(assumed):
+                restored = self.command(
+                    "update-index", "--no-skip-worktree", "--", path,
+                    check=False,
+                )
+                if restored.returncode:
+                    raise SyncBlocked(
+                        "Restauration de la garde d'index impossible pour "
+                        f"le fichier protege: {path}"
+                    )
 
     def _capture_conflicts(self, conflicted: list[str], local: str,
                            remote: str) -> None:
@@ -918,15 +1243,147 @@ class Synchronizer:
         self.report["conflict_files"] = conflicted
         self.say("Kit de reconciliation local: " + str(self.report["conflict_kit"]))
 
+    def _resolve_known_ci_conflicts(self, conflicted: list[str]) -> bool:
+        """Resolve only validated hosted CI contract conflicts.
+
+        Rebase names the upstream side `ours` and the replayed local commit
+        `theirs`.  For these two workflows the upstream version is preferred
+        because it contains the latest hosted CI contract; the safety markers
+        below prevent accepting a self-hosted or real-execution path.
+        Every other conflict remains fail-closed.
+        """
+        if not conflicted:
+            return False
+        if any(path not in AUTO_RESOLVABLE_CI_CONFLICTS for path in conflicted):
+            return self._resolve_trivial_code_conflicts(conflicted)
+        for path in conflicted:
+            upstream = self.command("show", f":2:{path}", check=False)
+            if upstream.returncode:
+                return False
+            content = upstream.stdout.decode("utf-8", errors="replace")
+            lowered = content.casefold()
+            if "runs-on: ubuntu-latest" not in lowered:
+                return False
+            if any(marker.casefold() in lowered
+                   for marker in FORBIDDEN_HOSTED_CI_MARKERS):
+                return False
+            self.command("checkout", "--ours", "--", path)
+            self.command("add", "--", path)
+        resolutions = self.report.setdefault("ci_conflict_resolutions", [])
+        if isinstance(resolutions, list):
+            resolutions.extend({
+                "path": path,
+                "resolution": "UPSTREAM_HOSTED_CI_CONTRACT",
+                "reason": "validated_no_self_hosted_or_real_execution_markers",
+            } for path in conflicted)
+        self.say(
+            "Conflit CI resolu automatiquement: version hosted upstream "
+            "validee, sans self-hosted ni execution reelle."
+        )
+        return True
+
+    def _resolve_trivial_code_conflicts(self, conflicted: list[str]) -> bool:
+        """Resolve a whitelisted code conflict only when semantics are equal."""
+        if any(
+            not path.endswith(".py")
+            or not path.startswith(("src/", "tools/", "tests/"))
+            or _protected(path)
+            for path in conflicted
+        ):
+            return False
+        for path in conflicted:
+            versions = []
+            for stage in (2, 3):
+                result = self.command("show", f":{stage}:{path}", check=False)
+                if result.returncode:
+                    return False
+                content = result.stdout.decode("utf-8", errors="strict")
+                try:
+                    compile(content, path, "exec")
+                except SyntaxError:
+                    return False
+                versions.append(content)
+            normalized = [
+                [line.rstrip() for line in content.splitlines() if line.strip()]
+                for content in versions
+            ]
+            if normalized[0] != normalized[1]:
+                return False
+            self.command("checkout", "--ours", "--", path)
+            self.command("add", "--", path)
+        resolutions = self.report.setdefault("ci_conflict_resolutions", [])
+        if isinstance(resolutions, list):
+            resolutions.extend({
+                "path": path,
+                "resolution": "TRIVIAL_WHITESPACE_ONLY",
+                "reason": "both_sides_compile_and_match_after_blank_line_normalization",
+            } for path in conflicted)
+        self.say("Conflit code trivial resolu: versions compilees et semantiquement identiques.")
+        return True
+
+    def _continue_rebase_after_known_ci_conflicts(
+        self, outcome: subprocess.CompletedProcess[bytes],
+    ) -> bool:
+        """Continue a rebase while only the known hosted CI conflicts occur.
+
+        The initial failed ``git rebase`` result is part of the state machine:
+        when the index has no conflicts, its stderr is the only evidence that
+        the current commit is empty and may be skipped safely.
+        """
+        previous_editor = os.environ.get("GIT_EDITOR")
+        os.environ["GIT_EDITOR"] = "true"
+        try:
+            for _ in range(32):
+                conflicted = _paths(self.command(
+                    "diff", "--name-only", "--diff-filter=U", "-z"
+                ).stdout)
+                if not conflicted:
+                    detail = (
+                        (outcome.stderr or b"") + (outcome.stdout or b"")
+                    ).decode("utf-8", errors="replace").casefold()
+                    if "empty" not in detail:
+                        return False
+                    skipped = self.command("rebase", "--skip", check=False)
+                    if skipped.returncode:
+                        return False
+                    self.report["empty_rebase_commits_skipped"] = (
+                        int(self.report.get("empty_rebase_commits_skipped", 0)) + 1
+                    )
+                    gitdir = Path(self.text("rev-parse", "--absolute-git-dir"))
+                    if not any((gitdir / marker).exists()
+                               for marker in ("rebase-merge", "rebase-apply")):
+                        return True
+                    continue
+                if not self._resolve_known_ci_conflicts(conflicted):
+                    return False
+                outcome = self.command(
+                    "rebase", "--continue", check=False,
+                )
+                if outcome.returncode == 0:
+                    return True
+            raise SyncBlocked("Trop de conflits CI successifs; rebase arrete.")
+        finally:
+            if previous_editor is None:
+                os.environ.pop("GIT_EDITOR", None)
+            else:
+                os.environ["GIT_EDITOR"] = previous_editor
+
     def reconcile(self) -> None:
         self.say(
             "[MOTEUR 5/5] Recuperation de main depuis GitHub "
             "(objets Git seulement, aucun shard)."
         )
-        self.command(
-            "fetch", "--progress", "--no-tags", "origin",
-            "refs/heads/main:refs/remotes/origin/main",
-        )
+        if self._remote_snapshot_ready:
+            self._remote_snapshot_ready = False
+            self.say(
+                "[FETCH] Snapshot preflight reutilise; aucun second fetch "
+                "identique avant le rebase."
+            )
+        else:
+            self.command(
+                "fetch", "--progress", "--no-tags", "origin",
+                "refs/heads/main:refs/remotes/origin/main",
+            )
         remote = self.text("rev-parse", "refs/remotes/origin/main")
         local = self.text("rev-parse", "HEAD")
         self.say(
@@ -946,7 +1403,8 @@ class Synchronizer:
                 "[INTEGRATION] Avance rapide possible: adoption des commits "
                 "GitHub sans creer de commit de fusion."
             )
-            self.command("merge", "--ff-only", remote)
+            with self._preserve_local_protected_index():
+                self.command("merge", "--ff-only", remote)
             self.say("[INTEGRATION OK] HEAD local aligne sur GitHub main.")
             return
         self.command(
@@ -972,39 +1430,74 @@ class Synchronizer:
             f"{replay_count.stdout.decode('ascii', errors='replace').strip()} "
             "commit(s) local(aux) sur GitHub main; aucun commit de fusion."
         )
-        outcome = self.command(
-            "rebase", "--no-autostash", remote, check=False
-        )
-        if outcome.returncode:
-            conflicted = _paths(self.command(
-                "diff", "--name-only", "--diff-filter=U", "-z"
-            ).stdout)
-            if conflicted:
-                try:
-                    self._capture_conflicts(conflicted, local, remote)
-                except (OSError, SyncBlocked) as exc:
-                    self.report["conflict_kit_error"] = str(exc)
-                    self.say("Kit de conflits non ecrit: " + str(exc))
-            gitdir = Path(self.text("rev-parse", "--absolute-git-dir"))
-            rebase_markers = (gitdir / "rebase-merge", gitdir / "rebase-apply")
-            if any(marker.exists() for marker in rebase_markers):
-                abort = self.command("rebase", "--abort", check=False)
-                if abort.returncode or any(marker.exists() for marker in rebase_markers):
-                    raise SyncBlocked(
-                        "Echec de git rebase --abort. Ne rien nettoyer; "
-                        "conserver les commits et terminer la reprise manuellement."
-                    )
-            if not conflicted:
-                raise SyncBlocked(
-                    "Git rebase refuse sans conflit index detecte; aucun choix "
-                    "automatique: "
-                    + outcome.stderr.decode("utf-8", errors="replace")[:900]
-                )
+        predicted = self._predict_merge_conflicts(remote, local)
+        unsupported = [
+            path for path in predicted
+            if not self._preflight_auto_resolvable_conflict(path)
+        ]
+        if unsupported:
             raise SyncBlocked(
-                "Conflit de code: " + ", ".join(conflicted[:12])
-                + ". Rejeu annule; commits locaux et GitHub preserves. "
-                "Voir le kit dans runtime/reports/git-sync/conflicts."
+                "Conflits previsibles non auto-resolvables: "
+                + ", ".join(unsupported[:12])
+                + ". Rebase non lance; commits locaux et GitHub preserves."
             )
+        rebase_resolved = False
+        with self._preserve_local_protected_index():
+            outcome = self.command(
+                "rebase", "--no-autostash", remote, check=False
+            )
+            if outcome.returncode:
+                rebase_resolved = self._continue_rebase_after_known_ci_conflicts(
+                    outcome,
+                )
+                if not rebase_resolved:
+                    conflicted = _paths(self.command(
+                        "diff", "--name-only", "--diff-filter=U", "-z"
+                    ).stdout)
+                    if conflicted:
+                        try:
+                            self._capture_conflicts(conflicted, local, remote)
+                        except (OSError, SyncBlocked) as exc:
+                            self.report["conflict_kit_error"] = str(exc)
+                            self.say("Kit de conflits non ecrit: " + str(exc))
+                    gitdir = Path(self.text("rev-parse", "--absolute-git-dir"))
+                    rebase_markers = (
+                        gitdir / "rebase-merge", gitdir / "rebase-apply"
+                    )
+                    if any(marker.exists() for marker in rebase_markers):
+                        abort = self.command("rebase", "--abort", check=False)
+                        if (
+                            abort.returncode
+                            or any(marker.exists() for marker in rebase_markers)
+                        ):
+                            raise SyncBlocked(
+                                "Echec de git rebase --abort. Ne rien nettoyer; "
+                                "conserver les commits et terminer la reprise "
+                                "manuellement."
+                            )
+                    if not conflicted:
+                        raise SyncBlocked(
+                            "Git rebase refuse sans conflit index detecte; "
+                            "aucun choix automatique: "
+                            + outcome.stderr.decode(
+                                "utf-8", errors="replace"
+                            )[:900]
+                        )
+                    raise SyncBlocked(
+                        "Conflit de code: " + ", ".join(conflicted[:12])
+                        + ". Rejeu annule; commits locaux et GitHub preserves. "
+                        "Voir le kit dans runtime/reports/git-sync/conflicts."
+                    )
+        if rebase_resolved:
+            self.report["rebases_performed"] = (
+                int(self.report["rebases_performed"]) + 1
+            )
+            self.report["local_rebased_onto"] = remote
+            self.say(
+                "[INTEGRATION OK] Commits locaux rejoues; conflits CI "
+                "resolus sous contrat hosted."
+            )
+            return
         self.report["rebases_performed"] = (
             int(self.report["rebases_performed"]) + 1
         )
@@ -1119,8 +1612,14 @@ class Synchronizer:
         )
         result_code = 0
         try:
-            gitdir = self.preflight()
+            # A shallow clone is safe to inspect in every mode.  The real
+            # synchronisation path expands it inside the Git mutex before
+            # comparing or replaying history; dry-run/checkpoint modes never
+            # fetch and therefore remain read-only.
+            gitdir = self.preflight(allow_shallow=True)
             with _mutex(gitdir):
+                if not self.dry_run and not wip_only:
+                    self._ensure_full_history()
                 self.capture_preflight(
                     fetch_remote=not self.dry_run and not wip_only,
                 )

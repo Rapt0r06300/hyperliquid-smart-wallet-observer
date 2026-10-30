@@ -240,6 +240,32 @@ def test_converges_without_losing_either_author(repos):
     assert not git(local, "diff", "--name-only")
 
 
+def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
+    task = Synchronizer(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **_kwargs):
+        commands.append(args)
+        if args[0] == "diff":
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if args[:2] == ("rebase", "--skip"):
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if args[:3] == ("rev-parse", "--absolute-git-dir"):
+            return subprocess.CompletedProcess(
+                args, 0, str(tmp_path / ".git").encode(), b""
+            )
+        raise AssertionError(f"unexpected command: {args!r}")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    empty = subprocess.CompletedProcess(
+        ["git", "rebase"], 1, b"", b"previous commit is empty"
+    )
+
+    assert task._continue_rebase_after_known_ci_conflicts(empty) is True
+    assert task.report["empty_rebase_commits_skipped"] == 1
+    assert ("rebase", "--skip") in commands
+
+
 def test_clean_sync_never_commits_empty(repos):
     local, _, origin = repos
     before = git(origin, "rev-parse", "main")
