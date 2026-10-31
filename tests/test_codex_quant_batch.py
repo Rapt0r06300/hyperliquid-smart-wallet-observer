@@ -9,7 +9,7 @@ def _spec(experiment_id: str) -> dict:
     return {
         "schema_version": 1,
         "experiment_id": experiment_id,
-        "family": "lead_lag",
+        "family": "copy_vault",
         "hypothesis_id": f"H-{experiment_id}",
         "phase": "train_search",
         "base_sha": "a" * 40,
@@ -45,7 +45,7 @@ def test_batch_runs_many_local_experiments_without_model_roundtrips(tmp_path: Pa
     result = run_batch(
         {
             "schema_version": 1,
-            "batch_id": "lead-lag-gauntlet-001",
+            "batch_id": "copy-vault-gauntlet-001",
             "experiments": [_spec("exp-1"), _spec("exp-2"), _spec("exp-3")],
         },
         runtime_root=tmp_path / "codex_experiments",
@@ -59,7 +59,7 @@ def test_batch_runs_many_local_experiments_without_model_roundtrips(tmp_path: Pa
     assert result["local_compute"] is True
     assert result["model_roundtrips_required_inside_batch"] == 0
     assert len(result["results"]) == 3
-    assert result["results"][0]["family"] == "lead_lag"
+    assert result["results"][0]["family"] == "copy_vault"
     assert result["results"][0]["hypothesis_id"] == "H-exp-1"
     assert result["results"][0]["phase"] == "train_search"
     assert result["results"][0]["trials"] == {
