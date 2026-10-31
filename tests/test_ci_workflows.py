@@ -59,6 +59,6 @@ def test_copy_vault_hosted_jobs_ne_telechargent_pas_le_reservoir_brut():
         assert "filter: blob:none" in txt
         assert "sparse-checkout-cone-mode: false" in txt
         assert "!/*/" in txt
-        for required in ("/src/", "/tests/", "/tools/", "/docs/"):
+        for required in ("/.github/", "/src/", "/tests/", "/tools/", "/docs/"):
             assert required in txt
         assert "/datasets/" not in txt
