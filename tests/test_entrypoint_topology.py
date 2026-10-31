@@ -53,7 +53,7 @@ def test_unclassified_root_cmd_fails_closed(tmp_path: Path) -> None:
 
     issues = audit_entrypoint_topology(tmp_path)
 
-    assert any(issue.code == "UNCLASSIFIED_ENTRYPOINT" for issue in issues)
+    assert any(issue.code == "UNEXPECTED_ROOT_ENTRYPOINT" for issue in issues)
 
 
 def test_official_research_rejects_system_python_fallback(tmp_path: Path) -> None:
