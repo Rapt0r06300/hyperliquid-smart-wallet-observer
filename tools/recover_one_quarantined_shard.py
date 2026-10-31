@@ -266,7 +266,11 @@ def hydrate_candidate(
                 temp.unlink(missing_ok=True)
     receipt = {**report,
                "status": "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED",
-               "quarantine_file": str(target.relative_to(root)),
+               # Receipts are portable evidence, not platform-specific paths.
+               # The verifier binds this field using POSIX separators on every
+               # host, so normalize the Windows relative path before hashing
+               # and persisting the receipt.
+               "quarantine_file": str(target.relative_to(root)).replace("\\", "/"),
                "recovered_bytes": logical_bytes}
     receipt_path = shards / (name + ".receipt.json")
     receipt_bytes = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode()
