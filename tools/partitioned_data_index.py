@@ -132,7 +132,6 @@ def load_partitioned_index(
     parts_dir = index_path.parent / "data-index-parts"
     if parts_dir.is_symlink():
         raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
-    index_root = index_path.parent.resolve()
     for i, descriptor in enumerate(parts, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -141,11 +140,7 @@ def load_partitioned_index(
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
         if path != f"data-index-parts/part-{i:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
-        # Do not let a partition directory symlink redirect a supposedly
-        # canonical read outside catalog/, even when the inner file is regular.
         file_path = index_path.parent / path
-        if not file_path.resolve().is_relative_to(index_root):
-            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         if file_path.is_symlink() or not file_path.is_file():
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
         # Read once and derive the size from the exact bytes being hashed and
@@ -235,7 +230,6 @@ def iter_index_rows(
     parts_dir = index_path.parent / "data-index-parts"
     if parts_dir.is_symlink():
         raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
-    index_root = index_path.parent.resolve()
     seen: set[str] = set()
     observed_count = 0
     global_digest = hashlib.sha256(b"[")
@@ -249,10 +243,8 @@ def iter_index_rows(
         if relative != f"data-index-parts/part-{number:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         part_path = index_path.parent / relative
-        resolved_part = part_path.resolve()
         if (
-            not resolved_part.is_relative_to(index_root)
-            or part_path.is_symlink() or not part_path.is_file()
+            part_path.is_symlink() or not part_path.is_file()
         ):
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
         # Read once and derive the size from the exact bytes being hashed and
@@ -371,7 +363,6 @@ def select_index_rows(
     parts_dir = index_path.parent / "data-index-parts"
     if parts_dir.is_symlink():
         raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
-    index_root = index_path.parent.resolve()
     for index, descriptor in enumerate(descriptors, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -382,8 +373,7 @@ def select_index_rows(
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         part_path = index_path.parent / relative
         if (
-            not part_path.resolve().is_relative_to(index_root)
-            or part_path.is_symlink() or not part_path.is_file()
+            part_path.is_symlink() or not part_path.is_file()
         ):
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
         # Read once and derive the size from the exact bytes being hashed and
