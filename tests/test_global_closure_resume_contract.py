@@ -209,6 +209,7 @@ def _write_structural_resume_receipt(root):
         "schema_version": "alina.resumable_campaign.v2",
         "campaign_id": "collect-resume-probe-e6-run123",
         "kind": "market_collection",
+        "code_sha": "a" * 40,
         "creation_phase": "COLLECT",
         "phase_epoch": 6,
         "status": "COMPLETE",
@@ -239,6 +240,8 @@ def _write_structural_resume_receipt(root):
         "segment_a_checkpoint_verified": True,
         "resumed_from_durable_checkpoint": True,
         "campaign_id": state["campaign_id"],
+        "code_sha": state["code_sha"],
+        "exact_sha_verified": True,
         "probe_kind": "market_collection",
         "probe_creation_phase": "COLLECT",
         "phase_epoch_at_proof": 6,
@@ -281,6 +284,25 @@ def test_structural_collect_resume_receipt_is_valid_without_entering_analyze(tmp
     assert valid is True
     assert reason == "CURRENT_RESUME_STRUCTURAL_RECEIPT_VALID"
     assert loaded["workflow_run_id"] == receipt["workflow_run_id"]
+
+
+def test_structural_resume_receipt_requires_exact_sha_claim(tmp_path):
+    _write_structural_resume_receipt(tmp_path)
+    path = tmp_path / "catalog/COLLECT_RESUME_SMOKE_RECEIPT.json"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    receipt["exact_sha_verified"] = False
+    body = dict(receipt)
+    body.pop("receipt_digest")
+    receipt["receipt_digest"] = digest(body)
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    valid, reason, _ = validate_current_resume_receipt(
+        tmp_path,
+        {"phase": "COLLECT", "epoch": 6},
+    )
+
+    assert valid is False
+    assert reason == "CURRENT_RESUME_EXACT_SHA_UNVERIFIED"
 
 
 def test_structural_resume_receipt_fails_when_control_plane_changes(tmp_path):

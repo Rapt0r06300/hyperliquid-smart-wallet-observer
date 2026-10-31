@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tools.collect_resume_probe import build_receipt, segment_a, segment_b
 
 
@@ -82,3 +84,29 @@ def test_collect_resume_receipt_binds_current_control_plane_files(tmp_path: Path
     assert receipt["network_used"] is False
     assert receipt["replay_run"] is False
     assert receipt["backtest_run"] is False
+
+
+def test_collect_resume_receipt_requires_a_git_checkout_for_exact_sha(tmp_path: Path):
+    _write_phase(tmp_path)
+    state = Path("catalog/COLLECT_RESUME_PROBE_STATE.json")
+    segment_a(
+        tmp_path,
+        state,
+        owner_run_id="run-a",
+        workflow_run_id="123",
+        code_sha="a" * 40,
+    )
+    segment_b(tmp_path, state, owner_run_id="run-b")
+
+    with pytest.raises(
+        ValueError, match="exact SHA verification requires a Git checkout"
+    ):
+        build_receipt(
+            tmp_path,
+            state,
+            Path("catalog/COLLECT_RESUME_SMOKE_RECEIPT.json"),
+            workflow_run_id="123",
+            segment_a_job_id="456",
+            segment_b_job_id="789",
+            require_exact_sha=True,
+        )

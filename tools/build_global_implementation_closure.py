@@ -6,10 +6,10 @@ import argparse
 import hashlib
 import json
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 ANALYSIS_KINDS = (
     "replay",
@@ -191,6 +191,8 @@ def validate_current_resume_receipt(
             return False, "CURRENT_RESUME_SAFETY_INVALID", structural
         if structural.get("terminal_campaign_status") != "COMPLETE":
             return False, "CURRENT_RESUME_SEGMENT_NOT_COMPLETE", structural
+        if structural.get("exact_sha_verified") is not True:
+            return False, "CURRENT_RESUME_EXACT_SHA_UNVERIFIED", structural
         if int(structural.get("terminal_completed_units") or 0) != 2:
             return False, "CURRENT_RESUME_TOO_FEW_UNITS", structural
         if int(structural.get("duplicate_completed_unit_count") or 0) != 0:
@@ -223,6 +225,9 @@ def validate_current_resume_receipt(
             return False, "CURRENT_RESUME_CAMPAIGN_NOT_COMPLETE", structural
         if structural.get("campaign_id") != state.get("campaign_id"):
             return False, "CURRENT_RESUME_CAMPAIGN_MISMATCH", structural
+        code_sha = str(structural.get("code_sha") or "")
+        if len(code_sha) != 40 or code_sha != str(state.get("code_sha") or ""):
+            return False, "CURRENT_RESUME_CODE_SHA_MISMATCH", structural
         if structural.get("state_machine_schema") != state.get("schema_version"):
             return False, "CURRENT_RESUME_STATE_MACHINE_MISMATCH", structural
         if structural.get("phase_epoch_at_proof") != state.get("phase_epoch"):

@@ -7,16 +7,16 @@ uses the production resumable-campaign state machine with COLLECT-safe metadata.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from pathlib import Path
 import subprocess
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from hl_observer.control_plane.resumable_campaign import (
-    CampaignManifest,
     SCHEMA_VERSION_V2,
+    CampaignManifest,
     acquire_lease,
     complete_work_unit,
     mark_continuation,
@@ -156,6 +156,8 @@ def segment_b(
 ) -> dict:
     phase = _phase(root)
     manifest = CampaignManifest.from_dict(_load(root / state_path))
+    if (root / ".git").exists() and _git_sha(root) != manifest.code_sha:
+        raise ValueError("probe code SHA changed between resume segments")
     if manifest.creation_phase != "COLLECT" or manifest.phase_epoch != phase.get("epoch"):
         raise ValueError("probe phase/epoch changed before segment B")
     if manifest.status != "CONTINUATION_REQUIRED":
@@ -217,6 +219,7 @@ def build_receipt(
     workflow_run_id: str,
     segment_a_job_id: str,
     segment_b_job_id: str,
+    require_exact_sha: bool = False,
     control_paths: Iterable[str] = CONTROL_PATHS,
 ) -> dict:
     manifest = CampaignManifest.from_dict(_load(root / state_path))
@@ -228,6 +231,17 @@ def build_receipt(
         raise ValueError("probe checkpoint lineage is missing")
     if segment_a_job_id == segment_b_job_id:
         raise ValueError("segment jobs must be distinct")
+
+    exact_sha_verified = False
+    if require_exact_sha:
+        if not (root / ".git").exists():
+            raise ValueError("exact SHA verification requires a Git checkout")
+        current_sha = _git_sha(root)
+        if current_sha != manifest.code_sha:
+            raise ValueError(
+                "receipt checkout SHA does not match the durable campaign code SHA"
+            )
+        exact_sha_verified = True
 
     required_paths = tuple(control_paths)
     control_hashes = {}
@@ -251,6 +265,8 @@ def build_receipt(
         "segment_a_checkpoint_verified": True,
         "resumed_from_durable_checkpoint": True,
         "campaign_id": manifest.campaign_id,
+        "code_sha": manifest.code_sha,
+        "exact_sha_verified": exact_sha_verified,
         "probe_kind": manifest.kind,
         "probe_creation_phase": manifest.creation_phase,
         "phase_epoch_at_proof": manifest.phase_epoch,
@@ -299,6 +315,7 @@ def main() -> int:
     r.add_argument("--workflow-run-id", required=True)
     r.add_argument("--segment-a-job-id", required=True)
     r.add_argument("--segment-b-job-id", required=True)
+    r.add_argument("--require-exact-sha", action="store_true")
 
     args = parser.parse_args()
     root = Path(args.root)
@@ -320,6 +337,7 @@ def main() -> int:
             workflow_run_id=args.workflow_run_id,
             segment_a_job_id=args.segment_a_job_id,
             segment_b_job_id=args.segment_b_job_id,
+            require_exact_sha=args.require_exact_sha,
         )
     print(json.dumps({
         "command": args.command,

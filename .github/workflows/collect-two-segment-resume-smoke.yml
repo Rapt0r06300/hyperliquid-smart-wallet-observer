@@ -150,7 +150,8 @@ jobs:
           PYTHONPATH=src python tools/collect_resume_probe.py receipt \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --segment-a-job-id "$SEGMENT_A_JOB_ID" \
-            --segment-b-job-id "$SEGMENT_B_JOB_ID"
+            --segment-b-job-id "$SEGMENT_B_JOB_ID" \
+            --require-exact-sha
 
       - name: Publish receipt
         run: |
