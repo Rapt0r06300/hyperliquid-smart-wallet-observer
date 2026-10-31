@@ -70,9 +70,9 @@ MERGE_TREE_TIMEOUT_SECONDS = 30
 # conflict, hook, or missing object.  The budget is deliberately capped: a
 # slow or ambiguous replay must return a receipt and require an explicit
 # retry, never keep the launcher blocked indefinitely.
-REBASE_TIMEOUT_SECONDS = 90
-REBASE_MIN_TIMEOUT_SECONDS = 30
-REBASE_SECONDS_PER_COMMIT = 8
+REBASE_TIMEOUT_SECONDS = 60
+REBASE_MIN_TIMEOUT_SECONDS = 20
+REBASE_SECONDS_PER_COMMIT = 4
 REBASE_ABORT_TIMEOUT_SECONDS = 8
 # Keep every network-bound Git operation bounded even when a future call site
 # forgets to pass an explicit timeout.  The launcher is code-only, so a
