@@ -74,6 +74,13 @@ REBASE_TIMEOUT_SECONDS = 60
 REBASE_MIN_TIMEOUT_SECONDS = 20
 REBASE_SECONDS_PER_COMMIT = 4
 REBASE_ABORT_TIMEOUT_SECONDS = 8
+# Git 2.54+ exposes ``git replay``.  It reconstructs a linear history while
+# leaving the index and worktree untouched, so it avoids the per-commit
+# checkout cost that made the classic rebase exceed the launcher budget on
+# this partial clone.  The command is experimental; older Git versions fall
+# back to the existing bounded rebase path.
+GIT_REPLAY_TIMEOUT_SECONDS = 30
+REPLAY_WORKTREE_TIMEOUT_SECONDS = 30
 # Keep every network-bound Git operation bounded even when a future call site
 # forgets to pass an explicit timeout.  The launcher is code-only, so a
 # stalled authentication, SSH host-key prompt, or unreachable remote must
@@ -86,7 +93,7 @@ LOCAL_READ_TIMEOUT_SECONDS = 30
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
-GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v11"
+GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v12"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -194,6 +201,14 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     if sync_engine_paths and "reapply-cherry-picks" in diff_signal:
         return (
             "fix(sync): avoid slow upstream rebase scans "
+            f"({len(normalized)} paths)"
+        )
+
+    if sync_engine_paths and any(marker in diff_signal for marker in (
+        "git replay", "git_replay_index_preserving", "replay_worktree_timeout",
+    )):
+        return (
+            "fix(sync): accelerate linear Git replay "
             f"({len(normalized)} paths)"
         )
 
@@ -440,6 +455,10 @@ def _git_operation_label(args: list[str]) -> str:
         if "--skip" in args:
             return "Ignorer le commit de rebase vide"
         return "Rejouer les commits locaux sans commit de fusion"
+    if verb == "replay":
+        return "Rejouer rapidement les commits sans toucher aux donnees"
+    if verb == "read-tree":
+        return "Mettre a jour le code apres le rejeu Git"
     if verb == "rev-list":
         return "Verifier les commits locaux a rejouer"
     if verb == "hash-object":
@@ -1927,6 +1946,118 @@ class Synchronizer:
             f"{budget}s; rebase annulee proprement."
         ) from timeout
 
+    def _try_git_replay(
+        self, remote: str, local: str, base: str,
+    ) -> bool:
+        """Use Git's index-preserving replay when the installed Git supports it.
+
+        ``git replay`` creates the rebased commit objects without changing the
+        current ref, index, or worktree.  We only publish its printed,
+        old-value-guarded ref update after materialising the new tree with
+        ``read-tree -u``.  If the ref update loses a race, the old tree is
+        restored and the operation fails closed.  Git versions without this
+        experimental command, or a replay with conflicts, return ``False`` so
+        the established bounded rebase/resolver remains the compatibility
+        path.
+        """
+        outcome = self.command(
+            "replay", f"--onto={remote}", "--ref=refs/heads/main",
+            "--ref-action=print", f"{base}..refs/heads/main",
+            check=False,
+            timeout=GIT_REPLAY_TIMEOUT_SECONDS,
+            expected_returncodes=(1, 129),
+        )
+        detail = "\n".join(
+            part.decode("utf-8", errors="replace")
+            for part in (outcome.stdout or b"", outcome.stderr or b"")
+            if part
+        ).strip()
+        if outcome.returncode:
+            lowered = detail.casefold()
+            if outcome.returncode == 1:
+                self.report["replay_fallback"] = "GIT_REPLAY_CONFLICT"
+                return False
+            if outcome.returncode == 129 and any(marker in lowered for marker in (
+                "is not a git command", "unknown command", "unknown subcommand",
+            )):
+                self.report["replay_fallback"] = "GIT_REPLAY_UNAVAILABLE"
+                return False
+            raise SyncBlocked(
+                "git replay a echoue sans resultat exploitable: "
+                + (detail[:900] or f"code {outcome.returncode}")
+            )
+
+        updates = []
+        for line in detail.splitlines():
+            fields = line.split()
+            if (
+                len(fields) == 4
+                and fields[0] == "update"
+                and fields[1] == "refs/heads/main"
+                and re.fullmatch(r"[0-9a-f]{40,64}", fields[2])
+                and re.fullmatch(r"[0-9a-f]{40,64}", fields[3])
+            ):
+                updates.append((fields[2], fields[3]))
+        if len(updates) != 1:
+            raise SyncBlocked(
+                "git replay a repondu sans une mise a jour unique de main; "
+                "aucun ref ni push modifie."
+            )
+        new_tip, expected_old = updates[0]
+        if expected_old != local or new_tip == local:
+            raise SyncBlocked(
+                "git replay a produit une ancienne base inattendue; "
+                "aucun ref ni push modifie."
+            )
+
+        # The replay itself did not touch the worktree.  Recheck the code
+        # inventory immediately before applying the new tracked tree so a
+        # concurrent editor cannot be overwritten silently.
+        self._assert_no_new_code_changes()
+        self.command(
+            "read-tree", "-u", "-m", new_tip,
+            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+        )
+        updated = self.command(
+            "update-ref", "refs/heads/main", new_tip, local,
+            check=False,
+        )
+        if updated.returncode:
+            restored = self.command(
+                "read-tree", "-u", "-m", local,
+                check=False,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+            if restored.returncode:
+                raise SyncBlocked(
+                    "Mise a jour atomique de main refusee et restauration du "
+                    "code impossible; intervention manuelle requise."
+                )
+            raise SyncBlocked(
+                "Mise a jour atomique de main refusee; code local restaure."
+            )
+
+        if self.text("rev-parse", "HEAD") != new_tip:
+            raise SyncBlocked(
+                "HEAD local ne confirme pas le rejeu Git; aucun push lance."
+            )
+        clean = self.command(
+            "diff", "--quiet", "HEAD", check=False,
+            expected_returncodes=(1,),
+        )
+        if clean.returncode:
+            raise SyncBlocked(
+                "Le rejeu Git a laisse une difference tracked inattendue; "
+                "aucun push lance."
+            )
+        self.report["replay_engine"] = "GIT_REPLAY_INDEX_PRESERVING"
+        self.report["local_rebased_onto"] = remote
+        self.say(
+            "[INTEGRATION RAPIDE] git replay a rejoue les commits sans "
+            "rebase checkout; code local aligne."
+        )
+        return True
+
     def _run_rebase(
         self, remote: str, *, timeout_seconds: int | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
@@ -2050,6 +2181,7 @@ class Synchronizer:
             f"{replay_count_value} commit(s) local(aux) sur GitHub main; "
             f"budget rebase={rebase_budget}s; aucun commit de fusion."
         )
+        base = self.text("merge-base", local, remote)
         predicted = self._predict_merge_conflicts(remote, local)
         unsupported = [
             path for path in predicted
@@ -2063,6 +2195,11 @@ class Synchronizer:
             )
         rebase_resolved = False
         with self._preserve_local_protected_index():
+            if not predicted and self._try_git_replay(remote, local, base):
+                self.report["rebases_performed"] = (
+                    int(self.report["rebases_performed"]) + 1
+                )
+                return
             outcome = self._run_rebase(
                 remote, timeout_seconds=rebase_budget,
             )
