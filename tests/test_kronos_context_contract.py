@@ -71,6 +71,29 @@ def test_context_receipt_requires_exact_repository_commit() -> None:
     assert receipt["missing_evidence"] == ["REPOSITORY_COMMIT_INVALID"]
 
 
+def test_context_receipt_rejects_invalid_provenance_types_and_cutoff() -> None:
+    metadata = _metadata()
+    metadata["model"] = 7
+    metadata["dependencies"] = ["numpy"]
+    metadata["training_cutoff"] = "2026-01-01"
+
+    receipt = build_context_receipt(metadata)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == [
+        "DEPENDENCIES_INVALID",
+        "MODEL_INVALID",
+        "TRAINING_CUTOFF_INVALID",
+    ]
+
+
+def test_context_receipt_rejects_invalid_source_files_container() -> None:
+    receipt = build_context_receipt(_metadata(), source_files=[])  # type: ignore[arg-type]
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["SOURCE_FILES_INVALID"]
+
+
 def test_context_receipt_fails_closed_on_noncanonical_metadata() -> None:
     metadata = _metadata()
     metadata["parameters"] = {"temperature": float("nan")}

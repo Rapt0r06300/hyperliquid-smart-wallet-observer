@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,16 @@ _REQUIRED_PROVENANCE = (
     "training_cutoff",
     "parameters",
 )
+_TEXT_PROVENANCE = (
+    "repository",
+    "article",
+    "model",
+    "model_revision",
+    "tokenizer_revision",
+    "license",
+    "training_cutoff",
+)
+_MAPPING_PROVENANCE = ("dependencies", "parameters")
 
 
 def _digest(value: object) -> str:
@@ -72,6 +83,28 @@ def _is_sha1(value: object) -> bool:
     )
 
 
+def _is_empty_provenance(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value
+    if isinstance(value, (Mapping, Sequence)) and not isinstance(
+        value, (bytes, bytearray)
+    ):
+        return not value
+    return False
+
+
+def _is_utc_cutoff(value: object) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
 def build_context_receipt(
     metadata: Mapping[str, Any],
     *,
@@ -88,7 +121,7 @@ def build_context_receipt(
     provenance: dict[str, Any] = {}
     for key in _REQUIRED_PROVENANCE:
         value = metadata_map.get(key)
-        if value in (None, "", {}, []):
+        if _is_empty_provenance(value):
             missing.append(key)
             provenance[key] = None
         elif not _is_canonical_json(value):
@@ -97,6 +130,30 @@ def build_context_receipt(
         else:
             provenance[key] = value
 
+    for key in _TEXT_PROVENANCE:
+        key_prefix = f"{key.upper()}_"
+        if (
+            key not in missing
+            and not any(reason.startswith(key_prefix) for reason in missing)
+            and not isinstance(provenance.get(key), str)
+        ):
+            missing.append(f"{key.upper()}_INVALID")
+    for key in _MAPPING_PROVENANCE:
+        key_prefix = f"{key.upper()}_"
+        if (
+            key not in missing
+            and not any(reason.startswith(key_prefix) for reason in missing)
+            and not isinstance(provenance.get(key), Mapping)
+        ):
+            missing.append(f"{key.upper()}_INVALID")
+    if (
+        "training_cutoff" not in missing
+        and not any(
+            reason.startswith("TRAINING_CUTOFF_") for reason in missing
+        )
+        and not _is_utc_cutoff(provenance.get("training_cutoff"))
+    ):
+        missing.append("TRAINING_CUTOFF_INVALID")
     for key in ("model_sha256", "tokenizer_sha256"):
         if key not in missing and not _is_sha256(provenance.get(key)):
             missing.append(f"{key.upper()}_INVALID")
@@ -106,7 +163,14 @@ def build_context_receipt(
     ):
         missing.append("REPOSITORY_COMMIT_INVALID")
     file_hashes: dict[str, str] = {}
-    for name, raw_path in (source_files or {}).items():
+    if source_files is None:
+        source_items = ()
+    elif isinstance(source_files, Mapping):
+        source_items = source_files.items()
+    else:
+        missing.append("SOURCE_FILES_INVALID")
+        source_items = ()
+    for name, raw_path in source_items:
         try:
             path = Path(raw_path)
             if not path.is_file():
