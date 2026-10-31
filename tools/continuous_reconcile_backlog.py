@@ -95,7 +95,8 @@ def pending(inventory: str, index: dict, quarantine: set[str]) -> list[str]:
         tag = row.get("release_tag")
         if tag and (row.get("release_repository") or index.get("release_repository_default")) == REPO:
             known.add(str(row.get("run_manifest_release_tag") or aliases.get(tag) or tag))
-    found, result = set(), []
+    found: dict[str, str] = {}
+    result = []
     for line in inventory.splitlines():
         parts = line.split("\t")
         if len(parts) != 2:
@@ -103,9 +104,13 @@ def pending(inventory: str, index: dict, quarantine: set[str]) -> list[str]:
         tag, has_manifest = parts
         if not TAG.fullmatch(tag) or has_manifest not in ("true", "false"):
             raise ValueError("invalid release identity")
-        if tag not in found and has_manifest == "true" and tag.startswith(PREFIX) and tag not in known and tag not in quarantine:
+        previous = found.get(tag)
+        if previous is not None and previous != has_manifest:
+            raise ValueError("conflicting release inventory")
+        if previous is None:
+            found[tag] = has_manifest
+        if previous is None and has_manifest == "true" and tag.startswith(PREFIX) and tag not in known and tag not in quarantine:
             result.append(tag)
-        found.add(tag)
     return result
 
 
