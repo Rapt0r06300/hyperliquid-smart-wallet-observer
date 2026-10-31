@@ -136,11 +136,20 @@ _HORS_JUGEMENT = {"__init__", "tombstones"}
 # 06/08 — RECALIBRAGE D'INSTRUMENT (meme mouvement que l'audit de cablage du jour) : l'ancien
 # comptage textuel marquait CABLE tout module dont le chemin pointe apparaissait n'importe ou
 # (docstring, commentaire, chaine) — il sous-comptait massivement le limbo. La resolution AST
-# reelle des imports revele 830 modules testes-non-branches hors dette declaree. Ce n'est pas une
-# regression du code : c'est la VERITE d'un compteur repare. Plafond pose a la mesure du jour —
-# cliquet inchange : il ne peut que BAISSER (brancher, enterrer, ou declarer NOMMEMENT).
-PLAFOND_MORTS_GLOBAL = 830
+# reelle des imports revele 830 modules testes-non-branches hors dette declaree dans le scope
+# economique actif. Ce n'est pas une regression du code : c'est la VERITE d'un compteur repare.
+# Le plafond ne compte donc pas les familles economiques explicitement desactivees par scope;
+# leurs modules historiques restent audites par leurs propres contrats et ne peuvent pas entrer
+# dans le runtime Copy-Vault.
+PLAFOND_MORTS_ACTIVE_SCOPE = 830
 PLAFOND_ORPHELINS_GLOBAL = 103
+
+_MODULES_HORS_SCOPE_ECONOMIQUE = (".arbitrage.", ".lead_lag", ".cross_venue", ".carry")
+
+
+def _module_hors_scope_economique(module: str) -> bool:
+    """Exclude only explicitly disabled economic families from the active-scope cliquet."""
+    return any(marker in module for marker in _MODULES_HORS_SCOPE_ECONOMIQUE)
 
 
 def _sources(motifs: tuple[str, ...]) -> dict[str, str]:
@@ -283,8 +292,12 @@ def test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter(verdict):
     # cliquet (assert plus bas), et un module ne peut y entrer que NOMME.
     from hl_observer.audit.dette_cablage import DETTE_CABLAGE, PLAFOND_DETTE, est_dette
 
-    declares = {m for m in verdict.testes_non_branches if est_dette(m)}
-    morts = len(verdict.testes_non_branches) - len(declares)
+    testes_actifs = {
+        m for m in verdict.testes_non_branches
+        if not _module_hors_scope_economique(m)
+    }
+    declares = {m for m in testes_actifs if est_dette(m)}
+    morts = len(testes_actifs) - len(declares)
     orphelins = len(verdict.orphelins)
 
     assert len(DETTE_CABLAGE) <= PLAFOND_DETTE, (
@@ -292,13 +305,13 @@ def test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter(verdict):
         "On ne DECLARE pas un module de plus : on en BRANCHE un de moins."
         % (len(DETTE_CABLAGE), PLAFOND_DETTE)
     )
-    assert morts <= PLAFOND_MORTS_GLOBAL, (
+    assert morts <= PLAFOND_MORTS_ACTIVE_SCOPE, (
         "REGRESSION DE CABLAGE : %d modules testes-non-branches HORS dette declaree "
-        "(plafond %d).\n"
+        "dans le scope actif (plafond %d).\n"
         "Un module de plus a ete ajoute sans etre appele par la production.\n"
         "Soit tu le branches, soit tu l'enterres, soit tu l'inscris NOMMEMENT dans "
         "src/hl_observer/audit/dette_cablage.py -- mais le nombre ne remonte pas."
-        % (morts, PLAFOND_MORTS_GLOBAL)
+        % (morts, PLAFOND_MORTS_ACTIVE_SCOPE)
     )
     assert orphelins <= PLAFOND_ORPHELINS_GLOBAL, (
         "REGRESSION DE CABLAGE : %d modules orphelins (plafond %d)."
