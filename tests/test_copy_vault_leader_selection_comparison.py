@@ -105,3 +105,16 @@ def test_incomplete_canonical_replay_receipt_is_unmeasurable() -> None:
     assert result["comparison_status"] == "UNMEASURABLE"
     assert "CHALLENGER_REPLAY_NOT_COMPLETED" in result["context_mismatch_reasons"]
     assert result["delta_usd_per_active_day"] is None
+
+
+def test_invalid_dataset_digest_fails_closed_before_comparison() -> None:
+    baseline = _run("1.25")
+    baseline["comparison_context"]["dataset"]["source_catalog_sha256"] = "not-a-sha"
+
+    result = compare_baseline_challenger(baseline, _run("2.75"))
+
+    assert result["comparison_status"] == "UNMEASURABLE"
+    assert "BASELINE_DATASET_SHA_INVALID:source_catalog_sha256" in result[
+        "context_mismatch_reasons"
+    ]
+    assert result["delta_usd_per_active_day"] is None
