@@ -227,7 +227,7 @@ def test_archiver_sans_recap_ne_leve_pas(tmp_path):
 
 def test_les_logs_sont_conserves_mais_bornes(tmp_path):
     d = L._chemin_logs(tmp_path)
-    d.mkdir()
+    d.mkdir(parents=True)
     for i in range(40):
         p = d / ("tout-tester-2026072%02d.log" % (i % 10))
         p.write_text(str(i), encoding="utf-8")
