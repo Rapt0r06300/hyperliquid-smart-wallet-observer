@@ -363,6 +363,10 @@ def select_index_rows(
     global_digest = hashlib.sha256()
     global_digest.update(b"[")
     has_global_rows = False
+    parts_dir = index_path.parent / "data-index-parts"
+    if parts_dir.is_symlink():
+        raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
+    index_root = index_path.parent.resolve()
     for index, descriptor in enumerate(descriptors, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -371,22 +375,23 @@ def select_index_rows(
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
         if relative != f"data-index-parts/part-{index:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
-        parts_dir = index_path.parent / "data-index-parts"
-        if parts_dir.is_symlink():
-            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         part_path = index_path.parent / relative
         if (
-            not part_path.resolve().is_relative_to(index_path.parent.resolve())
+            not part_path.resolve().is_relative_to(index_root)
             or part_path.is_symlink() or not part_path.is_file()
         ):
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
-        size = part_path.stat().st_size
+        # Read once and derive the size from the exact bytes being hashed and
+        # decoded.  This removes a filesystem stat per partition without
+        # weakening the size/hash/parity checks (and avoids a TOCTOU gap
+        # between stat() and read_bytes()).
+        data = part_path.read_bytes()
+        size = len(data)
         if (
             isinstance(descriptor.get("bytes"), bool)
             or descriptor.get("bytes") != size or size > limit
         ):
             raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
-        data = part_path.read_bytes()
         if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
             raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
         if not data.startswith(b"[") or not data.endswith(b"]\n"):
