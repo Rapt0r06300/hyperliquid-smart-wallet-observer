@@ -422,7 +422,7 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'resume_attempt:' in text
     assert 'default: "0"' in text
     assert "historical-retry:" in text
-    assert "needs.historical.result == 'failure'" in text
+    assert "needs.historical.result == 'failure' || needs.historical.result == 'cancelled'" in text
     assert "fromJSON(inputs.resume_attempt || '0') < 2" in text
     assert "gh workflow run reconcile-v2-catalog.yml" in text
     assert 'next=$((current + 1))' in text
