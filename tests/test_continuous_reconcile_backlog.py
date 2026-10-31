@@ -41,6 +41,15 @@ def test_malformed_inventory_rejected() -> None:
         pending("../attack\ttrue", {"shards": []}, set())
 
 
+def test_conflicting_duplicate_inventory_is_rejected() -> None:
+    with pytest.raises(ValueError, match="conflicting release inventory"):
+        pending(
+            "data-v2-next\tfalse\ndata-v2-next\ttrue\n",
+            {"shards": []},
+            set(),
+        )
+
+
 def test_git_pack_failure_not_confused_with_concurrent_main_update() -> None:
     assert PACK.search("remote unpack failed: index-pack failed")
     assert PACK.search("tree too large")
