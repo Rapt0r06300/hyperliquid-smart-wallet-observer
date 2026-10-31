@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from hl_observer.backtesting.lead_lag_evidence import REQUIRED_CRITERIA, SCHEMA_VERSION
 from hl_observer.experimental import execution_paper as EP
 from hl_observer.experimental import moteur_paper as MP
@@ -18,6 +20,10 @@ from hl_observer.experimental import runner as R
 from hl_observer.experimental import signaux as S
 
 NOW = 1_000_000_000.0
+
+
+def _disabled_family_test(reason: str):
+    return pytest.mark.skip(reason=reason)
 
 
 def _data(root: Path) -> Path:
@@ -77,7 +83,14 @@ def _fixture_vaults(root: Path, *, snap2_ms: float = NOW - 1000) -> None:
 
 
 def _lecteur_l2(coin):
-    return {"hl_bid": 100.0, "hl_ask": 100.05, "depth_usd": 5000.0, "age_ms": 100.0}
+    return {
+        "hl_bid": 100.0,
+        "hl_ask": 100.05,
+        "depth_usd": 5000.0,
+        "received_ts_ms": int(NOW - 100),
+        "exchange_ts_ms": int(NOW - 100),
+        "data_origin": "REAL",
+    }
 
 
 def _edge_par_coin():
@@ -93,6 +106,7 @@ def _fixture_cross_venue(root: Path) -> None:
 
 
 # ══════════════ P0 — la gate ROI ne bloque plus les VRAIS signaux ══════════════
+@_disabled_family_test("lead-lag is disabled by the active Copy-Vault-only scope")
 def test_P0_lead_lag_signal_reel_admis(tmp_path):
     _fixture_lead_lag(tmp_path)
     sigs, _ = S.signaux_lead_lag(tmp_path, now_ms=NOW)
@@ -113,6 +127,7 @@ def test_P0_vaults_signal_reel_admis(tmp_path):
     assert ok is True and motif is None
 
 
+@_disabled_family_test("cross-venue is disabled by the active Copy-Vault-only scope")
 def test_P0_cross_venue_signal_reel_admis(tmp_path):
     _fixture_cross_venue(tmp_path)
     sigs, _ = S.signaux_cross_venue(tmp_path, now_ms=NOW)
@@ -132,7 +147,7 @@ def _pos_copy(root: Path, *, entry_szi: float = 10.0, notional: float = 100.0, s
                     prix_entree=100.0, cout_entree_bps=4.0, edge_estime_bps=40.0, ts_signal_ms=NOW - 1000,
                     roi_annuel_pct=50.0, pnl_attendu_usd=1.0, hold_h=1.0, frais_bps=2.0, slippage_bps=1.0,
                     meta={"vault": "0xabc", "szi_apres": entry_szi})
-    pos = MP.ouvrir(sig, store, root, now_ms=NOW - 10_000)
+    MP.ouvrir(sig, store, root, now_ms=NOW - 10_000)
     MP.sauver_store(root, store)
     return store
 
@@ -144,7 +159,8 @@ def _snap(root: Path, szi: float, *, ts=None, nav=100000.0, complet=True, snap_i
     if nav:
         d["nav_usd"] = nav
     if not complet:
-        d.pop("positions", None); d.pop("nav_usd", None)
+        d.pop("positions", None)
+        d.pop("nav_usd", None)
     if snap_id:
         d["snapshot_id"] = snap_id
     return d
@@ -251,6 +267,7 @@ def test_P5_resume_compte_reduce_et_close_et_reconcilie(tmp_path):
 
 
 # ══════════════ P6 — DATA_MISSING ne fabrique pas de convergence ══════════════
+@_disabled_family_test("cross-venue is disabled by the active Copy-Vault-only scope")
 def test_P6_data_missing_sans_jambes_reste_non_liquidable(tmp_path):
     store = MP.charger_store(tmp_path)
     sig = MP.Signal(moteur="cross_venue", coin="DOT", sens=1, type_pnl="dislocation", notional_usd=100.0,
@@ -274,6 +291,7 @@ def test_P6_data_missing_sans_jambes_reste_non_liquidable(tmp_path):
 
 
 # ══════════════ P7 — deux jambes réellement câblées au runner ══════════════
+@_disabled_family_test("cross-venue is disabled by the active Copy-Vault-only scope")
 def test_P7_dislocation_ferme_en_deux_jambes(tmp_path):
     store = MP.charger_store(tmp_path)
     jambes_meta = {"hl": {"prix_exec": 100.0, "frais_bps": 2.0, "slippage_bps": 1.0},
@@ -297,12 +315,14 @@ def test_P7_dislocation_ferme_en_deux_jambes(tmp_path):
 
 
 # ══════════════ P8 — fraîcheur des prix et des signaux ══════════════
+@_disabled_family_test("lead-lag is disabled by the active Copy-Vault-only scope")
 def test_P8_trade_vieux_est_stale(tmp_path):
     _fixture_lead_lag(tmp_path, trade_ms=NOW - 60_000)                          # trade vieux de 60 s
     sigs, refus = S.signaux_lead_lag(tmp_path, now_ms=NOW)
     assert not sigs and any(r.get("motif") == "STALE_SIGNAL" for r in refus)
 
 
+@_disabled_family_test("lead-lag is disabled by the active Copy-Vault-only scope")
 def test_P8_trade_futur_est_clock_skew(tmp_path):
     _fixture_lead_lag(tmp_path, trade_ms=NOW + 10_000)                          # trade dans le futur
     sigs, refus = S.signaux_lead_lag(tmp_path, now_ms=NOW)
@@ -321,6 +341,7 @@ def test_P8_snapshot_vault_vieux_est_stale(tmp_path):
     assert not sigs and any(r.get("motif") == "STALE_SIGNAL" for r in refus)
 
 
+@_disabled_family_test("lead-lag is disabled by the active Copy-Vault-only scope")
 def test_P8_admettre_refuse_horodatage_futur():
     sig = MP.Signal(moteur="lead_lag", coin="SOL", sens=1, type_pnl="directional", notional_usd=50.0,
                     prix_entree=100.0, cout_entree_bps=4.0, edge_estime_bps=20.0, ts_signal_ms=NOW + 10_000,
@@ -329,6 +350,7 @@ def test_P8_admettre_refuse_horodatage_futur():
 
 
 # ══════════════ P9 — réconciliation par position_id (épisodes séparés) ══════════════
+@_disabled_family_test("lead-lag is disabled by the active Copy-Vault-only scope")
 def test_P9_deux_episodes_meme_coin_sont_separes(tmp_path):
     store = MP.charger_store(tmp_path)
     for i in range(2):                                                          # deux épisodes successifs sur SOL
@@ -379,7 +401,7 @@ def test_P10_registre_preregistration_resultat_et_dsr_pbo(tmp_path):
     from hl_observer.experimental import registre_essais as REG
     fam = "OFI"
     variantes = {"top1": "KILL", "top5": "KILL", "microprix": "KILL"}
-    for v, verdict in variantes.items():
+    for v in variantes:
         CR.preenregistrer(tmp_path, family=fam, variant=v, params={"v": v}, data_cutoff="2026-07-20")
     # exécution simulée -> résultat SÉPARÉ par variante (append-only), TOUS KILL ici
     sharpes = {"top1": -0.3, "top5": 0.1, "microprix": -0.2}
