@@ -165,6 +165,8 @@ def validate_causal_context_rows(
         if not isinstance(timestamp, int) or isinstance(timestamp, bool):
             reasons.append("TIMESTAMP_INVALID")
             continue
+        if timestamp <= 0:
+            reasons.append("TIMESTAMP_NON_POSITIVE")
         if first_ts is None:
             first_ts = timestamp
         last_ts = timestamp
@@ -257,12 +259,43 @@ def preregister_comparison(
 ) -> dict[str, Any]:
     """Create a deterministic comparison plan without evaluating economics."""
     reasons: list[str] = []
-    if not train_window:
+    if not isinstance(train_window, Mapping) or not train_window:
         reasons.append("TRAIN_WINDOW_MISSING")
-    if len(tuple(conditions)) < 2:
+    else:
+        start_ms = train_window.get("start_ms")
+        end_ms = train_window.get("end_ms")
+        if (
+            type(start_ms) is not int
+            or type(end_ms) is not int
+            or start_ms < 0
+            or end_ms <= start_ms
+        ):
+            reasons.append("TRAIN_WINDOW_INVALID")
+    condition_values = (
+        list(conditions)
+        if isinstance(conditions, Sequence)
+        and not isinstance(conditions, (str, bytes, bytearray))
+        else []
+    )
+    if len(condition_values) < 2:
         reasons.append("COMPARISON_CONDITIONS_INSUFFICIENT")
-    if not tuple(baselines):
+    if any(not isinstance(value, str) or not value.strip() for value in condition_values):
+        reasons.append("COMPARISON_CONDITION_INVALID")
+    if (
+        all(isinstance(value, str) for value in condition_values)
+        and len(set(condition_values)) != len(condition_values)
+    ):
+        reasons.append("COMPARISON_CONDITIONS_DUPLICATE")
+    baseline_values = (
+        list(baselines)
+        if isinstance(baselines, Sequence)
+        and not isinstance(baselines, (str, bytes, bytearray))
+        else []
+    )
+    if not baseline_values:
         reasons.append("BASELINE_MISSING")
+    if any(not isinstance(value, str) or not value.strip() for value in baseline_values):
+        reasons.append("BASELINE_INVALID")
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
         reasons.append("SEED_INVALID")
     if oos_tuning_allowed:
@@ -274,8 +307,8 @@ def preregister_comparison(
         "status": "PREREGISTERED" if not reasons else "UNMEASURABLE",
         "reasons": reasons,
         "train_window": dict(train_window),
-        "conditions": list(conditions),
-        "baselines": list(baselines),
+        "conditions": condition_values,
+        "baselines": baseline_values,
         "seed": seed,
         "oos_tuning_allowed": False,
         "forward_tuning_allowed": False,
