@@ -129,6 +129,10 @@ def load_partitioned_index(
     global_digest = hashlib.sha256()
     global_digest.update(b"[")
     has_global_rows = False
+    parts_dir = index_path.parent / "data-index-parts"
+    if parts_dir.is_symlink():
+        raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
+    index_root = index_path.parent.resolve()
     for i, descriptor in enumerate(parts, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -139,19 +143,20 @@ def load_partitioned_index(
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         # Do not let a partition directory symlink redirect a supposedly
         # canonical read outside catalog/, even when the inner file is regular.
-        parts_dir = index_path.parent / "data-index-parts"
-        if parts_dir.is_symlink():
-            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         file_path = index_path.parent / path
-        if not file_path.resolve().is_relative_to(index_path.parent.resolve()):
+        if not file_path.resolve().is_relative_to(index_root):
             raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         if file_path.is_symlink() or not file_path.is_file():
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
-        size = file_path.stat().st_size
+        # Read once and derive the size from the exact bytes being hashed and
+        # decoded.  This removes a filesystem stat per partition without
+        # weakening the size/hash/parity checks (and avoids a TOCTOU gap
+        # between stat() and read_bytes()).
+        data = file_path.read_bytes()
+        size = len(data)
         if (isinstance(descriptor.get("bytes"), bool)
                 or descriptor.get("bytes") != size or size > limit):
             raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
-        data = file_path.read_bytes()
         if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
             raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
         part_rows = _validate_rows(json.loads(data))
