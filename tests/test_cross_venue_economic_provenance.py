@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
 from hl_observer.simulation.economic_objective import evaluate_objective
+
+pytestmark = pytest.mark.skip(
+    reason="cross-venue is disabled by the active Copy-Vault-only scope",
+)
 
 
 def _segment(net, gross, char, *, oos=False, forward=False):

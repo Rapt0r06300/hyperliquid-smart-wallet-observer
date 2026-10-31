@@ -25,14 +25,9 @@ def test_cross_venue_open_records_per_leg_and_gross_exposure(tmp_path: Path) -> 
     store = {"mode": MP.MODE, "ouvertes": {}}
     sig = _signal("cross_venue", notional=50.0)
     ok, reason = MP.admettre(sig, store, now_ms=1_000_100.0)
-    assert ok is True and reason is None
-    pos = MP.ouvrir(sig, store, tmp_path, now_ms=1_000_100.0)
-    assert pos["per_leg_notional_usd"] == 50.0
-    assert pos["gross_exposure_usd"] == 100.0
-    # `ouvrir` mutates the transaction-local store; the runner persists once after the tick.
-    # `resume(root)` is intentionally disk-based, so reproduce the real commit boundary here.
-    MP.sauver_store(tmp_path, store)
-    assert MP.resume(tmp_path)["gross_exposure_open_usd"] == 100.0
+    assert ok is False
+    assert reason == "STRATEGY_SCOPE_BLOCKED_CROSS_VENUE_DISLOCATION"
+    assert store["ouvertes"] == {}
 
 
 def test_cross_venue_incoming_budget_counts_both_legs() -> None:
@@ -45,7 +40,7 @@ def test_cross_venue_incoming_budget_counts_both_legs() -> None:
     sig = _signal("cross_venue", notional=50.0)
     ok, reason = MP.admettre(sig, store, now_ms=1_000_100.0)
     assert ok is False
-    assert reason == "BUDGET_GLOBAL_DEPASSE"
+    assert reason == "STRATEGY_SCOPE_BLOCKED_CROSS_VENUE_DISLOCATION"
 
 
 def test_resume_separates_current_session_from_lifetime(tmp_path: Path, monkeypatch) -> None:
@@ -76,7 +71,7 @@ def test_new_ledger_rows_always_carry_scope(tmp_path: Path) -> None:
     sessions.mkdir(parents=True)
     (sessions / "COURANTE.json").write_text(json.dumps({"run_id": "run-42"}), encoding="utf-8")
     store = {"mode": MP.MODE, "ouvertes": {}}
-    MP.ouvrir(_signal("lead_lag", notional=50.0), store, tmp_path, now_ms=1_000_100.0)
+    MP.ouvrir(_signal("copy_vault", notional=50.0), store, tmp_path, now_ms=1_000_100.0)
     row = json.loads((tmp_path / MP.LEDGER_RELPATH).read_text(encoding="utf-8").splitlines()[0])
     assert row["session_id"] == "run-42"
     assert row["lane"] == "EXP"
