@@ -9,6 +9,7 @@ la boucle WS autour de ces fonctions. Lecture seule. 0 ordre, 0 clé, 0 signatur
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from hl_observer.realtime.event_identity import canonicalize_frame
@@ -20,9 +21,19 @@ def positions_depuis_snapshot(snap: dict) -> dict[str, dict]:
     """{coin: {szi, entryPx}} depuis un snapshot vault (seed de l'état live)."""
     out: dict[str, dict] = {}
     for p in (snap.get("positions") or []):
+        if not isinstance(p, dict):
+            continue
         c = str(p.get("coin") or "").upper()
-        if c:
-            out[c] = {"szi": float(p.get("szi") or 0.0), "entryPx": float(p.get("entryPx") or 0.0)}
+        if not c:
+            continue
+        try:
+            szi = float(p.get("szi") or 0.0)
+            entry_px = float(p.get("entryPx") or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(szi) or not math.isfinite(entry_px):
+            continue
+        out[c] = {"szi": szi, "entryPx": entry_px}
     return out
 
 
@@ -45,12 +56,22 @@ def appliquer_fill(positions: dict[str, dict], fill: dict) -> dict[str, dict]:
         px = float(fill.get("px") or 0.0)
     except (TypeError, ValueError, OverflowError):
         return positions
-    if sz <= _EPS or signe not in (-1, 1):
+    if (
+        not math.isfinite(sz)
+        or not math.isfinite(px)
+        or sz <= _EPS
+        or signe not in (-1, 1)
+    ):
         return positions
 
     cur = positions.setdefault(c, {"szi": 0.0, "entryPx": px})
-    avant = float(cur.get("szi") or 0.0)
-    entry_avant = float(cur.get("entryPx") or 0.0)
+    try:
+        avant = float(cur.get("szi") or 0.0)
+        entry_avant = float(cur.get("entryPx") or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return positions
+    if not math.isfinite(avant) or not math.isfinite(entry_avant):
+        return positions
     delta = signe * sz
     apres = round(avant + delta, 10)
 
@@ -79,9 +100,24 @@ def appliquer_fill(positions: dict[str, dict], fill: dict) -> dict[str, dict]:
 def snapshot_depuis_positions(vault: str, positions: dict[str, dict], *, nav_usd: float, ts_ms: int) -> dict:
     """Reconstruit un snapshot vault FRAIS (même format que collecter_vaults) depuis l'état live. On garde
     le NAV du dernier snapshot connu (le NAV bouge lentement ; l'important ici c'est le szi live)."""
-    pos = [{"coin": c, "szi": round(v["szi"], 8), "entryPx": v["entryPx"]}
-           for c, v in positions.items() if abs(v["szi"]) > _EPS]
-    return {"vault": vault, "ts_ms": int(ts_ms), "nav_usd": float(nav_usd), "positions": pos,
+    try:
+        nav = float(nav_usd)
+        timestamp = int(ts_ms)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("invalid live snapshot clock or NAV") from exc
+    if not math.isfinite(nav) or timestamp <= 0:
+        raise ValueError("invalid live snapshot clock or NAV")
+
+    pos = []
+    for c, value in positions.items():
+        try:
+            szi = float(value["szi"])
+            entry_px = float(value["entryPx"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(szi) and math.isfinite(entry_px) and abs(szi) > _EPS:
+            pos.append({"coin": c, "szi": round(szi, 8), "entryPx": entry_px})
+    return {"vault": vault, "ts_ms": timestamp, "nav_usd": nav, "positions": pos,
             "n_positions": len(pos), "source": "userfills_live", "read_only": True, "real_execution": False}
 
 
@@ -138,7 +174,9 @@ def parser_message_userfills(
             px = float(f["px"])
             sz = abs(float(f["sz"]))
             ts = int(f["time"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if not coin or not math.isfinite(px) or not math.isfinite(sz) or ts <= 0:
             continue
         side = str(f.get("side") or "").upper()
         try:

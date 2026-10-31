@@ -41,6 +41,41 @@ def test_appliquer_fill_short_add_est_aussi_pondere():
     assert pos["ETH"]["entryPx"] == pytest.approx((4 * 100 + 6 * 90) / 10)
 
 
+def test_appliquer_fill_refuse_les_valeurs_non_finies_sans_mutation():
+    pos = {"ETH": {"szi": 2.0, "entryPx": 100.0}}
+    before = {coin: values.copy() for coin, values in pos.items()}
+
+    UL.appliquer_fill(pos, {"coin": "ETH", "px": "nan", "sz": 1.0, "signe": 1})
+    UL.appliquer_fill(pos, {"coin": "ETH", "px": 100.0, "sz": "inf", "signe": 1})
+
+    assert pos == before
+
+
+def test_snapshot_et_parser_ignorent_les_valeurs_non_finies():
+    snap = UL.positions_depuis_snapshot(
+        {"positions": [
+            {"coin": "BAD-SNAPSHOT", "szi": "nan", "entryPx": 10},
+            {"coin": "GOOD", "szi": 2, "entryPx": 10},
+        ]},
+    )
+    assert set(snap) == {"GOOD"}
+
+    msg = {"data": {"fills": [
+        {"coin": "BAD", "px": "inf", "sz": 1, "side": "B", "time": 1000},
+        {"coin": "GOOD", "px": 10, "sz": 1, "side": "B", "time": 1000},
+    ]}}
+    fills = UL.parser_message_userfills(msg)
+    assert [fill["coin"] for fill in fills] == ["GOOD"]
+
+
+@pytest.mark.parametrize("kwargs", [{"nav_usd": "nan"}, {"ts_ms": 0}])
+def test_snapshot_refuse_un_horodatage_ou_nav_non_valide(kwargs):
+    values = {"nav_usd": 100.0, "ts_ms": 1234}
+    values.update(kwargs)
+    with pytest.raises(ValueError, match="invalid live snapshot"):
+        UL.snapshot_depuis_positions("0xA", {}, **values)
+
+
 def test_snapshot_depuis_positions_format():
     pos = {"HYPE": {"szi": 15.0, "entryPx": 21.0}, "VIDE": {"szi": 0.0, "entryPx": 1.0}}
     snap = UL.snapshot_depuis_positions("0xA", pos, nav_usd=100_000, ts_ms=1234)
