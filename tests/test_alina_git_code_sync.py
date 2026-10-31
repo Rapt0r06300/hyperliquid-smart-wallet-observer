@@ -623,7 +623,10 @@ def test_rebase_disables_interactive_editors_and_restores_environment(
 
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
-    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 300
+    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120
+    assert sync_module._rebase_timeout_budget(1) == 30
+    assert sync_module._rebase_timeout_budget(6) == 60
+    assert sync_module._rebase_timeout_budget(100) == 90
 
 
 def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch):
@@ -790,6 +793,7 @@ def test_dry_run_does_not_mutate_git(repos):
     remote_head = git(origin, "rev-parse", "main")
     rc, receipt = run_sync(local, dry=True)
     assert rc == 0 and receipt["status"] == "DRY_RUN_ONLY"
+    assert receipt["proposed_commit_message"] == "chore(runtime): update local"
     assert git(local, "rev-parse", "HEAD") == local_head
     assert git(origin, "rev-parse", "main") == remote_head
     assert git(local, "diff", "--cached", "--name-only") == ""
@@ -985,7 +989,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v8' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v9' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source

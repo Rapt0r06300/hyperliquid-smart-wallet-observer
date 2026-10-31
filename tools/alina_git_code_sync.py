@@ -65,17 +65,21 @@ HISTORY_DEEPEN_STEPS = (512,)
 HISTORY_FETCH_FILTER = "--filter=tree:0"
 HISTORY_FETCH_TIMEOUT_SECONDS = 90
 MERGE_TREE_TIMEOUT_SECONDS = 30
-# A rebase is bounded, but this repository's large code/audit commits can
-# legitimately take more than a minute.  Give one reconciliation enough time
-# to finish instead of repeatedly replaying the same expensive history.
-REBASE_TIMEOUT_SECONDS = 300
+# A rebase is bounded and receives a small budget per local commit.  A fixed
+# five-minute wait made a double-click look hung when Git was waiting on a
+# conflict, hook, or missing object.  The budget is deliberately capped: a
+# slow or ambiguous replay must return a receipt and require an explicit
+# retry, never keep the launcher blocked indefinitely.
+REBASE_TIMEOUT_SECONDS = 90
+REBASE_MIN_TIMEOUT_SECONDS = 30
+REBASE_SECONDS_PER_COMMIT = 8
 REBASE_ABORT_TIMEOUT_SECONDS = 8
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
-GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v8"
+GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v9"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -92,6 +96,21 @@ FORBIDDEN_HOSTED_CI_MARKERS = (
     'HYPERSMART_ENABLE_REAL_ORDERS: "1"',
     'ENABLE_REAL_ORDERS: "1"',
 )
+
+
+def _rebase_timeout_budget(replay_count: int) -> int:
+    """Return a bounded, deterministic timeout for a local replay.
+
+    The lower bound leaves Git enough time to start and finish a single
+    commit on Windows; the upper bound prevents a stalled rebase from making
+    the one-click launcher wait for minutes.  Invalid/negative counts are
+    treated conservatively as one commit.
+    """
+    count = max(1, int(replay_count))
+    return min(
+        REBASE_TIMEOUT_SECONDS,
+        max(REBASE_MIN_TIMEOUT_SECONDS, 12 + count * REBASE_SECONDS_PER_COMMIT),
+    )
 
 
 def _human_path_label(path: str) -> str:
@@ -579,6 +598,7 @@ class Synchronizer:
             "history_deepen_steps": [],
             "local_commit_created": False,
             "commit_message": None,
+            "proposed_commit_message": None,
             "merge_commits_created": 0,
             "rebases_performed": 0,
             "push_attempts": 0,
@@ -1391,6 +1411,17 @@ class Synchronizer:
         # Detect high-confidence private-key material BEFORE writing Git blobs.
         for path in eligible:
             self._check_file_payload(path, self.root / path)
+        if self.dry_run and eligible:
+            proposed_diff = self.command(
+                "diff", "HEAD", "--no-ext-diff", "--unified=0", "--",
+                *eligible, check=False,
+            )
+            proposed_message = _commit_subject(
+                eligible,
+                proposed_diff.stdout.decode("utf-8", errors="replace"),
+            )
+            self.report["proposed_commit_message"] = proposed_message
+            self.say(f"[DRY-RUN] Commit propose: {proposed_message}")
         if self.dry_run or not eligible:
             if self.dry_run:
                 self.say("[DRY-RUN] Aucun fichier prepare ou committe.")
@@ -1816,7 +1847,11 @@ class Synchronizer:
         recovery loop.  The abort is itself bounded and never deletes a Git
         lock; if Git cannot prove the abort completed, fail closed.
         """
-        self.report["rebase_timeout_seconds"] = REBASE_TIMEOUT_SECONDS
+        budget = int(
+            self.report.get("rebase_timeout_budget_seconds")
+            or REBASE_TIMEOUT_SECONDS
+        )
+        self.report["rebase_timeout_seconds"] = budget
         self.report["rebase_timeout_count"] = (
             int(self.report.get("rebase_timeout_count", 0)) + 1
         )
@@ -1828,7 +1863,7 @@ class Synchronizer:
         except subprocess.TimeoutExpired as abort_timeout:
             raise SyncBlocked(
                 "Rebase depassee apres "
-                f"{REBASE_TIMEOUT_SECONDS}s; git rebase --abort a aussi "
+                f"{budget}s; git rebase --abort a aussi "
                 f"depasse {REBASE_ABORT_TIMEOUT_SECONDS}s. Intervention "
                 "manuelle requise; aucun push force."
             ) from abort_timeout
@@ -1852,10 +1887,12 @@ class Synchronizer:
         )
         raise SyncBlocked(
             "Rebase depassee apres "
-            f"{REBASE_TIMEOUT_SECONDS}s; rebase annulee proprement."
+            f"{budget}s; rebase annulee proprement."
         ) from timeout
 
-    def _run_rebase(self, remote: str) -> subprocess.CompletedProcess[bytes]:
+    def _run_rebase(
+        self, remote: str, *, timeout_seconds: int | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
         """Run the bounded rebase without ever returning an unbound outcome.
 
         The timeout handler normally raises ``SyncBlocked`` after confirming
@@ -1875,10 +1912,12 @@ class Synchronizer:
         os.environ["GIT_EDITOR"] = "true"
         os.environ["GIT_SEQUENCE_EDITOR"] = "true"
         os.environ["GIT_MERGE_AUTOEDIT"] = "no"
+        budget = int(timeout_seconds or REBASE_TIMEOUT_SECONDS)
+        self.report["rebase_timeout_budget_seconds"] = budget
         try:
             return self.command(
                 "rebase", "--no-autostash", remote, check=False,
-                timeout=REBASE_TIMEOUT_SECONDS,
+                timeout=budget,
             )
         except subprocess.TimeoutExpired as timeout:
             self._abort_rebase_after_timeout(timeout)
@@ -1957,12 +1996,17 @@ class Synchronizer:
         replay_count = self.command(
             "rev-list", "--count", f"{remote}..{local}", check=False
         )
-        if replay_count.returncode:
+        replay_count_text = replay_count.stdout.decode(
+            "ascii", errors="replace"
+        ).strip()
+        if replay_count.returncode or not replay_count_text.isdecimal():
             raise SyncBlocked("Comptage des commits locaux a rejouer impossible.")
+        replay_count_value = int(replay_count_text)
+        rebase_budget = _rebase_timeout_budget(replay_count_value)
         self.say(
             "[INTEGRATION LINEAIRE] Rejeu de "
-            f"{replay_count.stdout.decode('ascii', errors='replace').strip()} "
-            "commit(s) local(aux) sur GitHub main; aucun commit de fusion."
+            f"{replay_count_value} commit(s) local(aux) sur GitHub main; "
+            f"budget rebase={rebase_budget}s; aucun commit de fusion."
         )
         predicted = self._predict_merge_conflicts(remote, local)
         unsupported = [
@@ -1977,7 +2021,9 @@ class Synchronizer:
             )
         rebase_resolved = False
         with self._preserve_local_protected_index():
-            outcome = self._run_rebase(remote)
+            outcome = self._run_rebase(
+                remote, timeout_seconds=rebase_budget,
+            )
             if outcome.returncode:
                 rebase_resolved = self._continue_rebase_after_known_ci_conflicts(
                     outcome,
