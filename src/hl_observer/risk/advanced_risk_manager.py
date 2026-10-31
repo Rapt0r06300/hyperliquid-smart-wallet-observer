@@ -295,12 +295,13 @@ class AdvancedRiskManager:
             total_exposure_pct=total_exposure_pct)
 
     def on_position_opened(self, coin: str, notional: float, category: str = "perpetual") -> None:
-        self.open_positions_coins.append(coin)
+        self.open_positions_coins.append(str(coin).strip().upper())
         self.category_exposures[category] = self.category_exposures.get(category, 0.0) + abs(notional)
 
     def on_position_closed(self, coin: str, notional: float, pnl_usdt: float, category: str = "perpetual") -> None:
-        if coin in self.open_positions_coins:
-            self.open_positions_coins.remove(coin)
+        coin_key = str(coin).strip().upper()
+        if coin_key in self.open_positions_coins:
+            self.open_positions_coins.remove(coin_key)
         cat_exp = self.category_exposures.get(category, 0.0) - abs(notional)
         self.category_exposures[category] = max(0.0, cat_exp)
         self.record_daily_pnl(pnl_usdt)
