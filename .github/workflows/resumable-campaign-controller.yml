@@ -15,16 +15,13 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: resumable-campaign-controller-${{ github.event_name == 'push' && github.sha || 'v5' }}
+  cancel-in-progress: false
+
 jobs:
   select:
     runs-on: ubuntu-latest
-    concurrency:
-      # Serialize only the short selector across event SHAs. Workers retain
-      # independent per-campaign concurrency and continue in parallel.
-      # Durable manifests are re-scanned by the scheduled selector if Actions
-      # reaches its 100-entry pending queue limit.
-      group: copy-vault-campaign-selector
-      queue: max
     timeout-minutes: 10
     outputs:
       copy_matrix: ${{ steps.due.outputs.copy_matrix }}

@@ -353,7 +353,7 @@ def test_campaign_watchdog_recomputes_on_concurrent_receipt_writers():
     assert "git fetch origin main" in text
     assert "git reset --hard origin/main" in text
     assert "python tools/campaign_watchdog.py --dispatch" in text
-    assert "for attempt in 1 2 3 4 5" in text
+    assert "publish_main_commit.py --max-attempts 20" in text
 
 def test_resumable_creator_structure_and_exact_analysis_selection_are_not_corrupted():
     text = _workflow("create-resumable-campaigns.yml")
