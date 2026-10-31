@@ -439,6 +439,16 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert "exit( code)? 143" not in retry
 
 
+def test_reconcile_does_not_delete_untracked_historical_artifacts_on_retry():
+    text = _workflow("reconcile-v2-catalog.yml")
+    commit = text.split("      - name: Commit reconciled catalog", 1)[1]
+    assert "git clean -fd -- catalog/data-index-parts" not in commit
+    assert "git ls-files --others --exclude-standard" in commit
+    assert "datasets/quarantine datasets/rejected" in commit
+    assert "datasets/sharded/quarantine datasets/sharded/rejected" in commit
+    assert "require manual quarantine review" in commit
+
+
 def test_reconcile_rebuilds_and_sha_verifies_metrics_after_mutating_tests():
     text = _workflow("reconcile-v2-catalog.yml")
     validate = text.split("- name: Validate rebuilt control plane", 1)[1]
