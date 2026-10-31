@@ -2944,6 +2944,46 @@ def load_improvement_history(root: str | Path) -> list[dict[str, Any]]:
     return rows
 
 
+_RESTORATION_SNAPSHOT_FIELDS = (
+    "code_sha",
+    "config_sha",
+    "data_manifest_sha256",
+    "seed",
+    "parameters",
+    "windows",
+    "capital_usd",
+    "ledger",
+    "equity",
+    "costs",
+    "metrics",
+    "trial_count",
+    "tests",
+    "report",
+    "restore_receipt",
+)
+
+
+def _restoration_snapshot(economic_result: Mapping[str, Any]) -> dict[str, Any]:
+    """Record reproducibility fields without ever inferring missing evidence."""
+    supplied = economic_result.get("reproducibility_snapshot")
+    if not isinstance(supplied, Mapping):
+        supplied = {}
+    values = {
+        field: supplied.get(field)
+        for field in _RESTORATION_SNAPSHOT_FIELDS
+    }
+    missing = [
+        field for field, value in values.items()
+        if value is None or value == "" or value == [] or value == {}
+    ]
+    return {
+        "schema_version": "hypersmart.copy_vault_restoration_snapshot.v1",
+        "complete": not missing,
+        "missing_fields": missing,
+        "fields": values,
+    }
+
+
 def record_frozen_candidate(
     root: str | Path,
     run_id: str,
@@ -3007,6 +3047,7 @@ def record_frozen_candidate(
         "economically_proven": economic_result.get("economically_proven") is True,
         "candidate_status": economic_result.get("status"),
         "candidate": economic_result.get("selected_candidate"),
+        "restoration_snapshot": _restoration_snapshot(economic_result),
         "paper_read_only": True,
         "real_execution": False,
     }

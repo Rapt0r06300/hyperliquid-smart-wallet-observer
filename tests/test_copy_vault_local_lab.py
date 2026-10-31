@@ -1147,6 +1147,73 @@ def test_frozen_candidate_history_is_append_only_and_idempotent(tmp_path: Path) 
     assert immutable.is_file()
 
 
+def test_frozen_candidate_records_missing_restoration_snapshot_fields_fail_closed(
+    tmp_path: Path,
+) -> None:
+    economic = {
+        "freeze_created": True,
+        "economically_proven": False,
+        "status": "PROMISING",
+        "selected_candidate": {"freeze": {"campaign_id": "candidate-1"}},
+        "validation": {"daily_mean_net_pnl_usd": 2.5},
+        "reproducibility_snapshot": {"code_sha": "a" * 40},
+    }
+
+    record = record_frozen_candidate(
+        tmp_path,
+        "run-incomplete-snapshot",
+        economic,
+        {"validation": {"daily_mean_net_pnl_usd": 1.0}},
+    )
+
+    assert record is not None
+    snapshot = record["restoration_snapshot"]
+    assert snapshot["complete"] is False
+    assert "restore_receipt" in snapshot["missing_fields"]
+    assert "ledger" in snapshot["missing_fields"]
+
+
+def test_frozen_candidate_accepts_only_explicit_complete_restoration_snapshot(
+    tmp_path: Path,
+) -> None:
+    required = {
+        "code_sha": "a" * 40,
+        "config_sha": "b" * 64,
+        "data_manifest_sha256": "c" * 64,
+        "seed": 17,
+        "parameters": {"horizon_ms": 300_000},
+        "windows": {"train": [1, 2], "oos": [3, 4]},
+        "capital_usd": 200.0,
+        "ledger": {"sha256": "d" * 64},
+        "equity": {"sha256": "e" * 64},
+        "costs": {"fees_usd": 1.0},
+        "metrics": {"daily_mean_net_pnl_usd": 2.5},
+        "trial_count": 3,
+        "tests": {"passed": 4},
+        "report": {"sha256": "f" * 64},
+        "restore_receipt": {"sha256": "0" * 64},
+    }
+    economic = {
+        "freeze_created": True,
+        "economically_proven": False,
+        "status": "PROMISING",
+        "selected_candidate": {"freeze": {"campaign_id": "candidate-1"}},
+        "validation": {"daily_mean_net_pnl_usd": 2.5},
+        "reproducibility_snapshot": required,
+    }
+
+    record = record_frozen_candidate(
+        tmp_path,
+        "run-complete-snapshot",
+        economic,
+        {"validation": {"daily_mean_net_pnl_usd": 1.0}},
+    )
+
+    assert record is not None
+    assert record["restoration_snapshot"]["complete"] is True
+    assert record["restoration_snapshot"]["missing_fields"] == []
+
+
 def test_historical_train_proxy_scales_to_200_usd_without_claiming_proof(tmp_path: Path) -> None:
     relative = "runtime/reports/train.json"
     target = tmp_path / relative
