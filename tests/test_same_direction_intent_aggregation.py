@@ -6,7 +6,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.execution_core.same_direction_intent_aggregation import agreger   # noqa: E402
+from hl_observer.execution_core.same_direction_intent_aggregation import agreger  # noqa: E402
 
 
 def test_agregation_meme_sens():

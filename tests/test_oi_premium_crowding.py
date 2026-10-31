@@ -38,9 +38,12 @@ def test_parser_ctx_extrait_les_champs():
 def test_collecteur_archive_avec_poster_mocke(tmp_path):
     n = CAC.une_passe(tmp_path, poster=lambda charge: _payload(), now=1000.0)
     assert n == 2
-    lignes = [json.loads(l) for l in (tmp_path / CAC.TAPE).read_text(encoding="utf-8").splitlines()]
-    assert len(lignes) == 2 and all(l["real_execution"] is False for l in lignes)
-    assert {l["coin"] for l in lignes} == {"BTC", "SOL"}
+    lignes = [
+        json.loads(line)
+        for line in (tmp_path / CAC.TAPE).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(lignes) == 2 and all(line["real_execution"] is False for line in lignes)
+    assert {line["coin"] for line in lignes} == {"BTC", "SOL"}
     assert (tmp_path / CAC.HEARTBEAT).exists()
 
 

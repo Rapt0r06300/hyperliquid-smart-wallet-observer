@@ -25,7 +25,6 @@ from hl_observer.backtesting.overfit_selection import (
     selection_par_plateau,
 )
 
-
 # ====================================================== 1. LE MAXIMUM D'UN BRUIT
 
 
@@ -203,7 +202,7 @@ def test_permuter_les_sens_DETRUIT_l_edge_et_RIEN_d_autre():
     faux = permuter_les_sens(cands, seed=1)
 
     assert len(faux) == len(cands)
-    for a, b in zip(cands, faux):
+    for a, b in zip(cands, faux, strict=False):
         for cle in ("coin", "recorded_at", "current_mid", "signal_age_ms",
                     "leader_score", "liquidity_score"):
             assert a[cle] == b[cle], f"la permutation a abime `{cle}` : le controle est invalide"
