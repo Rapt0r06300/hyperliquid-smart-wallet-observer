@@ -2065,13 +2065,11 @@ class Synchronizer:
                 self.report["checkpoint_sha_after_reconcile"] = local
                 self.say("GitHub et main local identiques; pas de commit vide.")
                 return
-            if self.command(
-                "merge-base", "--is-ancestor", current_remote, local,
-                check=False, expected_returncodes=(1,),
-            ).returncode:
-                self.say("GitHub a avance; nouvelle reconciliation bornee.")
-                push_races += 1
-                continue
+            # The non-force push is the authoritative ancestry check.  A
+            # merge-base probe here is both redundant and expensive on this
+            # shallow repository (it can take ~30 s), while GitHub may still
+            # advance immediately after the probe.  Let Git reject a stale
+            # ref atomically, then use the bounded reconciliation below.
             self.say(
                 f"Push sans force vers main ({push_races + 1}/{MAX_RACE_RETRIES})..."
             )
