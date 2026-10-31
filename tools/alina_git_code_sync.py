@@ -2092,13 +2092,34 @@ class Synchronizer:
                 self.say("GitHub a de nouveau avance; fusion supplementaire.")
                 push_races += 1
                 continue
-            if self.remote_sha() != current_remote:
+            # A rejection can race with the remote ref update: ls-remote may
+            # still expose the old value while the server has already judged
+            # the push against a newer ref.  Refresh the tracking ref before
+            # classifying the rejection, otherwise a valid race is reported
+            # as a false authentication/protection failure.
+            self.command(
+                "fetch", "--progress", "--no-tags", "origin",
+                "refs/heads/main:refs/remotes/origin/main",
+            )
+            refreshed_remote = self.text(
+                "rev-parse", "refs/remotes/origin/main"
+            )
+            if refreshed_remote != current_remote:
                 self.say("Push non-fast-forward refuse; GitHub avance, reprise...")
                 push_races += 1
                 continue
             err = (pushed.stderr or b"").decode(
                 "utf-8", errors="replace",
             ).strip()
+            if any(marker in err.lower() for marker in (
+                "fetch first", "non-fast-forward", "non fast-forward",
+            )):
+                self.say(
+                    "Rejet non-fast-forward persistant sans nouveau SHA observe; "
+                    "nouvelle tentative bornee."
+                )
+                push_races += 1
+                continue
             if not err:
                 err = "detail Git affiche dans le terminal ci-dessus"
             raise SyncBlocked(
