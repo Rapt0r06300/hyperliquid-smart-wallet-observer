@@ -49,3 +49,11 @@ def test_fix55_factory_observable_linux_et_windows():
               "actions/upload-artifact", "test_run_factory.py", "test_factory_coverage.py"]:
         assert b in txt, f"dimension Factory manquante dans alpha-factory.yml: {b}"
     assert "push:" in txt and "branches: [main]" in txt      # Factory aussi observable au HEAD
+
+
+def test_ci_jobs_runtime_utilisent_un_python_isole():
+    txt = _texte("ci.yml")
+    for job in ["securite:", "tests-linux:", "tests-windows:", "runtime-replay:"]:
+        bloc = txt.split(f"  {job}", 1)[1]
+        assert "python -m venv .ci-venv" in bloc, f"venv manquant dans {job}"
+        assert "GITHUB_PATH" in bloc, f"PATH CI non isole dans {job}"
