@@ -1,7 +1,10 @@
 import json
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
 from pathlib import Path
+
+import pytest
 
 from tools.partitioned_data_index import iter_index_rows
 
@@ -26,6 +29,21 @@ def _validate_manifest(row):
     assert manifest["validation_allowed"] is (row["quality_status"] == "SAFE")
 
 
+@pytest.fixture(scope="module")
+def indexed_catalog_audit():
+    """Exhaustively verify the index and manifests once for related assertions."""
+    counts = Counter()
+    observed = 0
+    rows = _index_rows()
+    with ThreadPoolExecutor(max_workers=64) as pool:
+        while batch := list(islice(rows, 8192)):
+            counts.update(row["quality_status"] for row in batch)
+            for _ in pool.map(_validate_manifest, batch):
+                pass
+            observed += len(batch)
+    return counts, observed
+
+
 def test_safe_only_validation():
     assert REG["validation_allowed_statuses"] == ["SAFE"]
 
@@ -45,12 +63,11 @@ def test_active_status_matches_index():
     assert REG["active_dataset"]["proof_of_pnl_allowed"] is False
 
 
-def test_every_status_counter_is_index_bound():
-    from collections import Counter
-
-    counts = Counter(row["quality_status"] for row in _index_rows())
+def test_every_status_counter_is_index_bound(indexed_catalog_audit):
+    counts, observed = indexed_catalog_audit
     assert set(counts).issubset({"SAFE", "PARTIAL", "REJECT", "STALE"})
-    assert sum(counts.values()) == CAT["indexed_shard_count"]
+    assert observed == CAT["indexed_shard_count"]
+    assert sum(counts.values()) == observed
     assert REG["active_dataset"]["indexed_shards"] == CAT["indexed_shard_count"]
     for status, catalog_key, registry_key in (
         ("SAFE", "safe_shard_count", "safe_count"),
@@ -83,12 +100,9 @@ def test_no_pc_runner():
     assert REG["policy"]["user_pc_forbidden"] is True
 
 
-def test_every_indexed_manifest_exists_and_matches_status():
-    rows = _index_rows()
-    with ThreadPoolExecutor(max_workers=64) as pool:
-        while batch := list(islice(rows, 8192)):
-            for _ in pool.map(_validate_manifest, batch):
-                pass
+def test_every_indexed_manifest_exists_and_matches_status(indexed_catalog_audit):
+    _counts, observed = indexed_catalog_audit
+    assert observed == CAT["indexed_shard_count"]
 
 
 def test_dataset_quality_ci_budget_covers_full_catalog_validation():
