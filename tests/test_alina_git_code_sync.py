@@ -514,6 +514,16 @@ def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
     assert ("rebase", "--skip") in commands
 
 
+@pytest.mark.parametrize(
+    ("replay_count", "expected"),
+    [(0, 20), (2, 20), (6, 36), (20, 60)],
+)
+def test_rebase_timeout_budget_is_short_and_bounded(
+    replay_count: int, expected: int,
+) -> None:
+    assert sync_module._rebase_timeout_budget(replay_count) == expected
+
+
 def test_rebase_timeout_is_aborted_and_reported(tmp_path):
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []
@@ -624,9 +634,9 @@ def test_rebase_disables_interactive_editors_and_restores_environment(
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120
-    assert sync_module._rebase_timeout_budget(1) == 30
-    assert sync_module._rebase_timeout_budget(6) == 60
-    assert sync_module._rebase_timeout_budget(100) == 90
+    assert sync_module._rebase_timeout_budget(1) == 20
+    assert sync_module._rebase_timeout_budget(6) == 36
+    assert sync_module._rebase_timeout_budget(100) == 60
 
 
 def test_rebase_operation_labels_explain_abort_and_continue() -> None:
