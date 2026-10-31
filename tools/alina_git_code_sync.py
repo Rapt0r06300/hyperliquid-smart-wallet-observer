@@ -74,6 +74,13 @@ REBASE_TIMEOUT_SECONDS = 90
 REBASE_MIN_TIMEOUT_SECONDS = 30
 REBASE_SECONDS_PER_COMMIT = 8
 REBASE_ABORT_TIMEOUT_SECONDS = 8
+# Keep every network-bound Git operation bounded even when a future call site
+# forgets to pass an explicit timeout.  The launcher is code-only, so a
+# stalled authentication, SSH host-key prompt, or unreachable remote must
+# fail closed quickly instead of leaving a double-click apparently hung.
+DEFAULT_GIT_TIMEOUT_SECONDS = 90
+REMOTE_READ_TIMEOUT_SECONDS = 20
+LOCAL_READ_TIMEOUT_SECONDS = 30
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
 # bound remains fail-closed when the first synchronisation is slow or stuck.
@@ -419,6 +426,12 @@ def _git_operation_label(args: list[str]) -> str:
     if verb == "merge":
         return "Adopter GitHub main en avance rapide"
     if verb == "rebase":
+        if "--abort" in args:
+            return "Annuler le rebase inacheve"
+        if "--continue" in args:
+            return "Continuer le rebase sans choix automatique"
+        if "--skip" in args:
+            return "Ignorer le commit de rebase vide"
         return "Rejouer les commits locaux sans commit de fusion"
     if verb == "rev-list":
         return "Verifier les commits locaux a rejouer"
@@ -475,6 +488,13 @@ def _run_git(
     # fail closed instead of looking like a hung Git synchronization.
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "Never"
+    # HTTPS and SSH must both fail closed.  GIT_TERMINAL_PROMPT does not stop
+    # an SSH client from waiting for a host-key/passphrase prompt.  Respect a
+    # caller-provided command, but make the default non-interactive and short.
+    env.setdefault(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o ConnectTimeout=8",
+    )
     env["GIT_OPTIONAL_LOCKS"] = (
         "0" if args and args[0] in {"ls-files", "status", "diff"} else "1"
     )
@@ -615,6 +635,15 @@ class Synchronizer:
                 expected_returncodes: tuple[int, ...] = ()
                 ) -> subprocess.CompletedProcess[bytes]:
         git_args = list(args)
+        if timeout == 300:
+            verb = git_args[0] if git_args else ""
+            timeout = (
+                REMOTE_READ_TIMEOUT_SECONDS
+                if verb in {"ls-remote", "remote"}
+                else DEFAULT_GIT_TIMEOUT_SECONDS
+                if verb in {"fetch", "push"}
+                else LOCAL_READ_TIMEOUT_SECONDS
+            )
         label = _git_operation_label(git_args)
         self._command_count += 1
         command_number = self._command_count
