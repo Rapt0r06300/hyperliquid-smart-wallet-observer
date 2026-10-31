@@ -49,3 +49,13 @@ def test_fix55_factory_observable_linux_et_windows():
               "actions/upload-artifact", "test_run_factory.py", "test_factory_coverage.py"]:
         assert b in txt, "dimension Factory manquante dans alpha-factory.yml: %s" % b
     assert "push:" in txt and "branches: [main]" in txt      # Factory aussi observable au HEAD
+
+
+def test_copy_vault_hosted_jobs_ne_telechargent_pas_le_reservoir_brut():
+    """Les jobs code-only gardent le dépôt utile sans hydrater les shards bruts."""
+
+    for nom in ("hyperlab-ci.yml", "labo-continu-ci.yml"):
+        txt = _texte(nom)
+        assert "filter: blob:none" in txt
+        assert "sparse-checkout-cone-mode: false" in txt
+        assert "!/datasets/" in txt
