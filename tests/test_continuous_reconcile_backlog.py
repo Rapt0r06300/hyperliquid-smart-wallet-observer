@@ -98,6 +98,54 @@ def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
     assert ("git", "merge-base", "--is-ancestor", "a" * 40, "origin/main") in seen
 
 
+@pytest.mark.parametrize(
+    "boundary", ["inventory", "validation", "commit", "remote_receipt"],
+)
+def test_historical_publish_never_claims_partial_wave(
+    boundary, monkeypatch, tmp_path, capsys,
+):
+    """Every durable boundary must fail closed before a publication claim."""
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    manifest = tmp_path / "data-v2-release" / "RUN_MANIFEST.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}\n", encoding="utf-8")
+
+    def fake_run(*args, **kwargs):
+        if boundary == "inventory" and args[:2] == (
+            "python", "tools/index_run_manifest.py",
+        ):
+            return subprocess.CompletedProcess(args, 1, "", "injected inventory stop")
+        if boundary == "validation" and args[:2] == (
+            "python", "tools/check_dataset_quality.py",
+        ):
+            return subprocess.CompletedProcess(args, 1, "", "injected validation stop")
+        if boundary == "commit" and args[:2] == ("git", "commit"):
+            return subprocess.CompletedProcess(args, 1, "", "injected commit stop")
+        if args[:3] == ("git", "diff", "--cached"):
+            return subprocess.CompletedProcess(args, 1, "", "")
+        if args[:2] == ("git", "hash-object"):
+            return subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    monkeypatch.setattr(module, "synced", lambda: None)
+    monkeypatch.setattr(module, "enforce_quarantine_before_import", lambda _: None)
+    monkeypatch.setattr(module, "write_historical_wave_checkpoint", lambda _: None)
+    monkeypatch.setattr(
+        module, "time", type("NoSleep", (), {"sleep": staticmethod(lambda _: None)}),
+    )
+    if boundary == "remote_receipt":
+        monkeypatch.setattr(module, "remote_contains_head", lambda: False)
+        monkeypatch.setattr(module, "try_disjoint_campaign_rebase", lambda: (False, False))
+
+    with pytest.raises(RuntimeError):
+        module.publish([manifest])
+    assert "HISTORICAL_BATCH_PUBLISHED" not in capsys.readouterr().out
+
+
 def test_historical_wave_checkpoint_is_deterministic_and_idempotent(tmp_path):
     import tools.continuous_reconcile_backlog as module
 
