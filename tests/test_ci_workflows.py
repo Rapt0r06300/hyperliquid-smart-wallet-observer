@@ -57,3 +57,13 @@ def test_ci_jobs_runtime_utilisent_un_python_isole():
         bloc = txt.split(f"  {job}", 1)[1]
         assert "python -m venv .ci-venv" in bloc, f"venv manquant dans {job}"
         assert "GITHUB_PATH" in bloc, f"PATH CI non isole dans {job}"
+
+
+def test_copy_vault_hosted_jobs_ne_telechargent_pas_le_reservoir_brut():
+    """Les jobs code-only gardent le dépôt utile sans hydrater 1.8M shards bruts."""
+    for nom in ("hyperlab-ci.yml", "labo-continu-ci.yml"):
+        txt = _texte(nom)
+        assert "filter: blob:none" in txt, f"clone blobless manquant dans {nom}"
+        assert "sparse-checkout-cone-mode: false" in txt, f"mode sparse explicite manquant dans {nom}"
+        assert "!/datasets/" in txt, f"réservoir datasets non exclu dans {nom}"
+        assert "/*" in txt, f"racine du dépôt non conservée dans {nom}"
