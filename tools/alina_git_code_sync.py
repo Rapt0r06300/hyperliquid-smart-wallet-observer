@@ -731,6 +731,7 @@ class Synchronizer:
             ).strip()
             if remote_head and self.command(
                 "merge-base", local_head, remote_head, check=False,
+                expected_returncodes=(1,),
             ).returncode == 0:
                 self.report["history_mode"] = "EXISTING_SHALLOW_BASE"
                 self.say(
@@ -777,6 +778,7 @@ class Synchronizer:
             remote_head = self.text("rev-parse", "refs/remotes/origin/main")
             common = self.command(
                 "merge-base", local_head, remote_head, check=False,
+                expected_returncodes=(1,),
             )
             if common.returncode == 0:
                 self.report["history_expanded"] = True
@@ -1047,7 +1049,7 @@ class Synchronizer:
                 return True
             if fetched_remote == local or self.command(
                 "merge-base", "--is-ancestor", local, fetched_remote,
-                check=False,
+                check=False, expected_returncodes=(1,),
             ).returncode:
                 return False
 
@@ -1911,14 +1913,16 @@ class Synchronizer:
             f"[COMPARAISON] local={local[:12]} | GitHub={remote[:12]}"
         )
         if local == remote or self.command(
-            "merge-base", "--is-ancestor", remote, local, check=False
+            "merge-base", "--is-ancestor", remote, local, check=False,
+            expected_returncodes=(1,),
         ).returncode == 0:
             self.say("Tous les commits distants sont deja dans main local.")
             return
         self._assert_no_new_code_changes()
         self._protect_ignored_files(remote)
         if self.command(
-            "merge-base", "--is-ancestor", local, remote, check=False
+            "merge-base", "--is-ancestor", local, remote, check=False,
+            expected_returncodes=(1,),
         ).returncode == 0:
             self.say(
                 "[INTEGRATION] Avance rapide possible: adoption des commits "
@@ -2063,7 +2067,7 @@ class Synchronizer:
                 return
             if self.command(
                 "merge-base", "--is-ancestor", current_remote, local,
-                check=False,
+                check=False, expected_returncodes=(1,),
             ).returncode:
                 self.say("GitHub a avance; nouvelle reconciliation bornee.")
                 push_races += 1
