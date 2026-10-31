@@ -415,6 +415,19 @@ def test_reconcile_regenerates_from_release_manifests_after_concurrent_commit():
     assert 'if [ "$published" != true ]; then' in text
 
 
+def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retries():
+    text = _workflow("reconcile-v2-catalog.yml")
+    assert 'resume_attempt:' in text
+    assert 'default: "0"' in text
+    assert "historical-retry:" in text
+    assert "needs.historical.result == 'failure'" in text
+    assert "fromJSON(inputs.resume_attempt || '0') < 2" in text
+    assert "gh workflow run reconcile-v2-catalog.yml" in text
+    assert 'next=$((current + 1))' in text
+    assert "runs-on: ubuntu-latest" in text
+    assert "self-hosted" not in text
+
+
 def test_reconcile_rebuilds_and_sha_verifies_metrics_after_mutating_tests():
     text = _workflow("reconcile-v2-catalog.yml")
     validate = text.split("- name: Validate rebuilt control plane", 1)[1]

@@ -24,6 +24,12 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+    inputs:
+      resume_attempt:
+        description: "Nombre de relances automatiques apres interruption du backlog historique"
+        required: false
+        default: "0"
+        type: string
 
 permissions:
   actions: write
@@ -48,6 +54,7 @@ jobs:
     timeout-minutes: 115
     env:
       GH_TOKEN: ${{ github.token }}
+      RESUME_ATTEMPT: ${{ inputs.resume_attempt || '0' }}
 
     steps:
       - name: Checkout canonical Alina control plane
@@ -538,3 +545,41 @@ jobs:
           set -euo pipefail
           gh workflow run dataset-health-receipt.yml \
             --repo "$GITHUB_REPOSITORY" --ref main
+
+  historical-retry:
+    name: Requeue historical backlog after hosted interruption
+    needs: historical
+    if: >-
+      always() &&
+      needs.historical.result == 'failure' &&
+      fromJSON(inputs.resume_attempt || '0') < 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch one bounded hosted retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$RESUME_ATTEMPT"
+          case "$current" in
+            ''|*[!0-9]*)
+              echo "::error::Invalid resume_attempt: $current"
+              exit 1
+              ;;
+          esac
+          next=$((current + 1))
+          gh workflow run reconcile-v2-catalog.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f resume_attempt="$next"
+          {
+            echo "### Historical backlog retry"
+            echo "- Result: dispatched bounded hosted retry"
+            echo "- Attempt: $next/2"
+            echo "- Source conclusion: ${{ needs.historical.result }}"
+          } >> "$GITHUB_STEP_SUMMARY"
