@@ -48,7 +48,7 @@ def test_context_receipt_is_unmeasurable_when_provenance_is_missing() -> None:
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["license"]
+    assert receipt["missing_evidence"] == ["SOURCE_FILES_MISSING", "license"]
 
 
 def test_context_receipt_requires_reproducible_model_and_tokenizer_hashes() -> None:
@@ -58,7 +58,10 @@ def test_context_receipt_requires_reproducible_model_and_tokenizer_hashes() -> N
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["MODEL_SHA256_INVALID"]
+    assert receipt["missing_evidence"] == [
+        "MODEL_SHA256_INVALID",
+        "SOURCE_FILES_MISSING",
+    ]
 
 
 def test_context_receipt_requires_exact_repository_commit() -> None:
@@ -68,7 +71,10 @@ def test_context_receipt_requires_exact_repository_commit() -> None:
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["REPOSITORY_COMMIT_INVALID"]
+    assert receipt["missing_evidence"] == [
+        "REPOSITORY_COMMIT_INVALID",
+        "SOURCE_FILES_MISSING",
+    ]
 
 
 def test_context_receipt_rejects_invalid_provenance_types_and_cutoff() -> None:
@@ -83,6 +89,7 @@ def test_context_receipt_rejects_invalid_provenance_types_and_cutoff() -> None:
     assert receipt["missing_evidence"] == [
         "DEPENDENCIES_INVALID",
         "MODEL_INVALID",
+        "SOURCE_FILES_MISSING",
         "TRAINING_CUTOFF_INVALID",
     ]
 
@@ -94,6 +101,13 @@ def test_context_receipt_rejects_invalid_source_files_container() -> None:
     assert receipt["missing_evidence"] == ["SOURCE_FILES_INVALID"]
 
 
+def test_context_receipt_rejects_empty_source_files_mapping() -> None:
+    receipt = build_context_receipt(_metadata(), source_files={})
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["SOURCE_FILES_EMPTY"]
+
+
 def test_context_receipt_fails_closed_on_noncanonical_metadata() -> None:
     metadata = _metadata()
     metadata["parameters"] = {"temperature": float("nan")}
@@ -101,7 +115,10 @@ def test_context_receipt_fails_closed_on_noncanonical_metadata() -> None:
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["PARAMETERS_NOT_CANONICAL"]
+    assert receipt["missing_evidence"] == [
+        "PARAMETERS_NOT_CANONICAL",
+        "SOURCE_FILES_MISSING",
+    ]
     assert receipt["provenance"]["parameters"] is None
     assert len(receipt["receipt_sha256"]) == 64
 

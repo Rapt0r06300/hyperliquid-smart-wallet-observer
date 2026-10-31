@@ -164,8 +164,11 @@ def build_context_receipt(
         missing.append("REPOSITORY_COMMIT_INVALID")
     file_hashes: dict[str, str] = {}
     if source_files is None:
+        missing.append("SOURCE_FILES_MISSING")
         source_items = ()
     elif isinstance(source_files, Mapping):
+        if not source_files:
+            missing.append("SOURCE_FILES_EMPTY")
         source_items = source_files.items()
     else:
         missing.append("SOURCE_FILES_INVALID")
