@@ -13,7 +13,6 @@ from hl_observer.ops.self_hosted_return import (
     write_return,
 )
 
-
 FAMILIES = ("copy_vault",)
 
 
@@ -134,7 +133,7 @@ def test_build_return_resume_copy_vault_et_le_prochain_job(tmp_path: Path) -> No
     assert "copy_vault" in text
     assert "lead_lag" not in text
     assert "cross_venue_dislocation_v2" not in text
-    assert "Certification économique CopyVault 1/1 : **NON**" in text
+    assert "Preuve économique OOS/forward CopyVault : **NON CERTIFIÉE**" in text
 
 
 def test_build_return_reste_explicite_si_job_result_absent(tmp_path: Path) -> None:
@@ -194,9 +193,9 @@ def test_build_return_message_3_sur_3_uniquement_apres_certification_recalculee(
     )
     payload = build_return(result_dir)
     assert payload["economic_certification"]["all_families_certified"] is True
-    assert "CopyVault est certifié" in payload["message_fr"]
+    assert "Preuve économique CopyVault certifiée" in payload["message_fr"]
     _, md_path = write_return(result_dir, payload)
-    assert "Certification économique CopyVault 1/1 : **OUI**" in md_path.read_text(encoding="utf-8")
+    assert "Preuve économique OOS/forward CopyVault : **CERTIFIÉE**" in md_path.read_text(encoding="utf-8")
 
 
 def test_build_return_ne_masque_pas_une_erreur_du_cerveau(
