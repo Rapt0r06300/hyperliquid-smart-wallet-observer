@@ -665,6 +665,55 @@ def test_rebase_avoids_scanning_all_upstream_cherry_picks(
     )
 
 
+def test_git_replay_print_plan_is_applied_without_ref_race(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+    old = "1" * 40
+    new = "2" * 40
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **kwargs):
+        commands.append(args)
+        if args[0] == "replay":
+            return subprocess.CompletedProcess(
+                args, 0, f"update refs/heads/main {new} {old}\n".encode(), b"",
+            )
+        if args[0] == "update-ref":
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if args[:2] == ("rev-parse", "HEAD"):
+            return subprocess.CompletedProcess(args, 0, f"{new}\n".encode(), b"")
+        if args[:2] == ("diff", "--quiet"):
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    task._assert_no_new_code_changes = lambda: None  # type: ignore[method-assign]
+
+    assert task._try_git_replay("remote", old, "base") is True
+    assert task.report["replay_engine"] == "GIT_REPLAY_INDEX_PRESERVING"
+    assert commands[:3] == [
+        (
+            "replay", "--onto=remote", "--ref=refs/heads/main",
+            "--ref-action=print", "base..refs/heads/main",
+        ),
+        ("read-tree", "-u", "-m", new),
+        ("update-ref", "refs/heads/main", new, old),
+    ]
+
+
+def test_git_replay_falls_back_on_unsupported_git(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **kwargs):
+        assert args[0] == "replay"
+        return subprocess.CompletedProcess(
+            args, 129, b"", b"git: 'replay' is not a git command.\n",
+        )
+
+    task.command = fake_command  # type: ignore[method-assign]
+    assert task._try_git_replay("remote", "1" * 40, "base") is False
+    assert task.report["replay_fallback"] == "GIT_REPLAY_UNAVAILABLE"
+
+
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120
@@ -1049,7 +1098,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v11' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v12' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
