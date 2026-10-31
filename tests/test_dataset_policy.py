@@ -25,7 +25,9 @@ def _index_rows():
 
 def _validate_manifest(row):
     path = ROOT / row["manifest_path"]
-    assert path.is_file()
+    # Reading is the authoritative existence/type check.  Avoid a redundant
+    # stat() before read_bytes(): every indexed path is still opened, and any
+    # missing, directory, or unreadable manifest fails closed at the read.
     manifest = json.loads(path.read_bytes())
     assert manifest["dataset_id"] == row["dataset_id"]
     assert manifest["quality_status"] == row["quality_status"]
