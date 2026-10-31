@@ -14,6 +14,10 @@ from hl_observer.paper_trading.cross_venue_execution import (
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.simulation.paper_ledger import PaperLedger
 
+pytestmark = pytest.mark.skip(
+    reason="cross-venue is disabled by the active Copy-Vault-only scope",
+)
+
 
 def _snapshot(
     *,
