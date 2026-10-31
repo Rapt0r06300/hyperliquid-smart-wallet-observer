@@ -418,10 +418,18 @@ jobs:
             else
               echo "RECONCILE_REBUILD_HEAD=$REMOTE_SHA attempt=$attempt"
               git reset --hard "$REMOTE_SHA"
-              # Failed oversized pushes can leave untracked staged receipts.
-              # Cleaning only generated paths in this disposable checkout prevents
-              # discarded manifest proofs from leaking into a smaller retry.
-              git clean -fd -- catalog/data-index-parts catalog/quarantine-audit-parts datasets/sharded >/dev/null
+              # Failed oversized pushes can leave untracked generated or
+              # quarantined artifacts.  Never delete them to make a retry look
+              # clean: preserve the evidence and fail closed instead.
+              stale_paths="$(git ls-files --others --exclude-standard -- \
+                catalog/data-index-parts catalog/quarantine-audit-parts \
+                datasets/quarantine datasets/rejected \
+                datasets/sharded/quarantine datasets/sharded/rejected)"
+              if [ -n "$stale_paths" ]; then
+                echo "::error::Untracked historical artifacts require manual quarantine review"
+                printf '%s\n' "$stale_paths"
+                exit 1
+              fi
               python tools/index_run_manifest.py "${MANIFESTS[@]}"
               python tools/build_catalog_metrics.py
               python tools/build_quarantine_audit.py
