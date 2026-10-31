@@ -11,7 +11,7 @@ from tools.resolve_analysis_selection import resolve_selection
 def _expected(source_epoch: int, cutoff: str, index_bytes: bytes) -> str:
     index_sha = hashlib.sha256(index_bytes).hexdigest()
     return hashlib.sha256(
-        f"{source_epoch}|{cutoff}|{index_sha}".encode("utf-8")
+        f"{source_epoch}|{cutoff}|{index_sha}".encode()
     ).hexdigest()
 
 

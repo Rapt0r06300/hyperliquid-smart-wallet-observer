@@ -3,11 +3,11 @@ from __future__ import annotations
 from typer.testing import CliRunner
 
 from hl_observer.cli import app
+from hl_observer.copying.realtime_magic_score import RealtimeCopyRiskConfig
 from hl_observer.opportunities.fresh_opportunity import (
     find_fresh_opportunities,
     format_fresh_opportunity_report,
 )
-from hl_observer.copying.realtime_magic_score import RealtimeCopyRiskConfig
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.storage.models import MarketSnapshot, PositionDeltaModel, TopWallet
 from hl_observer.utils.time import now_ms

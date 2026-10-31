@@ -6,7 +6,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.execution_core.global_intent_netting import netter   # noqa: E402
+from hl_observer.execution_core.global_intent_netting import netter  # noqa: E402
 
 
 def test_netting_cross_module():
