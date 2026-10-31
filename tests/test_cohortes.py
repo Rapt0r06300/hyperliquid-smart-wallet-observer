@@ -19,17 +19,26 @@ def _setup(root):
                            "stop_bps": 35.0, "take_profit_bps": 54.0}}}))
 
 
-def _l2(coin):
+def _l2(coin, *, received_ts_ms=1_000_000_000_000, exchange_ts_ms=None):
+    exchange_ts_ms = received_ts_ms if exchange_ts_ms is None else exchange_ts_ms
     return {
         "hl_bid": 149.98,
         "hl_ask": 150.02,
         "depth_usd": 5000.0,
         "age_ms": 50,
+        "received_ts_ms": received_ts_ms,
+        "exchange_ts_ms": exchange_ts_ms,
+        "received_ts_unit": "ms_since_unix_epoch",
         "bids": [[149.98, 100.0], [149.95, 100.0]],
         "asks": [[150.02, 100.0], [150.05, 100.0]],
         "source": "test:recorded-real-l2",
         "data_origin": "RECORDED_REAL",
     }
+
+
+def _l2_at(now_ms):
+    timestamp = int(now_ms)
+    return lambda coin: _l2(coin, received_ts_ms=timestamp, exchange_ts_ms=timestamp)
 
 
 def _fill(**kw):
@@ -43,7 +52,7 @@ def test_ouvre_inline_sur_open_add_significatif(tmp_path):
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
-    r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])   # 20×150 = 3000$ ≥ 2000
+    r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])   # 20×150 = 3000$ ≥ 2000
     assert r and r.get("ouverture") and r["ouverture"]["coin"] == "SOL"
     assert r["ouverture"]["prix_entree"] > 150.02 and r["paire"] == "SOL"                   # prix effectif all-in, clé paire = coin
     assert r["latence_ws_open_ms"] is not None                                             # latence MONOTONE locale
@@ -57,7 +66,7 @@ def test_raw_probe_sans_edge_reste_shadow_sans_pnl(tmp_path):
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     fill = _fill(coin="DOGE", sz=2, px=150.0)
-    r = CO.traiter_fill(CO.RAW_PROBE, etat, fill, tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])
+    r = CO.traiter_fill(CO.RAW_PROBE, etat, fill, tmp_path, now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])
     assert r and r.get("refus") == "EDGE_UNMEASURABLE"
     assert "EDGE_UNMEASURABLE" in r["raisons"]
     assert etat["store"]["ouvertes"] == {}
@@ -70,7 +79,7 @@ def test_gate_age_refuse_fill_catchup(tmp_path):
     now = 1_000_000_000_000 + CO.AGE_MAX_OPEN_MS + 60_000            # fill à ts 1e12, décision 65 s plus tard
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=2, px=150.0), tmp_path,
-                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+                        now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])
     assert r and r.get("refus") == "FILL_TROP_VIEUX_OPEN"           # trop vieux -> aucune ouverture
 
 
@@ -84,10 +93,10 @@ def test_declencheur_relatif_au_vault(tmp_path):
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     sous = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", px=1.0, sz=1999.0), tmp_path,
-                           now_ms=now, lecteur_l2=_l2, token=etat["token"])
+                           now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])
     assert sous is None                                             # 1 999 $ < 0.2 % de 1 M$ -> pas significatif
     sur = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="PEPE", px=1.0, sz=2001.0, hash="h2"), tmp_path,
-                          now_ms=now, lecteur_l2=_l2, token=etat["token"])
+                          now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])
     assert sur and sur.get("refus") == "EDGE_UNMEASURABLE"
     assert etat["store"]["ouvertes"] == {}
 
@@ -102,7 +111,7 @@ def test_declencheur_plafonne_ne_bloque_pas_les_grands_vaults(tmp_path):
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", px=1.0, sz=2001.0), tmp_path,
-                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+                        now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])
     assert r and r.get("refus") == "EDGE_UNMEASURABLE"
     assert etat["store"]["ouvertes"] == {}
 
@@ -118,7 +127,7 @@ def test_close_canonique_retire_position_et_desabonne(tmp_path):
     actifs = json.loads((tmp_path / "runtime" / "data" / "raw_coins_actifs.json").read_text())["coins"]
     assert "SOL" in actifs
     c = CO.traiter_fill(CO.ALPHA, etat, _fill(coin="SOL", sz=20, px=150.0, signe=-1, dir="Close Long",
-                        start_position=20.0, hash="c1"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])
+                        start_position=20.0, hash="c1"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2_at(now + 1000), token=etat["token"])
     assert c and c.get("fermeture")
     assert "SOL" not in etat["store"]["ouvertes"]
     actifs2 = json.loads((tmp_path / "runtime" / "data" / "raw_coins_actifs.json").read_text())["coins"]
@@ -129,8 +138,8 @@ def test_agrege_plusieurs_petits_open(tmp_path):
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
-    assert CO.traiter_fill(CO.ALPHA, etat, _fill(sz=7, hash="a"), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"]) is None  # 1050 < 2000
-    r = CO.traiter_fill(CO.ALPHA, etat, _fill(sz=7, hash="b"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])      # cumul 2100
+    assert CO.traiter_fill(CO.ALPHA, etat, _fill(sz=7, hash="a"), tmp_path, now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"]) is None  # 1050 < 2000
+    r = CO.traiter_fill(CO.ALPHA, etat, _fill(sz=7, hash="b"), tmp_path, now_ms=now + 1000, lecteur_l2=_l2_at(now + 1000), token=etat["token"])      # cumul 2100
     assert r and r.get("ouverture")                                                        # agrégé -> ouvre
 
 
@@ -139,10 +148,10 @@ def test_refuse_sans_token_valide(tmp_path):
     REFUSÉ — impossible de le connaître depuis le payload."""
     _setup(tmp_path)
     etat = CO.etat_initial(CO.ALPHA, tmp_path, run_id="run-test")
-    assert CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2)["refus"] == "PROVENANCE_NON_AUTORISEE"  # sans token
-    assert CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2, token="faux")["refus"] == "PROVENANCE_NON_AUTORISEE"  # mauvais token
+    assert CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12))["refus"] == "PROVENANCE_NON_AUTORISEE"  # sans token
+    assert CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token="faux")["refus"] == "PROVENANCE_NON_AUTORISEE"  # mauvais token
     # avec le bon token (celui de la cohorte en mémoire) -> ça passe
-    assert CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"]).get("ouverture")
+    assert CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token=etat["token"]).get("ouverture")
 
 
 def test_pytest_ne_peut_pas_ecrire_runtime(tmp_path, monkeypatch):
@@ -163,7 +172,7 @@ def test_pytest_ne_peut_pas_ecrire_runtime(tmp_path, monkeypatch):
 def test_run_id_et_provenance_dans_ledger(tmp_path):
     _setup(tmp_path)
     etat = CO.etat_initial(CO.ALPHA, tmp_path, run_id="run-abc123")
-    CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"])   # ouvre (LIVE_WS)
+    CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token=etat["token"])   # ouvre (LIVE_WS)
     import json as _j
     ligne = _j.loads((tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl").read_text().splitlines()[0])
     assert ligne["run_id"] == "run-abc123" and ligne["source"] == "LIVE_WS" and ligne["evt"] == "OPEN"
@@ -173,8 +182,8 @@ def test_dedup_snapshot_et_hash(tmp_path):
     _setup(tmp_path)
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
     assert CO.traiter_fill(CO.ALPHA, etat, _fill(isSnapshot=True), tmp_path, lecteur_l2=_l2, token=etat["token"]) is None   # snapshot ignoré
-    CO.traiter_fill(CO.ALPHA, etat, _fill(hash="x"), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"])
-    assert CO.traiter_fill(CO.ALPHA, etat, _fill(hash="x"), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"]) is None  # hash déjà vu
+    CO.traiter_fill(CO.ALPHA, etat, _fill(hash="x"), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token=etat["token"])
+    assert CO.traiter_fill(CO.ALPHA, etat, _fill(hash="x"), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token=etat["token"]) is None  # hash déjà vu
 
 
 def test_fill_sans_statut_snapshot_ne_peut_pas_ouvrir_de_position(tmp_path):
@@ -196,9 +205,9 @@ def test_leader_close_sort_inline(tmp_path):
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
-    CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])          # ouvre SOL
+    CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])          # ouvre SOL
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, hash="c2"),
-                        tmp_path, now_ms=now + 5000, lecteur_l2=_l2, token=etat["token"])                        # leader clôt (start absent)
+                        tmp_path, now_ms=now + 5000, lecteur_l2=_l2_at(now + 5000), token=etat["token"])                        # leader clôt (start absent)
     assert r and r.get("fermeture") and r["fermeture"]["raison"] == "LEADER_A_CLOS"
     assert CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"] == {}
 
@@ -207,17 +216,17 @@ def test_reduce_proportionnel_close_total_flip(tmp_path):
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
-    CO.traiter_fill(CO.ALPHA, etat, _fill(sz=20), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])   # ouvre SOL (leader long 20)
+    CO.traiter_fill(CO.ALPHA, etat, _fill(sz=20), tmp_path, now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])   # ouvre SOL (leader long 20)
     notional0 = CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"]["SOL"]["notional_usd"]
     # REDUCE : le leader vend 5 sur 20 (start=20) -> réduit la copie de 25 %
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, sz=5, start_position=20.0, hash="r1"),
-                        tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])
+                        tmp_path, now_ms=now + 1000, lecteur_l2=_l2_at(now + 1000), token=etat["token"])
     assert r["reduction"]["raison"] == "LEADER_A_REDUIT" and round(r["reduction"]["fraction"], 2) == 0.25
     notional1 = CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"]["SOL"]["notional_usd"]
     assert notional1 < notional0                                    # copie réduite proportionnellement
     # CLOSE : le leader vend le reste (15 sur 15) -> ferme tout
     r2 = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, sz=15, start_position=15.0, hash="c1"),
-                         tmp_path, now_ms=now + 2000, lecteur_l2=_l2, token=etat["token"])
+                         tmp_path, now_ms=now + 2000, lecteur_l2=_l2_at(now + 2000), token=etat["token"])
     assert r2["fermeture"]["raison"] == "LEADER_A_CLOS" and CO.charger_store(CO.ALPHA, tmp_path)["ouvertes"] == {}
 
 
@@ -225,10 +234,10 @@ def test_flip_ferme_et_reamorce(tmp_path):
     _setup(tmp_path)
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.ALPHA, tmp_path)
-    CO.traiter_fill(CO.ALPHA, etat, _fill(sz=20), tmp_path, now_ms=now, lecteur_l2=_l2, token=etat["token"])   # long 20
+    CO.traiter_fill(CO.ALPHA, etat, _fill(sz=20), tmp_path, now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])   # long 20
     # FLIP : le leader vend 30 (start=20) -> passe short 10 -> ferme la copie + réamorce l'agrégation
     r = CO.traiter_fill(CO.ALPHA, etat, _fill(dir="Close Long", signe=-1, sz=30, start_position=20.0, hash="f1"),
-                        tmp_path, now_ms=now + 1000, lecteur_l2=_l2, token=etat["token"])
+                        tmp_path, now_ms=now + 1000, lecteur_l2=_l2_at(now + 1000), token=etat["token"])
     assert r["fermeture"]["raison"] == "LEADER_A_FLIP" and r.get("flip") is True
     assert ("0xV", "SOL") in etat["agg"] and etat["agg"][("0xV", "SOL")]["sens"] == -1   # résidu short réamorcé
 
@@ -252,7 +261,7 @@ def test_auto_kill_expectancy_negative(tmp_path):
     led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": -0.5, "notional_usd": 60.0,
                                           "config_hash": ch, "trigger_version": "v1"}) for _ in range(10)))
     assert CO.cohorte_active(CO.ALPHA, tmp_path, config_hash=ch) is False
-    r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"])
+    r = CO.traiter_fill(CO.ALPHA, etat, _fill(), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token=etat["token"])
     assert r and r.get("refus") == "COHORTE_EN_PAUSE_AUTO_KILL"
 
 
@@ -276,7 +285,7 @@ def test_cycle_valide_traverse_un_redemarrage(tmp_path):
     _setup(tmp_path)
     led = tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl"
     led.write_text("\n".join(json.dumps({"evt": "CLOSE", "realized_usd": 0.02, "notional_usd": 10.0,
-                                          "trigger_version": "v1", "cycle_id": "cyc-%d" % i,
+                                          "trigger_version": "v1", "cycle_id": f"cyc-{i}",
                                           "open_run_id": "run-A", "close_run_id": "run-B"}) for i in range(3)))
     ex = CO._expectancy(CO.ALPHA, tmp_path, trigger_version="v1")                  # aucun gate run_id
     assert ex["n_trades"] == 3 and ex["n_legacy_cross_run"] == 0                   # comptés malgré open_run != close_run
@@ -291,7 +300,7 @@ def test_entree_trop_tardive_refusee(tmp_path, monkeypatch):
     now = 1_000_000_000_500.0
     etat = CO.etat_initial(CO.RAW_PROBE, tmp_path)
     r = CO.traiter_fill(CO.RAW_PROBE, etat, _fill(coin="DOGE", sz=3, px=150.0, ts_ms=now - 300), tmp_path,
-                        now_ms=now, lecteur_l2=_l2, token=etat["token"])
+                        now_ms=now, lecteur_l2=_l2_at(now), token=etat["token"])
     assert r and r.get("refus") == "ENTREE_TROP_TARDIVE"          # 300 ms > plafond 100 ms
 
 
@@ -303,7 +312,7 @@ def test_trigger_version_et_placebo_au_cycle_canonique(tmp_path):
         {"ts_ms": now1, "mids": {"BTC": 60000.0, "SOL": 150.0}}))
     etat = CO.etat_initial(CO.ALPHA, tmp_path, git_commit="deadbeef1234", transport_version="tport_test")
     o = CO.traiter_fill(CO.ALPHA, etat, _fill(coin="SOL", sz=20, px=150.0), tmp_path,
-                        now_ms=now1, lecteur_l2=_l2, token=etat["token"])
+                        now_ms=now1, lecteur_l2=_l2_at(now1), token=etat["token"])
     assert o and o.get("ouverture") and o["age_at_paper_fill_ms"] is not None
     cyc = o["ouverture"]["meta"]["cycle_id"]
     ch = o["ouverture"]["meta"]["config_hash"]
@@ -316,7 +325,7 @@ def test_trigger_version_et_placebo_au_cycle_canonique(tmp_path):
     now2 = now1 + 3_600_001
     (tmp_path / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps(
         {"ts_ms": now2, "mids": {"BTC": 59400.0, "SOL": 150.0}}))
-    assert CO.gerer_exits(CO.ALPHA, tmp_path, now_ms=now2, lecteur_l2=_l2, close_run_id="run-CLOSE")
+    assert CO.gerer_exits(CO.ALPHA, tmp_path, now_ms=now2, lecteur_l2=_l2_at(now2), close_run_id="run-CLOSE")
     led2 = [json.loads(x) for x in (tmp_path / "runtime" / "data" / "exploratory_paper_ledger.jsonl").read_text().splitlines()]
     clo = [e for e in led2 if e["evt"] == "CLOSE"][0]
     assert clo["trigger_version"] == "v1" and clo["ret_marche_bps"] is not None
@@ -359,6 +368,6 @@ def test_isolation_alpha_probe(tmp_path):
     (tmp_path / "runtime" / "data" / "copy_prelim_probe.json").write_text(json.dumps(
         {"table": {"DOT": {"edge_brut_bps": 40.0, "horizon_ms": 3_600_000.0, "stop_bps": 40.0, "take_profit_bps": 60.0}}}))
     etat = CO.etat_initial(CO.PROBE, tmp_path)
-    r = CO.traiter_fill(CO.PROBE, etat, _fill(coin="DOT", sz=5), tmp_path, now_ms=1e12, lecteur_l2=_l2, token=etat["token"])  # 750 ≥ 500
+    r = CO.traiter_fill(CO.PROBE, etat, _fill(coin="DOT", sz=5), tmp_path, now_ms=1e12, lecteur_l2=_l2_at(1e12), token=etat["token"])  # 750 ≥ 500
     assert r and r.get("ouverture") and r["ouverture"]["notional_usd"] <= 15.0              # notional PROBE tout petit
     assert not (tmp_path / "runtime" / "data" / "exploratory_paper_positions.json").exists()  # ALPHA intact
