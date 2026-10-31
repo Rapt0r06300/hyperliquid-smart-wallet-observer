@@ -657,10 +657,11 @@ def test_rebase_avoids_scanning_all_upstream_cherry_picks(
     assert result.returncode == 0
     assert captured == [(
         "rebase", "--no-autostash", "--reapply-cherry-picks",
+        "--no-fork-point",
         "refs/remotes/origin/main",
     )]
     assert task.report["rebase_strategy"] == (
-        "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN"
+        "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN_NO_FORK_POINT"
     )
 
 
@@ -1048,7 +1049,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v10' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v11' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
