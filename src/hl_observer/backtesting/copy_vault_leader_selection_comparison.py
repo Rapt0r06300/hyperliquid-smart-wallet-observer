@@ -23,11 +23,19 @@ _REQUIRED_CONTEXT_KEYS = (
     "paper_capital_usd",
     "protocol",
     "trial_accounting",
+    "replay_receipt",
 )
 _REQUIRED_DATASET_KEYS = (
     "selection_digest",
     "source_catalog_sha256",
     "source_asset_inventory_sha256",
+)
+_REQUIRED_REPLAY_RECEIPT_KEYS = (
+    "schema",
+    "status",
+    "receipt_sha256",
+    "paper_read_only",
+    "real_execution",
 )
 
 
@@ -63,6 +71,27 @@ def _context_reasons(context: object, *, label: str) -> list[str]:
                 reasons.append(f"{label}_DATASET_FIELD_MISSING:{key}")
     else:
         reasons.append(f"{label}_CONTEXT_FIELD_INVALID:dataset")
+    replay_receipt = context.get("replay_receipt")
+    if isinstance(replay_receipt, Mapping):
+        for key in _REQUIRED_REPLAY_RECEIPT_KEYS:
+            value = replay_receipt.get(key)
+            if value is None or value == "":
+                reasons.append(f"{label}_REPLAY_RECEIPT_FIELD_MISSING:{key}")
+        receipt_sha256 = replay_receipt.get("receipt_sha256")
+        if (
+            not isinstance(receipt_sha256, str)
+            or len(receipt_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in receipt_sha256)
+        ):
+            reasons.append(f"{label}_REPLAY_RECEIPT_SHA_INVALID")
+        if replay_receipt.get("status") != "COMPLETED":
+            reasons.append(f"{label}_REPLAY_NOT_COMPLETED")
+        if replay_receipt.get("paper_read_only") is not True:
+            reasons.append(f"{label}_REPLAY_NOT_PAPER_READ_ONLY")
+        if replay_receipt.get("real_execution") is not False:
+            reasons.append(f"{label}_REPLAY_REAL_EXECUTION_NOT_FALSE")
+    else:
+        reasons.append(f"{label}_CONTEXT_FIELD_INVALID:replay_receipt")
     return reasons
 
 

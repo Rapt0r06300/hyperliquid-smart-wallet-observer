@@ -147,6 +147,15 @@ def test_commit_subject_names_sync_engine_semantic_copy_vault_rule() -> None:
     )
 
 
+def test_commit_subject_names_canonical_replay_receipt_gate() -> None:
+    assert _commit_subject([
+        "src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py",
+        "tests/test_copy_vault_leader_selection_comparison.py",
+    ], "replay_receipt replay_not_completed") == (
+        "fix(copy-vault): require canonical replay receipt (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_change() -> None:
     assert _commit_subject([
         "tools/alina_git_code_sync.py",

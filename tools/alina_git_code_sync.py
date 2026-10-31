@@ -190,6 +190,20 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     )):
         return "fix(sync): name semantic Copy-Vault commits (2 paths)"
 
+    if (
+        any(path.endswith("src/hl_observer/backtesting/copy_vault_leader_selection_comparison.py") for path in normalized)
+        and any(path.endswith("tests/test_copy_vault_leader_selection_comparison.py") for path in normalized)
+        and any(marker in diff_signal for marker in (
+            "replay_receipt",
+            "replay_not_completed",
+            "canonical replay",
+        ))
+    ):
+        return (
+            "fix(copy-vault): require canonical replay receipt "
+            f"({len(normalized)} paths)"
+        )
+
     if sync_engine_paths and (
         not diff_signal
         or any(marker in diff_signal for marker in ("remote_sha", "github sha", "pushed_head"))

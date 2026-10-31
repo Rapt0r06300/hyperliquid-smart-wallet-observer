@@ -22,6 +22,13 @@ def _context() -> dict:
         "paper_capital_usd": "200.00",
         "protocol": "copy_vault_canonical_replay_v1",
         "trial_accounting": {"family_trial_count": 24, "trial_number": 25},
+        "replay_receipt": {
+            "schema": "hypersmart.copy_vault_canonical_replay_receipt.v1",
+            "status": "COMPLETED",
+            "receipt_sha256": "d" * 64,
+            "paper_read_only": True,
+            "real_execution": False,
+        },
     }
 
 
@@ -74,3 +81,27 @@ def test_invalid_score_fails_closed() -> None:
     assert result["context_mismatch_reasons"] == []
     assert result["delta_usd_per_active_day"] is None
     assert result["promotion_blockers"] == ["SCORE_UNAVAILABLE"]
+
+
+def test_missing_canonical_replay_receipt_is_unmeasurable() -> None:
+    baseline = _run("1.25")
+    baseline["comparison_context"].pop("replay_receipt")
+
+    result = compare_baseline_challenger(baseline, _run("2.75"))
+
+    assert result["comparison_status"] == "UNMEASURABLE"
+    assert "BASELINE_CONTEXT_FIELD_MISSING:replay_receipt" in result[
+        "context_mismatch_reasons"
+    ]
+    assert result["delta_usd_per_active_day"] is None
+
+
+def test_incomplete_canonical_replay_receipt_is_unmeasurable() -> None:
+    challenger = _run("2.75")
+    challenger["comparison_context"]["replay_receipt"]["status"] = "RUNNING"
+
+    result = compare_baseline_challenger(_run("1.25"), challenger)
+
+    assert result["comparison_status"] == "UNMEASURABLE"
+    assert "CHALLENGER_REPLAY_NOT_COMPLETED" in result["context_mismatch_reasons"]
+    assert result["delta_usd_per_active_day"] is None
