@@ -1772,6 +1772,46 @@ def test_restoration_snapshot_rejects_noncanonical_artifacts() -> None:
     assert "metrics" not in snapshot["artifacts_sha256"]
 
 
+def test_train_freeze_bridges_durable_artifacts_without_fabricating_external_proof(
+    tmp_path: Path,
+) -> None:
+    artifacts = local_lab._restoration_artifacts_from_train(
+        trial={
+            "schema": "hypersmart.copy_vault_local_trial.v2",
+            "trial_number": 3,
+            "selection_digest": "0" * 64,
+            "parameter_signature": "1" * 64,
+        },
+        train={
+            "eligible": True,
+            "daily_mean_net_pnl_usd": 1.5,
+            "active_day_mean_net_pnl_usd": 1.5,
+            "daily_mean_net_pnl_scope": "COMPLETE_UTC_CALENDAR_DAYS",
+            "statistics": {
+                "daily_net_pnl_usd": [1.5],
+                "daily_net_pnl_usd_exact_decimal": ["1.5"],
+            },
+            "trades": [{
+                "fees_usd": 0.1,
+                "spread_cost_usd": 0.2,
+                "slippage_cost_usd": 0.3,
+                "latency_cost_usd": 0.4,
+                "net_pnl_usd": 1.5,
+            }],
+        },
+        trial_path=tmp_path / "TRIALS.jsonl",
+        attempt_path=tmp_path / "ATTEMPTS.jsonl",
+        checkpoint_path=tmp_path / "CHECKPOINT.json",
+        freeze={},
+    )
+
+    assert set(("ledger", "equity", "costs", "metrics")) <= set(artifacts)
+    assert "tests" not in artifacts
+    assert "restoration_receipt" not in artifacts
+    assert artifacts["ledger"]["trial_row"]["trial_number"] == 3
+    assert artifacts["costs"]["rows"][0]["fees_usd"] == 0.1
+
+
 def test_improvement_history_rejects_malformed_rows_instead_of_hiding_them(tmp_path: Path) -> None:
     ledger = tmp_path / "runtime/codex_research/copy_vault_improvements/HISTORY.jsonl"
     ledger.parent.mkdir(parents=True)

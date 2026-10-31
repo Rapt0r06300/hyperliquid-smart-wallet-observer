@@ -3080,6 +3080,16 @@ def run_local_campaign(
                     "data_complete": input_manifest.get("data_complete") is True,
                     "heldout_evaluated": False,
                 }
+                frozen_result.update(
+                    _restoration_artifacts_from_train(
+                        trial=trial,
+                        train=train,
+                        trial_path=trial_path,
+                        attempt_path=attempt_path,
+                        checkpoint_path=checkpoint_path,
+                        freeze=freeze.get("freeze", freeze),
+                    )
+                )
                 current_for_record = {"train": baseline_train or {}}
                 frozen_record = record_frozen_candidate(
                     repository_root, candidate_id, frozen_result, current_for_record
@@ -3644,6 +3654,113 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
     }
     snapshot["restoration_snapshot_sha256"] = _canonical_json_sha256(snapshot)
     return snapshot
+
+
+def _restoration_artifacts_from_train(
+    *,
+    trial: Mapping[str, Any],
+    train: Mapping[str, Any],
+    trial_path: Path,
+    attempt_path: Path,
+    checkpoint_path: Path,
+    freeze: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose only artifacts actually emitted by the TRAIN evaluation.
+
+    The campaign used to freeze a candidate before passing any of its durable
+    TRAIN outputs to ``record_frozen_candidate``.  That made every historical
+    snapshot lose the concrete trial/evaluation payload, even though the
+    payload was already available in memory.  Keep this bridge deliberately
+    conservative: missing external tests or a restoration receipt are not
+    synthesized and therefore keep the snapshot fail-closed.
+    """
+    artifacts: dict[str, Any] = {
+        "ledger": {
+            "schema": "hypersmart.copy_vault_train_ledger_reference.v1",
+            "trial_path": str(trial_path),
+            "attempt_path": str(attempt_path),
+            "checkpoint_path": str(checkpoint_path),
+            "trial_row": dict(trial),
+        }
+    }
+    statistics = train.get("statistics")
+    daily_values = (
+        statistics.get("daily_net_pnl_usd")
+        if isinstance(statistics, Mapping)
+        else None
+    )
+    daily_exact_values = (
+        statistics.get("daily_net_pnl_usd_exact_decimal")
+        if isinstance(statistics, Mapping)
+        else None
+    )
+    if daily_values or daily_exact_values:
+        artifacts["equity"] = {
+            "schema": "hypersmart.copy_vault_train_equity_reference.v1",
+            "starting_capital_usd": PAPER_CAPITAL_USD,
+            "daily_net_pnl_usd": daily_values,
+            "daily_net_pnl_usd_exact_decimal": daily_exact_values,
+            "scope": "COMPLETE_UTC_CALENDAR_DAYS",
+            "source": str(trial_path),
+        }
+    trades = train.get("trades")
+    if isinstance(trades, list) and trades:
+        cost_fields = (
+            "fees_usd",
+            "spread_cost_usd",
+            "slippage_cost_usd",
+            "latency_cost_usd",
+            "funding_cost_usd",
+            "net_pnl_usd",
+        )
+        cost_rows = [
+            {
+                key: row.get(key)
+                for key in cost_fields
+                if isinstance(row, Mapping) and row.get(key) is not None
+            }
+            for row in trades
+        ]
+        cost_rows = [row for row in cost_rows if row]
+        if cost_rows:
+            artifacts["costs"] = {
+                "schema": "hypersmart.copy_vault_train_costs_reference.v1",
+                "rows": cost_rows,
+                "source": str(trial_path),
+            }
+    metric_fields = (
+        "eligible",
+        "reasons",
+        "candidate_count",
+        "daily_mean_net_pnl_usd",
+        "active_day_mean_net_pnl_usd",
+        "daily_mean_net_pnl_scope",
+        "calendar_day_statistics",
+        "funding_receipt",
+        "heldout_evaluated",
+        "retuned_on_heldout",
+    )
+    metrics = {
+        key: train.get(key)
+        for key in metric_fields
+        if train.get(key) is not None
+    }
+    if isinstance(statistics, Mapping):
+        metrics["statistics"] = dict(statistics)
+    if metrics:
+        artifacts["metrics"] = {
+            "schema": "hypersmart.copy_vault_train_metrics_reference.v1",
+            "values": metrics,
+            "source": str(trial_path),
+        }
+    report_path = freeze.get("train_report") if isinstance(freeze, Mapping) else None
+    if report_path:
+        artifacts["report"] = {
+            "schema": "hypersmart.copy_vault_train_report_reference.v1",
+            "path": str(report_path),
+            "source": "candidate_freeze",
+        }
+    return artifacts
 
 
 def _has_complete_economic_proof(result: Mapping[str, Any]) -> bool:
