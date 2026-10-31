@@ -262,8 +262,28 @@ def test_partition_reader_rejects_symlinked_parent_directory(tmp_path):
     with pytest.raises(ValueError, match="PARTITION_PARITY_UNSAFE_DIRECTORY"):
         load_partitioned_index(index_path)
 
+
+def test_partition_reader_rejects_symlinked_partition_file(tmp_path):
+    # A canonical filename must not authorize a leaf symlink to external bytes.
+    root, files = partition_index(_index(), max_partition_bytes=240)
+    index_path = _stage(tmp_path, root, files)
+    relative = next(iter(files))
+    part_path = index_path.parent / relative
+    outside = tmp_path / "outside-part.json"
+    outside.write_bytes(part_path.read_bytes())
+    part_path.unlink()
+    try:
+        part_path.symlink_to(outside)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip(f"file symlinks are unavailable: {exc}")
+        raise
+    with pytest.raises(ValueError, match="PARTITION_PARITY_MISSING_FILE"):
+        load_partitioned_index(index_path)
+
+
 def test_save_index_keeps_small_inline_and_switches_to_verified_partitions(tmp_path):
-    from tools.partitioned_data_index import save_index, read_index
+    from tools.partitioned_data_index import read_index, save_index
 
     logical = _index()
     path = tmp_path / "catalog" / "DATA_INDEX.json"
