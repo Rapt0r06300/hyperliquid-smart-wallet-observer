@@ -10,7 +10,7 @@ def _read(name: str) -> str:
 
 
 def test_lanceur_176go_garde_toute_execution_coupee() -> None:
-    text = _read("LANCER_REPLAY_176GO.cmd")
+    text = _read("tools/launchers/LANCER_REPLAY_176GO.cmd")
     assert "HL_ENABLE_MAINNET_EXECUTION=0" in text
     assert "HL_ENABLE_TESTNET_EXECUTION=0" in text
     assert "REAL_MAINNET_TRADING=false" in text

@@ -103,7 +103,11 @@ def test_full_archive_prend_tout_meme_les_elements_qu_il_faut_quarantainer_apres
     assert select_suite_records(rows, "full-archive") == rows
 
 
-def test_plan_all_compte_cache_volume_restant_research_et_sqlite(tmp_path: Path) -> None:
+def test_plan_all_compte_cache_volume_restant_research_et_sqlite(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("ALINA_DATASET_HOME", raising=False)
+    monkeypatch.delenv("ALINA_RESEARCH_HOME", raising=False)
     rows = [
         _record("runtime/data/vault_fills.jsonl", 10, "a.zip"),
         _record("runtime/data/bbo_tape.jsonl", 20, "b.zip"),
@@ -134,7 +138,11 @@ def test_plan_all_compte_cache_volume_restant_research_et_sqlite(tmp_path: Path)
     assert sqlite_plan["download_bytes"] == 400
 
 
-def test_workspace_est_versionne_par_digest_et_pointe_sans_melange(tmp_path: Path) -> None:
+def test_workspace_est_versionne_par_digest_et_pointe_sans_melange(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("ALINA_DATASET_HOME", raising=False)
+    monkeypatch.delenv("ALINA_RESEARCH_HOME", raising=False)
     digest = "1" * 64
     workspace = suite_workspace_for_digest(tmp_path, "economic-full", digest)
     workspace.mkdir(parents=True)

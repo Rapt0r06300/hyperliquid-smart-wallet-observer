@@ -1,46 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
-from enum import Enum
-from pathlib import Path
-import sys
-import types
-
 import pytest
 
-
-ROOT = Path(__file__).resolve().parents[1]
-realtime_package = types.ModuleType("hl_observer.realtime")
-realtime_package.__path__ = [str(ROOT / "src" / "hl_observer" / "realtime")]
-sys.modules["hl_observer.realtime"] = realtime_package
-feed_quality = types.ModuleType("hl_observer.realtime.feed_quality")
-
-
-class FeedEventKind(str, Enum):
-    SNAPSHOT = "SNAPSHOT"
-    INCREMENTAL = "INCREMENTAL"
-    EVENT = "EVENT"
-
-
-feed_quality.FeedEventKind = FeedEventKind
-sys.modules["hl_observer.realtime.feed_quality"] = feed_quality
-collection_package = types.ModuleType("hl_observer.collection")
-collection_package.__path__ = [str(ROOT / "src" / "hl_observer" / "collection")]
-sys.modules["hl_observer.collection"] = collection_package
-for module_name in ("tick_dataset", "native_market_tape"):
-    qualified = f"hl_observer.collection.{module_name}"
-    spec = importlib.util.spec_from_file_location(
-        qualified,
-        ROOT / "src" / "hl_observer" / "collection" / f"{module_name}.py",
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[qualified] = module
-    spec.loader.exec_module(module)
-
-native_tick_envelopes = sys.modules[
-    "hl_observer.collection.native_market_tape"
-].native_tick_envelopes
+from hl_observer.collection.native_market_tape import native_tick_envelopes
 
 
 def _transport() -> dict[str, object]:
