@@ -184,6 +184,15 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
         )
 
     if sync_engine_paths and any(marker in diff_signal for marker in (
+        "unexpected internal sync error", "unexpected_engine_error",
+        "except exception", "fail closed on unexpected",
+    )):
+        return (
+            "fix(sync): fail closed on engine errors "
+            f"({len(normalized)} paths)"
+        )
+
+    if sync_engine_paths and any(marker in diff_signal for marker in (
         "restoration_artifacts_from_train",
         "train_ledger_reference",
         "durable train outputs",
@@ -2219,6 +2228,23 @@ class Synchronizer:
             self.report["status"] = "NO_GO"
             self.report["error"] = str(exc)
             self.say("[NO_GO] " + str(exc))
+            self.say(
+                "Aucun shard telecharge; aucun push force, reset ou clean."
+            )
+            result_code = 2
+        except Exception as exc:  # pragma: no cover - regression guard below
+            # The synchronizer is a safety boundary. A future programming
+            # regression must never escape as a traceback while leaving a
+            # stale NOT_STARTED receipt that looks inconclusive to the CMD.
+            # Do not attempt recovery, cleanup, rebase or push here: the
+            # finally block only records the fail-closed outcome.
+            self.report["status"] = "NO_GO"
+            self.report["error_type"] = type(exc).__name__
+            self.report["error"] = str(exc) or type(exc).__name__
+            self.say(
+                "[NO_GO] Unexpected internal sync error: "
+                + (str(exc) or type(exc).__name__)
+            )
             self.say(
                 "Aucun shard telecharge; aucun push force, reset ou clean."
             )

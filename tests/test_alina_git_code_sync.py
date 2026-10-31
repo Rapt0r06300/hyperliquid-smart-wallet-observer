@@ -190,6 +190,15 @@ def test_commit_subject_names_the_mutex_collision_guard_from_staged_diff() -> No
     )
 
 
+def test_commit_subject_names_unexpected_engine_error_guard() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "except Exception fail closed on unexpected internal sync error") == (
+        "fix(sync): fail closed on engine errors (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_and_launcher_change() -> None:
     assert _commit_subject([
         "POUSSER-GITHUB-FORCE.cmd",
@@ -548,6 +557,36 @@ def test_rebase_timeout_handler_cannot_leave_an_unbound_outcome(
 
     with pytest.raises(SyncBlocked, match="timeout handler"):
         task._run_rebase("refs/remotes/origin/main")
+
+
+def test_unexpected_engine_error_is_fail_closed_and_receipted(
+    repos, monkeypatch, capsys,
+) -> None:
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+    task = Synchronizer(local, allow_test_remote=True)
+
+    def unexpected_error(*_args, **_kwargs):
+        raise UnboundLocalError("outcome")
+
+    monkeypatch.setattr(task, "preflight", unexpected_error)
+
+    assert task.run() == 2
+    receipt = json.loads(
+        (local / "runtime/reports/git-sync/LAST_SYNC.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert receipt["status"] == "NO_GO"
+    assert receipt["error_type"] == "UnboundLocalError"
+    assert receipt["error"] == "outcome"
+    assert receipt["exit_code"] == 2
+    assert git(local, "rev-parse", "HEAD") == before
+    assert git(origin, "rev-parse", "main") == before
+    output = capsys.readouterr().out
+    assert "Unexpected internal sync error: outcome" in output
+    assert "Traceback" not in output
 
 
 def test_rebase_disables_interactive_editors_and_restores_environment(
