@@ -86,7 +86,7 @@ LOCAL_READ_TIMEOUT_SECONDS = 30
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
-GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v10"
+GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v11"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -1951,10 +1951,13 @@ class Synchronizer:
         os.environ["GIT_MERGE_AUTOEDIT"] = "no"
         budget = int(timeout_seconds or REBASE_TIMEOUT_SECONDS)
         self.report["rebase_timeout_budget_seconds"] = budget
-        self.report["rebase_strategy"] = "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN"
+        self.report["rebase_strategy"] = (
+            "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN_NO_FORK_POINT"
+        )
         try:
             return self.command(
-                "rebase", "--no-autostash", "--reapply-cherry-picks", remote,
+                "rebase", "--no-autostash", "--reapply-cherry-picks",
+                "--no-fork-point", remote,
                 check=False,
                 timeout=budget,
             )
