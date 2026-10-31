@@ -629,6 +629,18 @@ def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert sync_module._rebase_timeout_budget(100) == 90
 
 
+def test_rebase_operation_labels_explain_abort_and_continue() -> None:
+    assert sync_module._git_operation_label(["rebase", "--abort"]) == (
+        "Annuler le rebase inacheve"
+    )
+    assert sync_module._git_operation_label(["rebase", "--continue"]) == (
+        "Continuer le rebase sans choix automatique"
+    )
+    assert sync_module._git_operation_label(["rebase", "--skip"]) == (
+        "Ignorer le commit de rebase vide"
+    )
+
+
 def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 
@@ -655,6 +667,9 @@ def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch)
     env = captured["env"]
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GCM_INTERACTIVE"] == "Never"
+    assert env["GIT_SSH_COMMAND"] == (
+        "ssh -o BatchMode=yes -o ConnectTimeout=8"
+    )
 
 
 def test_clean_sync_never_commits_empty(repos):
@@ -1000,6 +1015,9 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert "[LANCEUR 1/6]" in source
     assert "[LANCEUR 6/6]" in source
     assert "DRY-RUN TERMINE" in source
+    assert 'if /I "%HYPERSMART_PUSH_PAUSE%"=="1" pause' in source
+    assert 'if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause' not in source
+    assert "-TimeoutSec 20" in source
 
 
 def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
