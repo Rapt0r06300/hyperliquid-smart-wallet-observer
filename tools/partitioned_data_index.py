@@ -230,6 +230,7 @@ def iter_index_rows(
     parts_dir = index_path.parent / "data-index-parts"
     if parts_dir.is_symlink():
         raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
+    index_root = index_path.parent.resolve()
     seen: set[str] = set()
     observed_count = 0
     global_digest = hashlib.sha256(b"[")
@@ -243,18 +244,23 @@ def iter_index_rows(
         if relative != f"data-index-parts/part-{number:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
         part_path = index_path.parent / relative
+        resolved_part = part_path.resolve()
         if (
-            not part_path.resolve().is_relative_to(index_path.parent.resolve())
+            not resolved_part.is_relative_to(index_root)
             or part_path.is_symlink() or not part_path.is_file()
         ):
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
-        size = part_path.stat().st_size
+        # Read once and derive the size from the exact bytes being hashed and
+        # decoded.  This removes a filesystem stat per partition without
+        # weakening the size/hash/parity checks (and avoids a TOCTOU gap
+        # between stat() and read_bytes()).
+        data = part_path.read_bytes()
+        size = len(data)
         if (
             isinstance(descriptor.get("bytes"), bool)
             or descriptor.get("bytes") != size or size > limit
         ):
             raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
-        data = part_path.read_bytes()
         if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
             raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
         if not data.startswith(b"[") or not data.endswith(b"]\n"):
