@@ -4,6 +4,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
 from pathlib import Path
+from queue import Full, Queue
+from threading import Event, Thread
 
 import pytest
 
@@ -14,8 +16,9 @@ REG = json.loads((ROOT / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
 CAT = json.loads((ROOT / "catalog/DATA_CATALOG.json").read_text())
 INDEX_PATH = ROOT / "catalog/DATA_INDEX.json"
 INDEX_ROOT = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-MANIFEST_WORKERS = max(64, min(128, (os.cpu_count() or 8) * 8))
 MANIFEST_BATCH_SIZE = 16384
+MANIFEST_BATCHES_IN_FLIGHT = 2
+MANIFEST_WORKERS = max(64, min(128, (os.cpu_count() or 8) * 8))
 
 
 def _index_rows():
@@ -32,19 +35,62 @@ def _validate_manifest(row):
     assert manifest["validation_allowed"] is (row["quality_status"] == "SAFE")
 
 
+def _produce_index_batches(batch_queue, stop):
+    """Prefetch verified index batches while manifests are validated."""
+    try:
+        rows = _index_rows()
+        while not stop.is_set():
+            batch = list(islice(rows, MANIFEST_BATCH_SIZE))
+            if not batch:
+                break
+            while not stop.is_set():
+                try:
+                    batch_queue.put(("batch", batch), timeout=0.25)
+                    break
+                except Full:
+                    continue
+    except BaseException as exc:  # propagate producer failures to the fixture
+        while not stop.is_set():
+            try:
+                batch_queue.put(("error", exc), timeout=0.25)
+                break
+            except Full:
+                continue
+    finally:
+        while not stop.is_set():
+            try:
+                batch_queue.put(("done", None), timeout=0.25)
+                break
+            except Full:
+                continue
+
+
 @pytest.fixture(scope="module")
 def indexed_catalog_audit():
     """Exhaustively verify the index and manifests once for related assertions."""
     counts = Counter()
     observed = 0
-    rows = _index_rows()
-    with ThreadPoolExecutor(max_workers=MANIFEST_WORKERS) as pool:
-        while batch := list(islice(rows, MANIFEST_BATCH_SIZE)):
-            counts.update(row["quality_status"] for row in batch)
-            for _ in pool.map(_validate_manifest, batch):
-                pass
-            observed += len(batch)
-    return counts, observed
+    batch_queue = Queue(maxsize=MANIFEST_BATCHES_IN_FLIGHT)
+    stop = Event()
+    producer = Thread(target=_produce_index_batches, args=(batch_queue, stop), daemon=True)
+    producer.start()
+    try:
+        with ThreadPoolExecutor(max_workers=MANIFEST_WORKERS) as pool:
+            while True:
+                kind, payload = batch_queue.get()
+                if kind == "done":
+                    break
+                if kind == "error":
+                    raise payload
+                batch = payload
+                for _ in pool.map(_validate_manifest, batch):
+                    pass
+                counts.update(row["quality_status"] for row in batch)
+                observed += len(batch)
+        return counts, observed
+    finally:
+        stop.set()
+        producer.join(timeout=5)
 
 
 def test_safe_only_validation():
