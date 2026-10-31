@@ -1,22 +1,22 @@
 {
   "authoritative_plan": {
-    "active_lane_count": 1,
+    "active_lane_count": 0,
     "broad_rest_universe_count": 3059,
     "campaigns": [
       {
-        "campaign_id": "copy-vault-e8-broad-2026103117-v8",
+        "campaign_id": "copy-vault-e8-broad-2026103121-v8",
         "collected": false,
-        "completed_units": 0,
+        "completed_units": 1,
         "published": false,
         "shard_index": 0,
-        "status": "RUNNING",
-        "status_reason": "worker_started"
+        "status": "PARTIAL",
+        "status_reason": "collection_publication_unproven"
       }
     ],
     "collected_lane_count": 0,
     "collection_mode": "two_speed_broad_rest_priority_ws",
-    "completed_unit_count": 0,
-    "created_at_max": "2026-10-31T17:43:45.336754+00:00",
+    "completed_unit_count": 1,
+    "created_at_max": "2026-10-31T21:26:36.317739+00:00",
     "declared_universe_count": 3059,
     "duplicate_lane_indices": [],
     "explicit_unavailable_lane_count": 0,
@@ -34,17 +34,17 @@
     "qualified_shard_count": 0,
     "scheduled_lane_count": 1,
     "selected_count": 3059,
-    "selection_file": "catalog/copy_vault_selections/e8/2026103117.json",
-    "selection_sha256": "2cd6fbbda55da64d58274f2a826bb6a44d866dd6f30c53d0d1f4261b23224a7e",
+    "selection_file": "catalog/copy_vault_selections/e8/2026103121.json",
+    "selection_sha256": "35c20f9986ec36440a27b7f973c114119733a02fb6ba851ea8875f83a8cba500",
     "selection_verified": true,
     "status": "MORE_DATA",
-    "terminal_lane_count": 0,
+    "terminal_lane_count": 1,
     "unexpected_failures": [],
     "users_per_largest_lane": 3059,
     "ws_subscription_limit_verified": true,
     "ws_users_per_largest_lane": 10
   },
-  "candidate_campaign_count": 120,
+  "candidate_campaign_count": 121,
   "collection_cutoff_at_utc": null,
   "invalid_manifest_paths": [],
   "paper_only": true,
@@ -5407,22 +5407,22 @@
       "ws_users_per_largest_lane": 10
     },
     {
-      "active_lane_count": 1,
+      "active_lane_count": 0,
       "broad_rest_universe_count": 3059,
       "campaigns": [
         {
           "campaign_id": "copy-vault-e8-broad-2026103117-v8",
           "collected": false,
-          "completed_units": 0,
+          "completed_units": 1,
           "published": false,
           "shard_index": 0,
-          "status": "RUNNING",
-          "status_reason": "worker_started"
+          "status": "PARTIAL",
+          "status_reason": "collection_publication_unproven"
         }
       ],
       "collected_lane_count": 0,
       "collection_mode": "two_speed_broad_rest_priority_ws",
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "created_at_max": "2026-10-31T17:43:45.336754+00:00",
       "declared_universe_count": 3059,
       "duplicate_lane_indices": [],
@@ -5445,7 +5445,52 @@
       "selection_sha256": "2cd6fbbda55da64d58274f2a826bb6a44d866dd6f30c53d0d1f4261b23224a7e",
       "selection_verified": true,
       "status": "MORE_DATA",
-      "terminal_lane_count": 0,
+      "terminal_lane_count": 1,
+      "unexpected_failures": [],
+      "users_per_largest_lane": 3059,
+      "ws_subscription_limit_verified": true,
+      "ws_users_per_largest_lane": 10
+    },
+    {
+      "active_lane_count": 0,
+      "broad_rest_universe_count": 3059,
+      "campaigns": [
+        {
+          "campaign_id": "copy-vault-e8-broad-2026103121-v8",
+          "collected": false,
+          "completed_units": 1,
+          "published": false,
+          "shard_index": 0,
+          "status": "PARTIAL",
+          "status_reason": "collection_publication_unproven"
+        }
+      ],
+      "collected_lane_count": 0,
+      "collection_mode": "two_speed_broad_rest_priority_ws",
+      "completed_unit_count": 1,
+      "created_at_max": "2026-10-31T21:26:36.317739+00:00",
+      "declared_universe_count": 3059,
+      "duplicate_lane_indices": [],
+      "explicit_unavailable_lane_count": 0,
+      "fully_published": false,
+      "lane_indices": [
+        0
+      ],
+      "manifest_lane_count": 1,
+      "max_users_per_lane_contract": 10,
+      "missing_lane_indices": [],
+      "no_silent_loss": true,
+      "out_of_range_lane_indices": [],
+      "plan_valid": true,
+      "published_lane_count": 0,
+      "qualified_shard_count": 0,
+      "scheduled_lane_count": 1,
+      "selected_count": 3059,
+      "selection_file": "catalog/copy_vault_selections/e8/2026103121.json",
+      "selection_sha256": "35c20f9986ec36440a27b7f973c114119733a02fb6ba851ea8875f83a8cba500",
+      "selection_verified": true,
+      "status": "MORE_DATA",
+      "terminal_lane_count": 1,
       "unexpected_failures": [],
       "users_per_largest_lane": 3059,
       "ws_subscription_limit_verified": true,
@@ -5454,7 +5499,7 @@
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "4093d0874d1c98baa501990fea15c0313385d541262aaebc8bf82bc124e49fe7",
+  "receipt_digest": "bfe85521d3c0d698eb834037e6c645571848d9bd4f9cb283b5fc4e314fc16208",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
