@@ -23,9 +23,27 @@ COPY_VAULT_EXECUTABLE_SUITES: tuple[str, ...] = (
     "tests/test_copy_vault_v21_frozen.py",
 )
 
+COPY_VAULT_LOCAL_LAB_SUITES: tuple[str, ...] = (
+    "tests/test_alina_quant_lab_console.py",
+    "tests/test_copy_vault_campaign_lock.py",
+    "tests/test_copy_vault_leader_review.py",
+    "tests/test_copy_vault_local_lab.py",
+)
+
+COPY_VAULT_PIPELINE_SUITES: tuple[str, ...] = (
+    "tests/test_copy_vault_local_lab.py",
+    "tests/test_pipeline_copie_reel.py",
+)
+
 MODULE_TESTS: dict[str, tuple[str, ...]] = {
     "src/hl_observer/backtesting/copy_vault_executable.py":
         COPY_VAULT_EXECUTABLE_SUITES,
+    "src/hl_observer/backtesting/copy_vault_local_lab.py":
+        COPY_VAULT_LOCAL_LAB_SUITES,
+    "tools/pipeline_copie_reel.py":
+        COPY_VAULT_PIPELINE_SUITES,
+    "tools/run_copy_vault_regressions.py":
+        ("tests/test_copy_vault_regression_runner.py",),
 }
 
 CRITICAL_PREFIXES = (

@@ -14,6 +14,16 @@ def test_executable_has_only_current_existing_downstream_suites() -> None:
     assert all((runner.ROOT / path).is_file() for path in selected)
 
 
+def test_local_lab_and_pipeline_have_explicit_downstream_suites() -> None:
+    local_lab = runner.select_tests([
+        "src/hl_observer/backtesting/copy_vault_local_lab.py",
+    ])
+    pipeline = runner.select_tests(["tools/pipeline_copie_reel.py"])
+
+    assert local_lab == sorted(runner.COPY_VAULT_LOCAL_LAB_SUITES)
+    assert pipeline == sorted(runner.COPY_VAULT_PIPELINE_SUITES)
+
+
 def test_unknown_critical_module_fails_closed() -> None:
     with pytest.raises(ValueError, match="no regression mapping"):
         runner.select_tests(["src/hl_observer/backtesting/future_engine.py"])
