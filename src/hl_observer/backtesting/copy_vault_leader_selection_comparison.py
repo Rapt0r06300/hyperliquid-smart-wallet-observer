@@ -55,6 +55,14 @@ def _finite_decimal(value: object) -> Decimal | None:
     return parsed if parsed.is_finite() else None
 
 
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
 def _context_reasons(context: object, *, label: str) -> list[str]:
     if not isinstance(context, Mapping):
         return [f"{label}_COMPARISON_CONTEXT_MISSING"]
@@ -69,6 +77,8 @@ def _context_reasons(context: object, *, label: str) -> list[str]:
             value = dataset.get(key)
             if value is None or value == "":
                 reasons.append(f"{label}_DATASET_FIELD_MISSING:{key}")
+            elif not _is_sha256(value):
+                reasons.append(f"{label}_DATASET_SHA_INVALID:{key}")
     else:
         reasons.append(f"{label}_CONTEXT_FIELD_INVALID:dataset")
     replay_receipt = context.get("replay_receipt")
