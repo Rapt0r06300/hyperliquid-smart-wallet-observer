@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from dataclasses import asdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -320,6 +321,35 @@ app = typer.Typer(
 )
 
 
+@lru_cache(maxsize=8)
+def _cached_safety_audit(root: str, runner_identity: int):
+    """Reuse one safety result during a single CLI process.
+
+    The dynamic read-only CLI contract invokes commands through several
+    argument shapes. Re-scanning the same repository for each shape is
+    needlessly expensive, while a process-local cache remains fresh for normal
+    CLI invocations. ``runner_identity`` also invalidates the cache when tests
+    replace the audit runner.
+    """
+    del runner_identity
+    return run_safety_audit(root)
+
+
+def _current_safety_audit():
+    return _cached_safety_audit(str(Path.cwd()), id(run_safety_audit))
+
+
+@lru_cache(maxsize=8)
+def _cached_archive_audit(root: str, writer_identity: int):
+    """Avoid repeating the bounded archive walk in one CLI process."""
+    del writer_identity
+    return write_archive_audit_report(Path(root))
+
+
+def _current_archive_audit():
+    return _cached_archive_audit(str(Path.cwd()), id(write_archive_audit_report))
+
+
 def _settings() -> Settings:
     settings = load_settings()
     configure_logging(settings.log_level)
@@ -626,7 +656,7 @@ def doctor() -> None:
         "logs_dir_configured": bool(settings.logs_dir),
         "info_endpoint_read_only": info_url_for_settings(settings).endswith("/info"),
     }
-    audit = run_safety_audit(".")
+    audit = _current_safety_audit()
     checks["safety_audit_ok"] = audit.ok
     for name, ok in checks.items():
         typer.echo(f"{name}: {'ok' if ok else 'FAIL'}")
@@ -645,7 +675,7 @@ def init_db() -> None:
 @app.command("safety-audit")
 def safety_audit() -> None:
     """Run local safety checks for secrets and forbidden execution paths."""
-    result = run_safety_audit(".")
+    result = _current_safety_audit()
     for name, ok in result.checks.items():
         typer.echo(f"{name}: {'ok' if ok else 'FAIL'}")
     for finding in result.findings:
@@ -799,7 +829,7 @@ def simulation_readiness(
 @app.command("archive-audit")
 def archive_audit() -> None:
     """Audit archive hygiene and write the release archive audit report."""
-    report_path = write_archive_audit_report(Path(".").resolve())
+    report_path = _current_archive_audit()
     typer.echo(f"archive-audit report: {report_path}")
 
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_EXCLUDED_DIRS: set[str] = {
-    ".git", "data", "runtime", "outputs", "node_modules",
+    ".git", "data", "datasets", "runtime", "outputs", "node_modules",
     "__pycache__", ".pytest_cache", ".pytest_tmp", ".mypy_cache",
     ".ruff_cache", ".refact", ".venv", "venv", "env", "dist", "build",
     ".cache", ".idea", ".vscode",
