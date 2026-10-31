@@ -1673,10 +1673,17 @@ def test_frozen_candidate_history_is_append_only_and_idempotent(tmp_path: Path) 
 
 
 def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
+    campaign_config = {
+        "schema": "hypersmart.copy_vault_search_config.v1",
+        "family": "copy_vault",
+        "proposal_seed": 0,
+        "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
+    }
     complete = {
         "selection_digest": "0" * 64,
         "engine_source_sha256": "a" * 64,
-        "campaign_config_sha256": "b" * 64,
+        "campaign_config_sha256": local_lab._canonical_json_sha256(campaign_config),
+        "campaign_config": campaign_config,
         "source_catalog_sha256": "c" * 64,
         "source_asset_inventory_sha256": "d" * 64,
         "source_asset_inventory_count": 2,
@@ -1711,6 +1718,7 @@ def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
     assert snapshot["lineage"]["selection_digest"] == "0" * 64
     assert snapshot["trial_accounting"]["trial_number"] == 7
     assert snapshot["search"]["global_trial_count"] == 7
+    assert snapshot["search"]["campaign_config"] == campaign_config
     assert snapshot["candidate_freeze"]["freeze"]["parameters_sha256"] == local_lab.parameter_hash(
         {"core_notional_usd": 20.0}
     )

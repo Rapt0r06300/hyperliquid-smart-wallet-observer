@@ -3067,6 +3067,7 @@ def run_local_campaign(
                     "source_catalog_sha256": input_manifest.get("source_index_sha256"),
                     "engine_source_sha256": engine_source_sha,
                     "campaign_config_sha256": campaign_config_sha,
+                    "campaign_config": dict(campaign_config),
                     "proposal_method": campaign_config["proposal_method"],
                     "proposal_seed": campaign_config["proposal_seed"],
                     "temporal_windows": dict(bounds),
@@ -3578,6 +3579,17 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
     if decimal_value(paper_capital) != Decimal(str(PAPER_CAPITAL_USD)):
         missing.append("PAPER_CAPITAL_USD")
 
+    campaign_config = result.get("campaign_config")
+    if not isinstance(campaign_config, Mapping) or not campaign_config:
+        missing.append("CAMPAIGN_CONFIG")
+    else:
+        try:
+            campaign_config_digest = _canonical_json_sha256(campaign_config)
+        except (TypeError, ValueError):
+            campaign_config_digest = None
+        if campaign_config_digest != result.get("campaign_config_sha256"):
+            missing.append("CAMPAIGN_CONFIG_HASH_MISMATCH")
+
     selected_candidate = result.get("selected_candidate")
     candidate_freeze = (
         selected_candidate.get("freeze")
@@ -3634,6 +3646,8 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
             )
         },
         "search": {
+            "campaign_config": dict(campaign_config)
+            if isinstance(campaign_config, Mapping) else None,
             "proposal_seed": seed,
             "temporal_windows": windows,
             "paper_capital_usd": paper_capital,
