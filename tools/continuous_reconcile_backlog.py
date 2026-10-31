@@ -60,8 +60,10 @@ def classify_hosted_termination(
             "runner shutdown",
             "runner was shut down",
             "runner is shutting down",
+            "runner has received a shutdown",
             "hosted runner stopped",
             "infrastructure shutdown",
+            "shutdown signal",
         )
     ):
         return "INFRASTRUCTURE_STOP"

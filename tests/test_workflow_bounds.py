@@ -433,8 +433,10 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'gh run view "$GITHUB_RUN_ID"' in retry
     assert 'historical_job_id' in retry
     assert '--log-failed' in retry
-    assert "grep -Eiq" in retry
-    assert "No explicit hosted-runner interruption evidence" in retry
+    assert "classify_hosted_termination" in retry
+    assert 'termination_class" != "INFRASTRUCTURE_STOP"' in retry
+    assert "No explicit hosted-runner interruption evidence" not in retry
+    assert "exit( code)? 143" not in retry
 
 
 def test_reconcile_rebuilds_and_sha_verifies_metrics_after_mutating_tests():

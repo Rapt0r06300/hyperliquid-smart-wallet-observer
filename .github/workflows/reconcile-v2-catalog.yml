@@ -561,6 +561,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RESUME_ATTEMPT: ${{ inputs.resume_attempt || '0' }}
     steps:
+      - name: Checkout canonical termination classifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            tools
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
       - name: Dispatch one bounded hosted retry
         shell: bash
         run: |
@@ -581,13 +594,35 @@ jobs:
             echo "::error::Historical job id is unavailable; refusing an unproven retry"
             exit 1
           fi
+          job_json="$RUNNER_TEMP/historical-job.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$historical_job_id" > "$job_json"
           failure_log="$(gh run view "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --job "$historical_job_id" \
             --log-failed 2>&1 || true)"
-          if ! printf '%s\n' "$failure_log" | grep -Eiq \
-            'SIGTERM|signal 15|exit( code)? 143|runner has received a shutdown|shutdown signal'; then
-            echo "::error::No explicit hosted-runner interruption evidence; refusing automatic retry"
+          printf '%s\n' "$failure_log" > "$RUNNER_TEMP/historical-failure.log"
+          termination_class="$(python - "$job_json" \
+            "$RUNNER_TEMP/historical-failure.log" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          from tools.continuous_reconcile_backlog import classify_hosted_termination
+
+          job = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          log = Path(sys.argv[2]).read_text(encoding="utf-8")
+          classification = classify_hosted_termination(
+              returncode=143 if "exit 143" in log.lower() else None,
+              status=job.get("status"),
+              conclusion=job.get("conclusion"),
+              log_text=log,
+          )
+          print(classification)
+          PY
+          )"
+          echo "Historical termination classification: $termination_class"
+          if [ "$termination_class" != "INFRASTRUCTURE_STOP" ]; then
+            echo "::error::Termination is not a proven hosted infrastructure stop; refusing automatic retry"
             exit 1
           fi
           next=$((current + 1))
