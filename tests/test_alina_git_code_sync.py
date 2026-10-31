@@ -367,6 +367,25 @@ def test_git_command_prints_named_step_duration_and_exit_code(
     assert calls[0][1]["live_stderr"] is False
 
 
+def test_expected_git_return_code_is_logged_as_info_not_failure(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    def fake_run_git(root, git, args, **kwargs):
+        return subprocess.CompletedProcess([git, *args], 1, b"", b"")
+
+    monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
+    task = Synchronizer(tmp_path)
+    result = task.command(
+        "diff", "--cached", "--quiet", check=False,
+        expected_returncodes=(1,),
+    )
+
+    assert result.returncode == 1
+    output = capsys.readouterr().out
+    assert "[INFO] Comparer les fichiers suivis par Git | code=1" in output
+    assert "[ECHEC] Comparer les fichiers suivis par Git" not in output
+
+
 @pytest.mark.parametrize("verb", ["fetch", "push"])
 def test_network_git_commands_stream_progress_to_terminal(
     tmp_path: Path, monkeypatch, capsys, verb: str,

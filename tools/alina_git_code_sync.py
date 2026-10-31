@@ -581,7 +581,8 @@ class Synchronizer:
         }
 
     def command(self, *args: str, input_bytes: bytes | None = None,
-                check: bool = True, timeout: int = 300
+                check: bool = True, timeout: int = 300,
+                expected_returncodes: tuple[int, ...] = ()
                 ) -> subprocess.CompletedProcess[bytes]:
         git_args = list(args)
         label = _git_operation_label(git_args)
@@ -619,12 +620,16 @@ class Synchronizer:
         self._record_git_command(
             command_number, label, completed.returncode, elapsed_ms,
         )
-        outcome = "OK" if completed.returncode == 0 else "ECHEC"
+        outcome = (
+            "OK" if completed.returncode == 0
+            else "INFO" if completed.returncode in expected_returncodes
+            else "ECHEC"
+        )
         self.say(
             f"[{outcome}] {label} | code={completed.returncode} | "
             f"duree={elapsed_ms / 1000:.2f} s"
         )
-        if check and completed.returncode:
+        if check and completed.returncode and completed.returncode not in expected_returncodes:
             stderr = (completed.stderr or b"").decode(
                 "utf-8", errors="replace",
             ).strip()
@@ -1387,7 +1392,10 @@ class Synchronizer:
             input_bytes=pathspec,
         )
         self._verify_stage()
-        diff = self.command("diff", "--cached", "--quiet", check=False)
+        diff = self.command(
+            "diff", "--cached", "--quiet", check=False,
+            expected_returncodes=(1,),
+        )
         if diff.returncode not in (0, 1):
             raise SyncBlocked("Verification de l'index Git impossible.")
         if diff.returncode == 1:
