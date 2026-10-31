@@ -45,14 +45,17 @@ def test_safety_audit_does_not_scan_embedded_third_party_runtime(tmp_path):
     app_file = tmp_path / "src" / "app.py"
     third_party = tmp_path / "portable_runtime" / "python" / "Lib" / "site-packages" / "vendor.py"
     embedded_python = tmp_path / "tools" / "python" / "Lib" / "site-packages" / "vendor.py"
+    ci_venv = tmp_path / ".ci-venv" / "lib" / "python3.11" / "site-packages" / "vendor.py"
     transient = tmp_path / ".portable-preflight-old" / "bad.env"
     app_file.parent.mkdir(parents=True)
     third_party.parent.mkdir(parents=True)
     embedded_python.parent.mkdir(parents=True)
+    ci_venv.parent.mkdir(parents=True)
     transient.parent.mkdir(parents=True)
     app_file.write_text("SAFE = True\n", encoding="utf-8")
     third_party.write_text("PRIVATE_KEY = 'third-party-license-token'\n", encoding="utf-8")
     embedded_python.write_text("PRIVATE_KEY = 'third-party-license-token'\n", encoding="utf-8")
+    ci_venv.write_text("PRIVATE_KEY = 'third-party-license-token'\n", encoding="utf-8")
     transient.write_text("PRIVATE_KEY=pytest-fixture\n", encoding="utf-8")
 
     files = _iter_scannable_files(tmp_path)
@@ -60,6 +63,7 @@ def test_safety_audit_does_not_scan_embedded_third_party_runtime(tmp_path):
     assert app_file in files
     assert third_party not in files
     assert embedded_python not in files
+    assert ci_venv not in files
     assert transient not in files
 
 
