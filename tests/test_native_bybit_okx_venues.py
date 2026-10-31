@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
+import httpx
+import pytest
+
+from hl_observer.markets.venues import okx as okx_module
 from hl_observer.markets.venues.bybit import (
     BybitPublicClient,
     parse_bybit_bbo,
@@ -131,6 +136,107 @@ def test_okx_public_parsers_cover_instrument_bbo_and_metrics() -> None:
     assert metrics is not None
     assert metrics.funding_rate == 0.0002
     assert metrics.open_interest == 999.0
+
+
+def test_okx_public_client_rejects_rate_limits_and_api_errors() -> None:
+    async def exercise() -> None:
+        async def rate_limited(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, json={"code": "0", "data": []})
+
+        async def api_error(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"code": "51000", "msg": "bad request", "data": []})
+
+        for handler, expected in ((rate_limited, httpx.HTTPStatusError), (api_error, RuntimeError)):
+            transport = httpx.MockTransport(handler)
+            http_client = httpx.AsyncClient(transport=transport, base_url=okx_module.OKX_REST_BASE)
+            adapter = OkxPublicClient(http_client=http_client)
+            try:
+                with pytest.raises(expected):
+                    await adapter.discover_instruments()
+            finally:
+                await http_client.aclose()
+
+    asyncio.run(exercise())
+
+
+def test_okx_public_client_keeps_missing_metrics_unmeasurable() -> None:
+    async def exercise() -> None:
+        async def incomplete(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"code": "0", "data": []})
+
+        http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(incomplete),
+            base_url=okx_module.OKX_REST_BASE,
+        )
+        adapter = OkxPublicClient(http_client=http_client)
+        try:
+            assert await adapter.discover_instruments() == []
+            assert await adapter.fetch_metrics("BTC-USDT-SWAP") is None
+        finally:
+            await http_client.aclose()
+
+    asyncio.run(exercise())
+
+
+def test_okx_bbo_reconnects_after_transient_socket_failure() -> None:
+    async def exercise() -> None:
+        messages = [
+            json.dumps({
+                "arg": {"channel": "bbo-tbt", "instId": "BTC-USDT-SWAP"},
+                "data": [{
+                    "asks": [["65001", "3", "0", "1"]],
+                    "bids": [["65000", "4", "0", "1"]],
+                    "ts": "1700000000000",
+                    "seqId": "77",
+                }],
+            }),
+        ]
+        attempts = []
+
+        class FakeSocket:
+            def __init__(self, fail: bool) -> None:
+                self.fail = fail
+
+            async def __aenter__(self):
+                if self.fail:
+                    raise OSError("injected connection loss")
+                return self
+
+            async def __aexit__(self, *_exc: object) -> None:
+                return None
+
+            async def send(self, _payload: str) -> None:
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if messages:
+                    return messages.pop(0)
+                raise StopAsyncIteration
+
+        def connect(*_args, **_kwargs):
+            attempts.append(len(attempts) + 1)
+            return FakeSocket(len(attempts) == 1)
+
+        async def fast_sleep(_seconds: float) -> None:
+            return None
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(okx_module.websockets, "connect", connect)
+        monkeypatch.setattr(okx_module.asyncio, "sleep", fast_sleep)
+        stream = adapter = OkxPublicClient()
+        try:
+            async for quote in stream.iter_bbo(["BTC-USDT-SWAP"]):
+                assert quote.sequence == 77
+                break
+        finally:
+            await adapter.close()
+            monkeypatch.undo()
+        assert attempts == [1, 2]
+
+    asyncio.run(exercise())
 
 
 def test_subscription_payloads_use_public_bbo_channels() -> None:
