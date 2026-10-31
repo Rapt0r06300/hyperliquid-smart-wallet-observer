@@ -54,6 +54,13 @@ GENERIC_MODULE_UNSAFE = {
     "hl_observer.cli",
 }
 PROCESS_GLOBAL_UNSAFE = {
+    # These CLI commands mutate the checkout or create runtime artefacts; the
+    # dynamic read-only contract must not invoke them with synthetic inputs.
+    ("hl_observer.cli", "init_db"),
+    ("hl_observer.cli", "runtime_write_check"),
+    ("hl_observer.cli", "prepare_simulation_logs"),
+    ("hl_observer.cli", "archive_audit"),
+    ("hl_observer.cli", "create_clean_archive_command"),
     ("hl_observer.ops.portable_audit_guard", "install"),
     ("hl_observer.ops.portable_audit_guard", "install_from_environment"),
     ("hl_observer.scoring.wallet_ranking", "export_classification_robustness_report"),

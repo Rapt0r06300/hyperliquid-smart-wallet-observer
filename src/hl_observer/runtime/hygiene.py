@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -8,6 +9,39 @@ from hl_observer.config.settings import Settings
 
 DB_SUFFIXES = (".sqlite3", ".db")
 SQLITE_RUNTIME_SUFFIXES = (".sqlite3", ".sqlite3-wal", ".sqlite3-shm", ".db", ".db-wal", ".db-shm")
+_HYGIENE_PRUNED_DIRS = {
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    ".venv-portable",
+    "__pycache__",
+    "datasets",
+    "node_modules",
+    "src",
+    "tests",
+}
+
+
+def _hygiene_scan_roots(root: Path) -> list[Path]:
+    """Return bounded runtime roots for a repository checkout.
+
+    The project contains immutable datasets, source trees and historical
+    archives that cannot contain an active SQLite/log runtime state. Scanning
+    those trees made the read-only CLI contract unbounded. Temporary fixture
+    roots are still scanned generically so the unit-level safety contract does
+    not lose coverage.
+    """
+    if not (root / ".git").is_dir():
+        return [root]
+    candidates = [
+        root / "data",
+        root / "logs",
+        root / "runtime" / "data",
+        root / "runtime" / "logs",
+    ]
+    existing = [path for path in candidates if path.is_dir()]
+    return existing or [root]
 
 
 @dataclass(frozen=True)
@@ -42,19 +76,22 @@ def scan_runtime_hygiene(settings: Settings, *, root: Path = Path(".")) -> Runti
     sqlite_sidecars: list[Path] = []
     log_files: list[Path] = []
     warnings: list[str] = []
-    for path in resolved_root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = _safe_relative(path, resolved_root).as_posix().lower()
-        name = path.name.lower()
-        if name.endswith(DB_SUFFIXES):
-            databases.append(path)
-            if rel.startswith("logs/"):
-                databases_in_logs.append(path)
-        if name.endswith((".sqlite3-wal", ".sqlite3-shm", ".db-wal", ".db-shm")):
-            sqlite_sidecars.append(path)
-        if name.endswith(".log"):
-            log_files.append(path)
+    for scan_root in _hygiene_scan_roots(resolved_root):
+        for dirpath, dirnames, filenames in os.walk(scan_root, topdown=True):
+            dirnames[:] = [name for name in dirnames if name not in _HYGIENE_PRUNED_DIRS]
+            current = Path(dirpath)
+            for filename in filenames:
+                path = current / filename
+                rel = _safe_relative(path, resolved_root).as_posix().lower()
+                name = path.name.lower()
+                if name.endswith(DB_SUFFIXES):
+                    databases.append(path)
+                    if rel.startswith("logs/"):
+                        databases_in_logs.append(path)
+                if name.endswith((".sqlite3-wal", ".sqlite3-shm", ".db-wal", ".db-shm")):
+                    sqlite_sidecars.append(path)
+                if name.endswith(".log"):
+                    log_files.append(path)
     if db_path is not None and "logs" in [part.lower() for part in db_path.parts]:
         warnings.append("configured database_url points inside logs/; move runtime DB to data/.")
     if databases_in_logs:

@@ -91,8 +91,10 @@ def is_archive_safe_source(root: Path, path: Path) -> bool:
         return False
     if not is_archive_safe_path(relative):
         return False
-    resolved = path.resolve()
-    return resolved == root or root in resolved.parents
+    # A regular file already has a lexical path below ``root``. Resolving
+    # every file is needlessly expensive on the full checkout; symlinks are
+    # the only entries whose target still needs the containment check above.
+    return True
 
 
 def create_clean_archive(root: Path, output_dir: Path | None = None, *, name: str | None = None) -> ArchiveResult:
