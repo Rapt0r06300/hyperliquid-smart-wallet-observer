@@ -6,7 +6,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
-from hl_observer.collection import l4_capture as L4   # noqa: E402
+from hl_observer.collection import l4_capture as L4  # noqa: E402
 
 
 def test_chantier4_capture_reconstruit_le_cycle(tmp_path):
@@ -29,3 +29,20 @@ def test_chantier4_capture_reconstruit_le_cycle(tmp_path):
 def test_chantier4_sans_flux_est_blocked_external():
     assert L4.capturer(None)["verdict"] == "BLOCKED_EXTERNAL"
     assert L4.event_canonique({"type": "NEW"}) is None        # order_id manquant -> jamais une intention fabriquée
+
+
+def test_chantier4_quarantaine_les_valeurs_non_finites_ou_incompletes():
+    valide = {"order_id": "o1", "ts_ms": 0, "type": "NEW", "coin": "BTC", "side": "BUY", "px": 100.0, "sz": 1.0}
+    assert L4.event_canonique(valide)["px"] == 100.0
+    for field, value in (("ts_ms", float("nan")), ("px", float("inf")), ("sz", -1.0), ("mid", float("nan")), ("queue_ahead", -1.0)):
+        invalid = {**valide, field: value}
+        assert L4.event_canonique(invalid) is None
+    assert L4.event_canonique({**valide, "side": "UNKNOWN"}) is None
+
+
+def test_chantier4_ne_fabrique_pas_les_champs_obligatoires():
+    valide = {"order_id": "o1", "ts_ms": 0, "type": "NEW", "coin": "BTC", "side": "BUY", "px": 100.0, "sz": 1.0}
+    for field in ("ts_ms", "coin", "side", "px", "sz"):
+        invalid = {**valide}
+        invalid.pop(field)
+        assert L4.event_canonique(invalid) is None
