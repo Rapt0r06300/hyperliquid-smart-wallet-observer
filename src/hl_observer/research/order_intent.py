@@ -12,6 +12,7 @@ Schéma L4 attendu : `{"order_id", "ts_ms", "type" ∈ {NEW,MODIFY,CANCEL,PARTIA
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -20,14 +21,31 @@ BLOCKED = "BLOCKED_EXTERNAL"
 TYPES = ("NEW", "MODIFY", "CANCEL", "PARTIAL", "FILL")
 
 
+def _finite_number(value: Any, *, minimum: float | None = None) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed) or (minimum is not None and parsed < minimum):
+        return None
+    return parsed
+
+
 def reconstruire_cycles(events: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Groupe les événements L4 par order_id et trie chaque cycle par temps."""
     cycles: dict[str, list[dict[str, Any]]] = {}
     for e in events:
-        oid = e.get("order_id")
-        if oid is None:
+        if not isinstance(e, Mapping):
             continue
-        cycles.setdefault(str(oid), []).append(dict(e))
+        oid = e.get("order_id")
+        ts_ms = _finite_number(e.get("ts_ms"), minimum=0.0)
+        typ = str(e.get("type", "")).strip().upper()
+        if oid is None or not str(oid).strip() or ts_ms is None or typ not in TYPES:
+            continue
+        normalized = dict(e)
+        normalized["order_id"] = str(oid).strip()
+        normalized["ts_ms"] = ts_ms
+        normalized["type"] = typ
+        cycles.setdefault(normalized["order_id"], []).append(normalized)
     for oid in cycles:
         cycles[oid].sort(key=lambda s: s.get("ts_ms", 0))
     return cycles
@@ -37,10 +55,10 @@ def cycle_features(states: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Features d'un cycle d'ordre unique (liste d'états triés)."""
     if not states:
         return {"statut": UNMEASURABLE}
-    types = [str(s.get("type")) for s in states]
-    ts = [s.get("ts_ms") for s in states if isinstance(s.get("ts_ms"), (int, float))]
-    pxs = [s.get("px") for s in states if isinstance(s.get("px"), (int, float))]
-    szs = [s.get("sz") for s in states if isinstance(s.get("sz"), (int, float))]
+    types = [str(s.get("type", "")).strip().upper() for s in states]
+    ts = [v for s in states if (v := _finite_number(s.get("ts_ms"), minimum=0.0)) is not None]
+    pxs = [v for s in states if (v := _finite_number(s.get("px"), minimum=0.0)) is not None]
+    szs = [v for s in states if (v := _finite_number(s.get("sz"), minimum=0.0)) is not None]
     side = str(states[0].get("side", "")).upper()
     persistence_ms = (max(ts) - min(ts)) if len(ts) >= 2 else 0.0
     n_modify = types.count("MODIFY")
@@ -53,10 +71,12 @@ def cycle_features(states: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         sens = 1.0 if side == "BUY" else -1.0
         chase = sens * (pxs[-1] - pxs[0]) / pxs[0] * 1e4 / (persistence_ms / 1000.0)
     # distance-to-touch initiale (bps) si mid fourni
-    m0 = states[0].get("mid")
-    dist_touch = (abs(pxs[0] - m0) / m0 * 1e4) if (pxs and isinstance(m0, (int, float)) and m0 > 0) else UNMEASURABLE
+    m0 = _finite_number(states[0].get("mid"), minimum=0.0)
+    dist_touch = (abs(pxs[0] - m0) / m0 * 1e4) if (pxs and m0 is not None and m0 > 0) else UNMEASURABLE
     # queue (taille devant) si fournie
-    queue = states[0].get("queue_ahead", UNMEASURABLE)
+    queue = _finite_number(states[0].get("queue_ahead"), minimum=0.0)
+    if queue is None:
+        queue = UNMEASURABLE
     return {"persistence_ms": persistence_ms, "n_modify": n_modify, "eventual_fill": eventual_fill,
             "partial": partial, "size_escalation": size_escalation, "chase_velocity_bps_s": chase,
             "distance_to_touch_bps": dist_touch, "queue_ahead": queue, "statut": "MEASURABLE"}

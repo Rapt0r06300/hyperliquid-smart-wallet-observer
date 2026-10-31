@@ -50,3 +50,14 @@ def test_experience_blocked_sans_flux():
 def test_experience_mesurable_si_flux():
     r = O.experience_intent(_cycle_buy_chase_fill())
     assert r["verdict"] == "MEASURABLE" and r["n_cycles"] == 1
+
+
+def test_recherche_l4_ignore_les_evenements_invalides_sans_nan_ou_tri_ambigu():
+    events = _cycle_buy_chase_fill() + [
+        {"order_id": "bad", "ts_ms": float("nan"), "type": "FILL", "px": 1.0, "sz": 1.0},
+        {"order_id": "bad", "ts_ms": "later", "type": "FILL", "px": 1.0, "sz": 1.0},
+        {"order_id": "bad", "ts_ms": 2, "type": "UNKNOWN", "px": 1.0, "sz": 1.0},
+    ]
+    cycles = O.reconstruire_cycles(events)
+    assert list(cycles) == ["o1"]
+    assert O.cycle_features([{"type": "FILL", "ts_ms": float("nan"), "px": float("inf"), "sz": -1.0}])["persistence_ms"] == 0.0
