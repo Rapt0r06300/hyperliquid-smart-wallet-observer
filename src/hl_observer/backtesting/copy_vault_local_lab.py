@@ -3630,6 +3630,30 @@ def _build_restoration_snapshot(result: Mapping[str, Any]) -> dict[str, Any]:
                 continue
             artifacts[field] = value
 
+    # A non-empty receipt is not, by itself, evidence that the corresponding
+    # operation succeeded.  The automatic TRAIN freeze deliberately emits
+    # explicit NOT_RUN/NOT_EXECUTED receipts; preserve them in the immutable
+    # snapshot while keeping the snapshot fail-closed.  Hand-authored or
+    # externally supplied test receipts without a status remain accepted for
+    # backwards compatibility with the historical v1 contract.
+    tests_receipt = result.get("tests")
+    if (
+        isinstance(tests_receipt, Mapping)
+        and "status" in tests_receipt
+        and str(tests_receipt.get("status") or "").upper() not in {
+            "PASS", "PASSED", "SUCCESS", "VERIFIED",
+        }
+    ):
+        missing.append("TESTS_NOT_VERIFIED")
+    restoration_receipt = result.get("restoration_receipt")
+    if (
+        isinstance(restoration_receipt, Mapping)
+        and str(restoration_receipt.get("status") or "").upper() not in {
+            "RESTORABLE", "RESTORED", "VERIFIED",
+        }
+    ):
+        missing.append("RESTORATION_NOT_VERIFIED")
+
     snapshot: dict[str, Any] = {
         "schema_version": "hypersmart.copy_vault_restoration_snapshot.v1",
         "restoration_status": "READY" if not missing else "UNMEASURABLE",
@@ -3774,6 +3798,36 @@ def _restoration_artifacts_from_train(
             "path": str(report_path),
             "source": "candidate_freeze",
         }
+    # Keep the evidence slots explicit for every automatically frozen TRAIN
+    # candidate.  These are declarations of what still has to be run, not
+    # fabricated test or restore results; _build_restoration_snapshot marks
+    # them as missing proof until a real receipt replaces them.
+    artifacts["tests"] = {
+        "schema": "hypersmart.copy_vault_train_test_reference.v1",
+        "status": "NOT_RUN",
+        "scope": "TRAIN_FREEZE_ONLY",
+        "reason": "EXTERNAL_TEST_RECEIPT_REQUIRED",
+        "trial_path": str(trial_path),
+        "attempt_path": str(attempt_path),
+        "engine_source_sha256": trial.get("engine_source_sha256"),
+        "selection_digest": trial.get("selection_digest"),
+    }
+    artifacts["restoration_receipt"] = {
+        "schema": "hypersmart.copy_vault_restoration_receipt.v1",
+        "status": "NOT_EXECUTED",
+        "restore_started": False,
+        "source_untouched": True,
+        "reason": "EXTERNAL_RESTORE_RECEIPT_REQUIRED",
+        "checkpoint_path": str(checkpoint_path),
+        "trial_path": str(trial_path),
+        "attempt_path": str(attempt_path),
+        "source_asset_inventory_sha256": trial.get(
+            "source_asset_inventory_sha256"
+        ),
+        "source_catalog_sha256": trial.get("source_catalog_sha256"),
+        "engine_source_sha256": trial.get("engine_source_sha256"),
+        "selection_digest": trial.get("selection_digest"),
+    }
     return artifacts
 
 
