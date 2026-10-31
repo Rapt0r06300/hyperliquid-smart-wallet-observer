@@ -1814,10 +1814,60 @@ def test_train_freeze_bridges_durable_artifacts_without_fabricating_external_pro
     )
 
     assert set(("ledger", "equity", "costs", "metrics")) <= set(artifacts)
-    assert "tests" not in artifacts
-    assert "restoration_receipt" not in artifacts
+    assert artifacts["tests"]["status"] == "NOT_RUN"
+    assert artifacts["restoration_receipt"]["status"] == "NOT_EXECUTED"
     assert artifacts["ledger"]["trial_row"]["trial_number"] == 3
     assert artifacts["costs"]["rows"][0]["fees_usd"] == 0.1
+
+
+def test_automatic_train_receipts_remain_fail_closed_until_external_evidence() -> None:
+    result = {
+        "selection_digest": "0" * 64,
+        "engine_source_sha256": "a" * 64,
+        "campaign_config_sha256": "b" * 64,
+        "campaign_config": {"schema": "hypersmart.copy_vault_search_config.v1"},
+        "source_catalog_sha256": "c" * 64,
+        "source_asset_inventory_sha256": "d" * 64,
+        "source_asset_inventory_count": 1,
+        "proposal_seed": 0,
+        "paper_capital_usd": 200.0,
+        "global_trial_count": 1,
+        "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
+        "trial_number": 1,
+        "selected_candidate": {
+            "freeze": {
+                "parameters": {"core_notional_usd": 20.0},
+                "parameters_sha256": local_lab.parameter_hash(
+                    {"core_notional_usd": 20.0}
+                ),
+            }
+        },
+        "attempt_receipt_sha256": "e" * 64,
+        "trial_receipt_sha256": "f" * 64,
+        "ledger": {"rows": []},
+        "equity": {"rows": []},
+        "costs": {"rows": []},
+        "metrics": {"status": "TRAIN_ONLY"},
+        "tests": {
+            "schema": "hypersmart.copy_vault_train_test_reference.v1",
+            "status": "NOT_RUN",
+        },
+        "report": {"path": "train-report.json"},
+        "restoration_receipt": {
+            "schema": "hypersmart.copy_vault_restoration_receipt.v1",
+            "status": "NOT_EXECUTED",
+        },
+    }
+
+    snapshot = local_lab._build_restoration_snapshot(result)
+
+    assert snapshot["restoration_status"] == "UNMEASURABLE"
+    assert "TESTS_NOT_VERIFIED" in snapshot["restoration_missing_requirements"]
+    assert "RESTORATION_NOT_VERIFIED" in snapshot["restoration_missing_requirements"]
+    assert snapshot["artifacts"]["tests"]["status"] == "NOT_RUN"
+    assert snapshot["artifacts"]["restoration_receipt"]["status"] == "NOT_EXECUTED"
+    assert len(snapshot["artifacts_sha256"]["tests"]) == 64
+    assert len(snapshot["artifacts_sha256"]["restoration_receipt"]) == 64
 
 
 def test_improvement_history_rejects_malformed_rows_instead_of_hiding_them(tmp_path: Path) -> None:
