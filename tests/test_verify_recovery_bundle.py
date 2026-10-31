@@ -25,9 +25,14 @@ def _make(tmp_path):
     raw_candidates = "".join(json.dumps(item, sort_keys=True) + "\n" for item in candidates).encode()
     digest = hashlib.sha256(raw_candidates).hexdigest()
     footer = {"kind": "footer", "candidate_count": 2, "candidates_sha256": digest}
-    (tmp_path / "recovery-triage.jsonl").write_text(
-        json.dumps(header, sort_keys=True) + "\n" +
-        raw_candidates.decode() + json.dumps(footer, sort_keys=True) + "\n"
+    # Keep the signed JSONL bytes identical on Windows and POSIX.  The
+    # production verifier hashes the exact bytes; implicit text newline
+    # translation would otherwise make this fixture fail before verification.
+    (tmp_path / "recovery-triage.jsonl").write_bytes(
+        (
+            json.dumps(header, sort_keys=True) + "\n" +
+            raw_candidates.decode() + json.dumps(footer, sort_keys=True) + "\n"
+        ).encode()
     )
     (tmp_path / "preservation-census.json").write_text(json.dumps({
         "status": "CATALOG_CLASSIFIED_NOT_RESTORED",
