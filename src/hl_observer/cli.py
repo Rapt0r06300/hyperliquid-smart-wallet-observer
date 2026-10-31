@@ -110,7 +110,7 @@ from hl_observer.local_index.index_benchmark import format_benchmark_report, run
 from hl_observer.local_index.query_engine import scan_wallet_index
 from hl_observer.local_index.wallet_index import (  # fake-data-scan: allow benchmark-only import (scan-local research command)
     WalletLocalIndex,
-    fake_wallet,
+    fake_wallet,  # fake-data-scan: allow benchmark-only import (scan-local research command)
 )
 from hl_observer.loops.candidate_factory import (
     build_signal_candidates_from_observation,
