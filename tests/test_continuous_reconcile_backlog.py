@@ -146,6 +146,33 @@ def test_historical_wave_checkpoint_rejects_duplicate_or_unsafe_manifest(tmp_pat
             [link], index_blob_sha="a" * 40,
             index_counts={"catalog_shard_row_count": 1},
         )
+    invalid_tag = tmp_path / "release tag with spaces" / "RUN_MANIFEST.json"
+    invalid_tag.parent.mkdir()
+    invalid_tag.write_text("{}", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="invalid release tag"):
+        module.historical_wave_checkpoint(
+            [invalid_tag], index_blob_sha="a" * 40,
+            index_counts={"catalog_shard_row_count": 1},
+        )
+
+
+def test_historical_wave_checkpoint_writer_rejects_tampering(tmp_path):
+    import tools.continuous_reconcile_backlog as module
+
+    manifest = tmp_path / "data-v2-release" / "RUN_MANIFEST.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}", encoding="utf-8")
+    checkpoint = module.historical_wave_checkpoint(
+        [manifest], index_blob_sha="a" * 40,
+        index_counts={"catalog_shard_row_count": 1},
+    )
+    checkpoint["counts"] = {
+        "catalog_shard_row_count": 2,
+        "selected_release_count": 1,
+        "selected_manifest_count": 1,
+    }
+    with pytest.raises(RuntimeError, match="identity mismatch"):
+        module.write_historical_wave_checkpoint(checkpoint, root=tmp_path)
 
 
 def test_disjoint_rebase_refusal_does_not_force_or_retry_push(monkeypatch):

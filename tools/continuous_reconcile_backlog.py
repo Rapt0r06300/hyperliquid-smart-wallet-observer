@@ -128,9 +128,12 @@ def _manifest_fingerprint(path: Path) -> dict[str, int | str]:
     """Return an exact, bounded identity for one immutable Release manifest."""
     if path.is_symlink() or not path.is_file():
         raise RuntimeError(f"historical manifest is not a regular file: {path}")
+    release_tag = path.parent.name
+    if not TAG.fullmatch(release_tag):
+        raise RuntimeError(f"historical manifest has invalid release tag: {release_tag}")
     payload = path.read_bytes()
     return {
-        "release_tag": path.parent.name,
+        "release_tag": release_tag,
         "filename": path.name,
         "bytes": len(payload),
         "sha256": hashlib.sha256(payload).hexdigest(),
@@ -193,9 +196,17 @@ def write_historical_wave_checkpoint(
 ) -> Path:
     """Persist a wave checkpoint without overwriting a different receipt."""
     root = Path(root)
-    relative = HISTORICAL_CHECKPOINT_DIR / (
-        str(checkpoint.get("checkpoint_id")) + ".json"
-    )
+    checkpoint_id = checkpoint.get("checkpoint_id")
+    if not isinstance(checkpoint_id, str) or not re.fullmatch(r"[0-9a-f]{64}", checkpoint_id):
+        raise RuntimeError("invalid historical checkpoint identity")
+    unsigned = dict(checkpoint)
+    unsigned.pop("checkpoint_id", None)
+    canonical = json.dumps(
+        unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if hashlib.sha256(canonical).hexdigest() != checkpoint_id:
+        raise RuntimeError("historical checkpoint identity mismatch")
+    relative = HISTORICAL_CHECKPOINT_DIR / f"{checkpoint_id}.json"
     target = root / relative
     for parent in (root / "catalog", root / HISTORICAL_CHECKPOINT_DIR):
         if parent.is_symlink():
