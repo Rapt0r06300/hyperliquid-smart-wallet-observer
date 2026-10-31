@@ -181,6 +181,15 @@ def test_commit_subject_names_noninteractive_rebase_guard_from_staged_diff() -> 
     )
 
 
+def test_commit_subject_names_upstream_rebase_scan_optimization() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "GIT_SEQUENCE_EDITOR --reapply-cherry-picks") == (
+        "fix(sync): avoid slow upstream rebase scans (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_mutex_collision_guard_from_staged_diff() -> None:
     assert _commit_subject([
         "tools/alina_git_code_sync.py",
@@ -631,6 +640,30 @@ def test_rebase_disables_interactive_editors_and_restores_environment(
     assert os.environ["GIT_MERGE_AUTOEDIT"] == "yes"
 
 
+def test_rebase_avoids_scanning_all_upstream_cherry_picks(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    task = Synchronizer(tmp_path)
+    captured: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **kwargs):
+        captured.append(args)
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(task, "command", fake_command)
+
+    result = task._run_rebase("refs/remotes/origin/main", timeout_seconds=20)
+
+    assert result.returncode == 0
+    assert captured == [(
+        "rebase", "--no-autostash", "--reapply-cherry-picks",
+        "refs/remotes/origin/main",
+    )]
+    assert task.report["rebase_strategy"] == (
+        "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN"
+    )
+
+
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120
@@ -1015,7 +1048,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v9' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v10' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
