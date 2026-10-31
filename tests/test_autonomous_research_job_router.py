@@ -37,16 +37,19 @@ def test_canonical_worker_stays_narrow() -> None:
     assert set(canonical_job.ECONOMIC_SUITES) == before
 
 
-@pytest.mark.parametrize(
-    "suite",
-    ["copy-vault-full", "lead-lag-full", "cross-venue-full"],
-)
-def test_router_accepts_only_active_family_economic_suites(suite: str) -> None:
+def test_router_accepts_copy_vault_full_economic_suite() -> None:
+    suite = "copy-vault-full"
     before = set(canonical_job.ECONOMIC_SUITES)
     validated = router.validate_request(_request(suite))
     assert validated["suite"] == suite
     assert validated["mode"] == "economic"
     assert set(canonical_job.ECONOMIC_SUITES) == before
+
+
+@pytest.mark.parametrize("suite", ["lead-lag-full", "cross-venue-full"])
+def test_router_refuse_les_suites_economiques_hors_scope(suite: str) -> None:
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        router.validate_request(_request(suite))
 
 
 def test_router_does_not_turn_unrelated_archives_into_economic_jobs() -> None:
@@ -154,16 +157,14 @@ def _main_args(tmp_path: Path) -> list[str]:
     ]
 
 
-def test_main_routes_family_success_and_postprocessing(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(canonical_job, "_load_request", lambda _path: {"mode": "economic", "suite": "lead-lag-full"})
-    monkeypatch.setattr(router, "execute_family_job", lambda *args, **kwargs: 0)
-    seen = []
-    monkeypatch.setattr(router, "_run_family_postprocessing", lambda **kwargs: seen.append(kwargs))
-    assert router.main(_main_args(tmp_path)) == 0
-    assert seen == [{"suite": "lead-lag-full", "result_dir": (tmp_path / "result").resolve()}]
+def test_main_refuse_la_suite_lead_lag_avant_execution(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(canonical_job, "_load_request", lambda _path: _request("lead-lag-full"))
+    monkeypatch.setattr(router, "execute_family_job", lambda *args, **kwargs: pytest.fail("disabled suite executed"))
+    assert router.main(_main_args(tmp_path)) == 20
+    assert "DISABLED_BY_SCOPE" in capsys.readouterr().out
 
 
-def test_main_skips_postprocessing_after_family_failure(tmp_path: Path, monkeypatch) -> None:
+def test_main_skips_postprocessing_after_copy_vault_failure(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(canonical_job, "_load_request", lambda _path: {"mode": "economic", "suite": "copy-vault-full"})
     monkeypatch.setattr(router, "execute_family_job", lambda *args, **kwargs: 7)
     monkeypatch.setattr(router, "_run_family_postprocessing", lambda **kwargs: pytest.fail("must not postprocess failed family job"))

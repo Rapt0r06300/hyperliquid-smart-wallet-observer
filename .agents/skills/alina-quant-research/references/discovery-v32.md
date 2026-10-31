@@ -1,14 +1,14 @@
 # Discovery V3.2 — quota-first semantic control plane
 
-V3.2 wraps the V3.1 scientific controller; it does not replace economic gates. Use this reference only during Discovery, Rediscovery or champion-challenger work.
+V3.2 wraps the V3.1 scientific controller; it does not replace economic gates. Copy-Vault is the only active economic family. Use this reference only during Copy-Vault Discovery, Rediscovery or champion-challenger work. Legacy family evidence stays readable but cannot seed a new out-of-scope experiment.
 
 ## Context first
 
-Run `python tools/codex_research_context.py --auto`. Do not reconstruct state by reading full Git history, the sealed 775 optimization list, all docs or raw trial logs. The local context pack should answer what family is underworked, what failed/succeeded, what is vetoed, how much search pressure accumulated, and what actions are admissible.
+Run `python tools/codex_research_context.py --auto`. Do not reconstruct state by reading full Git history, the sealed optimization list, all docs or raw trial logs. The local context pack should summarize Copy-Vault progress, what failed/succeeded, what is vetoed, how much search pressure accumulated, and what actions are admissible. It must not select a legacy family as the next active research target.
 
 ## Semantic expansion on CPU
 
-Use `codex_semantic_discovery.py` to generate a broad **semantic** Cartesian pool over event × context × data surface × temporal operator × regime × target × execution. CPU may enumerate thousands of candidates without spending model turns.
+Use `codex_semantic_discovery.py --family copy_vault` to generate a broad **semantic** Cartesian pool over event × context × data surface × temporal operator × regime × target × execution. CPU may enumerate thousands of Copy-Vault candidates without spending model turns. Every library and CLI entrypoint that generates or ranks candidates must enforce the central active-scope gate.
 
 The local engine should:
 - reject declared invalid combinations;
@@ -33,4 +33,4 @@ Negative high-confidence repeated evidence may stop rediscovery of the same fail
 
 ## Economic invariants
 
-Full fees, spread, slippage, latency, capacity, fill/liquidatability, closed positions, provenance, no-lookahead, frozen parameters, OOS and strict post-freeze forward remain mandatory. Final target remains >= +4 USD NET/day separately for each canonical family on the exact certified HEAD.
+Full fees, spread, slippage, latency, capacity, fill/liquidatability, closed positions, provenance, no-lookahead, frozen parameters, OOS and strict post-freeze forward remain mandatory. The terminal research objective is >= +5 USD NET/day for Copy-Vault on 200 USD paper, evaluated only after those contracts are repaired and validated. It is not a shortcut or substitute for any evidence gate; never force a verdict.

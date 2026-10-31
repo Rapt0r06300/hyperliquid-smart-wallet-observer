@@ -1193,7 +1193,6 @@ def _paper_ledger_projection_from_status_state(
         fees_paid_usdc=0.0,
         funding_net_usdc=0.0,
         actual_equity_usdc=float(equity),
-        tolerance_usdc=0.02,
     )
     event_counts: dict[str, int] = {}
     for row in ledger_events:

@@ -24,6 +24,7 @@ from hl_observer.research.semantic_discovery import (  # noqa: E402
     load_catalog,
     rank_semantic_plans,
 )
+from hl_observer.strategies.active_scope import require_active_strategy  # noqa: E402
 
 DEFAULT_CATALOG = (
     REPO_ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
@@ -100,6 +101,14 @@ def _load_aggregate_status(path: Path, head: str) -> dict[str, dict]:
 
 def main() -> int:
     args = _parser().parse_args()
+    try:
+        args.family = require_active_strategy(args.family)
+    except ValueError as exc:
+        print(
+            json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
     catalog = load_catalog(args.catalog)
     plans = generate_semantic_plans(catalog, args.family, args.pool_size, args.seed)
     if args.retest_evidence:

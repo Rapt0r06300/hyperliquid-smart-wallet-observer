@@ -91,6 +91,51 @@ def test_historical_userfills_snapshots_have_separate_exact_counts(tmp_path) -> 
     assert manifest["historical_fill_observation_count_exact"] is True
 
 
+def test_copy_vault_market_contract_families_are_exported_as_replay_compatible(tmp_path) -> None:
+    rows = [
+        ("copy_vault_bbo", "bbo", 1_000, "SNAPSHOT", "causal_event_availability"),
+        ("copy_vault_l2", "l2Book", 1_001, "SNAPSHOT", "causal_event_availability"),
+        ("copy_vault_trades", "trades", 1_002, "EVENT", "causal_event_availability"),
+        ("copy_vault_active_asset_ctx", "activeAssetCtx", None, "INCREMENTAL", "receive_observation_time_only"),
+        ("copy_vault_instrument_metadata", "instrument_metadata", None, "SNAPSHOT", "receive_observation_time_only"),
+    ]
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for family, raw_channel, exchange_ts, event_kind, timestamp_semantics in rows:
+        data = {"coin": "xyz:TSLA"}
+        if raw_channel == "l2Book":
+            data.update({"time": exchange_ts, "levels": [[{"px": "100", "sz": "2"}], [{"px": "101", "sz": "2"}]]})
+        elif raw_channel == "bbo":
+            data.update({"time": exchange_ts, "bbo": [{"px": "100", "sz": "2"}, {"px": "101", "sz": "2"}]})
+        elif raw_channel == "trades":
+            data = [{"coin": "xyz:TSLA", "time": exchange_ts, "px": "100.5", "sz": "1", "side": "B", "hash": "0x1", "tid": 1}]
+        elif raw_channel == "activeAssetCtx":
+            data["ctx"] = {"oraclePx": "100.5"}
+        else:
+            data["metadata"] = {"name": "TSLA"}
+        writer.append(TickEnvelope(
+            source_id="hl_copy_market" if raw_channel != "instrument_metadata" else "hl_copy_meta",
+            channel=family,
+            instrument="xyz:TSLA",
+            event_kind=event_kind,
+            raw_payload={"channel": raw_channel, "data": data},
+            exchange_ts_ms=exchange_ts,
+            received_ts_ms=1_010,
+            local_monotonic_ns=123_000,
+            connection_id="same-run-market-feed",
+            provenance={
+                "access": "read_only", "transport": "https" if raw_channel == "instrument_metadata" else "websocket",
+                "venue": "hyperliquid", "authenticated": False,
+                "timestamp_semantics": timestamp_semantics,
+            },
+            parsed_summary={"event_count": 1},
+        ))
+    shards = writer.rotate_all()
+    manifests = [build_manifest_from_tick_shard(shard, collector_version="abc123") for shard in shards]
+    assert len(manifests) == len(rows)
+    assert {manifest["family"] for manifest in manifests} == {row[0] for row in rows}
+    assert all(manifest["replay_compatible"] is True for manifest in manifests)
+
+
 def test_explicit_unchanged_cumulative_gap_baseline_is_not_a_local_gap(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
     for ts in (1000, 1010):

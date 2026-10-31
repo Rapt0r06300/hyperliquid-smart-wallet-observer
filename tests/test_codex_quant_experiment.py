@@ -21,16 +21,16 @@ from tools.codex_quant_experiment import run_experiment
 def spec_payload() -> dict:
     return {
         "schema_version": 1,
-        "experiment_id": "ll-latency-001",
-        "family": "lead_lag",
-        "hypothesis_id": "H-LL-latency-decay",
+        "experiment_id": "cv-leader-latency-001",
+        "family": "copy_vault",
+        "hypothesis_id": "H-CV-leader-latency",
         "phase": "train_search",
         "base_sha": "a" * 40,
         "data_fingerprint": "sha256:data-v1",
         "data_cutoff_utc": "2026-09-09T17:00:00Z",
         "evaluator": "hl_observer.fake_quant:evaluate",
         "search_space": {
-            "lag_ms": [50, 100, 150],
+            "leader_delay_ms": [50, 100, 150],
             "threshold_bps": {"min": 1.0, "max": 8.0},
         },
         "engine": "tpe",
@@ -117,7 +117,7 @@ def _install_fake_evaluator() -> dict[str, int]:
     def evaluate(params: dict, *, budget: float = 1.0, context: dict | None = None) -> dict:
         calls["count"] += 1
         assert context is not None
-        assert context["family"] == "lead_lag"
+        assert context["family"] == "copy_vault"
         return {
             "net_usd": float(params.get("score", 1.0)) * budget,
             "pf": 1.2,

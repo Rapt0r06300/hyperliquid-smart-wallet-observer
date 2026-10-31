@@ -326,6 +326,13 @@ def test_inspection_exposes_protocol_only_for_heartbeat_owned_by_active_pid(
         )
     )
     now = float(lease["issued_at_ms"]) / 1000.0 + 1.0
+    heartbeat.write_text(
+        json.dumps({
+            "pid": 191, "protocol": "bbo-causal-v2",
+            "ts_ms": int((now - 0.1) * 1000),
+        }),
+        encoding="utf-8",
+    )
     def inventory(_root: Path) -> list[dict[str, object]]:
         return [
             {

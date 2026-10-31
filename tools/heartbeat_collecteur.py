@@ -13,7 +13,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 
-
 _LOCAL_LOCKS: dict[str, threading.RLock] = {}
 _LOCAL_LOCKS_GUARD = threading.Lock()
 
@@ -112,8 +111,8 @@ def _ecrire_atomique(p: Path, contenu: str, *, tentatives: int = 8) -> None:
             pass
 
 
-# Clés de qualité de flux persistées dans le heartbeat (LANCEUR item 2). Un heartbeat FRAIS ne doit
-# jamais masquer un de ces signaux : le collecteur les reporte à chaque passe, la preuve de vie les lit.
+# Compteurs et clés de qualité du flux persistés dans le heartbeat. Un heartbeat frais ne doit pas
+# confondre réception, parsing et persistance ; la preuve de vie lit les champs retenus explicitement.
 CLES_METRIQUES = (
     "gaps_critiques",       # trous critiques détectés (feed_quality)
     "carnet_desync",        # carnet local désynchronisé du snapshot exchange
@@ -127,6 +126,10 @@ CLES_METRIQUES = (
     "checkpoint_expirations",
     "checkpoint_queue_rejections",
     "input_rotations",
+    "frames_received",
+    "fills_parsed",
+    "fills_persisted",
+    "native_subscription_acks",
 )
 
 _CLES_METRIQUES_ENTIERES = frozenset({
@@ -134,6 +137,8 @@ _CLES_METRIQUES_ENTIERES = frozenset({
     "source_queue_drops", "l2_tape_queue_drops",
     "checkpoint_expirations", "checkpoint_queue_rejections",
     "input_rotations",
+    "frames_received", "fills_parsed", "fills_persisted",
+    "native_subscription_acks",
 })
 
 

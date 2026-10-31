@@ -1,4 +1,4 @@
-"""Run the three separate read-only/paper economic evidence campaigns."""
+"""Run the active Copy-Vault read-only/paper economic evidence campaign."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from hl_observer.backtesting import copy_vault_executable, lead_lag_shadow  # noqa: E402
+from hl_observer.backtesting import copy_vault_executable  # noqa: E402
 from hl_observer.backtesting.copy_vault_generalization import (  # noqa: E402
     derive_heldout_vault_generalization,
 )
@@ -38,52 +38,19 @@ from hl_observer.backtesting.copy_vault_v8_entry_efficiency_train import (  # no
 from hl_observer.backtesting.copy_vault_v9_online_leader_quality_train import (  # noqa: E402
     explore_copy_vault_v9_online_leader_quality_train,
 )
-from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
-    SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
-)
-from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
-    load_certified_atomic_series,
-)
 from hl_observer.backtesting.economic_hypotheses_v3 import (  # noqa: E402
     qualify_copy_vault_train_only,
-    qualify_cross_venue_train_only,
-    qualify_lead_lag_queue_maker_train_only,
-)
-from hl_observer.backtesting.lead_lag_causal_diagnostic import (  # noqa: E402
-    DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
-    diagnose_causal_book_availability,
-)
-from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
-    backtest_with_certified_wall_clock,
-)
-from hl_observer.backtesting.lead_lag_maker_queue_train import (  # noqa: E402
-    load_train_microstructure_history,
-)
-from hl_observer.backtesting.lead_lag_queue_replay import (  # noqa: E402
-    detect_rolling_shocks,
-    evaluate_frozen_maker,
-    maker_protocol_signature,
-    post_freeze_proof_window,
-    replay_lead_lag_queue_maker,
-)
-from hl_observer.backtesting.lead_lag_source_alignment import (  # noqa: E402
-    load_aligned_binance_trade_tape,
-    select_aligned_bbo_sources,
 )
 from hl_observer.datasets.source_discovery import (  # noqa: E402
     is_dataset_workspace,
-    load_family_source_paths,
     source_manifest_summary,
     write_family_source_manifest,
 )
 from hl_observer.economics.assumptions import EconomicRunMode  # noqa: E402
-from hl_observer.economics.families import build_lead_lag_maker_contract  # noqa: E402
 from hl_observer.ops.bounded_collection import inspect_bounded_collectors  # noqa: E402
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_copy_campaign,
-    build_cross_campaign,
-    build_lead_lag_campaign,
     dataset_provenance,
     find_oldest_parameter_freeze,
     freeze_train_selected_parameters,
@@ -95,12 +62,7 @@ from hl_observer.simulation.economic_collection_plan import (  # noqa: E402
     write_collection_plan,
 )
 from hl_observer.simulation.economic_family_scoreboard import export_scoreboards  # noqa: E402
-from hl_observer.simulation.lead_lag_l2_history import (  # noqa: E402
-    load_market_microstructure_event_windows,
-)
-from hl_observer.simulation.lead_lag_measured_replay import (  # noqa: E402
-    load_runtime_latency_evidence,
-)
+from hl_observer.strategies.active_scope import active_strategy_families  # noqa: E402
 
 
 def _tool(name: str, path: Path):
@@ -199,18 +161,116 @@ def _lead_trade_window_ms(
     return min(timestamps_ms), max(timestamps_ms) + max(0, int(trailing_padding_ms))
 
 
+def _finalize_campaign_run(
+    root: Path,
+    *,
+    campaigns: list[dict[str, Any]],
+    raw_reports: dict[str, dict[str, Any]],
+    analysis_stage: str,
+    dataset_mode: bool,
+    dataset_manifest_path: Path | None,
+    dataset_sources: dict[str, object] | None,
+    environment_provenance: dict[str, Any],
+) -> dict[str, Any]:
+    for campaign in campaigns:
+        campaign["analysis_stage"] = analysis_stage
+        campaign["analysis_stage_contract"] = {
+            "stage": analysis_stage,
+            "paper_read_only": True,
+            "real_execution": False,
+            "input_selection": {
+                "dataset_workspace": dataset_mode,
+                "dataset_source_manifest": (
+                    str(dataset_manifest_path) if dataset_manifest_path is not None else None
+                ),
+            },
+        }
+    scoreboards_path = export_scoreboards(root)
+    report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_campaign_report(campaigns), encoding="utf-8", newline="\n")
+
+    stage_receipt = {
+        "schema": "alina.analysis_stage_artifact.v1",
+        "analysis_stage": analysis_stage,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+        "active_families": sorted(active_strategy_families()),
+        "input_selection": {
+            "dataset_workspace": dataset_mode,
+            "dataset_source_manifest": (
+                str(dataset_manifest_path) if dataset_manifest_path is not None else None
+            ),
+            "source_summary": dataset_sources,
+        },
+        "environment_provenance": environment_provenance,
+        "campaigns": [
+            {
+                "family": row.get("family"),
+                "analysis_stage": row.get("analysis_stage"),
+                "objective_status": row.get("objective_status"),
+                "daily_evidence": row.get("daily_evidence"),
+            }
+            for row in campaigns
+        ],
+        "scoreboard_artifact": str(scoreboards_path),
+        "report_artifact": str(report_path),
+    }
+    stage_receipt_path = (
+        root / "runtime" / "reports" / "analysis_stages" / f"{analysis_stage.lower()}.json"
+    )
+    stage_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    stage_receipt["artifact_digest"] = _stable_json_sha256(stage_receipt)
+    stage_receipt_path.write_text(
+        json.dumps(stage_receipt, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    collector_state = inspect_bounded_collectors(root)
+    collection_plan = build_collection_plan(
+        campaigns,
+        raw_reports,
+        collector_state=collector_state,
+    )
+    collection_path, collection_report_path = write_collection_plan(root, collection_plan)
+    return {
+        "campaigns": campaigns,
+        "report_path": str(report_path),
+        "scoreboards_path": str(scoreboards_path),
+        "collector_state": collector_state,
+        "collection_plan_path": str(collection_path),
+        "collection_plan_report_path": str(collection_report_path),
+        "dataset_workspace": dataset_mode,
+        "dataset_source_manifest": (
+            str(dataset_manifest_path) if dataset_manifest_path is not None else None
+        ),
+        "dataset_source_summary": dataset_sources,
+        "active_families": sorted(active_strategy_families()),
+        "disabled_families": sorted(
+            {"lead_lag", "cross_venue_dislocation_v2"} - active_strategy_families()
+        ),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def run_campaigns(
     root: Path,
     *,
     cross_budget_s: float = 20.0,
     cross_current_only: bool = False,
-    lead_history_sources: int = lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
+    lead_history_sources: int = 8,
     start_collection: bool = False,
     collection_duration_s: float = 24 * 60 * 60,
     collection_startup_wait_s: float = 3.0,
     analysis_stage: str | None = None,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    active_families = active_strategy_families()
+    if active_families != frozenset({"copy_vault"}):
+        raise RuntimeError(
+            "canonical economic campaign runner requires Copy-Vault-only active scope"
+        )
     if start_collection:
         raise RuntimeError(
             "ANALYZE cannot start collectors; run COLLECT first, freeze the cutoff, then analyze"
@@ -232,7 +292,6 @@ def run_campaigns(
     # workspace. Loading them from `root/tools` made GitHub-hosted backtest/OOS
     # campaigns fail with FileNotFoundError after materialization.
     copy_tool = _tool("hypersmart_copy_pipeline", ROOT / "tools" / "pipeline_copie_reel.py")
-    cross_tool = _tool("hypersmart_cross_campaign", ROOT / "tools" / "backtest_dislocation_2jambes.py")
 
     copy_data = dataset_provenance(
         root,
@@ -452,482 +511,29 @@ def run_campaigns(
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
-    if dataset_mode:
-        # Dans un workspace FULL/COLD, le manifeste explicite est la source de vérité.
-        # On ne tronque plus arbitrairement l'historique à quelques shards.
-        selected_lead_sources = load_family_source_paths(root, "lead_lag")
-    else:
-        selected_lead_sources = lead_lag_shadow.selectionner_sources(
-            root,
-            include_history=True,
-            max_history_sources=max(0, int(lead_history_sources)),
-        )
-    aligned_lead_sources, lead_alignment_meta = select_aligned_bbo_sources(
+    return _finalize_campaign_run(
         root,
-        candidates=selected_lead_sources,
+        campaigns=[copy_campaign],
+        raw_reports={"copy_vault": copy_raw},
+        analysis_stage=analysis_stage,
+        dataset_mode=dataset_mode,
+        dataset_manifest_path=dataset_manifest_path,
+        dataset_sources=dataset_sources,
+        environment_provenance=environment_provenance,
     )
-    lead_tape, aligned_lead_meta = load_aligned_binance_trade_tape(
-        root,
-        aligned_lead_sources,
-    )
-    lead_trade_rows = (lead_tape.get("ETH") or {}).get("TRADE") or ()
-    lead_trade_timestamps_ms = sorted(
-        int(float(row[0])) // 1_000_000
-        for row in lead_trade_rows
-        if isinstance(row, (list, tuple)) and row and float(row[0]) > 0
-    )
-    lead_shocks = detect_rolling_shocks(lead_trade_rows)
-    diagnostic_shocks = detect_rolling_shocks(
-        lead_trade_rows,
-        threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
-    )
-    latency_evidence = load_runtime_latency_evidence(root)
-
-    # The maker signature is intentionally distinct from every legacy taker
-    # freeze.  Only queue-proven, profitable TRAIN fills may create it.
-    lead_protocol = maker_protocol_signature()
-    maker_contract = build_lead_lag_maker_contract(mode=EconomicRunMode.CERTIFIABLE)
-    maker_economic_receipt = maker_contract.receipt()
-    lead_freeze = find_oldest_parameter_freeze(
-        root,
-        "lead_lag",
-        required_parameters=lead_protocol,
-    )
-    lead_calibration: dict[str, Any] | None = None
-    maker_queue_replay: dict[str, Any] | None = None
-    maker_evaluation: dict[str, Any] | None = None
-    microstructure_meta: dict[str, Any] = {
-        "status": "NO_LEAD_TRADE_HISTORY",
-        "paper_read_only": True,
-        "real_execution": False,
-    }
-    l2_history: dict[str, list[dict[str, Any]]] = {}
-    public_trade_history: dict[str, list[dict[str, Any]]] = {}
-
-    if lead_freeze is None and lead_trade_timestamps_ms:
-        selection_cutoff_ms = max(lead_trade_timestamps_ms)
-        train_ranges = [(min(lead_trade_timestamps_ms), selection_cutoff_ms)]
-        train_event_timestamps = [
-            int(shock["trigger_ts_ms"])
-            for shock in lead_shocks
-            if train_ranges[0][0]
-            <= int(shock["trigger_ts_ms"])
-            <= train_ranges[0][1]
-        ]
-        l2_history, public_trade_history, microstructure_meta = (
-            load_train_microstructure_history(
-                root,
-                train_event_timestamps,
-                train_ranges=train_ranges,
-            )
-        )
-        maker_queue_replay = replay_lead_lag_queue_maker(
-            lead_tape,
-            l2_history,
-            public_trade_history,
-            latency_evidence=latency_evidence,
-            segment_bounds={
-                "train": train_ranges[0],
-                "validation": (None, None),
-                "oos": (None, None),
-                "forward": (None, None),
-            },
-        )
-        lead_calibration = qualify_lead_lag_queue_maker_train_only(
-            {
-                "maker_queue_candidates": maker_queue_replay[
-                    "maker_queue_candidates"
-                ],
-                "maker_queue_replay": maker_queue_replay,
-            }
-        )
-        selection_eligible = bool(
-            lead_calibration.get("selection_eligible") is True
-            and latency_evidence.get("measured") is True
-        )
-        lead_parameters = {
-            **lead_protocol,
-            "selection_cutoff_ms": selection_cutoff_ms,
-            "train_ranges": [list(bounds) for bounds in train_ranges],
-            "applied_latency_ms": latency_evidence.get("p95_ms"),
-            "latency_evidence_sha256": _stable_json_sha256(latency_evidence),
-            "training_selection_evidence_sha256": lead_calibration.get(
-                "selection_evidence_sha256"
-            ),
-            "training_selection_eligible": selection_eligible,
-            "selection_status": lead_calibration.get("status"),
-        }
-        freeze_source_paths = [
-            *aligned_lead_sources,
-            *_microstructure_source_paths(microstructure_meta),
-            root / "runtime" / "data" / "lead_lag_event_decisions.jsonl",
-        ]
-        initial_lead_data = dataset_provenance(root, freeze_source_paths)
-        lead_freeze = freeze_train_selected_parameters(
-            root,
-            "lead_lag",
-            lead_parameters,
-            initial_lead_data,
-            selection_eligible=selection_eligible,
-        )
-    elif lead_freeze is None:
-        lead_calibration = {
-            "status": "NO_PREDECLARED_STRONG_SHOCK_HISTORY",
-            "selection_eligible": False,
-            "physical_freeze_allowed": False,
-        }
-
-    if lead_freeze is not None:
-        lead_parameters = dict(lead_freeze["parameters"])
-        evaluated_at_ms = int(time.time() * 1000)
-        maker_window = post_freeze_proof_window(
-            frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
-            evaluated_at_ms=evaluated_at_ms,
-        )
-        proof_segments = dict(maker_window.get("segments") or {})
-        proof_event_timestamps = [
-            int(shock["trigger_ts_ms"])
-            for shock in [*lead_shocks, *diagnostic_shocks]
-            if any(
-                start_ms is not None
-                and end_ms is not None
-                and int(start_ms) <= int(shock["trigger_ts_ms"]) <= int(end_ms)
-                for start_ms, end_ms in proof_segments.values()
-            )
-        ]
-        l2_history, public_trade_history, microstructure_meta = (
-            load_market_microstructure_event_windows(
-                root,
-                sorted(set(proof_event_timestamps)),
-            )
-        )
-        maker_evaluation = evaluate_frozen_maker(
-            lead_tape,
-            l2_history,
-            public_trade_history,
-            frozen_parameters=lead_parameters,
-            frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
-            evaluated_at_ms=evaluated_at_ms,
-            economic_mode=EconomicRunMode.CERTIFIABLE,
-        )
-
-    lead_sources = list(
-        dict.fromkeys(
-            [
-                *aligned_lead_sources,
-                *_microstructure_source_paths(microstructure_meta),
-            ]
-        )
-    )
-    lead_data = dataset_provenance(root, lead_sources)
-    lead_raw = backtest_with_certified_wall_clock(
-        root,
-        sources=aligned_lead_sources,
-        economic_frozen_at_ms=None,
-        economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
-        economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
-        economic_mode=EconomicRunMode.CERTIFIABLE,
-    )
-    if isinstance(lead_raw, dict):
-        # Never let the legacy taker campaign remain the canonical proof path.
-        lead_raw.pop("executable_campaign", None)
-        # Keep the canonical maker cost contract visible even before a physical
-        # freeze exists, so a missing proof cannot be confused with missing costs.
-        lead_raw["economic_contract"] = maker_economic_receipt
-        lead_raw["assumption_snapshot_hash"] = maker_contract.registry.snapshot_hash()
-        lead_raw["calibration"] = lead_calibration
-        lead_raw["canonical_mechanism"] = lead_protocol["execution_model"]
-        lead_raw["provisional_without_physical_freeze"] = lead_freeze is None
-        lead_raw["dataset_workspace"] = dataset_mode
-        lead_raw["dataset_manifest_source_count"] = len(selected_lead_sources)
-        lead_raw["dataset_source_manifest"] = (
-            str(dataset_manifest_path) if dataset_manifest_path is not None else None
-        )
-        if maker_queue_replay is None and maker_evaluation is not None:
-            maker_queue_replay = maker_evaluation
-        lead_raw["maker_queue_candidates"] = (
-            list(maker_queue_replay.get("maker_queue_candidates") or [])
-            if isinstance(maker_queue_replay, dict)
-            else []
-        )
-        lead_raw["maker_queue_replay"] = maker_queue_replay
-        if maker_evaluation is not None:
-            lead_raw["executable_campaign"] = maker_evaluation
-            lead_raw["economic_contract"] = maker_evaluation.get(
-                "economic_contract"
-            )
-            lead_raw["assumption_snapshot_hash"] = maker_evaluation.get(
-                "assumption_snapshot_hash"
-            )
-        microstructure_meta["frozen_shock_count"] = len(lead_shocks)
-        microstructure_meta["diagnostic_shock_count"] = len(diagnostic_shocks)
-        microstructure_meta["diagnostic_threshold_bps"] = (
-            DIAGNOSTIC_SHOCK_THRESHOLD_BPS
-        )
-        causal_availability = diagnose_causal_book_availability(
-            diagnostic_shocks,
-            l2_history,
-            diagnostic_threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
-        )
-        lead_raw["lead_lag_microstructure_history"] = microstructure_meta
-        lead_raw["lead_lag_causal_availability_diagnostic"] = causal_availability
-        lead_raw["lead_lag_source_alignment"] = {
-            **lead_alignment_meta,
-            "aligned_lead_tape": aligned_lead_meta,
-        }
-        if lead_freeze is None:
-            lead_raw["next_hypothesis_v3"] = qualify_lead_lag_queue_maker_train_only(
-                lead_raw
-            )
-        else:
-            lead_raw["next_hypothesis_v3"] = {
-                "status": "FROZEN_MAKER_EVALUATION_ACTIVE",
-                "selection_eligible": True,
-                "physical_freeze_allowed": True,
-                "selection_evidence_sha256": lead_parameters.get(
-                    "training_selection_evidence_sha256"
-                ),
-            }
-    lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
-    lead_campaign = build_lead_lag_campaign(
-        lead_raw, freeze=lead_freeze, datasets=lead_data, require_daily=True
-    )
-    lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())
-    write_campaign(root, lead_campaign)
-
-    cross_data = dataset_provenance(
-        root,
-        (
-            "runtime/data/carnet_venues.jsonl",
-        ),
-    )
-    series, cross_depth, cross_meta = load_certified_atomic_series(root)
-    cross_meta["legacy_bbo_budget_s_unused"] = max(0.0, cross_budget_s)
-    cross_meta["legacy_current_only_unused"] = bool(cross_current_only)
-    if dataset_mode:
-        cross_meta["dataset_source_manifest"] = str(dataset_manifest_path)
-        cross_meta["dataset_sources_discovered"] = (
-            dataset_sources.get("cross_venue") if isinstance(dataset_sources, dict) else None
-        )
-    cross_depth_meta = {
-        "source": cross_meta.get("source"),
-        "source_mode": cross_meta.get("source_mode"),
-        "valid_snapshots": cross_meta.get("certified_snapshots"),
-        "coins": cross_meta.get("coins"),
-        "capacity_definition": cross_meta.get("capacity_definition"),
-    }
-    cross_protocol = cross_tool.walk_forward_protocol_signature()
-    cross_freeze = find_oldest_parameter_freeze(
-        root,
-        "cross_venue_dislocation_v2",
-        required_parameters=cross_protocol,
-    )
-    calibration = None
-    if cross_freeze is None:
-        calibration = cross_tool.calibrer_walk_forward(series, cross_depth)
-        selection = calibration.get("selection") if isinstance(calibration, dict) else None
-        selected = selection.get("selected") if isinstance(selection, dict) else None
-        if not isinstance(selected, dict) or not isinstance(selected.get("parameters"), dict):
-            selected_parameters = {
-                "seuil_entree": cross_tool.SEUIL_ENTREE_BPS,
-                "stop_bps": cross_tool.STOP_AGGRAVATION_BPS,
-                "horizon_s": cross_tool.HORIZON_MAX_S,
-                "min_executable_edge_bps": cross_tool.MIN_EXECUTABLE_EDGE_BPS,
-            }
-            selection_eligible = False
-        else:
-            selected_parameters = dict(selected["parameters"])
-            selection_eligible = selected.get("eligible") is True
-        cross_params = {
-            **cross_protocol,
-            "walk_forward_bounds": calibration.get("bounds"),
-            "selected_strategy_parameters": selected_parameters,
-            "training_selection_eligible": selection_eligible,
-            "selection_status": calibration.get("status"),
-            "seuil_sortie_bps": cross_tool.SEUIL_SORTIE_BPS,
-            "fraicheur_max_ms": cross_tool.FRAICHEUR_MAX_MS,
-            "latence_ms": cross_tool.LATENCE_MS,
-            "fees_ar_bps": cross_tool.FEES_AR_BPS,
-            "notional_usd": cross_tool.NOTIONAL_USD,
-            "depth_freshness_ms": cross_tool.DEPTH_FRESHNESS_MS,
-            "max_observation_gap_ms": cross_tool.MAX_OBSERVATION_GAP_MS,
-            "source_mode": CERTIFIED_CROSS_SOURCE_MODE,
-        }
-        cross_freeze = freeze_train_selected_parameters(
-            root,
-            "cross_venue_dislocation_v2",
-            cross_params,
-            cross_data,
-            selection_eligible=selection_eligible,
-        )
-    else:
-        cross_params = dict(cross_freeze["parameters"])
-
-    cross_walk_forward = cross_tool.evaluer_walk_forward_gelé(
-        series,
-        cross_depth,
-        frozen_parameters=cross_params,
-        frozen_at_ms=(
-            float(cross_freeze["frozen_at_ms"])
-            if cross_freeze is not None
-            else float(
-                ((calibration or {}).get("bounds") or {}).get(
-                    "calibration_data_end_ms"
-                )
-                or 0.0
-            )
-        ),
-    )
-    segment_trades = cross_walk_forward.get("trades", {})
-    cross_economic = cross_tool.economic_contract(EconomicRunMode.CERTIFIABLE)
-    cross_economic_receipt = cross_economic.receipt()
-    cross_assumption_snapshot_hash = cross_economic.registry.snapshot_hash()
-    cross_trades = [
-        {
-            **trade,
-            "walk_forward_segment": name,
-            "economic_contract": cross_economic_receipt,
-            "assumption_snapshot_hash": cross_assumption_snapshot_hash,
-        }
-        for name in ("train", "validation", "oos", "forward")
-        for trade in segment_trades.get(name, [])
-    ] if isinstance(segment_trades, dict) else []
-    cross_temporal = cross_tool.preuves_temporelles_walk_forward(cross_walk_forward)
-    cross_hypothesis_audit = cross_tool.diagnostiquer_hypothese_walk_forward(
-        cross_walk_forward
-    )
-    cross_raw = {
-        "schema_version": "hypersmart.cross_venue_campaign.v2",
-        "meta": cross_meta,
-        "depth_meta": cross_depth_meta,
-        "decision_diagnostics": cross_walk_forward.get("diagnostics"),
-        "quotes_par_coin": {coin: len(values) for coin, values in series.items() if values},
-        "params": cross_params,
-        "calibration": calibration,
-        "walk_forward": {
-            key: value
-            for key, value in cross_walk_forward.items()
-            if key != "trades"
-        },
-        "economic_contract": cross_economic_receipt,
-        "assumption_snapshot_hash": cross_assumption_snapshot_hash,
-        "verdict_realiste_16bps": cross_tool.juger(cross_trades),
-        "temporal_evidence": cross_temporal,
-        "hypothesis_audit": cross_hypothesis_audit,
-        "trades": cross_trades,
-        "paper_read_only": True,
-        "real_execution": False,
-        "provisional_without_physical_freeze": cross_freeze is None,
-        "dataset_workspace": dataset_mode,
-        "dataset_source_summary": dataset_sources,
-        "environment_provenance": environment_provenance,
-    }
-    cross_raw["next_hypothesis_v3"] = qualify_cross_venue_train_only(
-        cross_trades,
-        source_mode=str(cross_params.get("source_mode") or ""),
-    )
-    cross_raw_path = _write_raw(root, "cross_venue_dislocation_v2", cross_raw)
-    cross_campaign = build_cross_campaign(
-        cross_raw, freeze=cross_freeze, datasets=cross_data, require_daily=True
-    )
-    cross_campaign["evidence_paths"].append(cross_raw_path.relative_to(root).as_posix())
-    write_campaign(root, cross_campaign)
-
-    campaigns = [copy_campaign, lead_campaign, cross_campaign]
-    for campaign in campaigns:
-        campaign["analysis_stage"] = analysis_stage
-        campaign["analysis_stage_contract"] = {
-            "stage": analysis_stage,
-            "paper_read_only": True,
-            "real_execution": False,
-            "input_selection": {
-                "dataset_workspace": dataset_mode,
-                "dataset_source_manifest": (
-                    str(dataset_manifest_path) if dataset_manifest_path is not None else None
-                ),
-            },
-        }
-    scoreboards_path = export_scoreboards(root)
-    markdown = render_campaign_report(campaigns)
-    report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
-    report_path.write_text(markdown, encoding="utf-8", newline="\n")
-
-    raw_reports = {
-        "copy_vault": copy_raw,
-        "lead_lag": lead_raw,
-        "cross_venue_dislocation_v2": cross_raw,
-    }
-    stage_receipt = {
-        "schema": "alina.analysis_stage_artifact.v1",
-        "analysis_stage": analysis_stage,
-        "paper_only": True,
-        "read_only": True,
-        "real_execution": False,
-        "input_selection": {
-            "dataset_workspace": dataset_mode,
-            "dataset_source_manifest": (
-                str(dataset_manifest_path) if dataset_manifest_path is not None else None
-            ),
-            "source_summary": dataset_sources,
-        },
-        "environment_provenance": environment_provenance,
-        "campaigns": [
-            {
-                "family": row.get("family"),
-                "analysis_stage": row.get("analysis_stage"),
-                "objective_status": row.get("objective_status"),
-                "daily_evidence": row.get("daily_evidence"),
-            }
-            for row in campaigns
-        ],
-        "scoreboard_artifact": str(scoreboards_path),
-        "report_artifact": str(report_path),
-    }
-    stage_receipt_path = (
-        root / "runtime" / "reports" / "analysis_stages" / f"{analysis_stage.lower()}.json"
-    )
-    stage_receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    stage_receipt["artifact_digest"] = _stable_json_sha256(stage_receipt)
-    stage_receipt_path.write_text(
-        json.dumps(stage_receipt, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    preliminary_plan = build_collection_plan(campaigns, raw_reports)
-    collector_state = inspect_bounded_collectors(root)
-    collection_plan = build_collection_plan(
-        campaigns,
-        raw_reports,
-        collector_state=collector_state,
-    )
-    collection_path, collection_report_path = write_collection_plan(root, collection_plan)
-    return {
-        "campaigns": campaigns,
-        "report_path": str(report_path),
-        "scoreboards_path": str(scoreboards_path),
-        "collector_state": collector_state,
-        "collection_plan_path": str(collection_path),
-        "collection_plan_report_path": str(collection_report_path),
-        "dataset_workspace": dataset_mode,
-        "dataset_source_manifest": (
-            str(dataset_manifest_path) if dataset_manifest_path is not None else None
-        ),
-        "dataset_source_summary": dataset_sources,
-    }
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(ROOT))
-    parser.add_argument("--cross-budget-s", type=float, default=20.0)
-    parser.add_argument("--cross-current-only", action="store_true")
+    # Keep legacy flags parseable for existing automation, but do not advertise
+    # non-Copy-Vault controls in the canonical runner's public help.
+    parser.add_argument("--cross-budget-s", type=float, default=20.0, help=argparse.SUPPRESS)
+    parser.add_argument("--cross-current-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--lead-history-sources",
         type=int,
-        default=lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
-        help=(
-            "Nombre de sources historiques Lead-Lag hors workspace FULL/COLD. "
-            "Dans un workspace dataset, toutes les sources manifestées sont utilisées."
-        ),
+        default=8,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--no-start-collection", action="store_true")
     parser.add_argument("--collection-duration-s", type=float, default=24 * 60 * 60)

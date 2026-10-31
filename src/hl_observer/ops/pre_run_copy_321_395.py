@@ -185,7 +185,7 @@ def _summary_for(rows): return summarize(rows)
 
 def _scenario_oos_forward():
     oos=_strict_trade(60,vault="0xB",net=2); fwd=_strict_trade(61,vault="0xC",net=2.5); placebo=_strict_trade(62,vault="0xD",net=-1)
-    evaluation={"segments":{"oos":{"summary":_summary_for([oos])},"forward":{"summary":_summary_for([fwd])}},"trades":{"forward":[fwd]},"placebo_inverted_oos":{"summary":_summary_for([placebo])}}
+    evaluation={"segments":{"oos":{"summary":_summary_for([oos])},"forward":{"summary":_summary_for([fwd])}},"trades":{"forward":[fwd]},"placebo_inverted_oos":{"summary":_summary_for([placebo])},"causal_observation_required_all_segments":True,"temporal_purge_verified":True}
     proof=temporal_evidence(evaluation); non=dict(fwd); non["causal_forward_eligible"]=False; bad=temporal_evidence({**evaluation,"trades":{"forward":[non]}})
     return Scenario(proof["oos"]["no_lookahead"] and proof["forward"]["post_freeze"], bad["forward"]["post_freeze"] is False, proof==temporal_evidence(evaluation), {"forward_post_freeze":proof["forward"]["post_freeze"]})
 

@@ -10,8 +10,16 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 from typing import Any
 
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
+    float_not_below,
+)
 from hl_observer.simulation.ledger_integrity import verify_chain
 
 TRUSTED = "TRUSTED"
@@ -50,7 +58,7 @@ def audit_paper_ledger(
     events: Iterable[Mapping[str, Any]],
     *,
     snapshot: Mapping[str, Any] | None = None,
-    tolerance_usdc: float = 0.0001,
+    tolerance_usdc: float = float(USD_RECONCILIATION_ABS_TOLERANCE),
 ) -> PnlLedgerAudit:
     """Validate OPEN/ADD/REDUCE/CLOSE, costs, funding and position identity.
 
@@ -87,11 +95,22 @@ def audit_paper_ledger(
     except (TypeError, ValueError) as exc:
         issues.append(PnlAuditIssue("LEDGER_CHAIN_INVALID", None, str(exc)))
 
+    tolerance = decimal_value(tolerance_usdc)
+    if tolerance is None or tolerance < 0 or tolerance > USD_RECONCILIATION_ABS_TOLERANCE:
+        tolerance = Decimal(0)
+        issues.append(
+            PnlAuditIssue(
+                "PNL_TOLERANCE_INVALID",
+                None,
+                "Tolérance monétaire invalide ou supérieure au plafond canonique.",
+            )
+        )
+
     positions: dict[str, float] = {}
     fee_ids: set[str] = set()
-    realized = 0.0
-    fees = 0.0
-    funding = 0.0
+    realized_values: list[Decimal] = []
+    fee_values: list[Decimal] = []
+    funding_values: list[Decimal] = []
 
     for index, row in enumerate(rows, start=1):
         seq = _optional_int(row.get("event_seq")) or index
@@ -101,16 +120,16 @@ def audit_paper_ledger(
         position_id = str(refs.get("position_id") or _position_key(row.get("coin"), row.get("side")))
 
         if event_type == "PAPERFEECHARGED":
-            fee = _finite(row.get("fee_usdc"))
+            fee = decimal_value(row.get("fee_usdc"))
             if fee is None or fee < 0:
                 issues.append(PnlAuditIssue("FEE_INVALID", seq, "Frais absents, négatifs ou non finis."))
             else:
-                fees += fee
+                fee_values.append(fee)
                 fee_ids.add(str(row.get("event_id") or ""))
             continue
 
         if event_type in {"PAPERFUNDINGCHARGED", "PAPERFUNDINGRECEIVED"}:
-            amount = _finite(row.get("funding_usdc"))
+            amount = decimal_value(row.get("funding_usdc"))
             if amount is None:
                 issues.append(PnlAuditIssue("FUNDING_INVALID", seq, "Funding absent ou non fini."))
             elif event_type == "PAPERFUNDINGCHARGED" and amount > 0:
@@ -118,7 +137,7 @@ def audit_paper_ledger(
             elif event_type == "PAPERFUNDINGRECEIVED" and amount < 0:
                 issues.append(PnlAuditIssue("FUNDING_SIGN_CONTRADICTION", seq, "Funding received négatif."))
             else:
-                funding += amount
+                funding_values.append(amount)
             continue
 
         if event_type in {"PAPERPARTIALFILL", "PAPERFILLSIMULATED"}:
@@ -172,11 +191,11 @@ def audit_paper_ledger(
             else:
                 positions[position_id] = current + quantity
         else:
-            pnl = _finite(row.get("realized_pnl_usdc"))
+            pnl = decimal_value(row.get("realized_pnl_usdc"))
             if pnl is None:
                 issues.append(PnlAuditIssue("REALIZED_PNL_MISSING", seq, "PnL réalisé absent/non fini."))
             else:
-                realized += pnl
+                realized_values.append(pnl)
             if current is None:
                 issues.append(
                     PnlAuditIssue("CLOSE_WITHOUT_OPEN", seq, f"Sortie sans position: {position_id}.")
@@ -204,19 +223,22 @@ def audit_paper_ledger(
             else:
                 positions[position_id] = remaining
 
-    unrealized = _snapshot_number(snapshot, "unrealized_pnl_usdc")
-    starting = _snapshot_number(snapshot, "starting_balance_usdc")
-    actual_equity = _snapshot_number(snapshot, "equity_usdc")
+    realized = decimal_sum(realized_values) or Decimal(0)
+    fees = decimal_sum(fee_values) or Decimal(0)
+    funding = decimal_sum(funding_values) or Decimal(0)
+    unrealized = _snapshot_decimal(snapshot, "unrealized_pnl_usdc")
+    starting = _snapshot_decimal(snapshot, "starting_balance_usdc")
+    actual_equity = _snapshot_decimal(snapshot, "equity_usdc")
     if snapshot is not None:
-        _compare_snapshot(issues, snapshot, "realized_pnl_usdc", realized, tolerance_usdc)
-        _compare_snapshot(issues, snapshot, "fees_paid_usdc", fees, tolerance_usdc)
-        _compare_snapshot(issues, snapshot, "funding_net_usdc", funding, tolerance_usdc)
+        _compare_snapshot(issues, snapshot, "realized_pnl_usdc", realized, tolerance)
+        _compare_snapshot(issues, snapshot, "fees_paid_usdc", fees, tolerance)
+        _compare_snapshot(issues, snapshot, "funding_net_usdc", funding, tolerance)
     recalculated_equity = None
     recalculated_net = None
     if starting is not None and unrealized is not None:
         recalculated_equity = starting + realized + unrealized - fees + funding
         recalculated_net = recalculated_equity - starting
-        if actual_equity is not None and abs(actual_equity - recalculated_equity) > tolerance_usdc:
+        if actual_equity is not None and abs(actual_equity - recalculated_equity) > tolerance:
             issues.append(
                 PnlAuditIssue(
                     "EQUITY_RECONCILIATION_MISMATCH",
@@ -224,6 +246,23 @@ def audit_paper_ledger(
                     f"equity={actual_equity:.10f}, attendu={recalculated_equity:.10f}",
                 )
             )
+
+    realized_float = _output_float(realized)
+    fees_float = _output_float(fees, round_up=True)
+    funding_float = _output_float(funding)
+    unrealized_float = _output_float(unrealized) if unrealized is not None else None
+    equity_float = _output_float(recalculated_equity) if recalculated_equity is not None else None
+    net_float = _output_float(recalculated_net) if recalculated_net is not None else None
+    if any(value is None for value in (realized_float, fees_float, funding_float)) or (
+        recalculated_equity is not None and (equity_float is None or net_float is None)
+    ):
+        issues.append(
+            PnlAuditIssue(
+                "PNL_AGGREGATE_UNREPRESENTABLE",
+                None,
+                "Agrégat PnL non représentable en float.",
+            )
+        )
 
     if issues:
         return PnlLedgerAudit(
@@ -243,12 +282,12 @@ def audit_paper_ledger(
         status=TRUSTED,
         pnl_valid=True,
         events_checked=len(rows),
-        realized_pnl_usdc=round(realized, 10),
-        fees_paid_usdc=round(fees, 10),
-        funding_net_usdc=round(funding, 10),
-        unrealized_pnl_usdc=unrealized,
-        recalculated_equity_usdc=None if recalculated_equity is None else round(recalculated_equity, 10),
-        recalculated_net_pnl_usdc=None if recalculated_net is None else round(recalculated_net, 10),
+        realized_pnl_usdc=realized_float,
+        fees_paid_usdc=fees_float,
+        funding_net_usdc=funding_float,
+        unrealized_pnl_usdc=unrealized_float,
+        recalculated_equity_usdc=equity_float,
+        recalculated_net_pnl_usdc=net_float,
         open_positions=dict(sorted(positions.items())),
         issues=(),
     )
@@ -258,10 +297,10 @@ def _compare_snapshot(
     issues: list[PnlAuditIssue],
     snapshot: Mapping[str, Any],
     field: str,
-    expected: float,
-    tolerance: float,
+    expected: Decimal,
+    tolerance: Decimal,
 ) -> None:
-    actual = _snapshot_number(snapshot, field)
+    actual = decimal_value(snapshot.get(field))
     if actual is None:
         issues.append(PnlAuditIssue("SNAPSHOT_FIELD_MISSING", None, f"Champ absent/non fini: {field}."))
     elif abs(actual - expected) > tolerance:
@@ -274,10 +313,17 @@ def _compare_snapshot(
         )
 
 
-def _snapshot_number(snapshot: Mapping[str, Any] | None, field: str) -> float | None:
+def _snapshot_decimal(snapshot: Mapping[str, Any] | None, field: str) -> Decimal | None:
     if snapshot is None:
         return None
-    return _finite(snapshot.get(field))
+    return decimal_value(snapshot.get(field))
+
+
+def _output_float(value: Decimal, *, round_up: bool = False) -> float | None:
+    parsed = float_not_below(value) if round_up else float_not_above(value)
+    if parsed is None or not math.isfinite(parsed):
+        return None
+    return parsed
 
 
 def _position_key(coin: object, side: object) -> str:
@@ -289,6 +335,8 @@ def _token(value: object) -> str:
 
 
 def _finite(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):

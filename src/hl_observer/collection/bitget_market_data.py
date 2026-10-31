@@ -82,6 +82,7 @@ class BitgetMarketState:
     clock_offset_ms: float | None = None
     gap_count: int = 0
     regression_count: int = 0
+    snapshot_required_after_missing_time: bool = False
 
     def apply(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
         arg = payload.get("arg") or {}
@@ -93,11 +94,34 @@ class BitgetMarketState:
             self.quality, self.reason = DESYNC, "SYMBOL_MISMATCH"
             return self.quality
         channel = str(arg.get("channel", "")).lower()
+        is_book_channel = channel in {"books", "books1", "books5", "books15"}
+        received = receive_ts_ms or _i(transport.get("receive_wall_ts_ms"))
+        if is_book_channel:
+            exchange_ts = _i(item.get("ts"))
+            if exchange_ts is None or exchange_ts <= 0 or received is None or received <= 0:
+                self.bids.clear()
+                self.asks.clear()
+                self.sequence = None
+                self.exchange_ts_ms = 0
+                self.receive_ts_ms = 0 if received is None or received <= 0 else received
+                self.snapshot_required_after_missing_time = True
+                self.quality = UNMEASURABLE
+                self.reason = (
+                    "MISSING_EXCHANGE_TIMESTAMP"
+                    if exchange_ts is None or exchange_ts <= 0
+                    else "MISSING_RECEIVE_TIMESTAMP"
+                )
+                return self.quality
         if channel in {"books", "books1", "books5", "books15"}:
             seq = _i(item.get("seq") or item.get("seqId"))
             prev = _i(item.get("pseq") or item.get("prevSeqId"))
             action = str(payload.get("action") or "").lower()
             snapshot_push = action == "snapshot" or channel in {"books1", "books5", "books15"}
+
+            if self.snapshot_required_after_missing_time and not snapshot_push:
+                self.quality = UNMEASURABLE
+                self.reason = "SNAPSHOT_REQUIRED_AFTER_MISSING_TIME"
+                return self.quality
 
             if not snapshot_push and self.sequence is not None and seq is not None:
                 if prev is not None and prev != self.sequence:
@@ -114,6 +138,7 @@ class BitgetMarketState:
                     return self.quality
 
             if snapshot_push:
+                self.snapshot_required_after_missing_time = False
                 next_bids: dict[float, float] = {}
                 next_asks: dict[float, float] = {}
                 targets = ((item.get("bids"), next_bids), (item.get("asks"), next_asks))
@@ -142,14 +167,15 @@ class BitgetMarketState:
                 else UNMEASURABLE
             )
             self.reason = "" if self.quality == EXPLOITABLE else "INVALID_BBO"
-        self.exchange_ts_ms = _i(item.get("ts")) or self.exchange_ts_ms
-        self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
-        self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
-        self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
-        if transport.get("transport_rtt_ms") is not None:
-            self.transport_rtt_ms = _f(transport.get("transport_rtt_ms"))
-        if transport.get("clock_offset_ms") is not None:
-            self.clock_offset_ms = _f(transport.get("clock_offset_ms"))
+        if is_book_channel:
+            self.exchange_ts_ms = _i(item.get("ts")) or 0
+            self.receive_ts_ms = int(received)
+            self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
+            self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
+            if transport.get("transport_rtt_ms") is not None:
+                self.transport_rtt_ms = _f(transport.get("transport_rtt_ms"))
+            if transport.get("clock_offset_ms") is not None:
+                self.clock_offset_ms = _f(transport.get("clock_offset_ms"))
         self.last = _f(item.get("lastPr") or item.get("lastPrice")) or self.last
         self.mark = _f(item.get("markPrice")) or self.mark
         self.index = _f(item.get("indexPrice")) or self.index

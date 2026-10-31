@@ -9,8 +9,9 @@ est le pont honnête entre les deux, et il CÂBLE `scoreboard_metrics` (sinon as
   * il refuse tout si l'audit n'est pas `TRUSTED` (deny-by-default : un ledger douteux ne produit
     AUCUN PnL de stratégie, seulement des lignes UNMEASURABLE / `MORE_DATA`) ;
   * sur un ledger `TRUSTED`, il reconstruit chaque cycle OPEN→CLOSE comme UNE observation
-    indépendante (remise à zéro de la clé à la clôture : deux round-trips successifs sur le même
-    coin ne se confondent pas), regroupée par `refs["strategy"]` ;
+    indépendante, mais seuls les épisodes attribués à une famille active du registre central
+    alimentent le PnL économique ; les familles désactivées, ambiguës ou absentes sont comptées
+    dans la couverture et exclues ;
   * il n'affirme QUE le mesuré : PnL réalisé par épisode = mesuré ; edge brut bps, spread/slippage/
     latence bps, OOS, forward = ABSENTS du ledger ⇒ `UNMEASURABLE`. Donc, tel quel, **aucun**
     `net_bps` n'est calculable et **aucun** verdict `PROMOTE` n'est possible : c'est la vérité du
@@ -103,11 +104,18 @@ def _resoudre_strategie(strats: set[str]) -> str:
 
 
 def _familles_actives() -> tuple[str, ...]:
-    try:
-        from hl_observer.strategies.active_scope import active_strategy_families
-        return tuple(sorted(active_strategy_families()))
-    except Exception:  # pragma: no cover - l'autorité reste active_scope, mais on ne casse pas si absente
-        return ()
+    from hl_observer.strategies.active_scope import active_strategy_families
+    return tuple(sorted(active_strategy_families()))
+
+
+def _scope_snapshot() -> tuple[frozenset[str], Any]:
+    """Charge l'autorité centrale; l'appelant refuse toute économie si elle manque."""
+    from hl_observer.strategies.active_scope import active_strategy_families, canonical_strategy_family
+
+    active = frozenset(canonical_strategy_family(name) for name in active_strategy_families())
+    if not active:
+        raise RuntimeError("active strategy scope is empty")
+    return active, canonical_strategy_family
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +150,30 @@ def _union_manques(rows: Sequence[ScoreboardRow]) -> tuple[str, ...]:
             if champ not in vus:
                 vus.append(champ)
     return tuple(vus)
+
+
+def _scope_refusal(
+    reason: str,
+    *,
+    active: Iterable[str] = (),
+    scope_status: str = "UNMEASURABLE",
+) -> ResultatScoreboard:
+    rows = tuple(assembler_ligne(name) for name in sorted(set(active)))
+    return ResultatScoreboard(
+        status="UNMEASURABLE",
+        rows=rows,
+        n_episodes_clos=0,
+        manques_globaux=_union_manques(rows),
+        raison=reason,
+        identite_couverture={
+            "scope_status": scope_status,
+            "n_episodes": 0,
+            "n_episodes_economiques": 0,
+            "n_episodes_exclus_scope": 0,
+            "episodes_exclus_par_famille": {},
+        },
+        promotions={},
+    )
 
 
 _CHAMPS_MESURE = (
@@ -194,7 +226,26 @@ def lignes_depuis_ledger(
     un scoreboard positif obtenu sur ledger SYNTHÉTIQUE est une preuve de PLOMBERIE, jamais un PnL réel.
     `evidence_par_strategie` — si fournie, la porte de promotion deny-by-default est évaluée par stratégie."""
     rows_in = [dict(r) for r in events]
-    attendues = tuple(strategies_attendues) if strategies_attendues is not None else _familles_actives()
+    try:
+        active, canonicalize = _scope_snapshot()
+    except Exception as exc:
+        return _scope_refusal(
+            f"UNMEASURABLE: autorité active_scope indisponible ({type(exc).__name__})"
+        )
+
+    if strategies_attendues is None:
+        attendues = tuple(sorted(active))
+    else:
+        requested = (strategies_attendues,) if isinstance(strategies_attendues, str) else strategies_attendues
+        demandees = tuple(canonicalize(name) for name in requested)
+        hors_scope = tuple(sorted({name for name in demandees if name not in active}))
+        if hors_scope:
+            return _scope_refusal(
+                "DISABLED_BY_SCOPE: stratégies attendues refusées: " + ", ".join(hors_scope),
+                active=active,
+                scope_status="DISABLED_BY_SCOPE",
+            )
+        attendues = tuple(dict.fromkeys(demandees))
     roi_denominateurs = dict(roi_denominateurs or {})
     mesures = dict(mesures_par_strategie or {})
 
@@ -206,6 +257,13 @@ def lignes_depuis_ledger(
             status=audit.status, rows=rows, n_episodes_clos=0,
             manques_globaux=_union_manques(rows),
             raison=f"ledger {audit.status}: PnL par stratégie non calculable (deny-by-default)",
+            identite_couverture={
+                "scope_status": "ACTIVE",
+                "n_episodes": 0,
+                "n_episodes_economiques": 0,
+                "n_episodes_exclus_scope": 0,
+                "episodes_exclus_par_famille": {},
+            },
             promotions=_promotions(rows, evidence_par_strategie),
         )
 
@@ -238,18 +296,33 @@ def lignes_depuis_ledger(
             continue
 
     # §3.5 — rendre VISIBLE la qualité d'identité (episode_id réel vs repli ambigu coin:side).
+    pnls_par_strat: dict[str, list[float]] = {}
+    episodes_exclus: dict[str, int] = {}
+    for strat, pnl in episodes:
+        if strat == STRAT_ABSENTE:
+            famille = "non_attribue"
+        elif strat == STRAT_AMBIGUE:
+            famille = "ambigu"
+        else:
+            famille = canonicalize(strat)
+        if famille not in active:
+            episodes_exclus[famille] = episodes_exclus.get(famille, 0) + 1
+            continue
+        pnls_par_strat.setdefault(famille, []).append(pnl)
+
+    n_episodes_economiques = sum(map(len, pnls_par_strat.values()))
     identite_couverture = {
+        "scope_status": "ACTIVE",
         "n_episodes": len(episodes),
+        "n_episodes_economiques": n_episodes_economiques,
+        "n_episodes_exclus_scope": sum(episodes_exclus.values()),
+        "episodes_exclus_par_famille": dict(sorted(episodes_exclus.items())),
         "n_episode_id": niveaux.count("episode_id"),
         "n_position_id": niveaux.count("position_id"),
         "n_coin_side_fallback": niveaux.count("coin_side"),
     }
 
-    pnls_par_strat: dict[str, list[float]] = {}
-    for strat, pnl in episodes:
-        pnls_par_strat.setdefault(strat, []).append(pnl)
-
-    # Une ligne par stratégie ATTENDUE (même vide → MORE_DATA explicite) + toute stratégie vue.
+    # Une ligne par stratégie active attendue + toute stratégie active observée.
     strategies = list(dict.fromkeys([*attendues, *sorted(pnls_par_strat)]))
     rows = tuple(
         _ligne_alimentee(s, pnls_par_strat, roi_denominateurs.get(s), mesures.get(s) or {})
@@ -257,8 +330,12 @@ def lignes_depuis_ledger(
     )
     promotions = _promotions(rows, evidence_par_strategie)
     return ResultatScoreboard(
-        status=TRUSTED, rows=rows, n_episodes_clos=len(episodes),
-        manques_globaux=_union_manques(rows), raison=None,
+        status=TRUSTED, rows=rows, n_episodes_clos=n_episodes_economiques,
+        manques_globaux=_union_manques(rows),
+        raison=(
+            f"{sum(episodes_exclus.values())} épisode(s) hors scope ou sans attribution exclus du PnL"
+            if episodes_exclus else None
+        ),
         identite_couverture=identite_couverture, promotions=promotions,
     )
 
@@ -281,12 +358,37 @@ def depuis_fichier_ledger(
 
     lecture = read_chain(Path(path))
     if not lecture.strict_pnl_allowed:
-        attendues = tuple(strategies_attendues) if strategies_attendues is not None else _familles_actives()
+        try:
+            active, canonicalize = _scope_snapshot()
+        except Exception as exc:
+            return _scope_refusal(
+                f"UNMEASURABLE: autorité active_scope indisponible ({type(exc).__name__})"
+            )
+        requested = (strategies_attendues,) if isinstance(strategies_attendues, str) else strategies_attendues
+        demandees = (
+            tuple(canonicalize(name) for name in requested)
+            if strategies_attendues is not None else tuple(sorted(active))
+        )
+        hors_scope = tuple(sorted({name for name in demandees if name not in active}))
+        if hors_scope:
+            return _scope_refusal(
+                "DISABLED_BY_SCOPE: stratégies attendues refusées: " + ", ".join(hors_scope),
+                active=active,
+                scope_status="DISABLED_BY_SCOPE",
+            )
+        attendues = tuple(dict.fromkeys(demandees))
         rows = tuple(assembler_ligne(s) for s in attendues)
         return ResultatScoreboard(
             status=lecture.status, rows=rows, n_episodes_clos=0,
             manques_globaux=_union_manques(rows),
             raison=f"ledger illisible/rompu ({lecture.status}): PnL non calculable",
+            identite_couverture={
+                "scope_status": "ACTIVE",
+                "n_episodes": 0,
+                "n_episodes_economiques": 0,
+                "n_episodes_exclus_scope": 0,
+                "episodes_exclus_par_famille": {},
+            },
             promotions=_promotions(rows, evidence_par_strategie),
         )
     return lignes_depuis_ledger(

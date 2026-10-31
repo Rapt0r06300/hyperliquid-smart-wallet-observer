@@ -6,6 +6,7 @@ from typing import Iterable, Mapping
 
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.family_economic_job import (
+    DISABLED_FAMILY_ECONOMIC_SUITES,
     FAMILY_ECONOMIC_SUITES,
     execute_family_job,
     validate_family_request,
@@ -24,6 +25,8 @@ def validate_request(raw):
     mode = str(raw.get("mode") or "").strip()
     if mode == "economic" and suite in FAMILY_ECONOMIC_SUITES:
         return validate_family_request(raw)
+    if mode == "economic" and suite in DISABLED_FAMILY_ECONOMIC_SUITES:
+        raise ValueError(f"DISABLED_BY_SCOPE:{suite}")
     return canonical_job.validate_request(raw)
 
 
@@ -102,6 +105,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         raw = canonical_job._load_request(request_path)
         suite = str(raw.get("suite") or "").strip()
         mode = str(raw.get("mode") or "").strip()
+        if mode == "economic" and suite in DISABLED_FAMILY_ECONOMIC_SUITES:
+            raise ValueError(f"DISABLED_BY_SCOPE:{suite}")
         if mode == "economic" and suite in FAMILY_ECONOMIC_SUITES:
             result_dir = Path(args.result_dir)
             rc = execute_family_job(
@@ -128,6 +133,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
 __all__ = [
     "FAMILY_ECONOMIC_SUITES",
+    "DISABLED_FAMILY_ECONOMIC_SUITES",
     "_print_lead_lag_diagnostic",
     "_run_family_postprocessing",
     "allowed_economic_suites",

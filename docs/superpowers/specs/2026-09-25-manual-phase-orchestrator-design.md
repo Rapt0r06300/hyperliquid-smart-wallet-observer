@@ -11535,6 +11535,11 @@ Rules:
 
 - internal math uses Decimal/fixed-point or equivalent deterministic representation where precision affects order validity/accounting;
 - binary float formatting cannot change tick validity, minimum notional, fee amount or fill eligibility;
+- economic aggregates feeding sign, ranking or target gates retain decimal source precision; float conversion and presentation rounding cannot move a value across a gate, and rounded report values are never reused as inputs to another calculation or gate;
+- authoritative USD reconciliation uses Decimal source values and an absolute tolerance of at most `0.00000001 USD`; tolerances are never accumulated per trade or used as a PnL credit;
+- reconciliation uses zero relative tolerance at every level and checks both per-trade and aggregate source values; float serialization rounds claimed net/return downward and measured costs/drawdown upward;
+- when a declared net differs from gross minus measured costs but remains inside that representation tolerance, target/sign gates use the lower of the declared net and the recomputed net; a larger difference invalidates the proof;
+- booleans are not numeric economic evidence, even though the host language may coerce them to 0 or 1;
 - bps-to-decimal conversions are centralized and tested;
 - negative fee/rebate/funding signs are preserved rather than absolute-valued.
 
@@ -14109,3 +14114,31 @@ discontinue rend l'objectif `UNMEASURABLE`. Le nombre de jours actifs est
 déterminé par la présence de trades, pas par un PnL non nul. La couverture
 n'est jamais déduite des seuls trades ou snapshots, et la référence de
 5 USD/jour reste informative, sans seuil de promotion.
+
+
+### 2026-10-27 — Contrat du collecteur local Copy-Vault et identité native des marchés
+
+`LANCER_COLLECTEURS_COPY_VAULT.cmd` lance les collecteurs locaux sous bail
+renouvelable et s'arrête sur `Ctrl+C`. Ses observations sous `runtime/data/`
+restent brutes et locales : elles ne deviennent pas SAFE par leur seule
+présence. Le labo économique ne lit que les shards SAFE restaurés par AlinaSync
+dont le reçu, le catalogue actif, les tailles et les SHA concordent. La console
+du collecteur expose les heartbeats et une courte fin de journal; les journaux
+complets tournent avec une limite de taille afin qu'une collecte continue ne
+remplisse pas indéfiniment le disque.
+
+Les symboles Hyperliquid sont des identités natives sensibles à la casse. Les
+clés majuscules ne servent qu'à borner et rechercher les abonnements; les fills,
+carnets Copy-Vault, checkpoints et jointures conservent le symbole natif. Si
+plusieurs marchés distincts se replient sur la même clé normalisée, le
+collecteur les exclut plutôt que de choisir arbitrairement. Un carnet reçu sur
+WS n'est admis que si son symbole correspond exactement à celui de l'abonnement.
+L'identité d'un métaordre de checkpoint conserve aussi cette casse et doit être
+identique à celle reconstruite par le replay causal.
+
+La présence de BBO, trades, `activeAssetCtx` et métadonnées instrument dans le
+catalogue Copy-Vault n'établit pas leur alignement temporel avec chaque signal;
+la couverture causale reste une preuve distincte. Les inventaires SAFE de
+marchés externes peuvent être résumés par venue et famille, mais leurs payloads
+ne sont pas chargés par le replay local Copy-Vault et n'alimentent ni son PnL,
+ni sa preuve OOS/forward. La famille économique active reste Copy-Vault seule.

@@ -719,23 +719,138 @@ def _safe_copy_vault_exclusion_summary(inputs: Mapping[str, Any]) -> str:
     by_family = raw_by_family if isinstance(raw_by_family, Mapping) else {}
     raw_inventory = inputs.get("safe_copy_vault_shards_not_used_for_pnl_inventory_by_family")
     inventory = raw_inventory if isinstance(raw_inventory, Mapping) else {}
-    details = [
-        (
-            f"{int(evidence.get('local_files_present_unverified') or 0):,}/"
-            f"{int(evidence.get('catalogue_shards') or value):,} "
-            f"{labels.get(str(family), str(family))} fichiers locaux repérés "
-            f"({int(evidence.get('local_files_missing') or 0):,} absents)"
-        ).replace(",", " ")
-        if isinstance(evidence := inventory.get(family), Mapping)
-        else f"{value:,} {labels.get(str(family), str(family))} au catalogue; présence locale non vérifiée".replace(",", " ")
-        for family, value in sorted(by_family.items())
-        if type(value) is int and value > 0
-    ]
+    raw_verified = inputs.get("safe_context_verified_by_family")
+    verified = raw_verified if isinstance(raw_verified, Mapping) else {}
+    raw_expected = inputs.get("safe_context_expected_by_family")
+    expected = raw_expected if isinstance(raw_expected, Mapping) else {}
+    raw_context = inputs.get("safe_context_by_family")
+    context_counts = raw_context if isinstance(raw_context, Mapping) else {}
+    details = []
+    for family, value in sorted(by_family.items()):
+        if type(value) is not int or value <= 0:
+            continue
+        label = labels.get(str(family), str(family))
+        evidence = inventory.get(family)
+        if family in verified or family in expected:
+            verified_count = verified.get(family, 0)
+            expected_count = expected.get(family, value)
+            observation_count = context_counts.get(family, 0)
+            detail = (
+                f"{int(verified_count or 0):,}/{int(expected_count or 0):,} shards de {label} "
+                f"vérifiés, {int(observation_count or 0):,} observations matérialisées"
+            )
+        elif isinstance(evidence, Mapping):
+            detail = (
+                f"{int(evidence.get('local_files_present_unverified') or 0):,}/"
+                f"{int(evidence.get('catalogue_shards') or value):,} {label} fichiers locaux repérés "
+                f"({int(evidence.get('local_files_missing') or 0):,} absents, hash non vérifié ici)"
+            )
+        else:
+            detail = f"{value:,} {label} au catalogue; présence locale non vérifiée"
+        details.append(detail.replace(",", " "))
     suffix = f" ({', '.join(details)})" if details else ""
+    context_observations = inputs.get("safe_context_observations", 0)
+    context_observations = (
+        context_observations if type(context_observations) is int and context_observations >= 0 else 0
+    )
     return (
         f"{count:,} shards SAFE du catalogue hors replay économique{suffix}"
         .replace(",", " ")
-        + "; snapshots HTTP horodatés à réception, pas des événements PnL"
+        + f"; {context_observations:,} observations conservées hors calcul PnL dans une piste de contexte séparée"
+    )
+
+
+def _safe_accounting_lines(inputs: Mapping[str, Any]) -> list[str]:
+    """Expose SAFE funding/ledger coverage and the replay engine's limitation."""
+    def count_text(key: str) -> str:
+        value = inputs.get(key)
+        if type(value) is not int or value < 0:
+            return "non mesuré"
+        return f"{value:,}".replace(",", " ")
+
+    raw_by_coin = inputs.get("safe_funding_rates_by_coin")
+    by_coin = raw_by_coin if isinstance(raw_by_coin, Mapping) else {}
+    coins = [
+        (str(coin), value)
+        for coin, value in sorted(by_coin.items(), key=lambda item: str(item[0]))
+        if isinstance(coin, str) and type(value) is int and value > 0
+    ]
+    if coins:
+        instrument_text = (
+            f" ({len(coins)} instruments : "
+            + ", ".join(f"{coin} {value:,}".replace(",", " ") for coin, value in coins)
+            + ")"
+        )
+    else:
+        instrument_count = "0" if "safe_funding_rates_by_coin" in inputs else "non mesuré"
+        instrument_text = f" ({instrument_count} instrument(s))"
+    funding_line = (
+        f"Funding de règlement : {count_text('safe_funding_rate_observations')} taux SAFE"
+        f"{instrument_text} · {count_text('safe_funding_coverage_receipts')} fenêtres vérifiées · "
+        f"fichier : {inputs.get('safe_funding_rate_tape_path') or 'non disponible'}"
+    )
+    leader_line = (
+        f"Comptabilité des leaders : {count_text('safe_leader_accounting_events')} "
+        f"événements de funding/ledger de leaders · "
+        f"{count_text('safe_leader_accounting_coverage_receipts')} fenêtres vérifiées · "
+        f"fichier : {inputs.get('safe_leader_accounting_tape_path') or 'non disponible'}. "
+        "Ces événements décrivent les leaders et ne sont jamais utilisés comme PnL du suiveur."
+    )
+    application = str(inputs.get("funding_rate_economic_application") or "")
+    if application == "NOT_APPLIED_V21_REQUIRES_ORACLE_PRICE_AND_POSITION_BOUND_SETTLEMENT":
+        application_line = (
+            "Coûts de funding non appliqués au PnL V21. Le replay refuse toute traversée de règlement "
+            "sans prix oracle de règlement et position paper exacte à cette heure."
+        )
+    elif not application:
+        application_line = "Application du funding au PnL V21 : non mesurée dans ce rapport."
+    else:
+        application_line = f"Application du funding au PnL V21 : {application}."
+    return [funding_line, leader_line, application_line]
+
+
+def _safe_market_context_line(inputs: Mapping[str, Any]) -> str:
+    count = inputs.get("safe_market_context_observations")
+    count_text = f"{count:,}".replace(",", " ") if type(count) is int and count >= 0 else "non mesuré"
+    coverage = inputs.get("safe_market_context_coverage")
+    coverage = coverage if isinstance(coverage, Mapping) else {}
+    status = str(coverage.get("status") or "NON MESURÉ")
+    alignment = (
+        "prouvé" if coverage.get("temporal_alignment_status") == "PROVEN"
+        else "non prouvé"
+    )
+    missing = coverage.get("missing_families")
+    missing = [str(item) for item in missing if str(item)] if isinstance(missing, list) else []
+    missing_text = (
+        " · familles absentes : " + ", ".join(missing)
+        if missing else ""
+    )
+    return (
+        f"Flux de marché SAFE visibles du labo : {count_text} observations · "
+        f"couverture des familles : {status}{missing_text} · "
+        f"alignement temporel entre familles : {alignment} · "
+        f"fichier : {inputs.get('safe_market_context_tape_path') or 'non disponible'} · "
+        "BBO/trades/contexte/métadonnées conservés hors PnL V21"
+    )
+
+
+def _safe_external_market_inventory_line(inputs: Mapping[str, Any]) -> str:
+    count = inputs.get("safe_external_market_inventory_shards")
+    count_text = f"{count:,}".replace(",", " ") if type(count) is int and count >= 0 else "non mesuré"
+    coverage = inputs.get("safe_external_market_inventory_coverage")
+    coverage = coverage if isinstance(coverage, Mapping) else {}
+    status = str(coverage.get("status") or "NON MESURÉ")
+    observed = coverage.get("venues_with_safe_catalog_shards")
+    observed = [str(item) for item in observed if str(item)] if isinstance(observed, list) else []
+    missing = coverage.get("venues_without_safe_catalog_shards")
+    missing = [str(item) for item in missing if str(item)] if isinstance(missing, list) else []
+    observed_text = ", ".join(observed) if observed else "aucune venue"
+    missing_text = ", ".join(missing) if missing else "aucune"
+    return (
+        f"Catalogue SAFE des marchés multi-venues : {count_text} shards SAFE du catalogue indexés · {status} · "
+        f"venues présentes : {observed_text} · venues sans shard SAFE du catalogue : {missing_text} · "
+        f"inventaire : {inputs.get('safe_external_market_inventory_tape_path') or 'non disponible'} · "
+        "références catalogue uniquement : payloads non chargés, non rejoués et exclus du PnL"
     )
 
 
@@ -746,6 +861,9 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     historical = dict(summary.get("historical_replay") or {})
     history = list(summary.get("improvement_history") or [])
     inputs = dict(summary.get("safe_inputs") or {})
+    accounting_lines = _safe_accounting_lines(inputs)
+    market_context_line = _safe_market_context_line(inputs)
+    external_market_inventory_line = _safe_external_market_inventory_line(inputs)
     status = str(summary.get("status") or "UNKNOWN")
     live = dict(summary.get("live") or {})
     auto_refresh = "<meta http-equiv='refresh' content='5'>" if live.get("active") is True else ""
@@ -875,7 +993,12 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     coverage_receipts = historical_coverage.get("durable_receipt_release_count")
     coverage_missing_receipts = historical_coverage.get("missing_durable_receipt_tags")
     coverage_without_audit = historical_coverage.get("receipt_without_backfill_audit_tags")
-    if type(coverage_expected) is int and type(coverage_audited) is int:
+    if historical_coverage.get("status") == "NOT_APPLICABLE":
+        historical_coverage_text = (
+            "Aucun wrapper SAFE ne provient d'un backfill REST identifié; "
+            "aucun reçu de couverture REST n'est donc attendu. Cela ne prouve pas une couverture historique complète."
+        )
+    elif type(coverage_expected) is int and type(coverage_audited) is int:
         receipt_text = (
             f"; {int(coverage_receipts):,}/{coverage_expected:,} reçus durables de collecte"
             if type(coverage_receipts) is int else ""
@@ -898,6 +1021,13 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         ).replace(",", " ")
     else:
         historical_coverage_text = "Audit de backfill historique : reçu ou couverture non mesuré."
+    source_counts = inputs.get("source_observations_by_family")
+    source_counts = source_counts if isinstance(source_counts, Mapping) else {}
+    source_counts_text = " · ".join(
+        f"{str(source).replace('_', ' ')} : {int(count):,}"
+        for source, count in sorted(source_counts.items())
+        if type(count) is int and count > 0
+    ).replace(",", " ") or "non mesuré"
     safe_exclusion_summary = _safe_copy_vault_exclusion_summary(inputs)
     payload_rejection_labels = {
         "INVALID_OR_NONCAUSAL_L2_REJECTED": "carnets L2 invalides ou non causaux",
@@ -955,6 +1085,21 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"corpus complet : {'oui' if inputs.get('data_complete') is True else 'non' if inputs.get('data_complete') is False else 'calcul en cours'}</p>"
         f"<p class='small'>Contenu refusé : {html.escape(payload_rejection_text)}. "
         "Les fichiers SAFE vérifiés et la qualité de leurs événements sont affichés séparément.</p>"
+        "<h2>Emplacement des données utilisées par le labo</h2>"
+        f"<p class='path'><b>Source SAFE AlinaSync :</b> {html.escape(str(inputs.get('source_recovery_root') or 'non disponible'))}</p>"
+        f"<p class='path'><b>Workspace passé aux modules replay/backtest :</b> {html.escape(str(inputs.get('workspace_root') or 'non disponible'))}</p>"
+        f"<p class='path'><b>Fichiers matérialisés réellement consommés :</b> {html.escape(str(inputs.get('materialized_data_root') or 'non disponible'))}</p>"
+        f"<p class='path'><b>Piste SAFE positions/sélections (contexte seulement) :</b> {html.escape(str(inputs.get('safe_context_tape_path') or 'non disponible'))}</p>"
+        f"<p class='path'><b>NAV issu des snapshots de positions (horodatés à réception) :</b> {html.escape(str(inputs.get('nav_snapshot_tape_path') or 'non disponible'))} · {html.escape(str(inputs.get('nav_snapshot_observations', 0)))} observations</p>"
+        f"<p class='path'>{html.escape(accounting_lines[0])}</p>"
+        f"<p class='path'>{html.escape(accounting_lines[1])}</p>"
+        f"<p class='small'>{html.escape(accounting_lines[2])}</p>"
+        f"<p class='path'>{html.escape(market_context_line)}</p>"
+        f"<p class='path'>{html.escape(external_market_inventory_line)}</p>"
+        f"<p class='small'>Carnets L2 observés mais inexécutables : {int(inputs.get('unexecutable_l2_observations') or 0):,} (piste séparée, jamais replay/PnL) · fills dont le drapeau snapshot reste inconnu : {int(inputs.get('unclassified_fill_observations') or 0):,} (archivés bruts, exclus du PnL).</p>"
+        f"<p class='path'><b>L2 sans liquidité exécutable :</b> {html.escape(str(inputs.get('unexecutable_l2_tape_path') or 'non disponible'))}</p>"
+        f"<p class='path'><b>Fills non classés :</b> {html.escape(str(inputs.get('unclassified_fill_tape_path') or 'non disponible'))}</p>"
+        f"<p class='small'>Observations par famille/source SAFE : {html.escape(source_counts_text)}.</p>"
         f"<p class='small'>{html.escape(historical_coverage_text)}</p>"
         f"<p class='small'>Contexte SAFE hors replay économique : {html.escape(safe_exclusion_summary)}.</p>"
         + (
@@ -1050,6 +1195,37 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
     os.replace(temporary, result_path)
     economic = dict(summary.get("economic_result") or {})
     inputs = dict(summary.get("safe_inputs") or {})
+    accounting_lines = _safe_accounting_lines(inputs)
+    market_context_line = _safe_market_context_line(inputs)
+    external_market_inventory_line = _safe_external_market_inventory_line(inputs)
+    source_counts = inputs.get("source_observations_by_family")
+    source_counts = source_counts if isinstance(source_counts, Mapping) else {}
+    source_counts_text = " · ".join(
+        f"{str(source).replace('_', ' ')} : {int(count):,}"
+        for source, count in sorted(source_counts.items())
+        if type(count) is int and count > 0
+    ).replace(",", " ") or "non mesuré"
+    historical_coverage = inputs.get("historical_coverage_audit")
+    historical_coverage = historical_coverage if isinstance(historical_coverage, Mapping) else {}
+    expected_releases = historical_coverage.get("expected_release_count")
+    audited_releases = historical_coverage.get("audited_release_count")
+    if historical_coverage.get("status") == "NOT_APPLICABLE":
+        historical_coverage_text = (
+            "Aucun backfill REST identifié; la couverture historique complète reste non prouvée."
+        )
+    elif type(expected_releases) is int and type(audited_releases) is int:
+        historical_coverage_text = (
+            f"Audit backfill historique : {audited_releases:,}/{expected_releases:,} releases SAFE auditées."
+        ).replace(",", " ")
+    else:
+        historical_coverage_text = "Audit backfill historique : couverture non mesurée."
+    payload_rejections = inputs.get("payload_audit")
+    payload_rejections = payload_rejections if isinstance(payload_rejections, Mapping) else {}
+    payload_rejection_text = "; ".join(
+        f"{int(count):,} {str(reason).replace('_', ' ').lower()}"
+        for reason, count in sorted(payload_rejections.items())
+        if type(count) is int and count > 0
+    ).replace(",", " ") or "aucun enregistrement rejeté"
     live = dict(summary.get("live") or {})
     lines = [
         "# Laboratoire CopyVault — état en direct",
@@ -1059,6 +1235,21 @@ def _write_economic_report_bundle(report_dir: Path, summary: dict[str, Any]) -> 
         f"- Activité : {live.get('message', 'préparation')}",
         f"- Données SAFE : {inputs.get('verified_assets', 0)} / {inputs.get('expected_safe_shards', 0)} shards vérifiés; "
         f"{inputs.get('unique_fills', 0)} fills et {inputs.get('unique_books', 0)} carnets uniques.",
+        f"- Source AlinaSync SAFE : `{inputs.get('source_recovery_root') or 'non disponible'}`.",
+        f"- Workspace transmis aux modules du labo : `{inputs.get('workspace_root') or 'non disponible'}`.",
+        f"- Fichiers matérialisés : `{inputs.get('materialized_data_root') or 'non disponible'}`.",
+        f"- Contexte positions/sélections : `{inputs.get('safe_context_tape_path') or 'non disponible'}`; "
+        f"{inputs.get('safe_context_observations', 0)} observations conservées hors calcul PnL.",
+        f"- Snapshots NAV au temps de réception : `{inputs.get('nav_snapshot_tape_path') or 'non disponible'}`; "
+        f"{inputs.get('nav_snapshot_observations', 0)} observations source, jamais de NAV reconstitué.",
+        f"- {accounting_lines[0]}",
+        f"- {accounting_lines[1]}",
+        f"- {accounting_lines[2]}",
+        f"- {market_context_line}",
+        f"- {external_market_inventory_line}",
+        f"- L2 non exécutables : {inputs.get('unexecutable_l2_observations', 0)} observations archivées séparément dans `{inputs.get('unexecutable_l2_tape_path') or 'non disponible'}`.",
+        f"- Fills non classés : {inputs.get('unclassified_fill_observations', 0)} enveloppes brutes dans `{inputs.get('unclassified_fill_tape_path') or 'non disponible'}`, exclues du replay/PnL.",
+        f"- Observations par famille/source SAFE : {source_counts_text}.",
         f"- Contexte SAFE hors PnL : {_safe_copy_vault_exclusion_summary(inputs)}.",
         f"- {historical_coverage_text}",
         f"- Enregistrements refusés : {payload_rejection_text}.",
@@ -1210,6 +1401,34 @@ def _run_continuous_safe_lab(
                 f"{safe_inputs.get('unique_fills', 0)} fills · {safe_inputs.get('unique_books', 0)} carnets · "
                 f"{safe_inputs.get('missing_shards', 0)} absents · {safe_inputs.get('partial_shards_excluded', 0)} PARTIAL exclus.",
                 flush=True,
+            )
+            print(f"Source SAFE AlinaSync : {safe_inputs.get('source_recovery_root')}", flush=True)
+            print(f"Workspace transmis aux modules replay/backtest : {safe_inputs.get('workspace_root')}", flush=True)
+            print(f"Fichiers consommés : {safe_inputs.get('materialized_data_root')}", flush=True)
+            print(
+                f"Contexte SAFE séparé du PnL : {safe_inputs.get('safe_context_observations', 0)} observations · "
+                f"{safe_inputs.get('safe_context_tape_path')}", flush=True,
+            )
+            for accounting_line in _safe_accounting_lines(safe_inputs):
+                print(f"Comptabilité CopyVault : {accounting_line}", flush=True)
+            print(f"Flux marché SAFE : {_safe_market_context_line(safe_inputs)}", flush=True)
+            print(
+                f"Catalogue SAFE multi-venues : {_safe_external_market_inventory_line(safe_inputs)}",
+                flush=True,
+            )
+            print(
+                f"NAV observés (réception seulement) : {safe_inputs.get('nav_snapshot_observations', 0)} · "
+                f"{safe_inputs.get('nav_snapshot_tape_path')}", flush=True,
+            )
+            print(
+                f"Observations L2 sans liquidité exécutable (séparées) : "
+                f"{safe_inputs.get('unexecutable_l2_observations', 0)} · "
+                f"{safe_inputs.get('unexecutable_l2_tape_path')}", flush=True,
+            )
+            print(
+                f"Fills bruts non classés, exclus du PnL : "
+                f"{safe_inputs.get('unclassified_fill_observations', 0)} · "
+                f"{safe_inputs.get('unclassified_fill_tape_path')}", flush=True,
             )
             if safe_inputs.get("replay_inputs_available") is not True:
                 state = "MORE_DATA" if safe_inputs.get("expected_safe_shards") else "UNMEASURABLE"
@@ -1491,6 +1710,36 @@ def run_economic_lab(
             f"{safe_inputs.get('unique_fills', 0)} fills; {safe_inputs.get('unique_books', 0)} carnets L2.",
             flush=True,
         )
+        print(f"      Source SAFE AlinaSync : {safe_inputs.get('source_recovery_root')}", flush=True)
+        print(f"      DATA_INDEX actif : {safe_inputs.get('active_data_index')}", flush=True)
+        print(f"      Workspace transmis au replay/backtest : {safe_inputs.get('workspace_root')}", flush=True)
+        print(f"      Fichiers matérialisés réellement lus : {safe_inputs.get('materialized_data_root')}", flush=True)
+        print(
+            f"      Contexte positions/sélections, jamais PnL : "
+            f"{safe_inputs.get('safe_context_observations', 0)} observations · "
+            f"{safe_inputs.get('safe_context_tape_path')}", flush=True,
+        )
+        for accounting_line in _safe_accounting_lines(safe_inputs):
+            print(f"      Comptabilité CopyVault : {accounting_line}", flush=True)
+        print(f"      Flux marché SAFE : {_safe_market_context_line(safe_inputs)}", flush=True)
+        print(
+            f"      Catalogue SAFE multi-venues : {_safe_external_market_inventory_line(safe_inputs)}",
+            flush=True,
+        )
+        print(
+            f"      NAV source observés à réception : {safe_inputs.get('nav_snapshot_observations', 0)} · "
+            f"{safe_inputs.get('nav_snapshot_tape_path')}", flush=True,
+        )
+        print(
+            f"      L2 non exécutables, conservés séparément : "
+            f"{safe_inputs.get('unexecutable_l2_observations', 0)} · "
+            f"{safe_inputs.get('unexecutable_l2_tape_path')}", flush=True,
+        )
+        print(
+            f"      Fills non classés, conservés bruts et exclus du PnL : "
+            f"{safe_inputs.get('unclassified_fill_observations', 0)} · "
+            f"{safe_inputs.get('unclassified_fill_tape_path')}", flush=True,
+        )
         print(
             "      Fills non-snapshot uniques : "
             + str(safe_inputs.get("incremental_unique_fills", "non mesuré"))
@@ -1506,15 +1755,21 @@ def run_economic_lab(
             no_audit = coverage.get("receipt_without_backfill_audit_tags")
             missing_receipts = coverage.get("missing_durable_receipt_tags")
             if type(expected_releases) is int and type(audited_releases) is int:
-                print(
-                    "      Audit backfill historique : "
-                    f"{audited_releases}/{expected_releases} exploitables; "
-                    f"reçus durables {durable_receipts if type(durable_receipts) is int else 'non mesurés'}/"
-                    f"{expected_releases}; reçus sans audit {len(no_audit) if isinstance(no_audit, list) else 'non mesurés'}; "
-                    f"reçus manquants {len(missing_receipts) if isinstance(missing_receipts, list) else 'non mesurés'}. "
-                    "Ce n'est pas un décompte de shards absents.",
-                    flush=True,
-                )
+                if coverage.get("status") == "NOT_APPLICABLE":
+                    print(
+                        "      Audit backfill : aucune trame SAFE identifiée comme issue du backfill REST; "
+                        "la couverture historique n'est pas certifiée par ce constat.", flush=True,
+                    )
+                else:
+                    print(
+                        "      Audit backfill historique : "
+                        f"{audited_releases}/{expected_releases} exploitables; "
+                        f"reçus durables {durable_receipts if type(durable_receipts) is int else 'non mesurés'}/"
+                        f"{expected_releases}; reçus sans audit {len(no_audit) if isinstance(no_audit, list) else 'non mesurés'}; "
+                        f"reçus manquants {len(missing_receipts) if isinstance(missing_receipts, list) else 'non mesurés'}. "
+                        "Ce n'est pas un décompte de shards absents.",
+                        flush=True,
+                    )
         rejected_counts = safe_inputs.get("payload_audit")
         if isinstance(rejected_counts, Mapping) and rejected_counts:
             details = "; ".join(

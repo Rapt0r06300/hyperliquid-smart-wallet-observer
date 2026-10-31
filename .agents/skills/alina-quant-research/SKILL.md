@@ -1,6 +1,6 @@
 ---
 name: alina-quant-research
-description: Use for Alina SmartFlow quantitative edge discovery, backtests, tuning, falsification, OOS/forward validation, and certification of copy_vault, lead_lag, or cross_venue_dislocation_v2.
+description: Use for Alina SmartFlow Copy-Vault-only quantitative discovery, backtests, tuning, falsification, OOS/forward validation, and certification. Legacy family records are read-only history.
 ---
 
 # Alina Quant Research — Discovery V3.2
@@ -12,7 +12,13 @@ Treat its compact JSON as the default resume state. **Ne pas rescanner** Git com
 
 `HYPOTHESIS_LEDGER.jsonl` et `PROCESS_MEMORY.jsonl` sont append-only. Historical memory is guidance only, never certification.
 
-## Core rule
+## Scope and core rule
+
+Copy-Vault is the only active economic family. Lead-Lag, Cross-Venue, arbitrage,
+carry and shadow families may appear in archived evidence, but must never be
+generated, tuned, executed, promoted or certified by a new campaign. Use the
+central active-scope gate for every new execution or write path; preserve
+historical readers and records.
 
 One LLM controller; no LLM subagents inside an economic Discovery campaign. The PC does every deterministic calculation it can: Python, numpy/scipy, pytest, replay, backtest, bootstrap, permutations, Monte-Carlo, optimization, profiling and aggregation. CPU-first, local parallelism allowed. Model turns are scarce; CPU is not quota.
 
@@ -20,12 +26,12 @@ Preferred cadence: `1 model decision -> large local batch -> compact summary -> 
 
 ## DISCOVERY
 
-Enter on a fresh family cycle, `needs-rediscovery`, PIVOT, or champion-challenger event. Read `references/discovery-v32.md` only then.
+Enter on a fresh Copy-Vault cycle, `needs-rediscovery`, PIVOT, or champion-challenger event. Read `references/discovery-v32.md` only then.
 
 Default 12 structurally distinct hypotheses; hard minimum 8; target >=5 mechanism archetypes. `PARAMETER_ONLY` changes do not count as new hypotheses.
 
 Before spending model turns enumerating combinations, use:
-`python tools/codex_semantic_discovery.py --family <family> --pool-size 2000 --shortlist 12`.
+`python tools/codex_semantic_discovery.py --family copy_vault --pool-size 2000 --shortlist 12`.
 
 The semantic engine expands locally, rejects invalid combinations, filters exact/near duplicates and high-confidence process-memory vetoes, applies bounded positive priors, scores research priority, and returns only a diverse shortlist. Search score is not economic proof.
 
@@ -54,6 +60,6 @@ High-confidence negative memory may veto only a sufficiently equivalent mechanis
 
 All tried variants count toward search pressure. Search/feedback evidence is disjoint from final held-out proof. OOS/forward observed then used to retune becomes exploratory; refreeze and collect new disjoint proof.
 
-Final target remains >= +4.00 USD NET/day **for each canonical family separately**, with exact-HEAD machine gates, costs, liquidatability, closed positions, provenance, no-lookahead and strict post-freeze forward. `python tools/run_daily_economic_certification.py .` is final authority.
+The economic objective is >= +5.00 USD NET/day for Copy-Vault on 200 USD paper. Treat it as the terminal objective after the collector, data-integrity, replay, accounting, OOS and forward-paper contracts are repaired and evidenced; the target itself never substitutes for those gates or forces a positive verdict. Preserve exact-HEAD binding, full costs, liquidatability, closed positions, provenance, no-lookahead and strict post-freeze forward. `python tools/run_daily_economic_certification.py .` is the final economic certification entrypoint.
 
 Never route/sign/submit exchange orders, handle keys, deposits or withdrawals. Paper/read-only only; fail closed.

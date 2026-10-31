@@ -88,6 +88,65 @@ def test_dashboard_compares_current_copy_vault_with_challenger(tmp_path: Path) -
     assert "Amélioration mesurée" in dashboard
 
 
+def test_dashboard_exposes_safe_funding_and_leader_accounting_tapes(tmp_path: Path) -> None:
+    summary = {
+        "run_id": "accounting-visibility", "head": "abc", "status": "MORE_DATA",
+        "safe_inputs": {
+            "safe_funding_rate_observations": 12,
+            "safe_funding_coverage_receipts": 4,
+            "safe_funding_rates_by_coin": {"BTC": 8, "ETH": 4},
+            "safe_funding_rate_tape_path": "C:/lab/runtime/data/copy_vault_funding_rates.jsonl",
+            "safe_leader_accounting_events": 3,
+            "safe_leader_accounting_coverage_receipts": 4,
+            "safe_leader_accounting_tape_path": "C:/lab/runtime/data/copy_vault_accounting_context.jsonl",
+            "safe_market_context_observations": 27,
+            "safe_market_context_by_family": {
+                "copy_vault_bbo": 12, "copy_vault_trades": 8,
+                "copy_vault_active_asset_ctx": 5,
+                "copy_vault_instrument_metadata": 2,
+            },
+            "safe_market_context_coverage": {
+            "status": "REQUIRED_FAMILIES_PRESENT", "missing_families": [],
+            "temporal_alignment_status": "NOT_PROVEN_BY_FAMILY_PRESENCE",
+            },
+            "safe_market_context_tape_path": "C:/lab/runtime/data/copy_vault_market_context.jsonl",
+            "safe_external_market_inventory_shards": 18,
+            "safe_external_market_inventory_coverage": {
+                "status": "CATALOG_INVENTORY_ONLY",
+                "venues_with_safe_catalog_shards": ["binance", "hyperliquid"],
+                "venues_without_safe_catalog_shards": ["bitget", "bybit", "gate", "okx"],
+                "replay_eligible": False,
+                "pnl_eligible": False,
+            },
+            "safe_external_market_inventory_tape_path": (
+                "C:/lab/runtime/data/external_venue_safe_inventory.jsonl"
+            ),
+            "funding_rate_economic_application": (
+                "NOT_APPLIED_V21_REQUIRES_ORACLE_PRICE_AND_POSITION_BOUND_SETTLEMENT"
+            ),
+        },
+    }
+
+    dashboard = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
+
+    assert "12 taux SAFE" in dashboard
+    assert "2 instruments" in dashboard
+    assert "4 fenêtres" in dashboard
+    assert "3 événements de funding/ledger de leaders" in dashboard
+    assert "jamais utilisés comme PnL du suiveur" in dashboard
+    assert "copy_vault_funding_rates.jsonl" in dashboard
+    assert "copy_vault_accounting_context.jsonl" in dashboard
+    assert "27 observations" in dashboard
+    assert "copy_vault_market_context.jsonl" in dashboard
+    assert "couverture des familles : REQUIRED_FAMILIES_PRESENT" in dashboard
+    assert "alignement temporel entre familles : non prouvé" in dashboard
+    assert "18 shards SAFE du catalogue" in dashboard
+    assert "venues sans shard SAFE du catalogue : bitget, bybit, gate, okx" in dashboard
+    assert "external_venue_safe_inventory.jsonl" in dashboard
+    assert "non rejoués et exclus du PnL" in dashboard
+    assert "non appliqués au PnL V21" in dashboard
+
+
 def test_dashboard_explains_missing_signal_days_and_safe_payload_rejections(
     tmp_path: Path,
 ) -> None:
@@ -102,6 +161,20 @@ def test_dashboard_explains_missing_signal_days_and_safe_payload_rejections(
                 "copy_vault_positions": 100,
                 "copy_vault_selection": 100,
             },
+                "safe_context_expected_by_family": {
+                    "copy_vault_positions": 100,
+                    "copy_vault_selection": 100,
+                },
+                "safe_context_verified_by_family": {
+                    "copy_vault_positions": 100,
+                    "copy_vault_selection": 100,
+                },
+                "safe_context_by_family": {
+                    "copy_vault_positions": 100,
+                    "copy_vault_selection": 100,
+                },
+                "safe_context_observations": 200,
+                "safe_context_tape_path": "C:/lab/runtime/data/copy_vault_context.jsonl",
             "safe_copy_vault_shards_not_used_for_pnl_inventory_by_family": {
                 "copy_vault_positions": {
                     "catalogue_shards": 100,
@@ -143,9 +216,10 @@ def test_dashboard_explains_missing_signal_days_and_safe_payload_rejections(
     assert "2 319" in dashboard or "2,319" in dashboard
     assert "shards PARTIAL exclus : 10" in dashboard
     assert "200 shards SAFE du catalogue hors replay économique" in dashboard
-    assert "100 positions" in dashboard and "100 sélection" in dashboard
-    assert "0/100 positions fichiers locaux repérés (100 absents)" in dashboard
-    assert "0/100 sélection fichiers locaux repérés (100 absents)" in dashboard
+    assert "100/100 shards de positions vérifiés" in dashboard
+    assert "100/100 shards de sélection vérifiés" in dashboard
+    assert "200 observations conservées hors calcul PnL" in dashboard
+    assert "copy_vault_context.jsonl" in dashboard
 
 
 def test_dashboard_separates_missing_backfill_audit_from_missing_shards(tmp_path: Path) -> None:
@@ -381,7 +455,7 @@ def test_safe_inspection_rejects_registry_while_restore_is_in_progress(tmp_path:
 
 
 def test_safe_research_builds_workspace_then_runs_existing_campaign(
-    monkeypatch, tmp_path: Path,
+    monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     from hl_observer.backtesting import copy_vault_local_lab as local_lab
     from tools import alina_quant_lab_console as lab
@@ -403,6 +477,10 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
             "status": "UNMEASURABLE", "reason": "NO_SAFE_TEST_FIXTURE",
             "verified_assets": 0, "expected_safe_shards": 0,
             "unique_fills": 0, "unique_books": 0,
+            "source_recovery_root": str(recovery.resolve()),
+            "active_data_index": str((tmp_path / "catalog" / "DATA_INDEX.json").resolve()),
+            "workspace_root": str(workspace.resolve()),
+            "materialized_data_root": str((workspace / "runtime" / "data").resolve()),
         }
 
     monkeypatch.setattr(lab, "ROOT", tmp_path)
@@ -425,6 +503,11 @@ def test_safe_research_builds_workspace_then_runs_existing_campaign(
     assert recovery == tmp_path / "runtime" / "recovery" / "full"
     assert workspace.name == "workspace"
     assert workspace.parent.parent.name == "copy_vault_quant_lab"
+    console_output = capsys.readouterr().out
+    assert f"Source SAFE AlinaSync : {recovery.resolve()}" in console_output
+    assert f"DATA_INDEX actif : {(tmp_path / 'catalog' / 'DATA_INDEX.json').resolve()}" in console_output
+    assert f"Workspace transmis au replay/backtest : {workspace.resolve()}" in console_output
+    assert f"Fichiers matérialisés réellement lus : {(workspace / 'runtime' / 'data').resolve()}" in console_output
     assert json.loads((workspace.parent / "resultat.json").read_text(encoding="utf-8"))[
         "network_or_collection_started"
     ] is False

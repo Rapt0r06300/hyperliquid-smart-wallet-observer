@@ -16,8 +16,8 @@ from hl_observer.research.process_memory import (
 def _record(**overrides):
     payload = {
         "record_id": "PM-1",
-        "family": "lead_lag",
-        "mechanism_signature": "binance-bbo-leads-hl",
+        "family": "copy_vault",
+        "mechanism_signature": "leader-fills-to-observed-book",
         "context": ["high-liquidity"],
         "change_motif": "new-surface",
         "outcome": "FAILURE",
@@ -35,7 +35,7 @@ def _record(**overrides):
 
 def test_schema_validation_and_append_only(tmp_path):
     normalized = validate_process_record(_record())
-    assert normalized["family"] == "lead_lag"
+    assert normalized["family"] == "copy_vault"
     path = tmp_path / "memory.jsonl"
     append_process_record(path, normalized)
     assert load_process_records(path) == [normalized]
@@ -63,8 +63,8 @@ def test_process_memory_can_never_be_marked_certifying():
 def test_negative_memory_veto_positive_boost_and_retest_override():
     failures = [_record(record_id=f"PM-F{i}") for i in range(2)]
     candidate = {
-        "family": "lead_lag",
-        "mechanism_signature": "binance-bbo-leads-hl",
+        "family": "copy_vault",
+        "mechanism_signature": "leader-fills-to-observed-book",
         "context": ["high-liquidity"],
     }
     effect = candidate_memory_effect(candidate, failures)
@@ -106,13 +106,13 @@ def test_missing_context_does_not_match_every_candidate_or_create_veto():
         _record(record_id="PM-B", context=[]),
     ]
     candidate = {
-        "family": "lead_lag",
-        "mechanism_signature": "binance-bbo-leads-hl",
+        "family": "copy_vault",
+        "mechanism_signature": "leader-fills-to-observed-book",
         "context": ["high-liquidity"],
     }
 
     effect = candidate_memory_effect(candidate, failures)
-    summary = process_memory_summary(failures, family="lead_lag")
+    summary = process_memory_summary(failures, family="copy_vault")
 
     assert effect["veto"] is False
     assert effect["matching_records"] == 0
@@ -122,8 +122,8 @@ def test_missing_context_does_not_match_every_candidate_or_create_veto():
 def test_retest_override_requires_complete_normalized_condition_not_substring():
     failures = [_record(record_id="PM-A"), _record(record_id="PM-B")]
     candidate = {
-        "family": "lead_lag",
-        "mechanism_signature": "binance-bbo-leads-hl",
+        "family": "copy_vault",
+        "mechanism_signature": "leader-fills-to-observed-book",
         "context": ["high-liquidity"],
     }
 
@@ -136,9 +136,9 @@ def test_retest_override_requires_complete_normalized_condition_not_substring():
 
 def test_compact_summary_reports_veto_motifs():
     records = [_record(record_id="PM-A"), _record(record_id="PM-B")]
-    summary = process_memory_summary(records, family="lead_lag")
+    summary = process_memory_summary(records, family="copy_vault")
     assert summary["records"] == 2
-    assert "binance-bbo-leads-hl" in summary["high_confidence_veto_motifs"]
+    assert "leader-fills-to-observed-book" in summary["high_confidence_veto_motifs"]
 
 
 def test_compact_summary_does_not_merge_disjoint_contexts_into_veto():
@@ -147,20 +147,20 @@ def test_compact_summary_does_not_merge_disjoint_contexts_into_veto():
         _record(record_id="PM-B", context=["thin-book"]),
     ]
 
-    summary = process_memory_summary(records, family="lead_lag")
+    summary = process_memory_summary(records, family="copy_vault")
 
-    assert "binance-bbo-leads-hl" not in summary["high_confidence_veto_motifs"]
+    assert "leader-fills-to-observed-book" not in summary["high_confidence_veto_motifs"]
 
 
 def test_compact_summary_normalizes_signature_identity_case_insensitively():
     records = [
-        _record(record_id="PM-A", mechanism_signature="Binance-BBO-Leads-HL"),
-        _record(record_id="PM-B", mechanism_signature="binance-bbo-leads-hl"),
+        _record(record_id="PM-A", mechanism_signature="Leader-Fills-to-Observed-Book"),
+        _record(record_id="PM-B", mechanism_signature="leader-fills-to-observed-book"),
     ]
 
-    summary = process_memory_summary(records, family="lead_lag")
+    summary = process_memory_summary(records, family="copy_vault")
 
-    assert summary["high_confidence_veto_motifs"] == ["binance-bbo-leads-hl"]
+    assert summary["high_confidence_veto_motifs"] == ["leader-fills-to-observed-book"]
 
 
 def test_combining_memory_sources_rejects_duplicate_record_ids():

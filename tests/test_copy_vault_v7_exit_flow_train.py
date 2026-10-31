@@ -78,6 +78,16 @@ def test_cluster_exit_flow_rejects_snapshot_rows() -> None:
     assert audit["noncausal_or_nonexit_events_rejected"] == 1
 
 
+def test_exit_flow_clustering_keeps_case_sensitive_symbols_separate() -> None:
+    signals, _audit = cluster_causal_exit_flow([
+        _exit("lower", 1_000, coin="kPEPE"),
+        _exit("upper", 2_000, coin="KPEPE"),
+    ])
+
+    assert {row["coin"] for row in signals} == {"kPEPE", "KPEPE"}
+    assert len(signals) == 2
+
+
 def test_replay_long_reduction_opens_short_after_causal_delay() -> None:
     signal = _exit("a", 1_000)["observed_at_ms"]
     books = {

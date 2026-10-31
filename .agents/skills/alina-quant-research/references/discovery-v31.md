@@ -1,10 +1,10 @@
-# Discovery V3.1 — predictive alpha playbook
+# Discovery V3.1 — Copy-Vault predictive research playbook
 
 Lire cette référence **uniquement** à l'entrée d'un cycle Discovery, d'un mini-tournoi champion-challenger ou lorsqu'une lignée doit pivoter. Ne pas la recharger à chaque backtest.
 
 ## But
 
-Éviter l'exploitation locale interminable d'une même idée. Le modèle sert à inventer et choisir des mécanismes ; le PC exécute toute la partie numérique reproductible. Le résultat final reste économique : >= +4 USD NET/jour prouvés séparément par famille, jamais un simple score prédictif.
+Copy-Vault est la seule famille économique active. Les autres familles et résultats restent des archives en lecture seule. Éviter l'exploitation locale interminable d'une même idée : le modèle sert à formuler des hypothèses Copy-Vault falsifiables, puis l'ordinateur exécute les calculs reproductibles. L'objectif économique terminal est >= +5 USD NET/jour sur 200 USD paper, après réparation et validation complète; aucun score prédictif ne vaut preuve de rentabilité.
 
 ## 1. Diversité du pool
 
@@ -15,10 +15,10 @@ Par défaut proposer **12 candidats** ; le minimum dur reste 8. Un pool sain cou
 Archétypes possibles, non exhaustifs :
 
 - identité/informativeness/toxicité/anticipation des wallets ;
-- price discovery asynchrone CEX -> Hyperliquid et venue -> venue ;
+- information point-in-time apportée par les fills, changements de position et sorties des leaders Copy-Vault ;
 - L2/order-flow/event-time, queue, absorption, depletion, sweep, microprice ;
-- spillovers cross-asset / leader-follower ;
-- liquidations, OI, basis, funding et leurs interactions ;
+- spillovers entre actifs uniquement comme contexte de décision du même moteur Copy-Vault ;
+- liquidations, OI et funding comme contexte/coût mesuré, jamais comme famille ou source d'alpha autonome ;
 - régimes, ruptures/changepoints, volatilité/liquidité conditionnelles ;
 - micro-saisonnalités et clocks d'événements ;
 - exécution/queue/fill/adverse-selection comme mécanisme d'edge ;
@@ -57,6 +57,8 @@ Commencer par la méthode la plus simple capable de falsifier l'hypothèse, puis
 5. Mélanges de régimes, ensembles ou stacking seulement si les composants simples ont une valeur complémentaire démontrée.
 
 Une architecture plus complexe perd contre une baseline simple si son gain disparaît après coûts, perturbation des paramètres, changement de régime ou vraie séparation temporelle.
+
+Tout nouveau générateur, classement, tuner, exécuteur ou enregistreur économique doit appeler la porte de scope centrale et refuser toute famille autre que Copy-Vault. Les formats historiques peuvent être lus pour comparaison ou migration; ne pas les réécrire, supprimer ou promouvoir.
 
 ## 5. Recherche locale massive
 

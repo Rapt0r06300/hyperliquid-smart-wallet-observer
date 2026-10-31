@@ -173,6 +173,12 @@ La cible courante est :
 **démontrer Copy-Vault seul en PAPER, avec des données SAFE, causales, exécutables,
 backtestables et replayables, sur 200 USD de capital paper.**
 
+**Objectif économique terminal :** après réparation et validation des collecteurs,
+des données, du ledger, des replays/backtests et des preuves OOS/forward, évaluer
+si Copy-Vault démontre au moins **+5.00 USD nets/jour sur 200 USD paper**.
+Cette cible ne pilote pas les corrections techniques et ne peut être atteinte en
+affaiblissant les contrôles de qualité ou de preuve.
+
 Lead-Lag, Cross-Venue, arbitrage et les autres modules ne peuvent ni contribuer au PnL,
 ni compenser Copy-Vault, ni être lancés implicitement. Leur éventuelle réactivation exigera
 un changement explicite de `active_scope.py` et des tests associés.
@@ -716,7 +722,7 @@ Ce tableau décrit l'état structurel actuel sans transformer un composant prés
 
 | Surface | État |
 |---|---|
-| Scope économique des 3 familles | **Implémenté et autoritaire** |
+| Scope économique | **Copy-Vault actif ; Lead-Lag et Cross-Venue désactivés** |
 | Sécurité paper/read-only | **Invariant canonique** |
 | Control plane IDLE/COLLECT/ANALYZE | **Fondation implémentée dans le repo principal** |
 | Campaign schema v2 / phase epoch | **Fondation implémentée** |
@@ -729,7 +735,7 @@ Ce tableau décrit l'état structurel actuel sans transformer un composant prés
 | Exact global unique trade closure | **Ne pas considérer fermé tant que la preuve de complétude n'est pas produite** |
 | Whole-corpus SAFE -> replay-compatible closure | **Ne pas considérer fermé tant que le backlog n'est pas classifié** |
 | Real two-segment fresh-runner resume proof | **Contrat final requis par la spec** |
-| OOS + forward + final PnL proof des 3 familles | **Doit être certifié par evidence, pas supposé** |
+| OOS + forward + preuve PnL finale Copy-Vault | **À certifier par preuves, pas à supposer** |
 | Ordres réels/testnet | **Interdits** |
 | Self-hosted / PC cloud dependency | **Interdits** |
 
@@ -976,4 +982,7 @@ C'est un **système de recherche, de collecte, de simulation paper et de preuve 
 
 La réussite d'Alina ne sera pas “le logiciel tourne”.
 
-Elle sera atteinte lorsque les trois familles actives disposeront chacune d'une preuve indépendante, causale, reproductible, après coûts réels, avec données fiables, capacité, replays rigoureux, OOS/forward post-freeze et fermeture fail-closed — ou lorsqu'Alina aura démontré honnêtement qu'une famille doit rester `MORE_DATA`, `UNMEASURABLE` ou `KILL`.
+Elle sera atteinte lorsque Copy-Vault disposera d'une preuve indépendante, causale,
+reproductible et après coûts réels, avec données fiables, capacité, replays rigoureux,
+OOS/forward post-freeze et fermeture fail-closed — ou lorsque les preuves montreront
+honnêtement que le résultat reste `MORE_DATA`, `UNMEASURABLE` ou `REJECTED`.

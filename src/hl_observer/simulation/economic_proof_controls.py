@@ -12,6 +12,12 @@ from typing import Any
 from hl_observer.economics.assumptions import ZeroCostReason
 from hl_observer.economics.hardcode_scanner import PROPOSAL_DISPOSITION
 from hl_observer.economics.hardcode_scanner import SCHEMA_VERSION as HARDCODE_SCAN_SCHEMA
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
+)
 
 INDEPENDENT_AUDIT_SCHEMA = "hypersmart.independent_economic_audit.v1"
 
@@ -44,6 +50,8 @@ _MAX_CONTROL_ISSUES = 32
 
 
 def _number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         result = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -156,9 +164,14 @@ def _freshness(family: str, rows: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     ids = [str(row["trade_id"]) for row in rows]
-    economics = {
-        key: _rounded(sum(float(row[key]) for row in rows)) for key in _ECONOMIC_KEYS
-    }
+    economics = {}
+    for key in _ECONOMIC_KEYS:
+        total = decimal_sum(row[key] for row in rows)
+        economics[key] = (
+            float_not_above(total)
+            if key == "net_pnl_usd" and total is not None
+            else float(total) if total is not None else None
+        )
     wins = [float(row["net_pnl_usd"]) for row in rows if float(row["net_pnl_usd"]) > 0]
     losses = [-float(row["net_pnl_usd"]) for row in rows if float(row["net_pnl_usd"]) < 0]
     return {
@@ -168,7 +181,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "duplicate_trade_ids": len(ids) - len(set(ids)),
         "trade_ids_sha256": _hash_ids(ids),
         "hit_rate": _rounded(len(wins) / len(rows)) if rows else None,
-        "profit_factor": _rounded(sum(wins) / sum(losses)) if losses else None,
+        "profit_factor": _rounded(math.fsum(wins) / math.fsum(losses)) if losses else None,
         "liquidatable_net": bool(rows),
     }
 
@@ -184,7 +197,9 @@ def _concentration(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
                 "value": value,
                 "trade_count": len(group),
                 "share": _rounded(len(group) / len(rows)) if rows else 0.0,
-                "net_pnl_usd": _rounded(sum(float(item["net_pnl_usd"]) for item in group)),
+                "net_pnl_usd": float_not_above(
+                    decimal_sum(item["net_pnl_usd"] for item in group)
+                ),
             }
             for value, group in groups.items()
         ),
@@ -199,13 +214,22 @@ def _compare_metric(
     label: str,
     expected: object,
     actual: object,
-    tolerance: float = 1e-4,
+    tolerance: float = float(USD_RECONCILIATION_ABS_TOLERANCE),
 ) -> None:
     expected_number = _number(expected)
     actual_number = _number(actual)
-    if expected_number is None or actual_number is None:
+    expected_decimal = decimal_value(expected)
+    actual_decimal = decimal_value(actual)
+    tolerance_decimal = decimal_value(tolerance)
+    if (
+        expected_number is None
+        or actual_number is None
+        or expected_decimal is None
+        or actual_decimal is None
+        or tolerance_decimal is None
+    ):
         issues.append(f"{label}_UNMEASURED")
-    elif not math.isclose(expected_number, actual_number, abs_tol=tolerance):
+    elif abs(expected_decimal - actual_decimal) > tolerance_decimal:
         issues.append(
             f"{label}_MISMATCH:published={expected_number:.8f};raw={actual_number:.8f}"
         )
@@ -480,10 +504,15 @@ def _trade_cost_controls(
         if any(value is None for value in economics.values()):
             issues["missing_costs"].append(f"TRADE_ECONOMICS_UNMEASURED:{trade_id}")
             continue
-        gross = float(economics["gross_pnl_usd"])
-        net = float(economics["net_pnl_usd"])
-        direct_costs = sum(float(economics[key]) for key in _COST_KEYS)
-        if not math.isclose(gross - direct_costs, net, abs_tol=1e-4):
+        gross = decimal_value(economics["gross_pnl_usd"])
+        net = decimal_value(economics["net_pnl_usd"])
+        direct_costs = decimal_sum(economics[key] for key in _COST_KEYS)
+        if (
+            gross is None
+            or net is None
+            or direct_costs is None
+            or abs(gross - direct_costs - net) > USD_RECONCILIATION_ABS_TOLERANCE
+        ):
             issues["reconciliation_identities"].append(
                 f"TRADE_RECONCILIATION_FAILED:{trade_id}"
             )
@@ -524,7 +553,14 @@ def _trade_cost_controls(
                 )
                 continue
             receipt_amounts.append(amount)
-            if not math.isclose(amount, expected_amount, abs_tol=1e-7):
+            amount_decimal = decimal_value(amount)
+            expected_amount_decimal = decimal_value(expected_amount)
+            if (
+                amount_decimal is None
+                or expected_amount_decimal is None
+                or abs(amount_decimal - expected_amount_decimal)
+                > USD_RECONCILIATION_ABS_TOLERANCE
+            ):
                 issues["duplicate_charging"].append(
                     f"COST_RECEIPT_AMOUNT_MISMATCH:{trade_id}:{component}"
                 )
@@ -559,8 +595,13 @@ def _trade_cost_controls(
             issues["duplicate_charging"].append(
                 f"DUPLICATE_COST_COMPONENT_ID:{trade_id}"
             )
-        if len(receipt_amounts) == len(_COMPONENT_TO_COST_KEY) and not math.isclose(
-            gross - sum(receipt_amounts), net, abs_tol=1e-4
+        receipt_total = decimal_sum(receipt_amounts)
+        if (
+            len(receipt_amounts) == len(_COMPONENT_TO_COST_KEY)
+            and gross is not None
+            and net is not None
+            and receipt_total is not None
+            and abs(gross - receipt_total - net) > USD_RECONCILIATION_ABS_TOLERANCE
         ):
             issues["duplicate_charging"].append(
                 f"COST_RECEIPT_DEDUCTION_COUNT_INVALID:{trade_id}"

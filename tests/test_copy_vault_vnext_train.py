@@ -182,6 +182,20 @@ def test_copy_vnext_does_not_count_same_public_entity_as_independent_wallets() -
     assert reasons["ENTITY_INDEPENDENCE_NOT_PROVEN"] >= 1
 
 
+def test_copy_vnext_consensus_does_not_merge_case_sensitive_symbols() -> None:
+    rows = [
+        _row(ts=2_050_000_000_000, vault="0xa", coin="kPEPE"),
+        _row(ts=2_050_000_001_000, vault="0xb", coin="KPEPE"),
+    ]
+
+    admitted, reasons = admit_consensus_train_rows(
+        rows, window_ms=30_000, minimum_distinct_wallets=2,
+    )
+
+    assert admitted == []
+    assert reasons["INSUFFICIENT_PRIOR_DISTINCT_WALLET_CONSENSUS"] == 2
+
+
 def test_copy_vnext_counts_each_metaorder_only_once_for_train_statistics() -> None:
     first = _row(ts=2_100_000_000_000, vault="0xa")
     second = _row(ts=2_100_000_001_000, vault="0xb")

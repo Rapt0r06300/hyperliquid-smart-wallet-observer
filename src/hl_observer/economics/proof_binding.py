@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -13,6 +12,7 @@ from .assumptions import (
     hash_payload,
     is_certifiable_mode,
 )
+from .numeric import USD_RECONCILIATION_ABS_TOLERANCE, decimal_value
 
 ECONOMIC_POLICY_VERSION = "hypersmart.economic_policy.v21"
 CONTRACT_SCHEMA = "hypersmart.family_economic_contract.v2"
@@ -373,26 +373,28 @@ def audit_cross_artifact_numeric_consistency(
     """Compare shared scalars to one authority; never recompute PnL report-side."""
 
     issues: list[str] = []
+    parsed_tolerance = decimal_value(tolerance)
+    if (
+        parsed_tolerance is None
+        or parsed_tolerance < 0
+        or parsed_tolerance > USD_RECONCILIATION_ABS_TOLERANCE
+    ):
+        issues.append("NUMERIC_TOLERANCE_OUT_OF_BOUNDS")
+        effective_tolerance = USD_RECONCILIATION_ABS_TOLERANCE
+    else:
+        effective_tolerance = parsed_tolerance
     normalized_fields = tuple(sorted(set(fields)))
     for field in normalized_fields:
-        authority = authority_values.get(field)
-        try:
-            authority_number = float(authority)
-        except (TypeError, ValueError, OverflowError):
-            issues.append(f"AUTHORITY_VALUE_UNMEASURED:{field}")
-            continue
-        if not math.isfinite(authority_number):
+        authority_number = decimal_value(authority_values.get(field))
+        if authority_number is None:
             issues.append(f"AUTHORITY_VALUE_UNMEASURED:{field}")
             continue
         for artifact_name, values in sorted(artifacts.items()):
-            try:
-                candidate = float(values.get(field))
-            except (TypeError, ValueError, OverflowError):
+            candidate = decimal_value(values.get(field))
+            if candidate is None:
                 issues.append(f"ARTIFACT_VALUE_UNMEASURED:{artifact_name}:{field}")
                 continue
-            if not math.isfinite(candidate) or not math.isclose(
-                candidate, authority_number, abs_tol=tolerance
-            ):
+            if abs(candidate - authority_number) > effective_tolerance:
                 issues.append(f"ARTIFACT_VALUE_MISMATCH:{artifact_name}:{field}")
     receipt_body = {
         "schema": "hypersmart.cross_artifact_numeric_consistency.v1",
@@ -402,7 +404,7 @@ def audit_cross_artifact_numeric_consistency(
             name: hash_payload(dict(values)) for name, values in sorted(artifacts.items())
         },
         "fields": list(normalized_fields),
-        "tolerance": float(tolerance),
+        "tolerance": float(effective_tolerance),
     }
     return {
         **receipt_body,

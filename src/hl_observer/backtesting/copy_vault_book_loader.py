@@ -105,7 +105,7 @@ def load_observed_books(
         and output_start_offset >= 0
         and collector_gap_count == 0
     )
-    wanted = {str(coin).upper() for coin in coins} if coins is not None else None
+    wanted = {str(coin).strip() for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
     invalid = 0
     rows_read = 0
@@ -195,7 +195,7 @@ def load_observed_books(
                 rows_read += 1
                 try:
                     raw = json.loads(line)
-                    coin = str(raw.get("coin") or "").upper()
+                    coin = str(raw.get("coin") or "").strip()
                     if wanted is not None and coin not in wanted:
                         continue
                     if any(
@@ -224,7 +224,7 @@ def load_observed_books(
             for line in handle:
                 try:
                     raw = json.loads(line)
-                    coin = str(raw.get("coin") or "").upper()
+                    coin = str(raw.get("coin") or "").strip()
                     if wanted is not None and coin not in wanted:
                         continue
                     checkpoint_id = str(raw.get("checkpoint_id") or "").strip()
@@ -321,7 +321,7 @@ def load_observed_books(
                 rows_read += 1
                 try:
                     raw = json.loads(line)
-                    coin = str(raw.get("coin") or "").upper()
+                    coin = str(raw.get("coin") or "").strip()
                     if wanted is not None and coin not in wanted:
                         continue
                     received = int(raw["received_at_ms"])

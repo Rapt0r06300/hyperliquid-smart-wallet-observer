@@ -31,8 +31,9 @@ env:
 permissions:
   contents: write
 concurrency:
-  group: alina-operator-intent-${{ inputs.request_id }}
+  group: copy-vault-main-state-writer
   cancel-in-progress: false
+  queue: max
 jobs:
   persist:
     runs-on: ubuntu-latest
@@ -151,13 +152,7 @@ jobs:
           git add control/operator-intents control/operator-status
           git diff --cached --quiet && exit 0
           git commit -m "operator: persist intent ${{ inputs.request_id }}"
-          for i in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((i*2))
-          done
-          exit 1
+          python tools/publish_main_commit.py --max-attempts 20 --base-delay-seconds 0.5 --max-delay-seconds 8
   dispatch-alina:
     needs: persist
     runs-on: ubuntu-latest

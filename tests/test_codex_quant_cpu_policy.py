@@ -14,7 +14,7 @@ def _spec() -> ExperimentSpec:
         {
             "schema_version": 1,
             "experiment_id": "cpu-policy-001",
-            "family": "lead_lag",
+            "family": "copy_vault",
             "hypothesis_id": "H-CPU-LOCAL",
             "phase": "train_search",
             "base_sha": "a" * 40,

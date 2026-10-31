@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.research.hypothesis_ledger import FAMILIES
+from hl_observer.strategies.active_scope import require_active_strategy
 
 SCHEMA_VERSION = 1
 OUTCOMES = frozenset({"SUCCESS", "FAILURE", "NEUTRAL", "BLOCKED"})
@@ -217,6 +218,10 @@ def combine_process_records(
 def append_process_record(path: str | Path, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and append one record without rewriting prior history."""
     record = validate_process_record(payload)
+    try:
+        require_active_strategy(record["family"])
+    except ValueError as exc:
+        raise ProcessMemoryValidationError(str(exc)) from exc
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     existing = {item["record_id"] for item in load_process_records(target)}
@@ -248,6 +253,10 @@ def _normalized_candidate(candidate: Mapping[str, Any]) -> tuple[str, str, set[s
     family = candidate.get("family")
     if family not in FAMILIES:
         raise ProcessMemoryValidationError(f"family must be one of {sorted(FAMILIES)}")
+    try:
+        family = require_active_strategy(family)
+    except ValueError as exc:
+        raise ProcessMemoryValidationError(str(exc)) from exc
     mechanism = _text(candidate.get("mechanism_signature"), "mechanism_signature")
     assert mechanism is not None
     context = {item.casefold() for item in _strings(candidate.get("context", []), "context")}

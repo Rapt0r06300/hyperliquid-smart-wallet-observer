@@ -51,8 +51,9 @@ def test_ledger_trusted_regroupe_pnl_par_strategie_et_compte_les_episodes():
         + _episode("p3", "ETH", "SHORT", "o3", "c3", 3.0, "lead_lag")
     )
     r = F.lignes_depuis_ledger(_seal(raw))
-    assert r.status == "TRUSTED" and r.n_episodes_clos == 3
+    assert r.status == "TRUSTED" and r.n_episodes_clos == 2
     by = _par_strat(r)
+    assert set(by) == {"copy_vault"}
 
     assert by["copy_vault"].n_independent == 2          # 2 épisodes clos, pas 4 fills
     assert by["copy_vault"].pnl_usd == 6.0
@@ -61,8 +62,9 @@ def test_ledger_trusted_regroupe_pnl_par_strategie_et_compte_les_episodes():
     assert by["copy_vault"].max_drawdown_usd == 4.0
     assert by["copy_vault"].expected_shortfall_usd == -4.0
 
-    assert by["lead_lag"].n_independent == 1 and by["lead_lag"].pnl_usd == 3.0
-    assert by["lead_lag"].profit_factor is None          # que des gains → PF non défini
+    assert r.identite_couverture["n_episodes"] == 3
+    assert r.identite_couverture["n_episodes_exclus_scope"] == 1
+    assert r.identite_couverture["episodes_exclus_par_famille"] == {"lead_lag": 1}
 
 
 def test_edge_couts_oos_forward_absents_du_ledger_restent_unmeasurable():
@@ -77,15 +79,31 @@ def test_edge_couts_oos_forward_absents_du_ledger_restent_unmeasurable():
         assert champ in r.manques_globaux
 
 
-def test_familles_actives_sans_episode_sont_listees_more_data():
+def test_seule_copy_vault_est_listee_dans_le_scoreboard_economique():
     raw = _episode("p1", "BTC", "LONG", "o1", "c1", 10.0, "copy_vault")
     r = F.lignes_depuis_ledger(_seal(raw))
     by = _par_strat(r)
-    # Les 3 familles ACTIVES apparaissent, même celles sans donnée (absence rendue explicite).
-    assert {"copy_vault", "lead_lag", "cross_venue_dislocation"} <= set(by)
-    assert by["cross_venue_dislocation"].pnl_usd is None
-    assert by["cross_venue_dislocation"].n_independent is None
-    assert by["cross_venue_dislocation"].verdict == "MORE_DATA"
+    assert set(by) == {"copy_vault"}
+
+
+def test_strategie_attendue_hors_scope_refuse_le_scoreboard_entier():
+    raw = _episode("p1", "BTC", "LONG", "o1", "c1", 10.0, "copy_vault")
+    r = F.lignes_depuis_ledger(_seal(raw), strategies_attendues=("lead_lag",))
+    assert r.status == "UNMEASURABLE"
+    assert "DISABLED_BY_SCOPE" in (r.raison or "")
+    assert r.n_episodes_clos == 0
+    assert all(row.pnl_usd is None for row in r.rows)
+
+
+def test_autorite_scope_absente_bloque_le_scoreboard(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "hl_observer.strategies.active_scope", None)
+    raw = _episode("p1", "BTC", "LONG", "o1", "c1", 10.0, "copy_vault")
+    r = F.lignes_depuis_ledger(_seal(raw))
+    assert r.status == "UNMEASURABLE"
+    assert "autorité active_scope indisponible" in (r.raison or "")
+    assert r.n_episodes_clos == 0 and all(row.pnl_usd is None for row in r.rows)
 
 
 # --- deny-by-default : un ledger contaminé ne fabrique aucun PnL ------------
@@ -97,12 +115,12 @@ def test_ledger_contamine_ne_produit_aucun_pnl():
     assert r.status != "TRUSTED" and r.n_episodes_clos == 0
     assert all(row.pnl_usd is None and row.net_bps is None for row in r.rows)
     assert all(row.verdict == "MORE_DATA" for row in r.rows)
-    assert {"copy_vault", "lead_lag", "cross_venue_dislocation"} <= set(_par_strat(r))
+    assert set(_par_strat(r)) == {"copy_vault"}
     assert "deny-by-default" in (r.raison or "")
 
 
 # --- identité : tag stratégie absent rendu visible, pas caché ---------------
-def test_strategie_absente_est_rendue_visible():
+def test_strategie_absente_est_exclue_du_pnl_economique():
     raw = [
         _ev("o1", OPEN, coin="SOL", side="LONG", quantity=1.0, refs={"position_id": "p9"}),
         _ev("c1", CLOSE, coin="SOL", side="LONG", quantity=1.0, realized_pnl_usdc=2.0,
@@ -111,8 +129,10 @@ def test_strategie_absente_est_rendue_visible():
     r = F.lignes_depuis_ledger(_seal(raw))
     assert r.status == "TRUSTED"
     by = _par_strat(r)
-    assert F.STRAT_ABSENTE in by
-    assert by[F.STRAT_ABSENTE].pnl_usd == 2.0 and by[F.STRAT_ABSENTE].n_independent == 1
+    assert set(by) == {"copy_vault"}
+    assert by["copy_vault"].pnl_usd is None
+    assert r.n_episodes_clos == 0
+    assert r.identite_couverture["episodes_exclus_par_famille"] == {"non_attribue": 1}
 
 
 # --- indépendance : 2 round-trips sur le même coin sans position_id ---------
@@ -126,9 +146,10 @@ def test_deux_round_trips_meme_coin_sans_position_id_restent_independants():
             realized_pnl_usdc=7.0, refs={"strategy": "lead_lag"}),
     ]
     r = F.lignes_depuis_ledger(_seal(raw))
-    assert r.status == "TRUSTED" and r.n_episodes_clos == 2   # PAS 1 épisode fusionné
-    ll = _par_strat(r)["lead_lag"]
-    assert ll.n_independent == 2 and ll.pnl_usd == 12.0
+    assert r.status == "TRUSTED" and r.n_episodes_clos == 0
+    assert _par_strat(r)["copy_vault"].pnl_usd is None
+    assert r.identite_couverture["n_episodes_exclus_scope"] == 2
+    assert r.identite_couverture["episodes_exclus_par_famille"] == {"lead_lag": 2}
 
 
 # --- ROI : uniquement si un dénominateur est fourni -------------------------

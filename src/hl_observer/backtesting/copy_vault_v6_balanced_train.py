@@ -64,7 +64,7 @@ def apply_causal_daily_risk_budget(
     ):
         day = int(raw.get("entry_ts_ms") or 0) // UTC_DAY_MS
         vault_key = (day, str(raw.get("vault") or "UNKNOWN"))
-        coin_key = (day, str(raw.get("coin") or "UNKNOWN").upper())
+        coin_key = (day, str(raw.get("coin") or "UNKNOWN").strip())
         if vault_counts[vault_key] >= int(max_entries_per_vault_day):
             audit["VAULT_DAILY_BUDGET_REJECTED"] += 1
             continue

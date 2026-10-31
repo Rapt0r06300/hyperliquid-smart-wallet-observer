@@ -6,7 +6,10 @@ import asyncio
 import importlib.util
 import json
 import time
+from contextlib import suppress
 from pathlib import Path
+
+import pytest
 
 from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
 
@@ -53,7 +56,11 @@ def test_journal_conserve_identite_vault_complete(tmp_path):
     assert saved["vault_short"] == vault[:12]
     assert saved["source"] == "LIVE_WS"
     assert saved["isSnapshot"] is False
-    assert saved["received_at_ms"] == 1010
+    assert saved["received_at_ms"] is None
+    assert saved["processed_at_ms"] == 1010
+    assert saved["latence_fill_receive_ms"] is None
+    assert saved["latence_receive_process_ms"] is None
+    assert saved["latence_fill_decision_ms"] == 10
 
 
 def test_journal_liquidation_separe_live_causal_et_snapshot(tmp_path, monkeypatch):
@@ -180,16 +187,65 @@ def test_fill_persiste_avec_horodatage_de_reception_causale(tmp_path, monkeypatc
     (tmp_path / "runtime" / "data").mkdir(parents=True)
     monkeypatch.setattr(C, "_TAPE_FILLS", None)
     monkeypatch.setattr(C.CO, "COHORTES", {})
+    monkeypatch.setitem(C._HEARTBEAT_WS, "persisted_fills", 0)
+    monkeypatch.setattr(C.time, "time", lambda: 2.0)
     fill = {
         "vault": "0xV", "coin": "SOL", "ts_ms": 1000, "source": "LIVE_WS",
-        "isSnapshot": False, "hash": "0xfill",
+        "received_at_ms": 1_010, "isSnapshot": False, "hash": "0xfill",
     }
 
     C._traiter_un(tmp_path, fill, set(), 1.0)
 
     saved = json.loads((tmp_path / C.FILLS_LIVE).read_text(encoding="utf-8"))
-    assert saved["received_at_ms"] >= saved["ts_ms"]
-    assert "received_at_ms" not in fill
+    assert saved["received_at_ms"] == 1_010
+    assert saved["processed_at_ms"] == 2_000
+    assert fill["received_at_ms"] == 1_010
+    assert C._HEARTBEAT_WS["persisted_fills"] == 1
+
+
+@pytest.mark.parametrize("raw_received_at_ms", [None, 0, -1])
+def test_invalid_received_timestamp_stays_unknown_through_parse_persist_and_journal(
+    tmp_path, monkeypatch, raw_received_at_ms,
+):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    monkeypatch.setattr(C, "_TAPE_FILLS", None)
+    monkeypatch.setattr(C.CO, "COHORTES", {})
+    monkeypatch.setitem(C._HEARTBEAT_WS, "persisted_fills", 0)
+    monkeypatch.setattr(C.time, "time", lambda: 2.0)
+    message = {
+        "channel": "userFills",
+        "data": {
+            "user": "0xV",
+            "isSnapshot": False,
+            "fills": [{
+                "coin": "SOL", "px": "100", "sz": "1", "time": 1_000,
+                "side": "B", "hash": "0xfill", "tid": 7,
+            }],
+        },
+    }
+
+    fills = C.UL.parser_message_userfills(
+        message,
+        vault="0xV",
+        received_at_ms=raw_received_at_ms,
+        receive_mono_ns=123,
+        connection_id="ws-test",
+    )
+    assert len(fills) == 1
+    assert fills[0]["received_at_ms"] is None
+
+    C._traiter_un(tmp_path, fills[0], set(), 1.0)
+    persisted = json.loads((tmp_path / C.FILLS_LIVE).read_text(encoding="utf-8"))
+    assert persisted["received_at_ms"] is None
+    assert persisted["processed_at_ms"] == 2_000
+
+    C._journal(tmp_path, persisted, "PROBE", None, 2_010)
+    journal = json.loads((tmp_path / C.JOURNAL).read_text(encoding="utf-8"))
+    assert journal["received_at_ms"] is None
+    assert journal["processed_at_ms"] == 2_010
+    assert journal["latence_fill_receive_ms"] is None
+    assert journal["latence_receive_process_ms"] is None
+    assert journal["latence_fill_decision_ms"] == 1_010
 
 
 def test_file_l2_saturee_est_signalee_sans_perdre_le_fill_source(tmp_path, monkeypatch):
@@ -210,6 +266,44 @@ def test_file_l2_saturee_est_signalee_sans_perdre_le_fill_source(tmp_path, monke
     saved = json.loads((tmp_path / C.FILLS_LIVE).read_text(encoding="utf-8"))
     assert saved["hash"] == "0xqueue-full"
     assert C._HEARTBEAT_WS["tape_drops"] == 1
+
+
+@pytest.mark.parametrize(
+    ("messages", "fills", "persisted_fills", "acks", "expected_written", "expected_ack"),
+    [
+        (4, 0, 0, 0, 0, False),
+        (8, 3, 0, 1, 0, True),
+        (8, 3, 2, 0, 2, False),
+    ],
+)
+def test_heartbeat_separates_received_parsed_persisted_and_native_ack(
+    tmp_path, monkeypatch, messages, fills, persisted_fills, acks,
+    expected_written, expected_ack,
+):
+    captured = []
+
+    class _StopHeartbeat(Exception):
+        pass
+
+    monkeypatch.setattr(C.VI, "heartbeat", lambda *args: None)
+    monkeypatch.setattr(C.HB, "battre", lambda *args, **kwargs: captured.append(kwargs))
+    monkeypatch.setitem(C._HEARTBEAT_WS, "messages", messages)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "fills", fills)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "persisted_fills", persisted_fills)
+    monkeypatch.setitem(C._HEARTBEAT_WS, "acks", acks)
+
+    async def stop_after_first_heartbeat(_interval):
+        raise _StopHeartbeat
+
+    monkeypatch.setattr(C.asyncio, "sleep", stop_after_first_heartbeat)
+    with suppress(_StopHeartbeat):
+        asyncio.run(C._heartbeat(tmp_path, {}))
+
+    assert captured[0]["n_ecrites"] == expected_written
+    assert captured[0]["souscription_ack"] is expected_ack
+    assert captured[0]["metriques"]["frames_received"] == messages
+    assert captured[0]["metriques"]["fills_parsed"] == fills
+    assert captured[0]["metriques"]["fills_persisted"] == persisted_fills
 
 
 def test_tape_copy_vault_persiste_un_l2_causal_et_echantillonne(tmp_path, monkeypatch):
@@ -600,10 +694,12 @@ def test_checkpoint_info_public_persiste_provenance_causale(tmp_path, monkeypatc
     assert row["data_origin"] == "REAL_OBSERVED"
 
 
-def _live_open_fill(*, received_at_ms: int, ts_ms: int, start_position: float) -> dict:
+def _live_open_fill(
+    *, received_at_ms: int, ts_ms: int, start_position: float, coin: str = "btc"
+) -> dict:
     return {
         "vault": "0xabc",
-        "coin": "btc",
+        "coin": coin,
         "px": 100.0,
         "sz": 1.5,
         "signe": 1,
@@ -617,11 +713,13 @@ def _live_open_fill(*, received_at_ms: int, ts_ms: int, start_position: float) -
     }
 
 
-def test_identite_checkpoint_live_identique_au_replay_causal() -> None:
+@pytest.mark.parametrize("coin", ["btc", "kPEPE", "xyz:TSLA"])
+def test_identite_checkpoint_live_identique_au_replay_causal(coin: str) -> None:
     live_fill = _live_open_fill(
         received_at_ms=10_100,
         ts_ms=10_000,
         start_position=0.0,
+        coin=coin,
     )
     live_id, stage = C._copy_vault_checkpoint_metaorder({}, live_fill)
     event_id = C.canonical_fill_id(live_fill)
@@ -637,6 +735,38 @@ def test_identite_checkpoint_live_identique_au_replay_causal() -> None:
 
     assert stage == "FIRST_SLICE"
     assert live_id == replay_metaorder["metaorder_id"]
+
+
+def test_l2_copy_vault_persiste_la_casse_native_du_symbole(tmp_path):
+    stored = C._append_copy_vault_book(
+        tmp_path,
+        "kPEPE",
+        {
+            "bid": 99.0,
+            "ask": 101.0,
+            "book_exchange_time": 10_000,
+            "bids5": [[99.0, 2.0]],
+            "asks5": [[101.0, 2.0]],
+        },
+        received_at_ms=10_010,
+    )
+
+    assert stored is True
+    row = json.loads((tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert row["coin"] == "kPEPE"
+
+
+def test_univers_l2_ecarte_les_symboles_ambigus_apres_normalisation():
+    symbols = C._active_l2_symbols(
+        Path("."),
+        post_allmids=lambda: {
+            "kPEPE": "1.0",
+            "KPEPE": "2.0",
+            "BTC": "60000",
+        },
+    )
+
+    assert symbols == {"BTC": "BTC"}
 
 
 def test_checkpoint_add_continue_et_open_explicite_redemarre() -> None:

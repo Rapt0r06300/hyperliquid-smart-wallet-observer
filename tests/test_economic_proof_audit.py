@@ -338,6 +338,84 @@ def test_audit_economic_proof_detecte_un_resume_desynchronise_du_ledger():
     assert any("CAMPAIGN_NET_PNL_USD_MISMATCH" in reason for reason in result["issues"])
 
 
+def test_audit_economic_proof_ne_certifie_pas_un_net_inferieur_au_brut_moins_couts():
+    campaign, raw = _positive_copy_evidence()
+    campaign["daily_target_required"] = False
+    campaign["daily_evidence"] = None
+
+    for trade in raw["trades"]:
+        trade["gross_pnl_usd"] = 2.99998
+        trade["net_pnl_usd"] = 2.50004
+
+    for name in ("oos", "forward"):
+        segment = campaign[name]
+        segment.update(
+            gross_pnl_usd=2.99998,
+            fees_usd=0.25,
+            spread_cost_usd=0.25,
+            slippage_cost_usd=0.0,
+            latency_cost_usd=0.0,
+            net_pnl_usd=2.50004,
+        )
+    campaign.update(
+        gross_pnl_usd=5.99996,
+        fees_usd=0.5,
+        spread_cost_usd=0.5,
+        net_pnl_usd=5.00008,
+    )
+    campaign.update(evaluate_objective(campaign))
+
+    result = _audit(campaign, raw)
+
+    assert result["ledger_valid"] is False
+    assert result["classification"] == "INVALID"
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert any(
+        issue.startswith("TRADE_ECONOMIC_RECONCILIATION_FAILED:")
+        for issue in result["issues"]
+    )
+
+
+def test_audit_cumule_les_segments_depuis_le_ledger_pas_depuis_les_resumes_toleres():
+    campaign, raw = _positive_copy_evidence()
+    campaign["daily_target_required"] = False
+    campaign["daily_evidence"] = None
+
+    exact_trade_net = 2.499999991
+    for trade in raw["trades"]:
+        trade["gross_pnl_usd"] = exact_trade_net + 0.5
+        trade["net_pnl_usd"] = exact_trade_net
+
+    for name in ("oos", "forward"):
+        campaign[name].update(
+            gross_pnl_usd=3.0,
+            fees_usd=0.25,
+            spread_cost_usd=0.25,
+            slippage_cost_usd=0.0,
+            latency_cost_usd=0.0,
+            net_pnl_usd=2.5,
+        )
+    campaign.update(
+        gross_pnl_usd=2 * (exact_trade_net + 0.5),
+        fees_usd=0.5,
+        spread_cost_usd=0.5,
+        net_pnl_usd=2 * exact_trade_net,
+    )
+    campaign.update(evaluate_objective(campaign))
+    assert campaign["objective_status"] == "ATTEINT"
+
+    result = _audit(campaign, raw)
+
+    assert result["ledger_valid"] is False
+    assert result["classification"] == "INVALID"
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["proof_net_pnl_usd"] < 5.0
+    assert any(
+        issue.startswith("OBJECTIVE_STATUS_NOT_REPRODUCIBLE")
+        for issue in result["issues"]
+    )
+
+
 def test_audit_economic_proof_refuse_un_snapshot_economique_desynchronise():
     campaign, raw = _positive_copy_evidence()
     raw["trades"][1]["assumption_snapshot_hash"] = "0" * 64

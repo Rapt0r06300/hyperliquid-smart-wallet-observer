@@ -10,7 +10,6 @@ order.
 from __future__ import annotations
 
 import json
-import math
 import os
 import time
 from collections import Counter
@@ -21,6 +20,12 @@ from typing import Any
 
 from hl_observer.economics.hardcode_scanner import (
     scan_economic_paths,
+)
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
 )
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
 from hl_observer.simulation.economic_proof_controls import (
@@ -130,14 +135,30 @@ def audit_family(
             continue
         if any(float(economics[key]) < 0 for key in _COST_KEYS):
             issues.append(f"TRADE_NEGATIVE_COST:{trade_id}")
-        reconciled = math.isclose(
-            float(economics["gross_pnl_usd"])
-            - sum(float(economics[key]) for key in _COST_KEYS),
-            float(economics["net_pnl_usd"]),
-            abs_tol=1e-4,
+        gross_decimal = decimal_value(economics["gross_pnl_usd"])
+        cost_total_decimal = decimal_sum(economics[key] for key in _COST_KEYS)
+        reported_net_decimal = decimal_value(economics["net_pnl_usd"])
+        expected_net_decimal = (
+            gross_decimal - cost_total_decimal
+            if gross_decimal is not None and cost_total_decimal is not None
+            else None
+        )
+        reconciled = bool(
+            expected_net_decimal is not None
+            and reported_net_decimal is not None
+            and abs(expected_net_decimal - reported_net_decimal)
+            <= USD_RECONCILIATION_ABS_TOLERANCE
         )
         if not reconciled:
             issues.append(f"TRADE_ECONOMIC_RECONCILIATION_FAILED:{trade_id}")
+        if expected_net_decimal is not None and reported_net_decimal is not None:
+            conservative_net = float_not_above(
+                min(expected_net_decimal, reported_net_decimal)
+            )
+            if conservative_net is None:
+                issues.append(f"TRADE_ECONOMICS_UNMEASURED:{trade_id}")
+                continue
+            economics["net_pnl_usd"] = conservative_net
         signal_ms, entry_ms, exit_ms = _trade_times(family, row)
         if entry_ms is None or exit_ms is None or entry_ms > exit_ms:
             issues.append(f"TRADE_LIFECYCLE_INVALID:{trade_id}")
@@ -180,6 +201,25 @@ def audit_family(
             actual=aggregate.get("sample_count"),
             tolerance=0.0,
         )
+        _compare_metric(
+            issues,
+            label="CAMPAIGN_TRADE_IDS_COUNT",
+            expected=campaign.get("trade_ids_count"),
+            actual=aggregate.get("trade_ids_count"),
+            tolerance=0.0,
+        )
+        _compare_metric(
+            issues,
+            label="CAMPAIGN_DUPLICATE_TRADE_IDS",
+            expected=campaign.get("duplicate_trade_ids"),
+            actual=aggregate.get("duplicate_trade_ids"),
+            tolerance=0.0,
+        )
+        campaign_liquidatable = campaign.get(
+            "liquidatable_net", campaign.get("LIQUIDATABLE_NET")
+        )
+        if campaign_liquidatable is not aggregate["liquidatable_net"]:
+            issues.append("CAMPAIGN_LIQUIDATABLE_NET_MISMATCH")
         if str(campaign.get("trade_ids_sha256") or "") != aggregate["trade_ids_sha256"]:
             issues.append("CAMPAIGN_TRADE_HASH_MISMATCH")
 
@@ -248,12 +288,73 @@ def audit_family(
                 expected=published.get(key),
                 actual=audited.get(key),
             )
+        for key in ("sample_count", "trade_ids_count", "duplicate_trade_ids"):
+            _compare_metric(
+                issues,
+                label=f"{name.upper()}_{key.upper()}",
+                expected=published.get(key),
+                actual=audited.get(key),
+                tolerance=0.0,
+            )
+        if str(published.get("trade_ids_sha256") or "") != audited["trade_ids_sha256"]:
+            issues.append(f"{name.upper()}_TRADE_HASH_MISMATCH")
+        published_liquidatable = published.get(
+            "liquidatable_net", published.get("LIQUIDATABLE_NET")
+        )
+        if published_liquidatable is not audited["liquidatable_net"]:
+            issues.append(f"{name.upper()}_LIQUIDATABLE_NET_MISMATCH")
         if name == "oos" and published.get("no_lookahead") is not True:
             issues.append("OOS_NO_LOOKAHEAD_PROOF_MISSING")
         if name == "forward" and published.get("post_freeze") is not True:
             issues.append("FORWARD_POST_FREEZE_FLAG_MISSING")
 
     objective_input = dict(campaign)
+    if family == "copy_vault":
+        if aggregate is None:
+            objective_input.update({key: None for key in _ECONOMIC_KEYS})
+            objective_input.update(
+                closed_positions=0,
+                duplicate_trade_ids=None,
+                trade_ids_count=None,
+                trade_ids_sha256=None,
+                liquidatable_net=False,
+            )
+        else:
+            objective_input.update(
+                {key: aggregate[key] for key in _ECONOMIC_KEYS},
+                closed_positions=aggregate["sample_count"],
+                duplicate_trade_ids=aggregate["duplicate_trade_ids"],
+                trade_ids_count=aggregate["trade_ids_count"],
+                trade_ids_sha256=aggregate["trade_ids_sha256"],
+                liquidatable_net=(
+                    aggregate["liquidatable_net"]
+                    and campaign.get(
+                        "liquidatable_net", campaign.get("LIQUIDATABLE_NET")
+                    ) is True
+                ),
+            )
+        for name in ("oos", "forward"):
+            audited = segment_audits[name]
+            published = campaign.get(name)
+            if audited is None:
+                objective_input[name] = None
+                continue
+            segment_input = dict(published) if isinstance(published, Mapping) else {}
+            segment_input.update(
+                {key: audited[key] for key in _ECONOMIC_KEYS},
+                sample_count=audited["sample_count"],
+                trade_ids_count=audited["trade_ids_count"],
+                duplicate_trade_ids=audited["duplicate_trade_ids"],
+                trade_ids_sha256=audited["trade_ids_sha256"],
+                liquidatable_net=(
+                    audited["liquidatable_net"]
+                    and isinstance(published, Mapping)
+                    and published.get(
+                        "liquidatable_net", published.get("LIQUIDATABLE_NET")
+                    ) is True
+                ),
+            )
+            objective_input[name] = segment_input
     if campaign.get("daily_target_required") is True:
         published_daily = published_daily_evidence
         recomputed_daily = (

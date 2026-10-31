@@ -8,25 +8,31 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
+    CHECKPOINT_COLLECTOR_PROTOCOL,
+    UNBOUND_L2_SOURCE_PROTOCOL,
+)
 from hl_observer.ops.bounded_collection import (  # noqa: E402
     STATE_RELPATH,
     ensure_bounded_collectors,
     renew_bounded_collection_lease,
 )
-from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
-    CHECKPOINT_COLLECTOR_PROTOCOL,
-    UNBOUND_L2_SOURCE_PROTOCOL,
+from hl_observer.ops.collecteur_registry import (  # noqa: E402
+    COLLECTEURS_CAMPAGNE,
+    REGISTRE,
 )
 
 DEFAULT_NAMES = (
     "allmids-collector",
     "bbo-collector",
+    "native-venues",
     "carnet-collector",
     "venues-collector",
     "marks-collector",
@@ -39,6 +45,9 @@ DEFAULT_NAMES = (
     "userfills-live",
     "copy-vault-checkpoints",
 )
+_COLLECTOR_REGISTRY = {
+    str(row["nom"]): row for row in (*REGISTRE, *COLLECTEURS_CAMPAGNE)
+}
 
 
 def _idle_priority() -> None:
@@ -62,6 +71,73 @@ def _append_log(root: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _file_status(path: Path, *, now: float) -> dict[str, Any]:
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        return {"path": str(path.resolve()), "exists": False, "error": type(exc).__name__}
+    return {
+        "path": str(path.resolve()),
+        "exists": True,
+        "bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+        "age_s": round(max(0.0, now - stat.st_mtime), 1),
+    }
+
+
+def _tail(path: Path, *, lines: int = 2, max_bytes: int = 8192) -> list[str]:
+    """Read a small bounded log tail for the live console, not the full log."""
+    if lines <= 0 or max_bytes <= 0:
+        return []
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - max_bytes), os.SEEK_SET)
+            data = handle.read(max_bytes)
+    except OSError:
+        return []
+    decoded = data.decode("utf-8", errors="replace")
+    return decoded.splitlines()[-lines:]
+
+
+def _collector_details(root: Path, names: Sequence[str], active: Mapping[str, Any]) -> list[dict[str, Any]]:
+    now = time.time()
+    details: list[dict[str, Any]] = []
+    for name in names:
+        row = _COLLECTOR_REGISTRY.get(name, {})
+        log_paths = (
+            root / "runtime" / "logs" / f"economic-{name}.log",
+            root / "runtime" / "logs" / f"{name}.log",
+        )
+        present_logs = []
+        for path in log_paths:
+            observation = _file_status(path, now=now)
+            if observation["exists"]:
+                present_logs.append({**observation, "tail": _tail(path, lines=2)})
+        present_logs.sort(key=lambda item: str(item.get("modified_at") or ""), reverse=True)
+        expected_log = log_paths[0] if name in active else log_paths[1]
+        heartbeat_rel = row.get("heartbeat")
+        heartbeat_paths = [root / str(heartbeat_rel)] if heartbeat_rel else []
+        canonical_heartbeat = root / "runtime" / "research_lab" / "heartbeats" / f"{name}.json"
+        if canonical_heartbeat not in heartbeat_paths:
+            heartbeat_paths.append(canonical_heartbeat)
+        heartbeat_observations = [
+            _file_status(path, now=now)
+            for path in heartbeat_paths
+            if path.is_file()
+        ]
+        details.append({
+            "name": name,
+            "state": "ACTIVE" if name in active else "MISSING",
+            "pid": active.get(name),
+            "logs": present_logs,
+            "expected_log": str(expected_log.resolve()),
+            "heartbeats": heartbeat_observations,
+        })
+    return details
 
 
 def run_watchdog(
@@ -127,9 +203,12 @@ def run_watchdog(
                 or checkpoint_protocol not in {"", CHECKPOINT_COLLECTOR_PROTOCOL}
                 else "EN COURS"
             )
+            processes_ready = not missing and len(active) == len(names)
             status = (
                 "ACTIVE"
-                if not missing and len(active) == len(names) and renewal.get("renewed")
+                if processes_ready and renewal.get("renewed") and protocol_status == "OK"
+                else "STARTING"
+                if processes_ready and renewal.get("renewed") and protocol_status in {"ATTENTE HEARTBEATS", "EN COURS"}
                 else "DEGRADED"
             )
             record = {
@@ -148,28 +227,56 @@ def run_watchdog(
                 "paper_read_only": result.get("paper_read_only") is True,
                 "real_execution": False,
             }
+            details = _collector_details(root, names, active_map)
+            record["collector_details"] = details
             print(
-                "[COLLECTE COPY-VAULT] %s — processus %d/%d; manquants: %s; protocole causal: %s; bail: %s"
-                % (
-                    status,
-                    len(active),
-                    len(names),
-                    ", ".join(missing) if missing else "aucun",
-                    protocol_status,
-                    lease_id or "indisponible",
-                ),
+                f"[COLLECTE COPY-VAULT] {status} — processus {len(active)}/{len(names)}; "
+                f"manquants: {', '.join(missing) if missing else 'aucun'}; "
+                f"protocole causal: {protocol_status}; bail: {lease_id or 'indisponible'}",
                 flush=True,
             )
+            print(
+                "[JOURNAUX] Dernières lignes de chaque collecteur ci-dessous; "
+                "journaux complets conservés avec rotation bornée dans runtime\\logs.",
+                flush=True,
+            )
+            for index, detail in enumerate(details, 1):
+                log = detail["logs"][0] if detail["logs"] else None
+                heartbeat = max(
+                    detail["heartbeats"], key=lambda item: float(item.get("age_s", 0.0)) * -1,
+                    default=None,
+                )
+                log_text = (
+                    f"journal={log['path']} · {log['bytes']:,} octets · modifié il y a {log['age_s']} s"
+                    if log else f"journal en attente={detail['expected_log']}"
+                )
+                heartbeat_text = (
+                    f"heartbeat={heartbeat['path']} · modifié il y a {heartbeat['age_s']} s"
+                    if heartbeat else "heartbeat=pas encore observé"
+                )
+                process_text = (
+                    f"PID {detail['pid']}" if detail["state"] == "ACTIVE" else "ABSENT"
+                )
+                print(
+                    f"  [{index:02d}/{len(details):02d}] {detail['name']} · {process_text} · "
+                    f"{log_text} · {heartbeat_text}",
+                    flush=True,
+                )
+                if log:
+                    for line in log.get("tail", ()):
+                        visible_line = str(line).replace("\r", " ").replace("\n", " ")
+                        print(f"       derniere sortie: {visible_line[:240]}", flush=True)
             if protocol_status == "À CORRIGER":
                 print(
-                    "[PROTOCOLE] userfills=%s; checkpoints=%s; aucune preuve causale ne doit être admise tant que les deux protocoles attendus ne sont pas actifs"
-                    % (fills_protocol or "absent", checkpoint_protocol or "absent"),
+                    f"[PROTOCOLE] userfills={fills_protocol or 'absent'}; "
+                    f"checkpoints={checkpoint_protocol or 'absent'}; aucune preuve causale "
+                    "ne doit être admise tant que les deux protocoles attendus ne sont pas actifs",
                     flush=True,
                 )
             if not renewal.get("renewed"):
                 print(
-                    "[BAIL] renouvellement non confirmé (%s); le superviseur réessaiera au prochain cycle"
-                    % renewal.get("reason"),
+                    f"[BAIL] renouvellement non confirmé ({renewal.get('reason')}); "
+                    "le superviseur réessaiera au prochain cycle",
                     flush=True,
                 )
         except Exception as exc:  # noqa: BLE001 - watchdog must survive a transient failure
@@ -182,8 +289,8 @@ def run_watchdog(
                 "real_execution": False,
             }
             print(
-                "[COLLECTE COPY-VAULT] ERREUR %s; nouvelle tentative au prochain cycle; voir runtime/logs/economic-collector-watchdog.jsonl"
-                % type(exc).__name__,
+                f"[COLLECTE COPY-VAULT] ERREUR {type(exc).__name__}; nouvelle tentative au prochain cycle; "
+                "voir runtime/logs/economic-collector-watchdog.jsonl",
                 flush=True,
             )
         _append_log(root, record)

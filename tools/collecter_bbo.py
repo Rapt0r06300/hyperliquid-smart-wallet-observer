@@ -16,6 +16,7 @@ READ-ONLY / PAPER-ONLY : deux flux PUBLICS en lecture. Aucune clé, aucun ordre,
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -206,6 +207,19 @@ def _f(x: Any) -> float | None:
         return None
 
 
+def _timestamp_ms_or_none(value: Any) -> int | None:
+    """Parse a positive integral exchange timestamp; never substitute receive time."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(numeric) or numeric <= 0 or not numeric.is_integer():
+        return None
+    return int(numeric)
+
+
 def parser_bbo_hl(msg: Any) -> dict | None:
     """WS HL `bbo` -> {coin, bid, ask, bid_sz, ask_sz, ts_ex}. Autre message -> None."""
     if not isinstance(msg, dict) or msg.get("channel") != "bbo":
@@ -221,7 +235,7 @@ def parser_bbo_hl(msg: Any) -> dict | None:
         return None
     return {"coin": str(d.get("coin") or "").upper(), "bid": b, "ask": a,
             "bid_sz": _f(bid.get("sz")) or 0.0, "ask_sz": _f(ask.get("sz")) or 0.0,
-            "ts_ex": float(d.get("time") or 0.0)}
+            "ts_ex": _timestamp_ms_or_none(d.get("time"))}
 
 
 def parser_l2_hl(msg: Any) -> dict | None:
@@ -240,7 +254,7 @@ def parser_l2_hl(msg: Any) -> dict | None:
         "coin": str(data.get("coin") or "").upper(),
         "bids": bids,
         "asks": asks,
-        "ts_ex": int(float(data.get("time") or 0.0)),
+        "ts_ex": _timestamp_ms_or_none(data.get("time")),
     }
 
 
@@ -299,7 +313,8 @@ def parser_bookticker_binance(msg: Any) -> dict | None:
         return None
     return {"symbol": str(d.get("s")).upper(), "bid": b, "ask": a,
             "bid_sz": _f(d.get("B")) or 0.0, "ask_sz": _f(d.get("A")) or 0.0,
-            "ts_ex": float(d.get("T") or d.get("E") or 0.0), "update_id": d.get("u")}
+            "ts_ex": _timestamp_ms_or_none(d.get("T")) or _timestamp_ms_or_none(d.get("E")),
+            "update_id": d.get("u")}
 
 
 def build_binance_bbo_tape_record(
@@ -345,7 +360,8 @@ def parser_aggtrade_binance(msg: Any) -> dict | None:
     if px is None:
         return None
     return {"symbol": str(d.get("s")).upper(), "px": px, "sz": _f(d.get("q")) or 0.0,
-            "side": "SELL" if d.get("m") else "BUY", "ts_ex": float(d.get("T") or 0.0)}
+            "side": "SELL" if d.get("m") else "BUY",
+            "ts_ex": _timestamp_ms_or_none(d.get("T"))}
 
 
 def dispatch_lead_lag_trade(
@@ -429,11 +445,16 @@ class MagasinBBO:
             b["ask"] * b["ask_sz"],
         )
         minimum_four_side_capacity = min(four_side_capacities)
+        exchange_timestamps_complete = bool(
+            _timestamp_ms_or_none(h.get("ts_ex")) is not None
+            and _timestamp_ms_or_none(b.get("ts_ex")) is not None
+        )
         atomic_bbo_certified = bool(
             mapping["exact"] is True
             and minimum_four_side_capacity > 0.0
             and h["ask"] > h["bid"]
             and b["ask"] > b["bid"]
+            and exchange_timestamps_complete
         )
         snapshot_wall_ts_ms = int(ts_wall_ms)
         event_id = (
@@ -450,6 +471,7 @@ class MagasinBBO:
                  "binance_symbol": b.get("symbol"),
                  "instrument_mapping_schema": MAPPING_SCHEMA_VERSION,
                  "instrument_mapping_exact": mapping["exact"] is True,
+                 "exchange_timestamps_complete": exchange_timestamps_complete,
                  "hl_mid": hmid, "bin_mid": bmid, "ecart_mid_bps": round(1e4 * (hmid - bmid) / bmid, 3),
                  "taille_top_usd": round(minimum_four_side_capacity, 8),
                  "minimum_four_side_top_capacity_usd": round(minimum_four_side_capacity, 8),
@@ -684,6 +706,7 @@ async def _boucle(
              "binance_trade_ws_url": WS_BINANCE_MARKET,
              "binance_trade_last_error": "",
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
+             "missing_exchange_timestamps": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "certified_atomic_bbo_written": 0,
              "lead_lag_checkpoint_requests": 0,
@@ -980,15 +1003,18 @@ async def _boucle(
                         elif isinstance(data, list) and data and isinstance(data[0], dict):
                             coin_name = str(data[0].get("coin") or "").upper()
                         exchange_ts_ms: int | None = None
-                        if isinstance(data, dict) and data.get("time") is not None:
-                            exchange_ts_ms = int(float(data["time"]))
+                        if isinstance(data, dict):
+                            exchange_ts_ms = _timestamp_ms_or_none(data.get("time"))
                         elif isinstance(data, list):
                             exchange_times = [
-                                int(float(item["time"]))
+                                _timestamp_ms_or_none(item.get("time"))
                                 for item in data
-                                if isinstance(item, dict) and item.get("time") is not None
+                                if isinstance(item, dict)
                             ]
-                            exchange_ts_ms = max(exchange_times) if exchange_times else None
+                            valid_exchange_times = [value for value in exchange_times if value is not None]
+                            exchange_ts_ms = max(valid_exchange_times) if valid_exchange_times else None
+                        if channel in {"bbo", "l2Book"} and exchange_ts_ms is None:
+                            stats["missing_exchange_timestamps"] += 1
                         sequence = next_sequence(channel, coin_name or "*")
                         envelope = TickEnvelope(
                             source_id="hyperliquid_mainnet_readonly",
@@ -1032,22 +1058,31 @@ async def _boucle(
                         if quote and quote["coin"] in coins_set:
                             gate = quality_gates[("bbo", quote["coin"])]
                             gate.mark_heartbeat(received_ts_ms=received_ts_ms)
-                            quality = gate.ingest_book_snapshot(
-                                bids=[{"px": quote["bid"], "sz": quote["bid_sz"]}],
-                                asks=[{"px": quote["ask"], "sz": quote["ask_sz"]}],
-                                exchange_ts_ms=int(quote["ts_ex"] or received_ts_ms),
-                                received_ts_ms=received_ts_ms,
-                                event_id=stable_event_id(message),
-                                sequence=sequence,
-                            )
+                            exchange_ts_ms = _timestamp_ms_or_none(quote["ts_ex"])
+                            if exchange_ts_ms is None:
+                                quality_score = None
+                                quality_ready = False
+                                quality_reasons = ["MISSING_EXCHANGE_TIMESTAMP"]
+                            else:
+                                quality = gate.ingest_book_snapshot(
+                                    bids=[{"px": quote["bid"], "sz": quote["bid_sz"]}],
+                                    asks=[{"px": quote["ask"], "sz": quote["ask_sz"]}],
+                                    exchange_ts_ms=exchange_ts_ms,
+                                    received_ts_ms=received_ts_ms,
+                                    event_id=stable_event_id(message),
+                                    sequence=sequence,
+                                )
+                                quality_score = quality.feed_quality_score
+                                quality_ready = quality.ready
+                                quality_reasons = list(quality.reasons)
                             envelope.parsed_summary = {
                                 "best_bid": quote["bid"],
                                 "best_ask": quote["ask"],
                                 "bid_size": quote["bid_sz"],
                                 "ask_size": quote["ask_sz"],
-                                "feed_quality_score": quality.feed_quality_score,
-                                "data_gate_ready": quality.ready,
-                                "quality_reasons": list(quality.reasons),
+                                "feed_quality_score": quality_score,
+                                "data_gate_ready": quality_ready,
+                                "quality_reasons": quality_reasons,
                                 "asset_ctx": latest_hl_asset_ctx(
                                     quote["coin"],
                                     received_ts_ms=received_ts_ms,
@@ -1086,14 +1121,23 @@ async def _boucle(
                             stats["frames_l2_hl"] += 1
                             gate = quality_gates[("l2Book", book["coin"])]
                             gate.mark_heartbeat(received_ts_ms=received_ts_ms)
-                            quality = gate.ingest_book_snapshot(
-                                bids=book["bids"],
-                                asks=book["asks"],
-                                exchange_ts_ms=book["ts_ex"] or received_ts_ms,
-                                received_ts_ms=received_ts_ms,
-                                event_id=stable_event_id(message),
-                                sequence=sequence,
-                            )
+                            exchange_ts_ms = _timestamp_ms_or_none(book["ts_ex"])
+                            if exchange_ts_ms is None:
+                                quality_score = None
+                                quality_ready = False
+                                quality_reasons = ["MISSING_EXCHANGE_TIMESTAMP"]
+                            else:
+                                quality = gate.ingest_book_snapshot(
+                                    bids=book["bids"],
+                                    asks=book["asks"],
+                                    exchange_ts_ms=exchange_ts_ms,
+                                    received_ts_ms=received_ts_ms,
+                                    event_id=stable_event_id(message),
+                                    sequence=sequence,
+                                )
+                                quality_score = quality.feed_quality_score
+                                quality_ready = quality.ready
+                                quality_reasons = list(quality.reasons)
                             try:
                                 bid_depth_usd = sum(
                                     float(level["px"]) * float(level["sz"])
@@ -1110,9 +1154,9 @@ async def _boucle(
                                 "ask_levels": len(book["asks"]),
                                 "bid_depth_usd": round(bid_depth_usd, 6),
                                 "ask_depth_usd": round(ask_depth_usd, 6),
-                                "feed_quality_score": quality.feed_quality_score,
-                                "data_gate_ready": quality.ready,
-                                "quality_reasons": list(quality.reasons),
+                                "feed_quality_score": quality_score,
+                                "data_gate_ready": quality_ready,
+                                "quality_reasons": quality_reasons,
                                 "asset_ctx": latest_hl_asset_ctx(
                                     book["coin"],
                                     received_ts_ms=received_ts_ms,
@@ -1131,7 +1175,15 @@ async def _boucle(
                                 if gate is None:
                                     continue
                                 gate.mark_heartbeat(received_ts_ms=received_ts_ms)
-                                trade_ts = int(float(trade.get("time") or received_ts_ms))
+                                trade_ts = _timestamp_ms_or_none(trade.get("time"))
+                                if trade_ts is None:
+                                    stats["missing_exchange_timestamps"] += 1
+                                    quality_by_coin[trade_coin] = {
+                                        "feed_quality_score": None,
+                                        "data_gate_ready": False,
+                                        "quality_reasons": ["MISSING_EXCHANGE_TIMESTAMP"],
+                                    }
+                                    continue
                                 trade_id = "%s|%s|%s" % (
                                     trade_ts,
                                     trade_coin,
@@ -1377,7 +1429,7 @@ async def _boucle(
                                 "sequence": sequence,
                                 "event_id": "bin-trade:%s:%s:%s" % (
                                     t["symbol"],
-                                    t.get("ts_ex") or recv_wall_ms,
+                                    t.get("ts_ex") or "missing-exchange-time",
                                     sequence,
                                 ),
                                 "ts_ex": t["ts_ex"],

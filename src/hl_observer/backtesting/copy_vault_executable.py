@@ -7,6 +7,7 @@ import json
 import math
 import time
 from collections.abc import Iterable, Mapping
+from decimal import Decimal
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
@@ -50,6 +51,13 @@ from hl_observer.economics.assumptions import (
     is_certifiable_mode,
 )
 from hl_observer.economics.families import build_copy_vault_contract
+from hl_observer.economics.numeric import (
+    USD_RECONCILIATION_ABS_TOLERANCE,
+    decimal_sum,
+    decimal_value,
+    float_not_above,
+    float_not_below,
+)
 from hl_observer.funding.funding_times import next_funding_time_ms
 from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
@@ -398,7 +406,12 @@ def execute_metaorder(
     fees = (abs(quantity * entry_exec) + abs(quantity * exit_exec)) * rate_bps / 10_000.0
     net = gross_pnl - spread_cost - fees - slippage - latency
     expected = executable_before_fees - fees
-    if not math.isclose(net, expected, abs_tol=1e-8):
+    if not math.isclose(
+        net,
+        expected,
+        rel_tol=0.0,
+        abs_tol=float(USD_RECONCILIATION_ABS_TOLERANCE),
+    ):
         return None, "ECONOMIC_RECONCILIATION_FAILED"
     identity = {
         "metaorder_id": metaorder["metaorder_id"], "entry_ts_ms": entry["ts_ms"],
@@ -617,24 +630,95 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     rows = list(trades)
     ids = [str(row.get("trade_id") or "") for row in rows]
     duplicates = len(ids) - len(set(ids))
-    gross = sum(float(row["gross_pnl_usd"]) for row in rows)
-    fees = sum(float(row["fees_usd"]) for row in rows)
-    spread = sum(float(row["spread_cost_usd"]) for row in rows)
-    slippage = sum(float(row["slippage_cost_usd"]) for row in rows)
-    latency = sum(float(row["latency_cost_usd"]) for row in rows)
-    net = sum(float(row["net_pnl_usd"]) for row in rows)
-    equity = peak = max_drawdown = gains = losses = 0.0
+    totals = {
+        key: decimal_sum(row[key] for row in rows)
+        for key in (
+            "gross_pnl_usd",
+            "fees_usd",
+            "spread_cost_usd",
+            "slippage_cost_usd",
+            "latency_cost_usd",
+            "net_pnl_usd",
+        )
+    }
+    if any(value is None for value in totals.values()):
+        raise ValueError("Copy-Vault summary contains non-finite or non-numeric PnL evidence")
+    gross_total = totals["gross_pnl_usd"]
+    fees_total = totals["fees_usd"]
+    spread_total = totals["spread_cost_usd"]
+    slippage_total = totals["slippage_cost_usd"]
+    latency_total = totals["latency_cost_usd"]
+    reported_net_total = totals["net_pnl_usd"]
+    cost_totals = (fees_total, spread_total, slippage_total, latency_total)
+    recomputed_net_total = gross_total - sum(cost_totals, Decimal(0))
+    conservative_nets: list[Decimal] = []
+    economic_reconciliation_ok = all(cost >= 0 for cost in cost_totals)
+    for row in rows:
+        gross = decimal_value(row["gross_pnl_usd"])
+        costs = tuple(
+            decimal_value(row[key])
+            for key in ("fees_usd", "spread_cost_usd", "slippage_cost_usd", "latency_cost_usd")
+        )
+        reported_net = decimal_value(row["net_pnl_usd"])
+        if gross is None or reported_net is None or any(value is None for value in costs):
+            raise ValueError("Copy-Vault trade contains non-finite or non-numeric PnL evidence")
+        recomputed_net = gross - sum(costs, Decimal(0))
+        economic_reconciliation_ok = economic_reconciliation_ok and all(
+            cost >= 0 for cost in costs
+        ) and abs(recomputed_net - reported_net) <= USD_RECONCILIATION_ABS_TOLERANCE
+        conservative_nets.append(min(recomputed_net, reported_net))
+    net_total = decimal_sum(conservative_nets)
+    if net_total is None:
+        raise ValueError("Copy-Vault summary could not aggregate conservative PnL")
+    economic_reconciliation_ok = economic_reconciliation_ok and (
+        abs(recomputed_net_total - reported_net_total)
+        <= USD_RECONCILIATION_ABS_TOLERANCE
+    )
+
+    def _output_float(
+        value: Decimal,
+        *,
+        round_down: bool = False,
+        round_up: bool = False,
+    ) -> float:
+        if round_down and round_up:
+            raise ValueError("Conflicting Copy-Vault conservative float directions")
+        result = (
+            float_not_above(value)
+            if round_down
+            else float_not_below(value)
+            if round_up
+            else float(value)
+        )
+        if result is None or not math.isfinite(result):
+            raise ValueError("Copy-Vault summary aggregate is not representable as a finite float")
+        return result
+
+    gross = _output_float(gross_total, round_down=True)
+    fees = _output_float(fees_total, round_up=True)
+    spread = _output_float(spread_total, round_up=True)
+    slippage = _output_float(slippage_total, round_up=True)
+    latency = _output_float(latency_total, round_up=True)
+    net = _output_float(net_total, round_down=True)
+    equity = peak = max_drawdown = Decimal(0)
     wins = 0
-    for row in sorted(rows, key=lambda item: int(item["exit_ts_ms"])):
-        pnl = float(row["net_pnl_usd"])
+    positive_values: list[Decimal] = []
+    negative_values: list[Decimal] = []
+    paired_rows = sorted(
+        zip(rows, conservative_nets, strict=True),
+        key=lambda pair: int(pair[0]["exit_ts_ms"]),
+    )
+    for row, pnl in paired_rows:
         equity += pnl
         peak = max(peak, equity)
         max_drawdown = max(max_drawdown, peak - equity)
         if pnl > 0:
             wins += 1
-            gains += pnl
+            positive_values.append(pnl)
         elif pnl < 0:
-            losses -= pnl
+            negative_values.append(-pnl)
+    gains = decimal_sum(positive_values) or Decimal(0)
+    losses = decimal_sum(negative_values) or Decimal(0)
     financeable_count = sum(1 for row in rows if row.get("financeable_under_paper_policy") is True)
     non_financeable_count = len(rows) - financeable_count
     return {
@@ -648,19 +732,22 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         },
         "financeable_trade_count": financeable_count,
         "non_financeable_trade_count": non_financeable_count,
-        "gross_pnl_usd": round(gross, 8), "fees_usd": round(fees, 8),
-        "spread_cost_usd": round(spread, 8), "slippage_cost_usd": round(slippage, 8),
-        "latency_cost_usd": round(latency, 8), "net_pnl_usd": round(net, 8),
-        "roi_pct": round(net / STARTING_CAPITAL_USD * 100.0, 8),
-        "max_drawdown_usd": round(max_drawdown, 8),
-        "hit_rate": round(wins / len(rows), 8) if rows else 0.0,
-        "profit_factor": round(gains / losses, 8) if losses > 0 else None,
+        # These are evidence values consumed by economic gates and candidate
+        # ranking. Keep them unrounded; renderers may round for presentation.
+        "gross_pnl_usd": gross, "fees_usd": fees,
+        "spread_cost_usd": spread, "slippage_cost_usd": slippage,
+        "latency_cost_usd": latency, "net_pnl_usd": net,
+        "roi_pct": _output_float(
+            net_total / Decimal(str(STARTING_CAPITAL_USD)) * Decimal(100),
+            round_down=True,
+        ),
+        "max_drawdown_usd": _output_float(max_drawdown, round_up=True),
+        "hit_rate": wins / len(rows) if rows else 0.0,
+        "profit_factor": _output_float(gains / losses, round_down=True) if losses > 0 else None,
         "LIQUIDATABLE_NET": bool(rows) and all(row.get("liquidatable_net") is True for row in rows),
         "duplicate_trade_ids": duplicates, "trade_ids_count": len(set(ids)),
         "trade_ids_sha256": hashlib.sha256("\n".join(sorted(set(ids))).encode("utf-8")).hexdigest(),
-        "economic_reconciliation_ok": math.isclose(
-            gross - fees - spread - slippage - latency, net, abs_tol=1e-6
-        ),
+        "economic_reconciliation_ok": economic_reconciliation_ok,
     }
 
 

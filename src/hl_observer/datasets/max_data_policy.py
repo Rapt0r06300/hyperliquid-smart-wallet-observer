@@ -24,8 +24,6 @@ ANALYSIS_MODES = {"economic", "historical", "historical-full", "historical-deep"
 
 FAMILY_SUITES = {
     "copy_vault": "copy-vault-full",
-    "lead_lag": "lead-lag-full",
-    "cross_venue_dislocation_v2": "cross-venue-full",
 }
 REQUIRED_FAMILIES = tuple(FAMILY_SUITES)
 
@@ -241,7 +239,11 @@ def load_suite_plans(lab_root: str | Path) -> dict[str, dict[str, Any]]:
 
 
 def _top_family(family_decisions: Iterable[Mapping[str, Any]]) -> str | None:
-    rows = [row for row in family_decisions if str(row.get("family") or "") in FAMILY_SUITES]
+    rows = [
+        row
+        for row in family_decisions
+        if str(row.get("family") or "") in FAMILY_SUITES
+    ]
     if not rows:
         return None
     rows.sort(key=lambda row: (-int(row.get("priority") or 0), str(row.get("family") or "")))
@@ -249,10 +251,11 @@ def _top_family(family_decisions: Iterable[Mapping[str, Any]]) -> str | None:
 
 
 def suite_ladder(top_family: str | None) -> list[str]:
-    family_suite = FAMILY_SUITES.get(str(top_family or ""))
+    # MAX DATA is an economic research path: supporting archives remain useful,
+    # but no suite for a disabled strategy may be selected or executed.
     ordered = [
         "economic-full",
-        family_suite,
+        FAMILY_SUITES["copy_vault"],
         "microstructure-full",
         "research-lab-full",
         "sqlite-all-safe",
@@ -267,9 +270,9 @@ def targets_reached_from_brain(family_decisions: Iterable[Mapping[str, Any]]) ->
         for row in family_decisions
         if isinstance(row, Mapping)
     }
-    return all(
-        str(by_family.get(family, {}).get("phase") or "") == "FREEZE_AND_CONFIRM_FORWARD"
-        for family in REQUIRED_FAMILIES
+    return (
+        str(by_family.get("copy_vault", {}).get("phase") or "")
+        == "FREEZE_AND_CONFIRM_FORWARD"
     )
 
 
@@ -295,15 +298,17 @@ def choose_max_data_job(
     target_contract = {
         "target_net_usd_per_family": TARGET_NET_USD_PER_FAMILY,
         "required_families": list(REQUIRED_FAMILIES),
-        "independent_targets_required": True,
+        "independent_targets_required": False,
         "aggregate_substitution_allowed": False,
     }
 
-    if all_targets_reached:
+    copy_vault_proof_phase = targets_reached_from_brain(decisions)
+    suites_exhausted = set(ladder).issubset(completed)
+    if all_targets_reached and copy_vault_proof_phase and suites_exhausted:
         return {
             "schema": SCHEMA,
             "status": "STOP_PROOF_REACHED",
-            "reason": "Les trois objectifs économiques indépendants sont atteints; ne pas consommer plus de données pour retuner le holdout.",
+            "reason": "L’objectif Copy-Vault a atteint sa phase de preuve terminale et toutes les suites prévues pour ce SHA sont terminées.",
             "recommended_suite": None,
             "recommended_mode": None,
             "download_budget_gib": 0.0,
@@ -311,6 +316,8 @@ def choose_max_data_job(
             "completed_suites": sorted(completed),
             "suite_ladder": ladder,
             "target_contract": target_contract,
+                "copy_vault_proof_phase": copy_vault_proof_phase,
+            "copy_vault_suite_ladder_exhausted": suites_exhausted,
             "holdout_used_for_ranking": False,
             "paper_read_only": True,
             "real_execution": False,
@@ -357,7 +364,7 @@ def choose_max_data_job(
         return {
             "schema": SCHEMA,
             "status": "READY",
-            "reason": "Première suite utile non encore traitée pour ce SHA qui tient sur le disque avec réserve de sécurité.",
+            "reason": "Première suite utile Copy-Vault non encore traitée pour ce SHA qui tient sur le disque avec réserve de sécurité.",
             "recommended_suite": suite,
             "recommended_mode": mode,
             "download_budget_gib": round(budget, 4),
@@ -369,6 +376,8 @@ def choose_max_data_job(
             "suite_ladder": ladder,
             "rejected_before_selection": rejected,
             "target_contract": target_contract,
+            "copy_vault_proof_phase": copy_vault_proof_phase,
+            "copy_vault_suite_ladder_exhausted": suites_exhausted,
             "holdout_used_for_ranking": False,
             "paper_read_only": True,
             "real_execution": False,
@@ -377,7 +386,7 @@ def choose_max_data_job(
     return {
         "schema": SCHEMA,
         "status": "NO_GO",
-        "reason": "Aucune suite supplémentaire utile ne peut être sélectionnée avec les plans, le SHA et l'espace disque actuels.",
+        "reason": "Aucune suite supplémentaire Copy-Vault ne peut être sélectionnée avec les plans, le SHA et l'espace disque actuels.",
         "recommended_suite": None,
         "recommended_mode": None,
         "download_budget_gib": 0.0,
@@ -386,6 +395,8 @@ def choose_max_data_job(
         "suite_ladder": ladder,
         "rejected": rejected,
         "target_contract": target_contract,
+        "copy_vault_proof_phase": copy_vault_proof_phase,
+        "copy_vault_suite_ladder_exhausted": suites_exhausted,
         "holdout_used_for_ranking": False,
         "paper_read_only": True,
         "real_execution": False,
@@ -410,8 +421,10 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
         f"- Budget téléchargement : **{decision.get('download_budget_gib')} Gio**",
         f"- Famille prioritaire : `{decision.get('top_family')}`",
         f"- SHA de code pris en compte : `{decision.get('project_sha_scope')}`",
-        "- Objectif : **≥ 4,00 $ net séparément sur Copy-Vault, Lead-Lag et Cross-Venue**",
-        "- Compensation entre familles : **INTERDITE**",
+        "- Périmètre économique actif : **Copy-Vault uniquement**",
+        f"- Objectif terminal Copy-Vault : **≥ {TARGET_NET_USD_PER_FAMILY:.2f} $ net/jour sur 200 $ paper**",
+        "- Cible terminale : ne clôt pas les réparations logicielles ni les suites Copy-Vault encore disponibles",
+        "- Lead-Lag et Cross-Venue : **DISABLED_BY_SCOPE**",
         "- OOS/forward utilisés comme gradient : **NON**",
         "",
         f"Pourquoi : {decision.get('reason')}",
@@ -433,7 +446,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Choisit la prochaine suite FULL/COLD utile avec garde disque et objectif +5 USD par famille."
+        description="Choisit la prochaine suite Copy-Vault FULL/COLD; +5 USD/jour sur 200 USD est une cible économique terminale, pas un arrêt technique."
     )
     parser.add_argument("--brain-json", required=True)
     parser.add_argument("--lab-root", required=True)

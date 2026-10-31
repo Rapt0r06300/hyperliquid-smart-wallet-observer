@@ -27,25 +27,7 @@ from hl_observer.backtesting.copy_vault_vnext_train import (
 from hl_observer.backtesting.copy_vault_vnext_train import (
     explore_copy_vault_vnext_train,
 )
-from hl_observer.backtesting.cross_venue_certified import (
-    load_certified_atomic_union_series,
-    load_preferred_certified_atomic_series,
-)
-from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_train
-from hl_observer.backtesting.cross_venue_v5_persistence_train import (
-    explore_cross_venue_v5_train,
-)
-from hl_observer.backtesting.cross_venue_v6_coverage_union_train import (
-    explore_cross_venue_v6_train,
-)
-from hl_observer.backtesting.lead_lag_bbo_repricing_train import (
-    explore_lead_lag_bbo_repricing_train,
-)
-from hl_observer.backtesting.native_cross_venue_replay import (
-    scan_native_cross_venue_prefilter,
-)
-from hl_observer.backtesting.lead_lag_multiasset_train import explore_lead_lag_multiasset_train
-from hl_observer.backtesting.lead_lag_source_alignment import select_aligned_bbo_sources
+from hl_observer.strategies.active_scope import active_strategy_families
 
 SCHEMA_VERSION = "hypersmart.economic_vnext_pack.v1"
 REPORT_DIR = Path("runtime") / "reports" / "economic_campaigns" / "research_vnext"
@@ -82,50 +64,31 @@ def run_economic_vnext_pack(
     lead_sources: Sequence[str | Path],
 ) -> dict[str, Any]:
     project_root = Path(root).resolve()
-    requested_lead_sources = list(lead_sources)
-    # An empty dataset manifest means that no explicit source override was
-    # available.  It must not silently disable the standard local discovery.
-    aligned_lead_sources, lead_alignment = select_aligned_bbo_sources(
-        project_root,
-        candidates=requested_lead_sources or None,
-    )
-    lead_alignment = {
-        **lead_alignment,
-        "requested_sources": len(requested_lead_sources),
-        "source_request_mode": (
-            "EXPLICIT_DATASET_MANIFEST"
-            if requested_lead_sources
-            else "LOCAL_AUTO_DISCOVERY_FALLBACK"
-        ),
+    active = active_strategy_families()
+    if active != frozenset({"copy_vault"}):
+        raise RuntimeError(
+            "economic vNext pack requires the canonical Copy-Vault-only active scope"
+        )
+    disabled = {
+        "status": "DISABLED_BY_SCOPE",
+        "selection_eligible": False,
+        "physical_freeze_allowed": False,
+        "freeze_candidate_sha256": None,
+        "heldout_evaluated": False,
     }
-    lead = explore_lead_lag_multiasset_train(project_root, aligned_lead_sources)
-    lead_bbo_repricing = explore_lead_lag_bbo_repricing_train(
-        project_root,
-        sources=aligned_lead_sources,
-    )
-
-    cross_series, cross_depth, cross_meta = load_preferred_certified_atomic_series(project_root)
-    cross = explore_cross_venue_v4_train(
-        cross_series,
-        cross_depth,
-        source_mode=str(cross_meta.get("source_mode") or ""),
-    )
-    cross["certified_source_meta"] = cross_meta
-    cross_v5 = explore_cross_venue_v5_train(
-        cross_series,
-        cross_depth,
-        source_mode=str(cross_meta.get("source_mode") or ""),
-    )
-    cross_v5["certified_source_meta"] = cross_meta
-    union_series, union_depth, union_meta = load_certified_atomic_union_series(project_root)
-    cross_v6 = explore_cross_venue_v6_train(
-        union_series,
-        union_depth,
-        source_mode=str(union_meta.get("source_mode") or ""),
-        source_meta=union_meta,
-    )
-    cross_v6["certified_source_meta"] = union_meta
-    native_cross = scan_native_cross_venue_prefilter(project_root)
+    # Keep the result schema explicit while avoiding discovery, replay, scoring,
+    # or report writes for disabled families. Historical reports remain intact.
+    lead = dict(disabled)
+    lead_bbo_repricing = dict(disabled)
+    cross = dict(disabled)
+    cross_v5 = dict(disabled)
+    cross_v6 = dict(disabled)
+    native_cross = dict(disabled)
+    lead_alignment = {
+        "status": "DISABLED_BY_SCOPE",
+        "requested_sources": 0,
+        "source_request_mode": "DISABLED_BY_SCOPE",
+    }
 
     copy_hypothesis = require_runnable_copy_vault_hypothesis(COPY_VAULT_VNEXT_MECHANISM)
     copy_raw = _load_copy_raw(project_root)
@@ -241,28 +204,6 @@ def run_economic_vnext_pack(
     copy_v9 = gate_copy_vault_candidate(copy_v9, copy_integrity)
 
     paths = {
-        "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
-        "lead_lag_bbo_repricing": _write_json(
-            project_root,
-            "lead_lag_bbo_repricing_train",
-            lead_bbo_repricing,
-        ),
-        "cross_venue": _write_json(project_root, "cross_venue_v4_train", cross),
-        "cross_venue_persistence_v5": _write_json(
-            project_root,
-            "cross_venue_v5_persistence_train",
-            cross_v5,
-        ),
-        "cross_venue_coverage_union_v6": _write_json(
-            project_root,
-            "cross_venue_v6_coverage_union_train",
-            cross_v6,
-        ),
-        "cross_venue_native_multivenue": _write_json(
-            project_root,
-            "cross_venue_native_multivenue_prefilter",
-            native_cross,
-        ),
         "copy_vault": _write_json(project_root, "copy_vault_vnext_train", copy),
         "copy_vault_continuation_v4": _write_json(
             project_root, "copy_vault_v4_train", copy_v4
@@ -409,6 +350,11 @@ def run_economic_vnext_pack(
         },
         "paper_read_only": True,
         "real_execution": False,
+        "active_scope": ["copy_vault"],
+        "disabled_scope": {
+            "lead_lag": "DISABLED_BY_SCOPE",
+            "cross_venue_dislocation_v2": "DISABLED_BY_SCOPE",
+        },
     }
     summary_path = _write_json(project_root, "VNext_SUMMARY", summary)
     summary["summary_path"] = summary_path.relative_to(project_root).as_posix()

@@ -13,6 +13,8 @@ from hl_observer.simulation.economic_objective import TARGET_NET_USD
 
 SCHEMA = "alina.economic_memory.v1"
 RELATIVE_PATH = Path("runtime") / "reports" / "economic_memory" / "ECONOMIC_MEMORY.json"
+# Legacy families remain recognized by proof_key/load_exact_proof so archived
+# records stay addressable. New writes are additionally gated by active_scope.
 CANONICAL_FAMILIES = {"copy_vault", "lead_lag", "cross_venue_dislocation_v2"}
 
 
@@ -37,6 +39,34 @@ def _family(value: object) -> str:
     if name not in CANONICAL_FAMILIES:
         raise EconomicMemoryError(f"non canonical family: {name}")
     return name
+
+
+def _active_family_for_write(value: object) -> str:
+    """New writes obey current scope; legacy family keys stay accepted for historical reads."""
+    name = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "cross_venue_dislocation": "cross_venue_dislocation_v2",
+        "cross_venue": "cross_venue_dislocation_v2",
+    }
+    name = aliases.get(name, name)
+    try:
+        from hl_observer.strategies.active_scope import require_active_strategy
+    except Exception as exc:
+        raise EconomicMemoryError("UNMEASURABLE: active strategy scope unavailable") from exc
+    try:
+        active = require_active_strategy(name)
+    except ValueError as exc:
+        raise EconomicMemoryError(str(exc)) from exc
+    return _family(active)
+
+
+def _current_scope_status(family: str) -> str:
+    """Annotate a returned proof copy without changing immutable historical bytes."""
+    try:
+        from hl_observer.strategies.active_scope import strategy_can_materialize
+        return "ACTIVE" if strategy_can_materialize(family) else "DISABLED_BY_SCOPE"
+    except Exception:
+        return "UNMEASURABLE"
 
 
 def _certified_net(value: object, *, label: str) -> float:
@@ -124,9 +154,9 @@ def record_certified_proof(
         raise EconomicMemoryError("incomplete or uncertified proof cannot enter economic memory")
     if paper_only is not True or real_execution is not False:
         raise EconomicMemoryError("only paper/read-only proofs are accepted")
+    fam = _active_family_for_write(family)
     net = _certified_net(net_pnl_usd, label="net_pnl_usd")
     project = _sha(project_sha, 40, "project_sha")
-    fam = _family(family)
     snapshot = _sha(dataset_snapshot_sha256, 64, "dataset_snapshot_sha256")
     config = _sha(config_sha256, 64, "config_sha256")
     runtime = _sha(runtime_proof_sha256, 64, "runtime_proof_sha256")
@@ -198,7 +228,11 @@ def load_exact_proof(
     if record.get("analysis_complete") is not True or record.get("certified") is not True:
         raise EconomicMemoryError("stored proof is not certified complete")
     _certified_net(record.get("net_pnl_usd"), label="stored net_pnl_usd")
-    return dict(record)
+    result = dict(record)
+    scope_status = _current_scope_status(str(result.get("family") or ""))
+    result["current_scope_status"] = scope_status
+    result["current_scope_eligible"] = scope_status == "ACTIVE"
+    return result
 
 
 __all__ = [

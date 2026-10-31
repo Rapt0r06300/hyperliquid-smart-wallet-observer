@@ -312,6 +312,56 @@ def test_daily_net_groups_only_supplied_closed_trades_by_utc_day() -> None:
     assert result["all_days_at_or_above_target"] is True
 
 
+def test_daily_net_target_gate_uses_unrounded_daily_values() -> None:
+    day_ms = 86_400_000
+    start_ms = 1_725_571_200_000
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": start_ms, "net_pnl_usd": 4.999999999},
+            {"exit_ts_ms": start_ms + day_ms, "net_pnl_usd": 4.999999999},
+        ],
+        as_of_ms=start_ms + 3 * day_ms,
+    )
+
+    assert result["days"][0]["net_pnl_usd"] == 4.999999999
+    assert result["days"][0]["at_or_above_target"] is False
+    assert result["min_daily_net_pnl_usd"] == 4.999999999
+    assert result["all_days_at_or_above_target"] is False
+
+
+def test_daily_net_target_gate_uses_decimal_sum_when_float_addition_rounds_up() -> None:
+    day_ms = 86_400_000
+    start_ms = 1_725_571_200_000
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": start_ms, "net_pnl_usd": 4.5},
+            {"exit_ts_ms": start_ms + 1, "net_pnl_usd": 0.4999999999999996},
+            {"exit_ts_ms": start_ms + day_ms, "net_pnl_usd": 5.0},
+        ],
+        as_of_ms=start_ms + 3 * day_ms,
+    )
+
+    assert 4.5 + 0.4999999999999996 == 5.0  # binary float loses the deficit
+    assert result["days"][0]["net_pnl_usd"] < 5.0
+    assert result["days"][0]["at_or_above_target"] is False
+    assert result["all_days_at_or_above_target"] is False
+
+
+def test_daily_net_rejects_boolean_pnl_as_missing_numeric_evidence() -> None:
+    day_ms = 86_400_000
+    start_ms = 1_725_571_200_000
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": start_ms, "net_pnl_usd": True},
+            {"exit_ts_ms": start_ms + day_ms, "net_pnl_usd": 5.0},
+        ],
+        as_of_ms=start_ms + 3 * day_ms,
+    )
+
+    assert result["missing_trade_net"] == 1
+    assert result["all_days_at_or_above_target"] is False
+
+
 def test_daily_net_fails_closed_for_missing_timestamp_or_bad_day() -> None:
     result = evaluate_daily_net(
         [

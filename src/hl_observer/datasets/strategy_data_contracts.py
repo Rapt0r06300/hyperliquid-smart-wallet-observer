@@ -67,12 +67,12 @@ LEAD_LAG_REQUIRED_FAMILIES: dict[str, frozenset[str]] = {
 COPY_VAULT_REQUIRED_FAMILIES: dict[str, frozenset[str]] = {
     "hyperliquid": frozenset(
         {
-            "userFills",
-            "bbo",
-            "l2Book",
-            "trades",
-            "activeAssetCtx",
-            "instrument_metadata",
+            "copy_vault_fills",
+            "copy_vault_bbo",
+            "copy_vault_l2",
+            "copy_vault_trades",
+            "copy_vault_active_asset_ctx",
+            "copy_vault_instrument_metadata",
         }
     )
 }

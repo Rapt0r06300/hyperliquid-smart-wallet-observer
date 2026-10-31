@@ -72,6 +72,11 @@ def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(parsed, maximum))
 
 
+def _exact_nonnegative_count(value: Any) -> int | None:
+    """Accept explicit integer counters only; absent or coerced values stay unknown."""
+    return value if type(value) is int and value >= 0 else None
+
+
 def _output_root(ctx: AdapterContext) -> Path:
     configured = ctx.partition.get("output_root")
     root = Path(str(configured)) if configured else Path.cwd() / "campaign-output"
@@ -475,8 +480,6 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     compressed_bytes = 0
     uncompressed_bytes = 0
     uncompressed_exact_shards = 0
-    bbo_frames = 0
-    l2_manifest_frames = 0
     manifest_count = 0
     trade_shards = 0
     trade_shards_exact = 0
@@ -484,19 +487,45 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     historical_fill_observations = 0
     historical_snapshot_shards_exact = 0
     manifest_paths = index.get("manifests")
+    manifest_set_complete = (
+        isinstance(manifest_paths, list)
+        and _exact_nonnegative_count(index.get("shard_count")) == len(manifest_paths)
+    )
+    manifest_record_count = 0
+    manifest_l2_frames = 0
+    manifest_bbo_frames = 0
+    seen_manifest_paths: set[str] = set()
     if isinstance(manifest_paths, list):
         for rel in manifest_paths:
+            rel_text = str(rel)
+            if rel_text in seen_manifest_paths:
+                manifest_set_complete = False
+                continue
+            seen_manifest_paths.add(rel_text)
             try:
-                row = json.loads((output_root / str(rel)).read_text(encoding="utf-8"))
+                row = json.loads((output_root / rel_text).read_text(encoding="utf-8"))
             except (OSError, ValueError, TypeError):
+                manifest_set_complete = False
                 continue
             if not isinstance(row, dict):
+                manifest_set_complete = False
                 continue
             manifest_count += 1
-            records = _bounded_int(
-                row.get("record_count") or row.get("event_count"), 0, 0, 2**63 - 1
-            )
+            raw_records = row.get("record_count")
+            if raw_records is None:
+                raw_records = row.get("event_count")
+            records = _exact_nonnegative_count(raw_records)
+            if records is None:
+                manifest_set_complete = False
+                records = 0
+            if (
+                row.get("record_count") is not None
+                and row.get("event_count") is not None
+                and _exact_nonnegative_count(row.get("event_count")) != records
+            ):
+                manifest_set_complete = False
             record_count += records
+            manifest_record_count += records
             compressed_bytes += _bounded_int(row.get("bytes"), 0, 0, 2**63 - 1)
             if row.get("uncompressed_size_exact") is True:
                 uncompressed_exact_shards += 1
@@ -504,6 +533,8 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                     row.get("uncompressed_bytes"), 0, 0, 2**63 - 1
                 )
             family = str(row.get("family") or "").lower()
+            if not family:
+                manifest_set_complete = False
             if family == "copy_vault_snapshot":
                 historical_snapshot_shards += 1
                 if row.get("historical_fill_observation_count_exact") is True:
@@ -515,9 +546,9 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                         2**63 - 1,
                     )
             if family in {"l2book", "copy_vault_l2", "native_market"}:
-                l2_manifest_frames += records
+                manifest_l2_frames += records
             elif family == "bbo":
-                bbo_frames += records
+                manifest_bbo_frames += records
             if family in {
                 "trades",
                 "agg_trades",
@@ -535,9 +566,30 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
 
     drops = summary.get("queue_drops")
     if isinstance(drops, dict):
-        queue_drops = sum(_bounded_int(v, 0, 0, 2**63 - 1) for v in drops.values())
+        exact_drops = [_exact_nonnegative_count(value) for value in drops.values()]
+        queue_drops_exact = all(value is not None for value in exact_drops)
+        queue_drops = sum(exact_drops) if queue_drops_exact else None
     else:
-        queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
+        queue_drops = _exact_nonnegative_count(drops)
+        queue_drops_exact = queue_drops is not None
+
+    accepted_frames = _exact_nonnegative_count(summary.get("accepted_frames"))
+    persisted_frames = _exact_nonnegative_count(summary.get("persisted_frames"))
+    summary_l2_frames = _exact_nonnegative_count(summary.get("l2_frames"))
+    l2_frames_exact = (
+        summary_l2_frames is None
+        or summary_l2_frames == manifest_l2_frames
+    )
+    l2_frames = manifest_l2_frames if manifest_set_complete else None
+    frame_metrics_complete = bool(
+        manifest_set_complete
+        and manifest_count == len(manifest_paths)
+        and accepted_frames is not None
+        and persisted_frames is not None
+        and queue_drops_exact
+        and l2_frames_exact
+        and persisted_frames == manifest_record_count
+    )
 
     metrics = {
         "started_at_ms": _bounded_int(
@@ -560,18 +612,12 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
             historical_snapshot_shards == historical_snapshot_shards_exact
         ),
         "record_count_observed": record_count,
-        "accepted_frames": _bounded_int(
-            summary.get("accepted_frames"), 0, 0, 2**63 - 1
-        ),
-        "persisted_frames": _bounded_int(
-            summary.get("persisted_frames"), 0, 0, 2**63 - 1
-        ),
-        "l2_frames": max(
-            l2_manifest_frames,
-            _bounded_int(summary.get("l2_frames"), 0, 0, 2**63 - 1),
-        ),
-        "bbo_frames": bbo_frames,
+        "accepted_frames": accepted_frames if frame_metrics_complete else None,
+        "persisted_frames": persisted_frames if frame_metrics_complete else None,
+        "l2_frames": l2_frames if frame_metrics_complete else None,
+        "bbo_frames": manifest_bbo_frames if frame_metrics_complete else None,
         "queue_drops": queue_drops,
+        "frame_metrics_complete": frame_metrics_complete,
         "shard_count": _bounded_int(index.get("shard_count"), 0, 0, 2**63 - 1),
         "safe_count": _bounded_int(index.get("safe_count"), 0, 0, 2**63 - 1),
         "partial_count": _bounded_int(

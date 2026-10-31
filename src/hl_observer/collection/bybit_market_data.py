@@ -145,7 +145,9 @@ class BybitMarketState:
             return self._desync("SYMBOL_MISMATCH")
 
         meta = _transport(payload)
-        received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
+        received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms"))
+        if received is None or received <= 0:
+            return self._desync("MISSING_RECEIVE_TIMESTAMP")
         receive_mono = _int(meta.get("receive_mono_ns"))
         connection_id = str(meta.get("connection_id") or "") or None
         connection_changed = bool(
@@ -240,16 +242,6 @@ class BybitMarketState:
         self.open_interest = _coalesce_float(item.get("openInterest"), self.open_interest)
         self.funding_rate = _coalesce_float(item.get("fundingRate"), self.funding_rate)
         self.funding_interval_hours = _coalesce_float(item.get("fundingIntervalHour"), self.funding_interval_hours)
-        self.exchange_ts_ms = _int(payload.get("ts")) or self.exchange_ts_ms
-        self.receive_ts_ms = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or self.receive_ts_ms or int(time.time() * 1000)
-        self.receive_mono_ns = _int(meta.get("receive_mono_ns")) or self.receive_mono_ns
-        self.connection_id = str(meta.get("connection_id") or "") or self.connection_id
-        parsed_rtt = _float(meta.get("transport_rtt_ms"))
-        if parsed_rtt is not None:
-            self.transport_rtt_ms = parsed_rtt
-        parsed_offset = _float(meta.get("clock_offset_ms"))
-        if parsed_offset is not None:
-            self.clock_offset_ms = parsed_offset
         return self.quality
 
     def snapshot(self, *, now_ms: int | None = None, depth: int = 200) -> NativeMarketSnapshot:

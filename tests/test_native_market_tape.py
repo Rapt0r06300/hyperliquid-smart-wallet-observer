@@ -416,14 +416,14 @@ def test_gate_reconstructed_book_reanchors_on_authoritative_full_snapshot():
             "a": [{"p": str(bid + 2), "s": "2"}],
             "full": full,
         }
-    state.apply_book(depth(1, 2, 100, full=True))
+    state.apply_book(depth(1, 2, 100, full=True), receive_ts_ms=1003)
     assert state.sequence == 2
-    state.apply_book(depth(100, 101, 200, full=True))
+    state.apply_book(depth(100, 101, 200, full=True), receive_ts_ms=1102)
     assert state.sequence == 101
     assert 100 not in state.bids
     assert 200 in state.bids
     assert state.gap_count == 0
-    state.apply_book(depth(105, 106, 201))
+    state.apply_book(depth(105, 106, 201), receive_ts_ms=1107)
     assert state.gap_count == 1  # A real post-snapshot delta gap remains fatal.
 
 
@@ -433,9 +433,11 @@ def test_gate_malformed_full_snapshot_does_not_destroy_previous_causal_book():
     state.apply_book({
         "U": 1, "u": 2, "b": [{"p": "100", "s": "2"}],
         "a": [{"p": "102", "s": "2"}], "t": 1002, "full": True,
-    })
+    }, receive_ts_ms=1003)
     before = dict(state.bids), dict(state.asks), state.sequence
-    result = state.apply_book({"full": True, "U": 100, "u": 101, "b": [], "a": []})
+    result = state.apply_book({
+        "full": True, "U": 100, "u": 101, "b": [], "a": [], "t": 1003,
+    }, receive_ts_ms=1004)
     assert result != "EXPLOITABLE"
     assert (state.bids, state.asks, state.sequence) == before
     # The retained book is diagnostic only; invalid re-anchors must not
@@ -443,6 +445,6 @@ def test_gate_malformed_full_snapshot_does_not_destroy_previous_causal_book():
     assert state.apply_book({
         "U": 3, "u": 4,
         "b": [{"p": "100", "s": "2"}],
-        "a": [{"p": "102", "s": "2"}],
-    }) != "EXPLOITABLE"
+        "a": [{"p": "102", "s": "2"}], "t": 1004,
+    }, receive_ts_ms=1005) != "EXPLOITABLE"
     assert (state.bids, state.asks, state.sequence) == before

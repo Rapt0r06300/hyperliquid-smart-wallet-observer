@@ -61,7 +61,9 @@ def canonical_metaorder_id(
 
     material = {
         "vault": str(vault or "").lower(),
-        "coin": str(coin or "").upper(),
+        # Hyperliquid native symbols are case-sensitive (and HIP-3 symbols
+        # carry a DEX prefix). Preserve source identity to prevent collisions.
+        "coin": str(coin or "").strip(),
         "direction": int(direction),
         "signal_ts_ms": int(signal_ts_ms),
         "first_event_id": str(first_event_id or ""),
@@ -106,7 +108,7 @@ def protocol_signature() -> dict[str, Any]:
         "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
         "checkpoint_writer_state_schema": CHECKPOINT_WRITER_STATE_SCHEMA,
         "checkpoint_integrity_schema": CHECKPOINT_INTEGRITY_SCHEMA,
-        "metaorder_identity_policy": "immutable_first_observed_fill",
+        "metaorder_identity_policy": "immutable_first_observed_fill_exact_native_symbol",
         "checkpoint_binding_policy": "exact_metaorder_stage_and_protocol",
         "metaorder_gap_ms": METAORDER_GAP_MS,
         "copy_delay_ms": COPY_DELAY_MS,

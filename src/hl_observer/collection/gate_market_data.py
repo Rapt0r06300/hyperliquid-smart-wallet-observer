@@ -103,6 +103,25 @@ class GateMarketState:
     def apply_book(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
         meta = payload.get("_alina_transport")
         transport = dict(meta) if isinstance(meta, Mapping) else {}
+        exchange_ts = _epoch_ms(
+            payload.get("time_ms") or payload.get("t")
+            or payload.get("time") or payload.get("current")
+        )
+        received = receive_ts_ms or _i(transport.get("receive_wall_ts_ms"))
+        if exchange_ts is None or received is None or received <= 0:
+            self.bids.clear()
+            self.asks.clear()
+            self.sequence = None
+            self.rest_anchor_pending = False
+            self.last_ws_delta_signature = None
+            self.exchange_ts_ms = 0
+            self.receive_ts_ms = 0 if received is None or received <= 0 else received
+            self.quality = UNMEASURABLE
+            self.reason = (
+                "MISSING_EXCHANGE_TIMESTAMP" if exchange_ts is None
+                else "MISSING_RECEIVE_TIMESTAMP"
+            )
+            return self.quality
         first = _i(payload.get("U") or payload.get("first_update_id"))
         last = _i(payload.get("u") or payload.get("last_update_id") or payload.get("id"))
         # Gate sends an explicit 'full' marker when a payload is a complete
@@ -244,8 +263,8 @@ class GateMarketState:
         self.sequence = last if last is not None else self.sequence
         if not is_full_snapshot:
             self.last_ws_delta_signature = signature
-        self.exchange_ts_ms = _epoch_ms(payload.get("time_ms") or payload.get("t") or payload.get("time")) or self.exchange_ts_ms
-        self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
+        self.exchange_ts_ms = exchange_ts
+        self.receive_ts_ms = received
         self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
         self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
         if transport.get("transport_rtt_ms") is not None:

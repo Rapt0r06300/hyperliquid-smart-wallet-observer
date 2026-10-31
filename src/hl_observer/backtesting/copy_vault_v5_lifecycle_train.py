@@ -86,7 +86,7 @@ def index_causal_leader_exits(
             continue
         row = dict(raw)
         row["action"] = str(row["action"]).upper()
-        row["coin"] = str(row["coin"]).upper()
+        row["coin"] = str(row["coin"]).strip()
         row["vault"] = str(row["vault"])
         row["direction"] = int(row["direction"])
         row["observed_at_ms"] = int(row["observed_at_ms"])
@@ -124,7 +124,7 @@ def _continuous_causal_books(
         ]
         rows.sort(key=lambda row: int(row.get("ts_ms") or 0))
         if rows:
-            selected[str(raw_coin).upper()] = rows
+            selected[str(raw_coin).strip()] = rows
     return selected
 
 
@@ -175,7 +175,7 @@ def _replay_selected(
         if signal_ms < int(train_start_ms) or signal_ms > int(train_end_ms):
             continue
         counters["metaorders_considered"] += 1
-        coin = str(metaorder.get("coin") or "").upper()
+        coin = str(metaorder.get("coin") or "").strip()
         books = continuous_books.get(coin, [])
         entry = _first_book_at_or_after(books, signal_ms + COPY_DELAY_MS)
         if entry is None:

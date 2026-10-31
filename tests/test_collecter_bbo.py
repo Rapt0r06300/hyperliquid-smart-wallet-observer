@@ -77,6 +77,45 @@ def test_parser_bbo_hl():
     assert m.parser_bbo_hl({"channel": "trades"}) is None     # autre canal -> None
 
 
+def test_exchange_event_timestamp_is_never_substituted_with_receive_time():
+    m = _mod()
+    assert m.parser_bbo_hl({
+        "channel": "bbo",
+        "data": {"coin": "ETH", "bbo": [{"px": "100", "sz": "1"}, {"px": "101", "sz": "2"}]},
+    })["ts_ex"] is None
+    assert m.parser_bbo_hl({
+        "channel": "bbo",
+        "data": {"coin": "ETH", "time": 0, "bbo": [{"px": "100", "sz": "1"}, {"px": "101", "sz": "2"}]},
+    })["ts_ex"] is None
+    book = m.parser_l2_hl({
+        "channel": "l2Book",
+        "data": {"coin": "ETH", "levels": [[{"px": "100", "sz": "1"}], [{"px": "101", "sz": "2"}]]},
+    })
+    assert book["ts_ex"] is None
+    assert m.parser_bookticker_binance({
+        "s": "ETHUSDT", "b": "100", "a": "101", "B": "1", "A": "2",
+    })["ts_ex"] is None
+    assert m.parser_aggtrade_binance({
+        "e": "trade", "s": "ETHUSDT", "p": "100", "q": "1", "m": False,
+    })["ts_ex"] is None
+
+
+def test_atomic_bbo_requires_exchange_timestamps_on_both_venues():
+    m = _mod()
+    mag = m.MagasinBBO()
+    mag.maj_hl(
+        {"coin": "ETH", "bid": 100, "ask": 101, "bid_sz": 2, "ask_sz": 2, "ts_ex": None},
+        recu_mono_ns=_NS, recu_wall_ms=1000,
+    )
+    mag.maj_binance(
+        {"symbol": "ETHUSDT", "bid": 99, "ask": 100, "bid_sz": 2, "ask_sz": 2, "ts_ex": 999},
+        "ETH", recu_mono_ns=_NS, recu_wall_ms=1000,
+    )
+    snapshot = mag.snapshot("ETH", now_mono_ns=_NS, ts_wall_ms=1000)
+    assert snapshot is not None
+    assert snapshot["atomic_bbo_certified"] is False
+
+
 def test_binance_ws_candidates_include_documented_mainnet_failover():
     m = _mod()
     assert m.BINANCE_PUBLIC_WS_CANDIDATES == (

@@ -139,6 +139,9 @@ def test_load_plans_top_family_ladder_and_targets(tmp_path) -> None:
     assert policy._top_family(decisions) == "copy_vault"
     assert policy._top_family([]) is None
     assert policy.suite_ladder("copy_vault")[1] == "copy-vault-full"
+    assert policy._top_family([{"family": "lead_lag", "priority": 100}]) is None
+    assert policy.suite_ladder("lead_lag")[1] == "copy-vault-full"
+    assert not ({"lead-lag-full", "cross-venue-full"} & set(policy.suite_ladder(None)))
     assert len(policy.suite_ladder(None)) == len(set(policy.suite_ladder(None)))
     frozen = [{"family": family, "phase": "FREEZE_AND_CONFIRM_FORWARD"} for family in policy.REQUIRED_FAMILIES]
     assert policy.targets_reached_from_brain(frozen) is True
@@ -152,8 +155,18 @@ def test_choose_max_data_job_all_outcomes() -> None:
         "economic-full": {"missing_asset_count": 0, "remaining_download_gib": 3},
         "copy-vault-full": {"missing_asset_count": 0, "download_gib": 2},
     }
-    stop = policy.choose_max_data_job(
+    not_a_proof = policy.choose_max_data_job(
         family_decisions=decisions, suite_plans=plans, free_disk_gib=100,
+        all_targets_reached=True,
+    )
+    assert not_a_proof["status"] == "READY"
+    assert not_a_proof["recommended_suite"] == "economic-full"
+
+    stop = policy.choose_max_data_job(
+        family_decisions=[{"family": "copy_vault", "phase": "FREEZE_AND_CONFIRM_FORWARD"}],
+        suite_plans=plans,
+        completed_suites=policy.suite_ladder("copy_vault"),
+        free_disk_gib=100,
         all_targets_reached=True,
     )
     assert stop["status"] == "STOP_PROOF_REACHED"
@@ -203,7 +216,7 @@ def test_write_decision_and_main_ready_and_no_go(monkeypatch, tmp_path, capsys) 
     }
     json_path, md_path = policy.write_decision(tmp_path / "out", decision)
     assert json.loads(json_path.read_text())["status"] == "READY"
-    assert "Compensation entre familles" in md_path.read_text()
+    assert "Copy-Vault uniquement" in md_path.read_text()
 
     brain = tmp_path / "brain.json"
     brain.write_text(json.dumps({"family_decisions": [{"family": "copy_vault", "phase": "EXPLORE"}]}), encoding="utf-8")

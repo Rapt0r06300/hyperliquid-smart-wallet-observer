@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import math
 import uuid
+from copy import copy
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from hashlib import sha256
 
+from hl_observer.economics.numeric import USD_RECONCILIATION_ABS_TOLERANCE
 from hl_observer.simulation.accounting_truth import first_not_none, named_roi_metrics
 from hl_observer.simulation.capital_accounting import (
     CapitalAccountingSnapshot,
@@ -13,7 +15,12 @@ from hl_observer.simulation.capital_accounting import (
     PositionCapitalInput,
 )
 from hl_observer.simulation.fee_model import compute_fee_usdc
-from hl_observer.simulation.ledger_integrity import GENESIS_HASH, seal_event, verify_chain
+from hl_observer.simulation.ledger_integrity import (
+    GENESIS_HASH,
+    canonical_json,
+    seal_event,
+    verify_chain,
+)
 from hl_observer.simulation.paper_event import PaperEvent, PaperEventType
 from hl_observer.simulation.pnl_ledger_audit import audit_paper_ledger
 from hl_observer.simulation.pnl_reconciliation import PnlReconciliation, reconcile_pnl
@@ -439,50 +446,128 @@ class PaperLedger:
         timestamp_ms: int,
         refs: dict | None = None,
     ) -> PaperEvent:
+        timestamp_ms = _require_timestamp_ms(timestamp_ms)
         try:
             funding_amount = float(amount_usdc)
         except (TypeError, ValueError, OverflowError):
-            return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
-        if not math.isfinite(funding_amount):
-            return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
-        funding_refs = dict(refs or {})
-        settlement_id = _funding_settlement_id(funding_refs)
-        if settlement_id is None:
-            # Retain the amount for legacy/diagnostic continuity, but never let
-            # an unidentified cash flow certify economic PnL.
-            self.funding_evidence_complete = False
-            funding_refs["funding_identity_status"] = "UNIDENTIFIED_DIAGNOSTIC_ONLY"
-        else:
-            if settlement_id in self.funding_settlement_ids:
-                return self.no_trade(
-                    coin=coin,
-                    reason="DUPLICATE_FUNDING_SETTLEMENT",
-                    timestamp_ms=timestamp_ms,
-                    refs={
-                        **funding_refs,
-                        "funding_settlement_id": settlement_id,
-                        "funding_identity_status": "DUPLICATE_REJECTED",
-                    },
-                )
-            self.funding_settlement_ids.add(settlement_id)
-            funding_refs["funding_settlement_id"] = settlement_id
-            funding_refs["funding_identity_status"] = "EXACTLY_ONCE_IDENTIFIED"
-        self.funding_net_usdc += funding_amount
-        cash = first_not_none(self.cash_balance_usdc, 0.0)
-        self.cash_balance_usdc = float(cash) + funding_amount
-        event_type = PaperEventType.FUNDING_RECEIVED if funding_amount >= 0 else PaperEventType.FUNDING_CHARGED
-        appended = self._append(
-            PaperEvent.create(
-                event_type,
+            return self.no_trade(
+                coin=coin,
+                reason="FUNDING_INVALID",
                 timestamp_ms=timestamp_ms,
-                coin=str(coin).upper(),
-                side=str(side).upper(),
-                funding_usdc=funding_amount,
-                refs=funding_refs,
+                refs={"funding_refusal": "INVALID_AMOUNT"},
             )
+        if not math.isfinite(funding_amount):
+            return self.no_trade(
+                coin=coin,
+                reason="FUNDING_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={"funding_refusal": "INVALID_AMOUNT"},
+            )
+        try:
+            funding_refs = dict(refs or {})
+            settlement_id = _funding_settlement_id(funding_refs)
+        except Exception as exc:
+            return self.no_trade(
+                coin=coin,
+                reason="FUNDING_REFS_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={"failure_type": type(exc).__name__},
+            )
+
+        if settlement_id is not None and settlement_id in self.funding_settlement_ids:
+            return self.no_trade(
+                coin=coin,
+                reason="DUPLICATE_FUNDING_SETTLEMENT",
+                timestamp_ms=timestamp_ms,
+                refs={
+                    "funding_settlement_id": settlement_id,
+                    "funding_identity_status": "DUPLICATE_REJECTED",
+                },
+            )
+
+        funding_refs["funding_identity_status"] = (
+            "EXACTLY_ONCE_IDENTIFIED"
+            if settlement_id is not None
+            else "UNIDENTIFIED_DIAGNOSTIC_ONLY"
         )
-        self._observe_capital()
-        return appended
+        if settlement_id is not None:
+            funding_refs["funding_settlement_id"] = settlement_id
+
+        cash = float(first_not_none(self.cash_balance_usdc, 0.0))
+        next_funding = self.funding_net_usdc + funding_amount
+        next_cash = cash + funding_amount
+        next_realized_pnl = next_cash - self.starting_balance_usdc
+        if not all(
+            math.isfinite(value)
+            for value in (next_funding, next_cash, next_realized_pnl)
+        ):
+            return self.no_trade(
+                coin=coin,
+                reason="FUNDING_AGGREGATE_NON_FINITE",
+                timestamp_ms=timestamp_ms,
+                refs={
+                    "funding_settlement_id": settlement_id,
+                    "funding_identity_status": "REJECTED_BEFORE_MUTATION",
+                },
+            )
+
+        event_type = PaperEventType.FUNDING_RECEIVED if funding_amount >= 0 else PaperEventType.FUNDING_CHARGED
+        try:
+            prepared_event = self._prepare_append(
+                PaperEvent.create(
+                    event_type,
+                    timestamp_ms=timestamp_ms,
+                    coin=str(coin).upper(),
+                    side=str(side).upper(),
+                    funding_usdc=funding_amount,
+                    refs=funding_refs,
+                )
+            )
+        except Exception as exc:
+            return self.no_trade(
+                coin=coin,
+                reason="FUNDING_EVIDENCE_INVALID",
+                timestamp_ms=timestamp_ms,
+                refs={
+                    "failure_type": type(exc).__name__,
+                    "funding_settlement_id": settlement_id,
+                },
+            )
+
+        candidate_tracker = copy(self.capital_tracker)
+        try:
+            candidate_snapshot = candidate_tracker.observe(
+                collateral_cash_usd=next_cash,
+                positions=tuple(
+                    position.capital_input()
+                    for position in self.positions.values()
+                ),
+                realized_pnl_usd=next_realized_pnl,
+                turnover_usd=self.turnover_usdc,
+            )
+            canonical_json(candidate_snapshot.to_dict())
+        except Exception as exc:
+            return self.no_trade(
+                coin=coin,
+                reason="FUNDING_CAPITAL_PREVALIDATION_FAILED",
+                timestamp_ms=timestamp_ms,
+                refs={
+                    "failure_type": type(exc).__name__,
+                    "funding_settlement_id": settlement_id,
+                },
+            )
+
+        # All fallible calculations, serialization and hash sealing are complete.
+        # Publish the financial state only after every candidate component passed.
+        self.funding_net_usdc = next_funding
+        self.cash_balance_usdc = next_cash
+        if settlement_id is None:
+            self.funding_evidence_complete = False
+        else:
+            self.funding_settlement_ids.add(settlement_id)
+        self.capital_tracker = candidate_tracker
+        self.events.append(prepared_event)
+        return prepared_event
 
     def no_trade(
         self,
@@ -502,7 +587,11 @@ class PaperLedger:
             )
         )
 
-    def reconciliation(self, *, tolerance_usdc: float = 0.0001) -> PnlReconciliation:
+    def reconciliation(
+        self,
+        *,
+        tolerance_usdc: float = float(USD_RECONCILIATION_ABS_TOLERANCE),
+    ) -> PnlReconciliation:
         return reconcile_pnl(
             starting_balance_usdc=self.starting_balance_usdc,
             realized_pnl_usdc=self.realized_pnl_usdc,
@@ -634,7 +723,7 @@ class PaperLedger:
             )
         )
 
-    def _append(self, event: PaperEvent) -> PaperEvent:
+    def _prepare_append(self, event: PaperEvent) -> PaperEvent:
         if any(existing.event_id == event.event_id for existing in self.events):
             collision_material = (
                 f"{self.session_id}|{event.event_id}|{len(self.events) + 1}"
@@ -657,6 +746,10 @@ class PaperLedger:
             prev_hash=str(row["prev_hash"]),
             event_hash=str(row["event_hash"]),
         )
+        return sealed
+
+    def _append(self, event: PaperEvent) -> PaperEvent:
+        sealed = self._prepare_append(event)
         self.events.append(sealed)
         return sealed
 
@@ -731,6 +824,12 @@ def _funding_settlement_id(refs: dict[str, object]) -> str | None:
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def _require_timestamp_ms(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("timestamp_ms must be an explicit positive causal timestamp")
+    return value
 
 
 def _finite_positive(value: object) -> bool:

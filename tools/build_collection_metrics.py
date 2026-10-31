@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping
+from contextlib import suppress
+from html import escape
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 CAMPAIGNS = ROOT / "catalog" / "campaigns"
@@ -31,6 +34,13 @@ TRADE_FAMILIES = {
     "user_fills",
     "copy_vault_fills",
 }
+FRAME_METRIC_FIELDS = (
+    "accepted_frames",
+    "persisted_frames",
+    "l2_frames",
+    "bbo_frames",
+    "queue_drops",
+)
 
 
 def _int(value: Any) -> int:
@@ -40,10 +50,30 @@ def _int(value: Any) -> int:
         return 0
 
 
+def _exact_nonnegative_int(value: Any) -> int | None:
+    """Return only explicit integer evidence; never coerce missing values to zero."""
+    return value if type(value) is int and value >= 0 else None
+
+
+def _normalize_frame_metrics(compact: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(compact)
+    exact_fields = {
+        name: _exact_nonnegative_int(compact.get(name))
+        for name in FRAME_METRIC_FIELDS
+    }
+    complete = (
+        compact.get("frame_metrics_complete") is True
+        and all(value is not None for value in exact_fields.values())
+    )
+    normalized.update(exact_fields)
+    normalized["frame_metrics_complete"] = complete
+    return normalized
+
+
 def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     metrics = result.get("collection_metrics")
     if isinstance(metrics, Mapping):
-        compact = dict(metrics)
+        compact = _normalize_frame_metrics(metrics)
         # A compact checkpoint carrying an explicit non-negative trade total
         # is itself exact count evidence unless the producer explicitly marks
         # its coverage incomplete.
@@ -95,10 +125,11 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     live_fills = summary.get("live_fill_counts")
     if isinstance(live_fills, Mapping):
         live_total = sum(_int(v) for v in live_fills.values())
-        if reference_fills or reconciliation_complete:
-            trade_count = reference_fills
-        else:
-            trade_count = live_total
+        trade_count = (
+            reference_fills
+            if reference_fills or reconciliation_complete
+            else live_total
+        )
 
     bundle = summary.get("bundle_index")
     if not isinstance(bundle, Mapping):
@@ -108,7 +139,10 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
 
     drops = summary.get("queue_drops")
     if isinstance(drops, Mapping):
-        drops = sum(_int(v) for v in drops.values())
+        exact_drops = [_exact_nonnegative_int(value) for value in drops.values()]
+        drops = sum(exact_drops) if all(value is not None for value in exact_drops) else None
+    else:
+        drops = _exact_nonnegative_int(drops)
 
     fallback_trade_coverage = (
         reconciliation_complete
@@ -116,14 +150,15 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
         else not trade_assets_seen
     )
 
-    return {
+    compact = {
         "trade_count_observed": trade_count,
         "trade_count_coverage_complete": fallback_trade_coverage,
         "record_count_observed": record_count,
-        "accepted_frames": _int(summary.get("accepted_frames")),
-        "persisted_frames": _int(summary.get("persisted_frames")),
-        "l2_frames": _int(summary.get("l2_frames")),
-        "queue_drops": _int(drops),
+        "accepted_frames": _exact_nonnegative_int(summary.get("accepted_frames")),
+        "persisted_frames": _exact_nonnegative_int(summary.get("persisted_frames")),
+        "l2_frames": _exact_nonnegative_int(summary.get("l2_frames")),
+        "bbo_frames": _exact_nonnegative_int(summary.get("bbo_frames")),
+        "queue_drops": drops,
         "shard_count": _int(bundle.get("shard_count")),
         "safe_count": _int(bundle.get("safe_count")),
         "partial_count": _int(bundle.get("partial_count")),
@@ -134,10 +169,12 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
             if isinstance(reconciliation, Mapping)
             else "collection_summary_trade_events"
         ),
+        "frame_metrics_complete": summary.get("frame_metrics_complete") is True,
     }
+    return _normalize_frame_metrics(compact)
 
 
-def _empty_bucket() -> dict[str, int]:
+def _empty_bucket() -> dict[str, Any]:
     return {
         "durable_units": 0,
         "trades_observed": 0,
@@ -157,6 +194,8 @@ def _empty_bucket() -> dict[str, int]:
         "compressed_bytes": 0,
         "uncompressed_bytes": 0,
         "units_missing_compact_metrics": 0,
+        "units_frame_metrics_complete": 0,
+        "units_frame_metrics_incomplete": 0,
         "units_uncompressed_coverage_incomplete": 0,
         "units_trade_count_coverage_incomplete": 0,
     }
@@ -164,7 +203,7 @@ def _empty_bucket() -> dict[str, int]:
 
 def build() -> dict[str, Any]:
     totals = _empty_bucket()
-    by_kind: dict[str, dict[str, int]] = {}
+    by_kind: dict[str, dict[str, Any]] = {}
     campaign_statuses: Counter[str] = Counter()
     admission_reasons: Counter[str] = Counter()
     admission_seen_units = 0
@@ -237,6 +276,8 @@ def build() -> dict[str, Any]:
             if compact is None:
                 totals["units_missing_compact_metrics"] += 1
                 bucket["units_missing_compact_metrics"] += 1
+                totals["units_frame_metrics_incomplete"] += 1
+                bucket["units_frame_metrics_incomplete"] += 1
                 if kind != "event_intelligence_collection":
                     totals["units_trade_count_coverage_incomplete"] += 1
                     bucket["units_trade_count_coverage_incomplete"] += 1
@@ -248,6 +289,13 @@ def build() -> dict[str, Any]:
             if compact.get("uncompressed_size_coverage_complete") is not True:
                 totals["units_uncompressed_coverage_incomplete"] += 1
                 bucket["units_uncompressed_coverage_incomplete"] += 1
+
+            if compact.get("frame_metrics_complete") is True:
+                totals["units_frame_metrics_complete"] += 1
+                bucket["units_frame_metrics_complete"] += 1
+            else:
+                totals["units_frame_metrics_incomplete"] += 1
+                bucket["units_frame_metrics_incomplete"] += 1
 
             fields = {
                 "trades_observed": "trade_count_observed",
@@ -265,9 +313,24 @@ def build() -> dict[str, Any]:
                 "uncompressed_bytes": "uncompressed_bytes",
             }
             for target, source in fields.items():
+                if target in FRAME_METRIC_FIELDS and compact.get("frame_metrics_complete") is not True:
+                    continue
                 value = _int(compact.get(source))
                 totals[target] += value
                 bucket[target] += value
+
+    def finalize_frame_metrics(bucket: dict[str, Any]) -> None:
+        complete_units = bucket["units_frame_metrics_complete"]
+        incomplete_units = bucket["units_frame_metrics_incomplete"]
+        complete = complete_units > 0 and incomplete_units == 0
+        bucket["frame_metrics_complete"] = complete
+        if not complete:
+            for field in FRAME_METRIC_FIELDS:
+                bucket[field] = None
+
+    finalize_frame_metrics(totals)
+    for bucket in by_kind.values():
+        finalize_frame_metrics(bucket)
 
     indexed: dict[str, Any] = {}
     try:
@@ -303,18 +366,27 @@ def build() -> dict[str, Any]:
         "campaign_status_counts": dict(sorted(campaign_statuses.items())),
         "instant": {
             "trades_collected_observed": totals["trades_observed"],
+            "accepted_frames": totals["accepted_frames"],
             "persisted_frames": totals["persisted_frames"],
+            "queue_drops": totals["queue_drops"],
             "shards_published": totals["shards"],
             "compressed_bytes_known": totals["compressed_bytes"],
             "uncompressed_bytes_known": totals["uncompressed_bytes"],
             "l2_frames": totals["l2_frames"],
             "bbo_frames": totals["bbo_frames"],
+            "frame_metrics_complete": totals["frame_metrics_complete"],
             "coverage_complete": totals["units_trade_count_coverage_incomplete"] == 0,
             "uncompressed_coverage_complete": (
                 totals["units_uncompressed_coverage_incomplete"] == 0
             ),
-            "all_collection_metrics_complete": totals["units_missing_compact_metrics"] == 0,
+            "all_collection_metrics_complete": (
+                totals["units_missing_compact_metrics"] == 0
+                and totals["frame_metrics_complete"]
+                and totals["units_trade_count_coverage_incomplete"] == 0
+                and totals["units_uncompressed_coverage_incomplete"] == 0
+            ),
             "units_missing_compact_metrics": totals["units_missing_compact_metrics"],
+            "units_frame_metrics_incomplete": totals["units_frame_metrics_incomplete"],
             "units_trade_count_coverage_incomplete": (
                 totals["units_trade_count_coverage_incomplete"]
             ),
@@ -362,14 +434,91 @@ def build() -> dict[str, Any]:
 
 
 def _write_atomic(payload: Mapping[str, Any]) -> None:
-    """Persist metrics without ever exposing a partially written JSON file."""
+    """Publish the machine-readable snapshot and its matching human-readable view."""
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUTPUT.with_suffix(OUTPUT.suffix + ".tmp")
-    tmp.write_text(
+    html_output = OUTPUT.with_suffix(".html")
+    html_tmp = html_output.with_suffix(html_output.suffix + ".tmp")
+    json_tmp = OUTPUT.with_suffix(OUTPUT.suffix + ".tmp")
+    html_tmp.write_text(_render_html(payload), encoding="utf-8")
+    json_tmp.write_text(
         json.dumps(dict(payload), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    tmp.replace(OUTPUT)
+    html_tmp.replace(html_output)
+    json_tmp.replace(OUTPUT)
+
+
+def _render_html(payload: Mapping[str, Any]) -> str:
+    instant = payload.get("instant")
+    instant = instant if isinstance(instant, Mapping) else {}
+    totals = payload.get("totals")
+    totals = totals if isinstance(totals, Mapping) else {}
+    by_kind = payload.get("by_kind")
+    by_kind = by_kind if isinstance(by_kind, Mapping) else {}
+
+    def show(value: Any) -> str:
+        if value is None:
+            return "Non mesurable"
+        if isinstance(value, bool):
+            return "Oui" if value else "Non"
+        return escape(str(value))
+
+    labels = {
+        "accepted_frames": "Frames acceptées",
+        "persisted_frames": "Frames persistées",
+        "l2_frames": "Frames L2",
+        "bbo_frames": "Frames BBO",
+        "queue_drops": "Pertes de file",
+    }
+    rows = "".join(
+        f'<tr><th scope="row">{escape(label)}</th>'
+        f'<td>{show(instant.get(key))}</td></tr>'
+        for key, label in labels.items()
+    )
+    kind_rows: list[str] = []
+    for kind, values in sorted(by_kind.items(), key=lambda item: str(item[0])):
+        if not isinstance(values, Mapping):
+            continue
+        values_html = "".join(
+            f"<td>{show(values.get(key))}</td>" for key in labels
+        )
+        kind_rows.append(
+            f'<tr><th scope="row">{escape(str(kind))}</th>{values_html}</tr>'
+        )
+    kind_headers = "".join(
+        f"<th>{escape(label)}</th>" for label in labels.values()
+    )
+    kind_body = "".join(kind_rows) or (
+        '<tr><td colspan="6">Aucune unité durable</td></tr>'
+    )
+    kind_table = (
+        f"<table><thead><tr><th>Collecteur</th>{kind_headers}</tr></thead>"
+        f"<tbody>{kind_body}</tbody></table>"
+    )
+    incomplete = int(totals.get("units_frame_metrics_incomplete") or 0)
+    completeness = (
+        "Métriques de frames complètes"
+        if instant.get("frame_metrics_complete") is True
+        else f"{incomplete} unité(s) avec métriques de frames incomplètes ; "
+        "les totaux inconnus restent non mesurables."
+    )
+    state_color = "#55d6a3" if instant.get("frame_metrics_complete") is True else "#ffc857"
+    return f"""<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Métriques de collecte Copy-Vault</title>
+<style>
+body{{font:16px system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;background:#0b1220;color:#e5edf8}}
+section{{background:#121e31;border:1px solid #2b4264;border-radius:12px;padding:1.2rem;margin:1rem 0}}
+h1,h2{{color:#f3f7fd}}table{{border-collapse:collapse;width:100%}}th,td{{text-align:left;padding:.7rem;border-bottom:1px solid #2b4264}}
+.state{{font-weight:700;color:{state_color}}}.muted{{color:#aabbd2}}
+</style></head><body>
+<h1>Collecte Copy-Vault</h1>
+<p class="muted">État : <span class="state">{show(payload.get("status"))}</span> · dernière mise à jour : {show(payload.get("latest_checkpoint_at_utc"))}</p>
+<section><h2>{escape(completeness)}</h2><p>Complétude globale : <strong>{show(instant.get("all_collection_metrics_complete"))}</strong></p><table><tbody>{rows}</tbody></table></section>
+<section><h2>Détail par collecteur</h2>{kind_table}</section>
+<p class="muted">Un champ inconnu s’affiche « Non mesurable ». Un zéro est affiché uniquement quand la collecte l’a certifié. PAPER · READ-ONLY.</p>
+</body></html>
+"""
 
 
 def _read_previous() -> dict[str, Any] | None:
@@ -423,14 +572,17 @@ def safe_build() -> dict[str, Any]:
                 "read_only": True,
                 "real_execution": False,
             }
-        try:
+        with suppress(Exception):
             _write_atomic(degraded)
-        except Exception:
-            # Even persistence failure is non-fatal to collection. The JSON
-            # emitted on stdout still exposes the degraded state to logs.
-            pass
+        # Even persistence failure is non-fatal to collection. The JSON
+        # emitted on stdout still exposes the degraded state to logs.
         return degraded
 
 
-if __name__ == "__main__":
+def main() -> int:
     print(json.dumps(safe_build(), sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -10,11 +10,16 @@ from typing import Any
 
 _RECEIVE_ONLY_CHANNELS = {
     "activeAssetCtx",
+    "copy_vault_active_asset_ctx",
+    "copy_vault_instrument_metadata",
     "cross_venue_capacity_tape",
     "copy_vault_positions",
     "copy_vault_selection",
     "external_events",
     "instrument_metadata",
+    "copy_vault_user_funding",
+    "copy_vault_ledger",
+    "copy_vault_funding_rates",
 }
 _RECEIVE_ONLY_SEMANTICS = {
     "causal_event_availability",
@@ -34,6 +39,7 @@ _TRADE_CHANNELS = {
     "userfills",
     "user_fills",
     "copy_vault_fills",
+    "copy_vault_trades",
 }
 _REPLAYABLE_CHANNELS = {
     "activeAssetCtx",
@@ -41,10 +47,17 @@ _REPLAYABLE_CHANNELS = {
     "bbo",
     "capacity_tape",
     "copy_vault_fills",
+    "copy_vault_bbo",
+    "copy_vault_active_asset_ctx",
+    "copy_vault_instrument_metadata",
     "copy_vault_l2",
     "copy_vault_positions",
     "copy_vault_selection",
     "copy_vault_snapshot",
+    "copy_vault_user_funding",
+    "copy_vault_trades",
+    "copy_vault_ledger",
+    "copy_vault_funding_rates",
     "cross_venue_capacity_tape",
     "clock_sync",
     "external_events",

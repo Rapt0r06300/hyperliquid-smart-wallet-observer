@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from statistics import NormalDist
 from typing import Any
 
+from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
 from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21,
@@ -28,9 +29,41 @@ from tools.copy_vault_continuity import load_release_history_audits
 OBJECTIVE_USD_PER_DAY = 5.0
 PAPER_CAPITAL_USD = 200.0
 _SAFE_AUDIT_CACHE_SCHEMA = "hypersmart.copy_vault_local_safe_hash_cache.v1"
-_SAFE_FAMILIES = {"copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot"}
+_SAFE_PNL_FAMILIES = {
+    "copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot",
+}
+_SAFE_REPLAY_SUPPORT_FAMILIES = {"copy_vault_funding_rates"}
+_SAFE_MARKET_CONTEXT_FAMILIES = {
+    "copy_vault_bbo", "copy_vault_trades",
+    "copy_vault_active_asset_ctx", "copy_vault_instrument_metadata",
+}
+_SAFE_CONTEXT_FAMILIES = {
+    "copy_vault_positions", "copy_vault_selection",
+    "copy_vault_user_funding", "copy_vault_ledger",
+} | _SAFE_MARKET_CONTEXT_FAMILIES
+_SAFE_FAMILIES = _SAFE_PNL_FAMILIES | _SAFE_REPLAY_SUPPORT_FAMILIES | _SAFE_CONTEXT_FAMILIES
+_SAFE_EXTERNAL_MARKET_VENUES = frozenset({
+    "hyperliquid", "binance", "bybit", "okx", "gate", "bitget",
+})
+_SAFE_EXTERNAL_MARKET_FAMILIES = frozenset({
+    "activeAssetCtx", "agg_trades", "bbo", "capacity_tape", "clock_sync", "funding",
+    "funding_settlement", "index_price", "instrument_metadata", "l2Book",
+    "liquidations", "mark_price", "native_market", "open_interest", "ticker",
+    "trades",
+})
+_CONTEXT_SOURCE_BY_FAMILY = {
+    "copy_vault_positions": "hyperliquid_public_info",
+    "copy_vault_selection": "hyperliquid_public_vaults",
+}
 _CANONICAL_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
-_MATERIALIZED_TAPE_NAMES = ("vault_fills.jsonl", "copy_vault_l2_tape.jsonl")
+_MATERIALIZED_TAPE_NAMES = (
+    "vault_fills.jsonl", "vault_snapshots.jsonl", "copy_vault_l2_tape.jsonl",
+    "copy_vault_context.jsonl", "copy_vault_l2_unexecutable.jsonl",
+    "copy_vault_unclassified_fills.jsonl", "copy_vault_funding_rates.jsonl",
+    "copy_vault_accounting_context.jsonl",
+    "copy_vault_market_context.jsonl",
+    "external_venue_safe_inventory.jsonl",
+)
 _MINIMUM_SIGNAL_UTC_DAYS = 6
 _HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
@@ -101,12 +134,18 @@ def _copy_vault_catalog_audit(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     unused = {
         family: count
         for family, count in sorted(safe_counts.items())
-        if family not in _SAFE_FAMILIES
+        if family not in _SAFE_PNL_FAMILIES
     }
     reasons = {
         family: (
             "RECEIVE_TIME_HTTP_SNAPSHOT_NOT_PER_FILL_PNL_INPUT"
             if family in {"copy_vault_positions", "copy_vault_selection"}
+            else "LEADER_FUNDING_IS_CONTEXT_NOT_SCALED_FOLLOWER_PNL"
+            if family == "copy_vault_user_funding"
+            else "LEDGER_CASHFLOW_IS_CONTEXT_NOT_TRADING_PNL"
+            if family == "copy_vault_ledger"
+            else "FUNDING_RATE_COLLECTED_BUT_FOLLOWER_PAYMENT_STILL_UNPRICED"
+            if family == "copy_vault_funding_rates"
             else "UNSUPPORTED_COPY_VAULT_FAMILY_NOT_REPLAYED"
         )
         for family in unused
@@ -131,7 +170,7 @@ def _copy_vault_auxiliary_inventory(
         family = str(row.get("family") or "")
         if (
             not family.startswith("copy_vault_")
-            or family in _SAFE_FAMILIES
+            or family in _SAFE_PNL_FAMILIES
             or row.get("quality_status") != "SAFE"
         ):
             continue
@@ -149,13 +188,17 @@ def _copy_vault_auxiliary_inventory(
             family_counts["local_files_unsafe"] += 1
             continue
         path = usable_root / tag / asset_name
+        io_path = _windows_io_path(path)
         if any(part.is_symlink() for part in (
-            recovery / "usable", usable_root, usable_root / tag, path,
+            _windows_io_path(recovery / "usable"),
+            _windows_io_path(usable_root),
+            _windows_io_path(usable_root / tag),
+            io_path,
         )):
             family_counts["local_files_unsafe"] += 1
             continue
         try:
-            if path.is_file() and path.resolve().is_relative_to(usable_root.resolve()):
+            if io_path.is_file() and path.resolve().is_relative_to(usable_root.resolve()):
                 family_counts["local_files_present_unverified"] += 1
             else:
                 family_counts["local_files_missing"] += 1
@@ -196,6 +239,108 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     os.replace(temporary, path)
+
+
+def _record_external_market_catalog_row(
+    inventory: dict[tuple[str, str], dict[str, Any]], row: Mapping[str, Any],
+) -> None:
+    """Aggregate bounded index metadata; never load external venue payloads."""
+    venue = str(row.get("venue") or "").strip().lower()
+    family = str(row.get("family") or "")
+    if venue not in _SAFE_EXTERNAL_MARKET_VENUES or family not in _SAFE_EXTERNAL_MARKET_FAMILIES:
+        return
+    stats = inventory.setdefault((venue, family), {
+        "catalog_rows": 0, "safe_catalog_shards": 0,
+        "replay_compatible_safe_catalog_shards": 0,
+        "safe_catalog_bytes": 0, "safe_catalog_bytes_exact": True,
+        "event_count": 0, "event_count_exact": True,
+        "trade_count": 0, "trade_count_exact": True,
+        "unique_trade_count": 0, "unique_trade_count_exact": True,
+        "start_ts_ms": None, "end_ts_ms": None,
+    })
+    stats["catalog_rows"] += 1
+    if row.get("quality_status") != "SAFE":
+        return
+    stats["safe_catalog_shards"] += 1
+    if row.get("replay_compatible") is True and row.get("validation_allowed") is not False:
+        stats["replay_compatible_safe_catalog_shards"] += 1
+    size = row.get("bytes")
+    if type(size) is int and size >= 0:
+        stats["safe_catalog_bytes"] += size
+    else:
+        stats["safe_catalog_bytes_exact"] = False
+    event_count = row.get("event_count", row.get("record_count"))
+    if type(event_count) is int and event_count >= 0:
+        stats["event_count"] += event_count
+    else:
+        stats["event_count_exact"] = False
+    for field, exact_field in (
+        ("trade_count", "trade_count_exact"),
+        ("unique_trade_count", "unique_trade_count_exact"),
+    ):
+        value = row.get(field)
+        exact = row.get(exact_field) is True and type(value) is int and value >= 0
+        stats[exact_field] = bool(stats[exact_field] and exact)
+        if exact:
+            stats[field] += value
+    for field, reducer in (("start_ts_ms", min), ("end_ts_ms", max)):
+        value = row.get(field)
+        if type(value) is int and value > 0:
+            prior = stats[field]
+            stats[field] = value if prior is None else reducer(prior, value)
+
+
+def _external_market_catalog_rows(
+    inventory: Mapping[tuple[str, str], Mapping[str, Any]], *,
+    source_recovery_root: str | None = None,
+    active_data_index: str | None = None,
+    catalog_sha256: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return small catalog references, explicitly not replay observations."""
+    rows: list[dict[str, Any]] = []
+    for (venue, family), stats in sorted(inventory.items()):
+        rows.append({
+            "schema_version": "hypersmart.external_venue_safe_catalog_inventory.v1",
+            "record_type": "SAFE_CATALOG_INVENTORY_REFERENCE",
+            "venue": venue, "family": family,
+            "catalog_rows": stats.get("catalog_rows", 0),
+            "safe_catalog_shards": stats.get("safe_catalog_shards", 0),
+            "replay_compatible_safe_catalog_shards": stats.get(
+                "replay_compatible_safe_catalog_shards", 0,
+            ),
+            "safe_catalog_bytes": (
+                stats.get("safe_catalog_bytes")
+                if stats.get("safe_catalog_bytes_exact") is True else None
+            ),
+            "safe_catalog_bytes_exact": stats.get("safe_catalog_bytes_exact") is True,
+            "event_count": (
+                stats.get("event_count") if stats.get("event_count_exact") is True else None
+            ),
+            "event_count_exact": stats.get("event_count_exact") is True,
+            "trade_count": (
+                stats.get("trade_count") if stats.get("trade_count_exact") is True else None
+            ),
+            "trade_count_exact": stats.get("trade_count_exact") is True,
+            "unique_trade_count": (
+                stats.get("unique_trade_count")
+                if stats.get("unique_trade_count_exact") is True else None
+            ),
+            "unique_trade_count_exact": stats.get("unique_trade_count_exact") is True,
+            "start_ts_ms": stats.get("start_ts_ms"),
+            "end_ts_ms": stats.get("end_ts_ms"),
+            "source_recovery_root": source_recovery_root,
+            "active_data_index": active_data_index,
+            "catalog_sha256": catalog_sha256,
+            "catalog_safe_declaration_only": True,
+            "local_payload_verified": False,
+            "loaded_payload_rows": 0,
+            "replay_eligible": False,
+            "pnl_eligible": False,
+            "forward_evidence_allowed": False,
+            "strategy_execution_allowed": False,
+            "replay_status": "NOT_REPLAYED_BY_COPY_VAULT_ENGINE",
+        })
+    return rows
 
 
 def _verify_materialized_tapes(
@@ -260,9 +405,17 @@ def _verified_assets(
 
         if progress is not None:
             progress("Lecture bornée du DATA_INDEX actif, une partition à la fois")
+        external_catalog_inventory: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def keep_row(row: Mapping[str, Any]) -> bool:
+            if str(row.get("family") or "").startswith("copy_vault_"):
+                return True
+            _record_external_market_catalog_row(external_catalog_inventory, row)
+            return False
+
         index, all_rows = select_index_rows(
             catalog_path,
-            lambda row: str(row.get("family") or "").startswith("copy_vault_"),
+            keep_row,
             progress_callback=(
                 lambda done, total: progress(
                     f"DATA_INDEX vérifié · partition {done:,}/{total:,}"
@@ -296,13 +449,14 @@ def _verified_assets(
         and isinstance(row.get("release_tag"), str)
     })
     safe_rows = [row for row in selected_rows if row.get("quality_status") == "SAFE"]
+    core_safe_rows = [row for row in safe_rows if row.get("family") in _SAFE_FAMILIES]
     family_expected = Counter(str(row.get("family")) for row in safe_rows)
     expected_material = [
         f"{row.get('dataset_id')}\0{row.get('family')}\0{row.get('bytes')}\0{row.get('sha256')}"
-        for row in sorted(safe_rows, key=lambda item: str(item.get("dataset_id") or ""))
+        for row in sorted(core_safe_rows, key=lambda item: str(item.get("dataset_id") or ""))
     ]
     expected_digest = hashlib.sha256(
-        (catalog_sha + "\n" + "\n".join(expected_material)).encode("utf-8")
+        "\n".join(expected_material).encode("utf-8")
     ).hexdigest()
     cache_path = root / "runtime" / "research_lab" / "copy_vault_safe_hash_cache.json"
     cached: dict[str, Any] = {}
@@ -330,13 +484,22 @@ def _verified_assets(
     expected_ids: set[str] = set()
     recovery = Path(recovery_root).resolve()
     ordered_safe_rows = sorted(safe_rows, key=lambda item: str(item.get("dataset_id") or ""))
+    safe_context_expected = Counter(
+        str(row.get("family")) for row in core_safe_rows
+        if row.get("family") in _SAFE_CONTEXT_FAMILIES
+    )
     auxiliary_inventory = _copy_vault_auxiliary_inventory(all_rows, recovery)
+    progress_every = max(1, (len(ordered_safe_rows) + 99) // 100)
     for row_number, row in enumerate(ordered_safe_rows, 1):
         dataset_id = str(row.get("dataset_id") or "")
-        if progress is not None:
+        if progress is not None and (
+            row_number == 1
+            or row_number % progress_every == 0
+            or row_number == len(ordered_safe_rows)
+        ):
             progress(
                 f"Audit SAFE {row_number:,}/{len(ordered_safe_rows):,} · "
-                f"{len(selected):,} vérifiés · shard {dataset_id or 'sans identifiant'}"
+                f"{len(selected):,} vérifiés · dernier shard {dataset_id or 'sans identifiant'}"
             )
         if not dataset_id or dataset_id in expected_ids:
             rejected.append({"dataset_id": dataset_id, "reason": "DUPLICATE_OR_MISSING_DATASET_ID"})
@@ -349,7 +512,8 @@ def _verified_assets(
         asset_name = str(row.get("release_asset") or "")
         try:
             if (
-                family not in _SAFE_FAMILIES or row.get("replay_compatible") is not True
+                family not in _SAFE_FAMILIES
+                or row.get("replay_compatible") is not True
                 or row.get("validation_allowed") is False or len(sha) != 64
                 or any(char not in "0123456789abcdef" for char in sha)
                 or type(size) is not int or size <= 0
@@ -440,15 +604,50 @@ def _verified_assets(
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
             rejected.append({"dataset_id": dataset_id, "reason": str(exc)[:180]})
 
+    core_selected = [
+        asset for asset in selected if asset[1].get("family") in _SAFE_FAMILIES
+    ]
     selection_digest = hashlib.sha256(
-        (catalog_sha + "\n" + "\n".join(
-            f"{asset['dataset_id']}\0{asset['sha256']}"
-            for _path, asset in sorted(selected, key=lambda pair: str(pair[1].get("dataset_id") or ""))
-        )).encode("utf-8")
+        "\n".join(
+            f"{asset['dataset_id']}\0{asset['family']}\0{asset['bytes']}\0{asset['sha256']}"
+            for _path, asset in sorted(
+                core_selected, key=lambda pair: str(pair[1].get("dataset_id") or ""),
+            )
+        ).encode("utf-8")
     ).hexdigest()
+    core_ids = {str(row.get("dataset_id") or "") for row in core_safe_rows}
+    core_verified = sum(
+        str(asset.get("dataset_id") or "") in core_ids for _path, asset in selected
+    )
+    core_missing_ids = {
+        str(row.get("dataset_id") or "") for row in core_safe_rows
+    }.intersection(missing)
+    core_rejected_ids = {
+        str(item.get("dataset_id") or "") for item in rejected
+    }.intersection(core_ids)
     audit_status = "SAFE_COMPLETE" if (
-        len(selected) == len(safe_rows) and not missing and not rejected
+        core_verified == len(core_safe_rows)
+        and not core_missing_ids and not core_rejected_ids
     ) else "SAFE_PARTIAL"
+    safe_context_verified = Counter(
+        str(asset.get("family")) for _path, asset in selected
+        if asset.get("family") in _SAFE_CONTEXT_FAMILIES
+        and str(asset.get("dataset_id") or "") in core_ids
+    )
+    family_by_id = {
+        str(row.get("dataset_id") or ""): str(row.get("family") or "")
+        for row in safe_rows
+    }
+    safe_context_missing = Counter(
+        family_by_id[dataset_id] for dataset_id in core_missing_ids
+        if family_by_id.get(dataset_id) in _SAFE_CONTEXT_FAMILIES
+    )
+    safe_context_rejected = Counter(
+        family_by_id[dataset_id] for dataset_id in {
+            item.get("dataset_id", "") for item in rejected
+        }
+        if dataset_id in core_ids and family_by_id.get(dataset_id) in _SAFE_CONTEXT_FAMILIES
+    )
     audit = {
         "schema": "hypersmart.copy_vault_local_safe_audit.v1",
         **_copy_vault_catalog_audit(all_rows),
@@ -458,19 +657,30 @@ def _verified_assets(
         "source_index_sha256": catalog_sha,
         "expected_selection_sha256": expected_digest,
         "selection_digest": selection_digest,
-        "expected_safe_shards": len(safe_rows),
+        "expected_safe_shards": len(core_safe_rows),
+        "external_market_catalog_inventory": _external_market_catalog_rows(
+            external_catalog_inventory,
+            source_recovery_root=str(Path(recovery_root).resolve()),
+            active_data_index=str(catalog_path.resolve()),
+            catalog_sha256=catalog_sha,
+        ),
         "copy_vault_release_tags": copy_vault_release_tags,
-        "verified_safe_shards": len(selected),
+        "verified_safe_shards": core_verified,
         "expected_by_family": dict(sorted(family_expected.items())),
+        "safe_context_expected_by_family": dict(sorted(safe_context_expected.items())),
+        "safe_context_verified_by_family": dict(sorted(safe_context_verified.items())),
+        "safe_context_missing_by_family": dict(sorted(safe_context_missing.items())),
+        "safe_context_rejected_by_family": dict(sorted(safe_context_rejected.items())),
         "quality_counts_by_family": dict(sorted(
             (f"{family}:{quality}", count)
             for (family, quality), count in Counter(
                 (str(row.get("family") or ""), str(row.get("quality_status") or "MISSING"))
-                for row in selected_rows
+                for row in all_rows
             ).items()
         )),
         "partial_rows_excluded": sum(
-            1 for row in selected_rows if row.get("quality_status") != "SAFE"
+            1 for row in all_rows
+            if row.get("family") in _SAFE_FAMILIES and row.get("quality_status") != "SAFE"
         ),
         "missing_count": len(missing),
         "missing_sample": missing[:50],
@@ -592,7 +802,7 @@ def _fill_rows(
             rows.append({
                 "vault": vault,
                 "ts_ms": event_ts,
-                "coin": str(fill["coin"]).upper(),
+                "coin": str(fill["coin"]).strip(),
                 "px": _number(fill["px"]),
                 "sz": _number(fill["sz"]),
                 "signe": 1 if side == "B" else -1,
@@ -624,33 +834,128 @@ def _fill_rows(
     return rows
 
 
-def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
+def _unclassified_fill_observation(
+    wrapper: Mapping[str, Any], *, family: str,
+) -> dict[str, Any] | None:
+    """Retain a SAFE live fill envelope whose snapshot/event flag is unknown.
+
+    This archive is diagnostic only: the row is deliberately never converted to
+    a fill and cannot enter replay or PnL.
+    """
+    raw = wrapper.get("_raw")
+    data = raw.get("data") if isinstance(raw, Mapping) else None
+    provenance = wrapper.get("provenance")
+    received = wrapper.get("received_ts_ms")
+    raw_text = wrapper.get("raw_payload")
+    if not isinstance(data, Mapping):
+        return None
+    snapshot_flag = data.get("isSnapshot")
+    if (
+        family != "copy_vault_fills"
+        or raw.get("channel") != "userFills"
+        or wrapper.get("channel") != "copy_vault_fills"
+        or wrapper.get("source_id") != "hyperliquid_public_userfills"
+        or type(snapshot_flag) is bool
+        or not isinstance(provenance, Mapping)
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or str(provenance.get("transport") or "").lower() != "websocket"
+        or type(received) is not int or received <= 0
+        or not isinstance(raw_text, str)
+        or not str(wrapper.get("instrument") or "").strip()
+        or str(data.get("user") or "").lower() != str(wrapper.get("instrument") or "").lower()
+    ):
+        return None
+    return {
+        "schema_version": "hypersmart.copy_vault_unclassified_fill.v1",
+        "vault": str(wrapper["instrument"]).lower(),
+        "source_id": wrapper["source_id"],
+        "channel": wrapper["channel"],
+        "received_at_ms": received,
+        "event_ts_ms": None,
+        "snapshot_flag": snapshot_flag,
+        "event_kind": str(wrapper.get("event_kind") or "UNCLASSIFIED"),
+        "executable": False,
+        "pnl_eligible": False,
+        "reason": "SNAPSHOT_FLAG_MISSING_OR_INVALID",
+        "provenance": {
+            "access": provenance.get("access"),
+            "authenticated": provenance.get("authenticated"),
+            "transport": provenance.get("transport"),
+        },
+        "raw_payload": raw_text,
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+    }
+
+
+def _book_row(
+    wrapper: Mapping[str, Any], *, rejection_audit: Counter[str] | None = None,
+) -> dict[str, Any] | None:
+    def reject(reason: str) -> None:
+        if rejection_audit is not None:
+            rejection_audit[reason] += 1
+
     raw = wrapper["_raw"]
     data = raw.get("data") if isinstance(raw.get("data"), Mapping) else {}
     levels = data.get("levels")
+    provenance = wrapper.get("provenance")
+    if (
+        wrapper.get("channel") != "copy_vault_l2"
+        or wrapper.get("source_id") != "hyperliquid_public_copy_l2"
+        or not isinstance(provenance, Mapping)
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or provenance.get("copy_vault_execution_evidence") is not True
+        or str(provenance.get("transport") or "").lower() != "websocket"
+    ):
+        reject("L2_PROVENANCE_INVALID")
+        return None
     if raw.get("channel") != "l2Book" or not isinstance(levels, list) or len(levels) != 2:
+        reject("CHANNEL_OR_LEVELS_INVALID")
         return None
     try:
+        if not isinstance(levels[0], list) or not isinstance(levels[1], list):
+            reject("DEPTH_LEVELS_NOT_LISTS")
+            return None
         bids = [[_number(level["px"]), _number(level["sz"])] for level in levels[0]][:5]
         asks = [[_number(level["px"]), _number(level["sz"])] for level in levels[1]][:5]
         if not bids or not asks:
+            reject("EMPTY_BOOK_SIDE")
             return None
         bids.sort(key=lambda row: row[0], reverse=True)
         asks.sort(key=lambda row: row[0])
         bid, ask = bids[0][0], asks[0][0]
         if bid <= 0 or ask <= bid:
+            reject("CROSSED_OR_NONPOSITIVE_BOOK")
             return None
         capacity = min(
             sum(price * size for price, size in bids),
             sum(price * size for price, size in asks),
         )
-        received = int(wrapper.get("received_ts_ms") or wrapper.get("recv_wall_ts_ms") or 0)
-        exchange = int(data.get("time") or wrapper.get("exchange_ts_ms") or 0)
-        if received < exchange or exchange <= 0 or received - exchange > 30_000:
+        received_value = wrapper.get("received_ts_ms")
+        exchange_value = data.get("time")
+        received = received_value if type(received_value) is int else 0
+        exchange = exchange_value if type(exchange_value) is int else 0
+        coin = str(data.get("coin") or "").strip()
+        instrument = str(wrapper.get("instrument") or "").strip()
+        if not coin or coin != instrument:
+            reject("L2_INSTRUMENT_IDENTITY_MISMATCH")
+            return None
+        if exchange <= 0:
+            reject("EXCHANGE_TIMESTAMP_MISSING")
+            return None
+        if received <= 0:
+            reject("RECEIVE_TIMESTAMP_MISSING")
+            return None
+        if received < exchange:
+            reject("RECEIVE_BEFORE_EXCHANGE")
+            return None
+        if received - exchange > 30_000:
+            reject("EXCHANGE_DATA_STALE_OVER_30S")
             return None
         return {
             "schema_version": "hypersmart.copy_vault_l2.v1",
-            "coin": str(data.get("coin") or wrapper.get("instrument") or "").upper(),
+            "coin": coin,
             "received_at_ms": received,
             "exchange_ts_ms": exchange,
             "bid": bid,
@@ -664,7 +969,520 @@ def _book_row(wrapper: Mapping[str, Any]) -> dict[str, Any] | None:
             "source_raw_sha256": wrapper.get("raw_sha256"),
         }
     except (KeyError, TypeError, ValueError, OverflowError):
+        reject("LEVEL_VALUE_INVALID")
         return None
+
+
+def _l2_unexecutable_observation(
+    wrapper: Mapping[str, Any], *, reason: str,
+) -> dict[str, Any] | None:
+    """Keep valid empty-side L2 observations without treating them as executable."""
+    if reason != "EMPTY_BOOK_SIDE":
+        return None
+    raw = wrapper.get("_raw")
+    data = raw.get("data") if isinstance(raw, Mapping) else None
+    levels = data.get("levels") if isinstance(data, Mapping) else None
+    provenance = wrapper.get("provenance")
+    raw_text = wrapper.get("raw_payload")
+    try:
+        received_value = wrapper.get("received_ts_ms")
+        exchange_value = data.get("time")
+        received = received_value if type(received_value) is int else 0
+        exchange = exchange_value if type(exchange_value) is int else 0
+        instrument = str(wrapper.get("instrument") or "").strip()
+        coin = str(data.get("coin") or instrument).strip()
+        if (
+            raw.get("channel") != "l2Book"
+            or wrapper.get("channel") != "copy_vault_l2"
+            or wrapper.get("source_id") != "hyperliquid_public_copy_l2"
+            or not isinstance(provenance, Mapping)
+            or provenance.get("access") != "read_only"
+            or provenance.get("authenticated") is not False
+            or provenance.get("copy_vault_execution_evidence") is not True
+            or not isinstance(levels, list) or len(levels) != 2
+            or not all(isinstance(side, list) for side in levels)
+            or (levels[0] and levels[1])
+            or not instrument or coin != instrument
+            or not isinstance(raw_text, str)
+            or exchange <= 0 or received < exchange or received - exchange > 30_000
+        ):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return {
+        "schema_version": "hypersmart.copy_vault_l2_observation.v1",
+        "coin": coin,
+        "received_at_ms": received,
+        "exchange_ts_ms": exchange,
+        "executable": False,
+        "pnl_eligible": False,
+        "reason": "EMPTY_BOOK_SIDE",
+        "source": "HYPERLIQUID_L2_WS",
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+        "raw_payload": raw_text,
+    }
+
+
+def _context_row(
+    wrapper: Mapping[str, Any], *, family: str, audit: Counter[str] | None = None,
+) -> dict[str, Any] | None:
+    """Preserve SAFE receive-time vault context without making it PnL evidence."""
+    expected_source = _CONTEXT_SOURCE_BY_FAMILY.get(family)
+    provenance = wrapper.get("provenance")
+    summary = wrapper.get("parsed_summary")
+    received = wrapper.get("received_ts_ms")
+    raw_text = wrapper.get("raw_payload")
+    invalid_reason = None
+    if family not in _SAFE_CONTEXT_FAMILIES or not expected_source:
+        invalid_reason = "UNKNOWN_CONTEXT_FAMILY"
+    elif (
+        wrapper.get("channel") != family
+        or wrapper.get("source_id") != expected_source
+        or not str(wrapper.get("instrument") or "").strip()
+    ):
+        invalid_reason = "CONTEXT_IDENTITY_MISMATCH"
+    elif (
+        not isinstance(provenance, Mapping)
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or str(provenance.get("transport") or "").lower() != "https"
+        or provenance.get("timestamp_semantics") != "receive_observation_time_only"
+        or (family == "copy_vault_selection" and provenance.get("selection_causal") is not True)
+    ):
+        invalid_reason = "CONTEXT_PROVENANCE_INVALID"
+    elif type(received) is not int or received <= 0:
+        invalid_reason = "CONTEXT_RECEIVE_TIME_INVALID"
+    elif not isinstance(summary, Mapping) or summary.get("data_gate_ready") is not False:
+        invalid_reason = "CONTEXT_SUMMARY_NOT_OBSERVATION_ONLY"
+    elif family == "copy_vault_positions" and (
+        type(summary.get("position_count")) is not int or summary.get("position_count") < 0
+    ):
+        invalid_reason = "CONTEXT_POSITION_COUNT_INVALID"
+    elif family == "copy_vault_selection" and summary.get("observation_only") is not True:
+        invalid_reason = "CONTEXT_SELECTION_NOT_OBSERVATION_ONLY"
+    elif not isinstance(raw_text, str):
+        invalid_reason = "CONTEXT_RAW_PAYLOAD_MISSING"
+    if invalid_reason:
+        if audit is not None:
+            audit[f"{invalid_reason}_REJECTED"] += 1
+        return None
+    nav_snapshot = None
+    if family == "copy_vault_positions":
+        raw_state = wrapper.get("_raw")
+        margin_summary = raw_state.get("marginSummary") if isinstance(raw_state, Mapping) else None
+        try:
+            nav_value = _number(margin_summary["accountValue"])
+            if nav_value > 0:
+                nav_snapshot = {
+                    "vault": str(wrapper["instrument"]).lower(),
+                    "ts_ms": received,
+                    "nav_usd": nav_value,
+                    "source": "SAFE_RECEIVE_TIME_POSITION_SNAPSHOT",
+                    "source_id": expected_source,
+                    "received_at_ms": received,
+                    "timestamp_semantics": "receive_observation_time_only",
+                    "pnl_eligible": False,
+                    "source_raw_sha256": wrapper.get("raw_sha256"),
+                }
+        except (KeyError, TypeError, ValueError, OverflowError):
+            nav_snapshot = None
+    return {
+        "schema_version": "hypersmart.copy_vault_context.v1",
+        "family": family,
+        "source_id": expected_source,
+        "channel": family,
+        "instrument": str(wrapper["instrument"]).lower(),
+        "observed_at_ms": received,
+        "timestamp_semantics": "receive_observation_time_only",
+        "event_ts_ms": None,
+        "exchange_ts_ms": None,
+        "pnl_eligible": False,
+        "forward_evidence_allowed": False,
+        "observation_only": True,
+        "provenance": {
+            "access": provenance.get("access"),
+            "authenticated": provenance.get("authenticated"),
+            "transport": provenance.get("transport"),
+            "timestamp_semantics": provenance.get("timestamp_semantics"),
+            **({"selection_causal": True} if provenance.get("selection_causal") is True else {}),
+        },
+        "summary": dict(summary),
+        "nav_snapshot": nav_snapshot,
+        "raw_payload": raw_text,
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+    }
+
+
+def _market_context_row(
+    wrapper: Mapping[str, Any], *, family: str, audit: Counter[str] | None = None,
+) -> dict[str, Any] | None:
+    """Validate and preserve same-run market evidence without feeding PnL."""
+    expected = {
+        "copy_vault_bbo": ("bbo", "hyperliquid_public_copy_vault_market_ws", "causal_event_availability"),
+        "copy_vault_trades": ("trades", "hyperliquid_public_copy_vault_market_ws", "causal_event_availability"),
+        "copy_vault_active_asset_ctx": (
+            "activeAssetCtx", "hyperliquid_public_copy_vault_market_ws",
+            "receive_observation_time_only",
+        ),
+        "copy_vault_instrument_metadata": (
+            "instrument_metadata", "hyperliquid_public_copy_vault_instrument_metadata",
+            "receive_observation_time_only",
+        ),
+    }
+
+    def reject(reason: str) -> None:
+        if audit is not None:
+            audit[f"{reason}_REJECTED"] += 1
+
+    contract = expected.get(family)
+    raw = wrapper.get("_raw")
+    data = raw.get("data") if isinstance(raw, Mapping) else None
+    provenance = wrapper.get("provenance")
+    summary = wrapper.get("parsed_summary")
+    native_instrument = str(wrapper.get("instrument") or "").strip()
+    received = wrapper.get("received_ts_ms")
+    exchange = wrapper.get("exchange_ts_ms")
+    raw_text = wrapper.get("raw_payload")
+    if contract is None:
+        reject("UNKNOWN_MARKET_CONTEXT_FAMILY")
+        return None
+    raw_channel, expected_source, semantics = contract
+    if (
+        not isinstance(raw, Mapping) or raw.get("channel") != raw_channel
+        or not isinstance(data, (Mapping, list))
+        or wrapper.get("channel") != family
+        or wrapper.get("source_id") != expected_source
+    ):
+        reject("MARKET_CHANNEL_OR_SOURCE_MISMATCH")
+        return None
+    if (
+        not native_instrument
+        or not isinstance(provenance, Mapping)
+        or provenance.get("venue") != "hyperliquid"
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or provenance.get("timestamp_semantics") != semantics
+        or wrapper.get("read_only") is not True
+        or wrapper.get("real_execution") is not False
+        or str(provenance.get("transport") or "").lower()
+        != ("https" if family == "copy_vault_instrument_metadata" else "websocket")
+        or type(received) is not int or received <= 0
+        or not isinstance(summary, Mapping) or summary.get("data_gate_ready") is not False
+        or not isinstance(raw_text, str)
+        or len(str(wrapper.get("raw_sha256") or "")) != 64
+    ):
+        reject("MARKET_CONTEXT_PROVENANCE_OR_CLOCK_INVALID")
+        return None
+    if family in {"copy_vault_active_asset_ctx", "copy_vault_instrument_metadata"}:
+        if exchange is not None:
+            reject("MARKET_OBSERVATION_HAS_FABRICATED_EXCHANGE_TIME")
+            return None
+        if (
+            not isinstance(data, Mapping)
+            or str(data.get("coin") or "").strip() != native_instrument
+        ):
+            reject("MARKET_NATIVE_INSTRUMENT_MISMATCH")
+            return None
+        if family == "copy_vault_active_asset_ctx" and not isinstance(data.get("ctx"), Mapping):
+            reject("ACTIVE_ASSET_CONTEXT_INVALID")
+            return None
+        if family == "copy_vault_instrument_metadata":
+            metadata = data.get("metadata")
+            symbol = native_instrument.split(":", 1)[-1]
+            if not isinstance(metadata, Mapping) or str(metadata.get("name") or "") != symbol:
+                reject("INSTRUMENT_METADATA_IDENTITY_INVALID")
+                return None
+    else:
+        if (
+            type(exchange) is not int or exchange <= 0 or exchange > received
+            or received - exchange > 30_000
+        ):
+            reject("MARKET_EVENT_CLOCK_INVALID_OR_STALE")
+            return None
+        if family == "copy_vault_bbo":
+            bbo = data.get("bbo") if isinstance(data, Mapping) else None
+            if not isinstance(data, Mapping) or str(data.get("coin") or "").strip() != native_instrument:
+                reject("MARKET_NATIVE_INSTRUMENT_MISMATCH")
+                return None
+            if (
+                type(data.get("time")) is not int or data["time"] != exchange
+                or not isinstance(bbo, list) or len(bbo) != 2
+                or not all(isinstance(level, Mapping) for level in bbo)
+            ):
+                reject("BBO_PAYLOAD_INVALID")
+                return None
+            try:
+                prices = [_number(level["px"]) for level in bbo]
+                sizes = [_number(level["sz"]) for level in bbo]
+                if min(prices) <= 0 or min(sizes) < 0 or prices[0] >= prices[1]:
+                    raise ValueError
+            except (KeyError, TypeError, ValueError, OverflowError):
+                reject("BBO_PRICE_OR_SIZE_INVALID")
+                return None
+        else:
+            if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], Mapping):
+                reject("TRADE_ENVELOPE_NOT_SINGLE_EVENT")
+                return None
+            trade = data[0]
+            has_identity = bool(str(trade.get("hash") or "").strip()) or (
+                isinstance(trade.get("tid"), int) and not isinstance(trade.get("tid"), bool)
+            )
+            try:
+                price, size = _number(trade["px"]), _number(trade["sz"])
+                valid_time = type(trade.get("time")) is int and trade["time"] == exchange
+            except (KeyError, TypeError, ValueError, OverflowError):
+                price, size, valid_time = 0.0, 0.0, False
+            if (
+                str(trade.get("coin") or "").strip() != native_instrument
+                or not has_identity or price <= 0 or size <= 0
+                or str(trade.get("side") or "").upper() not in {"A", "B"}
+                or not valid_time
+            ):
+                reject("TRADE_EVENT_INVALID_OR_NATIVE_INSTRUMENT_MISMATCH")
+                return None
+    return {
+        "schema_version": "hypersmart.copy_vault_market_context.v1",
+        "family": family,
+        "source_id": expected_source,
+        "instrument": native_instrument,
+        "observed_at_ms": received,
+        "event_ts_ms": exchange if semantics == "causal_event_availability" else None,
+        "exchange_ts_ms": exchange if semantics == "causal_event_availability" else None,
+        "timestamp_semantics": semantics,
+        "observation_only": True,
+        "pnl_eligible": False,
+        "forward_evidence_allowed": False,
+        "connection_id": wrapper.get("connection_id"),
+        "provenance": {
+            "venue": provenance.get("venue"), "access": provenance.get("access"),
+            "authenticated": provenance.get("authenticated"),
+            "transport": provenance.get("transport"),
+        },
+        "raw_payload": raw_text,
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+    }
+
+
+def _exact_accounting_contract(
+    wrapper: Mapping[str, Any], *, family: str,
+) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]] | None:
+    """Authenticate exact-window read-only receipts before accepting accounting rows."""
+    raw = wrapper.get("_raw")
+    provenance = wrapper.get("provenance")
+    if not isinstance(raw, Mapping) or not isinstance(provenance, Mapping):
+        return None
+    expected_request = {
+        "copy_vault_user_funding": "userFunding",
+        "copy_vault_ledger": "userNonFundingLedgerUpdates",
+        "copy_vault_funding_rates": "fundingHistory",
+    }.get(family)
+    source_prefix = {
+        "copy_vault_user_funding": "hyperliquid_public_userFunding_",
+        "copy_vault_ledger": "hyperliquid_public_userNonFundingLedgerUpdates_",
+        "copy_vault_funding_rates": "hyperliquid_public_funding_history_",
+    }.get(family)
+    data = raw.get("data")
+    if (
+        expected_request is None or source_prefix is None
+        or wrapper.get("channel") != family
+        or raw.get("channel") != expected_request
+        or not str(wrapper.get("source_id") or "").startswith(source_prefix)
+        or str(wrapper.get("source_id") or "").rsplit("_", 1)[-1]
+        not in {"historical", "forward"}
+        or not isinstance(data, Mapping)
+        or not isinstance(data.get("records"), list)
+        or wrapper.get("read_only") is not True
+        or wrapper.get("real_execution") is not False
+        or provenance.get("network") != "mainnet"
+        or provenance.get("access") != "read_only"
+        or provenance.get("authenticated") is not False
+        or provenance.get("transport") != "https"
+        or provenance.get("request_type") != expected_request
+    ):
+        return None
+    received = wrapper.get("received_ts_ms")
+    if type(received) is not int or received <= 0:
+        return None
+    if family in {"copy_vault_user_funding", "copy_vault_ledger"}:
+        identity = data.get("user")
+        expected_identity = str(wrapper.get("instrument") or "").strip().lower()
+        if not isinstance(identity, str) or identity.strip().lower() != expected_identity:
+            return None
+    else:
+        identity = data.get("coin")
+        if not isinstance(identity, str) or identity.strip() != str(wrapper.get("instrument") or "").strip():
+            return None
+    coverage = data.get("coverage")
+    if not isinstance(coverage, Mapping):
+        return None
+    window_kind = coverage.get("window_kind")
+    forward_allowed = window_kind == "FORWARD"
+    records = data["records"]
+    requested_start, requested_end = (
+        coverage.get("requested_start_ms"), coverage.get("requested_end_ms")
+    )
+    lower, upper = coverage.get("leaf_start_ms"), coverage.get("leaf_end_ms")
+    response_rows, accepted_rows = (
+        coverage.get("leaf_response_rows"), coverage.get("leaf_accepted_rows")
+    )
+    if (
+        coverage.get("schema") != "alina.copy_vault_exact_window_receipt.v1"
+        or coverage.get("status") != "COMPLETE"
+        or coverage.get("request_type") != expected_request
+        or window_kind not in {"FORWARD", "PRE_SELECTION_HISTORICAL_RESEARCH_ONLY"}
+        or coverage.get("forward_evidence_allowed") is not forward_allowed
+        or provenance.get("window_kind") != window_kind
+        or provenance.get("forward_evidence_allowed") is not forward_allowed
+        or any(type(value) is not int or value <= 0 for value in (
+            requested_start, requested_end, lower, upper,
+        ))
+        or not requested_start <= lower <= upper <= requested_end
+        or type(response_rows) is not int or response_rows < 0
+        or type(accepted_rows) is not int or accepted_rows != len(records)
+        or response_rows < accepted_rows
+    ):
+        return None
+    for row in records:
+        if not isinstance(row, Mapping):
+            return None
+        ts_ms = row.get("time")
+        if type(ts_ms) is not int or not lower <= ts_ms <= upper or ts_ms > received:
+            return None
+    return data, provenance, coverage
+
+
+def _funding_rate_rows(
+    wrapper: Mapping[str, Any], *, family: str,
+    audit: Counter[str] | None = None,
+) -> list[dict[str, Any]]:
+    def reject(reason: str) -> list[dict[str, Any]]:
+        if audit is not None:
+            audit[f"{reason}_REJECTED"] += 1
+        return []
+
+    contract = _exact_accounting_contract(wrapper, family=family)
+    if contract is None:
+        return reject("FUNDING_RATE_RECEIPT_OR_PROVENANCE_INVALID")
+    data, _provenance, coverage = contract
+    output: list[dict[str, Any]] = [{
+        "schema_version": "hypersmart.copy_vault_funding_rate_coverage.v1",
+        "record_type": "COVERAGE_RECEIPT",
+        "coin": str(wrapper.get("instrument") or ""),
+        "window_start_ms": int(coverage["leaf_start_ms"]),
+        "window_end_ms": int(coverage["leaf_end_ms"]),
+        "window_kind": str(coverage["window_kind"]),
+        "forward_evidence_allowed": coverage.get("forward_evidence_allowed") is True,
+        "received_at_ms": int(wrapper["received_ts_ms"]),
+        "response_rows": coverage.get("leaf_response_rows"),
+        "accepted_rows": coverage.get("leaf_accepted_rows"),
+        "coverage_status": "COMPLETE",
+        "pnl_eligible": False,
+        "source_id": wrapper.get("source_id"),
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+    }]
+    for raw_row in data["records"]:
+        try:
+            ts_ms = raw_row["time"]
+            rate = _number(raw_row["fundingRate"])
+            premium = _number(raw_row["premium"]) if raw_row.get("premium") is not None else None
+            if type(ts_ms) is not int or ts_ms <= 0:
+                raise ValueError
+            output.append({
+                "schema_version": "hypersmart.copy_vault_funding_rate.v1",
+                "record_type": "SETTLEMENT_RATE",
+                "coin": str(wrapper.get("instrument") or ""),
+                "ts_ms": ts_ms,
+                "funding_rate": rate,
+                "premium": premium,
+                "window_kind": str(coverage["window_kind"]),
+                "forward_evidence_allowed": coverage.get("forward_evidence_allowed") is True,
+                "received_at_ms": int(wrapper["received_ts_ms"]),
+                "source_id": wrapper.get("source_id"),
+                "pnl_eligible": False,
+                "source_raw_sha256": wrapper.get("raw_sha256"),
+                "raw_record": dict(raw_row),
+            })
+        except (KeyError, TypeError, ValueError, OverflowError):
+            if audit is not None:
+                audit["INVALID_FUNDING_RATE_EVENT_REJECTED"] += 1
+    return output
+
+
+def _leader_accounting_rows(
+    wrapper: Mapping[str, Any], *, family: str, audit: Counter[str] | None = None,
+) -> list[dict[str, Any]]:
+    def reject(reason: str) -> list[dict[str, Any]]:
+        if audit is not None:
+            audit[f"{reason}_REJECTED"] += 1
+        return []
+
+    contract = _exact_accounting_contract(wrapper, family=family)
+    if contract is None:
+        return reject("LEADER_ACCOUNTING_RECEIPT_OR_PROVENANCE_INVALID")
+    data, _provenance, coverage = contract
+    received = wrapper["received_ts_ms"]
+    vault = str(wrapper["instrument"]).lower()
+    lower = int(coverage["leaf_start_ms"])
+    upper = int(coverage["leaf_end_ms"])
+    output: list[dict[str, Any]] = [{
+        "schema_version": "hypersmart.copy_vault_leader_accounting_coverage.v1",
+        "record_type": "COVERAGE_RECEIPT",
+        "family": family,
+        "vault": vault,
+        "window_start_ms": lower,
+        "window_end_ms": upper,
+        "window_kind": str(coverage["window_kind"]),
+        "forward_evidence_allowed": coverage["forward_evidence_allowed"] is True,
+        "received_at_ms": received,
+        "response_rows": coverage.get("leaf_response_rows"),
+        "accepted_rows": coverage.get("leaf_accepted_rows"),
+        "coverage_status": "COMPLETE",
+        "pnl_eligible": False,
+        "source_id": wrapper.get("source_id"),
+        "source_raw_sha256": wrapper.get("raw_sha256"),
+    }]
+    for raw_row in data["records"]:
+        try:
+            if not isinstance(raw_row, Mapping):
+                raise TypeError
+            ts_ms = raw_row["time"]
+            transaction_hash = str(raw_row["hash"] or "").strip().lower()
+            delta = raw_row["delta"]
+            if (
+                isinstance(ts_ms, bool) or type(ts_ms) is not int
+                or not lower <= ts_ms <= upper or ts_ms > received
+                or not transaction_hash or not isinstance(delta, Mapping)
+                or not str(delta.get("type") or "").strip()
+            ):
+                raise ValueError
+            if family == "copy_vault_user_funding":
+                if str(delta.get("type") or "") != "funding":
+                    raise ValueError
+                normalized_delta: dict[str, Any] = dict(delta)
+                for field in ("fundingRate", "szi", "usdc"):
+                    normalized_delta[f"{field}_numeric"] = _number(delta[field])
+            else:
+                normalized_delta = dict(delta)
+            output.append({
+                "schema_version": "hypersmart.copy_vault_leader_accounting_event.v1",
+                "record_type": "LEADER_ACCOUNTING_EVENT",
+                "family": family,
+                "vault": vault,
+                "ts_ms": ts_ms,
+                "hash": transaction_hash,
+                "delta": normalized_delta,
+                "window_kind": str(coverage["window_kind"]),
+                "forward_evidence_allowed": coverage["forward_evidence_allowed"] is True,
+                "received_at_ms": received,
+                "source_id": wrapper.get("source_id"),
+                "pnl_eligible": False,
+                "source_raw_sha256": wrapper.get("raw_sha256"),
+                "raw_record": dict(raw_row),
+            })
+        except (KeyError, TypeError, ValueError, OverflowError):
+            if audit is not None:
+                audit["INVALID_LEADER_ACCOUNTING_EVENT_REJECTED"] += 1
+    return output
 
 
 def materialize_safe_workspace(
@@ -676,18 +1494,24 @@ def materialize_safe_workspace(
     recovery_root, workspace = Path(recovery_root), Path(workspace)
     assets, audit = _verified_assets(recovery_root, progress=progress)
     repository_root = Path(recovery_root).resolve().parents[2]
-    history_audit = load_release_history_audits(
-        repository_root / "catalog" / "campaigns",
-        release_tags=set(audit.get("copy_vault_release_tags") or []),
-    )
     data_dir = workspace / "runtime" / "data"
     if any(part.is_symlink() for part in (workspace, workspace / "runtime", data_dir)):
         raise OSError("refusing symlinked Copy-Vault replay workspace")
     data_dir.mkdir(parents=True, exist_ok=True)
     fills: dict[tuple[Any, ...], dict[str, Any]] = {}
     books: dict[tuple[Any, ...], dict[str, Any]] = {}
+    context: dict[tuple[Any, ...], dict[str, Any]] = {}
+    unexecutable_l2: dict[tuple[Any, ...], dict[str, Any]] = {}
+    unclassified_fills: dict[tuple[Any, ...], dict[str, Any]] = {}
+    funding_rates: dict[tuple[Any, ...], dict[str, Any]] = {}
+    leader_accounting: dict[tuple[Any, ...], dict[str, Any]] = {}
+    market_context: dict[tuple[Any, ...], dict[str, Any]] = {}
+    historical_backfill_release_tags: set[str] = set()
+    source_counts_by_family: Counter[str] = Counter()
     wrapper_rejections = 0
     payload_audit: Counter[str] = Counter()
+    l2_rejection_audit: Counter[str] = Counter()
+    payload_rejection_samples: list[dict[str, Any]] = []
     raw_frames = 0
     historical_snapshot_shards = 0
     historical_fill_observations = 0
@@ -697,7 +1521,15 @@ def materialize_safe_workspace(
             if family == "copy_vault_snapshot":
                 historical_snapshot_shards += 1
             for wrapper in _load_wrappers(path):
+                wrapper["_manifest_accounting"] = asset.get("copy_vault_accounting")
                 raw_frames += 1
+                source_counts_by_family[f"{family}:{wrapper.get('source_id') or 'SOURCE_ID_MISSING'}"] += 1
+                if (
+                    family == "copy_vault_snapshot"
+                    and wrapper.get("source_id") == "hyperliquid_public_userfills_backfill"
+                    and isinstance(asset.get("release_tag"), str)
+                ):
+                    historical_backfill_release_tags.add(str(asset["release_tag"]))
                 if family in {"copy_vault_fills", "copy_vault_snapshot"}:
                     if family == "copy_vault_snapshot":
                         data = wrapper["_raw"].get("data")
@@ -708,7 +1540,35 @@ def materialize_safe_workspace(
                             and isinstance(raw_fill_list, list)
                         ):
                             historical_fill_observations += len(raw_fill_list)
-                    for row in _fill_rows(wrapper, family=family, audit=payload_audit):
+                    before_rejections = sum(payload_audit.values())
+                    normalized_fills = _fill_rows(wrapper, family=family, audit=payload_audit)
+                    unclassified = _unclassified_fill_observation(wrapper, family=family)
+                    if unclassified is not None:
+                        identity = (
+                            unclassified["vault"], unclassified["received_at_ms"],
+                            unclassified.get("source_raw_sha256"),
+                        )
+                        unclassified_fills[identity] = unclassified
+                    if (
+                        sum(payload_audit.values()) > before_rejections
+                        and len(payload_rejection_samples) < 50
+                    ):
+                        payload_rejection_samples.append({
+                            "dataset_id": asset.get("dataset_id"),
+                            "family": family,
+                            "channel": wrapper.get("channel"),
+                            "source_id": wrapper.get("source_id"),
+                            "received_ts_ms": wrapper.get("received_ts_ms"),
+                            "snapshot_flag": (
+                                wrapper.get("_raw", {}).get("data", {}).get("isSnapshot")
+                                if isinstance(wrapper.get("_raw"), Mapping)
+                                and isinstance(wrapper.get("_raw", {}).get("data"), Mapping)
+                                else None
+                            ),
+                            "raw_sha256": wrapper.get("raw_sha256"),
+                            "reason_counts": dict(sorted(payload_audit.items())),
+                        })
+                    for row in normalized_fills:
                         identity = (
                             row["vault"], row["coin"], row["ts_ms"], row.get("tid"),
                             row.get("hash"), row.get("oid"), row["px"], row["sz"], row["signe"],
@@ -720,7 +1580,8 @@ def materialize_safe_workspace(
                         ):
                             fills[identity] = row
                 elif asset.get("family") == "copy_vault_l2":
-                    row = _book_row(wrapper)
+                    before_l2_rejections = l2_rejection_audit.copy()
+                    row = _book_row(wrapper, rejection_audit=l2_rejection_audit)
                     if row:
                         identity = (
                             row["coin"], row["received_at_ms"], row["exchange_ts_ms"],
@@ -730,7 +1591,78 @@ def materialize_safe_workspace(
                         )
                         books[identity] = row
                     else:
-                        payload_audit["INVALID_OR_NONCAUSAL_L2_REJECTED"] += 1
+                        l2_reason = next((
+                            reason for reason, count in l2_rejection_audit.items()
+                            if count > before_l2_rejections.get(reason, 0)
+                        ), "UNKNOWN_L2_REJECTION")
+                        observation = _l2_unexecutable_observation(
+                            wrapper, reason=str(l2_reason),
+                        )
+                        if observation is not None:
+                            identity = (
+                                observation["coin"], observation["received_at_ms"],
+                                observation["exchange_ts_ms"], observation.get("source_raw_sha256"),
+                            )
+                            unexecutable_l2[identity] = observation
+                        else:
+                            payload_audit["INVALID_OR_NONCAUSAL_L2_REJECTED"] += 1
+                            if len(payload_rejection_samples) < 50:
+                                payload_rejection_samples.append({
+                                    "dataset_id": asset.get("dataset_id"),
+                                    "family": family,
+                                    "channel": wrapper.get("channel"),
+                                    "source_id": wrapper.get("source_id"),
+                                    "exchange_ts_ms": wrapper.get("exchange_ts_ms"),
+                                    "received_ts_ms": wrapper.get("received_ts_ms"),
+                                    "raw_sha256": wrapper.get("raw_sha256"),
+                                    "l2_rejection_reason": l2_reason,
+                                })
+                elif family in _SAFE_CONTEXT_FAMILIES:
+                    if family in {"copy_vault_user_funding", "copy_vault_ledger"}:
+                        rows = _leader_accounting_rows(
+                            wrapper, family=family, audit=payload_audit,
+                        )
+                        for row in rows:
+                            identity = (
+                                row["family"], row["vault"], row["record_type"],
+                                row.get("ts_ms", row.get("window_start_ms")),
+                                row.get("hash", row.get("window_end_ms")),
+                                row.get("source_raw_sha256"),
+                            )
+                            leader_accounting[identity] = row
+                    elif family in _SAFE_MARKET_CONTEXT_FAMILIES:
+                        row = _market_context_row(
+                            wrapper, family=family, audit=payload_audit,
+                        )
+                        if row is not None:
+                            identity = (
+                                family, row["instrument"], row["event_ts_ms"],
+                                row["observed_at_ms"], row["source_raw_sha256"],
+                            )
+                            market_context[identity] = row
+                    else:
+                        row = _context_row(wrapper, family=family, audit=payload_audit)
+                        if row is not None:
+                            identity = (
+                                family, row["instrument"], row["observed_at_ms"],
+                                row.get("source_raw_sha256"),
+                            )
+                            context[identity] = row
+                elif family == "copy_vault_funding_rates":
+                    rows = _funding_rate_rows(
+                        wrapper, family=family, audit=payload_audit,
+                    )
+                    for row in rows:
+                        identity = (
+                            str(row["coin"]), row["record_type"],
+                            row.get("ts_ms", row.get("window_start_ms")),
+                            row.get("window_end_ms"), row.get("source_raw_sha256"),
+                        )
+                        prior = funding_rates.get(identity)
+                        if prior is not None and prior != row:
+                            payload_audit["CONFLICTING_FUNDING_RATE_OR_RECEIPT"] += 1
+                        else:
+                            funding_rates[identity] = row
                 if progress is not None and raw_frames % 2_000 == 0:
                     progress(
                         f"Reconstruction SAFE {asset_number:,}/{len(assets):,} · "
@@ -743,11 +1675,166 @@ def materialize_safe_workspace(
                 f"Reconstruction SAFE {asset_number:,}/{len(assets):,} · "
                 f"{raw_frames:,} enveloppes · {len(fills):,} fills · {len(books):,} carnets"
             )
+    if historical_backfill_release_tags:
+        history_audit = load_release_history_audits(
+            repository_root / "catalog" / "campaigns",
+            release_tags=historical_backfill_release_tags,
+        )
+        history_audit["scope"] = "SAFE snapshot-family wrappers from the REST backfill source"
+        history_audit["applicable"] = True
+    else:
+        history_audit = {
+            "status": "NOT_APPLICABLE",
+            "scope": "SAFE snapshot-family wrappers from the REST backfill source",
+            "applicable": False,
+            "expected_release_count": 0,
+            "audited_release_count": 0,
+            "durable_receipt_release_count": 0,
+            "missing_durable_receipt_tags": [],
+            "receipt_without_backfill_audit_tags": [],
+            "unknown_release_tags": [],
+            "partial_report_count": 0,
+            "reports": [],
+            "unresolved_gaps": [],
+        }
     fill_rows = sorted(fills.values(), key=lambda row: (row["ts_ms"], row["vault"], str(row.get("tid"))))
     book_rows = sorted(books.values(), key=lambda row: (row["received_at_ms"], row["coin"]))
+    context_rows = sorted(
+        context.values(),
+        key=lambda row: (row["observed_at_ms"], row["family"], row["instrument"]),
+    )
+    unexecutable_l2_rows = sorted(
+        unexecutable_l2.values(),
+        key=lambda row: (row["received_at_ms"], row["coin"], row["exchange_ts_ms"]),
+    )
+    unclassified_fill_rows = sorted(
+        unclassified_fills.values(),
+        key=lambda row: (row["received_at_ms"], row["vault"]),
+    )
+    funding_rate_rows = sorted(
+        funding_rates.values(),
+        key=lambda row: (
+            str(row["coin"]),
+            int(row.get("ts_ms") or row.get("window_start_ms") or 0),
+            str(row["record_type"]),
+        ),
+    )
+    leader_accounting_rows = sorted(
+        leader_accounting.values(),
+        key=lambda row: (
+            str(row["vault"]),
+            str(row["family"]),
+            int(row.get("ts_ms") or row.get("window_start_ms") or 0),
+            str(row.get("hash") or ""),
+        ),
+    )
+    market_context_rows = sorted(
+        market_context.values(),
+        key=lambda row: (
+            int(row["observed_at_ms"]), str(row["family"]),
+            str(row["instrument"]), int(row.get("event_ts_ms") or 0),
+        ),
+    )
+    external_market_inventory_rows = list(audit.get("external_market_catalog_inventory") or [])
+    required_market_families = set(_SAFE_MARKET_CONTEXT_FAMILIES)
+    observed_market_families = {str(row["family"]) for row in market_context_rows}
+    missing_market_families = sorted(required_market_families - observed_market_families)
+    instruments_by_market_family = {
+        family: {
+            str(row["instrument"]) for row in market_context_rows
+            if row.get("family") == family and str(row.get("instrument") or "")
+        }
+        for family in sorted(required_market_families)
+    }
+    instruments_with_all_market_families = (
+        set.intersection(*instruments_by_market_family.values())
+        if instruments_by_market_family and all(instruments_by_market_family.values())
+        else set()
+    )
+    market_context_family_presence_complete = not missing_market_families
+    market_context_coverage = {
+        "status": (
+            "REQUIRED_FAMILIES_PRESENT"
+            if market_context_family_presence_complete else "PARTIAL"
+        ),
+        "family_presence_complete": market_context_family_presence_complete,
+        "required_families": sorted(required_market_families),
+        "observed_families": sorted(observed_market_families),
+        "missing_families": missing_market_families,
+        "observation_count": len(market_context_rows),
+        "distinct_instruments_by_family": {
+            family: len(instruments)
+            for family, instruments in sorted(instruments_by_market_family.items())
+        },
+        "instruments_with_all_required_families": len(instruments_with_all_market_families),
+        "temporal_alignment_status": "NOT_PROVEN_BY_FAMILY_PRESENCE",
+        "pnl_eligible": False,
+    }
+    known_external_venues = set(_SAFE_EXTERNAL_MARKET_VENUES)
+    external_safe_by_venue = Counter()
+    external_safe_by_family = Counter()
+    external_catalog_safe_shards = 0
+    external_catalog_replay_compatible_shards = 0
+    for row in external_market_inventory_rows:
+        venue = str(row.get("venue") or "")
+        family = str(row.get("family") or "")
+        safe_count = int(row.get("safe_catalog_shards", 0) or 0)
+        external_catalog_safe_shards += safe_count
+        external_catalog_replay_compatible_shards += int(
+            row.get("replay_compatible_safe_catalog_shards", 0) or 0
+        )
+        if safe_count:
+            external_safe_by_venue[venue] += safe_count
+            external_safe_by_family[family] += safe_count
+    external_safe_venues = set(external_safe_by_venue)
+    missing_external_venues = sorted(known_external_venues - external_safe_venues)
+    external_market_coverage = {
+        "status": (
+            "CATALOG_INVENTORY_ONLY" if external_catalog_safe_shards else "NO_SAFE_SHARDS"
+        ),
+        "supported_venues": sorted(known_external_venues),
+        "venues_with_safe_catalog_shards": sorted(external_safe_venues),
+        "venues_without_safe_catalog_shards": missing_external_venues,
+        "catalog_safe_shards": external_catalog_safe_shards,
+        "catalog_replay_compatible_safe_shards": external_catalog_replay_compatible_shards,
+        "inventory_records": len(external_market_inventory_rows),
+        "loaded_payload_rows": 0,
+        "local_payloads_verified": False,
+        "active_data_index": audit.get("external_market_catalog_inventory", [{}])[0].get(
+            "active_data_index"
+        ) if external_market_inventory_rows else str(
+            (repository_root / "catalog" / "DATA_INDEX.json").resolve()
+        ),
+        "source_recovery_root": str(recovery_root.resolve()),
+        "replay_eligible": False,
+        "pnl_eligible": False,
+        "forward_evidence_allowed": False,
+    }
+    nav_rows_by_identity: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for context_row in context_rows:
+        nav_row = context_row.get("nav_snapshot")
+        if not isinstance(nav_row, Mapping):
+            continue
+        identity = (
+            nav_row["vault"], nav_row["ts_ms"], nav_row["nav_usd"],
+            nav_row.get("source_raw_sha256"),
+        )
+        nav_rows_by_identity[identity] = dict(nav_row)
+    nav_rows = sorted(nav_rows_by_identity.values(), key=lambda row: (row["ts_ms"], row["vault"]))
     historical_unique_fills = sum(bool(row.get("isSnapshot")) for row in fill_rows)
     materialized_tapes: dict[str, dict[str, Any]] = {}
-    for name, rows in (("vault_fills.jsonl", fill_rows), ("copy_vault_l2_tape.jsonl", book_rows)):
+    for name, rows in (
+        ("vault_fills.jsonl", fill_rows),
+        ("vault_snapshots.jsonl", nav_rows),
+        ("copy_vault_l2_tape.jsonl", book_rows),
+        ("copy_vault_context.jsonl", context_rows),
+        ("copy_vault_l2_unexecutable.jsonl", unexecutable_l2_rows),
+        ("copy_vault_unclassified_fills.jsonl", unclassified_fill_rows),
+        ("copy_vault_funding_rates.jsonl", funding_rate_rows),
+        ("copy_vault_accounting_context.jsonl", leader_accounting_rows),
+        ("copy_vault_market_context.jsonl", market_context_rows),
+        ("external_venue_safe_inventory.jsonl", external_market_inventory_rows),
+    ):
         target = data_dir / name
         temporary = target.with_suffix(target.suffix + ".partial")
         if target.is_symlink() or temporary.is_symlink():
@@ -758,12 +1845,14 @@ def materialize_safe_workspace(
         )
         os.replace(temporary, target)
         materialized_tapes[name] = {
+            "path": str(target.resolve()),
             "bytes": target.stat().st_size,
             "sha256": _sha256(target),
         }
     data_complete = (
         audit.get("status") == "SAFE_COMPLETE"
-        and history_audit.get("status") == "COMPLETE"
+        and history_audit.get("status") in {"COMPLETE", "NOT_APPLICABLE"}
+        and market_context_coverage.get("family_presence_complete") is True
         and wrapper_rejections == 0
         and not payload_audit
     )
@@ -781,31 +1870,112 @@ def materialize_safe_workspace(
         reason = "SAFE_WRAPPERS_REJECTED"
     elif payload_audit:
         reason = "SAFE_PAYLOAD_ROWS_REJECTED"
-    elif history_audit.get("status") != "COMPLETE":
+    elif market_context_coverage.get("family_presence_complete") is not True:
+        reason = "REQUIRED_COPY_VAULT_MARKET_CONTEXT_MISSING_OR_PARTIAL"
+    elif history_audit.get("status") not in {"COMPLETE", "NOT_APPLICABLE"}:
         reason = "HISTORICAL_BACKFILL_COVERAGE_PARTIAL_OR_UNKNOWN"
     else:
         reason = audit.get("reason") or "FILLS_OR_CAUSAL_L2_MISSING"
     result = {
         "status": status,
         "reason": reason,
-        "verified_assets": len(assets),
+        "source_recovery_root": str(recovery_root.resolve()),
+        "active_data_index": str((repository_root / "catalog" / "DATA_INDEX.json").resolve()),
+        "workspace_root": str(workspace.resolve()),
+        "materialized_data_root": str(data_dir.resolve()),
+        "verified_assets": audit.get("verified_safe_shards", len(assets)),
+        "verified_copy_vault_assets_total": len(assets),
         "expected_safe_shards": audit.get("expected_safe_shards", 0),
         "missing_shards": audit.get("missing_count", 0),
+        "expected_external_market_shards": audit.get("expected_external_market_shards", 0),
+        "verified_external_market_shards": audit.get("verified_external_market_shards", 0),
+        "missing_external_market_shards": audit.get("missing_external_market_shards", 0),
+        "rejected_external_market_shards": audit.get("rejected_external_market_shards", 0),
         "partial_shards_excluded": audit.get("partial_rows_excluded", 0),
         "rejected_assets": audit.get("rejected_count", 0),
         "invalid_wrappers": wrapper_rejections,
         "payload_audit": dict(sorted(payload_audit.items())),
+        "l2_rejection_audit": dict(sorted(l2_rejection_audit.items())),
+        "payload_rejection_samples": payload_rejection_samples,
         "payload_rejected_records": sum(payload_audit.values()),
         "raw_frames": raw_frames,
+        "source_observations_by_family": dict(sorted(source_counts_by_family.items())),
         "unique_fills": len(fill_rows),
         "historical_snapshot_shards": historical_snapshot_shards,
         "historical_fill_observations": historical_fill_observations,
         "historical_unique_fills": historical_unique_fills,
         "historical_coverage_audit": history_audit,
+        "safe_funding_rate_observations": sum(
+            row["record_type"] == "SETTLEMENT_RATE" for row in funding_rate_rows
+        ),
+        "safe_funding_coverage_receipts": sum(
+            row["record_type"] == "COVERAGE_RECEIPT" for row in funding_rate_rows
+        ),
+        "safe_funding_rates_by_coin": dict(sorted(Counter(
+            str(row["coin"]) for row in funding_rate_rows
+            if row["record_type"] == "SETTLEMENT_RATE"
+        ).items())),
+        "safe_leader_accounting_events": sum(
+            row["record_type"] == "LEADER_ACCOUNTING_EVENT"
+            for row in leader_accounting_rows
+        ),
+        "safe_leader_accounting_coverage_receipts": sum(
+            row["record_type"] == "COVERAGE_RECEIPT"
+            for row in leader_accounting_rows
+        ),
+        "safe_funding_rate_tape_path": str(
+            (data_dir / "copy_vault_funding_rates.jsonl").resolve()
+        ),
+        "safe_leader_accounting_tape_path": str(
+            (data_dir / "copy_vault_accounting_context.jsonl").resolve()
+        ),
+        "safe_market_context_observations": len(market_context_rows),
+        "safe_market_context_by_family": dict(sorted(Counter(
+            str(row["family"]) for row in market_context_rows
+        ).items())),
+        "safe_market_context_coverage": market_context_coverage,
+        "safe_market_context_tape_path": str(
+            (data_dir / "copy_vault_market_context.jsonl").resolve()
+        ),
+        "safe_external_market_inventory_shards": external_catalog_safe_shards,
+        "safe_external_market_inventory_by_venue": dict(sorted(
+            external_safe_by_venue.items()
+        )),
+        "safe_external_market_inventory_by_family": dict(sorted(
+            external_safe_by_family.items()
+        )),
+        "safe_external_market_inventory_coverage": external_market_coverage,
+        "safe_external_market_inventory_tape_path": str(
+            (data_dir / "external_venue_safe_inventory.jsonl").resolve()
+        ),
+        "funding_rate_economic_application": (
+            "NOT_APPLIED_V21_REQUIRES_ORACLE_PRICE_AND_POSITION_BOUND_SETTLEMENT"
+        ),
         "incremental_unique_fills": len(fill_rows) - historical_unique_fills,
         "historical_fills_train_only": True,
         "snapshots_forward_evidence_allowed": False,
         "unique_books": len(book_rows),
+        "unexecutable_l2_observations": len(unexecutable_l2_rows),
+        "unexecutable_l2_by_reason": dict(sorted(Counter(
+            str(row["reason"]) for row in unexecutable_l2_rows
+        ).items())),
+        "unexecutable_l2_tape_path": str((data_dir / "copy_vault_l2_unexecutable.jsonl").resolve()),
+        "unclassified_fill_observations": len(unclassified_fill_rows),
+        "unclassified_fill_by_reason": dict(sorted(Counter(
+            str(row["reason"]) for row in unclassified_fill_rows
+        ).items())),
+        "unclassified_fill_tape_path": str((data_dir / "copy_vault_unclassified_fills.jsonl").resolve()),
+        "safe_context_observations": len(context_rows),
+        "safe_context_by_family": dict(sorted(Counter(
+            str(row["family"]) for row in context_rows
+        ).items())),
+        "safe_context_tape_path": str((data_dir / "copy_vault_context.jsonl").resolve()),
+        "safe_context_start_ms": context_rows[0]["observed_at_ms"] if context_rows else None,
+        "safe_context_end_ms": context_rows[-1]["observed_at_ms"] if context_rows else None,
+        "nav_snapshot_observations": len(nav_rows),
+        "nav_snapshot_start_ms": nav_rows[0]["ts_ms"] if nav_rows else None,
+        "nav_snapshot_end_ms": nav_rows[-1]["ts_ms"] if nav_rows else None,
+        "nav_snapshot_tape_path": str((data_dir / "vault_snapshots.jsonl").resolve()),
         "fill_start_ms": fill_rows[0]["ts_ms"] if fill_rows else None,
         "fill_end_ms": fill_rows[-1]["ts_ms"] if fill_rows else None,
         "book_start_ms": book_rows[0]["received_at_ms"] if book_rows else None,
@@ -1092,24 +2262,15 @@ def _daily_lcb(daily_values: object, trial_count: int) -> float | None:
     return mean - z * standard_error
 
 
-def _campaign_lock(path: Path) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    for _attempt in range(2):
-        try:
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.write(descriptor, f"{os.getpid()}\n".encode("ascii"))
-            os.fsync(descriptor)
-            return descriptor
-        except FileExistsError:
-            try:
-                owner = int(path.read_text(encoding="ascii").strip())
-                os.kill(owner, 0)
-                raise RuntimeError("COPY_VAULT_CAMPAIGN_ALREADY_RUNNING")
-            except ProcessLookupError:
-                path.unlink(missing_ok=True)
-            except (OSError, ValueError) as exc:
-                raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE") from exc
-    raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_BUSY")
+def _campaign_lock(path: Path) -> SingleWriterFileLock:
+    lock = SingleWriterFileLock(path)
+    try:
+        lock.acquire()
+    except WriterBusy as exc:
+        raise RuntimeError("COPY_VAULT_CAMPAIGN_ALREADY_RUNNING") from exc
+    except OSError as exc:
+        raise RuntimeError("COPY_VAULT_CAMPAIGN_LOCK_UNREADABLE") from exc
+    return lock
 
 
 def run_local_campaign(
@@ -1201,6 +2362,39 @@ def run_local_campaign(
         "safe_copy_vault_shards_not_used_for_pnl_reason_by_family": input_manifest.get(
             "safe_copy_vault_shards_not_used_for_pnl_reason_by_family", {}
         ),
+        "safe_context_observations": input_manifest.get("safe_context_observations", 0),
+        "safe_context_by_family": input_manifest.get("safe_context_by_family", {}),
+        "safe_context_expected_by_family": input_manifest.get("safe_context_expected_by_family", {}),
+        "safe_context_verified_by_family": input_manifest.get("safe_context_verified_by_family", {}),
+        "safe_context_missing_by_family": input_manifest.get("safe_context_missing_by_family", {}),
+        "safe_context_rejected_by_family": input_manifest.get("safe_context_rejected_by_family", {}),
+        "safe_context_tape_path": input_manifest.get("safe_context_tape_path"),
+        "safe_funding_rate_observations": input_manifest.get(
+            "safe_funding_rate_observations", 0
+        ),
+        "safe_funding_coverage_receipts": input_manifest.get(
+            "safe_funding_coverage_receipts", 0
+        ),
+        "safe_funding_rates_by_coin": input_manifest.get(
+            "safe_funding_rates_by_coin", {}
+        ),
+        "safe_funding_rate_tape_path": input_manifest.get(
+            "safe_funding_rate_tape_path"
+        ),
+        "funding_rate_economic_application": input_manifest.get(
+            "funding_rate_economic_application"
+        ),
+        "safe_leader_accounting_events": input_manifest.get(
+            "safe_leader_accounting_events", 0
+        ),
+        "safe_leader_accounting_coverage_receipts": input_manifest.get(
+            "safe_leader_accounting_coverage_receipts", 0
+        ),
+        "safe_leader_accounting_tape_path": input_manifest.get(
+            "safe_leader_accounting_tape_path"
+        ),
+        "nav_snapshot_observations": input_manifest.get("nav_snapshot_observations", 0),
+        "nav_snapshot_tape_path": input_manifest.get("nav_snapshot_tape_path"),
         "verified_safe_shards": input_manifest.get("verified_assets"),
         "missing_safe_shards": input_manifest.get("missing_shards"),
         "entries": len(entries), "metaorders": len(metaorders),
@@ -1264,7 +2458,7 @@ def run_local_campaign(
         / "copy_vault_continuous_lab" / ".active.lock"
     )
     try:
-        lock_descriptor = _campaign_lock(lock_path)
+        campaign_lock = _campaign_lock(lock_path)
     except RuntimeError as exc:
         return {**base, "status": "TECHNICAL_FAILURE", "reason": str(exc), "candidates_tested": 0}
     try:
@@ -1606,8 +2800,7 @@ def run_local_campaign(
             "freeze_created": bool(locals().get("best")), "economically_proven": False,
         }
     finally:
-        os.close(lock_descriptor)
-        lock_path.unlink(missing_ok=True)
+        campaign_lock.release()
 
 
 def evaluate_current_copy_vault(

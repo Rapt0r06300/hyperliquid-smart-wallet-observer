@@ -76,10 +76,30 @@ def run_paper_replay_experiment(
 
     for delta in sorted(deltas, key=lambda item: item.observed_at_ms):
         decision_time = delta.observed_at_ms + max(0, cfg.latency_ms)
+        if decision_time <= 0:
+            skipped_no_future_price += 1
+            decisions.append(
+                BacktestReplayDecision(
+                    delta_id=delta.delta_id,
+                    coin=delta.coin,
+                    action=delta.action.value,
+                    decision_time_ms=decision_time,
+                    fill_tick_time_ms=None,
+                    accepted=False,
+                    stopped_reason="MISSING_CAUSAL_TIMESTAMP",
+                    equity_usdt=engine.cash_usdt + engine.realized_pnl_usdt,
+                    realized_pnl_usdt=engine.realized_pnl_usdt,
+                    unrealized_pnl_usdt=0.0,
+                    evidence_hash=None,
+                )
+            )
+            continue
         tick = _first_tick_at_or_after(ticks_by_coin.get(delta.coin.upper(), []), decision_time)
         if tick is None:
             skipped_no_future_price += 1
-            equity, unrealized, drawdown = engine.mark_to_market(_latest_marks_before(ticks_by_coin, decision_time))
+            equity, unrealized, drawdown = engine.mark_to_market(
+                _latest_marks_before(ticks_by_coin, decision_time), timestamp_ms=decision_time
+            )
             decisions.append(
                 BacktestReplayDecision(
                     delta_id=delta.delta_id,
@@ -132,7 +152,18 @@ def run_paper_replay_experiment(
         )
 
     final_marks = _latest_marks_before(ticks_by_coin, 2**63 - 1)
-    final_equity, _, max_drawdown = engine.mark_to_market(final_marks)
+    final_timestamp_ms = max(
+        [tick.timestamp_ms for ticks in ticks_by_coin.values() for tick in ticks]
+        + [decision.decision_time_ms for decision in decisions if decision.decision_time_ms > 0],
+        default=0,
+    )
+    if final_timestamp_ms > 0:
+        final_equity, _, max_drawdown = engine.mark_to_market(
+            final_marks, timestamp_ms=final_timestamp_ms
+        )
+    else:
+        final_equity = round(engine.cash_usdt + engine.realized_pnl_usdt, 8)
+        max_drawdown = round(max(0.0, engine._high_water_equity - final_equity), 8)
     return BacktestExperimentResult(
         decisions=tuple(decisions),
         evidence=tuple(evidences),

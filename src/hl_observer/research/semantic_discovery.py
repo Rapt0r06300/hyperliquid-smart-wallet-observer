@@ -12,6 +12,10 @@ from typing import Any
 
 from hl_observer.research.hypothesis_ledger import FAMILIES
 from hl_observer.research.process_memory import candidate_memory_effect
+from hl_observer.strategies.active_scope import (
+    active_strategy_families,
+    require_active_strategy,
+)
 
 _COMPONENTS = (
     ("events", "event"),
@@ -96,6 +100,25 @@ def load_catalog(path: str | Path) -> dict[str, Any]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or not isinstance(payload.get("families"), dict):
         raise ValueError("catalog must contain a families object")
+    has_active_scope = "active_families" in payload
+    has_archived_scope = "archived_families" in payload
+    if has_active_scope != has_archived_scope:
+        raise ValueError("catalog active family scope metadata must define active and archived families")
+    if has_active_scope:
+        active = payload["active_families"]
+        archived = payload["archived_families"]
+        if (
+            not isinstance(active, list)
+            or not all(isinstance(item, str) for item in active)
+            or len(active) != len(set(active))
+            or not isinstance(archived, list)
+            or not all(isinstance(item, str) for item in archived)
+            or len(archived) != len(set(archived))
+            or set(active) != set(active_strategy_families())
+            or set(active) & set(archived)
+            or set(active) | set(archived) != set(payload["families"])
+        ):
+            raise ValueError("catalog active family scope metadata conflicts with active family scope")
     for family, components in payload["families"].items():
         if family not in FAMILIES:
             raise ValueError(f"unknown family in catalog: {family}")
@@ -184,6 +207,7 @@ def generate_semantic_plans(
     """Generate a deterministic, validated and exact-deduplicated local pool."""
     if family not in FAMILIES:
         raise ValueError(f"family must be one of {sorted(FAMILIES)}")
+    family = require_active_strategy(family)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("limit must be a positive integer")
     if not isinstance(seed, int) or isinstance(seed, bool):
@@ -304,6 +328,7 @@ def rank_semantic_plans(
     seen: set[str] = set()
     for raw in plans:
         plan = dict(raw)
+        plan["family"] = require_active_strategy(str(plan.get("family") or ""))
         key = plan.get("semantic_key")
         if not isinstance(key, str) or key in seen:
             continue

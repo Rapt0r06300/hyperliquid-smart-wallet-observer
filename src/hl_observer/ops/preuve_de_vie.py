@@ -413,9 +413,7 @@ def lire_heartbeats_reels(root: str | Path, sources: Sequence[SourceAttendue]) -
 
 
 def metriques_depuis_heartbeats(heartbeats: Mapping[str, Mapping[str, Any]]) -> dict[str, dict]:
-    """Extrait, pour chaque source, les VRAIES métriques de qualité écrites par le collecteur (item 2) :
-    sous-dict `metriques` du heartbeat, avec repli sur d'éventuelles clés à plat. C'est ce qui empêche un
-    heartbeat frais de masquer un gap/désync/séquence invalide/resync/stale/hors-ordre/reconnexions."""
+    """Extrait les compteurs de flux/persistance et métriques de qualité du heartbeat canonique."""
     from tools.heartbeat_collecteur import CLES_METRIQUES
     out: dict[str, dict] = {}
     for nom, hb in (heartbeats or {}).items():

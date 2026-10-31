@@ -24,8 +24,10 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
-from hl_observer.collection import userfills_live as UL  # noqa: E402
-from hl_observer.collection import verrou_instance as VI  # noqa: E402
+import collecter_vaults as CV  # noqa: E402  (univers officiel public, observation-only)
+import heartbeat_collecteur as HB  # noqa: E402
+import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
+
 from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
@@ -37,17 +39,16 @@ from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
 from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
     UNBOUND_L2_SOURCE_PROTOCOL,
 )
+from hl_observer.collection import userfills_live as UL  # noqa: E402
+from hl_observer.collection import verrou_instance as VI  # noqa: E402
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
+from hl_observer.experimental import liquidation_sentinels as LS  # noqa: E402  (LIQUIDATOR_SENTINELS_V2)
 from hl_observer.market_data.live_l2_service import (  # noqa: E402
     LiveL2Snapshot,
     snapshot_from_mapping,
     write_dynamic_snapshot,
 )
-from hl_observer.experimental import liquidation_sentinels as LS  # noqa: E402  (LIQUIDATOR_SENTINELS_V2)
-import sonde_confirmation_vaults as SD  # noqa: E402  (helpers de réconciliation par CLÉ COMPOSITE, partagés)
-import heartbeat_collecteur as HB  # noqa: E402
-import collecter_vaults as CV  # noqa: E402  (univers officiel public, observation-only)
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 FILLS_LIVE = Path("runtime") / "data" / "vault_fills_live.jsonl"
@@ -76,11 +77,22 @@ _WS_PAR_SOCKET: dict = {}                   # socket_id -> connexion WS vivante 
 _WS_KEYS: dict = {}                          # vault -> deque(maxlen) des CLÉS COMPOSITES de fills REÇUES par le WS
 WS_KEYS_CAP = 6000                          # borne par vault (couvre très largement la fenêtre de réconciliation)
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
-_HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
+_HEARTBEAT_WS = {"messages": 0, "fills": 0, "persisted_fills": 0,
+                 "acks": 0, "reconnects": 0,
                  "drops": 0, "tape_drops": 0, "unclassified_snapshot_frames": 0,
                  "dernier_exchange_ts": None}
 _CURRENT_ROTATION_VAULTS: tuple[str, ...] = ()
 _METAORDER_RUN_LOCK = threading.Lock()
+
+
+def _positive_timestamp_ms_or_none(value: object) -> int | None:
+    """Return an explicit positive millisecond timestamp; never infer one from processing time."""
+    if type(value) is int:
+        return value if value > 0 else None
+    if isinstance(value, str) and value.strip().isdecimal():
+        parsed = int(value.strip())
+        return parsed if parsed > 0 else None
+    return None
 
 
 def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
@@ -423,23 +435,28 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
     etat = "OUVERTURE" if d.get("ouverture") else ("FERMETURE" if d.get("fermeture") else (
         "REDUCTION" if d.get("reduction") else ("REFUS:" + str(d.get("refus")) if d.get("refus") else "AUCUN")))
     vault = str(fill.get("vault") or "")
-    try:
-        received_at_ms = int(fill.get("received_at_ms"))
-    except (TypeError, ValueError, OverflowError):
-        received_at_ms = int(recu_ms)
-    fill_ts = float(fill.get("ts_ms") or received_at_ms)
+    received_at_ms = _positive_timestamp_ms_or_none(fill.get("received_at_ms"))
+    fill_ts_ms = _positive_timestamp_ms_or_none(fill.get("ts_ms"))
+    processed_at_ms = int(recu_ms)
     ligne = {"recu_ms": int(recu_ms), "cohorte": cohorte, "coin": fill.get("coin"), "vault": vault,
              "vault_short": vault[:12],
              "dir": fill.get("dir"), "sz": fill.get("sz"), "px": fill.get("px"),
              "hash": fill.get("hash"), "tid": fill.get("tid"), "oid": fill.get("oid"),
              "source": fill.get("source"), "isSnapshot": fill.get("isSnapshot"),
-             "received_at_ms": received_at_ms, "processed_at_ms": int(recu_ms),
+             "received_at_ms": received_at_ms, "processed_at_ms": processed_at_ms,
              "recv_mono_ns": fill.get("recv_mono_ns"),
              "connection_id": fill.get("connection_id"),
              "fill_ts_ms": fill.get("ts_ms"),
-             "latence_fill_receive_ms": round(received_at_ms - fill_ts),
-             "latence_receive_process_ms": round(recu_ms - received_at_ms),
-             "latence_fill_decision_ms": round(recu_ms - fill_ts),
+             "latence_fill_receive_ms": (
+                 received_at_ms - fill_ts_ms
+                 if received_at_ms is not None and fill_ts_ms is not None else None
+             ),
+             "latence_receive_process_ms": (
+                 processed_at_ms - received_at_ms if received_at_ms is not None else None
+             ),
+             "latence_fill_decision_ms": (
+                 processed_at_ms - fill_ts_ms if fill_ts_ms is not None else None
+             ),
              "decision": etat, "run_id": RUN_ID}
     with (root / JOURNAL).open("a", encoding="utf-8") as f:
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
@@ -555,7 +572,9 @@ def _append_copy_vault_book(
 ) -> bool:
     """Persist one causal observed L2 sample for executable forward replay."""
 
-    symbol = str(coin or "").upper().strip()
+    # Hyperliquid symbols are native, case-sensitive instrument identities.
+    # Uppercase is used only by the bounded lookup index below, never stored.
+    symbol = str(coin or "").strip()
     try:
         received = int(received_at_ms)
         bid = float(resume["bid"])
@@ -653,7 +672,8 @@ def _lecteur_l2_ondemand(coin: str, *, force_refresh: bool = False) -> dict | No
     if _L2_POST is None:
         try:
             sys.path.insert(0, str(RACINE / "tools"))
-            from collecter_carnet import _post_hl as _p, parser_book_hl as _q
+            from collecter_carnet import _post_hl as _p
+            from collecter_carnet import parser_book_hl as _q
             _L2_POST, _L2_PARSE = _p, _q
         except Exception:  # noqa: BLE001
             _L2_CACHE[coin] = (now, None)
@@ -888,17 +908,16 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
-    try:
-        received = int(fill.get("received_at_ms"))
-    except (TypeError, ValueError, OverflowError):
-        received = int(recu)
     persisted_fill = {
         **fill,
-        "received_at_ms": received,
+        "received_at_ms": _positive_timestamp_ms_or_none(fill.get("received_at_ms")),
         "processed_at_ms": int(recu),
     }
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
         f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
+    _HEARTBEAT_WS["persisted_fills"] = int(
+        _HEARTBEAT_WS.get("persisted_fills") or 0
+    ) + 1
     coins_a_verifier.add(fill.get("coin"))
     if _TAPE_FILLS is not None:                                   # → tape L2/OFI : réception MONOTONE (même process)
         try:
@@ -1165,19 +1184,27 @@ async def _exits_periodiques(root: Path, *, intervalle_s: float = 2.0) -> None:
 
 
 async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> None:
-    derniers_messages = 0
+    derniers_fills_persistes = 0
     while True:
         VI.heartbeat(root, NOM_VERROU, info)
         messages = int(_HEARTBEAT_WS["messages"])
+        fills = int(_HEARTBEAT_WS["fills"])
+        persisted_fills = int(_HEARTBEAT_WS.get("persisted_fills") or 0)
+        native_acks = int(_HEARTBEAT_WS["acks"])
         HB.battre(
             root,
             "userfills-live",
             pid=os.getppid(),
-            n_ecrites=max(0, messages - derniers_messages),
+            n_ecrites=max(0, persisted_fills - derniers_fills_persistes),
             dernier_exchange_ts=_HEARTBEAT_WS["dernier_exchange_ts"],
-            souscription_ack=bool(_HEARTBEAT_WS["acks"] or messages),
-            note="%d WS messages, %d fills" % (messages, int(_HEARTBEAT_WS["fills"])),
+            souscription_ack=native_acks > 0,
+            note="%d WS frames, %d fills parsed, %d persisted"
+            % (messages, fills, persisted_fills),
             metriques={
+                "frames_received": messages,
+                "fills_parsed": fills,
+                "fills_persisted": persisted_fills,
+                "native_subscription_acks": native_acks,
                 "unclassified_snapshot_frames": int(
                     _HEARTBEAT_WS.get("unclassified_snapshot_frames") or 0
                 ),
@@ -1194,15 +1221,15 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
             },
             protocol=UNBOUND_L2_SOURCE_PROTOCOL,
         )
-        derniers_messages = messages
+        derniers_fills_persistes = persisted_fills
         await asyncio.sleep(intervalle_s)
 
 
 def _promotion_une_passe(root: Path) -> None:
     """Passe shadow bornée, volontairement exécutable hors event loop."""
+    from hl_observer.experimental import cohortes as _CO
     from hl_observer.experimental import promotion_candidats as PC
     from hl_observer.experimental import raw_shadow_variantes as RS
-    from hl_observer.experimental import cohortes as _CO
     from hl_observer.experimental.copy_edge_forward import charger_prix_tape_ciblee
     observes = _candidats_observes_tous(root)
     coins_probe = set(_CO.charger_table(_CO.PROBE, root))
@@ -1276,7 +1303,6 @@ async def _metaorder_shadow_periodique(root: Path, *, intervalle_s: float = 600.
     userTwapSliceFills, métaordres cachés agrégés, stades FIRST/CONTINUATION/LATE/REVERSAL, PnL forward net
     après coûts, placebo, taille rel, maker/taker, âges). N'OUVRE AUCUNE POSITION ; ledger SÉPARÉ, jamais
     mélangé au PnL live. REST hors event-loop ; poids journalisé. 0 ordre, 0 clé, 0 signature."""
-    import sonde_confirmation_vaults as SD
     await asyncio.sleep(30.0)                                     # démarrage doux (laisse le live s'installer)
     while True:
         try:
@@ -1522,10 +1548,21 @@ def _refresh_copy_vault_prewarm_once(
                 if str(coin).strip() and str(exact).strip()
             }
         else:
+            canonical = {}
+            ambiguous: set[str] = set()
+            for native_coin in active_symbols:
+                exact = str(native_coin).strip()
+                key = exact.upper()
+                if not exact:
+                    continue
+                previous = canonical.get(key)
+                if previous is not None and previous != exact:
+                    ambiguous.add(key)
+                else:
+                    canonical[key] = exact
             canonical = {
-                str(coin).upper().strip(): str(coin).strip()
-                for coin in active_symbols
-                if str(coin).strip()
+                key: exact for key, exact in canonical.items()
+                if key not in ambiguous
             }
         active = set(canonical)
         filtered_inactive = selected - active
@@ -1618,7 +1655,7 @@ def _new_metaorder_checkpoints(fill: dict, *, recv_mono_ms: float, metaorder_id:
     """Build reference/entry checkpoints from one live first slice."""
 
     try:
-        coin = str(fill["coin"]).upper().strip()
+        coin = str(fill["coin"]).strip()
         recv_wall_ms = int(fill["received_at_ms"])
     except (KeyError, TypeError, ValueError, OverflowError):
         return []
@@ -1697,10 +1734,24 @@ def _active_l2_symbols(
         mids = live
     if not isinstance(mids, dict):
         return {}
+    exact_by_key: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for native_coin, mid in mids.items():
+        exact = str(native_coin).strip()
+        key = exact.upper()
+        if not exact or _positive_float(mid) is None:
+            continue
+        previous = exact_by_key.get(key)
+        if previous is not None and previous != exact:
+            ambiguous.add(key)
+        else:
+            exact_by_key[key] = exact
+    # A case-insensitive lookup cannot choose safely between two native names
+    # that normalize to one key, so exclude that key entirely.
     return {
-        str(coin).upper().strip(): str(coin).strip()
-        for coin, mid in mids.items()
-        if str(coin).strip() and _positive_float(mid) is not None
+        key: exact
+        for key, exact in exact_by_key.items()
+        if key not in ambiguous
     }
 
 
@@ -1729,7 +1780,7 @@ def _copy_vault_checkpoint_metaorder(
         return None, "REJECTED"
     try:
         vault = str(fill["vault"]).lower()
-        coin = str(fill["coin"]).upper()
+        coin = str(fill["coin"]).strip()
         direction = int(fill.get("signe") or fill.get("sens") or 0)
         fill_ts_ms = int(fill["ts_ms"])
         signal_ts_ms = int(fill["received_at_ms"])
@@ -1795,7 +1846,7 @@ async def _capture_copy_vault_checkpoint(root: Path, checkpoint: dict) -> dict:
         return {"status": "NOT_DUE"}
     if now_mono - target_mono > COPY_VAULT_MAX_TARGET_LAG_MS:
         return {"status": "EXPIRED"}
-    coin = str(checkpoint["coin"]).upper()
+    coin = str(checkpoint["coin"]).strip()
     ws_event = _first_ws_checkpoint(
         _TAPE_BUFFER.get(coin, []),
         target_mono_ms=target_mono,
@@ -1861,6 +1912,7 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
     snapshots HORODATÉS (réception MONOTONE) → base du VRAI OFI (variations successives). 1 connexion WS
     (total 4 < 10). Résilient. Lecture seule ; aucune position, RAW intact."""
     import websockets
+
     from hl_observer.experimental import metaorder_l2_tape as T
     abonnes: set = set()
     while True:
@@ -1887,7 +1939,11 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                         continue
                     if isinstance(msg, dict) and msg.get("channel") == "l2Book":
                         d = msg.get("data") or {}
-                        coin = str(d.get("coin") or "").upper()
+                        native_coin = str(d.get("coin") or "").strip()
+                        coin = _TAPE_L2_CANONICAL.get(native_coin.upper())
+                        # Only accept the exact native symbol we subscribed to.
+                        if not coin or coin != native_coin:
+                            continue
                         r = T.resume_book(d)
                         if coin and r:
                             recv_wall_ms = int(time.time() * 1000)
@@ -1925,7 +1981,8 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
         try:
             while _TAPE_FILLS is not None and not _TAPE_FILLS.empty():
                 f, frm = _TAPE_FILLS.get_nowait()
-                _TAPE_COINS_ACTIFS[str(f.get("coin") or "").upper()] = time.time() * 1000   # abonne dès ce fill
+                fill_coin = str(f.get("coin") or "").strip()
+                _TAPE_COINS_ACTIFS[fill_coin.upper()] = time.time() * 1000  # normalized lookup key only
                 en_attente.append({"fill": f, "frm": float(frm), "due": time.monotonic() * 1000 + post_window_ms})
             mono = time.monotonic() * 1000
             lignes: list = []
@@ -1934,7 +1991,9 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 if mono < it["due"]:
                     reste.append(it)
                     continue
-                buf = _TAPE_BUFFER.get(str(it["fill"].get("coin") or "").upper(), [])
+                fill_coin = str(it["fill"].get("coin") or "").strip()
+                native_coin = _TAPE_L2_CANONICAL.get(fill_coin.upper())
+                buf = _TAPE_BUFFER.get(native_coin, []) if native_coin else []
                 pre = T.etat_pre(buf, it["frm"])
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
@@ -1943,14 +2002,15 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                                  posts=posts, fill_recv_mono=it["frm"])
                 if l:
                     lignes.append(l)
-                    exits.append({"fill": it["fill"], "frm": it["frm"], "due": it["frm"] + horizon_ms})
+                    exits.append({"fill": it["fill"], "coin": native_coin,
+                                  "frm": it["frm"], "due": it["frm"] + horizon_ms})
             en_attente = reste
             reste_ex: list = []
             for ex in exits:
                 if mono < ex["due"]:
                     reste_ex.append(ex)
                     continue
-                buf = _TAPE_BUFFER.get(str(ex["fill"].get("coin") or "").upper(), [])
+                buf = _TAPE_BUFFER.get(str(ex.get("coin") or ""), [])
                 sortie = T.etat_entree(buf, ex["frm"] + horizon_ms, None)   # 1er carnet ≥ +horizon
                 if sortie:
                     lignes.append(T.ligne_sortie(ex["fill"], sortie=sortie, capture_recv_mono=sortie["recv_mono"],
@@ -1985,8 +2045,10 @@ async def _boucle(root: Path) -> None:
     _ROOT_LIVE = root
     _TAPE_FILLS = asyncio.Queue(maxsize=5000)                     # fills → tape L2 (réception MONOTONE en process)
     _DEMARRAGE_MS = time.time() * 1000                            # plancher de confiance du garde REST↔WS (clés en mémoire dès ici)
-    _HEARTBEAT_WS.update({"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
+    _HEARTBEAT_WS.update({"messages": 0, "fills": 0, "persisted_fills": 0,
+                          "acks": 0, "reconnects": 0,
                           "drops": 0, "tape_drops": 0,
+                          "unclassified_snapshot_frames": 0,
                           "dernier_exchange_ts": None})
     TRIGGER_VERSION = CO._params_trigger(root).get("variante", "v1")
     GIT_COMMIT = _git_commit(root)

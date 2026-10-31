@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
@@ -36,6 +38,26 @@ def _evidence(**over):
 def test_promote_si_tout_mesure_et_positif():
     v = G.evaluer_promotion_scoreboard(_row(), _evidence())
     assert v.verdict == G.PROMOTE and v.echecs == () and v.manquants == ()
+
+
+@pytest.mark.parametrize("family", ["lead_lag", "cross_venue_dislocation", "unknown_family"])
+def test_famille_hors_scope_ne_peut_jamais_etre_promue(family):
+    v = G.evaluer_promotion_scoreboard(_row(strategy=family), _evidence())
+    assert v.verdict == G.DISABLED_BY_SCOPE
+    assert any(g["gate"] == "active_strategy_scope" and g["statut"] == "FAIL" for g in v.gates)
+
+
+def test_promotion_finale_signale_scope_bloque():
+    r = G.promotion_finale(_row(strategy="lead_lag"), _evidence(), deployment_decision=PROMOUVOIR_TESTNET)
+    assert r["promue"] is False
+    assert r["blocage"] == "SCOPE_DISABLED"
+
+
+def test_evaluateur_refuse_ferme_si_autorite_scope_indisponible(monkeypatch):
+    monkeypatch.setitem(sys.modules, "hl_observer.strategies.active_scope", None)
+    v = G.evaluer_promotion_scoreboard(_row(), _evidence())
+    assert v.verdict == G.UNMEASURABLE
+    assert "active_strategy_scope" in v.manquants
 
 
 # --- KILL : un négatif décisif suffit ---------------------------------------

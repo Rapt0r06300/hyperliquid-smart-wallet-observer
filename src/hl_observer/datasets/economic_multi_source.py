@@ -361,28 +361,53 @@ def write_economic_source_coverage(
     copy_consumed: Iterable[Path],
     lead_consumed: Iterable[Path],
     cross_consumed: Iterable[Path],
+    active_families: Iterable[str] | None = None,
 ) -> tuple[Path, Path, dict[str, object]]:
     resolved = Path(root).resolve()
-    copy_discovered = load_family_source_paths(resolved, "copy_vault")
-    cross_discovered = load_family_source_paths(resolved, "cross_venue")
-    # carnet_venues is a shared book source for Copy-Vault.
-    copy_discovered_union = sorted(
-        set([*copy_discovered, *[p for p in cross_discovered if p.name.casefold() == "carnet_venues.jsonl"]]),
-        key=lambda path: path.as_posix().casefold(),
+    active = (
+        {str(family).strip() for family in active_families}
+        if active_families is not None
+        else {"copy_vault", "lead_lag", "cross_venue"}
     )
-    families = {
-        "copy_vault": _family_coverage(copy_discovered_union, list(copy_consumed)),
-        "lead_lag": _family_coverage(
-            load_family_source_paths(resolved, "lead_lag"), list(lead_consumed)
-        ),
-        "cross_venue": _family_coverage(cross_discovered, list(cross_consumed)),
+    known = {"copy_vault", "lead_lag", "cross_venue"}
+    if not active or not active.issubset(known):
+        raise ValueError("active_families must name known economic coverage families")
+    consumed_by_family = {
+        "copy_vault": list(copy_consumed),
+        "lead_lag": list(lead_consumed),
+        "cross_venue": list(cross_consumed),
     }
+    families: dict[str, dict[str, object]] = {}
+    for family in sorted(known):
+        if family not in active:
+            families[family] = {"status": "DISABLED_BY_SCOPE"}
+            continue
+        discovered = load_family_source_paths(resolved, family)
+        if family == "copy_vault":
+            # Shared Hyperliquid L2 observations are Copy-Vault execution data,
+            # even when their archive category is cross_venue.
+            cross_discovered = load_family_source_paths(resolved, "cross_venue")
+            discovered = sorted(
+                set([*discovered, *[
+                    path for path in cross_discovered
+                    if path.name.casefold() == "carnet_venues.jsonl"
+                ]]),
+                key=lambda path: path.as_posix().casefold(),
+            )
+        families[family] = _family_coverage(
+            discovered,
+            consumed_by_family[family],
+        )
     payload: dict[str, object] = {
         "schema": "hypersmart.dataset_source_consumption_coverage.v1",
         "dataset_workspace": is_dataset_workspace(resolved),
         "source_release_id": 371149058,
         "families": families,
-        "all_families_full": all(row["status"] == "FULL" for row in families.values()),
+        "active_families": sorted(active),
+        "disabled_families": sorted(known - active),
+        "all_families_full": all(
+            families[family]["status"] == "FULL" for family in active
+        ),
     }
     report_dir = resolved / "runtime" / "reports" / "datasets"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -399,10 +424,13 @@ def write_economic_source_coverage(
         "|---|---:|---:|---:|---:|---|",
     ]
     for family, row in families.items():
-        lines.append(
-            f"| {family} | {row['discovered_files']} | {row['consumed_files']} | "
-            f"{row['file_coverage_pct']:.2f}% | {row['byte_coverage_pct']:.2f}% | {row['status']} |"
-        )
+        if row["status"] == "DISABLED_BY_SCOPE":
+            lines.append(f"| {family} | — | — | — | — | DISABLED_BY_SCOPE |")
+        else:
+            lines.append(
+                f"| {family} | {row['discovered_files']} | {row['consumed_files']} | "
+                f"{row['file_coverage_pct']:.2f}% | {row['byte_coverage_pct']:.2f}% | {row['status']} |"
+            )
     lines.extend(
         [
             "",

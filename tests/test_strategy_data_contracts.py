@@ -44,7 +44,28 @@ def test_copy_vault_contract_requires_live_fill_and_market_context() -> None:
     contract = get_strategy_data_contract("copy_vault")
     assert set(contract.required_families_by_venue) == {"hyperliquid"}
     required = contract.required_families_by_venue["hyperliquid"]
-    assert {"userFills", "bbo", "l2Book", "trades", "activeAssetCtx"}.issubset(required)
+    assert {
+        "copy_vault_fills", "copy_vault_bbo", "copy_vault_l2",
+        "copy_vault_trades", "copy_vault_active_asset_ctx",
+        "copy_vault_instrument_metadata",
+    }.issubset(required)
+
+
+def test_copy_vault_contract_does_not_accept_unrelated_generic_market_families() -> None:
+    missing = missing_required_families(
+        [
+            {"venue": "hyperliquid", "family": "bbo"},
+            {"venue": "hyperliquid", "family": "l2Book"},
+            {"venue": "hyperliquid", "family": "trades"},
+        ],
+        strategy="copy_vault",
+        venues=["hyperliquid"],
+    )
+    assert missing["hyperliquid"] == [
+        "copy_vault_active_asset_ctx", "copy_vault_bbo",
+        "copy_vault_fills", "copy_vault_instrument_metadata",
+        "copy_vault_l2", "copy_vault_trades",
+    ]
 
 
 def test_missing_required_families_never_silently_pass() -> None:

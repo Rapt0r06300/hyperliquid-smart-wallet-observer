@@ -33,8 +33,9 @@ permissions:
   contents: write
   actions: write
 concurrency:
-  group: alina-operator-dispatch-${{ github.event.client_payload.request_id || inputs.request_id }}
+  group: copy-vault-main-state-writer
   cancel-in-progress: false
+  queue: max
 jobs:
   receive:
     runs-on: ubuntu-latest
@@ -139,15 +140,9 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add catalog/operator-dispatches
-          git diff --cached --quiet || git commit -m "orchestration: record operator dispatch"
-          for attempt in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              break
-            fi
-            if [ "$attempt" = 5 ]; then
-              echo "Unable to publish dispatch receipt after five attempts" >&2
-              exit 1
-            fi
-          done
+          if ! git diff --cached --quiet; then
+            git commit -m "orchestration: record operator dispatch"
+            python tools/publish_main_commit.py --max-attempts 20 --base-delay-seconds 0.5 --max-delay-seconds 8
+          fi
           gh workflow run create-resumable-campaigns.yml --repo "$GITHUB_REPOSITORY" --ref main
           gh workflow run resumable-campaign-controller.yml --repo "$GITHUB_REPOSITORY" --ref main

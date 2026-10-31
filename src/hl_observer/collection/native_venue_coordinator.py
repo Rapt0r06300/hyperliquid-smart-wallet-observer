@@ -739,7 +739,7 @@ class NativeVenueCoordinator:
                         if isinstance(transport, Mapping):
                             cached["_alina_transport"] = dict(transport)
                         pending_deltas[contract].append((cached, now))
-                    self.ingest_gate(enriched, now_ms=now)
+                    self.ingest_gate(enriched, receive_ts_ms=now, now_ms=now)
                     state = self._gate_states.get(contract)
                     if (state is not None and state.quality == "EXPLOITABLE"
                             and not state.rest_anchor_pending

@@ -83,7 +83,7 @@ OBSERVABILITY_REQUIREMENTS = (
     ("cockpit_runtime", "cockpit: progression, ressources et runtime"),
     ("github_online_truth", "vérité GitHub en ligne, pas seulement service Running"),
 )
-DOCS_REQUIREMENTS = (("readme_truth", "README: scope courant, objectif +5, données/replay/safety et runner non installé"),)
+DOCS_REQUIREMENTS = (("readme_truth", "README: scope Copy-Vault, cible terminale +5/200, preuves SAFE et garde-fous PAPER"),)
 REHEARSALS_REQUIREMENTS = (
     ("ordered_rehearsals", "répétitions pré-full ~180GB avec crash/restart/RAM/disque/consommation runtime"),
     ("final_go_gate", "GO final: main propre, CI verte, ledger ~180GB, PnL réconcilié, 3 familles certifiables, anti-overfit/placebos/sanitisation/reproductibilité/docs"),
@@ -361,9 +361,14 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
         with tempfile.TemporaryDirectory() as tmp:
             common = dict(project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64, net_pnl_usd=5.2, analysis_complete=True, certified=True)
             a = record_certified_proof(tmp, family="copy_vault", **common)
-            b = record_certified_proof(tmp, family="lead_lag", **common)
+            try:
+                record_certified_proof(tmp, family="lead_lag", **common)
+            except EconomicMemoryError:
+                inactive_write_refused = True
+            else:
+                inactive_write_refused = False
             exact = load_exact_proof(tmp, family="copy_vault", project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64)
-            return a["key"] != b["key"] and exact["family"] == "copy_vault"
+            return inactive_write_refused and exact["family"] == "copy_vault"
 
     def memory_negative() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
@@ -390,8 +395,16 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
         return d["status"] == "READY" and d["holdout_used_for_ranking"] is False
 
     def select_stop() -> bool:
-        done = [{**row, "phase": "FREEZE_AND_CONFIRM_FORWARD"} for row in decisions]
-        d = choose_max_data_job(family_decisions=done, suite_plans=plans, free_disk_gib=100, all_targets_reached=True, reserve_gib=25)
+        done = [{"family": "copy_vault", "priority": 100, "phase": "FREEZE_AND_CONFIRM_FORWARD"}]
+        from hl_observer.datasets.max_data_policy import suite_ladder
+        d = choose_max_data_job(
+            family_decisions=done,
+            suite_plans=plans,
+            completed_suites=suite_ladder("copy_vault"),
+            free_disk_gib=100,
+            all_targets_reached=True,
+            reserve_gib=25,
+        )
         return d["status"] == "STOP_PROOF_REACHED" and d["download_budget_gib"] == 0.0
 
     common_mem = (memory_path,)
@@ -601,13 +614,16 @@ def _observability_probes(root: Path) -> dict[str, Probe]:
 
 
 def _docs_probes(root: Path) -> dict[str, Probe]:
-    readme = "README.md"; completion = "docs/PRE_RUN_775_TECHNICAL_COMPLETION.md"; source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
+    readme = "README.md"
     readme_text = _read(root, readme)
-    completion_text = _read(root, completion)
-    core = all(token in readme_text for token in ("Alina Smart Flow", "Copy-Vault", "Lead-Lag", "Cross-Venue", "paper"))
-    extended = all(token in (readme_text + completion_text) for token in ("5.00 USD", "FULL/COLD", "180", "MAX DATA", "GitHub-hosted"))
+    scope = all(token in readme_text for token in ("Copy-Vault uniquement", "Lead-Lag", "Cross-Venue", "DISABLED"))
+    terminal_target = all(token in readme_text for token in ("Objectif économique terminal", "5.00 USD nets/jour", "200 USD paper"))
+    data_proof = all(token in readme_text for token in ("SAFE", "replay", "backtest", "OOS/forward"))
+    no_stale_active_scope = "Scope économique des 3 familles" not in readme_text and "les trois familles actives" not in readme_text
+    core = all(token in readme_text for token in ("Alina Smart Flow", "Copy-Vault", "PAPER / READ-ONLY / FAIL-CLOSED"))
+    contract = core and scope and terminal_target and no_stale_active_scope
     deterministic = all(token in readme_text for token in ("spec canonique", "IDLE", "COLLECT", "ANALYZE"))
-    return {"readme_truth": Probe(core and extended, core, any(token in readme_text.casefold() for token in ("aucune exécution réelle", "aucun ordre réel", "aucun ordre reel", "real_execution")), deterministic, (readme, completion, source))}
+    return {"readme_truth": Probe(contract, data_proof, "Aucun ordre mainnet" in readme_text and "Aucun ordre testnet" in readme_text, deterministic, (readme, "AGENTS.md", "SECURITY.md"))}
 
 
 def _rehearsal_probes(root: Path) -> dict[str, Probe]:

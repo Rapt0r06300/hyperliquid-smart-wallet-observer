@@ -39,7 +39,7 @@ def _causal_exit(row: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     action = str(row.get("action") or "").upper()
     vault = str(row.get("vault") or "").strip()
-    coin = str(row.get("coin") or "").upper().strip()
+    coin = str(row.get("coin") or "").strip()
     if not (
         action in EXIT_ACTIONS
         and str(row.get("source") or "") == "LIVE_WS"
@@ -170,7 +170,7 @@ def replay_exit_flow_train(
             },
         }
     continuous = {
-        str(coin).upper(): sorted(
+        str(coin).strip(): sorted(
             [
                 dict(row)
                 for row in rows
@@ -191,7 +191,7 @@ def replay_exit_flow_train(
         counters["signals_considered"] += 1
         trade, reason = execute_metaorder(
             signal,
-            continuous.get(str(signal["coin"]).upper(), []),
+            continuous.get(str(signal["coin"]).strip(), []),
             horizon_ms=int(horizon_ms),
             direction_multiplier=int(direction_multiplier),
             copy_delay_ms=int(copy_delay_ms),

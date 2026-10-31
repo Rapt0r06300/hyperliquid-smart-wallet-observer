@@ -22,8 +22,9 @@ from hl_observer.ops.final_economic_certification import certify_campaign
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
 
 FAMILY_ECONOMIC_SUITES = frozenset(
-    {"copy-vault-full", "lead-lag-full", "cross-venue-full"}
+    {"copy-vault-full"}
 )
+DISABLED_FAMILY_ECONOMIC_SUITES = frozenset({"lead-lag-full", "cross-venue-full"})
 SUITE_CAMPAIGN_FAMILY = {
     "copy-vault-full": "copy_vault",
     "lead-lag-full": "lead_lag",
@@ -38,8 +39,12 @@ SUITE_COVERAGE_FAMILY = {
 
 def validate_family_request(raw: Mapping[str, Any]) -> dict[str, Any]:
     suite = str(raw.get("suite") or "").strip()
+    if suite in DISABLED_FAMILY_ECONOMIC_SUITES:
+        raise ValueError(f"DISABLED_BY_SCOPE:{suite}")
     if str(raw.get("mode") or "").strip() != "economic" or suite not in FAMILY_ECONOMIC_SUITES:
-        raise ValueError("family economic worker accepts only active-family FULL/COLD economic suites")
+        raise ValueError(
+            "family economic worker accepts only active-family Copy-Vault FULL/COLD economic suite"
+        )
     shim = dict(raw)
     shim["suite"] = "economic-full"
     validated = canonical_job.validate_request(shim)
@@ -305,6 +310,7 @@ def execute_family_job(
 
 __all__ = [
     "FAMILY_ECONOMIC_SUITES",
+    "DISABLED_FAMILY_ECONOMIC_SUITES",
     "SUITE_CAMPAIGN_FAMILY",
     "execute_family_job",
     "record_family_economic_memory",

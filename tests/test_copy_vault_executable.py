@@ -115,6 +115,34 @@ def test_metaorders_collapse_slices_even_when_other_coin_is_interleaved() -> Non
     assert audit["sliced_fills_collapsed"] == 1
 
 
+def test_metaorders_keep_case_sensitive_hyperliquid_symbols_distinct() -> None:
+    entries = [
+        _entry("lower-native", 1_000, coin="kPEPE", action="OPEN"),
+        _entry("upper-native", 1_000, coin="KPEPE", action="OPEN"),
+    ]
+
+    metaorders, _audit = cluster_metaorders(entries)
+
+    assert [row["coin"] for row in metaorders] == ["kPEPE", "KPEPE"]
+    assert len({row["metaorder_id"] for row in metaorders}) == 2
+
+
+def test_causal_protocol_does_not_join_fill_to_book_with_different_native_symbol() -> None:
+    entries = [{
+        **_entry("native-fill", 1_000, coin="kPEPE", action="OPEN"),
+        "source": "LIVE_WS", "is_snapshot": False,
+        "observed_at_ms": 1_025, "causal_forward_eligible": True,
+    }]
+    metaorders = cluster_metaorders(entries)[0]
+    books = {"KPEPE": [_book(1_025, 1.0, 1.01, line=1, causal=True)]}
+
+    signals, causal_books, audit = select_causal_protocol_inputs(metaorders, books)
+
+    assert [row["coin"] for row in signals] == ["kPEPE"]
+    assert causal_books == {}
+    assert audit["causal_protocol_book_rows"] == 0
+
+
 def test_metaorder_id_ne_change_pas_quand_une_slice_future_arrive() -> None:
     first = _entry("first", 1_000, action="OPEN")
     future_add = _entry("future-add", 2_000, action="ADD")
@@ -314,6 +342,26 @@ def test_loader_separe_historique_et_tape_ws_causale(tmp_path) -> None:
         "causal_ws": 1,
         "causal_info_checkpoint": 0,
     }
+
+
+def test_loader_keeps_native_case_sensitive_symbols_in_separate_books(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    rows = [
+        {"coin": "kPEPE", "collecte_ts": 1.0, "hl_bid": 99.0,
+         "hl_ask": 101.0, "taille_min_usd": 500.0},
+        {"coin": "KPEPE", "collecte_ts": 1.0, "hl_bid": 199.0,
+         "hl_ask": 201.0, "taille_min_usd": 600.0},
+    ]
+    (data / "carnet_venues.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+
+    books, _audit = load_observed_books(tmp_path, coins={"kPEPE", "KPEPE"})
+
+    assert set(books) == {"kPEPE", "KPEPE"}
+    assert books["kPEPE"][0]["bid"] == 99.0
+    assert books["KPEPE"][0]["bid"] == 199.0
 
 
 @pytest.mark.parametrize(
@@ -1237,3 +1285,113 @@ def test_calibration_never_selects_the_least_bad_losing_horizon(monkeypatch) -> 
     assert result["status"] == "KILL_TRAIN_NO_POSITIVE_RECONCILED_CANDIDATE"
     assert all(row["sample_eligible"] is True for row in result["grid"])
     assert all(row["eligible"] is False for row in result["grid"])
+
+
+def test_calibration_ranks_unrounded_train_net_when_candidates_differ_below_report_precision(monkeypatch) -> None:
+    entries = [
+        {
+            **_entry(f"rank-{index}", 1_000 + index * 4_000_000),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": 1_000 + index * 4_000_000,
+        }
+        for index in range(16)
+    ]
+    metaorders, _ = cluster_metaorders(entries)
+    candidate_nets = {
+        HORIZONS_MS[0]: 1.000000003,
+        HORIZONS_MS[1]: 1.000000004,
+    }
+
+    def ranked_replay(*args, horizon_ms, **kwargs):
+        del args, kwargs
+        net = candidate_nets.get(horizon_ms, 0.5)
+        return [
+            {
+                "trade_id": f"{horizon_ms}-{index}",
+                "exit_ts_ms": 10_000 + index,
+                "gross_pnl_usd": net / 8,
+                "fees_usd": 0.0,
+                "spread_cost_usd": 0.0,
+                "slippage_cost_usd": 0.0,
+                "latency_cost_usd": 0.0,
+                "net_pnl_usd": net / 8,
+                "liquidatable_net": True,
+            }
+            for index in range(8)
+        ], {}
+
+    monkeypatch.setattr(
+        "hl_observer.backtesting.copy_vault_executable.replay_metaorders",
+        ranked_replay,
+    )
+    result = calibrate_train_only(metaorders, {"BTC": []})
+
+    assert result["selection_eligible"] is True
+    assert result["selected_horizon_ms"] == HORIZONS_MS[1]
+    assert result["grid"][0]["summary"]["net_pnl_usd"] == 1.000000003
+    assert result["grid"][1]["summary"]["net_pnl_usd"] == 1.000000004
+
+
+def test_summary_uses_stable_net_aggregation_across_cancellation() -> None:
+    rows = [
+        {
+            "trade_id": f"stable-{index}",
+            "exit_ts_ms": index + 1,
+            "gross_pnl_usd": pnl,
+            "fees_usd": 0.0,
+            "spread_cost_usd": 0.0,
+            "slippage_cost_usd": 0.0,
+            "latency_cost_usd": 0.0,
+            "net_pnl_usd": pnl,
+            "liquidatable_net": True,
+        }
+        for index, pnl in enumerate((1.0, 1e-16, -1.0))
+    ]
+
+    result = summarize(rows)
+
+    assert result["net_pnl_usd"] == 1e-16
+    assert result["economic_reconciliation_ok"] is True
+
+
+def test_summary_uses_conservative_reconciled_net_not_reported_net() -> None:
+    row = {
+        "trade_id": "conservative-summary",
+        "exit_ts_ms": 1,
+        "gross_pnl_usd": 2.0,
+        "fees_usd": 1.0,
+        "spread_cost_usd": 0.0,
+        "slippage_cost_usd": 0.0,
+        "latency_cost_usd": 0.0,
+        "net_pnl_usd": 1.000000007,
+        "liquidatable_net": True,
+    }
+
+    result = summarize([row])
+
+    assert result["economic_reconciliation_ok"] is True
+    assert result["net_pnl_usd"] == 1.0
+    json.dumps(result, sort_keys=True, allow_nan=False)
+
+
+def test_summary_does_not_hide_accumulated_trade_reconciliation_error() -> None:
+    rows = [
+        {
+            "trade_id": f"small-recon-error-{index}",
+            "exit_ts_ms": index + 1,
+            "gross_pnl_usd": 2.0,
+            "fees_usd": 1.0,
+            "spread_cost_usd": 0.0,
+            "slippage_cost_usd": 0.0,
+            "latency_cost_usd": 0.0,
+            "net_pnl_usd": 1.000000007,
+            "liquidatable_net": True,
+        }
+        for index in range(2)
+    ]
+
+    result = summarize(rows)
+
+    assert result["economic_reconciliation_ok"] is False
+    assert result["net_pnl_usd"] == 2.0

@@ -47,8 +47,10 @@ concurrency:
   # The creator reloads latest main and phase-gates each new campaign.
   # Cancelling a running creation on every fresh COLLECT code push can
   # permanently starve the launched workers; serialize instead.
-  # GitHub automatically replaces redundant queued runs in this group.
   cancel-in-progress: false
+  # Keep every materialization request durable up to the Actions queue cap;
+  # the hourly schedule re-derives work if that cap is reached.
+  queue: max
 
 jobs:
   create:
@@ -373,23 +375,7 @@ jobs:
           done
           git diff --cached --quiet && exit 0
           git commit -m "campaign: create continuous resumable work"
-          for i in 1 2 3 4 5; do
-            set +e
-            git pull --rebase origin main
-            pull_rc=$?
-            set -e
-            if [ "$pull_rc" -ne 0 ]; then
-              git rebase --abort >/dev/null 2>&1 || true
-              echo "::warning::Campaign manifest refresh collided with concurrent worker updates; discarding this local batch so the next scheduled/push cycle recomputes from current main."
-              exit 0
-            fi
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((i*2))
-          done
-          echo "::warning::Campaign manifest push remained contended; deferring to the next controller cycle."
-          exit 0
+          python tools/publish_main_commit.py --max-attempts 20 --base-delay-seconds 0.5 --max-delay-seconds 8
 
 
 

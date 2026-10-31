@@ -4,8 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SRC = _REPO_ROOT / "src"
@@ -24,6 +25,7 @@ from hl_observer.research.hypothesis_ledger import (  # noqa: E402
     semantic_fingerprint,
     validate_record,
 )
+from hl_observer.strategies.active_scope import require_active_strategy  # noqa: E402
 
 DEFAULT_LEDGER = Path("runtime/codex_research/HYPOTHESIS_LEDGER.jsonl")
 
@@ -107,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "score":
             candidate = validate_record(_load_json(args.json_path))
+            try:
+                require_active_strategy(candidate["family"])
+            except ValueError as exc:
+                raise HypothesisValidationError(str(exc)) from exc
             fingerprint = semantic_fingerprint(candidate)
             fingerprints = {semantic_fingerprint(item) for item in history}
             _emit(

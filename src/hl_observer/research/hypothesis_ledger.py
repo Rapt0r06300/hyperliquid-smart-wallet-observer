@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from hl_observer.strategies.active_scope import require_active_strategy
+
 SCHEMA_VERSION = 1
 FAMILIES = frozenset({"copy_vault", "lead_lag", "cross_venue_dislocation_v2"})
 STAGES = frozenset({"DISCOVERY", "TOURNAMENT", "EXPLOIT", "FREEZE", "REJECTED", "BLOCKED"})
@@ -295,6 +297,10 @@ def novelty_score(candidate: Mapping[str, Any], history: Iterable[Mapping[str, A
 def append_record(path: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate then append exactly one JSONL record without rewriting history."""
     record = validate_record(payload)
+    try:
+        require_active_strategy(record["family"])
+    except ValueError as exc:
+        raise HypothesisValidationError(str(exc)) from exc
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     existing_ids = {item["record_id"] for item in load_records(target)}
@@ -423,9 +429,9 @@ def rediscovery_required(history: Iterable[Mapping[str, Any]], hypothesis_id: st
         for item in lineage
         if item["stage"] in {"TOURNAMENT", "EXPLOIT", "REJECTED", "BLOCKED"}
     ]
-    if len(evaluated) >= 2 and all(_nonpositive_or_rejected(item) for item in evaluated[-2:]):
-        return True
-    return False
+    return len(evaluated) >= 2 and all(
+        _nonpositive_or_rejected(item) for item in evaluated[-2:]
+    )
 
 
 def challenger_required(history: Iterable[Mapping[str, Any]], hypothesis_id: str) -> bool:

@@ -42,6 +42,7 @@ def _complete_lifecycle() -> PaperLedger:
         side="LONG",
         amount_usdc=0.2,
         timestamp_ms=4,
+        refs={"funding_settlement_id": "HYPE:funding:4"},
     )
     ledger.reduce_or_close(
         coin="HYPE",
@@ -72,6 +73,64 @@ def test_semantic_audit_reconciles_open_add_reduce_close_costs_and_funding():
     assert audit.recalculated_equity_usdc == pytest.approx(998.046)
     assert ledger.snapshot()["strict_pnl_allowed"] is True
     assert ledger.snapshot()["pnl_audit"]["status"] == TRUSTED
+
+
+def test_semantic_audit_rejects_snapshot_divergence_above_decimal_tolerance():
+    ledger = _complete_lifecycle()
+    snapshot = ledger.snapshot()
+    snapshot["realized_pnl_usdc"] += 0.00005
+
+    audit = audit_paper_ledger(
+        (event.to_dict() for event in ledger.events),
+        snapshot=snapshot,
+    )
+
+    assert audit.status == CONTAMINATED
+    assert audit.pnl_valid is False
+    assert any(issue.code == "SNAPSHOT_COMPONENT_MISMATCH" for issue in audit.issues)
+
+
+def test_semantic_audit_cannot_widen_the_canonical_economic_tolerance():
+    ledger = _complete_lifecycle()
+    audit = audit_paper_ledger(
+        (event.to_dict() for event in ledger.events),
+        snapshot=ledger.snapshot(),
+        tolerance_usdc=0.02,
+    )
+
+    assert audit.status == CONTAMINATED
+    assert audit.pnl_valid is False
+    assert any(issue.code == "PNL_TOLERANCE_INVALID" for issue in audit.issues)
+
+
+def test_semantic_audit_does_not_round_subthreshold_net_up_to_five():
+    ledger = PaperLedger(starting_balance_usdc=200.0, session_id="paper:subthreshold")
+    ledger.open_position(
+        coin="HYPE",
+        side="LONG",
+        notional_usdc=100.0,
+        quantity=1.0,
+        fill_price=100.0,
+        timestamp_ms=1,
+        fee_bps=0.0,
+    )
+    ledger.reduce_or_close(
+        coin="HYPE",
+        side="LONG",
+        quantity=1.0,
+        fill_price=104.99999999996,
+        timestamp_ms=2,
+        fee_bps=0.0,
+    )
+
+    audit = audit_paper_ledger(
+        (event.to_dict() for event in ledger.events),
+        snapshot=ledger.snapshot(),
+    )
+
+    assert audit.status == TRUSTED
+    assert audit.recalculated_net_pnl_usdc is not None
+    assert audit.recalculated_net_pnl_usdc < 5.0
 
 
 def test_empty_new_ledger_is_unmeasurable_without_economic_events():

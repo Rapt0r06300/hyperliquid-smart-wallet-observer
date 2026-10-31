@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 from pathlib import Path
 
@@ -77,7 +78,7 @@ def test_snapshot_and_live_userfills_are_separate_families() -> None:
     assert live_fills[0]["connection_id"] == "copy-test"
 
 
-def test_missing_snapshot_flag_is_preserved_but_never_classified_live() -> None:
+def test_missing_snapshot_flag_is_preserved_in_unclassified_family(tmp_path: Path) -> None:
     envelope, fills = C.userfills_envelope(
         {
             "channel": "userFills",
@@ -96,11 +97,182 @@ def test_missing_snapshot_flag_is_preserved_but_never_classified_live() -> None:
         connection_id="copy-test",
     )
     assert envelope is not None
-    assert envelope.channel == "copy_vault_fills"
+    assert envelope.channel == "copy_vault_unknown"
     assert envelope.event_kind == "UNCLASSIFIED"
     assert envelope.parsed_summary["snapshot_flag_status"] == "MISSING_OR_INVALID"
     assert envelope.parsed_summary["is_snapshot"] is None
     assert fills[0]["isSnapshot"] is None
+    shard = tmp_path / "unknown.jsonl.gz"
+    with gzip.open(shard, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps(envelope.as_record(written_ts_ms=1_010)) + "\n")
+    manifest = C.build_manifest_from_tick_shard(shard, collector_version="test")
+    assert manifest["family"] == "copy_vault_unknown"
+    assert manifest["replay_compatible"] is False
+    assert C.locally_replay_admissible(manifest) is False
+
+
+def test_copy_vault_market_envelopes_cover_required_hyperliquid_feeds_and_keep_native_coin() -> None:
+    messages = [
+        {
+            "channel": "bbo",
+            "data": {"coin": "xyz:TSLA", "time": 2_000, "bbo": [
+                {"px": "100", "sz": "3", "n": 1},
+                {"px": "101", "sz": "4", "n": 2},
+            ]},
+        },
+        {
+            "channel": "l2Book",
+            "data": {"coin": "xyz:TSLA", "time": 2_001, "levels": [
+                [{"px": "100", "sz": "3", "n": 1}],
+                [{"px": "101", "sz": "4", "n": 2}],
+            ]},
+        },
+        {
+            "channel": "trades",
+            "data": [{
+                "coin": "xyz:TSLA", "time": 2_002, "px": "100.5", "sz": "1",
+                "side": "B", "hash": "0xtrade", "tid": 7,
+            }],
+        },
+        {
+            "channel": "activeAssetCtx",
+            "data": {"coin": "xyz:TSLA", "ctx": {
+                "markPx": "100.5", "oraclePx": "100.4", "funding": "0.001",
+            }},
+        },
+    ]
+    expected = [
+        "copy_vault_bbo", "copy_vault_l2", "copy_vault_trades",
+        "copy_vault_active_asset_ctx",
+    ]
+    envelope_builder = getattr(C, "copy_vault_market_envelopes", None)
+    assert callable(envelope_builder), "Copy-Vault SAFE collector must expose every required market feed"
+    envelopes = [
+        envelope
+        for message in messages
+        for envelope in envelope_builder(
+            message,
+            receive_wall_ms=2_010,
+            receive_mono_ns=123,
+            connection_id="market-test",
+        )
+    ]
+
+    assert [envelope.channel for envelope in envelopes] == expected
+    assert all(envelope.instrument == "xyz:TSLA" for envelope in envelopes)
+    assert envelopes[0].exchange_ts_ms == 2_000
+    assert envelopes[1].exchange_ts_ms == 2_001
+    assert envelopes[2].exchange_ts_ms == 2_002
+    assert envelopes[3].exchange_ts_ms is None
+    assert envelopes[3].provenance["timestamp_semantics"] == "receive_observation_time_only"
+
+
+def test_copy_vault_trade_frame_is_split_into_unique_trade_envelopes() -> None:
+    envelope_builder = getattr(C, "copy_vault_market_envelopes", None)
+    assert callable(envelope_builder), "each public trade needs its own identity-bearing envelope"
+    rows = [
+        {"coin": "xyz:TSLA", "time": 2_002, "px": "100.5", "sz": "1", "side": "B", "hash": "0xa", "tid": 1},
+        {"coin": "xyz:TSLA", "time": 2_002, "px": "100.6", "sz": "2", "side": "A", "hash": "0xb", "tid": 2},
+    ]
+
+    envelopes = envelope_builder(
+        {"channel": "trades", "data": rows},
+        receive_wall_ms=2_010,
+        receive_mono_ns=123,
+        connection_id="market-test",
+    )
+
+    assert len(envelopes) == 2
+    assert [json.loads(row.as_record(written_ts_ms=2_011)["raw_payload"])["data"] for row in envelopes] == [
+        [rows[0]], [rows[1]],
+    ]
+    assert [row.parsed_summary["event_count"] for row in envelopes] == [1, 1]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"channel": "bbo", "data": {"coin": "kPEPE", "time": 2_000,
+         "bbo": [{"px": "2", "sz": "1"}, {"px": "1", "sz": "1"}]}},
+        {"channel": "l2Book", "data": {"coin": "kPEPE", "time": 2_000,
+         "levels": [[{"px": "NaN", "sz": "1"}], [{"px": "3", "sz": "1"}]]}},
+        {"channel": "trades", "data": [{"coin": "kPEPE", "time": 2_000,
+         "px": "0", "sz": "1", "side": "B", "tid": 1}]},
+    ],
+)
+def test_invalid_market_observation_is_quarantined_not_replayable(message) -> None:
+    envelopes = C.copy_vault_market_envelopes(
+        message, receive_wall_ms=2_010, receive_mono_ns=123,
+        connection_id="invalid-market-test",
+    )
+
+    assert envelopes
+    assert all(envelope.channel == "copy_vault_unknown" for envelope in envelopes)
+    assert all(envelope.event_kind == "UNCLASSIFIED" for envelope in envelopes)
+
+
+def test_copy_vault_market_subscription_plan_preserves_native_symbol_and_all_required_feeds() -> None:
+    subscription_builder = getattr(C, "copy_vault_market_subscriptions", None)
+    assert callable(subscription_builder), "market channels must be defined by one subscription plan"
+    assert subscription_builder("xyz:TSLA") == [
+        {"type": "bbo", "coin": "xyz:TSLA"},
+        {"type": "l2Book", "coin": "xyz:TSLA"},
+        {"type": "trades", "coin": "xyz:TSLA"},
+        {"type": "activeAssetCtx", "coin": "xyz:TSLA"},
+    ]
+
+
+def test_market_subscription_ack_parser_accepts_only_explicit_copy_vault_acknowledgements() -> None:
+    parser = getattr(C, "market_subscription_ack_key", None)
+    assert callable(parser)
+    assert parser({
+        "channel": "subscriptionResponse",
+        "data": {"method": "subscribe", "subscription": {"type": "trades", "coin": "xyz:TSLA"}},
+    }) == ("trades", "xyz:TSLA")
+    assert parser({
+        "channel": "subscriptionResponse",
+        "data": {"method": "unsubscribe", "subscription": {"type": "trades", "coin": "xyz:TSLA"}},
+    }) is None
+    assert parser({
+        "channel": "subscriptionResponse",
+        "data": {"method": "subscribe", "subscription": {"type": "userFills", "user": "0xabc"}},
+    }) is None
+
+
+def test_copy_vault_instrument_metadata_collects_the_referenced_hip3_dex() -> None:
+    requests: list[dict] = []
+
+    async def scenario() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content.decode())
+            requests.append(body)
+            if body["type"] == "perpDexs":
+                return httpx.Response(200, json=[None, {"name": "xyz"}])
+            if body.get("dex") == "xyz":
+                return httpx.Response(200, json={"universe": [{
+                    "name": "TSLA", "szDecimals": 3, "maxLeverage": 10,
+                }]})
+            return httpx.Response(200, json={"universe": []})
+
+        async with httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            report, envelopes = await C.collect_copy_vault_instrument_metadata(
+                {"xyz:TSLA"}, client=client,
+            )
+
+        assert report["status"] == "COMPLETE"
+        assert report["metadata_instruments"] == ["xyz:TSLA"]
+        assert len(envelopes) == 1
+        assert envelopes[0].instrument == "xyz:TSLA"
+        payload = json.loads(envelopes[0].as_record(written_ts_ms=2_010)["raw_payload"])
+        assert payload["data"]["metadata"]["name"] == "TSLA"
+        assert payload["data"]["dex"] == "xyz"
+
+    asyncio.run(scenario())
+    assert requests[0] == {"type": "perpDexs"}
+    assert {request.get("dex") for request in requests if request["type"] == "meta"} == {"xyz"}
 
 
 def test_selection_envelope_is_observation_only_and_causal() -> None:
@@ -261,6 +433,77 @@ def test_rest_weight_pacer_leaves_headroom_under_ip_limit() -> None:
 
     asyncio.run(scenario())
     assert sleeps == [pytest.approx(11.9)]
+
+
+def test_exact_time_range_query_splits_capped_windows_without_boundary_overlap() -> None:
+    observed_windows: list[tuple[int, int]] = []
+
+    async def scenario() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content.decode())
+            left, right = int(body["startTime"]), int(body["endTime"])
+            observed_windows.append((left, right))
+            if (left, right) == (1_000, 1_009):
+                # The API's full response cap forces a split before accepting data.
+                return httpx.Response(200, json=[{} for _ in range(C.MAX_TIME_RANGE_RESPONSE_ROWS)])
+            event_ms = left if left == right else left + 1
+            return httpx.Response(200, json=[{
+                "time": event_ms,
+                "hash": f"0x{event_ms:064x}",
+                "delta": {
+                    "type": "funding", "coin": "BTC", "fundingRate": "0.001",
+                    "szi": "2", "usdc": "0.2",
+                },
+            }])
+
+        async with httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            rows, leaves, audit = await C.exact_time_range_query(
+                client,
+                {"type": "userFunding", "user": "0x" + "1" * 40},
+                instrument="0x" + "1" * 40,
+                start_ms=1_000,
+                end_ms=1_009,
+            )
+
+        assert audit["status"] == "COMPLETE"
+        assert audit["requests"] == 3
+        assert audit["splits"] == 1
+        assert len(rows) == len(leaves) == 2
+        assert [(leaf["start_ms"], leaf["end_ms"]) for leaf in leaves] == [
+            (1_000, 1_004), (1_005, 1_009),
+        ]
+
+    asyncio.run(scenario())
+    assert observed_windows == [
+        (1_000, 1_009), (1_000, 1_004), (1_005, 1_009),
+    ]
+
+
+def test_empty_accounting_window_is_preserved_as_a_coverage_receipt() -> None:
+    envelope = C.time_range_envelopes(
+        [],
+        [{"start_ms": 1_000, "end_ms": 2_000, "response_rows": 0, "records": []}],
+        family="copy_vault_funding_rates",
+        source_id="hyperliquid_public_funding_history_forward",
+        instrument="BTC",
+        request_type="fundingHistory",
+        window_kind="FORWARD",
+        report={
+            "status": "COMPLETE", "requested_start_ms": 1_000,
+            "requested_end_ms": 2_000,
+        },
+    )[0]
+
+    record = envelope.as_record(written_ts_ms=2_001)
+    assert record["channel"] == "copy_vault_funding_rates"
+    raw_payload = json.loads(record["raw_payload"])
+    assert raw_payload["data"]["coverage"]["status"] == "COMPLETE"
+    assert raw_payload["data"]["coverage"]["leaf_accepted_rows"] == 0
+    assert record["provenance"]["timestamp_semantics"] == "receive_observation_time_only"
+    assert record["provenance"]["forward_evidence_allowed"] is True
 
 
 def test_historical_backfill_resumes_durable_cursor_and_keeps_known_gaps(monkeypatch) -> None:
@@ -527,6 +770,29 @@ def test_bundle_labels_rest_backfill_historical_and_not_forward(tmp_path: Path) 
     # Before GitHub release upload the asset is intentionally not SAFE yet.
     assert manifest["quality_status"] == "PARTIAL"
     assert "REMOTE_ASSET_NOT_VERIFIED" in manifest["quality_reasons"]
+
+
+def test_bundle_index_keeps_market_feed_coverage_and_unknown_continuity(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    output = tmp_path / "bundle"
+    coverage = {
+        "schema": "alina.copy_vault_market_feed_coverage.v1",
+        "status": "SUBSCRIPTIONS_ACKNOWLEDGED_CONTINUITY_UNPROVEN",
+        "required_channels": ["bbo", "l2Book", "trades", "activeAssetCtx"],
+        "forward_instruments": ["kPEPE"],
+        "continuity_status": "UNPROVEN_NO_COMPLETE_SEQUENCE_AND_GAP_RECOVERY_RECEIPT",
+    }
+
+    index = C.build_copy_vault_bundle(
+        raw, output, collector_version="a" * 40, reconciliation={},
+        queue_drops={}, selection={"selected_at_ms": 1_000},
+        collection_run_id="coverage-receipt-test", market_feed_coverage=coverage,
+    )
+
+    saved_index = json.loads((output / "BUNDLE_INDEX.json").read_text(encoding="utf-8"))
+    assert index["market_feed_coverage"] == coverage
+    assert saved_index["market_feed_coverage"] == coverage
 
 
 

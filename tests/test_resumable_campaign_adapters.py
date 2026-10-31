@@ -516,8 +516,78 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
     assert metrics["started_at_ms"] == 1000
     assert metrics["ended_at_ms"] == 61000
     assert metrics["duration_s"] == 60.0
+    assert metrics["accepted_frames"] is None
+    assert metrics["persisted_frames"] is None
+    assert metrics["frame_metrics_complete"] is False
+
+
+def test_collection_checkpoint_metrics_certifies_exact_zero_and_manifest_counts(tmp_path):
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps({
+            "accepted_frames": 10,
+            "persisted_frames": 10,
+            "l2_frames": 7,
+            "queue_drops": {},
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"family": "l2book", "record_count": 7}),
+        encoding="utf-8",
+    )
+    (tmp_path / "fills.json").write_text(
+        json.dumps({"family": "fills", "record_count": 3}),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps({
+            "manifests": ["manifest.json", "fills.json"],
+            "shard_count": 2,
+            "safe_count": 1,
+            "partial_count": 0,
+            "reject_count": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["frame_metrics_complete"] is True
     assert metrics["accepted_frames"] == 10
     assert metrics["persisted_frames"] == 10
+    assert metrics["l2_frames"] == 7
+    assert metrics["bbo_frames"] == 0
+    assert metrics["queue_drops"] == 0
+
+
+def test_collection_checkpoint_metrics_rejects_corrupt_manifest_coverage(tmp_path):
+    (tmp_path / "collection_summary.json").write_text(
+        json.dumps({
+            "accepted_frames": 10,
+            "persisted_frames": 10,
+            "l2_frames": 7,
+            "queue_drops": 0,
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        json.dumps({
+            "manifests": ["missing.json"],
+            "shard_count": 1,
+            "safe_count": 1,
+            "partial_count": 0,
+            "reject_count": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["frame_metrics_complete"] is False
+    assert metrics["accepted_frames"] is None
+    assert metrics["persisted_frames"] is None
+    assert metrics["l2_frames"] is None
+    assert metrics["bbo_frames"] is None
 
 
 def test_collection_checkpoint_metrics_preserve_historical_backfill_audit(tmp_path):

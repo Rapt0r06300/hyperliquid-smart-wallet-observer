@@ -6,8 +6,8 @@ from pathlib import Path
 
 from tools.augment_campaign_result import (
     annotate_collection,
-    annotate_rejected_collection,
     annotate_evidence,
+    annotate_rejected_collection,
     mark_durability_failure,
 )
 from tools.copy_vault_continuity import load_release_history_audits
@@ -50,6 +50,195 @@ def test_collection_annotation_rehashes_and_persists_counts(tmp_path):
     assert row["payload"]["safe_count"] == 2
     assert row["payload"]["source_admission"]["excluded_shards"] == 3
     assert row["sha256"] != before
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            row["payload"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert row["sha256"] == expected_digest
+
+
+def test_structured_verified_metrics_survive_truncated_stdout(tmp_path):
+    result = tmp_path / "result.json"
+    manifest = tmp_path / "RUN_MANIFEST.json"
+    _result(result)
+    row = json.loads(result.read_text(encoding="utf-8"))
+    row["payload"].update({
+        "stdout": '{"truncated":' + ("x" * 8_200),
+        "collection_metrics": {
+            "basis": "published_bundle_manifests",
+            "frame_metrics_complete": True,
+            "accepted_frames": 11,
+            "persisted_frames": 10,
+            "l2_frames": 6,
+            "bbo_frames": 2,
+            "queue_drops": 1,
+            "trade_count_observed": 2,
+            "trade_count_coverage_complete": True,
+        },
+    })
+    result.write_text(json.dumps(row), encoding="utf-8")
+    manifest.write_text(json.dumps({
+        "shard_count": 3,
+        "safe_count": 3,
+        "partial_count": 0,
+        "reject_count": 0,
+        "manifests": [
+            {"dataset_id": "l2-1", "family": "l2book", "record_count": 6},
+            {"dataset_id": "bbo-1", "family": "bbo", "record_count": 2},
+            {"dataset_id": "fills-1", "family": "fills", "record_count": 2},
+        ],
+    }), encoding="utf-8")
+
+    annotated = annotate_collection(
+        result,
+        manifest,
+        tag="data-v2-truncated-stdout-test",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+    )
+
+    metrics = annotated["payload"]["collection_metrics"]
+    assert metrics["frame_metrics_complete"] is True
+    assert metrics["accepted_frames"] == 11
+    assert metrics["persisted_frames"] == 10
+    assert metrics["l2_frames"] == 6
+    assert metrics["bbo_frames"] == 2
+    assert metrics["queue_drops"] == 1
+    assert metrics["basis"] == "published_bundle_manifests"
+    assert metrics["frame_metrics_provenance"]["source"] == "structured_collection_metrics"
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            annotated["payload"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert annotated["sha256"] == expected_digest
+
+
+def test_contradictory_structured_metrics_fail_closed_without_stdout_fallback(tmp_path):
+    result = tmp_path / "result.json"
+    manifest = tmp_path / "RUN_MANIFEST.json"
+    _result(result)
+    row = json.loads(result.read_text(encoding="utf-8"))
+    row["payload"].update({
+        "stdout": json.dumps({
+            "frame_metrics_complete": True,
+            "accepted_frames": 4,
+            "persisted_frames": 3,
+            "l2_frames": 3,
+            "bbo_frames": 0,
+            "queue_drops": 0,
+        }),
+        "collection_metrics": {
+            "basis": "published_bundle_manifests",
+            "frame_metrics_complete": True,
+            "accepted_frames": 4,
+            "persisted_frames": 3,
+            "l2_frames": 4,
+            "bbo_frames": 0,
+            "queue_drops": 0,
+        },
+    })
+    result.write_text(json.dumps(row), encoding="utf-8")
+    manifest.write_text(json.dumps({
+        "shard_count": 1,
+        "safe_count": 1,
+        "partial_count": 0,
+        "reject_count": 0,
+        "manifests": [
+            {"dataset_id": "l2-1", "family": "l2book", "record_count": 3},
+        ],
+    }), encoding="utf-8")
+
+    annotated = annotate_collection(
+        result,
+        manifest,
+        tag="data-v2-contradiction-test",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+    )
+
+    metrics = annotated["payload"]["collection_metrics"]
+    assert metrics["frame_metrics_complete"] is False
+    assert metrics["accepted_frames"] is None
+    assert metrics["persisted_frames"] is None
+    assert metrics["l2_frames"] is None
+    assert metrics["queue_drops"] is None
+    assert metrics["frame_metrics_provenance"]["source"] == "structured_collection_metrics"
+    assert "L2_FRAME_COUNT_MISMATCH" in metrics["frame_metrics_provenance"]["incomplete_reasons"]
+
+
+def test_collection_annotation_does_not_turn_missing_frame_counts_into_zero(tmp_path):
+    result = tmp_path / "result.json"
+    manifest = tmp_path / "RUN_MANIFEST.json"
+    _result(result)
+    row = json.loads(result.read_text(encoding="utf-8"))
+    row["payload"]["stdout"] = '{"accepted_frames":' + ("x" * 8_200)
+    result.write_text(json.dumps(row), encoding="utf-8")
+    manifest.write_text(json.dumps({
+        "shard_count": 0,
+        "safe_count": 0,
+        "partial_count": 0,
+        "reject_count": 0,
+        "manifests": [],
+    }), encoding="utf-8")
+
+    annotated = annotate_collection(
+        result,
+        manifest,
+        tag="data-v2-incomplete-test",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+    )
+
+    metrics = annotated["payload"]["collection_metrics"]
+    assert metrics["frame_metrics_complete"] is False
+    assert metrics["accepted_frames"] is None
+    assert metrics["persisted_frames"] is None
+    assert metrics["l2_frames"] is None
+    assert metrics["bbo_frames"] is None
+    assert metrics["queue_drops"] is None
+
+
+def test_collection_annotation_preserves_certified_frame_zeroes(tmp_path):
+    result = tmp_path / "result.json"
+    manifest = tmp_path / "RUN_MANIFEST.json"
+    _result(result)
+    row = json.loads(result.read_text(encoding="utf-8"))
+    row["payload"]["stdout"] = json.dumps({
+        "accepted_frames": 0,
+        "persisted_frames": 0,
+        "l2_frames": 0,
+        "bbo_frames": 0,
+        "queue_drops": {},
+        "frame_metrics_complete": True,
+    })
+    result.write_text(json.dumps(row), encoding="utf-8")
+    manifest.write_text(json.dumps({
+        "shard_count": 0,
+        "safe_count": 0,
+        "partial_count": 0,
+        "reject_count": 0,
+        "manifests": [],
+    }), encoding="utf-8")
+
+    annotated = annotate_collection(
+        result,
+        manifest,
+        tag="data-v2-zero-test",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+    )
+
+    metrics = annotated["payload"]["collection_metrics"]
+    assert metrics["frame_metrics_complete"] is True
+    assert metrics["accepted_frames"] == 0
+    assert metrics["persisted_frames"] == 0
+    assert metrics["l2_frames"] == 0
+    assert metrics["bbo_frames"] == 0
+    assert metrics["queue_drops"] == 0
 
 
 def test_collection_annotation_preserves_structured_historical_backfill_audit(tmp_path):

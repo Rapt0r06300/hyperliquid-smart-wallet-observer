@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import hl_observer.simulation.economic_objective as objective
+import hl_observer.simulation.economic_proof_controls as proof_controls
 
 
 def _segment(*, net: float = 2.6, count: int = 2, hash_char: str = "b", **overrides):
@@ -75,6 +76,8 @@ def test_number_and_family_normalisation_edges() -> None:
     assert objective._number(math.nan) is None
     assert objective._number(math.inf) is None
     assert objective._number(-math.inf) is None
+    assert objective._number(True) is None
+    assert proof_controls._number(True) is None
 
 
 def test_segment_economics_fails_closed_for_missing_cost_identity_and_liquidation() -> None:
@@ -235,3 +238,79 @@ def test_placebo_and_target_threshold_fail_closed_without_hiding_proof_net() -> 
     assert exact["proof_net_pnl_usd"] == 5.0
     assert exact["objective_status"] == "ATTEINT"
     assert exact["eligible_net_pnl_usd"] == 5.0
+
+
+def test_objective_target_gate_uses_unrounded_oos_and_forward_sum() -> None:
+    segment_net = 2.499999998
+    result = objective.evaluate_objective(
+        _proof(
+            oos=_segment(
+                net=segment_net,
+                gross_pnl_usd=segment_net + 0.4,
+                hash_char="f",
+                no_lookahead=True,
+            ),
+            forward=_segment(
+                net=segment_net,
+                gross_pnl_usd=segment_net + 0.4,
+                hash_char="0",
+                post_freeze=True,
+            ),
+        )
+    )
+
+    assert result["proof_economics"]["net_pnl_usd"] == 4.999999996
+    assert result["proof_net_pnl_usd"] == 4.999999996
+    assert result["eligible_net_pnl_usd"] is None
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert "TARGET_NET_USD_NOT_REACHED" in result["objective_reasons"]
+
+
+def test_objective_target_gate_does_not_trust_float_sum_rounded_up_to_target() -> None:
+    forward_net = 2.4999999999999996
+    result = objective.evaluate_objective(
+        _proof(
+            oos=_segment(net=2.5, gross_pnl_usd=2.9, hash_char="f", no_lookahead=True),
+            forward=_segment(
+                net=forward_net,
+                gross_pnl_usd=2.8999999999999995,
+                hash_char="0",
+                post_freeze=True,
+            ),
+        )
+    )
+
+    assert 2.5 + forward_net == 5.0  # binary float loses the deficit
+    assert result["proof_net_pnl_usd"] < 5.0
+    assert result["eligible_net_pnl_usd"] is None
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert "TARGET_NET_USD_NOT_REACHED" in result["objective_reasons"]
+
+
+def test_objective_target_gate_does_not_trust_net_that_exceeds_gross_less_costs() -> None:
+    reported_net = 2.500000005
+    reconciled_net = 2.999999999 - 0.25 - 0.25
+    assert math.isclose(reported_net - reconciled_net, 6e-9, abs_tol=1e-12)
+
+    def segment(hash_char: str, **flags):
+        return _segment(
+            net=reported_net,
+            gross_pnl_usd=2.999999999,
+            fees_usd=0.25,
+            spread_cost_usd=0.25,
+            slippage_cost_usd=0.0,
+            latency_cost_usd=0.0,
+            hash_char=hash_char,
+            **flags,
+        )
+
+    result = objective.evaluate_objective(
+        _proof(
+            oos=segment("d", no_lookahead=True),
+            forward=segment("e", post_freeze=True),
+        )
+    )
+
+    assert result["proof_net_pnl_usd"] == 4.999999998
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert "TARGET_NET_USD_NOT_REACHED" in result["objective_reasons"]

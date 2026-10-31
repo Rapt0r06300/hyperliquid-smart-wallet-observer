@@ -292,3 +292,28 @@ def test_consistance_numerique_inter_artefacts_resout_une_autorite_unique() -> N
     )
     assert invalid["ready"] is False
     assert "ARTIFACT_VALUE_MISMATCH:scoreboard:net_pnl_usd" in invalid["issues"]
+
+
+def test_consistance_inter_artefacts_n_utilise_pas_de_tolerance_relative() -> None:
+    result = audit_cross_artifact_numeric_consistency(
+        authority_name="family_ledger",
+        authority_values={"net_pnl_usd": 1000.0},
+        artifacts={"scoreboard": {"net_pnl_usd": 1000.0000005}},
+        fields=("net_pnl_usd",),
+    )
+
+    assert result["ready"] is False
+    assert "ARTIFACT_VALUE_MISMATCH:scoreboard:net_pnl_usd" in result["issues"]
+
+
+def test_consistance_inter_artefacts_refuse_tolerance_elargie() -> None:
+    result = audit_cross_artifact_numeric_consistency(
+        authority_name="family_ledger",
+        authority_values={"net_pnl_usd": 1.0},
+        artifacts={"scoreboard": {"net_pnl_usd": 1.0}},
+        fields=("net_pnl_usd",),
+        tolerance=0.01,
+    )
+
+    assert result["ready"] is False
+    assert "NUMERIC_TOLERANCE_OUT_OF_BOUNDS" in result["issues"]

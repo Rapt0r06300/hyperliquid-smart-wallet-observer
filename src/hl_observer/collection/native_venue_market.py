@@ -133,7 +133,7 @@ class NativeMarketSnapshot:
             raise ValueError("market timestamps and stale limit must be integers") from exc
         derived_quality = quality
         derived_reason = reason
-        if stale_limit < 0 or exchange_ts < 0 or receive_ts < 0:
+        if stale_limit < 0 or exchange_ts <= 0 or receive_ts <= 0:
             derived_quality = UNMEASURABLE
             derived_reason = derived_reason or "INVALID_MARKET_TIMESTAMPS"
         elif receive_ts > now:

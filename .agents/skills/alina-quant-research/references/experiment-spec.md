@@ -5,16 +5,16 @@ Minimal schema for `python tools/codex_quant_experiment.py SPEC.json`.
 ```json
 {
   "schema_version": 1,
-  "experiment_id": "ll-latency-001",
-  "family": "lead_lag",
-  "hypothesis_id": "H-LL-latency-decay",
+  "experiment_id": "copy-vault-leader-delay-001",
+  "family": "copy_vault",
+  "hypothesis_id": "H-CV-leader-delay",
   "phase": "train_search",
   "base_sha": "0123456789abcdef0123456789abcdef01234567",
   "data_fingerprint": "sha256:<dataset-or-manifest-fingerprint>",
   "data_cutoff_utc": "2026-09-09T17:00:00Z",
   "evaluator": "hl_observer.some_module:evaluate_candidate",
   "search_space": {
-    "lag_ms": [50, 100, 150],
+    "leader_to_follower_delay_ms": [50, 100, 150],
     "threshold_bps": {"min": 1.0, "max": 8.0}
   },
   "engine": "tpe",
@@ -34,7 +34,7 @@ Minimal schema for `python tools/codex_quant_experiment.py SPEC.json`.
 
 ## Allowed values
 
-`family`: `copy_vault`, `lead_lag`, `cross_venue_dislocation_v2`.
+`family`: `copy_vault` for every new run. Legacy family values may occur in archived specifications and remain readable for history, but must be rejected before execution or artifact writes with `DISABLED_BY_SCOPE`.
 
 `phase`: `feasibility`, `train_search`, `sensitivity`, `walk_forward`, `anti_overfit`, `oos`, `forward`, `certification`.
 
@@ -44,7 +44,7 @@ Minimal schema for `python tools/codex_quant_experiment.py SPEC.json`.
 
 ## Evaluator contract
 
-The callable receives `params` and may optionally accept keyword arguments `budget` and `context`:
+The callable receives `params` and may optionally accept keyword arguments `budget` and `context`. This is a contract illustration, not a measured result:
 
 ```python
 def evaluate_candidate(params: dict, *, budget: float = 1.0, context: dict | None = None) -> dict:

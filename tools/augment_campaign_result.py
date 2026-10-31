@@ -9,6 +9,17 @@ from pathlib import Path
 from typing import Any
 
 
+def _exact_nonnegative_int(value: Any) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _exact_drop_count(value: Any) -> int | None:
+    if isinstance(value, dict):
+        counts = [_exact_nonnegative_int(item) for item in value.values()]
+        return sum(counts) if all(item is not None for item in counts) else None
+    return _exact_nonnegative_int(value)
+
+
 def _load(path: Path) -> dict[str, Any]:
     value=json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value,dict):
@@ -44,8 +55,11 @@ def annotate_collection(
         raise ValueError("result payload must be an object")
 
     manifests=manifest.get("manifests")
-    if not isinstance(manifests,list):
-        manifests=[]
+    manifest_rows = manifests if isinstance(manifests, list) else []
+    manifest_set_complete = (
+        isinstance(manifests, list)
+        and _exact_nonnegative_int(manifest.get("shard_count")) == len(manifest_rows)
+    )
     trade_families={
         "trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"
     }
@@ -54,41 +68,107 @@ def annotate_collection(
     trade_shards_exact=0
     record_count=0
     compressed_bytes=0
-    for shard in manifests:
+    manifest_record_count=0
+    manifest_l2_frames=0
+    manifest_bbo_frames=0
+    dataset_ids=set()
+    for shard in manifest_rows:
         if not isinstance(shard,dict):
+            manifest_set_complete=False
             continue
-        record_count += int(shard.get("record_count") or shard.get("event_count") or 0)
-        compressed_bytes += int(shard.get("bytes") or 0)
+        dataset_id=shard.get("dataset_id")
+        if not isinstance(dataset_id, str) or not dataset_id.strip() or dataset_id in dataset_ids:
+            manifest_set_complete=False
+        else:
+            dataset_ids.add(dataset_id)
+        raw_records=shard.get("record_count")
+        if raw_records is None:
+            raw_records=shard.get("event_count")
+        exact_records=_exact_nonnegative_int(raw_records)
+        if exact_records is None:
+            manifest_set_complete=False
+            exact_records=0
+        if (
+            shard.get("record_count") is not None
+            and shard.get("event_count") is not None
+            and _exact_nonnegative_int(shard.get("event_count")) != exact_records
+        ):
+            manifest_set_complete=False
+        record_count += exact_records
+        manifest_record_count += exact_records
+        exact_bytes=_exact_nonnegative_int(shard.get("bytes"))
+        if exact_bytes is not None:
+            compressed_bytes += exact_bytes
         family=str(shard.get("family") or "").lower()
+        if not family:
+            manifest_set_complete=False
+        if family in {"l2book", "copy_vault_l2", "native_market"}:
+            manifest_l2_frames += exact_records
+        elif family == "bbo":
+            manifest_bbo_frames += exact_records
         if family in trade_families:
             trade_shards += 1
             if shard.get("trade_count_exact") is True:
                 trade_shards_exact += 1
-                trade_count += int(shard.get("trade_count") or 0)
+                exact_trade_count=_exact_nonnegative_int(shard.get("trade_count"))
+                if exact_trade_count is None:
+                    manifest_set_complete=False
+                else:
+                    trade_count += exact_trade_count
 
-    accepted_frames=persisted_frames=l2_frames=queue_drops=0
-    frame_metrics_complete=False
+    collection_metrics = payload.get("collection_metrics")
+    structured_metrics = (
+        dict(collection_metrics) if isinstance(collection_metrics, dict) else None
+    )
+    frame_source = "structured_collection_metrics" if structured_metrics is not None else "stdout_summary"
+    candidate_metrics = structured_metrics
     raw_stdout=payload.get("stdout")
-    if isinstance(raw_stdout,str) and raw_stdout.strip():
+    if candidate_metrics is None and isinstance(raw_stdout,str) and raw_stdout.strip():
         try:
             summary=json.loads(raw_stdout)
         except (TypeError,ValueError,json.JSONDecodeError):
             summary=None
         if isinstance(summary,dict):
-            accepted_frames=int(summary.get("accepted_frames") or 0)
-            persisted_frames=int(summary.get("persisted_frames") or 0)
-            l2_frames=int(summary.get("l2_frames") or 0)
-            drops=summary.get("queue_drops")
-            if isinstance(drops,dict):
-                queue_drops=sum(int(v or 0) for v in drops.values())
-            else:
-                queue_drops=int(drops or 0)
-            frame_metrics_complete=True
+            candidate_metrics = summary
 
-    collection_metrics = payload.get("collection_metrics")
-    merged_collection_metrics = (
-        dict(collection_metrics) if isinstance(collection_metrics, dict) else {}
-    )
+    accepted_frames = persisted_frames = l2_frames = bbo_frames = queue_drops = None
+    frame_metric_reasons = []
+    if not manifest_set_complete:
+        frame_metric_reasons.append("RUN_MANIFEST_COVERAGE_INCOMPLETE")
+    if candidate_metrics is None:
+        frame_metric_reasons.append("FRAME_METRIC_SOURCE_MISSING_OR_TRUNCATED")
+    else:
+        candidate_counts = {
+            key: _exact_nonnegative_int(candidate_metrics.get(key))
+            for key in (
+                "accepted_frames",
+                "persisted_frames",
+                "l2_frames",
+                "bbo_frames",
+            )
+        }
+        candidate_counts["queue_drops"] = _exact_drop_count(
+            candidate_metrics.get("queue_drops")
+        )
+        if candidate_metrics.get("frame_metrics_complete") is not True or any(
+            value is None for value in candidate_counts.values()
+        ):
+            frame_metric_reasons.append("STRUCTURED_FRAME_METRICS_MISSING_OR_INEXACT")
+        if candidate_counts["persisted_frames"] != manifest_record_count:
+            frame_metric_reasons.append("PERSISTED_FRAME_COUNT_MISMATCH")
+        if candidate_counts["l2_frames"] != manifest_l2_frames:
+            frame_metric_reasons.append("L2_FRAME_COUNT_MISMATCH")
+        if candidate_counts["bbo_frames"] != manifest_bbo_frames:
+            frame_metric_reasons.append("BBO_FRAME_COUNT_MISMATCH")
+        if not frame_metric_reasons:
+            accepted_frames = candidate_counts["accepted_frames"]
+            persisted_frames = candidate_counts["persisted_frames"]
+            l2_frames = candidate_counts["l2_frames"]
+            bbo_frames = candidate_counts["bbo_frames"]
+            queue_drops = candidate_counts["queue_drops"]
+
+    frame_metrics_complete = not frame_metric_reasons
+    merged_collection_metrics = dict(structured_metrics or {})
     merged_collection_metrics.update({
         "trade_count_observed":trade_count,
         "trade_count_coverage_complete":trade_shards == trade_shards_exact,
@@ -98,15 +178,29 @@ def annotate_collection(
         "accepted_frames":accepted_frames,
         "persisted_frames":persisted_frames,
         "l2_frames":l2_frames,
+        "bbo_frames":bbo_frames,
         "queue_drops":queue_drops,
         "frame_metrics_complete":frame_metrics_complete,
+        "frame_metrics_provenance": {
+            "source": frame_source,
+            "basis": (
+                structured_metrics.get("basis")
+                if structured_metrics is not None
+                else "parsed_stdout_summary"
+            ),
+            "run_manifest_sha256": hashlib.sha256(
+                run_manifest_path.read_bytes()
+            ).hexdigest(),
+            "run_manifest_crosscheck": "PASS" if frame_metrics_complete else "FAIL",
+            "incomplete_reasons": frame_metric_reasons,
+        },
         "shard_count":int(manifest.get("shard_count") or 0),
         "safe_count":int(manifest.get("safe_count") or 0),
         "partial_count":int(manifest.get("partial_count") or 0),
         "reject_count":int(manifest.get("reject_count") or 0),
         "compressed_bytes":compressed_bytes,
-        "basis":"published_run_manifest",
     })
+    merged_collection_metrics.setdefault("basis", "published_run_manifest")
     payload.update({
         "release_tag":str(tag),
         "release_repository":str(repository),

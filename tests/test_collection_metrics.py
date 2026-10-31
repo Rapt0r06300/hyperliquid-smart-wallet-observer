@@ -5,6 +5,36 @@ import json
 from tools import build_collection_metrics as metrics
 
 
+def _write_metric_cases(tmp_path, monkeypatch, cases):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    for index, (kind, result) in enumerate(cases):
+        (campaigns / f"campaign-{index}.json").write_text(
+            json.dumps({
+                "kind": kind,
+                "status": "COMPLETE",
+                "completed_units": {"0": {"result": result}},
+            }),
+            encoding="utf-8",
+        )
+    data_metrics = catalog / "DATA_METRICS.json"
+    data_metrics.write_text(json.dumps({"totals": {}}), encoding="utf-8")
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "DATA_METRICS", data_metrics)
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+    return catalog / "COLLECTION_METRICS.json"
+
+
+def _durable_result(collection_metrics=None, *, stdout=None):
+    result = {"durable_persisted": True, "release_tag": "safe-fixture"}
+    if collection_metrics is not None:
+        result["collection_metrics"] = collection_metrics
+    if stdout is not None:
+        result["stdout"] = stdout
+    return result
+
+
 def test_instant_collection_metrics_counts_durable_copy_vault_fills(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog"
     campaigns = catalog / "campaigns"
@@ -15,7 +45,9 @@ def test_instant_collection_metrics_counts_durable_copy_vault_fills(tmp_path, mo
         "accepted_frames": 1406,
         "persisted_frames": 1406,
         "l2_frames": 1338,
+        "bbo_frames": 0,
         "queue_drops": 0,
+        "frame_metrics_complete": True,
         "live_fill_counts": {"0xabc": 50},
         "reconciliation": {
             "0xabc": {
@@ -78,6 +110,157 @@ def test_instant_collection_metrics_counts_durable_copy_vault_fills(tmp_path, mo
     assert out["by_kind"]["copy_vault_collection"]["trades_observed"] == 50
     assert out["indexed_dataset"]["trades_indexed_exact"] == 0
     assert out["indexed_dataset"]["global_unique_trades"] is None
+
+
+def test_incomplete_frame_metrics_remain_unknown_in_aggregate_and_kind_views(
+    tmp_path, monkeypatch,
+):
+    incomplete = {
+        "frame_metrics_complete": False,
+        "trade_count_observed": 0,
+        "trade_count_coverage_complete": True,
+        "accepted_frames": 18,
+        "persisted_frames": None,
+        "l2_frames": None,
+        "bbo_frames": 0,
+        "queue_drops": 0,
+        "uncompressed_bytes": 0,
+        "uncompressed_size_coverage_complete": True,
+    }
+    output = _write_metric_cases(
+        tmp_path,
+        monkeypatch,
+        [("market_collection", _durable_result(incomplete))],
+    )
+
+    out = metrics.build()
+    persisted = json.loads(output.read_text(encoding="utf-8"))
+    html = output.with_suffix(".html").read_text(encoding="utf-8")
+
+    for report in (out, persisted):
+        assert report["instant"]["all_collection_metrics_complete"] is False
+        assert report["instant"]["frame_metrics_complete"] is False
+        assert report["instant"]["units_frame_metrics_incomplete"] == 1
+        assert report["instant"]["accepted_frames"] is None
+        assert report["instant"]["persisted_frames"] is None
+        assert report["instant"]["l2_frames"] is None
+        assert report["totals"]["accepted_frames"] is None
+        assert report["by_kind"]["market_collection"]["persisted_frames"] is None
+    assert "Non mesurable" in html
+    assert "métriques de frames incomplètes" in html
+
+
+def test_certified_zero_frame_metrics_remain_zero(tmp_path, monkeypatch):
+    exact_zero = {
+        "frame_metrics_complete": True,
+        "trade_count_observed": 0,
+        "trade_count_coverage_complete": True,
+        "accepted_frames": 0,
+        "persisted_frames": 0,
+        "l2_frames": 0,
+        "bbo_frames": 0,
+        "queue_drops": 0,
+        "uncompressed_bytes": 0,
+        "uncompressed_size_coverage_complete": True,
+    }
+    _write_metric_cases(
+        tmp_path,
+        monkeypatch,
+        [("copy_vault_collection", _durable_result(exact_zero))],
+    )
+
+    out = metrics.build()
+    html = (tmp_path / "catalog" / "COLLECTION_METRICS.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert out["instant"]["all_collection_metrics_complete"] is True
+    assert out["instant"]["frame_metrics_complete"] is True
+    assert out["instant"]["accepted_frames"] == 0
+    assert out["instant"]["persisted_frames"] == 0
+    assert out["instant"]["l2_frames"] == 0
+    assert "Frames persistées</th><td>0</td>" in html
+    assert "Métriques de frames complètes" in html
+
+
+def test_missing_or_truncated_checkpoint_metrics_remain_unknown(tmp_path, monkeypatch):
+    output = _write_metric_cases(
+        tmp_path,
+        monkeypatch,
+        [("market_collection", _durable_result(stdout='{"accepted_frames":'))],
+    )
+
+    out = metrics.build()
+    persisted = json.loads(output.read_text(encoding="utf-8"))
+
+    for report in (out, persisted):
+        assert report["instant"]["frame_metrics_complete"] is False
+        assert report["instant"]["all_collection_metrics_complete"] is False
+        assert report["instant"]["units_missing_compact_metrics"] == 1
+        assert report["instant"]["units_frame_metrics_incomplete"] == 1
+        assert report["instant"]["accepted_frames"] is None
+        assert report["instant"]["persisted_frames"] is None
+        assert report["totals"]["l2_frames"] is None
+
+
+def test_console_json_matches_unknown_snapshot_and_html(tmp_path, monkeypatch, capsys):
+    output = _write_metric_cases(
+        tmp_path,
+        monkeypatch,
+        [("market_collection", _durable_result(stdout='{"accepted_frames":'))],
+    )
+
+    assert metrics.main() == 0
+
+    console = json.loads(capsys.readouterr().out)
+    snapshot = json.loads(output.read_text(encoding="utf-8"))
+    html = output.with_suffix(".html").read_text(encoding="utf-8")
+    assert console == snapshot
+    assert console["instant"]["accepted_frames"] is None
+    assert "Non mesurable" in html
+
+
+def test_mixed_complete_and_incomplete_frame_metrics_do_not_publish_partial_sum(
+    tmp_path, monkeypatch,
+):
+    exact = {
+        "frame_metrics_complete": True,
+        "trade_count_observed": 3,
+        "trade_count_coverage_complete": True,
+        "accepted_frames": 20,
+        "persisted_frames": 20,
+        "l2_frames": 8,
+        "bbo_frames": 4,
+        "queue_drops": 0,
+        "uncompressed_bytes": 100,
+        "uncompressed_size_coverage_complete": True,
+    }
+    incomplete = {
+        **exact,
+        "frame_metrics_complete": False,
+        "accepted_frames": None,
+        "persisted_frames": None,
+        "l2_frames": None,
+    }
+    output = _write_metric_cases(
+        tmp_path,
+        monkeypatch,
+        [
+            ("market_collection", _durable_result(exact)),
+            ("copy_vault_collection", _durable_result(incomplete)),
+        ],
+    )
+
+    out = metrics.build()
+
+    assert out["instant"]["units_frame_metrics_incomplete"] == 1
+    assert out["instant"]["accepted_frames"] is None
+    assert out["totals"]["persisted_frames"] is None
+    assert out["by_kind"]["market_collection"]["accepted_frames"] == 20
+    assert out["by_kind"]["copy_vault_collection"]["accepted_frames"] is None
+    html = output.with_suffix(".html").read_text(encoding="utf-8")
+    assert "<td>20</td>" in html
+    assert "Non mesurable" in html
 
 
 def test_compact_checkpoint_metrics_do_not_depend_on_stdout(tmp_path, monkeypatch):

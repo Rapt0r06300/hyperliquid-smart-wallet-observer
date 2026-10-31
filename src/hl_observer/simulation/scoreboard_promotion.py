@@ -23,6 +23,8 @@ SCHEMA_VERSION = "hypersmart.scoreboard_promotion.v1"
 PROMOTE = "PROMOTE"
 KILL = "KILL"
 MORE_DATA = "MORE_DATA"
+DISABLED_BY_SCOPE = "DISABLED_BY_SCOPE"
+UNMEASURABLE = "UNMEASURABLE"
 
 # Statuts de porte.
 PASS = "PASS"
@@ -120,6 +122,26 @@ def evaluer_promotion_scoreboard(
     row: Any, evidence: ScoreboardPromotionEvidence | None = None
 ) -> ScoreboardPromotionVerdict:
     """Verdict ÉCONOMIQUE final deny-by-default. `row` = ScoreboardRow (ou dict) ; `evidence` = le reste."""
+    try:
+        from hl_observer.strategies.active_scope import require_active_strategy
+        require_active_strategy(_row_attr(row, "strategy"))
+    except ValueError:
+        gate = {"gate": "active_strategy_scope", "statut": "FAIL", "exigence": "famille économique active"}
+        return ScoreboardPromotionVerdict(
+            verdict=DISABLED_BY_SCOPE,
+            gates=(gate,),
+            echecs=("active_strategy_scope",),
+            manquants=(),
+        )
+    except Exception:
+        gate = {"gate": "active_strategy_scope", "statut": "MISSING", "exigence": "autorité de scope chargée"}
+        return ScoreboardPromotionVerdict(
+            verdict=UNMEASURABLE,
+            gates=(gate,),
+            echecs=(),
+            manquants=("active_strategy_scope",),
+        )
+
     ev = evidence or ScoreboardPromotionEvidence()
     unmeasured = tuple(_row_attr(row, "unmeasured") or ())
 
@@ -178,7 +200,11 @@ def promotion_finale(
     eco = evaluer_promotion_scoreboard(row, evidence)
     deploiement_ok = deployment_decision == PROMOUVOIR_TESTNET
     promue = (eco.verdict == PROMOTE) and deploiement_ok
-    if eco.verdict == KILL:
+    if eco.verdict == DISABLED_BY_SCOPE:
+        bloc = "SCOPE_DISABLED"
+    elif eco.verdict == UNMEASURABLE:
+        bloc = "SCOPE_UNMEASURABLE"
+    elif eco.verdict == KILL:
         bloc = "ECONOMIE_KILL"
     elif not deploiement_ok:
         bloc = "DEPLOIEMENT_NON_PROMU" if deployment_decision is not None else "DEPLOIEMENT_INCONNU"
@@ -199,7 +225,7 @@ def promotion_finale(
 
 
 __all__ = [
-    "SCHEMA_VERSION", "PROMOTE", "KILL", "MORE_DATA", "PASS", "FAIL", "MISSING",
+    "SCHEMA_VERSION", "PROMOTE", "KILL", "MORE_DATA", "DISABLED_BY_SCOPE", "UNMEASURABLE", "PASS", "FAIL", "MISSING",
     "N_INDEP_MIN", "MIN_JOURS", "MIN_REGIMES", "CONCENTRATION_MAX",
     "ScoreboardPromotionEvidence", "ScoreboardPromotionVerdict",
     "evaluer_promotion_scoreboard", "promotion_finale",

@@ -25,11 +25,9 @@ permissions:
   contents: write
   actions: write
 concurrency:
-  group: advance-analysis-stage
-  # Phase/campaign state is durable in main. A newer controller run reloads
-  # origin/main before advancing, so obsolete queued/running evaluations should
-  # be superseded instead of delaying the current canonical stage.
-  cancel-in-progress: true
+  group: copy-vault-main-state-writer
+  cancel-in-progress: false
+  queue: max
 jobs:
   advance:
     runs-on: ubuntu-latest
@@ -69,12 +67,7 @@ jobs:
           git add control/alina-phase.json control/phase-receipts catalog/campaigns
           git diff --cached --quiet && exit 0
           git commit -m "analysis: persist bounded drain and verified stage"
-          for attempt in 1 2 3 4 5; do
-            if git push origin HEAD:main; then exit 0; fi
-            git fetch origin main
-            git rebase origin/main
-          done
-          exit 1
+          python tools/publish_main_commit.py --max-attempts 20 --base-delay-seconds 0.5 --max-delay-seconds 8
       - name: Materialize next-stage work
         if: steps.advance.outputs.status == 'ADVANCED'
         env:

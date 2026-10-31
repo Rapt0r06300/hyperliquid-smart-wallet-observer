@@ -147,6 +147,17 @@ def test_index_refuse_un_close_sans_horloge_locale_monotone() -> None:
     assert audit["noncausal_or_nonexit_events_rejected"] == 1
 
 
+def test_exit_index_preserves_case_sensitive_native_symbols() -> None:
+    lower = {**_leader_exit(20_000), "coin": "kPEPE", "event_id": "lower"}
+    upper = {**_leader_exit(20_000), "coin": "KPEPE", "event_id": "upper"}
+
+    indexed, _audit = index_causal_leader_exits([lower, upper])
+
+    assert set((vault, coin, direction) for vault, coin, direction in indexed) == {
+        ("0xA", "kPEPE", 1), ("0xA", "KPEPE", 1),
+    }
+
+
 def test_replay_refuse_des_bornes_train_absentes() -> None:
     metaorders, _ = _metaorders()
 

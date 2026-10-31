@@ -12,17 +12,17 @@ def payload(*, record_id: str = "R-1", hypothesis_id: str = "H-1") -> dict:
         "record_id": record_id,
         "created_at_utc": "2026-09-10T12:00:00Z",
         "hypothesis_id": hypothesis_id,
-        "family": "lead_lag",
+        "family": "copy_vault",
         "parent_hypothesis_id": None,
         "stage": "DISCOVERY",
-        "mechanism": "cross venue asynchronous price discovery",
-        "data_surfaces": ["binance_bbo", "hl_bbo"],
-        "temporal_operator": "lagged response",
+        "mechanism": "leader fill predicts executable markout",
+        "data_surfaces": ["copy_vault_leader_fills", "hl_l2"],
+        "temporal_operator": "causal event time",
         "conditioning": ["liquid regime"],
-        "prediction_target": "30s executable markout",
-        "execution_translation": "paper taker on Hyperliquid",
+        "prediction_target": "net executable markout",
+        "execution_translation": "paper Copy-Vault replay",
         "change_class": "NEW_MECHANISM",
-        "rationale": "One venue may lead another.",
+        "rationale": "Leader activity may contain copyable market information.",
         "falsification_test": "Reject if held-out executable headroom is non-positive.",
         "source_refs": [],
         "experiment_ids": [],
@@ -42,7 +42,7 @@ def test_register_then_status_round_trip(tmp_path: Path, capsys) -> None:
     registered = json.loads(capsys.readouterr().out)
     assert registered["status"] == "REGISTERED"
     assert registered["hypothesis_id"] == "H-1"
-    assert main(["--ledger", str(ledger), "status", "--family", "lead_lag"]) == 0
+    assert main(["--ledger", str(ledger), "status", "--family", "copy_vault"]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["records"] == 1
     assert status["unique_hypotheses"] == 1

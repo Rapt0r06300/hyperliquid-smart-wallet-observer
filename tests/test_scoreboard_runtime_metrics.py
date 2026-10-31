@@ -60,7 +60,7 @@ def test_hedge_metriques_depuis_resumes_p93():
 
 
 def test_bout_en_bout_les_observations_runtime_alimentent_le_scoreboard():
-    obs = {"cross_venue_dislocation": {
+    obs = {"copy_vault": {
         "couts_par_fill": [{"fees_bps": 1.0, "spread_bps": 2.0, "slippage_bps": 1.0, "latency_bps": 1.0}],
         "gross_edge_bps": 25.0, "capacity_usd": 5000.0, "fill_ratios": [1.0],
         "latences_ms": [100, 150, 200], "oos_net_bps": 6.0, "forward_net_bps": 4.0,
@@ -73,12 +73,12 @@ def test_bout_en_bout_les_observations_runtime_alimentent_le_scoreboard():
         return b
     raw = [
         _ev("o1", ET.POSITION_OPENED.value, coin="BTC", side="LONG", quantity=1.0,
-            refs={"strategy": "cross_venue_dislocation", "position_id": "p1"}),
+            refs={"strategy": "copy_vault", "position_id": "p1"}),
         _ev("c1", ET.POSITION_CLOSED.value, coin="BTC", side="LONG", quantity=1.0, realized_pnl_usdc=5.0,
-            refs={"strategy": "cross_venue_dislocation", "position_id": "p1"}),
+            refs={"strategy": "copy_vault", "position_id": "p1"}),
     ]
     sealed = list(LI.seal_chain(raw, session_id="S"))
     res = F.lignes_depuis_ledger(sealed, mesures_par_strategie=paquet["mesures_par_strategie"])
-    row = {r.strategy: r for r in res.rows}["cross_venue_dislocation"]
+    row = {r.strategy: r for r in res.rows}["copy_vault"]
     assert row.net_bps == 20.0          # gross 25 − coûts (1+2+1+1)=5 → net 20, alimenté par le runtime
     assert row.capacity_usd == 5000.0 and row.latency_p95_ms is not None

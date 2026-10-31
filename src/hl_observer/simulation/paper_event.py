@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from typing import Any
@@ -64,8 +63,14 @@ class PaperEvent:
     event_hash: str | None = None
 
     @classmethod
-    def create(cls, event_type: PaperEventType, **kwargs: Any) -> "PaperEvent":
-        timestamp_ms = int(kwargs.pop("timestamp_ms", int(time.time() * 1000)))
+    def create(cls, event_type: PaperEventType, **kwargs: Any) -> PaperEvent:
+        timestamp_ms = kwargs.pop("timestamp_ms", None)
+        if (
+            not isinstance(timestamp_ms, int)
+            or isinstance(timestamp_ms, bool)
+            or timestamp_ms <= 0
+        ):
+            raise ValueError("timestamp_ms must be an explicit positive causal timestamp")
         material = "|".join(
             str(kwargs.get(key, ""))
             for key in (
@@ -85,7 +90,7 @@ class PaperEvent:
         )
         event_id = kwargs.pop(
             "event_id",
-            "pevt:" + sha256(f"{event_type}|{timestamp_ms}|{material}".encode("utf-8")).hexdigest()[:24],
+            "pevt:" + sha256(f"{event_type}|{timestamp_ms}|{material}".encode()).hexdigest()[:24],
         )
         return cls(event_type=event_type, event_id=event_id, timestamp_ms=timestamp_ms, **kwargs)
 

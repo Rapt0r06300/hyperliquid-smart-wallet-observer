@@ -128,23 +128,24 @@ class OkxMarketState:
         if inst != self.inst_id.upper():
             return self._desync("SYMBOL_MISMATCH")
         meta = _transport(payload)
-        received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
+        received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms"))
+        if channel in {"books5", "bbo-tbt", "books"} and (received is None or received <= 0):
+            return self._desync("MISSING_RECEIVE_TIMESTAMP")
         incoming_connection = str(meta.get("connection_id") or "") or None
         connection_reset = bool(
             incoming_connection
             and self.connection_id
             and incoming_connection != self.connection_id
         )
-        self.receive_mono_ns = _int(meta.get("receive_mono_ns")) or self.receive_mono_ns
-        self.connection_id = incoming_connection or self.connection_id
-        parsed_rtt = _float(meta.get("transport_rtt_ms"))
-        if parsed_rtt is not None:
-            self.transport_rtt_ms = parsed_rtt
-        parsed_offset = _float(meta.get("clock_offset_ms"))
-        if parsed_offset is not None:
-            self.clock_offset_ms = parsed_offset
-
         if channel in {"books5", "bbo-tbt", "books"}:
+            self.receive_mono_ns = _int(meta.get("receive_mono_ns")) or self.receive_mono_ns
+            self.connection_id = incoming_connection or self.connection_id
+            parsed_rtt = _float(meta.get("transport_rtt_ms"))
+            if parsed_rtt is not None:
+                self.transport_rtt_ms = parsed_rtt
+            parsed_offset = _float(meta.get("clock_offset_ms"))
+            if parsed_offset is not None:
+                self.clock_offset_ms = parsed_offset
             return self._apply_book(
                 item,
                 channel=channel,
@@ -156,23 +157,17 @@ class OkxMarketState:
         if channel == "tickers":
             self.last = _coalesce(item.get("last"), self.last)
             self.volume_24h = _coalesce(item.get("vol24h"), self.volume_24h)
-            self.exchange_ts_ms = _int(item.get("ts")) or self.exchange_ts_ms
         elif channel == "funding-rate":
             self.funding_rate = _coalesce(item.get("fundingRate"), self.funding_rate)
-            self.exchange_ts_ms = _int(item.get("ts")) or self.exchange_ts_ms
             interval_ms = _funding_interval_ms(item)
             if interval_ms:
                 self.funding_interval_hours = interval_ms / 3_600_000.0
         elif channel == "open-interest":
             self.open_interest = _coalesce(item.get("oi"), self.open_interest)
-            self.exchange_ts_ms = _int(item.get("ts")) or self.exchange_ts_ms
         elif channel == "mark-price":
             self.mark = _coalesce(item.get("markPx"), self.mark)
-            self.exchange_ts_ms = _int(item.get("ts")) or self.exchange_ts_ms
         elif channel == "index-tickers":
             self.index = _coalesce(item.get("idxPx"), self.index)
-            self.exchange_ts_ms = _int(item.get("ts")) or self.exchange_ts_ms
-        self.receive_ts_ms = received
         return self.quality
 
     def _apply_book(

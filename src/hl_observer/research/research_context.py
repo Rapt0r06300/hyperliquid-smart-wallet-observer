@@ -12,12 +12,15 @@ from hl_observer.research.process_memory import (
     load_process_records,
     process_memory_summary,
 )
+from hl_observer.strategies.active_scope import (
+    active_strategy_families,
+    require_active_strategy,
+)
 
 DEFAULT_LEDGER = Path("runtime/codex_research/HYPOTHESIS_LEDGER.jsonl")
 DEFAULT_PROCESS_MEMORY = Path("runtime/codex_research/PROCESS_MEMORY.jsonl")
 HISTORICAL_PROCESS_MEMORY = Path("docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl")
 SEMANTIC_STATUS = Path("runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json")
-_FAMILY_ORDER = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 _DATA_HINTS = (
     "data/bbo_synchro.jsonl",
     "runtime/data/bbo_synchro.jsonl",
@@ -116,7 +119,10 @@ def _resolve(repo_root: Path, value: str | Path | None, default: Path) -> Path:
 
 def _select_family(records: list[dict[str, Any]]) -> str:
     ranked: list[tuple[int, int, int, int, str]] = []
-    for index, family in enumerate(_FAMILY_ORDER):
+    active_families = sorted(active_strategy_families())
+    if not active_families:
+        raise ValueError("DISABLED_BY_SCOPE:no_active_family")
+    for index, family in enumerate(active_families):
         status = compact_status(records, family=family)
         ranked.append(
             (
@@ -233,7 +239,9 @@ def build_research_context(
 
     if family is not None and family not in FAMILIES:
         raise ValueError(f"family must be one of {sorted(FAMILIES)}")
-    selected_family = family or _select_family(ledger_records)
+    selected_family = (
+        require_active_strategy(family) if family is not None else _select_family(ledger_records)
+    )
     selected_status = compact_status(ledger_records, family=selected_family)
 
     runtime_memory = load_process_records(process_target)

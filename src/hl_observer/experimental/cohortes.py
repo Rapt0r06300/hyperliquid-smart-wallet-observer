@@ -85,12 +85,12 @@ COHORTES = {"ALPHA": ALPHA, "PROBE": PROBE, "RAW_PROBE": RAW_PROBE}
 
 
 def _p(coh: Cohorte, root: Path, quoi: str) -> Path:
-    return root / "runtime" / "data" / ("%s_%s" % (coh.prefixe, quoi))
+    return root / "runtime" / "data" / f"{coh.prefixe}_{quoi}"
 
 
 def _cle(coh: Cohorte, vault: str, coin: str) -> str:
     """Clé d'une position : PAR PAIRE vault+coin pour RAW_PROBE (on mesure chaque paire), par coin sinon."""
-    return ("%s|%s" % (vault, coin)) if not coh.edge_requis else coin
+    return f"{vault}|{coin}" if not coh.edge_requis else coin
 
 
 def charger_store(coh: Cohorte, root: Path) -> dict:
@@ -201,7 +201,13 @@ def _expectancy(coh: Cohorte, root: Path, *, run_id: str | None = None, trigger_
     AUTRE config comptent à part LEGACY_CROSS_RUN — jamais reclassés. `run_id` ignoré (audit). PnL/ROI cumulé
     + alpha placebo moyen inclus."""
     try:
-        evs = [json.loads(l) for l in _p(coh, root, "ledger.jsonl").read_text(encoding="utf-8", errors="ignore").splitlines() if l.strip()]
+        evs = [
+            json.loads(line)
+            for line in _p(coh, root, "ledger.jsonl")
+            .read_text(encoding="utf-8", errors="ignore")
+            .splitlines()
+            if line.strip()
+        ]
     except OSError:
         return {"n_trades": 0}
     closes = [c for c in evs if c.get("evt") == "CLOSE"]
@@ -1080,7 +1086,11 @@ def traiter_fill(coh: Cohorte, etat: dict, fill: dict, root: Path, *, now_ms: fl
     if not coh.edge_requis:                                       # RAW = baseline minuscule : FIGÉE à N cycles clôturés
         n_clot = _expectancy(coh, root, config_hash=_chash_gate).get("n_trades", 0)   # cycles config COURANTE (run-agnostique)
         if n_clot >= RAW_BASELINE_MAX_CYCLES:                     # jamais promue ; ne perd pas indéfiniment -> on FIGE pour décision
-            return {"refus": "RAW_BASELINE_FIGEE_%d" % RAW_BASELINE_MAX_CYCLES, "coin": coin, "cycles_clotures": n_clot}
+            return {
+                "refus": f"RAW_BASELINE_FIGEE_{RAW_BASELINE_MAX_CYCLES}",
+                "coin": coin,
+                "cycles_clotures": n_clot,
+            }
     # deny-by-default : le vault doit être suivi par la cohorte
     if vault not in _vaults_cohorte(coh, root):
         return {"refus": "VAULT_NON_SUIVI", "coin": coin}
@@ -1313,7 +1323,7 @@ def statut(coh: Cohorte, root: Path, *, now_ms: float | None = None, lecteur_l2=
                 if int(pos.get("sens") or 0) > 0
                 else execution_truth.best_ask
             )
-    equity, non_realise, drawdown = engine.mark_to_market(marks)
+    equity, non_realise, drawdown = engine.mark_to_market(marks, timestamp_ms=int(now))
     ledger_snapshot = engine.ledger.snapshot()
     store["canonical_ledger_snapshot"] = ledger_snapshot
     st = {"cohorte": coh.nom, "real_execution": False, "ts_ms": int(now),

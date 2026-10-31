@@ -52,6 +52,7 @@ def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monk
     USERFILLS._HEARTBEAT_WS.update({
         "messages": 2,
         "fills": 3,
+        "persisted_fills": 2,
         "acks": 1,
         "reconnects": 0,
         "drops": 0,
@@ -73,6 +74,10 @@ def test_userfills_bridge_writes_ack_and_real_message_count(tmp_path: Path, monk
     assert heartbeat["n_ecrites_cumul"] == 2
     assert heartbeat["dernier_exchange_ts"] == 123456
     assert heartbeat["souscription_ack"] is True
+    assert heartbeat["metriques"]["frames_received"] == 2
+    assert heartbeat["metriques"]["fills_parsed"] == 3
+    assert heartbeat["metriques"]["fills_persisted"] == 2
+    assert heartbeat["metriques"]["native_subscription_acks"] == 1
 
 
 def test_userfills_heartbeat_inclut_les_pertes_de_la_tape_l2(tmp_path: Path, monkeypatch):

@@ -22,14 +22,14 @@ def record(
     *,
     record_id: str,
     hypothesis_id: str = "H-1",
-    family: str = "lead_lag",
+    family: str = "copy_vault",
     stage: str = "DISCOVERY",
-    mechanism: str = "asynchronous price discovery",
+    mechanism: str = "leader fill predicts executable Copy-Vault markout",
     data_surfaces: list[str] | None = None,
-    temporal_operator: str = "lagged cross-correlation",
+    temporal_operator: str = "causal event-time lag",
     conditioning: list[str] | None = None,
-    prediction_target: str = "30s executable markout",
-    execution_translation: str = "paper taker after signal",
+    prediction_target: str = "30s net executable follower markout",
+    execution_translation: str = "paper Copy-Vault after measured delay",
     change_class: str = "NEW_MECHANISM",
     parent_hypothesis_id: str | None = None,
     verdict: str | None = None,
@@ -47,13 +47,13 @@ def record(
         "parent_hypothesis_id": parent_hypothesis_id,
         "stage": stage,
         "mechanism": mechanism,
-        "data_surfaces": data_surfaces or ["binance_bbo", "hl_bbo"],
+        "data_surfaces": data_surfaces or ["copy_vault_leader_fills", "hl_l2"],
         "temporal_operator": temporal_operator,
         "conditioning": conditioning or ["liquid regime"],
         "prediction_target": prediction_target,
         "execution_translation": execution_translation,
         "change_class": change_class,
-        "rationale": "Price discovery may arrive on one venue first.",
+        "rationale": "Leader actions may contain copyable market information.",
         "falsification_test": "Reject if post-cost held-out markout has no positive headroom.",
         "source_refs": ["paper:example"],
         "experiment_ids": [],
@@ -148,14 +148,30 @@ def test_append_is_append_only_and_duplicate_record_id_is_rejected(tmp_path: Pat
 
 def test_load_records_filters_family_and_rejects_corrupt_history(tmp_path: Path) -> None:
     ledger = tmp_path / "HYPOTHESIS_LEDGER.jsonl"
-    append_record(ledger, record(record_id="R-1", family="lead_lag"))
-    append_record(
-        ledger,
-        record(
-            record_id="R-2",
-            hypothesis_id="H-CV",
-            family="cross_venue_dislocation_v2",
+    legacy_records = [
+        validate_record(
+            record(
+                record_id="R-1",
+                family="lead_lag",
+                mechanism="external BBO predicts Hyperliquid markout",
+                data_surfaces=["binance_bbo", "hl_bbo"],
+                execution_translation="archived paper taker after signal",
+            )
         ),
+        validate_record(
+            record(
+                record_id="R-2",
+                hypothesis_id="H-CV",
+                family="cross_venue_dislocation_v2",
+                mechanism="cross-venue price dislocation",
+                data_surfaces=["binance_bbo", "hl_bbo"],
+                execution_translation="archived two-leg paper replay",
+            )
+        ),
+    ]
+    ledger.write_text(
+        "".join(json.dumps(item) + "\n" for item in legacy_records),
+        encoding="utf-8",
     )
     assert [item["record_id"] for item in load_records(ledger, "lead_lag")] == ["R-1"]
     ledger.write_text(ledger.read_text(encoding="utf-8") + "{bad json}\n", encoding="utf-8")
@@ -276,7 +292,7 @@ def test_compact_status_counts_baselines_trials_and_latest() -> None:
             "trial_count": 7,
         },
     ]
-    result = compact_status(history, "lead_lag")
+    result = compact_status(history, "copy_vault")
     assert result["records"] == 2
     assert result["unique_hypotheses"] == 2
     assert result["baseline_records"] == 1
