@@ -138,6 +138,36 @@ def test_synced_refuses_dirty_or_partial_checkout_without_cleanup(monkeypatch):
     assert not any(args[:2] == ("git", "clean") for args in seen)
 
 
+def test_synced_refuses_untracked_quarantine_or_rejected_artifacts(monkeypatch):
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(args)
+        if args[:4] == ("git", "ls-files", "--others", "--exclude-standard"):
+            return subprocess.CompletedProcess(
+                args, 0, b"datasets/quarantine/incomplete.manifest.json\0", "",
+            )
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    with pytest.raises(RuntimeError, match="refusing destructive cleanup"):
+        module.synced()
+    ls_files = next(args for args in seen if args[:3] == (
+        "git", "ls-files", "--others",
+    ))
+    assert "datasets/quarantine" in ls_files
+    assert "datasets/rejected" in ls_files
+    assert "datasets/sharded/quarantine" in ls_files
+    assert "datasets/sharded/rejected" in ls_files
+    assert "datasets/sharded/safe" not in ls_files
+    assert not any(args[:2] == ("git", "reset") for args in seen)
+    assert not any(args[:2] == ("git", "clean") for args in seen)
+
+
 @pytest.mark.parametrize(
     "boundary", ["inventory", "validation", "commit", "remote_receipt"],
 )

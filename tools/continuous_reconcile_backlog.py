@@ -26,6 +26,15 @@ MAX_RELEASE_WINDOW = 96
 TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PACK = re.compile(r"remote unpack failed|index-pack failed|tree.{0,80}too large|pack exceeds|pack.{0,80}too large|unpacker error", re.I)
 HISTORICAL_CHECKPOINT_DIR = Path("catalog/historical-reconcile-checkpoints")
+HISTORICAL_UNTRACKED_PATHS = (
+    "datasets/quarantine",
+    "datasets/rejected",
+    "datasets/sharded/quarantine",
+    "datasets/sharded/rejected",
+    "catalog/data-index-parts",
+    "catalog/quarantine-audit-parts",
+    str(HISTORICAL_CHECKPOINT_DIR),
+)
 
 
 def classify_hosted_termination(
@@ -128,8 +137,7 @@ def synced() -> None:
             )
     untracked = run(
         "git", "ls-files", "--others", "--exclude-standard", "-z", "--",
-        "datasets/sharded", "catalog/data-index-parts",
-        "catalog/quarantine-audit-parts", str(HISTORICAL_CHECKPOINT_DIR),
+        *HISTORICAL_UNTRACKED_PATHS,
     ).stdout
     if untracked:
         raise RuntimeError(
