@@ -269,7 +269,10 @@ def iter_index_rows(
         for item in part_rows:
             if not isinstance(item, Mapping):
                 raise ValueError("PARTITION_PARITY_INVALID_ROW")
-            row = dict(item)
+            # json.loads already returns plain dictionaries.  Avoid copying
+            # 1.85M rows while streaming; callers receive fresh decoded data,
+            # and the SHA/count checks below remain bound to the raw bytes.
+            row = item
             identity = row.get("dataset_id")
             if not isinstance(identity, str) or not identity or identity in seen:
                 raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
