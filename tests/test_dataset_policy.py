@@ -1,4 +1,5 @@
 import json
+import os
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
@@ -13,6 +14,8 @@ REG = json.loads((ROOT / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
 CAT = json.loads((ROOT / "catalog/DATA_CATALOG.json").read_text())
 INDEX_PATH = ROOT / "catalog/DATA_INDEX.json"
 INDEX_ROOT = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+MANIFEST_WORKERS = max(64, min(128, (os.cpu_count() or 8) * 8))
+MANIFEST_BATCH_SIZE = 16384
 
 
 def _index_rows():
@@ -35,8 +38,8 @@ def indexed_catalog_audit():
     counts = Counter()
     observed = 0
     rows = _index_rows()
-    with ThreadPoolExecutor(max_workers=64) as pool:
-        while batch := list(islice(rows, 8192)):
+    with ThreadPoolExecutor(max_workers=MANIFEST_WORKERS) as pool:
+        while batch := list(islice(rows, MANIFEST_BATCH_SIZE)):
             counts.update(row["quality_status"] for row in batch)
             for _ in pool.map(_validate_manifest, batch):
                 pass
