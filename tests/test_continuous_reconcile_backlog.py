@@ -70,6 +70,10 @@ def test_hosted_termination_uses_explicit_metadata_only() -> None:
         log_text="The hosted runner was shut down by infrastructure",
     ) == "INFRASTRUCTURE_STOP"
     assert classify_hosted_termination(
+        returncode=143, status="completed", conclusion="failure",
+        log_text="The runner has received a shutdown signal",
+    ) == "INFRASTRUCTURE_STOP"
+    assert classify_hosted_termination(
         returncode=0, status="completed", conclusion="success",
     ) == "COMPLETE"
 
