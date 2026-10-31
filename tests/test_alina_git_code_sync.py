@@ -138,6 +138,15 @@ def test_commit_subject_names_train_restoration_artifact_change() -> None:
     )
 
 
+def test_commit_subject_names_sync_engine_semantic_copy_vault_rule() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "restoration_artifacts_from_train") == (
+        "fix(sync): name semantic Copy-Vault commits (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_change() -> None:
     assert _commit_subject([
         "tools/alina_git_code_sync.py",
