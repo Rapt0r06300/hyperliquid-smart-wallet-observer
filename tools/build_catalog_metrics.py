@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from tools.partitioned_data_index import read_index
+    from tools.partitioned_data_index import SCHEMA, iter_index_rows, read_index
 except ModuleNotFoundError:
-    from partitioned_data_index import read_index
+    from partitioned_data_index import SCHEMA, iter_index_rows, read_index
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
@@ -90,8 +90,18 @@ def verify_metrics_source(
 
 
 def build() -> dict[str, Any]:
-    idx = read_index(INDEX)
-    shards = idx.get("shards") or []
+    raw_index = json.loads(INDEX.read_text(encoding="utf-8"))
+    if isinstance(raw_index, dict) and raw_index.get("schema") == SCHEMA:
+        idx = raw_index
+        total_shards = idx.get("shard_count")
+        if isinstance(total_shards, bool) or not isinstance(total_shards, int):
+            raise ValueError("DATA_INDEX_INVALID_SHARD_COUNT")
+        shards = iter_index_rows(INDEX)
+    else:
+        idx = read_index(INDEX)
+        legacy_rows = idx.get("shards") or []
+        total_shards = len(legacy_rows)
+        shards = iter(legacy_rows)
     size_doc = {}
     try:
         size_doc = json.loads(UNCOMPRESSED_PATCH.read_text(encoding="utf-8"))
@@ -118,7 +128,7 @@ def build() -> dict[str, Any]:
     if not isinstance(trade_rows, dict):
         trade_rows = {}
     totals: dict[str, Any] = {
-        "TOTAL_SHARDS": len(shards),
+        "TOTAL_SHARDS": total_shards,
         "TOTAL_RELEASES": 0,
         "MIN_COLLECTION_TS_MS": None,
         "MAX_COLLECTION_TS_MS": None,

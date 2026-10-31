@@ -13,6 +13,8 @@ def _frame(filename: str):
 
 
 def _fake_signal_runtime(monkeypatch, *, previous_remaining=0.0, previous_handler=signal.SIG_DFL):
+    if not all(hasattr(signal, name) for name in ("getitimer", "setitimer")):
+        pytest.skip("POSIX interval-timer support required for signal-bound invocation tests")
     state: dict[str, object] = {"handler": None, "alarms": [], "delegated": 0}
 
     def fake_getsignal(_signum):
