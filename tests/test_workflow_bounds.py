@@ -430,6 +430,11 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert "self-hosted" not in text
     assert 'RESUME_ATTEMPT: ${{ inputs.resume_attempt || \'0\' }}' in retry
     assert 'RESUME_ATTEMPT: ${{ inputs.resume_attempt || \'0\' }}' not in before_retry
+    assert 'gh run view "$GITHUB_RUN_ID"' in retry
+    assert 'historical_job_id' in retry
+    assert '--log-failed' in retry
+    assert "grep -Eiq" in retry
+    assert "No explicit hosted-runner interruption evidence" in retry
 
 
 def test_reconcile_rebuilds_and_sha_verifies_metrics_after_mutating_tests():

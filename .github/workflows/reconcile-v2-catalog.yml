@@ -572,6 +572,24 @@ jobs:
               exit 1
               ;;
           esac
+          historical_job_id="$(gh run view "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json jobs \
+            --jq '.jobs[] | select(.name == "Continue historical backlog on a fresh hosted runner") | .databaseId' \
+            | head -n 1)"
+          if [ -z "$historical_job_id" ]; then
+            echo "::error::Historical job id is unavailable; refusing an unproven retry"
+            exit 1
+          fi
+          failure_log="$(gh run view "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --job "$historical_job_id" \
+            --log-failed 2>&1 || true)"
+          if ! printf '%s\n' "$failure_log" | grep -Eiq \
+            'SIGTERM|signal 15|exit( code)? 143|runner has received a shutdown|shutdown signal'; then
+            echo "::error::No explicit hosted-runner interruption evidence; refusing automatic retry"
+            exit 1
+          fi
           next=$((current + 1))
           gh workflow run reconcile-v2-catalog.yml \
             --repo "$GITHUB_REPOSITORY" \
