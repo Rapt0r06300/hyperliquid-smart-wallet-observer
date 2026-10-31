@@ -108,11 +108,34 @@ def run(*argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 
 def synced() -> None:
+    """Refresh ``origin/main`` without deleting interrupted-run evidence.
+
+    Historical reconciliation may be resumed after a hosted interruption.  A
+    hard reset or a path-scoped ``git clean`` would silently erase generated
+    receipts or shard material that has not yet been admitted as SAFE.  The
+    runner is disposable, but the checkout is still an evidence boundary: a
+    dirty or partially materialized checkout must fail closed and be replaced
+    by a fresh hosted checkout.
+    """
     run("git", "fetch", "origin", "main")
-    run("git", "reset", "--hard", "origin/main")
-    # Only untracked generated receipts in this ephemeral GitHub-hosted checkout.
-    run("git", "clean", "-fd", "--", "datasets/sharded", "catalog/data-index-parts",
-        "catalog/quarantine-audit-parts")
+    for diff_args, reason in (
+        (("git", "diff", "--quiet"), "unstaged tracked changes"),
+        (("git", "diff", "--cached", "--quiet"), "staged tracked changes"),
+    ):
+        if run(*diff_args, check=False).returncode != 0:
+            raise RuntimeError(
+                f"dirty historical checkout ({reason}); refusing destructive cleanup"
+            )
+    untracked = run(
+        "git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+        "datasets/sharded", "catalog/data-index-parts",
+        "catalog/quarantine-audit-parts", str(HISTORICAL_CHECKPOINT_DIR),
+    ).stdout
+    if untracked:
+        raise RuntimeError(
+            "partial historical artifacts in checkout; refusing destructive cleanup"
+        )
+    run("git", "merge", "--ff-only", "origin/main")
 
 
 def remote_contains_head() -> bool:

@@ -98,6 +98,46 @@ def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
     assert ("git", "merge-base", "--is-ancestor", "a" * 40, "origin/main") in seen
 
 
+def test_synced_uses_non_destructive_fast_forward_only(monkeypatch):
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    module.synced()
+
+    assert ("git", "fetch", "origin", "main") in seen
+    assert ("git", "merge", "--ff-only", "origin/main") in seen
+    assert not any(args[:2] == ("git", "reset") for args in seen)
+    assert not any(args[:2] == ("git", "clean") for args in seen)
+
+
+def test_synced_refuses_dirty_or_partial_checkout_without_cleanup(monkeypatch):
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(args)
+        if args[:3] == ("git", "diff", "--quiet"):
+            return subprocess.CompletedProcess(args, 1, "", "tracked changes")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    with pytest.raises(RuntimeError, match="refusing destructive cleanup"):
+        module.synced()
+    assert not any(args[:2] == ("git", "reset") for args in seen)
+    assert not any(args[:2] == ("git", "clean") for args in seen)
+
+
 @pytest.mark.parametrize(
     "boundary", ["inventory", "validation", "commit", "remote_receipt"],
 )
