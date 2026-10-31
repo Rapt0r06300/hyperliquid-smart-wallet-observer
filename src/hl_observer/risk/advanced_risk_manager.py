@@ -277,11 +277,15 @@ class AdvancedRiskManager:
                         drawdown_pct=drawdown_pct, daily_pnl_pct=daily_pnl_pct)
 
         # 9. Correlation filter
-        if coin in self.open_positions_coins:
-            coin_count = self.open_positions_coins.count(coin)
-            if coin_count >= 2:
-                reasons.append("correlated_positions")
-                sizing_mult *= 0.5
+        coin_key = str(coin).strip().upper()
+        coin_count = sum(
+            1
+            for existing in self.open_positions_coins
+            if str(existing).strip().upper() == coin_key
+        )
+        if coin_count >= 2:
+            reasons.append("correlated_positions")
+            sizing_mult *= 0.5
 
         return RiskAssessment(
             allowed=True, veto=RiskVeto.NONE, reasons=reasons,
