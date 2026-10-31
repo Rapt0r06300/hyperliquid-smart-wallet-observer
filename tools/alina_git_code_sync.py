@@ -587,6 +587,7 @@ class Synchronizer:
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
+            "engine_build": GIT_SYNC_ENGINE_BUILD,
             "mode": "DRY_RUN" if dry_run else "SYNC",
             "status": "NOT_STARTED",
             "shard_downloads": False,

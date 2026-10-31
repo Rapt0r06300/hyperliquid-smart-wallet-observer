@@ -793,6 +793,7 @@ def test_dry_run_does_not_mutate_git(repos):
     remote_head = git(origin, "rev-parse", "main")
     rc, receipt = run_sync(local, dry=True)
     assert rc == 0 and receipt["status"] == "DRY_RUN_ONLY"
+    assert receipt["engine_build"] == sync_module.GIT_SYNC_ENGINE_BUILD
     assert receipt["proposed_commit_message"] == "chore(runtime): update local"
     assert git(local, "rev-parse", "HEAD") == local_head
     assert git(origin, "rev-parse", "main") == remote_head
