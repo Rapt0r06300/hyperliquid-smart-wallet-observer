@@ -4,6 +4,8 @@ import io
 import json
 import zipfile
 
+import pytest
+
 from tools import recover_one_quarantined_shard as recovery
 from tools import verify_quarantine_recovery as audit
 
@@ -127,7 +129,12 @@ def test_recovery_audit_refuses_symlinked_quarantine_parent(tmp_path, monkeypatc
     real = root / "quarantine"
     saved = tmp_path / "original-quarantine"
     real.rename(saved)
-    real.symlink_to(saved, target_is_directory=True)
+    try:
+        real.symlink_to(saved, target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable (WinError 1314)")
+        raise
     with __import__("pytest").raises(audit.InventoryError, match="UNSAFE_QUARANTINE"):
         audit.verify_quarantine(root, index, "a" * 64)
     assert next(saved.rglob("*.receipt.json")).is_file()
