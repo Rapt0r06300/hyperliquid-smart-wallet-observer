@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Checkpoint more than one complete historical batch per hosted runner."""
 from __future__ import annotations
+
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 try:
     from tools.partitioned_data_index import read_index
@@ -275,6 +276,22 @@ def current_pending(
     )
 
 
+def persist_remaining_to_github_env(remaining: int) -> bool:
+    """Publish the checkpoint count when running on GitHub, without requiring it locally.
+
+    The reconciler is also exercised in local PAPER/read-only verification.  A
+    missing ``GITHUB_ENV`` is therefore an ordinary local execution mode, not
+    evidence that reconciliation failed.  The durable checkpoint remains in
+    Git; this optional export only feeds later steps of the hosted workflow.
+    """
+    path = os.environ.get("GITHUB_ENV")
+    if not path:
+        return False
+    with open(path, "a", encoding="utf-8", newline="\n") as env:
+        env.write(f"REMAINING_NEW_TAGS={remaining}\n")
+    return True
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--inventory", type=Path, required=True)
@@ -365,8 +382,7 @@ def main() -> int:
         print(f"HISTORICAL_RECONCILE_FAIL_CLOSED {exc}", file=sys.stderr)
         return 2
     print(f"HISTORICAL_RUNNER_CHECKPOINT waves={waves} snapshot_remaining={remaining}", flush=True)
-    with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-        env.write(f"REMAINING_NEW_TAGS={remaining}\n")
+    persist_remaining_to_github_env(remaining)
     return 0
 
 

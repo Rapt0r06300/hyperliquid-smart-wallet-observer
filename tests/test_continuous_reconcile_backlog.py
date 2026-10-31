@@ -218,6 +218,23 @@ def test_index_blob_sha_requires_exact_git_object_identity(monkeypatch):
         module.index_blob_sha()
 
 
+def test_local_checkpoint_does_not_require_github_env(monkeypatch, tmp_path):
+    import tools.continuous_reconcile_backlog as module
+
+    monkeypatch.delenv("GITHUB_ENV", raising=False)
+    assert module.persist_remaining_to_github_env(7) is False
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_hosted_checkpoint_exports_remaining_count(monkeypatch, tmp_path):
+    import tools.continuous_reconcile_backlog as module
+
+    target = tmp_path / "github-env"
+    monkeypatch.setenv("GITHUB_ENV", str(target))
+    assert module.persist_remaining_to_github_env(11) is True
+    assert target.read_text(encoding="utf-8") == "REMAINING_NEW_TAGS=11\n"
+
+
 
 def test_oversized_staging_budget_returns_to_safe_steady_state() -> None:
     from tools.continuous_reconcile_backlog import next_shard_budget
