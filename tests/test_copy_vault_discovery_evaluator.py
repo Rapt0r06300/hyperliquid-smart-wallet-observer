@@ -107,3 +107,19 @@ def test_entry_features_ne_lisent_pas_la_capacite_de_sortie_future() -> None:
     assert low_exit["feature_l2_state_quality"] == high_exit[
         "feature_l2_state_quality"
     ]
+
+
+def test_missing_economic_values_are_not_fabricated_as_zero() -> None:
+    rows = _rows()
+    rows[0].pop("net_pnl_usd")
+    rows[1].pop("gross_pnl_usd")
+    rows[2]["notional_usd"] = float("nan")
+    result = evaluate_feature_rows(
+        rows,
+        mechanism="BURST_ACCELERATION",
+        keep_fraction=1.0,
+        family_trial_count=24,
+    )
+
+    assert result["sample_count"] == 9
+    assert result["selected_trade_ids"] == [f"t{index}" for index in range(3, 12)]

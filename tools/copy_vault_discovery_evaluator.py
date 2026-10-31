@@ -45,6 +45,11 @@ def _number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _positive_number(value: object) -> float | None:
+    number = _number(value)
+    return number if number is not None and number > 0.0 else None
+
+
 def _metaorder_feature_index() -> dict[str, dict[str, float]]:
     """Rebuild causal prefix features from the canonical Copy-Vault loader once."""
 
@@ -184,7 +189,14 @@ def evaluate_feature_rows(
     """Rank a causal feature and summarize TRAIN economics without certifying it."""
 
     feature = MECHANISM_FEATURES.get(str(mechanism))
-    train = [dict(row) for row in rows if str(row.get("walk_forward_segment") or "").lower() == "train"]
+    train = [
+        dict(row)
+        for row in rows
+        if str(row.get("walk_forward_segment") or "").lower() == "train"
+        and _number(row.get("net_pnl_usd")) is not None
+        and _number(row.get("gross_pnl_usd")) is not None
+        and _positive_number(row.get("notional_usd")) is not None
+    ]
     available = [
         row for row in train if feature and _number(row.get(feature)) is not None
     ]
@@ -211,8 +223,8 @@ def evaluate_feature_rows(
         ),
     )[:keep]
     selected.sort(key=lambda row: int(row.get("signal_ts_ms") or 0))
-    net_values = [float(row.get("net_pnl_usd") or 0.0) for row in selected]
-    gross = sum(float(row.get("gross_pnl_usd") or 0.0) for row in selected)
+    net_values = [float(_number(row["net_pnl_usd"])) for row in selected]
+    gross = sum(float(_number(row["gross_pnl_usd"])) for row in selected)
     costs = gross - sum(net_values)
     gains = sum(value for value in net_values if value > 0.0)
     losses = -sum(value for value in net_values if value < 0.0)
@@ -272,12 +284,12 @@ def evaluate_feature_rows(
         "costs_usd": round(costs, 8),
         "pf": round(pf, 8),
         "max_drawdown_usd": round(drawdown, 8),
-        "roi": round(sum(net_values) / max(1.0, sum(float(row.get("notional_usd") or 0.0) for row in selected)), 8),
+        "roi": round(sum(net_values) / sum(float(_positive_number(row["notional_usd"])) for row in selected), 8),
         "largest_vault_share": max(vault_counts.values(), default=0) / len(selected),
         "largest_coin_share": max(coin_counts.values(), default=0) / len(selected),
         "concentration": max(vault_counts.values(), default=0) / len(selected),
         "capacity": min(
-            (float(row.get("entry_capacity_usd") or 0.0) for row in selected), default=0.0
+            (value for row in selected if (value := _number(row.get("entry_capacity_usd"))) is not None), default=None
         ),
         "family_trial_count": int(family_trial_count),
         "multiplicity_adjusted_lcb_usd": stats.get("total_lcb_usd"),
