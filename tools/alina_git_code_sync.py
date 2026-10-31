@@ -224,6 +224,18 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    if (
+        len(normalized) == 2
+        and any(path.endswith("src/hl_observer/backtesting/copy_vault_local_lab.py") for path in normalized)
+        and any(path.endswith("tests/test_copy_vault_local_lab.py") for path in normalized)
+        and any(marker in diff_signal for marker in (
+            "restoration_artifacts_from_train",
+            "train_ledger_reference",
+            "durable train outputs",
+        ))
+    ):
+        return "fix(copy-vault): preserve TRAIN restoration artifacts (2 paths)"
+
     if any(
         token in path
         for path in normalized

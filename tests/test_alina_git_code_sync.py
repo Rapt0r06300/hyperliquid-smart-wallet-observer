@@ -129,6 +129,15 @@ def test_commit_subject_names_a_mixed_copy_vault_code_and_test_change() -> None:
     assert subject != "chore(repository): update (2 paths)"
 
 
+def test_commit_subject_names_train_restoration_artifact_change() -> None:
+    assert _commit_subject([
+        "src/hl_observer/backtesting/copy_vault_local_lab.py",
+        "tests/test_copy_vault_local_lab.py",
+    ], "_restoration_artifacts_from_train train_ledger_reference") == (
+        "fix(copy-vault): preserve TRAIN restoration artifacts (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_sync_engine_change() -> None:
     assert _commit_subject([
         "tools/alina_git_code_sync.py",
