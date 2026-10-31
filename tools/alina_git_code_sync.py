@@ -86,7 +86,7 @@ LOCAL_READ_TIMEOUT_SECONDS = 30
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
-GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v9"
+GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v10"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -191,9 +191,16 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    if sync_engine_paths and "reapply-cherry-picks" in diff_signal:
+        return (
+            "fix(sync): avoid slow upstream rebase scans "
+            f"({len(normalized)} paths)"
+        )
+
     if sync_engine_paths and any(marker in diff_signal for marker in (
         "git_editor", "git_sequence_editor", "git_merge_autoedit",
-        "rebase_timeout", "rebase timeout", "verified-remote-receipt-v",
+        "rebase_timeout", "rebase timeout",
+        "verified-remote-receipt-v",
     )):
         return (
             "fix(sync): prevent interactive rebase stalls "
@@ -1944,9 +1951,11 @@ class Synchronizer:
         os.environ["GIT_MERGE_AUTOEDIT"] = "no"
         budget = int(timeout_seconds or REBASE_TIMEOUT_SECONDS)
         self.report["rebase_timeout_budget_seconds"] = budget
+        self.report["rebase_strategy"] = "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN"
         try:
             return self.command(
-                "rebase", "--no-autostash", remote, check=False,
+                "rebase", "--no-autostash", "--reapply-cherry-picks", remote,
+                check=False,
                 timeout=budget,
             )
         except subprocess.TimeoutExpired as timeout:
