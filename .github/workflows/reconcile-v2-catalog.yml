@@ -54,7 +54,6 @@ jobs:
     timeout-minutes: 115
     env:
       GH_TOKEN: ${{ github.token }}
-      RESUME_ATTEMPT: ${{ inputs.resume_attempt || '0' }}
 
     steps:
       - name: Checkout canonical Alina control plane
@@ -560,6 +559,7 @@ jobs:
       contents: read
     env:
       GH_TOKEN: ${{ github.token }}
+      RESUME_ATTEMPT: ${{ inputs.resume_attempt || '0' }}
     steps:
       - name: Dispatch one bounded hosted retry
         shell: bash
