@@ -22,6 +22,7 @@ import threading
 import time
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))

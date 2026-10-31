@@ -22,6 +22,7 @@ EXCLUDED_DIRS = {
     ".git",
     ".venv",
     ".venv-portable",
+    ".ci-venv",
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
