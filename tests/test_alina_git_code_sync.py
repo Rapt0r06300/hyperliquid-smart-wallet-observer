@@ -1108,8 +1108,9 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert "[LANCEUR 1/6]" in source
     assert "[LANCEUR 6/6]" in source
     assert "DRY-RUN TERMINE" in source
-    assert 'if /I "%HYPERSMART_PUSH_PAUSE%"=="1" pause' in source
-    assert 'if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause' not in source
+    assert 'if /I "%HYPERSMART_PUSH_NO_PAUSE%"=="1" goto :finish_cleanup' in source
+    assert "pause" in source
+    assert "PORTABLE_GITHUB_PUSH_CHECK_OK" in source
     assert "-TimeoutSec 20" in source
 
 
