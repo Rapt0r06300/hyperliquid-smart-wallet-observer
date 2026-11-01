@@ -65,8 +65,24 @@ def test_copy_vault_hosted_jobs_ne_telechargent_pas_le_reservoir_brut():
         txt = _texte(nom)
         assert "filter: blob:none" in txt, f"clone blobless manquant dans {nom}"
         assert "sparse-checkout-cone-mode: false" in txt, f"mode sparse explicite manquant dans {nom}"
-        assert "!/datasets/" in txt, f"réservoir datasets non exclu dans {nom}"
-        assert "/*" in txt, f"racine du dépôt non conservée dans {nom}"
+    hyperlab = _texte("hyperlab-ci.yml")
+    assert "!/datasets/" in hyperlab and "/*" in hyperlab
+
+
+def test_labo_continu_sparse_checkout_ne_garde_que_ses_surfaces_utiles():
+    txt = _texte("labo-continu-ci.yml")
+    for required in (
+        "            /src/",
+        "            /tools/",
+        "            /tests/",
+        "            /conftest.py",
+        "            /pyproject.toml",
+        "            /requirements-ci-bootstrap.txt",
+        "            /requirements-recherche.txt",
+    ):
+        assert required in txt
+    assert "            /*" not in txt
+    assert "            !/datasets/" not in txt
 
 
 def test_local_l2_hosted_job_installs_import_dependencies():
