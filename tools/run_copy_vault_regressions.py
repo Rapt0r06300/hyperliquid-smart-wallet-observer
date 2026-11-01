@@ -51,6 +51,10 @@ MODULE_TESTS: dict[str, tuple[str, ...]] = {
         COPY_VAULT_EXECUTABLE_SUITES,
     "src/hl_observer/backtesting/copy_vault_local_lab.py":
         COPY_VAULT_LOCAL_LAB_SUITES,
+    "src/hl_observer/collection/l4_capture.py": (
+        "tests/test_l4_capture.py",
+        "tests/test_order_intent.py",
+    ),
     "tools/pipeline_copie_reel.py":
         COPY_VAULT_PIPELINE_SUITES,
     "tools/audit_live_ws_causal_capture.py": (
