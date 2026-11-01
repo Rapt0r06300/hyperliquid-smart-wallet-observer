@@ -243,6 +243,38 @@ def test_parseur_live_journalise_les_fills_invalides_sans_perdre_les_valides(tmp
     assert C._HEARTBEAT_WS["invalid_fill_rows"] == initial + 1
 
 
+def test_fill_live_conserve_ack_et_epoch_de_capture(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    vault = "0xV"
+    monkeypatch.setitem(C._HEARTBEAT_WS, "ack_received_at_ms_by_vault", {vault: 1_005})
+    monkeypatch.setitem(C._HEARTBEAT_WS, "capture_epoch_by_vault", {vault: "userfills-A-epoch-1"})
+    message = {
+        "channel": "userFills",
+        "sequence": 42,
+        "data": {
+            "isSnapshot": False,
+            "fills": [{
+                "coin": "SOL", "px": "150", "sz": "1", "side": "B",
+                "time": 1_000, "tid": 7, "startPosition": "0",
+            }],
+        },
+    }
+
+    fills = C._parse_userfills_frame(
+        tmp_path,
+        message,
+        vault=vault,
+        received_at_ms=1_010,
+        receive_mono_ns=2_000,
+        connection_id="userfills-A-epoch-1",
+    )
+
+    assert len(fills) == 1
+    assert fills[0]["ack_received_at_ms"] == 1_005
+    assert fills[0]["capture_epoch"] == "userfills-A-epoch-1"
+    assert fills[0]["post_ack"] is True
+
+
 def test_fill_sans_marqueur_snapshot_est_bloque_sans_modifier_curseur():
     cur = {}
     assert C.fills_a_traiter("0xV", [_f(100, snap=None)], cur) == []
