@@ -131,6 +131,14 @@ def test_labo_hosted_job_publishes_an_exact_sha_bound_junit_receipt():
     assert "if-no-files-found: error" in txt
 
 
+def test_labo_hosted_job_publishes_the_fail_closed_ten_task_report():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tools/verify_copy_vault_tasklist.py" in txt
+    assert "--head-sha \"${GITHUB_SHA}\"" in txt
+    assert "--evidence-dir /tmp/copy-vault-no-evidence" in txt
+    assert "copy-vault-tasklist-closure-${{ github.run_id }}-${{ github.sha }}" in txt
+
+
 def test_local_l2_cancels_only_obsolete_same_ref_runs():
     txt = _texte("local-l2-certification-tests.yml")
     assert "group: local-l2-certification-tests-${{ github.ref }}" in txt
