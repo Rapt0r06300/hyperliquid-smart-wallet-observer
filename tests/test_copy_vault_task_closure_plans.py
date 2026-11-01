@@ -75,3 +75,13 @@ def test_tasklist_report_exposes_the_exact_closure_contract() -> None:
 
     h170_contract = by_id["H-T170"]["closure_contract"][0]
     assert h170_contract["required_claims"]["snapshot_excluded_from_forward"] is True
+
+
+def test_each_task_contract_has_a_stable_sha256_identity() -> None:
+    first = evaluate_tasklist({}, expected_head_sha=HEAD)
+    second = evaluate_tasklist({}, expected_head_sha=HEAD)
+
+    first_hashes = {row["task_id"]: row["closure_contract_sha256"] for row in first["tasks"]}
+    second_hashes = {row["task_id"]: row["closure_contract_sha256"] for row in second["tasks"]}
+    assert first_hashes == second_hashes
+    assert all(len(value) == 64 for value in first_hashes.values())

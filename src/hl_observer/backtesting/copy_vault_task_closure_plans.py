@@ -14,6 +14,8 @@ missing SAFE evidence.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import hashlib
+import json
 from typing import Any
 
 from .copy_vault_closure_gate import (
@@ -51,6 +53,31 @@ def _criterion(
         min_distinct_runs=runs,
         unavailable_is_unmeasurable=unmeasurable,
     )
+
+
+def _contract_payload(criteria: Sequence[ClosureCriterion]) -> list[dict[str, Any]]:
+    return [
+        {
+            "criterion_id": criterion.criterion_id,
+            "required_kinds": list(criterion.required_kinds),
+            "required_claims": dict(criterion.required_claims),
+            "require_hosted": criterion.require_hosted,
+            "require_full_dataset": criterion.require_full_dataset,
+            "min_distinct_runs": criterion.min_distinct_runs,
+            "unavailable_is_unmeasurable": criterion.unavailable_is_unmeasurable,
+        }
+        for criterion in criteria
+    ]
+
+
+def _contract_sha256(criteria: Sequence[ClosureCriterion]) -> str:
+    encoded = json.dumps(
+        _contract_payload(criteria),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def build_task_closure_plans() -> dict[str, tuple[ClosureCriterion, ...]]:
@@ -218,6 +245,7 @@ def evaluate_tasklist(
     rows: list[dict[str, Any]] = []
     done = testing = blocked = 0
     for task_id in TASK_IDS:
+        contract_sha256 = _contract_sha256(plans[task_id])
         report = build_closure_matrix(
             task_id,
             plans[task_id],
@@ -242,18 +270,8 @@ def evaluate_tasklist(
             "external_block": external_block,
             "missing_evidence": report["missing_evidence"],
             "criteria": report["criteria"],
-            "closure_contract": [
-                {
-                    "criterion_id": criterion.criterion_id,
-                    "required_kinds": list(criterion.required_kinds),
-                    "required_claims": dict(criterion.required_claims),
-                    "require_hosted": criterion.require_hosted,
-                    "require_full_dataset": criterion.require_full_dataset,
-                    "min_distinct_runs": criterion.min_distinct_runs,
-                    "unavailable_is_unmeasurable": criterion.unavailable_is_unmeasurable,
-                }
-                for criterion in plans[task_id]
-            ],
+            "closure_contract_sha256": contract_sha256,
+            "closure_contract": _contract_payload(plans[task_id]),
         })
     return {
         "schema": SCHEMA,
