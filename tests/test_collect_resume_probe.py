@@ -110,3 +110,38 @@ def test_collect_resume_receipt_requires_a_git_checkout_for_exact_sha(tmp_path: 
             segment_b_job_id="789",
             require_exact_sha=True,
         )
+
+
+def test_collect_resume_receipt_rejects_incomplete_state_copy(tmp_path: Path):
+    _write_phase(tmp_path)
+    state = Path("catalog/COLLECT_RESUME_PROBE_STATE.json")
+    segment_a(
+        tmp_path,
+        state,
+        owner_run_id="run-a",
+        workflow_run_id="123",
+        code_sha="a" * 40,
+    )
+    segment_b(tmp_path, state, owner_run_id="run-b")
+
+    control_paths = ("a.py", "b.py", "workflow.yml")
+    for rel in control_paths:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rel, encoding="utf-8")
+
+    incomplete = tmp_path / "catalog" / "INCOMPLETE_STATE.json"
+    payload = json.loads((tmp_path / state).read_text(encoding="utf-8"))
+    payload["status"] = "CONTINUATION_REQUIRED"
+    incomplete.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="probe is not COMPLETE"):
+        build_receipt(
+            tmp_path,
+            incomplete.relative_to(tmp_path),
+            Path("catalog/INCOMPLETE_RECEIPT.json"),
+            workflow_run_id="123",
+            segment_a_job_id="456",
+            segment_b_job_id="789",
+            control_paths=control_paths,
+        )

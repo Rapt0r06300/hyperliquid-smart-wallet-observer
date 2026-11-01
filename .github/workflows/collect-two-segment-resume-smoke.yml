@@ -177,6 +177,49 @@ jobs:
           print("SEGMENT_B_JOB_ID="+str(b["id"]))
           PY
 
+      - name: Refuse stale and incomplete state artifacts
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/segment-b-state/COLLECT_RESUME_PROBE_STATE.json" "$RUNNER_TEMP/incomplete-state.json"
+          python - "$RUNNER_TEMP/incomplete-state.json" <<'PY'
+          import json
+          import sys
+          path = sys.argv[1]
+          payload = json.load(open(path, encoding="utf-8"))
+          payload["status"] = "CONTINUATION_REQUIRED"
+          json.dump(payload, open(path, "w", encoding="utf-8"), sort_keys=True)
+          PY
+          if PYTHONPATH=src python tools/collect_resume_probe.py receipt \
+            --state "$RUNNER_TEMP/incomplete-state.json" \
+            --output "$RUNNER_TEMP/incomplete-receipt.json" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --segment-a-job-id "$SEGMENT_A_JOB_ID" \
+            --segment-b-job-id "$SEGMENT_B_JOB_ID" \
+            --require-exact-sha; then
+            echo "incomplete state was incorrectly accepted"
+            exit 1
+          fi
+
+          cp "$RUNNER_TEMP/segment-b-state/COLLECT_RESUME_PROBE_STATE.json" "$RUNNER_TEMP/stale-state.json"
+          python - "$RUNNER_TEMP/stale-state.json" <<'PY'
+          import json
+          import sys
+          path = sys.argv[1]
+          payload = json.load(open(path, encoding="utf-8"))
+          payload["code_sha"] = "0" * 40
+          json.dump(payload, open(path, "w", encoding="utf-8"), sort_keys=True)
+          PY
+          if PYTHONPATH=src python tools/collect_resume_probe.py receipt \
+            --state "$RUNNER_TEMP/stale-state.json" \
+            --output "$RUNNER_TEMP/stale-receipt.json" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --segment-a-job-id "$SEGMENT_A_JOB_ID" \
+            --segment-b-job-id "$SEGMENT_B_JOB_ID" \
+            --require-exact-sha; then
+            echo "stale state was incorrectly accepted"
+            exit 1
+          fi
+
       - name: Build structural resume receipt
         run: |
           set -euo pipefail
