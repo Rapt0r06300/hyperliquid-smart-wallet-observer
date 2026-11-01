@@ -17,8 +17,10 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
+from hl_observer.collection import l4_capture as _l4
 from hl_observer.research import ofi_microprice as _ofi
 
 UNMEASURABLE = "UNMEASURABLE"
@@ -80,9 +82,91 @@ def adapter_bbo_synchro(path: str, *, limit: int | None = None) -> list[dict[str
     return out
 
 
+def _load_provenance_bound_l4(path: str | None) -> dict[str, Any]:
+    missing = "flux node/L4 (ORDER/MODIFY/CANCEL/PARTIAL/FILL) indisponible"
+    if not path:
+        return {"statut": BLOCKED, "events": [], "manque": missing}
+    source = Path(path)
+    if source.is_symlink() or not source.is_file():
+        return {"statut": BLOCKED, "events": [], "manque": "capture L4 absente ou non vérifiable"}
+
+    events: list[dict[str, Any]] = []
+    quarantined = 0
+    required_provenance = ("provider", "capture_run_id", "native_event_id")
+    try:
+        with source.open(encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    quarantined += 1
+                    continue
+                if not isinstance(raw, Mapping):
+                    quarantined += 1
+                    continue
+                event = _l4.event_canonique(raw)
+                provenance = raw.get("provenance")
+                received_at_ms = (
+                    provenance.get("received_at_ms")
+                    if isinstance(provenance, Mapping) else None
+                )
+                if (
+                    event is None
+                    or not isinstance(provenance, Mapping)
+                    or any(
+                        not str(provenance.get(key) or "").strip()
+                        for key in required_provenance
+                    )
+                    or isinstance(received_at_ms, bool)
+                    or not isinstance(received_at_ms, (int, float))
+                    or float(received_at_ms) < 0
+                    or raw.get("paper_read_only") is not True
+                    or raw.get("real_execution") is not False
+                ):
+                    quarantined += 1
+                    continue
+                events.append({
+                    **event,
+                    "provenance": dict(provenance),
+                    "native_event_id": str(provenance["native_event_id"]),
+                })
+    except (OSError, UnicodeError):
+        return {"statut": BLOCKED, "events": [], "manque": "capture L4 illisible ou non vérifiable"}
+
+    coverage = {event_type: sum(event["type"] == event_type for event in events)
+                for event_type in sorted(_l4.TYPES)}
+    complete_cycle = all(coverage.get(event_type, 0) > 0 for event_type in _l4.TYPES)
+    providers = {event["provenance"]["provider"] for event in events}
+    coins = {event["coin"] for event in events}
+    return {
+        "statut": "READY_FOR_PAIRING" if complete_cycle else UNMEASURABLE,
+        "events": events,
+        "source": str(source),
+        "quarantaine": quarantined,
+        "coverage": coverage,
+        "provenance_by_provider_coin": bool(providers and coins),
+        "timestamps_present": bool(events) and all(
+            isinstance(event.get("ts_ms"), (int, float))
+            and isinstance(event["provenance"].get("received_at_ms"), (int, float))
+            for event in events
+        ),
+        "real_l4_session": bool(events),
+        "paired_public_fills": False,
+        "paired_safe_l2": False,
+        "point_in_time": False,
+        "error_rates_present": False,
+        "incremental_value": False,
+        "paper_read_only": True,
+        "real_execution": False,
+        "manque": "appariement fills publics + L2 SAFE point-in-time requis",
+    }
+
+
 def adapter_l4(path: str | None = None) -> dict[str, Any]:
-    """L4 / order-intent : ABSENT dans les données → BLOCKED_EXTERNAL (interface prête, flux à brancher)."""
-    return {"statut": BLOCKED, "events": [], "manque": "flux node/L4 (ORDER/MODIFY/CANCEL/FILL) indisponible"}
+    """Load a strict provenance-bound capture; pairing remains a separate proof."""
+    return _load_provenance_bound_l4(path)
 
 
 # ════════════════════════ EVENT detectors ════════════════════════
