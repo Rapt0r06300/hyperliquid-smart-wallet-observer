@@ -97,6 +97,25 @@ def test_criterion_matrix_keeps_rejected_proof_reasons() -> None:
     ]
 
 
+def test_stale_rejected_receipt_does_not_poison_a_valid_current_receipt() -> None:
+    stale = EvidenceRecord(
+        **{**_hosted(semantic_equivalence=True).__dict__, "head_sha": "f" * 40},
+    )
+    current = _hosted(run_id="run-current", artifact_id="artifact-current", semantic_equivalence=True)
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion("exact_sha_hosted_run", ("github_hosted",), require_hosted=True)],
+        [stale, current],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == PROVEN
+    assert report["closure_allowed"] is True
+    assert report["criteria"][0]["run_ids"] == ["run-current"]
+    assert any(ref["result"] == "REJECTED" for ref in report["criteria"][0]["evidence_refs"])
+    assert not any("EXACT_SHA_MISMATCH" in item for item in report["missing_evidence"])
+
+
 def test_queued_or_wrong_sha_evidence_cannot_close_a_criterion() -> None:
     queued = _hosted(semantic_equivalence=True)
     queued = EvidenceRecord(
