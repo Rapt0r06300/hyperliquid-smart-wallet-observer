@@ -93,7 +93,7 @@ LOCAL_READ_TIMEOUT_SECONDS = 30
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
-GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v12"
+GIT_SYNC_ENGINE_BUILD = "2026-11-01-safe-main-promotion-v13"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -621,11 +621,13 @@ def _mutex(git_dir: Path):
 
 class Synchronizer:
     def __init__(self, root: Path, git: str = "git", *, dry_run: bool = False,
-                 allow_test_remote: bool = False):
+                 allow_test_remote: bool = False,
+                 promote_current_to_main: bool = False):
         self.root = root.resolve()
         self.git = git
         self.dry_run = dry_run
         self.allow_test_remote = allow_test_remote
+        self.promote_current_to_main = promote_current_to_main
         self.changed_python_paths: list[str] = []
         self._inventory_cache: tuple[list[str], list[str], list[str]] | None = None
         self._remote_snapshot_ready = False
@@ -646,6 +648,11 @@ class Synchronizer:
             "local_commit_created": False,
             "commit_message": None,
             "proposed_commit_message": None,
+            "branch_before": None,
+            "branch_after": None,
+            "promoted_current_branch": False,
+            "promoted_from_branch": None,
+            "promotion_sha": None,
             "merge_commits_created": 0,
             "rebases_performed": 0,
             "push_attempts": 0,
@@ -752,14 +759,25 @@ class Synchronizer:
         stamp = datetime.now().astimezone().strftime("%H:%M:%S")
         print(f"[{stamp}] {message}", flush=True)
 
-    def preflight(self, *, allow_shallow: bool = False) -> Path:
+    def preflight(
+        self, *, allow_shallow: bool = False, allow_non_main: bool = False,
+    ) -> Path:
         self.say("[MOTEUR 1/5] Controle du depot, de main et du remote autorise.")
         top = Path(self.text("rev-parse", "--show-toplevel")).resolve()
         if top != self.root:
             raise SyncBlocked(f"Lanceur hors racine du depot: {top}")
         branch = self.text("branch", "--show-current")
-        if branch != "main":
-            raise SyncBlocked("Seule main est autorisee; aucun checkout automatique.")
+        self.report["branch_before"] = branch or None
+        if not branch:
+            raise SyncBlocked(
+                "HEAD detache; impossible de promouvoir automatiquement vers main."
+            )
+        if branch != "main" and not allow_non_main:
+            raise SyncBlocked(
+                f"Branche active '{branch}' refusee: main est la seule branche "
+                "de livraison. Le lanceur peut la promouvoir automatiquement "
+                "avec --promote-current-to-main, sans force ni reset."
+            )
         shallow = self.text("rev-parse", "--is-shallow-repository") == "true"
         self.report["shallow_repository"] = shallow
         if shallow and not allow_shallow:
@@ -793,6 +811,64 @@ class Synchronizer:
             f"{str(self.report['head_before'])[:12]} | remote canonique confirme."
         )
         return gitdir
+
+    def _promote_current_branch_to_main(self, source_branch: str) -> None:
+        """Fast-forward local main from a clean, linear current branch."""
+        if source_branch == "main":
+            self.report["branch_after"] = "main"
+            return
+        source_sha = self.text("rev-parse", "HEAD")
+        main_sha = self.command(
+            "rev-parse", "--verify", "refs/heads/main", check=False,
+        )
+        if main_sha.returncode:
+            raise SyncBlocked("Branche locale main introuvable; promotion refusee.")
+        main_sha_text = main_sha.stdout.decode("ascii", errors="replace").strip()
+        ancestor = self.command(
+            "merge-base", "--is-ancestor", main_sha_text, source_sha,
+            check=False, expected_returncodes=(1,),
+        )
+        if ancestor.returncode != 0:
+            raise SyncBlocked(
+                f"Promotion refusee: main ({main_sha_text[:12]}) n'est pas "
+                f"un ancetre de {source_branch} ({source_sha[:12]}). "
+                "Aucune fusion automatique ni force-push."
+            )
+        dirty = self.command(
+            "status", "--porcelain=v1", "-z", "--untracked-files=no",
+        ).stdout
+        if dirty:
+            raise SyncBlocked(
+                "Promotion refusee: des modifications suivies restent presentes "
+                "apres le checkpoint; donnees conservees, aucune bascule."
+            )
+        self.say(
+            f"[PROMOTION] Fast-forward local de main depuis {source_branch} "
+            f"({source_sha[:12]}); aucun reset, clean ou merge de conflit."
+        )
+        switched = False
+        try:
+            self.command("switch", "main")
+            switched = True
+            self.command("merge", "--ff-only", source_branch)
+        except Exception:
+            if switched:
+                self.command("switch", source_branch, check=False)
+            raise
+        promoted_sha = self.text("rev-parse", "HEAD")
+        if promoted_sha != source_sha:
+            raise SyncBlocked(
+                "Promotion refusee: le SHA de main ne correspond pas au SHA "
+                "source apres fast-forward."
+            )
+        self.report["branch_after"] = "main"
+        self.report["promoted_current_branch"] = True
+        self.report["promoted_from_branch"] = source_branch
+        self.report["promotion_sha"] = promoted_sha
+        self.say(
+            f"[PROMOTION OK] main local={promoted_sha[:12]} | "
+            "branche active finale=main."
+        )
 
     def _ensure_full_history(self) -> None:
         """Deepen only until local and remote history have a common ancestor.
@@ -2401,10 +2477,20 @@ class Synchronizer:
             # synchronisation path expands it inside the Git mutex before
             # comparing or replaying history; dry-run/checkpoint modes never
             # fetch and therefore remain read-only.
-            gitdir = self.preflight(allow_shallow=True)
+            gitdir = self.preflight(
+                allow_shallow=True,
+                allow_non_main=(
+                    self.dry_run or wip_only or self.promote_current_to_main
+                ),
+            )
             with _mutex(gitdir):
+                active_branch = self.text("branch", "--show-current")
+                promotion_needed = (
+                    self.promote_current_to_main
+                    and active_branch != "main"
+                )
                 fast_path = False
-                if not self.dry_run and not wip_only:
+                if not self.dry_run and not wip_only and not promotion_needed:
                     fast_path = self._fast_path_if_clean()
                 if fast_path:
                     pass
@@ -2415,6 +2501,8 @@ class Synchronizer:
                         fetch_remote=not self.dry_run and not wip_only,
                     )
                     self.checkpoint()
+                    if promotion_needed:
+                        self._promote_current_branch_to_main(active_branch)
                 if self.dry_run:
                     remote_sha = self.remote_sha()
                     self.report["remote_sha_observed"] = remote_sha
@@ -2440,7 +2528,8 @@ class Synchronizer:
                     self.report["status"] = "LOCAL_CHECKPOINT_ONLY"
                     self.report["head_after"] = self.text("rev-parse", "HEAD")
                     self.say(
-                        "[CHECKPOINT LOCAL TERMINE] Travail conserve sur main; "
+                        "[CHECKPOINT LOCAL TERMINE] Travail conserve sur la "
+                        f"branche {self.text('branch', '--show-current')}; "
                         "aucun acces GitHub ni push."
                     )
                 elif not fast_path:
@@ -2496,10 +2585,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--git", default="git")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--wip-only", action="store_true")
+    parser.add_argument(
+        "--promote-current-to-main", action="store_true",
+        help="promouvoir la branche active vers main par fast-forward seulement",
+    )
     parser.add_argument("--test-remote", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
     if options.dry_run and options.wip_only:
         parser.error("Modes --dry-run et --wip-only incompatibles.")
+    if options.promote_current_to_main and (options.dry_run or options.wip_only):
+        parser.error(
+            "La promotion automatique est incompatible avec --dry-run et --wip-only."
+        )
     print(
         "ALINA CODE SYNC - main local <-> GitHub main - ZERO shard - sans force",
         flush=True,
@@ -2507,6 +2604,7 @@ def main(argv: list[str] | None = None) -> int:
     return Synchronizer(
         options.root, options.git, dry_run=options.dry_run,
         allow_test_remote=options.test_remote,
+        promote_current_to_main=options.promote_current_to_main,
     ).run(wip_only=options.wip_only)
 
 

@@ -13,7 +13,7 @@ set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
 set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-main"
 set "ALINA_BOOTSTRAP_REF=main"
-set "ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v12"
+set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
@@ -24,6 +24,7 @@ if /I "%~1"=="--dry-run" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="dry-run" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="--wip-only" set "SYNC_OPTION=--wip-only"
 if /I "%~1"=="wip" set "SYNC_OPTION=--wip-only"
+if /I "%~1"=="--promote-current-to-main" set "SYNC_OPTION=--promote-current-to-main"
 if /I "%~1"=="--portable-self-check" set "SYNC_OPTION=--portable-self-check"
 if not "%~1"=="" if not defined SYNC_OPTION goto :bad_option
 if not "%~2"=="" goto :bad_option
@@ -121,6 +122,16 @@ if errorlevel 1 goto :invalid_engine
 echo [OK] Version du moteur et syntaxe Python valides
 
 if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check
+
+rem A double click from a Codex/WIP branch promotes it only by a guarded
+rem fast-forward. Dry-run and WIP modes stay branch-local/read-only.
+if not defined SYNC_OPTION (
+  for /f "delims=" %%B in ('"%HYPERSMART_GIT%" -C "%ALINA_ROOT%." branch --show-current 2^>nul') do (
+    set "ALINA_ACTIVE_BRANCH=%%B"
+    if /I not "%%B"=="main" set "SYNC_OPTION=--promote-current-to-main"
+  )
+)
+if /I "%SYNC_OPTION%"=="--promote-current-to-main" echo [INFO] Branche active %ALINA_ACTIVE_BRANCH%; promotion fast-forward securisee vers main.
 
 echo.
 echo [LANCEUR 5/6] Demarrage du moteur; chaque commande Git sera detaillee ci-dessous

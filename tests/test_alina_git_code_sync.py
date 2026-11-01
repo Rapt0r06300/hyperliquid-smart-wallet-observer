@@ -960,6 +960,48 @@ def test_main_branch_is_mandatory(repos):
     assert rc == 2 and receipt["status"] == "NO_GO"
 
 
+def test_non_main_branch_is_promoted_by_fast_forward_only(repos):
+    local, _, origin = repos
+    git(local, "checkout", "-b", "codex/wip")
+    (local / "src" / "promotion.py").write_text("promoted = True\n")
+    safe = local / "runtime" / "safe" / "observation.json"
+    safe.parent.mkdir(parents=True)
+    safe.write_text('{"safe": true}\n', encoding="utf-8")
+
+    task = Synchronizer(
+        local, allow_test_remote=True, promote_current_to_main=True,
+    )
+    assert task.run() == 0
+    receipt = json.loads(
+        (local / "runtime/reports/git-sync/LAST_SYNC.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert receipt["status"] == "SYNCHRONIZED"
+    assert receipt["promoted_current_branch"] is True
+    assert receipt["promoted_from_branch"] == "codex/wip"
+    assert receipt["branch_after"] == "main"
+    assert git(local, "branch", "--show-current") == "main"
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+    assert (local / "runtime/safe/observation.json").read_text() == '{"safe": true}\n'
+    assert git(origin, "show", "main:src/promotion.py") == "promoted = True"
+
+
+def test_non_main_promotion_checkpoints_dirty_tracked_worktree(repos):
+    local, _, origin = repos
+    git(local, "checkout", "-b", "codex/dirty")
+    (local / "src" / "base.py").write_text("uncommitted = True\n")
+    task = Synchronizer(
+        local, allow_test_remote=True, promote_current_to_main=True,
+    )
+    assert task.run() == 0
+    assert task.report["status"] == "SYNCHRONIZED"
+    assert task.report["local_commit_created"] is True
+    assert git(local, "branch", "--show-current") == "main"
+    assert git(origin, "show", "main:src/base.py") == "uncommitted = True"
+
+
 def test_exact_historical_jsonl_relocation_syncs_with_concurrent_cloud_change(repos):
     local, cloud, origin = repos
     source = "CLAUDE_TASKS.jsonl"
@@ -1098,7 +1140,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v12' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
