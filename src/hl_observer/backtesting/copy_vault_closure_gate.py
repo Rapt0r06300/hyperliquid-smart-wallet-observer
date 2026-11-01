@@ -278,6 +278,7 @@ def evaluate_criterion(
             reasons.append(f"EVIDENCE_KIND_MISSING:{kind}")
             continue
         valid_for_kind = False
+        rejected_reasons: list[str] = []
         for record in kind_records:
             errors = _criterion_errors(
                 record, criterion=criterion, expected_head_sha=expected_head_sha,
@@ -287,8 +288,9 @@ def evaluate_criterion(
                 usable.append(record)
                 valid_for_kind = True
             else:
-                reasons.extend(f"{kind}:{reason}" for reason in errors)
+                rejected_reasons.extend(errors)
         if not valid_for_kind:
+            reasons.extend(f"{kind}:{reason}" for reason in rejected_reasons)
             reasons.append(f"EVIDENCE_KIND_NOT_PROVEN:{kind}")
 
     distinct_runs = {record.run_id for record in usable if record.run_id is not None}
