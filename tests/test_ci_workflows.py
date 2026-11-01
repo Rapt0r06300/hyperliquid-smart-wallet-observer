@@ -118,6 +118,11 @@ def test_labo_hosted_job_runs_read_only_evidence_inventory():
     assert "tests/test_copy_vault_evidence_inventory.py" in txt
 
 
+def test_labo_hosted_job_runs_the_all_ten_task_closure_audit():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tests/test_copy_vault_task_closure_plans.py" in txt
+
+
 def test_local_l2_cancels_only_obsolete_same_ref_runs():
     txt = _texte("local-l2-certification-tests.yml")
     assert "group: local-l2-certification-tests-${{ github.ref }}" in txt
