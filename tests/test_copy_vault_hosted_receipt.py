@@ -19,6 +19,10 @@ def _artifact(name: str, artifact_id: str) -> dict[str, str]:
 
 
 def _tasklist_report() -> dict[str, object]:
+    task_ids = (
+        "H-T95", "H-T99", "H-T102", "H-T115", "H-T119",
+        "H-T170", "H-T195", "H-T196", "H-T197", "H-T223",
+    )
     return {
         "schema": "hypersmart.copy_vault_task_closure_plans.v1",
         "expected_head_sha": HEAD,
@@ -29,7 +33,10 @@ def _tasklist_report() -> dict[str, object]:
             "total": 10,
             "closure_allowed": False,
         },
-        "tasks": [],
+        "tasks": [
+            {"task_id": task_id, "closure_contract_sha256": "b" * 64}
+            for task_id in task_ids
+        ],
     }
 
 
@@ -57,6 +64,7 @@ def test_receipt_binds_ci_and_artifacts_without_overclaiming_task_closure() -> N
     assert receipt["real_execution"] is False
     assert receipt["tasklist"]["closure_allowed"] is False
     assert receipt["claims"]["exact_sha_bound_ci_receipt"] is True
+    assert receipt["task_contract_sha256"]["H-T95"] == "b" * 64
     assert "checkpoint_resume_proven" not in receipt["claims"]
 
 

@@ -17,6 +17,7 @@ SCHEMA = "hypersmart.copy_vault_hosted_ci_receipt.v1"
 PROOF_STATUS = "HOSTED_CI_VERIFIED"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_HASH64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _text(value: object, label: str) -> str:
@@ -92,6 +93,23 @@ def build_hosted_ci_receipt(
         raise ValueError("tasklist report closure_allowed must be boolean")
     if closure_allowed != (done == total and testing == 0):
         raise ValueError("tasklist report closure_allowed contradicts its counts")
+    task_rows = report.get("tasks")
+    if not isinstance(task_rows, list) or len(task_rows) != total:
+        raise ValueError("tasklist report must contain ten task contract rows")
+    task_contract_sha256: dict[str, str] = {}
+    for row in task_rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("tasklist contract row must be an object")
+        task_id = _text(row.get("task_id"), "tasklist task_id")
+        contract_sha256 = row.get("closure_contract_sha256")
+        if (
+            not isinstance(contract_sha256, str)
+            or not _HASH64_RE.fullmatch(contract_sha256.lower())
+        ):
+            raise ValueError(f"task {task_id} has an invalid closure contract SHA-256")
+        if task_id in task_contract_sha256:
+            raise ValueError(f"duplicate task contract row: {task_id}")
+        task_contract_sha256[task_id] = contract_sha256.lower()
 
     artifacts = [
         _artifact(junit_artifact, head_sha=normalized_sha),
@@ -133,6 +151,7 @@ def build_hosted_ci_receipt(
             },
             "closure_allowed": closure_allowed,
         },
+        "task_contract_sha256": task_contract_sha256,
         "limitations": [
             "CI success does not prove economic performance or OOS/FORWARD validity.",
             "CI success does not prove a checkpoint interruption/resume.",
