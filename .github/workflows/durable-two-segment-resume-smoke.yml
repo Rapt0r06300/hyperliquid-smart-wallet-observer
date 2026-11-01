@@ -35,6 +35,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 1
+          sparse-checkout: |
+            catalog/campaigns
+            control
       - name: Refresh durable Dataset V2 state
         run: |
           set -euo pipefail
@@ -123,6 +126,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 1
+          sparse-checkout: |
+            catalog/campaigns
+            control
       - name: Read checkpoint from origin/main
         id: verify
         env:
@@ -183,6 +189,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 1
+          sparse-checkout: |
+            catalog/campaigns
+            control
       - name: Read terminal durable campaign
         run: |
           set -euo pipefail
