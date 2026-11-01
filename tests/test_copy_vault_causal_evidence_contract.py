@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.hl_observer.backtesting.copy_vault_causal_evidence_contract import (
+from src.hl_observer.backtesting.copy_vault_closure_gate import (
     NOT_PROVEN,
     PROVEN,
     validate_l4_pairing_receipt,
