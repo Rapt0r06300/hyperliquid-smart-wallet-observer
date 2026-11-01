@@ -79,6 +79,7 @@ def build_receipt(
 
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
+        "kind": "economic_replay",
         "head_sha": head_sha,
         "task_scope": task_scope,
         "evidence_status": "PROVEN" if not missing else "UNMEASURABLE",

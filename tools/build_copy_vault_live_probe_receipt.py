@@ -62,7 +62,10 @@ def build_receipt(
     summary_path: Path,
     selection_path: Path | None,
     head_sha: str,
+    evidence_kind: str = "safe_replay",
 ) -> dict[str, Any]:
+    if evidence_kind not in {"safe_replay", "l4_capture"}:
+        raise ValueError("evidence_kind must be safe_replay or l4_capture")
     missing: list[str] = []
     if summary.get("schema") != "alina.copy_vault_cloud_window.v2":
         missing.append("COLLECTOR_SCHEMA_INVALID")
@@ -108,6 +111,7 @@ def build_receipt(
     missing.append("L4_POINT_IN_TIME_PAIRING_MISSING")
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
+        "kind": evidence_kind,
         "head_sha": head_sha,
         "collection_run_id": run_id,
         "evidence_status": "UNMEASURABLE",
@@ -154,6 +158,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--selection-file", type=Path)
+    parser.add_argument(
+        "--evidence-kind",
+        choices=("safe_replay", "l4_capture"),
+        default="safe_replay",
+        help="Closure-gate role for this observation; it never changes measured data.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
@@ -166,6 +176,7 @@ def main() -> int:
             summary_path=args.summary,
             selection_path=args.selection_file,
             head_sha=_git_head(args.repo_root),
+            evidence_kind=args.evidence_kind,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(

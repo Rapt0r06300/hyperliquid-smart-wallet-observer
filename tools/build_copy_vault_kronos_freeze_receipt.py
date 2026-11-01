@@ -62,6 +62,7 @@ def build_receipt(source: dict[str, Any], *, source_path: Path, head_sha: str) -
     })
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
+        "kind": "kronos_freeze",
         "head_sha": head_sha,
         "evidence_status": "UNMEASURABLE",
         "decision": "NO_GO",
