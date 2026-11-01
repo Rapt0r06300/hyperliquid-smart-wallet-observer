@@ -64,7 +64,9 @@ jobs:
         env:
           PYTHONPATH: src:tools
         run: |
+          mkdir -p reports
           python -m pytest -q \
+            --junitxml=reports/labo-continu.xml \
             tests/test_copy_vault_closure_gate.py \
             tests/test_copy_vault_evidence_inventory.py \
             tests/test_copy_vault_task_closure_plans.py \
@@ -74,3 +76,11 @@ jobs:
             tests/test_labo_continu_absolute.py \
             tests/test_labo_continu_fix.py \
             tests/test_data_complete_18h.py
+      - name: Publier le rapport JUnit de la suite laboratoire
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: labo-continu-junit-${{ github.run_id }}-${{ github.sha }}
+          path: reports/labo-continu.xml
+          if-no-files-found: error
+          retention-days: 14

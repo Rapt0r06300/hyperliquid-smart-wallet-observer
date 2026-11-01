@@ -123,6 +123,14 @@ def test_labo_hosted_job_runs_the_all_ten_task_closure_audit():
     assert "tests/test_copy_vault_task_closure_plans.py" in txt
 
 
+def test_labo_hosted_job_publishes_an_exact_sha_bound_junit_receipt():
+    txt = _texte("labo-continu-ci.yml")
+    assert "--junitxml=reports/labo-continu.xml" in txt
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in txt
+    assert "labo-continu-junit-${{ github.run_id }}-${{ github.sha }}" in txt
+    assert "if-no-files-found: error" in txt
+
+
 def test_local_l2_cancels_only_obsolete_same_ref_runs():
     txt = _texte("local-l2-certification-tests.yml")
     assert "group: local-l2-certification-tests-${{ github.ref }}" in txt
