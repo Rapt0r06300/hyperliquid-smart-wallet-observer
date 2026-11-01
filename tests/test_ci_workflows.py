@@ -76,5 +76,12 @@ def test_local_l2_hosted_job_installs_import_dependencies():
 
 def test_local_l2_hosted_job_avoids_raw_dataset_checkout():
     txt = _texte("local-l2-certification-tests.yml")
-    for required in ("filter: blob:none", "sparse-checkout-cone-mode: false", "!/datasets/"):
+    for required in (
+        "filter: blob:none",
+        "sparse-checkout-cone-mode: false",
+        "            /src/",
+        "            /tools/",
+        "            /tests/",
+        "            /pyproject.toml",
+    ):
         assert required in txt
