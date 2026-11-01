@@ -139,6 +139,22 @@ def test_labo_hosted_job_publishes_the_fail_closed_ten_task_report():
     assert "copy-vault-tasklist-closure-${{ github.run_id }}-${{ github.sha }}" in txt
 
 
+def test_labo_hosted_job_publishes_a_strict_exact_sha_receipt():
+    txt = _texte("labo-continu-ci.yml")
+    for required in (
+        "id: test-suite",
+        "pytest_exit_code=$status",
+        "id: publish-junit",
+        "id: publish-closure",
+        "tools/build_copy_vault_hosted_receipt.py",
+        "--head-sha \"${GITHUB_SHA}\"",
+        "--junit-artifact-digest",
+        "--closure-artifact-digest",
+        "copy-vault-hosted-receipt-${{ github.run_id }}-${{ github.sha }}",
+    ):
+        assert required in txt, f"reçu hosted exact-SHA incomplet: {required}"
+
+
 def test_local_l2_cancels_only_obsolete_same_ref_runs():
     txt = _texte("local-l2-certification-tests.yml")
     assert "group: local-l2-certification-tests-${{ github.ref }}" in txt

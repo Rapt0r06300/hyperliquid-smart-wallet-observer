@@ -179,6 +179,8 @@ def _criterion_errors(
             errors.append("HOSTED_RUN_ID_MISSING")
         if record.artifact_id is None:
             errors.append("HOSTED_ARTIFACT_ID_MISSING")
+        if record.artifact_sha256 is None:
+            errors.append("HOSTED_ARTIFACT_DIGEST_MISSING")
         if record.run_status not in _SAFE_RUN_STATUSES:
             errors.append("HOSTED_RUN_NOT_COMPLETED")
         if record.conclusion not in _SAFE_CONCLUSIONS:
@@ -239,9 +241,17 @@ def evaluate_criterion(
             reasons.append(f"EVIDENCE_KIND_NOT_PROVEN:{kind}")
 
     distinct_runs = {record.run_id for record in usable if record.run_id is not None}
+    distinct_artifacts = {
+        record.artifact_id for record in usable if record.artifact_id is not None
+    }
     if len(distinct_runs) < criterion.min_distinct_runs:
         reasons.append(
             f"DISTINCT_RUNS_INSUFFICIENT:{len(distinct_runs)}<{criterion.min_distinct_runs}"
+        )
+    if criterion.require_hosted and len(distinct_artifacts) < criterion.min_distinct_runs:
+        reasons.append(
+            "DISTINCT_ARTIFACTS_INSUFFICIENT:"
+            f"{len(distinct_artifacts)}<{criterion.min_distinct_runs}"
         )
     deduped_reasons = list(dict.fromkeys(reasons))
     proven = not deduped_reasons and bool(usable)
@@ -253,6 +263,7 @@ def evaluate_criterion(
         "status": status,
         "evidence_count": len(usable),
         "run_ids": sorted(distinct_runs),
+        "artifact_ids": sorted(distinct_artifacts),
         "missing_evidence": deduped_reasons,
     }
 

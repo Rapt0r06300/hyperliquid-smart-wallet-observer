@@ -61,10 +61,12 @@ jobs:
           PYTHONPATH: src:tools
         run: python -m pytest -q tests/test_no_real_trade_foundations.py tests/test_paper_ledger.py tests/test_pnl_reconciliation.py
       - name: Suite laboratoire continu (FINAL / PROD-TRUTH / ULTIMATE / ABSOLUTE / FIX / e2e data)
+        id: test-suite
         env:
           PYTHONPATH: src:tools
         run: |
           mkdir -p reports
+          set +e
           python -m pytest -q \
             --junitxml=reports/labo-continu.xml \
             tests/test_copy_vault_closure_gate.py \
@@ -76,8 +78,13 @@ jobs:
             tests/test_labo_continu_absolute.py \
             tests/test_labo_continu_fix.py \
             tests/test_data_complete_18h.py
+          status=$?
+          set -e
+          echo "pytest_exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
       - name: Publier le rapport JUnit de la suite laboratoire
         if: always()
+        id: publish-junit
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: labo-continu-junit-${{ github.run_id }}-${{ github.sha }}
@@ -86,6 +93,7 @@ jobs:
           retention-days: 14
       - name: Produire le rapport fail-closed des dix tâches Copy-Vault
         if: always()
+        id: tasklist-audit
         env:
           PYTHONPATH: src:tools
         run: |
@@ -101,9 +109,43 @@ jobs:
           if [ "$status" -ne 2 ]; then exit "$status"; fi
       - name: Publier le rapport de clôture Copy-Vault
         if: always()
+        id: publish-closure
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: copy-vault-tasklist-closure-${{ github.run_id }}-${{ github.sha }}
           path: reports/copy-vault-tasklist-closure.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Construire le reçu hosted lié au SHA exact
+        if: steps.test-suite.outcome == 'success' && steps.tasklist-audit.outcome == 'success'
+        env:
+          PYTHONPATH: src:tools
+        run: |
+          python tools/build_copy_vault_hosted_receipt.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --workflow "${GITHUB_WORKFLOW}" \
+            --event "${GITHUB_EVENT_NAME}" \
+            --ref "${GITHUB_REF}" \
+            --head-sha "${GITHUB_SHA}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --status completed \
+            --conclusion success \
+            --pytest-exit-code "${{ steps.test-suite.outputs.pytest_exit_code }}" \
+            --junit-artifact-id "${{ steps.publish-junit.outputs.artifact-id }}" \
+            --junit-artifact-name "labo-continu-junit-${GITHUB_RUN_ID}-${GITHUB_SHA}" \
+            --junit-artifact-digest "${{ steps.publish-junit.outputs.artifact-digest }}" \
+            --closure-artifact-id "${{ steps.publish-closure.outputs.artifact-id }}" \
+            --closure-artifact-name "copy-vault-tasklist-closure-${GITHUB_RUN_ID}-${GITHUB_SHA}" \
+            --closure-artifact-digest "${{ steps.publish-closure.outputs.artifact-digest }}" \
+            --tasklist-report reports/copy-vault-tasklist-closure.json \
+            --output reports/copy-vault-hosted-receipt.json
+      - name: Publier le reçu hosted exact-SHA
+        if: steps.test-suite.outcome == 'success' && steps.tasklist-audit.outcome == 'success'
+        id: publish-hosted-receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: copy-vault-hosted-receipt-${{ github.run_id }}-${{ github.sha }}
+          path: reports/copy-vault-hosted-receipt.json
           if-no-files-found: error
           retention-days: 14

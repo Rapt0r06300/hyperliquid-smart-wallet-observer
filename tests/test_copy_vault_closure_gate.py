@@ -170,3 +170,45 @@ def test_two_hosted_runs_require_two_distinct_run_ids() -> None:
     assert one_run["status"] == NOT_PROVEN
     assert two_runs["status"] == PROVEN
     assert two_runs["criteria"][0]["run_ids"] == ["run-1", "run-2"]
+
+
+def test_hosted_evidence_requires_a_verified_artifact_digest() -> None:
+    record = EvidenceRecord(
+        **{**_hosted(semantic_equivalence=True).__dict__, "artifact_sha256": None},
+    )
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion("exact_sha_hosted_run", ("github_hosted",), require_hosted=True)],
+        [record],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == NOT_PROVEN
+    assert (
+        "exact_sha_hosted_run:github_hosted:HOSTED_ARTIFACT_DIGEST_MISSING"
+        in report["missing_evidence"]
+    )
+
+
+def test_two_hosted_runs_cannot_reuse_one_artifact() -> None:
+    criterion = ClosureCriterion(
+        "two_exact_sha_retries",
+        ("github_hosted",),
+        require_hosted=True,
+        min_distinct_runs=2,
+    )
+    reused_artifact = build_closure_matrix(
+        "H-T195",
+        [criterion],
+        [
+            _hosted(run_id="run-1", artifact_id="same-artifact"),
+            _hosted(run_id="run-2", artifact_id="same-artifact"),
+        ],
+        expected_head_sha=HEAD,
+    )
+
+    assert reused_artifact["status"] == NOT_PROVEN
+    assert (
+        "two_exact_sha_retries:DISTINCT_ARTIFACTS_INSUFFICIENT:1<2"
+        in reused_artifact["missing_evidence"]
+    )
