@@ -117,3 +117,9 @@ def test_local_l2_hosted_job_runs_read_only_evidence_inventory():
     txt = _texte("local-l2-certification-tests.yml")
     assert "tests/test_copy_vault_evidence_inventory.py" in txt
     assert "tools/inventory_copy_vault_evidence.py" in txt
+
+
+def test_local_l2_cancels_only_obsolete_same_ref_runs():
+    txt = _texte("local-l2-certification-tests.yml")
+    assert "group: local-l2-certification-tests-${{ github.ref }}" in txt
+    assert "cancel-in-progress: true" in txt
