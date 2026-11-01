@@ -45,7 +45,7 @@ from hl_observer.ops.registre_pids import REGISTRE_RELPATH
 SCHEMA_MANIFESTE = "hypersmart.portable_manifest.v1"
 NOM_MANIFESTE = "PORTABLE_MANIFEST.json"
 
-DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", "venv", "env", "node_modules",
+DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", ".ci-venv", "venv", "env", "node_modules",
                    ".pytest_cache", ".mypy_cache", ".ruff_cache", "portable_runtime",
                    ".venv-portable", "tmp_pytest", "htmlcov", "dist", "build",
                    ".portable-staging", "portable-build", "cache_moisson", ".hypothesis",
