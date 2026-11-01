@@ -51,8 +51,11 @@ def _normalise_receipts(value: Any) -> list[dict[str, Any]]:
             raise ValueError("every receipt must contain a lowercase 40-character head_sha")
         if not isinstance(status, str) or not status:
             raise ValueError("every receipt must contain evidence_status")
-        if not isinstance(decision, str) or not decision:
-            raise ValueError("every receipt must contain decision")
+        # Restoration receipts intentionally use VERIFIED/UNMEASURABLE as the
+        # terminal evidence status and may not have a decision field.  Other
+        # receipts usually carry NO_GO/GO; when present, it must be a string.
+        if decision is not None and (not isinstance(decision, str) or not decision):
+            raise ValueError("receipt decision must be a non-empty string when present")
         digest = _receipt_digest(item)
         if digest in seen:
             continue
