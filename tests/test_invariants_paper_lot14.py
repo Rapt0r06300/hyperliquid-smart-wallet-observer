@@ -1,7 +1,8 @@
-"""LOT14 — invariants économiques EXPERIMENTAL_PAPER prouvés (Flo 26/07).
+"""LOT14 — invariants paper et verrou de scope courant.
 
-Tests minimaux : ROI sous seuil rejeté, ROI NaN/inf rejeté, budget >1000 rejeté (multi-moteurs),
-notionnel<=0 rejeté, edge/prix NaN rejetés, long clôturé au bid, short à l'ask, spread non double-compté.
+Les familles historiques ne peuvent plus atteindre les invariants numériques :
+elles sont refusées par le scope canonique avant toute admission. Les invariants
+numériques restent donc exercés sur la seule famille active, Copy-Vault.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from hl_observer.experimental import moteur_paper as MP
 
 
 def _sig(**kw):
-    base = dict(moteur="cross_venue", coin="BTC", sens=1, type_pnl="directional", notional_usd=50.0,
+    base = dict(moteur="copy_vault", coin="BTC", sens=1, type_pnl="directional", notional_usd=50.0,
                prix_entree=100.0, cout_entree_bps=5.0, edge_estime_bps=20.0, ts_signal_ms=1_000_000.0,
                roi_annuel_pct=20.0, pnl_attendu_usd=0.5, hold_h=1.0, latence_ms=100.0)
     base.update(kw)
@@ -21,6 +22,13 @@ def _sig(**kw):
 
 def _store():
     return {"mode": MP.MODE, "ouvertes": {}}
+
+
+def test_historical_families_are_refused_before_numeric_admission():
+    for moteur in ("cross_venue", "lead_lag"):
+        ok, motif = MP.admettre(_sig(moteur=moteur), _store(), now_ms=1_000_100.0)
+        assert ok is False
+        assert motif == f"STRATEGY_SCOPE_BLOCKED_{'CROSS_VENUE_DISLOCATION' if moteur == 'cross_venue' else 'LEAD_LAG'}"
 
 
 # ── #1 ROI gate (voie STRICTE) ──
@@ -55,11 +63,12 @@ def test_signal_valide_admis():
 
 # ── #2 budget global (multi-moteurs) ──
 def test_budget_global_depasse_multi_moteurs():
-    # positions ouvertes sur 2 moteurs totalisant 980 $ ; une 3e de 50 $ -> 1030 > 1000 -> refus GLOBAL
+    # La famille active reste sous son plafond propre, mais l'exposition brute
+    # agrégée dépasse le budget global.
     store = {"mode": MP.MODE, "ouvertes": {
-        "cross_venue:ETH": {"moteur": "cross_venue", "notional_usd": 500.0},
-        "copy_vault:SOL": {"moteur": "copy_vault", "notional_usd": 480.0}}}
-    ok, motif = MP.admettre(_sig(moteur="lead_lag", coin="XRP", notional_usd=50.0), store, now_ms=1_000_100.0)
+        "cross_venue:ETH": {"moteur": "cross_venue", "notional_usd": 30.0},
+        "copy_vault:SOL": {"moteur": "copy_vault", "notional_usd": 50.0}}}
+    ok, motif = MP.admettre(_sig(coin="XRP", notional_usd=50.0), store, now_ms=1_000_100.0)
     assert ok is False and motif == "BUDGET_GLOBAL_DEPASSE"
 
 
