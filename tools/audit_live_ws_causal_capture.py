@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,38 @@ def _receipt_digest(receipt: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _git_head_sha() -> str | None:
+    """Return the exact repository HEAD, never a guessed or fallback SHA."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip().lower()
+    if result.returncode != 0 or len(value) != 40:
+        return None
+    if any(char not in "0123456789abcdef" for char in value):
+        return None
+    return value
+
+
+def _source_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def audit(path: Path) -> dict[str, Any]:
+    source_sha256 = _source_sha256(path)
+    git_sha = _git_head_sha()
     rows: list[dict[str, Any]] = []
     parse_errors: list[str] = []
     for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -118,12 +150,14 @@ def audit(path: Path) -> dict[str, Any]:
     }
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
+        "git_sha": git_sha,
         "completed": not missing and bool(eligible),
         "paper_read_only": True,
         "real_execution": False,
         "claims": claims,
         "capture": {
             "source_path": str(path),
+            "source_sha256": source_sha256,
             "row_count": len(rows),
             "causal_row_count": len(eligible),
             "capture_epochs": epochs,

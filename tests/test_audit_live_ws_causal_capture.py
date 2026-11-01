@@ -37,6 +37,8 @@ def test_missing_ack_epoch_fails_closed(tmp_path: Path) -> None:
     assert code == 2
     assert receipt["validation"]["status"] == "NOT_PROVEN"
     assert receipt["claims"]["causal_live_fill_rows"] == 0
+    assert receipt["git_sha"]
+    assert len(receipt["capture"]["source_sha256"]) == 64
     assert any("ACK_RECEIVED_AT_MS_MISSING" in item for item in receipt["capture"]["missing_evidence"])
 
 
@@ -56,3 +58,5 @@ def test_real_row_contract_can_be_proven(tmp_path: Path) -> None:
     assert code == 0
     assert receipt["validation"]["status"] == "PROVEN"
     assert receipt["claims"]["anti_double_count"] is True
+    assert receipt["git_sha"]
+    assert len(receipt["capture"]["source_sha256"]) == 64
