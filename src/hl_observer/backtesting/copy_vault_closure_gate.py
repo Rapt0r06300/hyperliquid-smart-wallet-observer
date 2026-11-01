@@ -9,17 +9,17 @@ unsafe, or synthetic evidence.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
-
 
 SCHEMA = "hypersmart.copy_vault_closure_evidence_matrix.v1"
 PROVEN = "PROVEN"
 NOT_PROVEN = "NOT_PROVEN"
 UNMEASURABLE = "UNMEASURABLE"
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_RUN_STATUSES = frozenset({"completed"})
 _SAFE_CONCLUSIONS = frozenset({"success"})
 _SAFE_EVIDENCE_STATUSES = frozenset({"VERIFIED", "PASS", "COMPLETED"})
@@ -98,7 +98,7 @@ class EvidenceRecord:
     claims: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "EvidenceRecord":
+    def from_mapping(cls, value: Mapping[str, Any]) -> EvidenceRecord:
         if not isinstance(value, Mapping):
             raise ValueError("evidence record must be an object")
         claims = value.get("claims", {})
@@ -328,6 +328,95 @@ def build_closure_matrix(
     }
 
 
+def _validate_causal_receipt(
+    receipt: Mapping[str, Any] | object,
+    *,
+    task_id: str,
+    schema: str,
+    required_claims: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate a causal receipt without collecting or inferring evidence."""
+
+    missing: list[str] = []
+    if not isinstance(receipt, Mapping):
+        return {
+            "schema": schema,
+            "task_id": task_id,
+            "status": NOT_PROVEN,
+            "missing_evidence": ["RECEIPT_NOT_OBJECT"],
+        }
+    if receipt.get("schema") != schema:
+        missing.append("SCHEMA_MISMATCH")
+    if receipt.get("completed") is not True:
+        missing.append("RECEIPT_NOT_COMPLETED")
+    digest = receipt.get("receipt_sha256")
+    if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest.lower()):
+        missing.append("RECEIPT_SHA256_MISSING_OR_INVALID")
+    if receipt.get("paper_read_only") is not True:
+        missing.append("PAPER_READ_ONLY_REQUIRED")
+    if receipt.get("real_execution") is not False:
+        missing.append("REAL_EXECUTION_MUST_BE_FALSE")
+    claims = receipt.get("claims")
+    if not isinstance(claims, Mapping):
+        missing.append("CLAIMS_NOT_OBJECT")
+        claims = {}
+    for path, expected in required_claims.items():
+        present, actual = _claim_at_path(claims, path)
+        if not present:
+            missing.append(f"CLAIM_MISSING:{path}")
+        elif not _claim_matches(actual, expected):
+            missing.append(f"CLAIM_MISMATCH:{path}")
+    missing = list(dict.fromkeys(missing))
+    return {
+        "schema": schema,
+        "task_id": task_id,
+        "status": PROVEN if not missing else NOT_PROVEN,
+        "missing_evidence": missing,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def validate_l4_pairing_receipt(receipt: Mapping[str, Any] | object) -> dict[str, Any]:
+    """Validate H-T115's real L4/public-fill/SAFE-L2 pairing envelope."""
+
+    return _validate_causal_receipt(
+        receipt,
+        task_id="H-T115",
+        schema="hypersmart.copy_vault_l4_pairing_receipt.v1",
+        required_claims={
+            "real_l4_session": True,
+            "paired_public_fills": True,
+            "paired_safe_l2": True,
+            "point_in_time": True,
+            "causal_coverage": {"min": 1},
+            "provenance_by_provider_coin": True,
+            "timestamps_present": True,
+            "error_rates_present": True,
+            "incremental_value": True,
+        },
+    )
+
+
+def validate_live_ws_causal_receipt(receipt: Mapping[str, Any] | object) -> dict[str, Any]:
+    """Validate H-T170's causal post-ACK LIVE_WS fill envelope."""
+
+    return _validate_causal_receipt(
+        receipt,
+        task_id="H-T170",
+        schema="hypersmart.copy_vault_live_ws_causal_receipt.v1",
+        required_claims={
+            "causal_live_fill_rows": {"min": 1},
+            "post_ack": True,
+            "cutoff_epoch_present": True,
+            "anti_double_count": True,
+            "native_identity_reconciled": True,
+            "snapshot_excluded_from_forward": True,
+            "live_ws_provenance": True,
+        },
+    )
+
+
 __all__ = [
     "ClosureCriterion",
     "EvidenceRecord",
@@ -337,4 +426,6 @@ __all__ = [
     "UNMEASURABLE",
     "build_closure_matrix",
     "evaluate_criterion",
+    "validate_l4_pairing_receipt",
+    "validate_live_ws_causal_receipt",
 ]

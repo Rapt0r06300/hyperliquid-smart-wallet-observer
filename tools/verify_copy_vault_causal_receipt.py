@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from hl_observer.backtesting.copy_vault_causal_evidence_contract import (  # noqa: E402
+from hl_observer.backtesting.copy_vault_closure_gate import (  # noqa: E402
     PROVEN,
     validate_l4_pairing_receipt,
     validate_live_ws_causal_receipt,
