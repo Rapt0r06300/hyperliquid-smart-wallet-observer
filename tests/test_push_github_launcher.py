@@ -63,6 +63,9 @@ def test_push_launchers_share_one_safe_implementation() -> None:
     assert '"%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%' in main_text
     assert 'SYNC_OPTION=--dry-run' in main_text
     assert 'SYNC_OPTION=--wip-only' in main_text
+    assert 'SYNC_OPTION=--promote-current-to-main' in main_text
+    assert 'branch --show-current' in main_text
+    assert 'promotion fast-forward securisee vers main' in main_text
     assert "GIT_SYNC_ENGINE_BUILD" in engine_text
     assert "FETCH_HEAD" not in engine_text
     assert '"push", "--progress", "origin", "HEAD:refs/heads/main"' in engine_text
