@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import os
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -59,6 +60,7 @@ class ProbeConfig:
     execution_style: str = "TAKER"
     every: int = 50
     max_intents: int = 400
+    max_records: int | None = None
     horizon_ms: int = 15_000
 
 
@@ -88,7 +90,9 @@ def _observable_ms(record: Mapping[str, Any]) -> int | None:
     return max(received, written)
 
 
-def iter_tick_records(ticks_dir: Path) -> Iterator[dict[str, Any]]:
+def iter_tick_records(
+    ticks_dir: Path, *, max_records: int | None = None
+) -> Iterator[dict[str, Any]]:
     """Lit les ticks durables : fichier courant + shards gzip immuables.
 
     Une ligne illisible est ignoree SANS masquer le probleme : elle est comptee par
@@ -96,11 +100,8 @@ def iter_tick_records(ticks_dir: Path) -> Iterator[dict[str, Any]]:
     """
     if not ticks_dir.exists():
         return
-    fichiers: list[Path] = sorted(ticks_dir.glob("*.jsonl"))
-    shards = ticks_dir / "shards"
-    if shards.is_dir():
-        fichiers.extend(sorted(shards.glob("*.jsonl.gz")))
-        fichiers.extend(sorted(shards.glob("*.jsonl")))
+    fichiers = _discover_tick_files(ticks_dir)
+    yielded = 0
     for chemin in fichiers:
         try:
             if chemin.suffix == ".gz":
@@ -120,15 +121,94 @@ def iter_tick_records(ticks_dir: Path) -> Iterator[dict[str, Any]]:
                     continue
                 if isinstance(row, dict):
                     yield row
+                    yielded += 1
+                    if max_records is not None and yielded >= max_records:
+                        return
 
 
-def load_ticks(ticks_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _manifest_tick_files(directory: Path, manifest: Path) -> set[Path]:
+    """Resolve the immutable/current files declared by one SAFE manifest."""
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+
+    current_names: set[str] = set()
+    shard_names: set[str] = set()
+    current = payload.get("current_path")
+    if isinstance(current, str) and current:
+        current_names.add(Path(current.replace("\\", "/")).name)
+    for item in payload.get("immutable_shards", ()):
+        if isinstance(item, str) and item:
+            shard_names.add(Path(item.replace("\\", "/")).name)
+    for item in payload.get("published_shards", ()):
+        if isinstance(item, dict) and isinstance(item.get("file_name"), str):
+            shard_names.add(Path(item["file_name"].replace("\\", "/")).name)
+
+    paths: set[Path] = set()
+    for name in current_names:
+        if name.endswith(".jsonl") or name.endswith(".jsonl.gz"):
+            paths.add(directory / name)
+    for name in shard_names:
+        if not (name.endswith(".jsonl") or name.endswith(".jsonl.gz")):
+            continue
+        shard_path = directory / "shards" / name
+        paths.add(shard_path if shard_path.exists() else directory / name)
+    return paths
+
+
+def _discover_tick_files(ticks_dir: Path) -> list[Path]:
+    """Discover nested SAFE tick files without walking manifest-covered shards.
+
+    A partition manifest is authoritative for its current file and published
+    immutable shards. When it is absent, the fallback recursively visits the
+    directory so test fixtures and legacy partitions remain discoverable.
+    """
+    discovered: set[Path] = set()
+
+    def visit(directory: Path) -> None:
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            return
+        manifest: Path | None = None
+        child_directories: list[Path] = []
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                if entry.is_file(follow_symlinks=False):
+                    if entry.name == "ticks.manifest.json":
+                        manifest = path
+                    elif entry.name.endswith(".jsonl") or entry.name.endswith(".jsonl.gz"):
+                        discovered.add(path)
+                elif entry.is_dir(follow_symlinks=False):
+                    child_directories.append(path)
+            except OSError:
+                continue
+
+        if manifest is not None:
+            discovered.update(_manifest_tick_files(directory, manifest))
+
+        for child in child_directories:
+            if manifest is not None and child.name in {"shards", "quarantine"}:
+                continue
+            visit(child)
+
+    visit(ticks_dir)
+    return sorted((path for path in discovered if path.is_file()), key=lambda path: path.as_posix())
+
+
+def load_ticks(
+    ticks_dir: Path, *, max_records: int | None = None
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Charge, valide le schema et trie les ticks par instant observable."""
     total = 0
     mauvais_schema = 0
     sans_horloge = 0
     retenus: list[dict[str, Any]] = []
-    for row in iter_tick_records(ticks_dir):
+    for row in iter_tick_records(ticks_dir, max_records=max_records):
         total += 1
         if row.get("schema_version") != TICK_SCHEMA:
             mauvais_schema += 1
@@ -146,6 +226,8 @@ def load_ticks(ticks_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         "rejets_schema": mauvais_schema,
         "rejets_horloge_locale": sans_horloge,
         "instruments": sorted({str(r.get("instrument") or "?") for r in retenus}),
+        "input_truncated": max_records is not None and total >= max_records,
+        "max_records": max_records,
     }
     return retenus, inventaire
 
@@ -221,12 +303,13 @@ def run_probe(ticks_dir: Path, config: ProbeConfig) -> dict[str, Any]:
             "execution_style": config.execution_style,
             "echantillonnage_1_tick_sur": config.every,
             "max_intentions": config.max_intents,
+            "max_records": config.max_records,
             "horizon_ms": config.horizon_ms,
             "sens_testes": list(SIDES),
         },
     }
 
-    ticks, inventaire = load_ticks(ticks_dir)
+    ticks, inventaire = load_ticks(ticks_dir, max_records=config.max_records)
     rapport["inventaire"] = inventaire
     if not ticks:
         rapport["statut"] = "NO_DATA"
@@ -358,6 +441,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--execution-style", default="TAKER", choices=["TAKER", "MAKER"])
     parser.add_argument("--every", type=int, default=50, help="Une ancre tous les N ticks d'un instrument.")
     parser.add_argument("--max-intents", type=int, default=400)
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        default=None,
+        help="Borne explicite pour une sonde rapide; le rapport est marqué tronqué.",
+    )
     parser.add_argument("--horizon-ms", type=int, default=15_000)
     return parser
 
@@ -373,6 +462,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         execution_style=str(args.execution_style),
         every=int(args.every),
         max_intents=int(args.max_intents),
+        max_records=(int(args.max_records) if args.max_records is not None else None),
         horizon_ms=int(args.horizon_ms),
     )
     rapport = run_probe(ticks_dir, config)
