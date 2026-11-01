@@ -62,7 +62,10 @@ def _path_has_data(path: Path) -> bool:
             return False
     if path.is_dir():
         try:
-            return any(item.is_file() for item in path.iterdir())
+            # Runtime datasets are partitioned below provider/venue/coin
+            # directories.  Looking only at direct children falsely marks a
+            # populated dataset as absent and skips the canonical replay.
+            return any(item.is_file() for item in path.rglob("*"))
         except OSError:
             return False
     return False

@@ -56,6 +56,26 @@ def test_stage_with_missing_local_data_is_skipped_without_subprocess(tmp_path):
     assert Path(result.log_path).exists()
 
 
+def test_nested_local_dataset_is_not_treated_as_missing(tmp_path):
+    nested = tmp_path / "market_ticks" / "venue" / "coin"
+    nested.mkdir(parents=True)
+    (nested / "ticks.jsonl").write_text('{"ts": 1}\n', encoding="utf-8")
+    stage = AnalysisStage(
+        key="nested-data",
+        title="Nested data",
+        purpose="test",
+        command=(sys.executable, "-c", "print('nested-analysis-ok')"),
+        required_paths=(tmp_path / "market_ticks",),
+        timeout_seconds=60,
+    )
+
+    result = run_stage(stage, root=tmp_path, output_dir=tmp_path / "reports")
+
+    assert result.status == "PASSED"
+    assert result.return_code == 0
+    assert "nested-analysis-ok" in Path(result.log_path).read_text(encoding="utf-8")
+
+
 def test_stage_captures_real_subprocess_output(tmp_path):
     stage = AnalysisStage(
         key="probe",
