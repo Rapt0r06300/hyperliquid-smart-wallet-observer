@@ -386,8 +386,151 @@ def preregister_comparison(
     return result
 
 
+def build_kronos_closure_report(evidence: Mapping[str, Any] | object) -> dict[str, Any]:
+    """Validate H-T223's explicit freeze/replay evidence without inference.
+
+    This is a closure preflight, not an economic certification.  It refuses a
+    missing forecast mean, unfrozen segment, absent report hash, or incomplete
+    claim set; no missing statistic is replaced with zero.
+    """
+
+    missing: list[str] = []
+    invalid: list[str] = []
+    required_claims = (
+        "repo_model_tokenizer_license_frozen",
+        "dependency_hashes",
+        "cutoff_frozen",
+        "protocol_preregistered",
+        "post_training_cutoff",
+        "sample_count_mean_verified",
+        "missing_fields_not_zeroed",
+        "train_oos_forward",
+        "forecast_realized_report",
+        "same_costs",
+        "baseline_comparison",
+        "same_episodes",
+        "trial_accounting",
+        "append_only_results",
+        "html_report",
+        "uncertainty_from_retained_trajectories",
+    )
+
+    if not isinstance(evidence, Mapping):
+        return {
+            "status": "NOT_PROVEN",
+            "missing": [],
+            "invalid": ["evidence"],
+            "claims": {},
+            "paper_read_only": None,
+            "real_execution": None,
+        }
+
+    def require(path: str, predicate: Any) -> Any:
+        current: Any = evidence
+        for part in path.split("."):
+            if not isinstance(current, Mapping) or part not in current:
+                missing.append(path)
+                return None
+            current = current[part]
+        if not predicate(current):
+            invalid.append(path)
+        return current
+
+    context = require("context_receipt", lambda value: isinstance(value, Mapping))
+    if isinstance(context, Mapping):
+        for field, predicate in (
+            ("status", lambda value: value == "READY"),
+            ("paper_read_only", lambda value: value is True),
+            ("real_execution", lambda value: value is False),
+            ("receipt_sha256", _is_sha256),
+        ):
+            path = f"context_receipt.{field}"
+            if field not in context:
+                missing.append(path)
+            elif not predicate(context[field]):
+                invalid.append(path)
+    preregistration = require("preregistration", lambda value: isinstance(value, Mapping))
+    if isinstance(preregistration, Mapping):
+        for field, predicate in (
+            ("status", lambda value: value == "PREREGISTERED"),
+            ("paper_read_only", lambda value: value is True),
+            ("real_execution", lambda value: value is False),
+            ("protocol_sha256", _is_sha256),
+        ):
+            path = f"preregistration.{field}"
+            if field not in preregistration:
+                missing.append(path)
+            elif not predicate(preregistration[field]):
+                invalid.append(path)
+
+    for field in ("post_training_cutoff", "missing_fields_not_zeroed"):
+        require(field, lambda value: value is True)
+    summary = require("forecast_summary", lambda value: isinstance(value, Mapping))
+    if isinstance(summary, Mapping):
+        if summary.get("status") != "MEASURED":
+            invalid.append("forecast_summary.status")
+        sample_count = summary.get("sample_count")
+        if "sample_count" not in summary:
+            missing.append("forecast_summary.sample_count")
+        elif not isinstance(sample_count, int) or isinstance(sample_count, bool) or sample_count <= 0:
+            invalid.append("forecast_summary.sample_count")
+        mean = summary.get("mean")
+        if "mean" not in summary:
+            missing.append("forecast_summary.mean")
+        elif _decimal(mean) is None:
+            invalid.append("forecast_summary.mean")
+
+    replay = require("replay", lambda value: isinstance(value, Mapping))
+    if isinstance(replay, Mapping):
+        for segment in ("train", "oos", "forward"):
+            row = replay.get(segment)
+            if row is None:
+                missing.append(f"replay.{segment}")
+                continue
+            if not isinstance(row, Mapping):
+                invalid.append(f"replay.{segment}")
+                continue
+            if row.get("frozen") is not True:
+                invalid.append(f"replay.{segment}.frozen")
+            digest = row.get("receipt_sha256")
+            if digest is None:
+                missing.append(f"replay.{segment}.receipt_sha256")
+            elif not _is_sha256(digest):
+                invalid.append(f"replay.{segment}.receipt_sha256")
+
+    report = require("report", lambda value: isinstance(value, Mapping))
+    if isinstance(report, Mapping):
+        for field in ("html_sha256", "forecast_realized_sha256"):
+            path = f"report.{field}"
+            if field not in report:
+                missing.append(path)
+            elif not _is_sha256(report[field]):
+                invalid.append(path)
+
+    claims = require("claims", lambda value: isinstance(value, Mapping))
+    if isinstance(claims, Mapping):
+        for claim in required_claims:
+            if claim not in claims:
+                missing.append(f"claims.{claim}")
+            elif claims[claim] is not True:
+                invalid.append(f"claims.{claim}")
+
+    missing = list(dict.fromkeys(missing))
+    invalid = list(dict.fromkeys(invalid))
+    proven = not missing and not invalid
+    return {
+        "status": "PROVEN" if proven else "NOT_PROVEN",
+        "missing": missing,
+        "invalid": invalid,
+        "claims": {claim: True for claim in required_claims} if proven else {},
+        "paper_read_only": True if proven else (context.get("paper_read_only") if isinstance(context, Mapping) else None),
+        "real_execution": False if proven else (context.get("real_execution") if isinstance(context, Mapping) else None),
+    }
+
+
 __all__ = [
     "build_context_receipt",
+    "build_kronos_closure_report",
     "preregister_comparison",
     "summarize_forecast_rows",
     "validate_causal_context_rows",
