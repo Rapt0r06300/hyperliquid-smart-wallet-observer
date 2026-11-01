@@ -71,7 +71,7 @@ def test_copy_vault_hosted_jobs_ne_telechargent_pas_le_reservoir_brut():
 
 def test_local_l2_hosted_job_installs_import_dependencies():
     txt = _texte("local-l2-certification-tests.yml")
-    assert "python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic" in txt
+    assert "python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic websockets" in txt
 
 
 def test_local_l2_hosted_job_avoids_raw_dataset_checkout():
