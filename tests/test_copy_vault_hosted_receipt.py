@@ -70,6 +70,32 @@ def test_receipt_binds_ci_and_artifacts_without_overclaiming_task_closure() -> N
     assert "checkpoint_resume_proven" not in receipt["claims"]
 
 
+def test_receipt_normalizes_github_upload_artifact_bare_digest() -> None:
+    receipt = build_hosted_ci_receipt(
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        workflow="labo-continu-ci",
+        event="push",
+        ref="refs/heads/codex/copyvault-evidence-709cf00",
+        head_sha=HEAD,
+        run_id="41305234537",
+        run_attempt="1",
+        status="completed",
+        conclusion="success",
+        pytest_exit_code=0,
+        junit_artifact={
+            "id": "13082693608",
+            "name": f"labo-continu-junit-41305234537-{HEAD}",
+            "digest": "a" * 64,
+        },
+        closure_artifact=_artifact(
+            f"copy-vault-tasklist-closure-41305234537-{HEAD}", "13083406734",
+        ),
+        tasklist_report=_tasklist_report(),
+    )
+
+    assert receipt["artifacts"][0]["digest"] == "sha256:" + "a" * 64
+
+
 def test_receipt_rejects_missing_digest_or_sha_bound_artifact_name() -> None:
     with pytest.raises(ValueError, match="artifact digest"):
         build_hosted_ci_receipt(
