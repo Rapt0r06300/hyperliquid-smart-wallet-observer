@@ -271,6 +271,30 @@ def discover_vaults(
     return rows, selection
 
 
+def write_selection_artifact(output: Path, selection: Mapping[str, Any]) -> dict[str, str]:
+    """Persist the exact final selection used by one collection window.
+
+    The selection is an observation input, not economic evidence.  Keeping the
+    canonical JSON beside the run makes the collector summary self-contained:
+    downstream receipts can bind the exact vault universe and selection epoch
+    without reconstructing a file from logs or from a later public snapshot.
+    """
+    output.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        dict(selection),
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+        separators=(",", ": "),
+    ).encode("utf-8") + b"\n"
+    artifact = output / "copy_vault_selection.json"
+    artifact.write_bytes(payload)
+    return {
+        "path": artifact.name,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
 def selection_envelope(row: Mapping[str, Any], selection: Mapping[str, Any]) -> TickEnvelope:
     vault = str(row["address"]).lower()
     selected_at_ms = int(selection["selected_at_ms"])
@@ -4141,6 +4165,7 @@ async def collect(
             "vaults": selected_rows,
         }
 
+    selection_artifact = write_selection_artifact(output, selection)
     vaults = [str(row["address"]).lower() for row in selected_rows]
     if not vaults:
         raise RuntimeError("selected Copy-Vault lane is empty")
@@ -4303,6 +4328,8 @@ async def collect(
         "vault_shard_count": selection.get("vault_shard_count"),
         "vault_shard_index": selection.get("vault_shard_index"),
         "copy_vault_mode": selection.get("mode"),
+        "selection_artifact": selection_artifact["path"],
+        "selection_sha256": selection_artifact["sha256"],
         "priority_ws_vaults": vaults,
         "socket_groups": len(groups),
         "vault_subscription_attempts": _public_subscription_attempts(

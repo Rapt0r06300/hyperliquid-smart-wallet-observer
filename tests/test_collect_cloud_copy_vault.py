@@ -10,6 +10,24 @@ import pytest
 from tools import collect_cloud_copy_vault as C
 
 
+def test_write_selection_artifact_is_canonical_and_hash_bound(tmp_path: Path) -> None:
+    selection = {
+        "schema": "alina.copy_vault_selection.v1",
+        "selected_at_ms": 1_700_000_000_000,
+        "source": "https://stats-data.hyperliquid.xyz/Mainnet/vaults",
+        "vaults": [{"address": "0xABC", "tvl_usd": 123.0}],
+        "observation_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+
+    receipt = C.write_selection_artifact(tmp_path, selection)
+    artifact = tmp_path / receipt["path"]
+    assert artifact.is_file()
+    assert json.loads(artifact.read_text(encoding="utf-8")) == selection
+    assert receipt["sha256"] == C.hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+
 def test_l2_payload_classifier_reports_stable_rejection_reasons() -> None:
     valid = {
         "channel": "l2Book",
