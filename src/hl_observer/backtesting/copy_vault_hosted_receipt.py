@@ -38,6 +38,12 @@ def _artifact(value: Mapping[str, Any], *, head_sha: str) -> dict[str, str]:
     artifact_id = _positive_number(value.get("id"), "artifact id")
     name = _text(value.get("name"), "artifact name")
     digest = value.get("digest")
+    if isinstance(digest, str) and _HASH64_RE.fullmatch(digest.lower()):
+        # actions/upload-artifact exposes ``artifact-digest`` as bare hex,
+        # while GitHub's artifact API and this receipt schema use the
+        # ``sha256:`` qualified form.  Normalize the hosted action output at
+        # the boundary; never weaken validation for other digest values.
+        digest = f"sha256:{digest}"
     if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest.lower()):
         raise ValueError(f"artifact digest for {name} must be sha256:<64 hex chars>")
     if head_sha not in name.lower():
