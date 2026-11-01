@@ -66,6 +66,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_copy_vault_closure_gate.py \
+            tests/test_copy_vault_evidence_inventory.py \
             tests/test_labo_continu_final.py \
             tests/test_labo_continu_prod_truth.py \
             tests/test_labo_continu_ultimate.py \
