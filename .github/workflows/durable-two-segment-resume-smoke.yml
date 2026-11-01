@@ -34,12 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Refresh durable Dataset V2 state
         run: |
           set -euo pipefail
-          git fetch origin main
-          git checkout main
+          git fetch --depth=1 origin main:refs/remotes/origin/main
+          git checkout -B main origin/main
           git reset --hard origin/main
       - id: select
         name: Resolve one current-epoch proof campaign
@@ -122,14 +122,14 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Read checkpoint from origin/main
         id: verify
         env:
           CAMPAIGN_ID: ${{ needs.select.outputs.campaign_id }}
         run: |
           set -euo pipefail
-          git fetch origin main
+          git fetch --depth=1 origin main:refs/remotes/origin/main
           M="$RUNNER_TEMP/segment-a.json"
           git show "origin/main:catalog/campaigns/$CAMPAIGN_ID.json" > "$M"
           python - <<'PY' "$M" >> "$GITHUB_OUTPUT"
@@ -182,11 +182,11 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Read terminal durable campaign
         run: |
           set -euo pipefail
-          git fetch origin main
+          git fetch --depth=1 origin main:refs/remotes/origin/main
           SNAPSHOT="$RUNNER_TEMP/campaign.json"
           git show "origin/main:catalog/campaigns/$CAMPAIGN_ID.json" > "$SNAPSHOT"
           python - <<'PY' "$SNAPSHOT"

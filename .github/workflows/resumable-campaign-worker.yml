@@ -75,7 +75,7 @@ jobs:
       - name: Checkout Alina repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           sparse-checkout: |
             catalog
             control
@@ -87,8 +87,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin main
-          git checkout main
+          git fetch --depth=1 origin main:refs/remotes/origin/main
+          git checkout -B main origin/main
           git reset --hard origin/main
 
       - id: pin
