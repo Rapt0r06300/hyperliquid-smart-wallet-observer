@@ -85,3 +85,8 @@ def test_local_l2_hosted_job_avoids_raw_dataset_checkout():
         "            /pyproject.toml",
     ):
         assert required in txt
+
+
+def test_continuous_lab_runs_the_fail_closed_copy_vault_closure_gate():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tests/test_copy_vault_closure_gate.py" in txt
