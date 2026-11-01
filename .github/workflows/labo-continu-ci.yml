@@ -31,13 +31,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          # The continuous lab consumes the canonical code/tests/catalog only;
-          # do not hydrate the multi-GB raw dataset reservoir for this job.
+          # The continuous lab consumes only the canonical code, tools, tests,
+          # and Python configuration used by this workflow.  Do not hydrate
+          # the multi-GB raw dataset reservoir or unrelated repository trees.
           filter: blob:none
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            /*
-            !/datasets/
+            /src/
+            /tools/
+            /tests/
+            /conftest.py
+            /pyproject.toml
+            /requirements-ci-bootstrap.txt
+            /requirements-recherche.txt
       - name: Configurer Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
