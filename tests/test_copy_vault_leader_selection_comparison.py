@@ -4,6 +4,8 @@ from copy import deepcopy
 
 from hl_observer.backtesting.copy_vault_leader_selection_comparison import (
     compare_baseline_challenger,
+    validate_canonical_oos_forward_receipt,
+    validate_crowding_ablation_receipt,
 )
 
 
@@ -118,3 +120,92 @@ def test_invalid_dataset_digest_fails_closed_before_comparison() -> None:
         "context_mismatch_reasons"
     ]
     assert result["delta_usd_per_active_day"] is None
+
+
+def _oos_forward_receipt() -> dict:
+    return {
+        "schema": "hypersmart.copy_vault_canonical_replay_receipt.v1",
+        "status": "COMPLETED",
+        "receipt_sha256": "e" * 64,
+        "paper_read_only": True,
+        "real_execution": False,
+        "same_corpus": True,
+        "same_windows": True,
+        "same_costs": True,
+        "same_latency_capacity": True,
+        "oos_frozen": True,
+        "forward_frozen": True,
+        "baseline_challenger_comparison": True,
+        "point_in_time_only": True,
+        "trial_accounting": True,
+        "insufficient_is_unmeasurable": True,
+        "segments": {
+            "oos": {"frozen": True, "receipt_sha256": "f" * 64},
+            "forward": {"frozen": True, "receipt_sha256": "a" * 64},
+        },
+        "results": {
+            "baseline": {"receipt_sha256": "b" * 64},
+            "challenger": {"receipt_sha256": "c" * 64},
+        },
+    }
+
+
+def test_canonical_oos_forward_receipt_requires_frozen_segments_and_paper_mode() -> None:
+    result = validate_canonical_oos_forward_receipt(_oos_forward_receipt())
+
+    assert result["status"] == "PROVEN"
+    assert result["missing"] == []
+    assert result["claims"]["oos_frozen"] is True
+    assert result["claims"]["forward_frozen"] is True
+    assert result["paper_read_only"] is True
+    assert result["real_execution"] is False
+
+
+def test_canonical_oos_forward_receipt_never_fills_missing_forward_evidence() -> None:
+    receipt = _oos_forward_receipt()
+    receipt["segments"].pop("forward")
+
+    result = validate_canonical_oos_forward_receipt(receipt)
+
+    assert result["status"] == "NOT_PROVEN"
+    assert "segments.forward" in result["missing"]
+    assert result["claims"] == {}
+
+
+def _crowding_ablation_receipt() -> dict:
+    return {
+        "schema": "hypersmart.copy_vault_crowding_ablation_receipt.v1",
+        "status": "COMPLETED",
+        "receipt_sha256": "d" * 64,
+        "paper_read_only": True,
+        "real_execution": False,
+        "ablation_follower_count": True,
+        "safe_oos": True,
+        "same_episodes": True,
+        "same_costs": True,
+        "baseline_comparison": True,
+        "point_in_time": True,
+        "oos_frozen": True,
+        "arms": {
+            "baseline": {"receipt_sha256": "e" * 64, "follower_count_used": True},
+            "ablated": {"receipt_sha256": "f" * 64, "follower_count_used": False},
+        },
+    }
+
+
+def test_crowding_ablation_requires_two_distinct_frozen_oos_arms() -> None:
+    result = validate_crowding_ablation_receipt(_crowding_ablation_receipt())
+
+    assert result["status"] == "PROVEN"
+    assert result["claims"]["ablation_follower_count"] is True
+    assert result["paper_read_only"] is True
+
+
+def test_crowding_ablation_missing_ablated_arm_stays_unproven() -> None:
+    receipt = _crowding_ablation_receipt()
+    receipt["arms"].pop("ablated")
+
+    result = validate_crowding_ablation_receipt(receipt)
+
+    assert result["status"] == "NOT_PROVEN"
+    assert "arms.ablated" in result["missing"]
