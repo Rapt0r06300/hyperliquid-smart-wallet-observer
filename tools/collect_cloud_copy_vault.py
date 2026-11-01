@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 import shutil
 import sys
 import time
@@ -106,6 +107,19 @@ MAX_ACCOUNTING_BACKFILL_REQUESTS_PER_CHANNEL = 8
 MAX_L2_DIAGNOSTIC_RECORDS = 256
 SUBSCRIPTION_ACK_TIMEOUT_S = 10.0
 SUBSCRIPTION_TIMEOUT_POLL_S = 0.1
+
+
+def _windows_io_path(path: str | Path) -> Path:
+    """Use the Windows extended form only at filesystem I/O boundaries."""
+    target = Path(path)
+    if os.name != "nt":
+        return target
+    absolute = os.path.abspath(os.fspath(target))
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
 
 
 class RestWeightPacer:
@@ -3867,8 +3881,9 @@ def build_copy_vault_bundle(
     manifests: list[dict[str, Any]] = []
     rejected_admission: list[dict[str, Any]] = []
     for shard in sorted(raw_root.glob("**/shards/*.jsonl.gz")):
+        shard_io = _windows_io_path(shard)
         preliminary = build_manifest_from_tick_shard(
-            shard,
+            shard_io,
             collector_version=collector_version,
             reconciliation_status="UNVERIFIED",
         )
@@ -3970,8 +3985,8 @@ def build_copy_vault_bundle(
             continue
 
         asset_name = f"{manifest['dataset_id']}.jsonl.gz"
-        target = assets / asset_name
-        shutil.move(str(shard), target)
+        target = _windows_io_path(assets / asset_name)
+        shutil.move(str(shard_io), str(target))
         manifest["release_asset"] = asset_name
         manifest["bytes"] = target.stat().st_size
         write_manifest(manifest, manifests_dir / f"{manifest['dataset_id']}.json")

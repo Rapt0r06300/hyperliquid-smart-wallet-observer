@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,26 @@ _RECEIVE_ONLY_SEMANTICS = {
 # Above this threshold publish an exact count + independently reproducible
 # sorted-set SHA-256, rather than storing the entire identity universe.
 MAX_EMBEDDED_TRADE_IDENTITY_DIGESTS = 256
+
+
+def _windows_io_path(path: str | Path) -> Path:
+    """Use the Windows extended path form for long-lived shard I/O.
+
+    Collectors may intentionally keep the source, run, family and instrument
+    in the directory layout.  On Windows that can exceed MAX_PATH even though
+    the same path is visible to Explorer.  Keep the logical path unchanged and
+    only add the OS-level prefix at the I/O boundary; manifests still publish
+    the normal relative asset names.
+    """
+    target = Path(path)
+    if os.name != "nt":
+        return target
+    absolute = os.path.abspath(os.fspath(target))
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
 
 _TRADE_CHANNELS = {
     "trades",
@@ -83,7 +104,7 @@ def build_manifest_from_tick_shard(
     cost_model_applicable: bool = False,
     cost_model_ready: bool = False,
 ) -> dict[str, Any]:
-    path = Path(shard_path)
+    path = _windows_io_path(shard_path)
     if not path.is_file():
         raise FileNotFoundError(path)
 
@@ -525,7 +546,7 @@ def build_manifest_from_tick_shard(
 
 
 def write_manifest(manifest: Mapping[str, Any], path: str | Path) -> Path:
-    target = Path(path)
+    target = _windows_io_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         json.dumps(dict(manifest), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
