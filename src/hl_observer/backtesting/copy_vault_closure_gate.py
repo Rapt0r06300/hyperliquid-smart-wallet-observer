@@ -9,6 +9,8 @@ unsafe, or synthetic evidence.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -72,6 +74,21 @@ def _claim_matches(actual: object, expected: object) -> bool:
                 return False
         return True
     return _equal(actual, expected)
+
+
+def _canonical_receipt_sha256(receipt: Mapping[str, Any]) -> str:
+    """Hash a causal receipt without its self-referential digest field."""
+
+    payload = {
+        key: value for key, value in receipt.items() if key != "receipt_sha256"
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -352,6 +369,8 @@ def _validate_causal_receipt(
     digest = receipt.get("receipt_sha256")
     if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest.lower()):
         missing.append("RECEIPT_SHA256_MISSING_OR_INVALID")
+    elif digest.lower() != _canonical_receipt_sha256(receipt):
+        missing.append("RECEIPT_SHA256_MISMATCH")
     if receipt.get("paper_read_only") is not True:
         missing.append("PAPER_READ_ONLY_REQUIRED")
     if receipt.get("real_execution") is not False:

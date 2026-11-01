@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from src.hl_observer.backtesting.copy_vault_closure_gate import (
     NOT_PROVEN,
     PROVEN,
@@ -9,10 +12,9 @@ from src.hl_observer.backtesting.copy_vault_closure_gate import (
 
 
 def _common(schema: str) -> dict[str, object]:
-    return {
+    receipt = {
         "schema": schema,
         "completed": True,
-        "receipt_sha256": "a" * 64,
         "paper_read_only": True,
         "real_execution": False,
         "claims": {
@@ -22,6 +24,19 @@ def _common(schema: str) -> dict[str, object]:
             "error_rates_present": True,
         },
     }
+    return _seal(receipt)
+
+
+def _seal(receipt: dict[str, object]) -> dict[str, object]:
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in receipt.items() if key != "receipt_sha256"},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
 
 
 def test_l4_pairing_requires_real_safe_inputs_and_reports_claims() -> None:
@@ -34,6 +49,7 @@ def test_l4_pairing_requires_real_safe_inputs_and_reports_claims() -> None:
         "incremental_value": True,
         "causal_coverage": 1,
     }
+    _seal(receipt)
 
     result = validate_l4_pairing_receipt(receipt)
 
@@ -70,6 +86,7 @@ def test_live_ws_requires_post_ack_causal_fill_and_anti_double_count() -> None:
         "snapshot_excluded_from_forward": True,
         "live_ws_provenance": True,
     }
+    _seal(receipt)
 
     result = validate_live_ws_causal_receipt(receipt)
 
@@ -96,3 +113,22 @@ def test_live_ws_refuses_snapshot_or_non_causal_rows() -> None:
     assert "CLAIM_MISMATCH:causal_live_fill_rows" in result["missing_evidence"]
     assert "CLAIM_MISMATCH:post_ack" in result["missing_evidence"]
     assert "CLAIM_MISMATCH:snapshot_excluded_from_forward" in result["missing_evidence"]
+
+
+def test_causal_receipt_refuses_a_forged_digest() -> None:
+    receipt = _common("hypersmart.copy_vault_l4_pairing_receipt.v1")
+
+    result = validate_l4_pairing_receipt(receipt)
+
+    assert result["status"] == NOT_PROVEN
+    assert "CLAIM_MISSING:real_l4_session" in result["missing_evidence"]
+    receipt["claims"] = {
+        **receipt["claims"],
+        "real_l4_session": True,
+        "paired_public_fills": True,
+        "paired_safe_l2": True,
+        "incremental_value": True,
+        "causal_coverage": 1,
+    }
+    result = validate_l4_pairing_receipt(receipt)
+    assert "RECEIPT_SHA256_MISMATCH" in result["missing_evidence"]
