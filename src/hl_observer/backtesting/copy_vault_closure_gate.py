@@ -228,6 +228,38 @@ def _validate_criterion(criterion: ClosureCriterion) -> None:
         return
 
 
+def _evidence_reference(
+    record: EvidenceRecord,
+    *,
+    errors: Sequence[str],
+) -> dict[str, Any]:
+    """Serialize the proof provenance used for one criterion decision.
+
+    The closure report is also the audit matrix.  Keeping the exact source,
+    SHA, run, artifact, safety flags, claims, and rejection reasons in the
+    report prevents a later reader from mistaking a count for a proof.
+    """
+
+    reference: dict[str, Any] = {
+        "kind": record.kind,
+        "source": record.source,
+        "head_sha": record.head_sha,
+        "evidence_status": record.evidence_status,
+        "paper_read_only": record.paper_read_only,
+        "real_execution": record.real_execution,
+        "run_id": record.run_id,
+        "artifact_id": record.artifact_id,
+        "artifact_sha256": record.artifact_sha256,
+        "run_status": record.run_status,
+        "conclusion": record.conclusion,
+        "claims": dict(record.claims),
+        "result": "PROVEN" if not errors else "REJECTED",
+    }
+    if errors:
+        reference["reasons"] = list(errors)
+    return reference
+
+
 def evaluate_criterion(
     criterion: ClosureCriterion,
     evidence: Sequence[EvidenceRecord],
@@ -239,6 +271,7 @@ def evaluate_criterion(
     _validate_criterion(criterion)
     usable: list[EvidenceRecord] = []
     reasons: list[str] = []
+    evidence_refs: list[dict[str, Any]] = []
     for kind in criterion.required_kinds:
         kind_records = [record for record in evidence if record.kind == kind]
         if not kind_records:
@@ -249,6 +282,7 @@ def evaluate_criterion(
             errors = _criterion_errors(
                 record, criterion=criterion, expected_head_sha=expected_head_sha,
             )
+            evidence_refs.append(_evidence_reference(record, errors=errors))
             if not errors:
                 usable.append(record)
                 valid_for_kind = True
@@ -281,6 +315,7 @@ def evaluate_criterion(
         "evidence_count": len(usable),
         "run_ids": sorted(distinct_runs),
         "artifact_ids": sorted(distinct_artifacts),
+        "evidence_refs": evidence_refs,
         "missing_evidence": deduped_reasons,
     }
 
