@@ -127,30 +127,32 @@ def test_labo_hosted_job_publishes_an_exact_sha_bound_junit_receipt():
     txt = _texte("labo-continu-ci.yml")
     assert "--junitxml=reports/labo-continu.xml" in txt
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in txt
-    assert "labo-continu-junit-${{ github.run_id }}-${{ github.sha }}" in txt
+    assert "labo-continu-junit-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}" in txt
     assert "if-no-files-found: error" in txt
 
 
 def test_labo_hosted_job_publishes_the_fail_closed_ten_task_report():
     txt = _texte("labo-continu-ci.yml")
     assert "tools/verify_copy_vault_tasklist.py" in txt
-    assert "--head-sha \"${GITHUB_SHA}\"" in txt
+    assert "--head-sha \"${COPY_VAULT_HEAD_SHA}\"" in txt
     assert "--evidence-dir /tmp/copy-vault-no-evidence" in txt
-    assert "copy-vault-tasklist-closure-${{ github.run_id }}-${{ github.sha }}" in txt
+    assert "copy-vault-tasklist-closure-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}" in txt
 
 
 def test_labo_hosted_job_publishes_a_strict_exact_sha_receipt():
     txt = _texte("labo-continu-ci.yml")
     for required in (
+        "COPY_VAULT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+        "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
         "id: test-suite",
         "pytest_exit_code=$status",
         "id: publish-junit",
         "id: publish-closure",
         "tools/build_copy_vault_hosted_receipt.py",
-        "--head-sha \"${GITHUB_SHA}\"",
+        "--head-sha \"${COPY_VAULT_HEAD_SHA}\"",
         "--junit-artifact-digest",
         "--closure-artifact-digest",
-        "copy-vault-hosted-receipt-${{ github.run_id }}-${{ github.sha }}",
+        "copy-vault-hosted-receipt-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}",
     ):
         assert required in txt, f"reçu hosted exact-SHA incomplet: {required}"
 
