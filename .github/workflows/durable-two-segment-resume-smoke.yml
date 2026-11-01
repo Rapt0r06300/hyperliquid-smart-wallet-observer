@@ -86,6 +86,19 @@ jobs:
           print("has_campaign="+("true" if selected else "false"))
           PY
 
+  fail_closed_without_campaign:
+    name: Refuse empty resume-proof run
+    needs: select
+    if: needs.select.outputs.has_campaign != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report missing admissible campaign
+        run: |
+          set -euo pipefail
+          echo "NO_RESUME_PROOF_CAMPAIGN: no current-epoch SAFE-compatible replay campaign is admissible" >&2
+          echo "This run is diagnostic only; no checkpoint, receipt, shard, or economic proof was produced." >&2
+          exit 1
+
   segment_a:
     name: Segment A useful selection checkpoint
     needs: select
