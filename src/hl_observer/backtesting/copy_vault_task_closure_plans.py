@@ -13,19 +13,18 @@ missing SAFE evidence.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .copy_vault_closure_gate import (
-    ClosureCriterion,
-    EvidenceRecord,
     PROVEN,
     UNMEASURABLE,
+    ClosureCriterion,
+    EvidenceRecord,
     build_closure_matrix,
 )
-
 
 SCHEMA = "hypersmart.copy_vault_task_closure_plans.v1"
 TASK_IDS = (
@@ -287,4 +286,21 @@ def evaluate_tasklist(
     }
 
 
-__all__ = ["SCHEMA", "TASK_IDS", "build_task_closure_plans", "evaluate_tasklist"]
+def task_closure_contract_sha256(task_id: str) -> str:
+    """Return the exact contract digest for one canonical Copy-Vault task."""
+
+    plans = build_task_closure_plans()
+    try:
+        criteria = plans[task_id]
+    except KeyError as exc:
+        raise ValueError(f"unknown Copy-Vault task: {task_id}") from exc
+    return _contract_sha256(criteria)
+
+
+__all__ = [
+    "SCHEMA",
+    "TASK_IDS",
+    "build_task_closure_plans",
+    "evaluate_tasklist",
+    "task_closure_contract_sha256",
+]

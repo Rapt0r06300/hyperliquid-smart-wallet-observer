@@ -12,6 +12,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from .copy_vault_task_closure_plans import TASK_IDS, task_closure_contract_sha256
 
 SCHEMA = "hypersmart.copy_vault_hosted_ci_receipt.v1"
 PROOF_STATUS = "HOSTED_CI_VERIFIED"
@@ -109,7 +110,22 @@ def build_hosted_ci_receipt(
             raise ValueError(f"task {task_id} has an invalid closure contract SHA-256")
         if task_id in task_contract_sha256:
             raise ValueError(f"duplicate task contract row: {task_id}")
+        if task_id not in TASK_IDS:
+            raise ValueError("tasklist must contain the exact Copy-Vault task IDs")
+        expected_contract_sha256 = task_closure_contract_sha256(task_id)
+        if contract_sha256.lower() != expected_contract_sha256:
+            raise ValueError(f"task {task_id} has a stale closure contract SHA-256")
         task_contract_sha256[task_id] = contract_sha256.lower()
+    if set(task_contract_sha256) != set(TASK_IDS):
+        raise ValueError("tasklist must contain the exact Copy-Vault task IDs")
+    if closure_allowed:
+        for row in task_rows:
+            if (
+                row.get("status") != "PROVEN"
+                or row.get("recommended_agiflow_state") != "Done"
+                or row.get("missing_evidence")
+            ):
+                raise ValueError("closure-allowed tasklist contains an unproven task")
 
     artifacts = [
         _artifact(junit_artifact, head_sha=normalized_sha),
