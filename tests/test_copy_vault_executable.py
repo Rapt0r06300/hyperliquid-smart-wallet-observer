@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 
@@ -24,6 +25,8 @@ from hl_observer.backtesting.copy_vault_executable import (
     temporal_evidence,
 )
 from hl_observer.economics.assumptions import EconomicConfigError, EconomicRunMode
+from hl_observer.simulation.ledger_integrity import canonical_json
+from hl_observer.simulation.paper_ledger import PaperLedger
 
 
 def _entry(
@@ -125,6 +128,90 @@ def test_metaorders_keep_case_sensitive_hyperliquid_symbols_distinct() -> None:
 
     assert [row["coin"] for row in metaorders] == ["kPEPE", "KPEPE"]
     assert len({row["metaorder_id"] for row in metaorders}) == 2
+
+
+def test_replay_resume_matches_continuous_paper_state_and_receipts() -> None:
+    """Compare a real Copy-Vault replay split with its uninterrupted equivalent.
+
+    This is a deterministic integration fixture for the resume contract.  It
+    proves state/trial/receipt/ledger parity only; it is not SAFE market data
+    and it cannot certify economic performance.
+    """
+
+    metaorders = cluster_metaorders([
+        _entry("continuous-1", 1_000, action="OPEN"),
+        _entry("continuous-2", 1_000_000, action="OPEN"),
+    ])[0]
+    books = {
+        "BTC": [
+            _book(990, 99.0, 101.0, line=1),
+            _book(61_000, 100.0, 102.0, line=2),
+            _book(361_000, 109.0, 111.0, line=3),
+            _book(999_990, 99.0, 101.0, line=4),
+            _book(1_060_000, 100.0, 102.0, line=5),
+            _book(1_360_000, 109.0, 111.0, line=6),
+        ]
+    }
+
+    def replay(rows: list[dict]) -> tuple[list[dict], dict[str, int]]:
+        return replay_metaorders(rows, books, horizon_ms=300_000)
+
+    continuous_trades, continuous_diagnostics = replay(metaorders)
+    prefix_trades, prefix_diagnostics = replay(metaorders[:1])
+    suffix_trades, suffix_diagnostics = replay(metaorders[1:])
+    resumed_trades = prefix_trades + suffix_trades
+
+    def paper_ledger(trades: list[dict]) -> PaperLedger:
+        ledger = PaperLedger(starting_balance_usdc=200.0, session_id="resume-parity")
+        for trade in trades:
+            side = "LONG" if int(trade["direction"]) > 0 else "SHORT"
+            position_id = str(trade["trade_id"])
+            opened = ledger.open_position(
+                coin=str(trade["coin"]), side=side,
+                notional_usdc=float(trade["notional_usd"]),
+                quantity=float(trade["quantity"]),
+                fill_price=float(trade["entry_price"]),
+                timestamp_ms=int(trade["entry_ts_ms"]),
+                fee_bps=4.5, position_id=position_id,
+            )
+            assert opened.reason is None
+            closed = ledger.reduce_or_close(
+                coin=str(trade["coin"]), side=side,
+                quantity=float(trade["quantity"]),
+                fill_price=float(trade["exit_price"]),
+                timestamp_ms=int(trade["exit_ts_ms"]),
+                fee_bps=4.5, position_id=position_id,
+            )
+            assert closed.event_type.name == "POSITION_CLOSED"
+        assert ledger.verify_event_chain()
+        return ledger
+
+    def receipt(trades: list[dict], diagnostics: dict[str, int], ledger: PaperLedger) -> dict:
+        body = {
+            "trade_ids": [str(row["trade_id"]) for row in trades],
+            "diagnostics": diagnostics,
+            "ledger": ledger.snapshot(),
+            "paper_only": True,
+            "read_only": True,
+        }
+        return {**body, "receipt_sha256": hashlib.sha256(canonical_json(body).encode()).hexdigest()}
+
+    continuous_ledger = paper_ledger(continuous_trades)
+    resumed_ledger = paper_ledger(resumed_trades)
+    continuous_receipt = receipt(continuous_trades, continuous_diagnostics, continuous_ledger)
+    resumed_receipt = receipt(
+        resumed_trades,
+        {
+            key: prefix_diagnostics.get(key, 0) + suffix_diagnostics.get(key, 0)
+            for key in set(prefix_diagnostics) | set(suffix_diagnostics)
+        },
+        resumed_ledger,
+    )
+
+    assert [row["trade_id"] for row in resumed_trades] == [
+        row["trade_id"] for row in continuous_trades
+    ]
+    assert resumed_receipt == continuous_receipt
 
 
 def test_causal_protocol_does_not_join_fill_to_book_with_different_native_symbol() -> None:
