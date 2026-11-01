@@ -24,6 +24,24 @@ def test_local_lab_and_pipeline_have_explicit_downstream_suites() -> None:
     assert pipeline == sorted(runner.COPY_VAULT_PIPELINE_SUITES)
 
 
+def test_copy_vault_evidence_tools_have_explicit_downstream_suites() -> None:
+    expected = sorted({
+        *runner.COPY_VAULT_EVIDENCE_SUITES,
+    })
+    selected = runner.select_tests([
+        "tools/audit_live_ws_causal_capture.py",
+        "tools/build_copy_vault_hosted_receipt.py",
+        "tools/build_copy_vault_restoration_evidence.py",
+        "tools/inventory_copy_vault_evidence.py",
+        "tools/verify_copy_vault_closure_matrix.py",
+        "tools/verify_copy_vault_causal_receipt.py",
+        "tools/verify_copy_vault_snapshot_contract.py",
+        "tools/verify_copy_vault_tasklist.py",
+    ])
+
+    assert selected == expected
+
+
 def test_unknown_critical_module_fails_closed() -> None:
     with pytest.raises(ValueError, match="no regression mapping"):
         runner.select_tests(["src/hl_observer/backtesting/future_engine.py"])

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.copy_vault_closure_gate import (
-    ClosureCriterion,
-    EvidenceRecord,
     NOT_PROVEN,
     PROVEN,
     UNMEASURABLE,
+    ClosureCriterion,
+    EvidenceRecord,
     build_closure_matrix,
 )
-
 
 HEAD = "2c550287593c9578c36f534705f10511d9082d6c"
 
@@ -49,6 +48,53 @@ def test_exact_sha_hosted_success_can_prove_a_criterion() -> None:
     assert report["recommended_agiflow_state"] == "Done"
     assert report["closure_allowed"] is True
     assert report["criteria"][0]["run_ids"] == ["run-1"]
+
+
+def test_criterion_matrix_keeps_exact_proof_provenance() -> None:
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion(
+            "exact_sha_hosted_run",
+            ("github_hosted",),
+            required_claims={"semantic_equivalence": True},
+            require_hosted=True,
+        )],
+        [_hosted(semantic_equivalence=True)],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["criteria"][0]["evidence_refs"] == [{
+        "artifact_id": "artifact-1",
+        "artifact_sha256": "a" * 64,
+        "claims": {"semantic_equivalence": True},
+        "conclusion": "success",
+        "evidence_status": "VERIFIED",
+        "head_sha": HEAD,
+        "kind": "github_hosted",
+        "paper_read_only": True,
+        "real_execution": False,
+        "result": "PROVEN",
+        "run_id": "run-1",
+        "run_status": "completed",
+        "source": "github://run/run-1/artifact/artifact-1",
+    }]
+
+
+def test_criterion_matrix_keeps_rejected_proof_reasons() -> None:
+    queued = EvidenceRecord(
+        **{**_hosted(semantic_equivalence=True).__dict__, "run_status": "queued"},
+    )
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion("exact_sha_hosted_run", ("github_hosted",), require_hosted=True)],
+        [queued],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["criteria"][0]["evidence_refs"][0]["result"] == "REJECTED"
+    assert report["criteria"][0]["evidence_refs"][0]["reasons"] == [
+        "HOSTED_RUN_NOT_COMPLETED",
+    ]
 
 
 def test_queued_or_wrong_sha_evidence_cannot_close_a_criterion() -> None:

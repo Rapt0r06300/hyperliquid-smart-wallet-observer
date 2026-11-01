@@ -35,6 +35,17 @@ COPY_VAULT_PIPELINE_SUITES: tuple[str, ...] = (
     "tests/test_pipeline_copie_reel.py",
 )
 
+COPY_VAULT_EVIDENCE_SUITES: tuple[str, ...] = (
+    "tests/test_audit_live_ws_causal_capture.py",
+    "tests/test_build_copy_vault_restoration_evidence.py",
+    "tests/test_copy_vault_causal_evidence_contract.py",
+    "tests/test_copy_vault_closure_gate.py",
+    "tests/test_copy_vault_evidence_inventory.py",
+    "tests/test_copy_vault_hosted_receipt.py",
+    "tests/test_copy_vault_snapshot_contract.py",
+    "tests/test_copy_vault_task_closure_plans.py",
+)
+
 MODULE_TESTS: dict[str, tuple[str, ...]] = {
     "src/hl_observer/backtesting/copy_vault_executable.py":
         COPY_VAULT_EXECUTABLE_SUITES,
@@ -42,6 +53,24 @@ MODULE_TESTS: dict[str, tuple[str, ...]] = {
         COPY_VAULT_LOCAL_LAB_SUITES,
     "tools/pipeline_copie_reel.py":
         COPY_VAULT_PIPELINE_SUITES,
+    "tools/audit_live_ws_causal_capture.py": (
+        "tests/test_audit_live_ws_causal_capture.py",
+        "tests/test_copy_vault_causal_evidence_contract.py",
+    ),
+    "tools/build_copy_vault_hosted_receipt.py":
+        ("tests/test_copy_vault_hosted_receipt.py",),
+    "tools/build_copy_vault_restoration_evidence.py":
+        ("tests/test_build_copy_vault_restoration_evidence.py",),
+    "tools/inventory_copy_vault_evidence.py":
+        ("tests/test_copy_vault_evidence_inventory.py",),
+    "tools/verify_copy_vault_closure_matrix.py":
+        ("tests/test_copy_vault_closure_gate.py",),
+    "tools/verify_copy_vault_causal_receipt.py":
+        ("tests/test_copy_vault_causal_evidence_contract.py",),
+    "tools/verify_copy_vault_snapshot_contract.py":
+        ("tests/test_copy_vault_snapshot_contract.py",),
+    "tools/verify_copy_vault_tasklist.py":
+        ("tests/test_copy_vault_task_closure_plans.py",),
     "tools/run_copy_vault_regressions.py":
         ("tests/test_copy_vault_regression_runner.py",),
 }
