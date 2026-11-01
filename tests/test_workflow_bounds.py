@@ -9,6 +9,18 @@ def _workflow(name: str) -> str:
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
 
+def test_collect_resume_passes_state_by_artifact_without_changing_exact_sha() -> None:
+    text = _workflow("collect-two-segment-resume-smoke.yml")
+    assert "ref: ${{ github.sha }}" in text
+    assert "actions/upload-artifact@" in text
+    assert "actions/download-artifact@" in text
+    assert "collect-resume-segment-a-state-${{ github.run_id }}" in text
+    assert "collect-resume-segment-b-state-${{ github.run_id }}" in text
+    assert "collect-resume-receipt-${{ github.run_id }}" in text
+    assert "git push origin HEAD:main" not in text
+    assert "git reset --hard origin/main" not in text
+
+
 
 def test_critical_qualification_and_collector_proofs_are_not_starved_by_main_pushes():
     for workflow in ("dataset-quality-ci.yml", "collector-replay-integrity-ci.yml"):
