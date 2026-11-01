@@ -28,7 +28,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 1
+          ref: ${{ github.sha }}
           persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/resumable-campaign-ci.yml
+            README.md
+            pyproject.toml
+            src/
+            hyper_smart_observer/
+            tools/augment_campaign_result.py
+            tools/resumable_campaign.py
+            tools/run_resumable_campaign.py
+            tests/test_augment_campaign_result.py
+            tests/test_resumable_campaign.py
+            tests/test_resumable_campaign_adapters.py
+            tests/test_module_pnl_proof_campaign.py
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
