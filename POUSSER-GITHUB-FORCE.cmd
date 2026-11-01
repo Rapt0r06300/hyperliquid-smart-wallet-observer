@@ -7,8 +7,8 @@ if errorlevel 1 goto :bad_location
 rem One-click code-only bidirectional Git reconciliation.
 rem AlinaSync alone downloads/validates/unpacks SAFE shards.
 rem No forced push, reset, clean, stash or automatic deletion of data.
-rem The launcher does not pause by default; set HYPERSMART_PUSH_PAUSE=1 when
-rem a double-click window must stay open after the receipt is written.
+rem A double-click window stays open by default so failures remain visible.
+rem Set HYPERSMART_PUSH_NO_PAUSE=1 for CI/automation or cmd /c callers.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
 set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-main"
@@ -143,6 +143,7 @@ goto :finish
 
 :self_check
 echo [OK] Git et moteur Python disponibles et syntaxiquement valides.
+echo PORTABLE_GITHUB_PUSH_CHECK_OK
 set "RC=0"
 goto :finish
 
@@ -198,6 +199,8 @@ exit /b 0
 :finish
 echo [LANCEUR 6/6] Fin du lanceur - code retour %RC%
 if exist "%ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json" echo Rapport detaille : %ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json
-if /I "%HYPERSMART_PUSH_PAUSE%"=="1" pause
+if /I "%HYPERSMART_PUSH_NO_PAUSE%"=="1" goto :finish_cleanup
+pause
+:finish_cleanup
 popd
 endlocal & exit /b %RC%
