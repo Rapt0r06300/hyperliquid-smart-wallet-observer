@@ -12,6 +12,9 @@ def _workflow(name: str) -> str:
 def test_collect_resume_passes_state_by_artifact_without_changing_exact_sha() -> None:
     text = _workflow("collect-two-segment-resume-smoke.yml")
     assert "ref: ${{ github.sha }}" in text
+    assert text.count("fetch-depth: 1") == 3
+    assert text.count("persist-credentials: false") == 3
+    assert "sparse-checkout-cone-mode: false" in text
     assert "actions/upload-artifact@" in text
     assert "actions/download-artifact@" in text
     assert "collect-resume-segment-a-state-${{ github.run_id }}" in text
