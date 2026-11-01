@@ -19,16 +19,28 @@ from hl_observer.backtesting.copy_vault_task_closure_plans import (  # noqa: E40
 def _read_receipts(directory: Path) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
     for task_id in TASK_IDS:
-        path = directory / f"{task_id}.json"
-        if not path.is_file():
+        # Keep the canonical aggregate while also ingesting append-only
+        # exact-SHA receipts emitted as ``H-T95-<evidence>-<sha>.json``.
+        # The evaluator remains fail-closed: unusable, stale, or mismatched
+        # receipts are still rejected downstream rather than treated as proof.
+        canonical = directory / f"{task_id}.json"
+        paths = ([canonical] if canonical.is_file() else []) + sorted(
+            path for path in directory.glob(f"{task_id}-*.json")
+        )
+        if not paths:
             result[task_id] = []
             continue
-        value = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(value, list):
-            raise ValueError(f"{path} must contain a JSON array of actual receipts")
-        if not all(isinstance(item, dict) for item in value):
-            raise ValueError(f"{path} contains a non-object receipt")
-        result[task_id] = value
+        receipts: list[dict[str, Any]] = []
+        for path in paths:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                value = [value]
+            if not isinstance(value, list):
+                raise ValueError(f"{path} must contain a JSON object or array of actual receipts")
+            if not all(isinstance(item, dict) for item in value):
+                raise ValueError(f"{path} contains a non-object receipt")
+            receipts.extend(value)
+        result[task_id] = receipts
     return result
 
 

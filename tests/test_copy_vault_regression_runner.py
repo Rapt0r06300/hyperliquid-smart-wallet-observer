@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tools import run_copy_vault_regressions as runner
+from tools.verify_copy_vault_tasklist import _read_receipts
 
 
 def test_executable_has_only_current_existing_downstream_suites() -> None:
@@ -81,3 +82,26 @@ def test_changed_paths_includes_workflows(monkeypatch) -> None:
     monkeypatch.setattr(runner.subprocess, "run", fake_run)
     assert runner.changed_paths() == [".github/workflows/copy-vault.yml"]
     assert calls[1][-1] == ".github/workflows"
+
+
+def test_tasklist_reader_includes_append_only_exact_sha_receipts(tmp_path) -> None:
+    (tmp_path / "H-T95.json").write_text(
+        '[{"head_sha":"old","evidence_status":"UNMEASURABLE"}]',
+        encoding="utf-8",
+    )
+    (tmp_path / "H-T95-restoration-current-newsha-r1.json").write_text(
+        '[{"head_sha":"newsha","evidence_status":"VERIFIED"}]',
+        encoding="utf-8",
+    )
+    (tmp_path / "H-T95-restoration-current-newsha-r2.json").write_text(
+        '{"head_sha":"newsha-2","evidence_status":"UNMEASURABLE"}',
+        encoding="utf-8",
+    )
+
+    receipts = _read_receipts(tmp_path)
+
+    assert receipts["H-T95"] == [
+        {"head_sha": "old", "evidence_status": "UNMEASURABLE"},
+        {"head_sha": "newsha", "evidence_status": "VERIFIED"},
+        {"head_sha": "newsha-2", "evidence_status": "UNMEASURABLE"},
+    ]
