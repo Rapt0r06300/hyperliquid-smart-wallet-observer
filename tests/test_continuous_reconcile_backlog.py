@@ -1,6 +1,7 @@
 """Fail-closed inventory and Git error classification for continuous Release waves."""
 import pytest
-from tools.continuous_reconcile_backlog import pending, PACK
+
+from tools.continuous_reconcile_backlog import PACK, REPO, pending
 
 
 def test_sparse_historical_publication_keeps_fail_closed_catalog_validation() -> None:
@@ -31,6 +32,40 @@ def test_pending_respects_release_aliases_status_and_quarantine() -> None:
     assert pending(rows, index, {"archive-v2-hold"}) == ["data-v2-next"]
 
 
+def test_restart_before_receipt_keeps_unpublished_wave_pending() -> None:
+    """A runner stop before the receipt must not turn a wave into a success."""
+    index = {
+        "release_repository_default": REPO,
+        "shards": [],
+    }
+    inventory = "copy-vault-v2-wave-a\ttrue\n"
+
+    first_attempt = pending(inventory, index, set())
+    restarted_attempt = pending(inventory, index, set())
+
+    assert first_attempt == restarted_attempt == ["copy-vault-v2-wave-a"]
+
+
+def test_restart_after_wave_commit_is_idempotent() -> None:
+    """Once the exact release is in the index, a restart cannot publish it twice."""
+    inventory = (
+        "copy-vault-v2-wave-a\ttrue\n"
+        "copy-vault-v2-wave-b\ttrue\n"
+    )
+    before_commit = {
+        "release_repository_default": REPO,
+        "shards": [],
+    }
+    after_commit = {
+        "release_repository_default": REPO,
+        "shards": [{"release_tag": "copy-vault-v2-wave-a"}],
+    }
+
+    assert pending(inventory, before_commit, set()) == ["copy-vault-v2-wave-a", "copy-vault-v2-wave-b"]
+    assert pending(inventory, after_commit, set()) == ["copy-vault-v2-wave-b"]
+    assert pending(inventory, after_commit, set()) == ["copy-vault-v2-wave-b"]
+
+
 def test_malformed_inventory_rejected() -> None:
     with pytest.raises(ValueError):
         pending("missing-tab", {"shards": []}, set())
@@ -46,6 +81,7 @@ def test_git_pack_failure_not_confused_with_concurrent_main_update() -> None:
 
 def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
     import subprocess
+
     import tools.continuous_reconcile_backlog as module
     seen = []
 
@@ -65,6 +101,7 @@ def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
 
 def test_disjoint_rebase_refusal_does_not_force_or_retry_push(monkeypatch):
     import subprocess
+
     import tools.continuous_reconcile_backlog as module
     seen = []
 
@@ -80,6 +117,7 @@ def test_disjoint_rebase_refusal_does_not_force_or_retry_push(monkeypatch):
 
 def test_disjoint_rebase_reports_pack_rejection_without_forcing(monkeypatch):
     import subprocess
+
     import tools.continuous_reconcile_backlog as module
     seen = []
 
@@ -97,6 +135,7 @@ def test_disjoint_rebase_reports_pack_rejection_without_forcing(monkeypatch):
 
 def test_disjoint_rebase_published_requires_remote_ancestry(monkeypatch):
     import subprocess
+
     import tools.continuous_reconcile_backlog as module
     seen = []
 
@@ -204,6 +243,7 @@ def test_pending_cache_reuses_exact_git_blob_only(monkeypatch):
 
 def test_index_blob_sha_requires_exact_git_object_identity(monkeypatch):
     import subprocess
+
     import tools.continuous_reconcile_backlog as module
     monkeypatch.setattr(
         module, "run",
@@ -307,9 +347,10 @@ def test_historical_manifest_staging_budget_is_propagated_and_bounded(
 
 
 def test_historical_git_commit_has_deterministic_hosted_author() -> None:
-    from pathlib import Path
-    import tools.continuous_reconcile_backlog as module
     import inspect
+    from pathlib import Path
+
+    import tools.continuous_reconcile_backlog as module
     implementation = inspect.getsource(module.publish)
     assert '"-c", "user.name=github-actions[bot]"' in implementation
     assert '"-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"' in implementation
