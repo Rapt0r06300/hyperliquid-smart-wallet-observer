@@ -22,6 +22,7 @@ def test_historical_kronos_metadata_cannot_become_current_closure(tmp_path: Path
     )
     assert receipt["evidence_status"] == "UNMEASURABLE"
     assert receipt["decision"] == "NO_GO"
+    assert receipt["kind"] == "kronos_freeze"
     assert receipt["source"]["historical_head_sha"] == "b" * 40
     assert receipt["claims"]["post_training_cutoff"] is False
     assert "AUTHORITATIVE_POST_TRAINING_CUTOFF_MISSING" in receipt["missing_evidence"]

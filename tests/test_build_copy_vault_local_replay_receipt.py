@@ -30,5 +30,6 @@ def test_train_only_replay_cannot_become_oos_proof(tmp_path: Path) -> None:
     )
     assert receipt["evidence_status"] == "UNMEASURABLE"
     assert receipt["decision"] == "NO_GO"
+    assert receipt["kind"] == "economic_replay"
     assert receipt["replay"]["trial_count"] == 73728
     assert "OOS_FROZEN_REPLAY_MISSING" in receipt["missing_evidence"]
