@@ -84,3 +84,26 @@ jobs:
           path: reports/labo-continu.xml
           if-no-files-found: error
           retention-days: 14
+      - name: Produire le rapport fail-closed des dix tâches Copy-Vault
+        if: always()
+        env:
+          PYTHONPATH: src:tools
+        run: |
+          mkdir -p reports /tmp/copy-vault-no-evidence
+          set +e
+          python tools/verify_copy_vault_tasklist.py \
+            --head-sha "${GITHUB_SHA}" \
+            --evidence-dir /tmp/copy-vault-no-evidence \
+            --output reports/copy-vault-tasklist-closure.json
+          status=$?
+          set -e
+          # Exit 2 means the audit ran correctly but closure evidence is incomplete.
+          if [ "$status" -ne 2 ]; then exit "$status"; fi
+      - name: Publier le rapport de clôture Copy-Vault
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: copy-vault-tasklist-closure-${{ github.run_id }}-${{ github.sha }}
+          path: reports/copy-vault-tasklist-closure.json
+          if-no-files-found: error
+          retention-days: 14
