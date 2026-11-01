@@ -27,10 +27,15 @@ jobs:
   tests-non-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Pull requests execute on a synthetic merge SHA by default. Receipts
+      # must bind to the commit actually under test.
+      COPY_VAULT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # The continuous lab consumes only the canonical code, tools, tests,
           # and Python configuration used by this workflow.  Do not hydrate
           # the multi-GB raw dataset reservoir or unrelated repository trees.
@@ -87,7 +92,7 @@ jobs:
         id: publish-junit
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: labo-continu-junit-${{ github.run_id }}-${{ github.sha }}
+          name: labo-continu-junit-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}
           path: reports/labo-continu.xml
           if-no-files-found: error
           retention-days: 14
@@ -100,7 +105,7 @@ jobs:
           mkdir -p reports /tmp/copy-vault-no-evidence
           set +e
           python tools/verify_copy_vault_tasklist.py \
-            --head-sha "${GITHUB_SHA}" \
+            --head-sha "${COPY_VAULT_HEAD_SHA}" \
             --evidence-dir /tmp/copy-vault-no-evidence \
             --output reports/copy-vault-tasklist-closure.json
           status=$?
@@ -112,7 +117,7 @@ jobs:
         id: publish-closure
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: copy-vault-tasklist-closure-${{ github.run_id }}-${{ github.sha }}
+          name: copy-vault-tasklist-closure-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}
           path: reports/copy-vault-tasklist-closure.json
           if-no-files-found: error
           retention-days: 14
@@ -126,17 +131,17 @@ jobs:
             --workflow "${GITHUB_WORKFLOW}" \
             --event "${GITHUB_EVENT_NAME}" \
             --ref "${GITHUB_REF}" \
-            --head-sha "${GITHUB_SHA}" \
+            --head-sha "${COPY_VAULT_HEAD_SHA}" \
             --run-id "${GITHUB_RUN_ID}" \
             --run-attempt "${GITHUB_RUN_ATTEMPT}" \
             --status completed \
             --conclusion success \
             --pytest-exit-code "${{ steps.test-suite.outputs.pytest_exit_code }}" \
             --junit-artifact-id "${{ steps.publish-junit.outputs.artifact-id }}" \
-            --junit-artifact-name "labo-continu-junit-${GITHUB_RUN_ID}-${GITHUB_SHA}" \
+            --junit-artifact-name "labo-continu-junit-${GITHUB_RUN_ID}-${COPY_VAULT_HEAD_SHA}" \
             --junit-artifact-digest "${{ steps.publish-junit.outputs.artifact-digest }}" \
             --closure-artifact-id "${{ steps.publish-closure.outputs.artifact-id }}" \
-            --closure-artifact-name "copy-vault-tasklist-closure-${GITHUB_RUN_ID}-${GITHUB_SHA}" \
+            --closure-artifact-name "copy-vault-tasklist-closure-${GITHUB_RUN_ID}-${COPY_VAULT_HEAD_SHA}" \
             --closure-artifact-digest "${{ steps.publish-closure.outputs.artifact-digest }}" \
             --tasklist-report reports/copy-vault-tasklist-closure.json \
             --output reports/copy-vault-hosted-receipt.json
@@ -145,7 +150,7 @@ jobs:
         id: publish-hosted-receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: copy-vault-hosted-receipt-${{ github.run_id }}-${{ github.sha }}
+          name: copy-vault-hosted-receipt-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}
           path: reports/copy-vault-hosted-receipt.json
           if-no-files-found: error
           retention-days: 14
