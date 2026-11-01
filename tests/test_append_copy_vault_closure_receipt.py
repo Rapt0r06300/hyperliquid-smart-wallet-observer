@@ -47,3 +47,24 @@ def test_rejects_stale_or_unbound_receipt_without_modifying_wrapper(tmp_path: Pa
         append_receipts(wrapper, receipt)
 
     assert json.loads(wrapper.read_text(encoding="utf-8")) == original
+
+
+def test_accepts_verified_restoration_receipt_without_decision(tmp_path: Path) -> None:
+    wrapper = tmp_path / "H-T95.json"
+    receipt = tmp_path / "restoration.json"
+    wrapper.write_text("[]\n", encoding="utf-8")
+    receipt.write_text(
+        json.dumps(
+            {
+                "head_sha": HEAD,
+                "evidence_status": "VERIFIED",
+                "kind": "restoration_report",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = append_receipts(wrapper, receipt)
+
+    assert result["added"] == 1
