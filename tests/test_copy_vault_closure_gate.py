@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+from hl_observer.backtesting.copy_vault_closure_gate import (
+    ClosureCriterion,
+    EvidenceRecord,
+    NOT_PROVEN,
+    PROVEN,
+    UNMEASURABLE,
+    build_closure_matrix,
+)
+
+
+HEAD = "2c550287593c9578c36f534705f10511d9082d6c"
+
+
+def _hosted(*, run_id: str = "run-1", artifact_id: str = "artifact-1", **claims: object) -> EvidenceRecord:
+    return EvidenceRecord(
+        kind="github_hosted",
+        source=f"github://run/{run_id}/artifact/{artifact_id}",
+        head_sha=HEAD,
+        evidence_status="VERIFIED",
+        paper_read_only=True,
+        real_execution=False,
+        run_id=run_id,
+        artifact_id=artifact_id,
+        run_status="completed",
+        conclusion="success",
+        artifact_sha256="a" * 64,
+        claims=claims,
+    )
+
+
+def test_exact_sha_hosted_success_can_prove_a_criterion() -> None:
+    report = build_closure_matrix(
+        "H-T102",
+        [
+            ClosureCriterion(
+                "exact_sha_hosted_run",
+                ("github_hosted",),
+                required_claims={"semantic_equivalence": True},
+                require_hosted=True,
+            )
+        ],
+        [_hosted(semantic_equivalence=True)],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == PROVEN
+    assert report["recommended_agiflow_state"] == "Done"
+    assert report["closure_allowed"] is True
+    assert report["criteria"][0]["run_ids"] == ["run-1"]
+
+
+def test_queued_or_wrong_sha_evidence_cannot_close_a_criterion() -> None:
+    queued = _hosted(semantic_equivalence=True)
+    queued = EvidenceRecord(
+        **{**queued.__dict__, "run_status": "in_progress"},
+    )
+    wrong_sha = EvidenceRecord(
+        **{**_hosted(semantic_equivalence=True).__dict__, "head_sha": "f" * 40},
+    )
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion("exact_sha_hosted_run", ("github_hosted",), require_hosted=True)],
+        [queued, wrong_sha],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == NOT_PROVEN
+    assert report["recommended_agiflow_state"] == "Testing"
+    assert report["closure_allowed"] is False
+    assert any("HOSTED_RUN_NOT_COMPLETED" in item for item in report["missing_evidence"])
+    assert any("EXACT_SHA_MISMATCH" in item for item in report["missing_evidence"])
+
+
+def test_omitted_safety_flags_fail_closed() -> None:
+    raw = _hosted(semantic_equivalence=True).__dict__.copy()
+    raw.pop("real_execution")
+    raw.pop("paper_read_only")
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion("exact_sha_hosted_run", ("github_hosted",), require_hosted=True)],
+        [EvidenceRecord.from_mapping(raw)],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == NOT_PROVEN
+    assert (
+        "exact_sha_hosted_run:github_hosted:PAPER_READ_ONLY_REQUIRED"
+        in report["missing_evidence"]
+    )
+    assert (
+        "exact_sha_hosted_run:github_hosted:REAL_EXECUTION_MUST_BE_FALSE"
+        in report["missing_evidence"]
+    )
+
+
+def test_sample_restore_is_not_full_dataset_proof() -> None:
+    report = build_closure_matrix(
+        "H-T195",
+        [
+            ClosureCriterion(
+                "full_safe_restore",
+                ("github_hosted",),
+                require_hosted=True,
+                require_full_dataset=True,
+            )
+        ],
+        [_hosted(full_dataset_certified=False)],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == NOT_PROVEN
+    assert (
+        "full_safe_restore:github_hosted:FULL_DATASET_CERTIFICATION_MISSING"
+        in report["missing_evidence"]
+    )
+
+
+def test_missing_causal_data_remains_unmeasurable() -> None:
+    report = build_closure_matrix(
+        "H-T170",
+        [
+            ClosureCriterion(
+                "causal_live_fill",
+                ("safe_replay",),
+                required_claims={"causal_live_fill_rows": {"min": 1}},
+                unavailable_is_unmeasurable=True,
+            )
+        ],
+        [
+            EvidenceRecord(
+                kind="safe_replay",
+                source="local://safe-replay-receipt.json",
+                head_sha=HEAD,
+                evidence_status="VERIFIED",
+                paper_read_only=True,
+                real_execution=False,
+                claims={"causal_live_fill_rows": 0},
+            )
+        ],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == UNMEASURABLE
+    assert report["recommended_agiflow_state"] == "Testing"
+    assert (
+        "causal_live_fill:safe_replay:CLAIM_MISMATCH:causal_live_fill_rows"
+        in report["missing_evidence"]
+    )
+
+
+def test_two_hosted_runs_require_two_distinct_run_ids() -> None:
+    criterion = ClosureCriterion(
+        "two_exact_sha_retries",
+        ("github_hosted",),
+        require_hosted=True,
+        min_distinct_runs=2,
+    )
+    one_run = build_closure_matrix(
+        "H-T195", [criterion], [_hosted()], expected_head_sha=HEAD,
+    )
+    two_runs = build_closure_matrix(
+        "H-T195",
+        [criterion],
+        [_hosted(), _hosted(run_id="run-2", artifact_id="artifact-2")],
+        expected_head_sha=HEAD,
+    )
+
+    assert one_run["status"] == NOT_PROVEN
+    assert two_runs["status"] == PROVEN
+    assert two_runs["criteria"][0]["run_ids"] == ["run-1", "run-2"]
