@@ -28,13 +28,7 @@ Famille économique active unique : `copy_vault`. Les anciens résultats
 Lead-Lag/Cross-Venue restent consultables pour provenance, mais ne reçoivent
 aucun budget de recherche, replay économique, sélection ou promotion.
 
-L'objectif terminal est **>= +5.00 USD NET/jour sur 200 USD paper** pour
-Copy-Vault, uniquement après les réparations techniques et la preuve OOS /
-forward-paper requise. C'est une cible de mesure, jamais une promesse ni une
-raison de modifier les gates. Suivre les critères du HEAD exact, les coûts
-complets, la causalité, **2 jours UTC complets**, une couverture >= **0.99**,
-le forward strict post-freeze et les exigences de certification finale de
-`python tools/run_daily_economic_certification.py .`.
+**Nouvel objectif sans seuil de profit fixe :** rechercher et conserver chaque amélioration NETTE de Copy-Vault, même faible. Geler tout résultat favorable avec sa provenance, ses fenêtres, sa seed, son code SHA, sa configuration et ses coûts. Séparer `FREEZE_EXPLORATORY` (amélioration mesurée mais non certifiée) et `CHAMPION_VERIFIED` (preuve OOS/forward post-freeze indépendante et toutes les gates applicables passées). Après chaque gel, continuer Discovery. Les contrôles du HEAD réel — dont la causalité, les coûts, les périodes UTC complètes, la couverture, le forward post-freeze et les refus fail-closed — restent stricts; ne jamais transformer la cible historique +5 USD en condition terminale.
 
 ## 3. Mémoire V3.2
 
@@ -87,7 +81,4 @@ Tous les essais comptent. OOS/forward observé puis utilisé pour retuner = feed
 
 Ne jamais baisser une gate, ignorer un test ou transformer `None` en 0 pour fabriquer du vert. Si seul le temps/nouvelles données manque, laisser les collecteurs locaux nécessaires tourner et arrêter les tours modèle inutiles.
 
-DONE économique uniquement quand `python tools/run_daily_economic_certification.py .`
-certifie Copy-Vault sur le SHA exact avec toutes les gates applicables au HEAD
-vertes. Les familles désactivées ne sont pas requises pour la certification et
-ne peuvent pas compenser ou promouvoir un résultat Copy-Vault.
+Une tâche technique est `VERIFIED_DONE` seulement avec code branché, tests et preuves exact-SHA. L'amélioration économique continue n'a **pas de DONE terminal lié à un montant** : geler les gains mesurés, certifier séparément les champions selon OOS/forward et toutes les gates applicables, puis reprendre la découverte. La CLI de certification existante peut encore contenir un seuil historique et doit être réconciliée avant de servir de gate du nouvel objectif; ne jamais maquiller un échec en PASS. Les familles désactivées ne peuvent pas promouvoir ou compenser Copy-Vault.
