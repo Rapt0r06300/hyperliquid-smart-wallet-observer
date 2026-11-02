@@ -28,10 +28,12 @@ def test_local_lab_and_pipeline_have_explicit_downstream_suites() -> None:
 def test_copy_vault_evidence_tools_have_explicit_downstream_suites() -> None:
     expected = sorted({
         *runner.COPY_VAULT_EVIDENCE_SUITES,
+        "tests/test_collect_cloud_copy_vault.py",
     })
     selected = runner.select_tests([
         "tools/audit_live_ws_causal_capture.py",
         "tools/build_copy_vault_hosted_receipt.py",
+        "tools/collect_cloud_copy_vault.py",
         "tools/build_copy_vault_restoration_evidence.py",
         "tools/inventory_copy_vault_evidence.py",
         "tools/verify_copy_vault_closure_matrix.py",
