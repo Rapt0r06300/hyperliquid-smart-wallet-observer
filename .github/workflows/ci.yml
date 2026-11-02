@@ -15,8 +15,8 @@ permissions:
 
 concurrency:
   group: hypersmart-ci-${{ github.ref }}
-  # Keep one running CI proof; newer main commits replace only the pending run.
-  cancel-in-progress: false
+  # Keep main proofs durable; replace only obsolete PR runs to avoid queue deadlock.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONPATH: src:tools
