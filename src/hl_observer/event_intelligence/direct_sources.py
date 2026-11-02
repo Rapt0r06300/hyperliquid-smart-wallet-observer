@@ -162,6 +162,7 @@ def normalize_usgs(
     received_ts_ms: int,
     min_magnitude: float = 4.5,
 ) -> list[ExternalEvent]:
+    received_ts_ms = _require_received_ts_ms(received_ts_ms)
     rows = payload.get("features")
     if not isinstance(rows, list):
         return []
@@ -218,6 +219,7 @@ def normalize_eonet(
     *,
     received_ts_ms: int,
 ) -> list[ExternalEvent]:
+    received_ts_ms = _require_received_ts_ms(received_ts_ms)
     rows = payload.get("events")
     if not isinstance(rows, list):
         return []
@@ -268,6 +270,7 @@ def normalize_gdacs(
     *,
     received_ts_ms: int,
 ) -> list[ExternalEvent]:
+    received_ts_ms = _require_received_ts_ms(received_ts_ms)
     rows = (
         payload.get("features")
         if isinstance(payload.get("features"), list)
@@ -342,6 +345,7 @@ def normalize_gdelt_articles(
     *,
     received_ts_ms: int,
 ) -> list[ExternalEvent]:
+    received_ts_ms = _require_received_ts_ms(received_ts_ms)
     rows = payload.get("articles")
     if not isinstance(rows, list):
         return []
@@ -390,6 +394,7 @@ def normalize_fred_observations(
     received_ts_ms: int,
     series_id: str,
 ) -> list[ExternalEvent]:
+    received_ts_ms = _require_received_ts_ms(received_ts_ms)
     rows = payload.get("observations")
     if not isinstance(rows, list):
         return []
@@ -483,11 +488,21 @@ def _gdacs_severity(value: str) -> float | None:
 
 
 def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    if isinstance(value, str) and not value.strip().lstrip("+").isdigit():
+        return None
     try:
         parsed = int(value)
     except (TypeError, ValueError, OverflowError):
         return None
     return parsed if parsed >= 0 else None
+
+
+def _require_received_ts_ms(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("received_ts_ms must be a non-negative integer")
+    return value
 
 
 def _finite(value: Any) -> float | None:

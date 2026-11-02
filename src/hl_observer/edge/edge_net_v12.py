@@ -8,6 +8,7 @@ visible, and a missing market fact becomes NO_TRADE rather than a guessed value.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,28 +42,68 @@ class EdgeNetV12Estimate:
     cost_breakdown_bps: dict[str, float] = field(default_factory=dict)
 
 
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) else None
+
+
 def estimate_edge_net_v12(inputs: EdgeNetV12Inputs) -> EdgeNetV12Estimate:
     reasons: list[str] = []
     missing: list[str] = []
-    if inputs.leader_reference_price is None or inputs.leader_reference_price <= 0:
+    leader_reference_price = _finite_number(inputs.leader_reference_price)
+    current_mid = _finite_number(inputs.current_mid)
+    leader_expected_edge = _finite_number(inputs.leader_expected_edge_bps)
+    spread = _finite_number(inputs.spread_bps)
+    slippage = _finite_number(inputs.slippage_bps)
+    fee = _finite_number(inputs.fee_bps)
+    if leader_reference_price is None or leader_reference_price <= 0:
         missing.append("leader_reference_price")
         reasons.append("EDGE_UNMEASURABLE")
-    if inputs.current_mid is None or inputs.current_mid <= 0:
+    if current_mid is None or current_mid <= 0:
         missing.append("current_mid")
         reasons.append("MID_MISSING")
-    if inputs.leader_expected_edge_bps is None:
+    if leader_expected_edge is None:
         missing.append("leader_expected_edge_bps")
         reasons.append("EDGE_UNMEASURABLE")
-    if inputs.spread_bps is None:
+    elif leader_expected_edge < 0:
+        reasons.append("EDGE_REMAINING_TOO_LOW")
+    if spread is None or spread < 0:
         missing.append("spread_bps")
         reasons.append("SPREAD_TOO_WIDE")
-    if inputs.slippage_bps is None:
+    if slippage is None or slippage < 0:
         missing.append("slippage_bps")
         reasons.append("LIQUIDITY_TOO_LOW")
-    if inputs.fee_bps is None:
+    if fee is None or fee < 0:
         missing.append("fee_bps")
         reasons.append("EDGE_UNMEASURABLE")
-    if inputs.funding_estimate_bps is None:
+    threshold = _finite_number(inputs.min_edge_bps)
+    max_copy_degradation = _finite_number(inputs.max_copy_degradation_bps)
+    if threshold is None or threshold < 0 or max_copy_degradation is None or max_copy_degradation < 0:
+        missing.append("edge_thresholds")
+        reasons.append("EDGE_UNMEASURABLE")
+    optional_costs = {
+        "latency_penalty_bps": inputs.latency_penalty_bps,
+        "copy_degradation_bps": inputs.copy_degradation_bps,
+        "liquidity_penalty_bps": inputs.liquidity_penalty_bps,
+        "volatility_penalty_bps": inputs.volatility_penalty_bps,
+        "adverse_selection_penalty_bps": inputs.adverse_selection_penalty_bps,
+        "crowding_penalty_bps": inputs.crowding_penalty_bps,
+    }
+    optional_values: dict[str, float] = {}
+    for name, value in optional_costs.items():
+        parsed = _finite_number(value)
+        if parsed is None or parsed < 0:
+            missing.append(name)
+            reasons.append("EDGE_UNMEASURABLE")
+        else:
+            optional_values[name] = parsed
+    funding = _finite_number(inputs.funding_estimate_bps)
+    if inputs.funding_estimate_bps is not None and (funding is None or funding < 0):
+        missing.append("funding_estimate_bps")
+        reasons.append("EDGE_UNMEASURABLE")
+    elif inputs.funding_estimate_bps is None:
         reasons.append("FUNDING_UNKNOWN")
 
     if missing:
@@ -72,29 +113,24 @@ def estimate_edge_net_v12(inputs: EdgeNetV12Inputs) -> EdgeNetV12Estimate:
             gross_edge_bps=None,
             total_cost_bps=None,
             net_edge_bps=None,
-            threshold_bps=inputs.min_edge_bps,
+            threshold_bps=threshold if threshold is not None else 0.0,
             reason_codes=tuple(dict.fromkeys(reasons)),
             cost_breakdown_bps={},
         )
 
     costs = {
-        "spread_bps": max(0.0, float(inputs.spread_bps or 0.0)),
-        "slippage_bps": max(0.0, float(inputs.slippage_bps or 0.0)),
-        "fee_bps": max(0.0, float(inputs.fee_bps or 0.0)),
-        "latency_penalty_bps": max(0.0, float(inputs.latency_penalty_bps)),
-        "copy_degradation_bps": max(0.0, float(inputs.copy_degradation_bps)),
-        "liquidity_penalty_bps": max(0.0, float(inputs.liquidity_penalty_bps)),
-        "volatility_penalty_bps": max(0.0, float(inputs.volatility_penalty_bps)),
-        "adverse_selection_penalty_bps": max(0.0, float(inputs.adverse_selection_penalty_bps)),
-        "crowding_penalty_bps": max(0.0, float(inputs.crowding_penalty_bps)),
-        "funding_estimate_bps": max(0.0, float(inputs.funding_estimate_bps or 0.0)),
+        "spread_bps": spread,
+        "slippage_bps": slippage,
+        "fee_bps": fee,
+        **optional_values,
+        "funding_estimate_bps": funding if funding is not None else 0.0,
     }
     total_cost = sum(costs.values())
-    net = float(inputs.leader_expected_edge_bps or 0.0) - total_cost
+    net = leader_expected_edge - total_cost
 
-    if costs["copy_degradation_bps"] > inputs.max_copy_degradation_bps:
+    if costs["copy_degradation_bps"] > max_copy_degradation:
         reasons.append("COPY_DEGRADATION_TOO_HIGH")
-    if net < inputs.min_edge_bps:
+    if net < threshold:
         reasons.append("EDGE_REMAINING_TOO_LOW")
     if net <= 0:
         reasons.append("EDGE_UNMEASURABLE" if inputs.leader_expected_edge_bps is None else "EDGE_REMAINING_TOO_LOW")
@@ -103,10 +139,10 @@ def estimate_edge_net_v12(inputs: EdgeNetV12Inputs) -> EdgeNetV12Estimate:
     return EdgeNetV12Estimate(
         measurable=True,
         accepted=not unique,
-        gross_edge_bps=round(float(inputs.leader_expected_edge_bps or 0.0), 8),
+        gross_edge_bps=round(leader_expected_edge, 8),
         total_cost_bps=round(total_cost, 8),
         net_edge_bps=round(net, 8),
-        threshold_bps=inputs.min_edge_bps,
+        threshold_bps=threshold,
         reason_codes=unique,
         cost_breakdown_bps={k: round(v, 8) for k, v in costs.items()},
     )

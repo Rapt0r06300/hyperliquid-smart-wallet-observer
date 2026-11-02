@@ -56,3 +56,16 @@ def test_v8_empty_input_reste_train_only_et_compte_huit_essais() -> None:
     assert result["heldout_evaluated"] is False
     assert result["paper_read_only"] is True
     assert result["real_execution"] is False
+
+
+def test_v8_entry_score_refuse_coercions_numeriques_et_horaires() -> None:
+    base = _trade(0)
+    for field, value in (
+        ("entry_capacity_usd", True),
+        ("entry_ts_ms", 1_800_000_000_000.5),
+        ("entry_ts_ms", "1800000000000"),
+        ("signal_ts_ms", True),
+    ):
+        row = dict(base)
+        row[field] = value
+        assert entry_efficiency_score(row) is None

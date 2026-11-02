@@ -89,7 +89,7 @@ def verify_snapshot_contract(snapshot: Mapping[str, Any] | object) -> dict[str, 
         count_path = "lineage.source_asset_inventory_count"
         if "source_asset_inventory_count" not in lineage:
             missing.append(count_path)
-        elif not _nonnegative_int(lineage["source_asset_inventory_count"]):
+        elif not _positive_int(lineage["source_asset_inventory_count"]):
             invalid.append(count_path)
 
     search = require("search", lambda value: isinstance(value, Mapping))

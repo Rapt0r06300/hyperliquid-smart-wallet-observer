@@ -10,6 +10,14 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# Direct CLI execution must work from a clean checkout without relying on the
+# caller's PYTHONPATH or an editable installation.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_SRC_ROOT = _REPO_ROOT / "src"
+for _path in (str(_SRC_ROOT), str(_REPO_ROOT)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
 from hl_observer.control_plane.resumable_campaign import (
     ANALYSIS_STAGE_BY_KIND,
     SCHEMA_VERSION_V1,
@@ -47,10 +55,24 @@ def save(path: str | Path, manifest: CampaignManifest, expected: str | None = No
     data = json.dumps(manifest.to_dict(), sort_keys=True, indent=2) + "\n"
     fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=target.name + ".")
     try:
-        os.write(fd, data.encode("utf-8"))
+        # Write through a file object and fsync before replace: os.write() is
+        # allowed to perform a short write, which could previously create a
+        # truncated checkpoint while still succeeding.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            fd = -1
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        temporary = ""
     finally:
-        os.close(fd)
-    os.replace(temporary, target)
+        if fd != -1:
+            os.close(fd)
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
 
 
 def _json_object(raw: str | None) -> dict:
@@ -192,7 +214,13 @@ def main() -> int:
         raise SystemExit("V1 manifest is immutable; historical evidence is read-only")
 
     if args.command in {"start", "acquire-lease"}:
-        token = acquire_lease(manifest, args.owner or "manual", max(60, int(args.ttl_s)), expected_phase=args.expected_phase, expected_epoch=args.expected_epoch)
+        token = acquire_lease(
+            manifest,
+            args.owner or "manual",
+            args.ttl_s,
+            expected_phase=args.expected_phase,
+            expected_epoch=args.expected_epoch,
+        )
         if args.command == "start" and manifest.status != "RUNNING":
             transition(manifest, "RUNNING", "worker_started")
         save(path, manifest, args.expected_digest)

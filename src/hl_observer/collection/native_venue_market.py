@@ -24,6 +24,14 @@ UNMEASURABLE = "UNMEASURABLE"
 _STABLE_QUOTES = ("USDT", "USDC", "USD")
 
 
+def _require_non_negative_int(value: object, *, field_name: str) -> int:
+    """Reject malformed causal clocks instead of silently truncating them."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    return value
+
+
 def canonical_coin(symbol: str) -> str:
     """Return a base-asset key shared by HL/Binance/Bybit/OKX perpetuals."""
     value = str(symbol or "").strip().upper()
@@ -122,21 +130,19 @@ class NativeMarketSnapshot:
         regression_count: int = 0,
         reason: str = "",
     ) -> "NativeMarketSnapshot":
-        now = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        now = (
+            int(time.time() * 1000)
+            if now_ms is None
+            else _require_non_negative_int(now_ms, field_name="now_ms")
+        )
         bid_f = _finite_positive(bid)
         ask_f = _finite_positive(ask)
-        try:
-            exchange_ts = int(exchange_ts_ms)
-            receive_ts = int(receive_ts_ms)
-            stale_limit = int(stale_after_ms)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("market timestamps and stale limit must be integers") from exc
+        exchange_ts = _require_non_negative_int(exchange_ts_ms, field_name="exchange_ts_ms")
+        receive_ts = _require_non_negative_int(receive_ts_ms, field_name="receive_ts_ms")
+        stale_limit = _require_non_negative_int(stale_after_ms, field_name="stale_after_ms")
         derived_quality = quality
         derived_reason = reason
-        if stale_limit < 0 or exchange_ts < 0 or receive_ts < 0:
-            derived_quality = UNMEASURABLE
-            derived_reason = derived_reason or "INVALID_MARKET_TIMESTAMPS"
-        elif receive_ts > now:
+        if receive_ts > now:
             derived_quality = DESYNC
             derived_reason = derived_reason or "FUTURE_RECEIVE_TIMESTAMP"
         elif exchange_ts > receive_ts:
@@ -196,10 +202,16 @@ class NativeMarketSnapshot:
         return self.quality == EXPLOITABLE and self.mid > 0.0
 
     def freshness_ms(self, now_ms: int | None = None) -> int:
-        now = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        now = (
+            int(time.time() * 1000)
+            if now_ms is None
+            else _require_non_negative_int(now_ms, field_name="now_ms")
+        )
         return max(0, now - self.receive_ts_ms)
 
     def with_freshness(self, *, now_ms: int, stale_after_ms: int) -> "NativeMarketSnapshot":
+        _require_non_negative_int(now_ms, field_name="now_ms")
+        _require_non_negative_int(stale_after_ms, field_name="stale_after_ms")
         if self.quality in {DESYNC, UNMEASURABLE}:
             return self
         if self.freshness_ms(now_ms) > stale_after_ms:

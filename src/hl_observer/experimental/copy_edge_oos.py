@@ -30,25 +30,57 @@ HORIZONS_DEFAUT_MS = (60_000.0, 300_000.0, 900_000.0, 3_600_000.0)
 SEUIL_VALIDATION_N = 100          # n_oos >= ça => VALIDATION ; en-dessous => PRÉLIMINAIRE (Flo : 30 = préliminaire)
 
 
+def _finite_numeric(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) else None
+
+
+def _exact_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _finite_exact_integer(value: object) -> float | None:
+    parsed = _finite_numeric(value)
+    return parsed if parsed is not None and parsed.is_integer() and parsed >= 0 else None
+
+
+def _normalise_oos_events(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only source rows with exact clocks and finite move magnitudes."""
+    normalised: list[dict[str, Any]] = []
+    for raw in events:
+        if not isinstance(raw, Mapping):
+            continue
+        ts_ms = _exact_non_negative_int(raw.get("ts_ms"))
+        move_frac = _finite_numeric(raw.get("move_frac"))
+        if ts_ms is None or move_frac is None or move_frac < 0:
+            continue
+        normalised.append({**dict(raw), "ts_ms": ts_ms, "move_frac": move_frac})
+    return normalised
+
+
 def seuils_depuis_train(events_train: list[dict], *, min_events_train: int = 20) -> tuple[float, ...]:
     """Build candidate thresholds from TRAIN data only, never from OOS."""
+    min_events = _exact_non_negative_int(min_events_train)
+    if min_events is None or min_events <= 0:
+        return ()
     values: list[float] = []
     for event in events_train:
-        try:
-            value = float(event.get("move_frac") or 0.0)
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if math.isfinite(value) and value > 0:
+        value = _finite_numeric(event.get("move_frac"))
+        if value is not None and value > 0:
             values.append(value)
     if not values:
         return ()
     values.sort(reverse=True)
     targets = (
-        min_events_train,
-        min_events_train * 2,
-        min_events_train * 5,
-        min_events_train * 10,
-        min_events_train * 25,
+        min_events,
+        min_events * 2,
+        min_events * 5,
+        min_events * 10,
+        min_events * 25,
     )
     thresholds = {
         round(values[min(len(values), target) - 1], 8)
@@ -129,8 +161,34 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
     période postérieure, PURGÉE). SECONDAIRE = généralisation par vault held-out (rectif Flo 23/07 : le
     split par vault est un test secondaire). IC bootstrap, vs placebo. Verdict NEED_MORE_DATA /
     PRÉLIMINAIRE / VALIDATION + SCALE/OBSERVE/KILL."""
-    ev = sorted(events, key=lambda e: int(e.get("ts_ms") or 0))
-    horizons_ms = tuple(float(h) for h in horizons_ms)
+    train_min = _exact_non_negative_int(min_events_train)
+    oos_min = _exact_non_negative_int(min_events_oos)
+    validation_min = _exact_non_negative_int(seuil_validation)
+    fraction = _finite_numeric(frac_train)
+    fees = _finite_numeric(frais_bps)
+    seed = _exact_non_negative_int(graine)
+    horizons_values = tuple(_finite_exact_integer(h) for h in horizons_ms)
+    thresholds_values = None if seuils is None else tuple(_finite_numeric(s) for s in seuils)
+    if (
+        train_min is None or train_min <= 0
+        or oos_min is None or oos_min <= 0
+        or validation_min is None or validation_min <= 0
+        or fraction is None or not 0.0 < fraction < 1.0
+        or fees is None or fees < 0.0
+        or seed is None
+        or not horizons_values or any(value is None or value <= 0 for value in horizons_values)
+        or thresholds_values is not None and any(value is None or value < 0 for value in thresholds_values)
+    ):
+        return {"statut": "INVALID_INPUT", "reason": "NON_FINITE_OR_NON_EXACT_PARAMETER"}
+    ev = sorted(_normalise_oos_events(events), key=lambda e: e["ts_ms"])
+    horizons_ms = tuple(value for value in horizons_values if value is not None)
+    seuils = None if thresholds_values is None else tuple(value for value in thresholds_values if value is not None)
+    min_events_train = train_min
+    min_events_oos = oos_min
+    seuil_validation = validation_min
+    frac_train = fraction
+    frais_bps = fees
+    graine = seed
     if len(ev) < (min_events_train + min_events_oos):
         return {"statut": "NEED_MORE_DATA", "n_events": len(ev), "requis": min_events_train + min_events_oos}
     purge = max(horizons_ms)                                       # la fenêtre forward la plus large

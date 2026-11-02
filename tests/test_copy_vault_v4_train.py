@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
+from hl_observer.backtesting.copy_vault_causal_selection import causal_live_observation
 from hl_observer.backtesting.copy_vault_protocol import NOTIONAL_USD
 from hl_observer.backtesting.copy_vault_v4_train import (
     _share_exceeds,
@@ -57,6 +58,29 @@ def _economic_trade(index: int, net: float, *, vault: str = "0xA") -> dict:
         "net_pnl_usd": net,
         "liquidatable_net": True,
     }
+
+
+def test_causal_live_observation_accepts_legacy_local_observation_clock() -> None:
+    assert causal_live_observation(
+        {
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "ts_ms": 1_000,
+            "observed_at_ms": 1_025,
+        }
+    ) is True
+
+
+def test_causal_live_observation_does_not_bypass_invalid_canonical_clock() -> None:
+    assert causal_live_observation(
+        {
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "ts_ms": 1_000,
+            "received_at_ms": "invalid",
+            "observed_at_ms": 1_025,
+        }
+    ) is False
 
 
 def test_replay_attend_deux_fills_et_utilise_le_notional_fixe() -> None:

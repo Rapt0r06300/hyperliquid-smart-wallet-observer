@@ -71,6 +71,54 @@ def normaliser_vault(vault: Any) -> str:
     return str(vault or "").strip().lower()
 
 
+def _strict_identity_timestamp(fill: Mapping[str, Any], field: str) -> int:
+    raw = fill.get(field)
+    if type(raw) is bool or raw is None:
+        raise ValueError(f"{field} manquant ou booleen")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{field} invalide") from None
+    if isinstance(raw, float) and not raw.is_integer():
+        raise ValueError(f"{field} non entier")
+    if value <= 0:
+        raise ValueError(f"{field} non positif")
+    return value
+
+
+def _strict_identity_number(fill: Mapping[str, Any], field: str) -> float:
+    raw = fill.get(field)
+    if type(raw) is bool or raw is None:
+        raise ValueError(f"{field} manquant ou booleen")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{field} invalide") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{field} non fini ou non positif")
+    return value
+
+
+def _identity_fields(fill: Mapping[str, Any]) -> dict[str, Any]:
+    vault = normaliser_vault(fill.get("vault"))
+    coin = preserve_native_instrument_symbol(fill.get("coin"))
+    if not vault or not coin:
+        raise ValueError("vault ou coin manquant")
+    return {
+        "vault": vault,
+        "ts_ms": _strict_identity_timestamp(fill, "ts_ms"),
+        "coin": coin,
+        "px": _strict_identity_number(fill, "px"),
+        "sz": _strict_identity_number(fill, "sz"),
+    }
+
+
+def _snapshot_marker(fill: Mapping[str, Any]) -> Any:
+    if "isSnapshot" in fill:
+        return fill.get("isSnapshot")
+    return fill.get("is_snapshot")
+
+
 # ─────────────────────────────── pagination ───────────────────────────────
 
 def plan_de_requetes(start_ms: int, end_ms: int, *, fenetre_ms: int = 24 * MS_PAR_HEURE) -> list[tuple[int, int]]:
@@ -248,6 +296,7 @@ def parser_fills_with_audit(
 def fill_identity(fill: dict) -> tuple:
     """Return one source-independent identity for a leader fill."""
 
+    fields = _identity_fields(fill)
     event_ref = (
         fill.get("hash")
         or fill.get("tid")
@@ -256,11 +305,11 @@ def fill_identity(fill: dict) -> tuple:
         or ""
     )
     return (
-        normaliser_vault(fill.get("vault")),
-        int(fill.get("ts_ms") or 0),
-        preserve_native_instrument_symbol(fill.get("coin")),
-        float(fill.get("px") or 0.0),
-        float(fill.get("sz") or 0.0),
+        fields["vault"],
+        fields["ts_ms"],
+        fields["coin"],
+        fields["px"],
+        fields["sz"],
         str(fill.get("dir") or ""),
         str(event_ref),
     )
@@ -274,12 +323,9 @@ def canonical_fill_id(fill: Mapping[str, Any]) -> str:
     stream.  Source provenance remains stored separately on the event.
     """
 
+    fields = _identity_fields(fill)
     identity = {
-        "vault": str(fill.get("vault") or "").lower(),
-        "ts_ms": int(fill.get("ts_ms") or 0),
-        "coin": preserve_native_instrument_symbol(fill.get("coin")),
-        "px": float(fill.get("px") or 0.0),
-        "sz": float(fill.get("sz") or 0.0),
+        **fields,
         "dir": str(fill.get("dir") or ""),
         "tid": fill.get("tid"),
         "oid": fill.get("oid"),
@@ -301,9 +347,9 @@ def _preuve_fill_score(fill: dict) -> tuple[int, int, int]:
     live = source == "LIVE_WS"
     causal_live = False
     try:
-        ts_ms = int(fill.get("ts_ms") or 0)
-        received_at_ms = int(fill.get("received_at_ms") or 0)
-        causal_live = live and fill.get("isSnapshot") is False and received_at_ms >= ts_ms > 0
+        ts_ms = _strict_identity_timestamp(fill, "ts_ms")
+        received_at_ms = _strict_identity_timestamp(fill, "received_at_ms")
+        causal_live = live and _snapshot_marker(fill) is False and received_at_ms >= ts_ms
     except (TypeError, ValueError, OverflowError):
         causal_live = False
     refs = sum(fill.get(name) not in (None, "") for name in ("hash", "tid", "oid", "stable_event_id"))
@@ -330,7 +376,7 @@ def dedupliquer(fills: list[dict]) -> list[dict]:
     return sorted(
         par_cle.values(),
         key=lambda x: (
-            int(x.get("ts_ms") or 0),
+            _strict_identity_timestamp(x, "ts_ms"),
             str(x.get("coin") or ""),
             repr(fill_identity(x)),
         ),

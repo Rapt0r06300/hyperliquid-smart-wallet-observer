@@ -90,6 +90,27 @@ def test_curseurs_ligne_incomplete_non_consommee(tmp_path):
     assert len(ev2) == 1 and ev2[0]["tid"] == 1
 
 
+def test_curseur_corrompu_ou_limite_tronquable_refuse_sans_repartir_du_debut(tmp_path):
+    rd = tmp_path / "run"
+    rd.mkdir()
+    src = tmp_path / "s.jsonl"
+    src.write_text(json.dumps({"tid": 0, "coin": "BTC"}) + "\n", encoding="utf-8")
+    (rd / "cursors.json").write_text(
+        json.dumps({str(src.resolve()): {"offset": "0"}}), encoding="utf-8"
+    )
+
+    events, info = CUR.nouveaux_evenements(tmp_path, rd, src)
+    assert events == []
+    assert info == {"erreur": "CURSEUR_INVALIDE"}
+
+    (rd / "cursors.json").write_text(
+        json.dumps({str(src.resolve()): {"offset": 0}}), encoding="utf-8"
+    )
+    events, info = CUR.nouveaux_evenements(tmp_path, rd, src, max_events=0)
+    assert events == []
+    assert info == {"erreur": "MAX_EVENTS_INVALIDE"}
+
+
 def test_scanner_new_events_et_fenetres(tmp_path):
     rd = tmp_path / "run"; rd.mkdir()
     _donnees(tmp_path, n=5)

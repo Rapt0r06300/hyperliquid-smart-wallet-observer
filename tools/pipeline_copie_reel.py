@@ -27,6 +27,7 @@ import functools  # noqa: E402
 
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
 from hl_observer.collection import vault_ledger as VL  # noqa: E402
+from hl_observer.backtesting.copy_vault_causal_selection import causal_live_observation  # noqa: E402
 from hl_observer.experimental.copy_edge_forward import (charger_prix_tape_candles, charger_prix_tape,  # noqa: E402
                                                         rendement_forward, rendement_forward_candles, geler)
 from hl_observer.experimental.copy_edge_oos import (  # noqa: E402
@@ -92,6 +93,23 @@ def _charger_jsonl(path: Path) -> list[dict]:
     except OSError:
         pass
     return rows
+
+
+def _strict_positive_timestamp_ms(value: object) -> int | None:
+    """Parse a positive millisecond timestamp without truncating invalid input."""
+
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        return int(value) if value.is_integer() and value > 0 else None
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw.isdigit():
+            parsed = int(raw)
+            return parsed if parsed > 0 else None
+    return None
 
 
 def _nav_history(root: Path) -> dict[str, list[tuple[int, float]]]:
@@ -188,8 +206,16 @@ def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
 
     seen: set[str] = set()
     canonical: list[dict] = []
+    invalid_episode_timestamps = 0
     duplicate_episodes = 0
-    for episode in sorted(episodes, key=lambda row: int(row.get("ts_ms") or 0)):
+    timestamped_episodes: list[tuple[int, dict]] = []
+    for episode in episodes:
+        timestamp_ms = _strict_positive_timestamp_ms(episode.get("ts_ms"))
+        if timestamp_ms is None:
+            invalid_episode_timestamps += 1
+            continue
+        timestamped_episodes.append((timestamp_ms, episode))
+    for timestamp_ms, episode in sorted(timestamped_episodes, key=lambda item: item[0]):
         event_id = str(episode.get("fill_id") or "")
         if not event_id:
             event_id = repr((
@@ -201,7 +227,7 @@ def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
             duplicate_episodes += 1
             continue
         seen.add(event_id)
-        canonical.append(dict(episode, event_id=event_id))
+        canonical.append(dict(episode, event_id=event_id, ts_ms=timestamp_ms))
     return canonical, {
         "episode_source": source,
         **source_audit,
@@ -211,6 +237,7 @@ def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
         "raw_episodes": len(episodes),
         "canonical_episodes": len(canonical),
         "duplicate_episodes_rejected": duplicate_episodes,
+        "invalid_episode_timestamps_rejected": invalid_episode_timestamps,
     }
 
 
@@ -229,8 +256,7 @@ def charger_entrees_alpha_avec_audit(root: Path) -> tuple[list[dict], dict[str, 
         if nav is None:
             rejected += 1
             if (
-                episode.get("source") == "LIVE_WS"
-                and episode.get("is_snapshot") is False
+                causal_live_observation(episode)
                 and int(episode.get("observed_at_ms") or 0) >= ts_ms > 0
             ):
                 causal_nav_rejected += 1
@@ -253,20 +279,17 @@ def charger_entrees_alpha_avec_audit(root: Path) -> tuple[list[dict], dict[str, 
         "missing_or_stale_asof_nav_rejected": rejected,
         "causal_episodes": sum(
             1 for row in episodes
-            if row.get("source") == "LIVE_WS"
-            and row.get("is_snapshot") is False
+            if causal_live_observation(row)
             and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
         ),
         "causal_alpha_before_nav_gate": sum(
             1 for row in alpha
-            if row.get("source") == "LIVE_WS"
-            and row.get("is_snapshot") is False
+            if causal_live_observation(row)
             and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
         ),
         "causal_alpha_entries": sum(
             1 for row in out
-            if row.get("source") == "LIVE_WS"
-            and row.get("is_snapshot") is False
+            if causal_live_observation(row)
             and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
         ),
         "causal_missing_or_stale_asof_nav_rejected": causal_nav_rejected,
@@ -301,8 +324,7 @@ def charger_entrees_alpha_notional_fixe_avec_audit(
     causal = [
         row
         for row in out
-        if row.get("source") == "LIVE_WS"
-        and row.get("is_snapshot") is False
+        if causal_live_observation(row)
         and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
     ]
     audit.update(

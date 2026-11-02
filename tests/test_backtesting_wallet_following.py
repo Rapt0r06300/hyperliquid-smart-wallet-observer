@@ -1,5 +1,6 @@
 from hl_observer.backtesting.replay_engine import replay_events_with_delay
 from hl_observer.backtesting.wallet_following_simulator import simulate_wallet_following
+import pytest
 
 
 def test_same_strategy_delay_changes_event_times():
@@ -7,6 +8,24 @@ def test_same_strategy_delay_changes_event_times():
     zero = replay_events_with_delay(events, delay_seconds=0)
     delayed = replay_events_with_delay(events, delay_seconds=60)
     assert zero[0]["effective_ts_ms"] != delayed[0]["effective_ts_ms"]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"event_id": "", "ts_ms": 1000},
+        {"event_id": "a", "ts_ms": 0},
+        {"event_id": "a"},
+    ],
+)
+def test_replay_rejects_missing_identity_or_clock(event):
+    with pytest.raises(ValueError):
+        replay_events_with_delay([event], delay_seconds=0)
+
+
+def test_replay_rejects_non_mapping_events():
+    with pytest.raises(ValueError):
+        replay_events_with_delay(["not-an-event"], delay_seconds=0)
 
 
 def test_wallet_following_applies_fees_and_slippage():

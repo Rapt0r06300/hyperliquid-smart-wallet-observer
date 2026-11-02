@@ -56,6 +56,50 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 REPOSITORY = DEFAULT_REPOSITORY
 
 
+def _require_non_negative_int(value: Any, *, field: str) -> int:
+    """Accept only an actual non-negative integer, never a coercible value."""
+    if type(value) is not int or value < 0:
+        raise RestoreError(f"SAFE {field} must be a non-negative integer")
+    return value
+
+
+def _require_identity_text(value: Any, *, field: str) -> str:
+    """Reject non-string or empty immutable identity fields."""
+    if not isinstance(value, str) or not value:
+        raise RestoreError(f"SAFE {field} must be a non-empty string")
+    return value
+
+
+def _require_sha256(value: Any, *, field: str) -> str:
+    """Return a canonical lowercase SHA-256 digest or fail closed."""
+    if not isinstance(value, str):
+        raise RestoreError(f"SAFE {field} must be a SHA-256 string")
+    digest = value.lower()
+    if HEX64.fullmatch(digest) is None:
+        raise RestoreError(f"SAFE {field} must be a SHA-256 string")
+    return digest
+
+
+def _normalise_required(
+    required: Mapping[tuple[str, str], tuple[int, str]],
+) -> dict[tuple[str, str], tuple[int, str]]:
+    """Validate the immutable outer-asset catalog before any partitioning."""
+    normalised: dict[tuple[str, str], tuple[int, str]] = {}
+    for key, value in required.items():
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise RestoreError("SAFE required asset key is invalid")
+        tag = _require_identity_text(key[0], field="release tag")
+        name = _require_identity_text(key[1], field="asset name")
+        if not isinstance(value, tuple) or len(value) != 2:
+            raise RestoreError(f"SAFE required asset identity is invalid: {tag}/{name}")
+        size = _require_non_negative_int(value[0], field=f"asset size {tag}/{name}")
+        digest = _require_sha256(value[1], field=f"asset digest {tag}/{name}")
+        if (tag, name) in normalised:
+            raise RestoreError(f"duplicate SAFE required asset: {tag}/{name}")
+        normalised[(tag, name)] = (size, digest)
+    return normalised
+
+
 def _sha_lines(lines: Iterable[str]) -> str:
     digest = hashlib.sha256()
     for line in lines:
@@ -65,18 +109,10 @@ def _sha_lines(lines: Iterable[str]) -> str:
 
 
 def _member_line(row: Mapping[str, Any]) -> str:
-    dataset_id = str(row.get("dataset_id") or "")
-    member = str(row.get("release_asset") or "")
-    size = row.get("bytes")
-    digest = str(row.get("sha256") or "").lower()
-    if (
-        not dataset_id
-        or not member
-        or type(size) is not int
-        or size < 0
-        or HEX64.fullmatch(digest) is None
-    ):
-        raise RestoreError("SAFE member has invalid immutable identity")
+    dataset_id = _require_identity_text(row.get("dataset_id"), field="dataset id")
+    member = _require_identity_text(row.get("release_asset"), field="member name")
+    size = _require_non_negative_int(row.get("bytes"), field="member size")
+    digest = _require_sha256(row.get("sha256"), field="member digest")
     return f"{dataset_id}\0{member}\0{size}\0{digest}"
 
 
@@ -85,13 +121,17 @@ def build_outer_specs(
     required: Mapping[tuple[str, str], tuple[int, str]],
 ) -> list[dict[str, Any]]:
     """Build compact expected evidence for each unique outer Release asset."""
+    required = _normalise_required(required)
     grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {
         key: [] for key in required
     }
     for row in rows:
-        tag = str(row.get("release_tag") or "")
-        member = str(row.get("release_asset") or "")
-        outer = str(row.get("release_container_asset") or member)
+        tag = _require_identity_text(row.get("release_tag"), field="release tag")
+        member = _require_identity_text(row.get("release_asset"), field="member name")
+        container = row.get("release_container_asset")
+        if container is not None and not isinstance(container, str):
+            raise RestoreError("SAFE container asset name must be a string")
+        outer = container or member
         key = (tag, outer)
         if key not in grouped:
             raise RestoreError("SAFE row is absent from required outer assets")
@@ -109,7 +149,10 @@ def build_outer_specs(
             "asset_bytes": size,
             "asset_sha256": digest,
             "member_rows": len(lines),
-            "member_bytes": sum(int(row["bytes"]) for row in members),
+            "member_bytes": sum(
+                _require_non_negative_int(row.get("bytes"), field="member size")
+                for row in members
+            ),
             "member_set_sha256": _sha_lines(lines),
             "rows": members,
         })
@@ -122,12 +165,17 @@ def assign_partitions(
     """Stable largest-first byte balancing with deterministic tie breaks."""
     if type(partition_count) is not int or not 1 <= partition_count <= 64:
         raise ValueError("partition_count must be between 1 and 64")
+    validated_specs = list(specs)
+    for spec in validated_specs:
+        _require_identity_text(spec.get("release_tag"), field="release tag")
+        _require_identity_text(spec.get("asset_name"), field="asset name")
+        _require_non_negative_int(spec.get("asset_bytes"), field="asset size")
     buckets: list[list[Mapping[str, Any]]] = [[] for _ in range(partition_count)]
     totals = [0] * partition_count
     ordered = sorted(
-        specs,
+        validated_specs,
         key=lambda item: (
-            -int(item["asset_bytes"]),
+            -item["asset_bytes"],
             str(item["release_tag"]),
             str(item["asset_name"]),
         ),
@@ -223,6 +271,8 @@ def write_plan(
     *, index: Path, metrics: Path, partitions: int, output: Path,
     max_asset_bytes: int,
 ) -> dict[str, Any]:
+    if type(max_asset_bytes) is not int or max_asset_bytes < 0:
+        raise ValueError("max_asset_bytes must be a non-negative integer")
     proof, specs = _load_specs(index, metrics)
     buckets = assign_partitions(specs, partitions)
     largest = max((int(spec["asset_bytes"]) for spec in specs), default=0)
@@ -330,6 +380,11 @@ def verify_partition(
     output: Path, token: str | None, work_root: Path, git_sha: str,
     reserve_bytes: int,
 ) -> dict[str, Any]:
+    if type(partitions) is not int or not 1 <= partitions <= 64:
+        raise ValueError("partitions must be between 1 and 64")
+    if type(partition) is not int:
+        raise ValueError("partition must be an integer")
+    _require_non_negative_int(reserve_bytes, field="reserve bytes")
     if not 0 <= partition < partitions:
         raise ValueError("partition index is outside the configured matrix")
     proof, specs = _load_specs(index, metrics)
@@ -439,6 +494,8 @@ def aggregate(
     *, index: Path, metrics: Path, partitions: int,
     receipts: Path, output: Path, git_sha: str,
 ) -> dict[str, Any]:
+    if type(partitions) is not int or not 1 <= partitions <= 64:
+        raise ValueError("partitions must be between 1 and 64")
     # A failed rerun must never leave a previous full-corpus certificate in place.
     if output.is_symlink():
         raise RestoreError("unsafe certificate output symlink")

@@ -17,6 +17,7 @@ from hl_observer.event_intelligence.market_features import MarketStateObservatio
 from hl_observer.event_intelligence.external_event import (
     ExternalEvent,
     ExternalEventReplayGuard,
+    _require_non_negative_int,
 )
 from hl_observer.event_intelligence.health import (
     detect_intelligence_gap,
@@ -55,12 +56,17 @@ def build_runtime_evidence(
     expected_sources: Iterable[str] = (),
     max_source_age_ms: int = 300_000,
 ) -> dict[str, object]:
+    validated_now_ms = _require_non_negative_int(now_ms, field_name="now_ms")
+    validated_max_age_ms = _require_non_negative_int(
+        max_source_age_ms,
+        field_name="max_source_age_ms",
+    )
     rows = tuple(sorted(events, key=lambda row: (row.ingest_ts_ms, row.source, row.event_id, row.revision)))
     guard = ExternalEventReplayGuard()
     accepted: list[ExternalEvent] = []
     rejection_counts: Counter[str] = Counter()
     for event in rows:
-        decision = guard.observe(event, decision_ts_ms=int(now_ms))
+        decision = guard.observe(event, decision_ts_ms=validated_now_ms)
         if decision.accepted:
             accepted.append(event)
         else:
@@ -127,7 +133,7 @@ def build_runtime_evidence(
             event,
             market_moved=False,
             liquidation_spike=False,
-            event_available_before_move=event.ingest_ts_ms <= int(now_ms),
+            event_available_before_move=event.ingest_ts_ms <= validated_now_ms,
         )
         regimes[label.regime.value] += 1
         relevance = map_event_to_assets(event)
@@ -144,15 +150,15 @@ def build_runtime_evidence(
         gap = detect_intelligence_gap(
             source=source,
             last_success_ms=last_success,
-            now_ms=int(now_ms),
-            max_age_ms=int(max_source_age_ms),
+            now_ms=validated_now_ms,
+            max_age_ms=validated_max_age_ms,
             fetch_ok=bool(source_events),
         )
         health = evaluate_direct_source_health(
             source_events,
             last_fetch_ms=last_success,
-            now_ms=int(now_ms),
-            max_age_ms=int(max_source_age_ms),
+            now_ms=validated_now_ms,
+            max_age_ms=validated_max_age_ms,
             fetch_ok=bool(source_events),
             contract_complete=True,
         )
@@ -284,16 +290,22 @@ def build_research_protocol_evidence(
     embargo_ms: int = 300_000,
     minimum_independent_events: int = 20,
 ) -> dict[str, object]:
+    validated_now_ms = _require_non_negative_int(now_ms, field_name="now_ms")
+    validated_embargo_ms = _require_non_negative_int(embargo_ms, field_name="embargo_ms")
+    validated_minimum_events = _require_non_negative_int(
+        minimum_independent_events,
+        field_name="minimum_independent_events",
+    )
     rows = tuple(sorted(observations, key=lambda row: (row.ts_ms, row.observation_id)))
-    split = purged_chronological_split(rows, embargo_ms=int(embargo_ms))
+    split = purged_chronological_split(rows, embargo_ms=validated_embargo_ms)
     training_cutoff_ms = max(
         (row.end_ts_ms if row.end_ts_ms is not None else row.ts_ms for row in split.train),
-        default=int(now_ms),
+        default=validated_now_ms,
     )
     freeze = freeze_event_research(
         config or {},
         training_cutoff_ms=int(training_cutoff_ms),
-        created_at_ms=int(now_ms),
+        created_at_ms=validated_now_ms,
         methodology_version=str(methodology_version),
     )
     for row in split.forward:
@@ -308,7 +320,7 @@ def build_research_protocol_evidence(
         split.oos,
         (),
         (),
-        min_independent_events=int(minimum_independent_events),
+        min_independent_events=validated_minimum_events,
     )
     return {
         "schema": "alina.event_intelligence_research_protocol.v1",

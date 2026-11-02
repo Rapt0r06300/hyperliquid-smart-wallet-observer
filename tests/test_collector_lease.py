@@ -151,6 +151,41 @@ def test_lease_fails_closed_for_wrong_root_and_safety_tampering(tmp_path: Path) 
     )
 
 
+@pytest.mark.parametrize("duration", [True, "60", float("nan"), float("inf"), 29.999])
+def test_lease_creation_rejects_non_strict_duration_values(
+    tmp_path: Path, duration: object
+) -> None:
+    with pytest.raises(ValueError):
+        create_lease(tmp_path, duration_s=duration)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("expires_at_ms", [True, "160000", 160000.5, 0])
+def test_lease_validation_rejects_non_exact_expiration_values(
+    tmp_path: Path, expires_at_ms: object
+) -> None:
+    lease_file, payload = create_lease(
+        tmp_path, duration_s=60.0, now=100.0, token="token"
+    )
+    payload["expires_at_ms"] = expires_at_ms
+    lease_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert validate_lease(lease_file, "token", tmp_path, now=101.0)[:2] == (
+        False,
+        "COLLECTOR_LEASE_EXPIRY_INVALID",
+    )
+
+
+def test_lease_validation_rejects_non_finite_clock(tmp_path: Path) -> None:
+    lease_file, _ = create_lease(
+        tmp_path, duration_s=60.0, now=100.0, token="token"
+    )
+
+    assert validate_lease(lease_file, "token", tmp_path, now=float("nan"))[:2] == (
+        False,
+        "COLLECTOR_LEASE_CLOCK_INVALID",
+    )
+
+
 def test_bounded_start_reuses_launcher_collector_and_starts_only_missing(
     tmp_path: Path,
 ) -> None:

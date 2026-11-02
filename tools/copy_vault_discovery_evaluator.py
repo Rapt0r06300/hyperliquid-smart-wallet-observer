@@ -45,6 +45,28 @@ def _number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _economic_row_is_valid(row: Mapping[str, Any]) -> bool:
+    """Return whether a row is safe to use in an economic summary.
+
+    Missing values must not silently become zero: that would turn an incomplete
+    observation into apparently measured PnL, cost, or ROI.  Timestamps are
+    checked here as well because the summary and its day count depend on them.
+    """
+
+    timestamp = row.get("signal_ts_ms")
+    if type(timestamp) is not int or timestamp <= 0:
+        return False
+    net = _number(row.get("net_pnl_usd"))
+    gross = _number(row.get("gross_pnl_usd"))
+    notional = _number(row.get("notional_usd"))
+    return (
+        net is not None
+        and gross is not None
+        and notional is not None
+        and notional > 0.0
+    )
+
+
 def _metaorder_feature_index() -> dict[str, dict[str, float]]:
     """Rebuild causal prefix features from the canonical Copy-Vault loader once."""
 
@@ -185,19 +207,32 @@ def evaluate_feature_rows(
 
     feature = MECHANISM_FEATURES.get(str(mechanism))
     train = [dict(row) for row in rows if str(row.get("walk_forward_segment") or "").lower() == "train"]
-    available = [
+    feature_rows = [
         row for row in train if feature and _number(row.get(feature)) is not None
     ]
-    if not feature or not available:
+    if not feature or not feature_rows:
+        reason = "FEATURE_UNAVAILABLE"
+        available: list[dict[str, Any]] = []
+    elif not all(_economic_row_is_valid(row) for row in feature_rows):
+        reason = "ECONOMIC_INPUT_UNMEASURABLE"
+        available = []
+    else:
+        reason = ""
+        available = feature_rows
+    if not available:
         return {
             "candidate_verdict": "REJECT",
-            "candidate_reasons": ["FEATURE_UNAVAILABLE"],
+            "candidate_reasons": [reason],
             "mechanism": str(mechanism),
+            "feature": feature,
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             "heldout_evaluated": False,
             "sample_count": 0,
-            "net_usd": 0.0,
-            "pf": 0.0,
+            "net_usd": None,
+            "gross_usd": None,
+            "costs_usd": None,
+            "roi": None,
+            "pf": None,
             "family_trial_count": int(family_trial_count),
         }
     fraction = min(1.0, max(0.05, float(keep_fraction)))
@@ -211,8 +246,8 @@ def evaluate_feature_rows(
         ),
     )[:keep]
     selected.sort(key=lambda row: int(row.get("signal_ts_ms") or 0))
-    net_values = [float(row.get("net_pnl_usd") or 0.0) for row in selected]
-    gross = sum(float(row.get("gross_pnl_usd") or 0.0) for row in selected)
+    net_values = [float(row["net_pnl_usd"]) for row in selected]
+    gross = sum(float(row["gross_pnl_usd"]) for row in selected)
     costs = gross - sum(net_values)
     gains = sum(value for value in net_values if value > 0.0)
     losses = -sum(value for value in net_values if value < 0.0)
@@ -272,7 +307,7 @@ def evaluate_feature_rows(
         "costs_usd": round(costs, 8),
         "pf": round(pf, 8),
         "max_drawdown_usd": round(drawdown, 8),
-        "roi": round(sum(net_values) / max(1.0, sum(float(row.get("notional_usd") or 0.0) for row in selected)), 8),
+        "roi": round(sum(net_values) / sum(float(row["notional_usd"]) for row in selected), 8),
         "largest_vault_share": max(vault_counts.values(), default=0) / len(selected),
         "largest_coin_share": max(coin_counts.values(), default=0) / len(selected),
         "concentration": max(vault_counts.values(), default=0) / len(selected),

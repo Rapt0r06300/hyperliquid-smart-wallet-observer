@@ -4,6 +4,7 @@ import pytest
 
 from hl_observer.control_plane.dispatch_receipt import (
     DispatchReceipt,
+    generate_request_id,
     validate_dispatch_receipt,
 )
 
@@ -58,3 +59,21 @@ def test_v1_complete_receipt_upgrades_to_terminal_state():
     validate_dispatch_receipt(upgraded)
     assert upgraded.status == "COMPLETE"
     assert upgraded.terminal_at_utc == upgraded.dispatched_at_utc
+
+
+def test_dispatch_receipt_rejects_boolean_epochs():
+    with pytest.raises(ValueError, match="invalid phase epoch"):
+        validate_dispatch_receipt(_base(phase_epoch=True))
+
+    with pytest.raises(ValueError, match="source collection epoch"):
+        validate_dispatch_receipt(
+            _base(
+                creation_phase="ANALYZE",
+                source_collection_epoch=True,
+            )
+        )
+
+
+def test_request_id_generation_rejects_boolean_epoch():
+    with pytest.raises(ValueError, match="positive integer"):
+        generate_request_id("collect", "a" * 40, True, "market_collection", {})

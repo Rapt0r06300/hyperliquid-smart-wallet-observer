@@ -56,6 +56,11 @@ def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _is_exact_int(value: Any, *, minimum: int = 0) -> bool:
+    """Return true only for a real integer, never for bool or coercible text."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
 def require_campaign_economic_scope(m: CampaignManifest) -> str | None:
     """Require an explicit canonical active family before executing ANALYZE work."""
     if (
@@ -163,15 +168,32 @@ def validate_manifest(m: CampaignManifest) -> None:
         raise ValueError("invalid operator_request_id")
     if m.status not in ALL_STATES:
         raise ValueError("invalid status")
-    if not m.paper_only or not m.read_only or m.real_execution:
+    if m.paper_only is not True or m.read_only is not True or m.real_execution is not False:
         raise ValueError("unsafe execution flags")
     for name in ("code_sha", "config_sha256", "work_plan_sha256"):
         if not getattr(m, name):
             raise ValueError(f"missing pinned {name}")
     if _parse_ts(m.expires_at) <= _parse_ts(m.created_at):
         raise ValueError("invalid expiry")
-    if m.chunk_index < 0 or m.attempts < 0:
-        raise ValueError("negative counters")
+    for name in (
+        "chunk_index",
+        "attempts",
+        "consecutive_failures",
+        "no_progress_count",
+    ):
+        if not _is_exact_int(getattr(m, name), minimum=0):
+            raise ValueError(f"invalid non-negative counter: {name}")
+    if not isinstance(m.limits, Mapping):
+        raise ValueError("limits must be a mapping")
+    for name in (
+        "max_attempts",
+        "max_chunks",
+        "max_wall_clock_s",
+        "max_consecutive_failures",
+        "max_no_progress",
+    ):
+        if not _is_exact_int(m.limits.get(name), minimum=1):
+            raise ValueError(f"invalid positive stop limit: {name}")
 
     # Schema V2 Specific Validations
     if m.schema_version == SCHEMA_VERSION_V2:
@@ -189,10 +211,10 @@ def validate_manifest(m: CampaignManifest) -> None:
             raise ValueError("ANALYZE manifest has collection-only or unknown kind")
         if m.creation_phase == "IDLE":
             raise ValueError("V2 campaign cannot be created in IDLE")
-        if not isinstance(m.phase_epoch, int) or m.phase_epoch < 1:
+        if not _is_exact_int(m.phase_epoch, minimum=1):
             raise ValueError("V2 manifest requires positive integer phase_epoch")
         if m.creation_phase == "ANALYZE":
-            if not isinstance(m.source_collection_epoch, int) or m.source_collection_epoch < 1:
+            if not _is_exact_int(m.source_collection_epoch, minimum=1):
                 raise ValueError("V2 ANALYZE manifest requires positive integer source_collection_epoch")
             if not m.collection_cutoff_at_utc:
                 raise ValueError("V2 ANALYZE manifest requires collection_cutoff_at_utc")
@@ -254,6 +276,8 @@ def acquire_lease(
     expected_epoch: int | None = None,
     now: str | None = None,
 ) -> str:
+    if not _is_exact_int(ttl_s, minimum=1):
+        raise ValueError("lease ttl_s must be a positive integer")
     current = _parse_ts(now or _now())
 
     # V1 manifests remain readable as historical evidence but cannot be executed.
@@ -377,9 +401,20 @@ def select_due_campaigns(
     current_analysis_stage: str | None = None,
     now: str | None = None,
 ) -> list[CampaignManifest]:
+    if current_phase not in (None, "COLLECT", "ANALYZE"):
+        raise ValueError("invalid current phase")
+    if current_epoch is not None and not _is_exact_int(current_epoch, minimum=1):
+        raise ValueError("current_epoch must be a positive integer")
+    if current_analysis_stage is not None and current_analysis_stage not in set(ANALYSIS_STAGE_BY_KIND.values()):
+        raise ValueError("invalid current analysis stage")
     current = _parse_ts(now or _now())
     buckets: dict[str, list[CampaignManifest]] = {kind: [] for kind in CAMPAIGN_KIND_ORDER}
     for m in items:
+        try:
+            validate_manifest(m)
+        except (TypeError, ValueError, KeyError) as exc:
+            logging.warning("campaign excluded before scheduling: invalid manifest: %s", exc)
+            continue
         # V1 remains readable evidence but is never executable after cutover.
         if m.schema_version != SCHEMA_VERSION_V2:
             continue

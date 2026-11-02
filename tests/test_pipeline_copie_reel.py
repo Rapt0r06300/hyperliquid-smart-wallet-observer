@@ -96,6 +96,7 @@ def test_notional_fixe_preserve_entree_sans_inventer_nav(tmp_path):
         "taille_usd": 100.0,
         "source": "LIVE_WS",
         "is_snapshot": False,
+        "received_at_ms": 205,
         "fill_id": "causal-entry",
     }
     (data / "vault_episodes.jsonl").write_text(json.dumps(entry), encoding="utf-8")
@@ -126,6 +127,24 @@ def test_pipeline_reconstruit_depuis_fills_dedupliques_et_preserve_identite(tmp_
     assert entries[0]["oid"] == 42 and entries[0]["fill_id"]
     assert audit["duplicate_fills_rejected"] == 1
     assert audit["episode_source"] == "vault_fills_deduped_reconstructed"
+
+
+def test_pipeline_rejette_timestamps_episode_non_entiers_sans_troncature(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    rows = [
+        {"vault": "0xA", "ts_ms": 1.5, "coin": "BTC", "action": "OPEN", "direction": 1,
+         "taille_usd": 100.0, "fill_id": "fractional"},
+        {"vault": "0xA", "ts_ms": 2_000, "coin": "SOL", "action": "OPEN", "direction": 1,
+         "taille_usd": 100.0, "fill_id": "valid"},
+    ]
+    (data / "vault_episodes.jsonl").write_text("\n".join(map(json.dumps, rows)))
+
+    episodes, audit = PR._episodes_canoniques(tmp_path)
+
+    assert [row["event_id"] for row in episodes] == ["valid"]
+    assert episodes[0]["ts_ms"] == 2_000
+    assert audit["invalid_episode_timestamps_rejected"] == 1
 
 
 def test_pipeline_fusionne_live_causal_exclut_snapshots_et_prefere_preuve_ws(tmp_path):

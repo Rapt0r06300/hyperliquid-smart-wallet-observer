@@ -61,6 +61,15 @@ def test_capacity_curve():
     assert c["capacity_before_edge_decay_usd"] >= 100.0     # rempli plein sous 20 bps
 
 
+def test_capacity_curve_empty_book_is_unmeasurable_not_zero():
+    empty = CC.book_walk({}, 100.0, side="BUY")
+    assert empty["vwap"] == CC.UNMEASURABLE
+    assert empty["base_remplie"] == CC.UNMEASURABLE
+    assert empty["quote_rempli_usd"] == CC.UNMEASURABLE
+    curve = CC.capacity_curve({}, edge_bps=20.0, side="BUY", notionals=(50, 100))
+    assert curve["capacity_before_edge_decay_usd"] == CC.UNMEASURABLE
+
+
 def test_exit_factory_stop_loss():
     chemin = [0.0, -10.0, -35.0, 5.0]
     o = EF.simuler_exit(chemin, regle="STOP_LOSS", sl_bps=30.0)

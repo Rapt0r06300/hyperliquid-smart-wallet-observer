@@ -35,6 +35,27 @@ def test_need_more_data_si_trop_peu():
     assert r["statut"] == "NEED_MORE_DATA"
 
 
+def test_mesurer_oos_rejette_parametres_tronquables_et_evenements_non_finis():
+    event = _events_multi_vault(n=2)[0]
+    result = mesurer_oos(
+        [event, {**event, "ts_ms": 1.5}],
+        _tape_pic([event]),
+        horizons_ms=(300_000.5,),
+        min_events_train=1,
+        min_events_oos=1,
+    )
+    assert result["statut"] == "INVALID_INPUT"
+
+    valid = mesurer_oos(
+        [event, {**event, "move_frac": float("nan")}],
+        _tape_pic([event]),
+        horizons_ms=(300_000,),
+        min_events_train=1,
+        min_events_oos=1,
+    )
+    assert valid["statut"] == "NEED_MORE_DATA"
+
+
 def test_oos_walk_forward_temporel_primaire_generalisation_vault_secondaire():
     ev = _events_multi_vault()
     tape = _tape_pic(ev)

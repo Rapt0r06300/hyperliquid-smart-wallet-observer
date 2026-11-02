@@ -43,6 +43,8 @@ BONFERRONI_TRIAL_COUNT = PRIOR_FAMILY_TRIAL_COUNT + NEW_TRIAL_COUNT
 
 
 def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -50,15 +52,20 @@ def _finite_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def entry_efficiency_score(row: Mapping[str, Any]) -> float | None:
     """Return a dimensionless score using only decision-time fields."""
 
     capacity = _finite_number(row.get("entry_capacity_usd"))
     notional = _finite_number(row.get("notional_usd"))
-    try:
-        entry_ms = int(row.get("entry_ts_ms") or 0)
-        signal_ms = int(row.get("signal_ts_ms") or 0)
-    except (TypeError, ValueError, OverflowError):
+    entry_ms = _strict_positive_int(row.get("entry_ts_ms"))
+    signal_ms = _strict_positive_int(row.get("signal_ts_ms"))
+    if entry_ms is None or signal_ms is None:
         return None
     delay_ms = entry_ms - signal_ms
     if (
@@ -66,7 +73,6 @@ def entry_efficiency_score(row: Mapping[str, Any]) -> float | None:
         or notional is None
         or capacity <= 0.0
         or notional <= 0.0
-        or signal_ms <= 0
         or delay_ms < 0
     ):
         return None
@@ -95,7 +101,7 @@ def select_entry_efficiency(
     scored.sort(
         key=lambda item: (
             -item[0],
-            int(item[1].get("entry_ts_ms") or 0),
+            _strict_positive_int(item[1].get("entry_ts_ms")) or 0,
             str(item[1].get("trade_id") or ""),
         )
     )
@@ -115,7 +121,7 @@ def select_entry_efficiency(
     ]
     selected.sort(
         key=lambda row: (
-            int(row.get("entry_ts_ms") or 0),
+            _strict_positive_int(row.get("entry_ts_ms")) or 0,
             str(row.get("trade_id") or ""),
         )
     )

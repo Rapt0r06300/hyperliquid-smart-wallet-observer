@@ -606,6 +606,31 @@ def test_gold_requires_sequence_and_exchange_timestamp() -> None:
     assert determine_replay_quality(records) is ReplayQuality.SILVER
 
 
+def test_replay_quality_is_unmeasurable_when_one_row_is_invalid() -> None:
+    types = {
+        HistoricalDataType.TRADES,
+        HistoricalDataType.BBO,
+        HistoricalDataType.FUNDING,
+        HistoricalDataType.OPEN_INTEREST,
+    }
+    records = [
+        _record(data_type, index + 1, receive_timestamp=index + 2)
+        for index, data_type in enumerate(types)
+    ]
+    records[-1] = _record(
+        HistoricalDataType.OPEN_INTEREST,
+        0,
+        receive_timestamp=5,
+    )
+    assert determine_replay_quality(records) is ReplayQuality.UNMEASURABLE
+
+
+def test_point_in_time_excludes_invalid_rows_before_ordering() -> None:
+    valid = _record(HistoricalDataType.BBO, 10, receive_timestamp=11)
+    invalid = _record(HistoricalDataType.TRADES, 0, receive_timestamp=12)
+    assert order_point_in_time([invalid, valid], decision_timestamp=20) == [valid]
+
+
 def test_point_in_time_orders_by_known_at_and_excludes_future_information() -> None:
     records = [
         _record(HistoricalDataType.TRADES, 100, receive_timestamp=120),
@@ -627,3 +652,21 @@ def test_historical_quality_rejects_missing_timestamp_duplicate_and_negative() -
     assert verdict.accepted is False and "MISSING_TIMESTAMP" in verdict.reasons
     assert validate_historical_record(bad).accepted is False
     assert order_point_in_time([duplicate, duplicate], decision_timestamp=20) == [duplicate]
+
+
+def test_historical_quality_rejects_non_finite_values_and_bad_timestamp_types() -> None:
+    nan_row = _record(HistoricalDataType.TRADES, 10, price="nan")
+    bad_timestamp = _record(HistoricalDataType.TRADES, "10")
+    nan_verdict = validate_historical_record(nan_row)
+    timestamp_verdict = validate_historical_record(bad_timestamp)
+    assert nan_verdict.accepted is False
+    assert "NON_FINITE_VALUE" in nan_verdict.reasons
+    assert timestamp_verdict.accepted is False
+    assert "MISSING_TIMESTAMP" in timestamp_verdict.reasons
+
+
+def test_historical_quality_rejects_boolean_numeric_payloads() -> None:
+    boolean_price = _record(HistoricalDataType.TRADES, 10, price=True)
+    verdict = validate_historical_record(boolean_price)
+    assert verdict.accepted is False
+    assert "INVALID_VALUE" in verdict.reasons

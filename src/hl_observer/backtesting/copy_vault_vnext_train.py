@@ -57,11 +57,19 @@ IDENTITY_CLAIM = "ENTITY_NORMALIZED_STRICT_PUBLIC_OR_REPEATED_BEHAVIORAL_EVIDENC
 
 
 def _number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         result = float(value)
     except (TypeError, ValueError, OverflowError):
         return None
     return result if math.isfinite(result) else None
+
+
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
 
 
 def _reconciled_net(row: Mapping[str, Any]) -> Decimal | None:
@@ -156,19 +164,17 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
         trade_id = str(raw.get("trade_id") or "")
         vault = str(raw.get("vault") or "").strip().lower()
         coin = preserve_native_instrument_symbol(raw.get("coin"))
-        try:
-            direction = int(raw.get("direction") or 0)
-            signal_ts_ms = int(raw.get("signal_ts_ms") or 0)
-        except (TypeError, ValueError, OverflowError):
-            continue
+        direction = raw.get("direction")
+        signal_ts_ms = _strict_positive_int(raw.get("signal_ts_ms"))
         conservative_net = _reconciled_net(raw)
         if (
             not trade_id
             or trade_id in seen
             or not vault
             or not coin
+            or isinstance(direction, bool)
             or direction not in (-1, 1)
-            or signal_ts_ms <= 0
+            or signal_ts_ms is None
             or raw.get("liquidatable_net") is not True
             or not _execution_evidence_complete(raw)
             or conservative_net is None
@@ -194,12 +200,13 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _identity_vote(row: Mapping[str, Any]) -> dict[str, Any]:
     """Adapt a causal Copy-Vault row to the canonical entity-consensus schema."""
 
-    direction = int(row.get("direction") or 0)
+    direction = row.get("direction")
+    signal_ts_ms = _strict_positive_int(row.get("signal_ts_ms"))
     return {
         "wallet": str(row.get("vault") or "").strip().lower(),
         "coin": preserve_native_instrument_symbol(row.get("coin")),
         "side": "long" if direction == 1 else "short",
-        "ts_ms": int(row.get("signal_ts_ms") or 0),
+        "ts_ms": signal_ts_ms,
         "size": _number(row.get("notional_usd")),
         "public_entity_id": row.get("public_entity_id"),
         "twap_cadence_ms": row.get("twap_cadence_ms"),

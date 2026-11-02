@@ -162,6 +162,25 @@ def test_reference_depth_rejects_stale_or_noncausal_books() -> None:
 
 
 @pytest.mark.parametrize(
+    "metaorder,book",
+    [
+        ({"signal_ts_ms": 1_000.5, "direction": 1}, {"ts_ms": 1_000}),
+        ({"signal_ts_ms": True, "direction": 1}, {"ts_ms": 1_000}),
+        ({"signal_ts_ms": 1_000, "direction": True}, {"ts_ms": 1_000}),
+        ({"signal_ts_ms": 1_000, "direction": 1}, {"ts_ms": "1000"}),
+    ],
+)
+def test_reference_depth_refuse_horloges_et_direction_coercees(metaorder, book) -> None:
+    row = {
+        **book,
+        "causal_observation": True,
+        "bids5": [[100.0, 2.0]],
+        "asks5": [[101.0, 1.0]],
+    }
+    assert V21._reference_depth_features(metaorder, [row]) is None
+
+
+@pytest.mark.parametrize(
     "bids,asks",
     [
         ([[99.0, 1.0], [100.0, 1.0]], [[101.0, 1.0]]),
@@ -611,6 +630,28 @@ def test_frozen_v21_rejects_non_chronological_hashed_bounds() -> None:
     payload["freeze"]["parameters_sha256"] = parameter_hash(params)
 
     with pytest.raises(ValueError, match="COPY_V21_FREEZE_BOUNDS_INVALID"):
+        V21.evaluate_frozen_v21([], {}, payload)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload["freeze"].update(frozen_at_ms="5000"),
+        lambda payload: payload["freeze"]["parameters"]["bounds"].update(
+            train_start_ms=100.5
+        ),
+    ],
+)
+def test_frozen_v21_refuse_timestamps_non_entiers(mutation) -> None:
+    payload = _freeze()
+    mutation(payload)
+    payload["freeze"]["parameters_sha256"] = parameter_hash(
+        payload["freeze"]["parameters"]
+    )
+    with pytest.raises(
+        ValueError,
+        match="COPY_V21_FREEZE_(TIMESTAMP|BOUNDS)_INVALID",
+    ):
         V21.evaluate_frozen_v21([], {}, payload)
 
 

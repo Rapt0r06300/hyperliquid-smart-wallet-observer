@@ -116,11 +116,31 @@ def userfill_required_fields_reason(
 
 def positions_depuis_snapshot(snap: dict) -> dict[str, dict]:
     """{coin: {szi, entryPx}} depuis un snapshot vault (seed de l'état live)."""
+    if not isinstance(snap, Mapping) or not isinstance(snap.get("positions"), list):
+        raise ValueError("snapshot positions missing or invalid")
     out: dict[str, dict] = {}
-    for p in (snap.get("positions") or []):
+    for index, p in enumerate(snap["positions"]):
+        if not isinstance(p, Mapping):
+            raise ValueError(f"snapshot position {index} is not an object")
         c = preserve_native_instrument_symbol(p.get("coin"))
-        if c:
-            out[c] = {"szi": float(p.get("szi") or 0.0), "entryPx": float(p.get("entryPx") or 0.0)}
+        if not c:
+            raise ValueError(f"snapshot position {index} has no native coin")
+        if c in out:
+            raise ValueError(f"duplicate normalized snapshot coin: {c}")
+        raw_szi = p.get("szi")
+        raw_entry = p.get("entryPx")
+        if isinstance(raw_szi, bool) or isinstance(raw_entry, bool):
+            raise ValueError(f"snapshot position {index} has boolean numeric field")
+        try:
+            szi = float(raw_szi)
+            entry_px = float(raw_entry)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"snapshot position {index} numeric field invalid") from exc
+        if not math.isfinite(szi) or not math.isfinite(entry_px):
+            raise ValueError(f"snapshot position {index} numeric field non-finite")
+        if abs(szi) > _EPS and entry_px <= 0:
+            raise ValueError(f"snapshot position {index} entryPx invalid for open position")
+        out[c] = {"szi": szi, "entryPx": entry_px}
     return out
 
 
@@ -153,9 +173,27 @@ def appliquer_fill(positions: dict[str, dict], fill: dict) -> dict[str, dict]:
     ):
         return positions
 
-    cur = positions.setdefault(c, {"szi": 0.0, "entryPx": px})
-    avant = float(cur.get("szi") or 0.0)
-    entry_avant = float(cur.get("entryPx") or 0.0)
+    cur = positions.get(c)
+    if cur is None:
+        cur = {"szi": 0.0, "entryPx": px}
+        positions[c] = cur
+    if not isinstance(cur, dict):
+        return positions
+    raw_avant = cur.get("szi")
+    raw_entry_avant = cur.get("entryPx")
+    if isinstance(raw_avant, bool) or isinstance(raw_entry_avant, bool):
+        return positions
+    try:
+        avant = float(raw_avant)
+        entry_avant = float(raw_entry_avant)
+    except (TypeError, ValueError, OverflowError):
+        return positions
+    if (
+        not math.isfinite(avant)
+        or not math.isfinite(entry_avant)
+        or (abs(avant) > _EPS and entry_avant <= 0)
+    ):
+        return positions
     delta = signe * sz
     apres = round(avant + delta, 10)
 
@@ -184,9 +222,45 @@ def appliquer_fill(positions: dict[str, dict], fill: dict) -> dict[str, dict]:
 def snapshot_depuis_positions(vault: str, positions: dict[str, dict], *, nav_usd: float, ts_ms: int) -> dict:
     """Reconstruit un snapshot vault FRAIS (même format que collecter_vaults) depuis l'état live. On garde
     le NAV du dernier snapshot connu (le NAV bouge lentement ; l'important ici c'est le szi live)."""
-    pos = [{"coin": c, "szi": round(v["szi"], 8), "entryPx": v["entryPx"]}
-           for c, v in positions.items() if abs(v["szi"]) > _EPS]
-    return {"vault": vault, "ts_ms": int(ts_ms), "nav_usd": float(nav_usd), "positions": pos,
+    if not isinstance(vault, str) or not vault.strip():
+        raise ValueError("snapshot vault identity missing")
+    if type(ts_ms) is not int or ts_ms <= 0:
+        raise ValueError("snapshot timestamp invalid")
+    if isinstance(nav_usd, bool):
+        raise ValueError("snapshot NAV invalid")
+    try:
+        nav = float(nav_usd)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("snapshot NAV invalid") from exc
+    if not math.isfinite(nav) or nav <= 0:
+        raise ValueError("snapshot NAV invalid")
+    if not isinstance(positions, Mapping):
+        raise ValueError("snapshot positions invalid")
+    pos = []
+    seen: set[str] = set()
+    for raw_coin, raw_state in positions.items():
+        coin = preserve_native_instrument_symbol(raw_coin)
+        if not coin or coin in seen:
+            raise ValueError("snapshot position identity invalid")
+        seen.add(coin)
+        if not isinstance(raw_state, Mapping):
+            raise ValueError(f"snapshot position state invalid: {coin}")
+        raw_szi = raw_state.get("szi")
+        raw_entry = raw_state.get("entryPx")
+        if isinstance(raw_szi, bool) or isinstance(raw_entry, bool):
+            raise ValueError(f"snapshot position numeric field invalid: {coin}")
+        try:
+            szi = float(raw_szi)
+            entry_px = float(raw_entry)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"snapshot position numeric field invalid: {coin}") from exc
+        if not math.isfinite(szi) or not math.isfinite(entry_px):
+            raise ValueError(f"snapshot position numeric field invalid: {coin}")
+        if abs(szi) > _EPS and entry_px <= 0:
+            raise ValueError(f"snapshot position entryPx invalid: {coin}")
+        if abs(szi) > _EPS:
+            pos.append({"coin": coin, "szi": round(szi, 8), "entryPx": entry_px})
+    return {"vault": vault.strip(), "ts_ms": ts_ms, "nav_usd": nav, "positions": pos,
             "n_positions": len(pos), "source": "userfills_live", "read_only": True, "real_execution": False}
 
 
@@ -300,7 +374,9 @@ def parser_message_userfills(
                  "ts_ms": ts, "received_at_ms": frame_event.received_at_ms,
                  "dir": str(f.get("dir") or ""), "hash": f.get("hash"),
                  "tid": f.get("tid"), "oid": f.get("oid"),
-                 "start_position": start_pos, "isSnapshot": est_snapshot,
+                 "start_position": start_pos,
+                 "isSnapshot": est_snapshot,
+                 "is_snapshot": est_snapshot,
                  "source": "LIVE_WS",
                  "recv_mono_ns": (
                      receive_mono_ns

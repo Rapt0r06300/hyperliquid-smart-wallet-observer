@@ -64,3 +64,19 @@ def test_edge_net_v12_rejects_low_edge_and_high_copy_degradation():
     assert result.net_edge_bps == -3.5
     assert "COPY_DEGRADATION_TOO_HIGH" in result.reason_codes
     assert "EDGE_REMAINING_TOO_LOW" in result.reason_codes
+
+
+def test_edge_net_v12_rejects_non_finite_cost_without_fail_open():
+    result = estimate_edge_net_v12(
+        EdgeNetV12Inputs(
+            leader_reference_price=100.0,
+            current_mid=100.0,
+            leader_expected_edge_bps=80.0,
+            spread_bps=float("nan"),
+            slippage_bps=4.0,
+            fee_bps=4.5,
+        )
+    )
+    assert result.measurable is False
+    assert result.accepted is False
+    assert "SPREAD_TOO_WIDE" in result.reason_codes

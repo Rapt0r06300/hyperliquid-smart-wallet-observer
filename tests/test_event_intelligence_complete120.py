@@ -258,6 +258,8 @@ def test_usgs_eonet_gdacs_gdelt_and_fred_normalize_to_external_events() -> None:
         received_ts_ms=1_000,
     )
     assert gdacs[0].severity == pytest.approx(1.0)
+    with pytest.raises(ValueError, match="received_ts_ms"):
+        normalize_usgs({"features": []}, received_ts_ms=1_000.5)
 
     gdelt = normalize_gdelt_articles(
         {

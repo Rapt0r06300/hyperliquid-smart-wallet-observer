@@ -81,3 +81,13 @@ def test_non_restorable_status_and_non_paper_mode_are_rejected() -> None:
     assert report["status"] == NOT_PROVEN
     assert "restoration_status" in report["invalid"]
     assert "real_execution" in report["invalid"]
+
+
+def test_empty_source_inventory_is_not_restorable() -> None:
+    snapshot = deepcopy(_snapshot())
+    snapshot["lineage"]["source_asset_inventory_count"] = 0  # type: ignore[index]
+
+    report = verify_snapshot_contract(snapshot)
+
+    assert report["status"] == NOT_PROVEN
+    assert "lineage.source_asset_inventory_count" in report["invalid"]

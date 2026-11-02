@@ -147,6 +147,69 @@ def test_client_uses_only_documented_get_paths_and_auth_header() -> None:
     assert fake.calls[-1]["params"]["category"] == "crypto"
 
 
+@pytest.mark.parametrize("bad_received_ts_ms", [2_000.5, True, "2000"])
+def test_normalizers_reject_noncanonical_received_clock(bad_received_ts_ms) -> None:
+    with pytest.raises(ValueError, match="received_ts_ms"):
+        normalize_cross_source_signals(
+            {"signals": []}, received_ts_ms=bad_received_ts_ms
+        )
+    with pytest.raises(ValueError, match="received_ts_ms"):
+        normalize_news_digest(
+            {"categories": {}}, received_ts_ms=bad_received_ts_ms
+        )
+    with pytest.raises(ValueError, match="received_ts_ms"):
+        PredictionShiftTracker().observe(
+            {"dataAvailable": False}, received_ts_ms=bad_received_ts_ms
+        )
+
+
+@pytest.mark.parametrize("bad_page_size", [0, -1, 1.5, True, "100"])
+def test_prediction_page_size_rejects_implicit_coercion(bad_page_size) -> None:
+    client = WorldMonitorReadOnlyClient(
+        api_key="wm_test", http_client=_FakeHTTP({"markets": []})
+    )
+    with pytest.raises(ValueError, match="page_size"):
+        client.list_prediction_markets(page_size=bad_page_size)
+
+
+def test_normalizers_reject_string_counts_and_non_boolean_alerts() -> None:
+    row = _digest_item(
+        source="Reuters",
+        title="Strict payload",
+        link="https://example.test/strict",
+        published_at=1_800,
+        first_seen=1_900,
+    )
+    row["corroborationCount"] = "4"
+    assert normalize_news_digest(
+        {"coverage": {"state": "complete"}, "categories": {"finance": {"items": [row]}}},
+        received_ts_ms=2_000,
+    ) == []
+
+    row = _digest_item(
+        source="Reuters",
+        title="Strict alert",
+        link="https://example.test/alert",
+        published_at=1_800,
+        first_seen=1_900,
+    )
+    row["isAlert"] = "true"
+    assert normalize_news_digest(
+        {"coverage": {"state": "complete"}, "categories": {"finance": {"items": [row]}}},
+        received_ts_ms=2_000,
+    ) == []
+
+    assert normalize_cross_source_signals(
+        {"signals": [{"id": "s1", "detectedAt": 1_900, "signalCount": "3"}]},
+        received_ts_ms=2_000,
+    ) == []
+
+
+def test_unknown_coverage_state_is_not_signal_usable() -> None:
+    row = _news_row("unknown", ts_ms=1_000, publisher="Source")
+    assert replace(row, coverage_state="future-unknown").usable_for_signal is False
+
+
 def test_http_failures_are_fail_closed_without_leaking_key() -> None:
     fake = _FakeHTTP(
         {"error": "too many"},

@@ -37,7 +37,8 @@ def book_walk(book: Mapping[str, Any], notional_usd: float, *, side: str,
     """Exécute un notional (quote/USD) contre le bon côté. VWAP, base remplie, slippage signé, partial fill."""
     niveaux = _cote(book, side)
     if not niveaux or notional_usd <= 0:
-        return {"vwap": UNMEASURABLE, "base_remplie": 0.0, "quote_rempli_usd": 0.0,
+        return {"vwap": UNMEASURABLE, "base_remplie": UNMEASURABLE,
+                "quote_rempli_usd": UNMEASURABLE,
                 "slippage_bps": UNMEASURABLE, "partial": True, "raison": "carnet vide"}
     best = niveaux[0][0]
     reste = float(notional_usd)
@@ -57,7 +58,8 @@ def book_walk(book: Mapping[str, Any], notional_usd: float, *, side: str,
             break
     partial = reste > 1e-6
     if base_tot <= 0:
-        return {"vwap": UNMEASURABLE, "base_remplie": 0.0, "quote_rempli_usd": 0.0,
+        return {"vwap": UNMEASURABLE, "base_remplie": UNMEASURABLE,
+                "quote_rempli_usd": UNMEASURABLE,
                 "slippage_bps": UNMEASURABLE, "partial": True}
     vwap = quote_tot / base_tot
     if str(side).upper() == "BUY":
@@ -72,7 +74,8 @@ def capacity_curve(book: Mapping[str, Any], *, edge_bps: float, side: str = "BUY
                    notionals: Sequence[int] = NOTIONALS_DEFAUT) -> dict[str, Any]:
     """Slippage par notional + capacity_before_edge_decay (plus grand notional PLEINEMENT rempli à slippage<edge)."""
     courbe: dict[int, Any] = {}
-    capacity = 0.0
+    # No qualifying notional is a missing measurement, not a measured zero.
+    capacity: float | str = UNMEASURABLE
     for n in notionals:
         w = book_walk(book, float(n), side=side)
         s = w["slippage_bps"]

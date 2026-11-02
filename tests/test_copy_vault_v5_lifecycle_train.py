@@ -14,6 +14,7 @@ def _live_fill(event_id: str, ts_ms: int, *, action: str, coin: str = "BTC") -> 
         "event_id": event_id,
         "ts_ms": ts_ms,
         "observed_at_ms": ts_ms + 25,
+        "received_at_ms": ts_ms + 25,
         "coin": coin,
         "direction": 1,
         "action": action,
@@ -45,6 +46,7 @@ def _leader_exit(observed_at_ms: int, *, causal: bool = True, coin: str = "BTC")
         "fill_id": "fill-reduce",
         "ts_ms": observed_at_ms - 25,
         "observed_at_ms": observed_at_ms,
+        "received_at_ms": observed_at_ms,
         "coin": coin,
         "direction": 1,
         "action": "REDUCE",
@@ -178,6 +180,37 @@ def test_index_refuse_un_close_sans_horloge_locale_monotone() -> None:
     assert indexed == {}
     assert audit["causal_exit_events"] == 0
     assert audit["noncausal_or_nonexit_events_rejected"] == 1
+
+
+def test_index_refuse_horloges_coercees_ou_identite_native_absente() -> None:
+    valid = _leader_exit(20_000)
+    invalid_rows = [
+        ("ts_ms", 19_975.5),
+        ("observed_at_ms", True),
+        ("received_at_ms", "20000"),
+        ("direction", True),
+    ]
+    for field, value in invalid_rows:
+        bad = dict(valid)
+        bad[field] = value
+        indexed, audit = index_causal_leader_exits([bad])
+        assert indexed == {}
+        assert audit["causal_exit_events"] == 0
+
+    anonymous = dict(valid, event_id="", fill_id="")
+    indexed, audit = index_causal_leader_exits([anonymous])
+    assert indexed == {}
+    assert audit["causal_exit_events"] == 0
+
+
+def test_index_refuse_reception_avant_observation() -> None:
+    bad = _leader_exit(20_000)
+    bad["received_at_ms"] = bad["observed_at_ms"] - 1
+
+    indexed, audit = index_causal_leader_exits([bad])
+
+    assert indexed == {}
+    assert audit["causal_exit_events"] == 0
 
 
 def test_replay_refuse_des_bornes_train_absentes() -> None:

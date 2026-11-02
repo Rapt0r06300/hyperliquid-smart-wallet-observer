@@ -11,6 +11,7 @@ from typing import Any
 from hl_observer.control_plane.phase_state import (
     AlinaPhaseState,
     _now,
+    parse_iso_utc,
     validate_phase_state,
 )
 
@@ -47,7 +48,23 @@ class PhaseController:
 
     @property
     def current_state(self) -> AlinaPhaseState:
-        return self._state
+        # Never expose mutable internal state: callers must use a validated
+        # transition instead of changing the control plane without a receipt.
+        return AlinaPhaseState(**self._state.to_dict())
+
+    def _ensure_monotonic_request_time(self, now_utc: str) -> None:
+        """Reject a phase request that moves the control plane backwards."""
+        # A freshly created IDLE state only records file creation time; it is
+        # not an operator transition and must not prevent replaying a pinned
+        # historical request in tests or an offline paper campaign.
+        if self._state.phase == "IDLE" and self._state.request_id is None:
+            return
+        requested = parse_iso_utc(now_utc)
+        current = parse_iso_utc(self._state.requested_at_utc)
+        if requested < current:
+            raise ValueError(
+                "phase request timestamp precedes the current state timestamp"
+            )
 
     def _load_from_disk(self) -> AlinaPhaseState:
         if not self.state_file_path or not self.state_file_path.exists():
@@ -93,6 +110,8 @@ class PhaseController:
                 state_digest=self._state.content_digest(),
                 state=self._state.to_dict(),
             )
+
+        self._ensure_monotonic_request_time(now)
 
         if self._state.phase not in ("IDLE", "COLLECT", "ANALYZE"):
             raise ValueError(f"Cannot transition to COLLECT from phase {self._state.phase}")
@@ -152,6 +171,8 @@ class PhaseController:
                 state=self._state.to_dict(),
             )
 
+        self._ensure_monotonic_request_time(now)
+
         if self._state.phase != "COLLECT":
             raise ValueError(f"Transition to ANALYZE requires phase COLLECT, current: {self._state.phase}")
         if initial_stage != "DRAIN":
@@ -209,6 +230,8 @@ class PhaseController:
                 state_digest=self._state.content_digest(),
                 state=self._state.to_dict(),
             )
+
+        self._ensure_monotonic_request_time(now)
 
         prev_epoch = self._state.epoch
         prev_phase = self._state.phase

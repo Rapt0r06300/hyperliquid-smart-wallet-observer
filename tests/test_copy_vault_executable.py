@@ -79,6 +79,16 @@ def test_metaorders_refusent_les_sorties_et_les_contradictions_de_sens() -> None
     assert audit["action_direction_contradictions_rejected"] == 1
 
 
+def test_metaorder_rejette_un_volume_ou_mouvement_manquant() -> None:
+    incomplete = _entry("missing-size", 1_000)
+    incomplete.pop("taille_usd")
+
+    metaorders, audit = cluster_metaorders([incomplete])
+
+    assert metaorders == []
+    assert audit["invalid_events_rejected"] == 1
+
+
 def test_metaorder_conserve_la_provenance_complete_des_fills_sources() -> None:
     event = {
         **_entry("safe-event", 1_000, action="OPEN"),
@@ -116,6 +126,21 @@ def test_metaorder_conserve_la_provenance_complete_des_fills_sources() -> None:
     ]
     assert metaorders[0]["member_events"][0]["source_dataset_id"] == "dataset-live-1"
     assert audit["source_evidence_missing_events"] == 0
+
+
+def test_metaorder_normalise_is_snapshot_du_collecteur() -> None:
+    event = {
+        **_entry("camel-live", 1_000, action="OPEN"),
+        "source": "LIVE_WS",
+        "isSnapshot": False,
+        "observed_at_ms": 1_010,
+        "received_at_ms": 1_010,
+    }
+
+    metaorders, _audit = cluster_metaorders([event])
+
+    assert metaorders[0]["causal_forward_eligible"] is True
+    assert metaorders[0]["member_events"][0]["causal_forward_eligible"] is True
 
 
 def test_metaorder_without_shard_lineage_is_marked_incomplete() -> None:
@@ -175,6 +200,7 @@ def test_metaorder_and_book_selection_preserve_native_coin_case() -> None:
         "source": "LIVE_WS",
         "is_snapshot": False,
         "observed_at_ms": 2_025,
+        "received_at_ms": 2_025,
     }
     metaorder = cluster_metaorders([signal])[0][0]
     book = {**_book(2_025, 0.0001, 0.0002, causal=True), "coin": "kPEPE"}
@@ -387,6 +413,13 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
         for row in trade["execution_book_evidence_refs"]
     )
 
+    missing_receive_books = [dict(row) for row in books]
+    missing_receive_books[0].pop("received_at_ms")
+    incomplete_trade, _ = execute_metaorder(selected[0], missing_receive_books, horizon_ms=300_000)
+    assert incomplete_trade is not None
+    assert incomplete_trade["execution_book_safe_evidence_status"] == "INCOMPLETE_OR_UNVERIFIED"
+    assert incomplete_trade["execution_book_unverified_count"] > 0
+
 
 def test_execution_reference_book_ne_peut_pas_etre_postérieur_au_signal() -> None:
     metaorder = cluster_metaorders([_entry("asof", 1_000)])[0][0]
@@ -428,6 +461,7 @@ def test_metaorder_live_emploie_reception_locale_et_backfill_ne_prouve_pas_forwa
         "source": "LIVE_WS",
         "is_snapshot": False,
         "observed_at_ms": 1_025,
+        "received_at_ms": 1_025,
     }
     history = _entry("history", 2_000)
     metaorders, audit = cluster_metaorders([live, history], gap_ms=1)
@@ -466,6 +500,7 @@ def test_forward_refuse_un_carnet_non_causal() -> None:
         "source": "LIVE_WS",
         "is_snapshot": False,
         "observed_at_ms": 1_025,
+        "received_at_ms": 1_025,
     }
     metaorder = cluster_metaorders([entry])[0][0]
     books = [
@@ -553,6 +588,7 @@ def test_l2_tape_gap_epoch_survives_loader_and_blocks_forward_replay(tmp_path) -
             "source": "LIVE_WS",
             "is_snapshot": False,
             "observed_at_ms": 1_000,
+            "received_at_ms": 1_000,
         }
     ])[0][0]
 
@@ -962,6 +998,7 @@ def test_protocol_inputs_excluent_backfill_et_carnet_non_causal() -> None:
         "source": "LIVE_WS",
         "is_snapshot": False,
         "observed_at_ms": 2_025,
+        "received_at_ms": 2_025,
     }])[0][0]
     books = {
         "BTC": [
@@ -1426,6 +1463,8 @@ def test_preuve_temporelle_ne_revendiqe_jamais_un_no_lookahead_non_prouve() -> N
 
     assert proof["oos"]["no_lookahead"] is False
     assert proof["oos"]["purged"] is False
+    assert proof["oos"]["sample_count"] is None
+    assert proof["forward"]["sample_count"] is None
 
 
 @pytest.mark.parametrize(
@@ -1701,6 +1740,7 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
             "source": "LIVE_WS",
             "is_snapshot": False,
             "observed_at_ms": signal,
+            "received_at_ms": signal,
         })
         books.extend([
             _book(signal, 99.0, 101.0, line=index * 3 + 1, causal=True),

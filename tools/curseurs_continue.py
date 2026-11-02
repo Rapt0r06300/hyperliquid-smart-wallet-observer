@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from pathlib import Path
+from collections.abc import Mapping
 
 CURSORS_REL = "cursors.json"
 EXTS_STREAM = (".jsonl",)                 # formats lus incrémentalement par offset (les autres : par identité)
@@ -19,15 +21,18 @@ EXTS_STREAM = (".jsonl",)                 # formats lus incrémentalement par of
 
 def _charger(rundir: Path) -> dict:
     try:
-        return json.loads((Path(rundir) / CURSORS_REL).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        payload = json.loads((Path(rundir) / CURSORS_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
         return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 def _sauver(rundir: Path, cur: dict) -> None:
     p = Path(rundir) / CURSORS_REL
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
+    tmp = p.with_name(
+        f".{p.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
     tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, p)
 
@@ -41,7 +46,13 @@ def _prefix_sha(p: Path, n: int) -> str:
 
 
 def _region_consommee(offset: int, plafond: int = 65536) -> int:
-    return min(int(offset), plafond)
+    return min(offset, plafond)
+
+
+def _exact_non_negative_int(value: object, *, field: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
+    return value
 
 
 def nouveaux_evenements(root: Path, rundir: Path, chemin: Path, *, max_events: int = 100_000) -> tuple[list[dict], dict]:
@@ -56,7 +67,13 @@ def nouveaux_evenements(root: Path, rundir: Path, chemin: Path, *, max_events: i
         taille = chemin.stat().st_size
     except OSError:
         return [], {"erreur": "STAT"}
-    offset = int(prev.get("offset", 0))
+    try:
+        offset = _exact_non_negative_int(prev.get("offset", 0), field="cursor.offset")
+        _exact_non_negative_int(max_events, field="max_events")
+    except ValueError:
+        return [], {"erreur": "CURSEUR_INVALIDE"}
+    if max_events < 1:
+        return [], {"erreur": "MAX_EVENTS_INVALIDE"}
     rotation = False
     # SHA de la région déjà consommée telle qu'elle est MAINTENANT : si elle a changé -> remplacement
     pref_region_now = _prefix_sha(chemin, _region_consommee(offset))

@@ -107,6 +107,7 @@ def _checkpoint(
     cursor: int,
     accepted: Iterable[Mapping[str, Any]],
     duplicate_count: int,
+    queue_high_water: int,
     accepted_count: int | None = None,
     accepted_sha256: str | None = None,
 ) -> dict[str, Any]:
@@ -117,12 +118,13 @@ def _checkpoint(
     elif accepted_count is None:
         raise ValueError("SOAK_ACCEPTED_COUNT_REQUIRED")
     body = {
-        "schema": "hypersmart.copy_vault_collector_soak_checkpoint.v2",
+        "schema": "hypersmart.copy_vault_collector_soak_checkpoint.v3",
         "input_sha256": input_sha256,
         "cursor": cursor,
         "accepted_count": accepted_count,
         "accepted_sha256": accepted_sha256,
         "duplicate_count": duplicate_count,
+        "queue_high_water": queue_high_water,
     }
     return body | {"checkpoint_sha256": _sha256(body)}
 
@@ -130,7 +132,7 @@ def _checkpoint(
 def _verify_checkpoint(checkpoint: Mapping[str, Any], input_sha256: str) -> None:
     body = {key: value for key, value in checkpoint.items() if key != "checkpoint_sha256"}
     if (
-        checkpoint.get("schema") != "hypersmart.copy_vault_collector_soak_checkpoint.v2"
+        checkpoint.get("schema") != "hypersmart.copy_vault_collector_soak_checkpoint.v3"
         or not _is_sha256(checkpoint.get("input_sha256"))
         or checkpoint.get("input_sha256") != input_sha256
         or type(checkpoint.get("cursor")) is not int
@@ -139,6 +141,8 @@ def _verify_checkpoint(checkpoint: Mapping[str, Any], input_sha256: str) -> None
         or checkpoint.get("accepted_count", -1) < 0
         or type(checkpoint.get("duplicate_count")) is not int
         or checkpoint.get("duplicate_count", -1) < 0
+        or type(checkpoint.get("queue_high_water")) is not int
+        or checkpoint.get("queue_high_water", -1) < 0
         or not _is_sha256(checkpoint.get("accepted_sha256"))
         or not _is_sha256(checkpoint.get("checkpoint_sha256"))
         or checkpoint.get("checkpoint_sha256") != _sha256(body)
@@ -188,6 +192,7 @@ def run_soak(
         _verify_checkpoint(checkpoint, input_sha256)
         cursor = checkpoint["cursor"]
         duplicates = checkpoint["duplicate_count"]
+        queue_high_water = checkpoint["queue_high_water"]
         if cursor > len(rows):
             raise ValueError("SOAK_CHECKPOINT_CURSOR_OUT_OF_RANGE")
         for row in rows[:cursor]:
@@ -241,6 +246,7 @@ def run_soak(
                 cursor=cursor,
                 accepted=accepted,
                 duplicate_count=duplicates,
+                queue_high_water=queue_high_water,
                 accepted_count=accepted_count,
                 accepted_sha256=_accepted_digest_finish(accepted_digest),
             )

@@ -75,6 +75,13 @@ def _finite_float(value: object) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
+def _positive_int(value: object) -> int | None:
+    """Accept only an actual positive integer; never coerce or truncate data."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def _strict_candidate(raw: Mapping[str, Any]) -> bool:
     return any(key in raw for key in _STRICT_SENTINELS)
 
@@ -177,11 +184,8 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
     """
     if oos_start_ms is None:
         return None
-    try:
-        boundary = int(oos_start_ms)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if boundary <= 0:
+    boundary = _positive_int(oos_start_ms)
+    if boundary is None:
         return None
     parsed: list[dict[str, Any]] = []
     strict_mode = False
@@ -192,9 +196,8 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
         vault = vault_raw.casefold()
         vault_display = vault if vault.startswith("0x") else vault_raw
         coin = preserve_native_instrument_symbol(raw.get("coin"))
-        try:
-            ts_ms = int(raw.get("signal_ts_ms") or 0)
-        except (TypeError, ValueError, OverflowError):
+        ts_ms = _positive_int(raw.get("signal_ts_ms"))
+        if ts_ms is None:
             continue
         net = decimal_value(raw.get("net_pnl_usd"))
         notional = decimal_value(raw.get("notional_usd"))

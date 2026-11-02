@@ -35,12 +35,20 @@ NEW_TRIAL_COUNT = len(COPY_DELAYS_MS) * len(HORIZONS_MS)
 BONFERRONI_TRIAL_COUNT = PRIOR_FAMILY_TRIAL_COUNT + NEW_TRIAL_COUNT
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def _causal_exit(row: Mapping[str, Any]) -> dict[str, Any] | None:
-    try:
-        event_ms = int(row.get("ts_ms") or 0)
-        observed_ms = int(row.get("observed_at_ms") or 0)
-        leader_direction = int(row.get("direction") or 0)
-    except (TypeError, ValueError, OverflowError):
+    event_ms = _strict_positive_int(row.get("ts_ms"))
+    observed_ms = _strict_positive_int(row.get("observed_at_ms"))
+    leader_direction = row.get("direction")
+    native_event_id = str(
+        row.get("event_id") or row.get("fill_id") or row.get("hash") or ""
+    ).strip()
+    if event_ms is None or observed_ms is None:
         return None
     action = str(row.get("action") or "").upper()
     vault = str(row.get("vault") or "").strip()
@@ -49,10 +57,12 @@ def _causal_exit(row: Mapping[str, Any]) -> dict[str, Any] | None:
         action in EXIT_ACTIONS
         and str(row.get("source") or "") == "LIVE_WS"
         and row.get("is_snapshot") is False
-        and observed_ms >= event_ms > 0
+        and observed_ms >= event_ms
+        and not isinstance(leader_direction, bool)
         and leader_direction in (-1, 1)
         and vault
         and coin
+        and native_event_id
     ):
         return None
     return {
@@ -63,12 +73,7 @@ def _causal_exit(row: Mapping[str, Any]) -> dict[str, Any] | None:
         "ts_ms": event_ms,
         "observed_at_ms": observed_ms,
         "direction": leader_direction,
-        "event_id": str(
-            row.get("event_id")
-            or row.get("fill_id")
-            or row.get("hash")
-            or f"{vault}:{coin}:{event_ms}:{action}"
-        ),
+        "event_id": native_event_id,
     }
 
 

@@ -444,18 +444,24 @@ def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
     oos_summary = (segments.get("oos") or {}).get("summary") or {}
     forward_summary = (segments.get("forward") or {}).get("summary") or {}
     placebo_summary = (evaluation.get("placebo_inverted_oos") or {}).get("summary") or {}
-    oos_count = int(oos_summary.get("positions_fermees") or 0)
-    forward_count = int(forward_summary.get("positions_fermees") or 0)
-    placebo_count = int(placebo_summary.get("positions_fermees") or 0)
-    oos_net = oos_summary.get("net_pnl_usd") if oos_count > 0 else None
-    placebo_net = placebo_summary.get("net_pnl_usd") if placebo_count > 0 else None
+    def summary_count(summary: Mapping[str, Any]) -> int | None:
+        raw = summary.get("positions_fermees")
+        if type(raw) is not int or raw < 0:
+            return None
+        return raw
+
+    oos_count = summary_count(oos_summary)
+    forward_count = summary_count(forward_summary)
+    placebo_count = summary_count(placebo_summary)
+    oos_net = oos_summary.get("net_pnl_usd") if oos_count is not None and oos_count > 0 else None
+    placebo_net = placebo_summary.get("net_pnl_usd") if placebo_count is not None and placebo_count > 0 else None
     oos_net_exact = (
         decimal_value(oos_summary.get("net_pnl_usd_exact_decimal"))
-        if oos_count > 0 else None
+        if oos_count is not None and oos_count > 0 else None
     )
     placebo_net_exact = (
         decimal_value(placebo_summary.get("net_pnl_usd_exact_decimal"))
-        if placebo_count > 0 else None
+        if placebo_count is not None and placebo_count > 0 else None
     )
     oos_net_comparable = (
         oos_net_exact if oos_net_exact is not None else decimal_value(oos_net)

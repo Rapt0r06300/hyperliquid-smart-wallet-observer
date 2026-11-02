@@ -383,22 +383,19 @@ def references_cmd(root: str | Path) -> dict:
 
 
 # ── CONTROLE DE COMPLETUDE ─────────────────────────────────────────────────────────────────────
-def fichiers_requis(root: str | Path) -> set[str]:
-    """Ensemble MINIMAL qui doit etre present ET inclus : masters + socle + configs + TOUS les .py de
-    src/hl_observer et tests + cloture d'imports + references .cmd."""
-    root = Path(root)
-    inv = inventaire(root)
+def _fichiers_requis_depuis(root: Path, inv: dict, imports: dict, refs: dict, dyn: dict) -> set[str]:
+    """Build the required set from one already completed deterministic scan."""
     req: set[str] = set()
     for nom in MAITRES + SOCLE:
         if (root / nom).is_file():
             req.add(nom)
-    req.update(inv["modules"])                             # tous les modules runtime
-    req.update(inv["tools_py"])                            # tous les outils Python
-    req.update(inv["cmd"])                                 # toute la fermeture CMD
-    req.update(inv["ps1"])                                 # scripts PowerShell appeles ou auxiliaires
-    req.update(inv["tests"])                               # la suite de tests (pas de release allegee)
-    req.update(inv["configs"])                             # configs/schemas/migrations
-    req.update(inv["certs"])                               # CA publics requis par TLS
+    req.update(inv["modules"])
+    req.update(inv["tools_py"])
+    req.update(inv["cmd"])
+    req.update(inv["ps1"])
+    req.update(inv["tests"])
+    req.update(inv["configs"])
+    req.update(inv["certs"])
     prefixes_ressources = (
         "src/", "tools/", "tests/", "config/", "configs/", "schemas/",
         "migrations/", "templates/", "static/", "assets/", "runtime/data/sessions/",
@@ -407,18 +404,28 @@ def fichiers_requis(root: str | Path) -> set[str]:
         low = rel.lower()
         if rel.startswith(prefixes_ressources) and low.endswith(EXT_RESSOURCE):
             req.add(rel)
-    req.update(cloture_imports(root)["requis"])
-    req.update(references_cmd(root)["requis"])
-    req.update(references_dynamiques(root)["requis"])
-    # Un fichier DELIBEREMENT exclu (etat machine volatil sous runtime/, secret, cache...) n'est jamais
-    # « requis » : sinon on se bloquerait sur ce qu'on exclut a raison. On aligne requis sur includable.
+    req.update(imports["requis"])
+    req.update(refs["requis"])
+    req.update(dyn["requis"])
+    # Files deliberately excluded from the portable release are not required.
     try:
         from hl_observer.ops.archive_portable import est_exclu
         req = {r for r in req if not est_exclu(r)}
-    except Exception:  # noqa: BLE001 — si archive_portable indisponible, on garde le set brut
-        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
+    except Exception:  # noqa: BLE001
+        import logging as _lg
         _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return req
+
+
+def fichiers_requis(root: str | Path) -> set[str]:
+    """Ensemble MINIMAL qui doit etre present ET inclus : masters + socle + configs + TOUS les .py de
+    src/hl_observer et tests + cloture d'imports + references .cmd."""
+    root = Path(root)
+    inv = inventaire(root)
+    imports = cloture_imports(root)
+    refs = references_cmd(root)
+    dyn = references_dynamiques(root)
+    return _fichiers_requis_depuis(root, inv, imports, refs, dyn)
 
 
 def _marqueur_wheel_runtime_installe_vide(rel: str) -> bool:
@@ -441,7 +448,11 @@ def controle_completude(root: str | Path, inclus, *, non_suivis: list[str] | Non
     Signale les fichiers non suivis (git) requis (jamais ignores en silence)."""
     root = Path(root)
     inclus_set = set(inclus)
-    requis = fichiers_requis(root)
+    inv = inventaire(root)
+    imports = cloture_imports(root)
+    refs = references_cmd(root)
+    dyn = references_dynamiques(root)
+    requis = _fichiers_requis_depuis(root, inv, imports, refs, dyn)
     absents_disque = sorted(r for r in requis if not (root / r).is_file())
     # Un __init__.py vide est legitime. Une sentinelle .whl vide est toleree UNIQUEMENT dans le
     # runtime installe; un wheel source vide (tools/wheelhouse) reste un echec de completude.
@@ -454,9 +465,6 @@ def controle_completude(root: str | Path, inclus, *, non_suivis: list[str] | Non
     )
     exclus_par_erreur = sorted(r for r in requis
                                if (root / r).is_file() and r not in inclus_set)
-    imports = cloture_imports(root)
-    refs = references_cmd(root)
-    dyn = references_dynamiques(root)
     ns = set(non_suivis or [])
     non_suivis_requis = sorted(r for r in requis if r in ns)
     complet = not (absents_disque or vides or exclus_par_erreur

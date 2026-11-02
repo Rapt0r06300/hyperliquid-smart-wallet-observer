@@ -562,9 +562,19 @@ def execute_metaorder(
             "manifest_verified": row.get("source_manifest_verified") is True,
             "replay_compatible": row.get("source_replay_compatible") is True,
             "exchange_ts_ms": row.get("exchange_ts_ms"),
-            "received_at_ms": row.get("received_at_ms", row.get("ts_ms")),
+            "received_at_ms": row.get("received_at_ms"),
             "source": row.get("source"),
         }
+
+    def _book_timing_is_verified(row: Mapping[str, Any]) -> bool:
+        exchange_ts_ms = row.get("exchange_ts_ms")
+        received_at_ms = row.get("received_at_ms")
+        return bool(
+            type(exchange_ts_ms) is int
+            and exchange_ts_ms > 0
+            and type(received_at_ms) is int
+            and received_at_ms >= exchange_ts_ms
+        )
 
     signal_member_ids = {
         str(value)
@@ -625,6 +635,7 @@ def execute_metaorder(
             and isinstance(row.get("source_catalog_sha256"), str)
             and len(row["source_catalog_sha256"]) == 64
             and all(char in "0123456789abcdef" for char in row["source_catalog_sha256"].lower())
+            and _book_timing_is_verified(row)
             for row in execution_evidence_refs
         )
     )
@@ -636,6 +647,7 @@ def execute_metaorder(
             and isinstance(row.get("source_catalog_sha256"), str)
             and len(row["source_catalog_sha256"]) == 64
             and all(char in "0123456789abcdef" for char in row["source_catalog_sha256"].lower())
+            and _book_timing_is_verified(row)
         )
         for row in execution_evidence_refs
     )

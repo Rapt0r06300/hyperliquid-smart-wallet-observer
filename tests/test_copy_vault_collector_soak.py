@@ -43,6 +43,12 @@ def test_soak_resume_keeps_exact_counts_and_hashes(tmp_path) -> None:
     assert receipt["continuous"]["accepted_sha256"] == receipt["resumed"][
         "accepted_sha256"
     ]
+    assert receipt["continuous"]["queue_high_water"] == receipt["resumed"][
+        "queue_high_water"
+    ]
     assert json.loads((tmp_path / "checkpoint.json").read_text())[
         "accepted_count"
     ] == 1_000
+    assert json.loads((tmp_path / "checkpoint.json").read_text())[
+        "queue_high_water"
+    ] == receipt["continuous"]["queue_high_water"]

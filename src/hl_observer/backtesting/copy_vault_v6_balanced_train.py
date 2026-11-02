@@ -40,6 +40,12 @@ BONFERRONI_TRIAL_COUNT = PARENT_TRIAL_COUNT + NEW_TRIAL_COUNT
 UTC_DAY_MS = 86_400_000
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def apply_causal_daily_risk_budget(
     trades: Sequence[Mapping[str, Any]],
     *,
@@ -48,7 +54,9 @@ def apply_causal_daily_risk_budget(
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Admit trades using identifiers and prior counters only."""
 
-    if int(max_entries_per_vault_day) <= 0 or int(max_entries_per_coin_day) <= 0:
+    vault_limit = _strict_positive_int(max_entries_per_vault_day)
+    coin_limit = _strict_positive_int(max_entries_per_coin_day)
+    if vault_limit is None or coin_limit is None:
         raise ValueError("daily entry limits must be positive")
     vault_counts: Counter[tuple[int, str]] = Counter()
     coin_counts: Counter[tuple[int, str]] = Counter()
@@ -58,22 +66,29 @@ def apply_causal_daily_risk_budget(
             "ADMITTED": 0,
             "VAULT_DAILY_BUDGET_REJECTED": 0,
             "COIN_DAILY_BUDGET_REJECTED": 0,
+            "INVALID_ENTRY_TIMESTAMP_REJECTED": 0,
         }
     )
+    valid_rows: list[tuple[int, dict[str, Any]]] = []
+    for row in trades:
+        candidate = dict(row)
+        entry_ts_ms = _strict_positive_int(candidate.get("entry_ts_ms"))
+        if entry_ts_ms is None:
+            audit["INVALID_ENTRY_TIMESTAMP_REJECTED"] += 1
+            continue
+        valid_rows.append((entry_ts_ms, candidate))
     for raw in sorted(
-        (dict(row) for row in trades),
-        key=lambda row: (
-            int(row.get("entry_ts_ms") or 0),
-            str(row.get("trade_id") or ""),
-        ),
+        valid_rows,
+        key=lambda item: (item[0], str(item[1].get("trade_id") or "")),
     ):
-        day = int(raw.get("entry_ts_ms") or 0) // UTC_DAY_MS
+        entry_ts_ms, raw = raw
+        day = entry_ts_ms // UTC_DAY_MS
         vault_key = (day, str(raw.get("vault") or "UNKNOWN"))
         coin_key = (day, preserve_native_instrument_symbol(raw.get("coin")) or "UNKNOWN")
-        if vault_counts[vault_key] >= int(max_entries_per_vault_day):
+        if vault_counts[vault_key] >= vault_limit:
             audit["VAULT_DAILY_BUDGET_REJECTED"] += 1
             continue
-        if coin_counts[coin_key] >= int(max_entries_per_coin_day):
+        if coin_counts[coin_key] >= coin_limit:
             audit["COIN_DAILY_BUDGET_REJECTED"] += 1
             continue
         vault_counts[vault_key] += 1
@@ -82,8 +97,8 @@ def apply_causal_daily_risk_budget(
             {
                 **raw,
                 "mechanism": MECHANISM,
-                "max_entries_per_vault_day": int(max_entries_per_vault_day),
-                "max_entries_per_coin_day": int(max_entries_per_coin_day),
+                "max_entries_per_vault_day": vault_limit,
+                "max_entries_per_coin_day": coin_limit,
                 "admission_uses_outcome": False,
             }
         )

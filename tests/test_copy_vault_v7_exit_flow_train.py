@@ -90,6 +90,22 @@ def test_cluster_exit_flow_rejects_snapshot_rows() -> None:
     assert audit["noncausal_or_nonexit_events_rejected"] == 1
 
 
+def test_cluster_exit_flow_refuse_identite_native_absente_et_coercions() -> None:
+    valid = _exit("native", 1_000)
+    invalid_rows = [
+        {**valid, "event_id": "", "fill_id": "", "hash": ""},
+        {**valid, "ts_ms": 1_000.5},
+        {**valid, "observed_at_ms": "1025"},
+        {**valid, "direction": True},
+    ]
+
+    signals, audit = cluster_causal_exit_flow(invalid_rows)
+
+    assert signals == []
+    assert audit["causal_exit_events"] == 0
+    assert audit["noncausal_or_nonexit_events_rejected"] == len(invalid_rows)
+
+
 def test_replay_long_reduction_opens_short_after_causal_delay() -> None:
     signal = _exit("a", 1_000)["observed_at_ms"]
     books = {

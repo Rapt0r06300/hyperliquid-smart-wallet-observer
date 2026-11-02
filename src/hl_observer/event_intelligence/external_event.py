@@ -16,6 +16,14 @@ import math
 SCHEMA_VERSION = "alina.external_event.v1"
 
 
+def _require_non_negative_int(value: object, *, field_name: str) -> int:
+    """Validate a causal clock/counter without truncating or coercing it."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    return value
+
+
 class ExternalEventType(StrEnum):
     NEWS = "NEWS"
     PREDICTION = "PREDICTION"
@@ -86,15 +94,11 @@ class ExternalEvent:
         if not isinstance(self.source_tier, SourceTier):
             raise TypeError("source_tier must be SourceTier")
         for field_name in ("retrieval_ts_ms", "ingest_ts_ms"):
-            value = getattr(self, field_name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"{field_name} must be a non-negative integer")
+            _require_non_negative_int(getattr(self, field_name), field_name=field_name)
         for field_name in ("publication_ts_ms", "event_ts_ms"):
             value = getattr(self, field_name)
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 0
-            ):
-                raise ValueError(f"{field_name} must be None or a non-negative integer")
+            if value is not None:
+                _require_non_negative_int(value, field_name=field_name)
         if self.retrieval_ts_ms > self.ingest_ts_ms:
             raise ValueError("retrieval_ts_ms cannot be after ingest_ts_ms")
         if (
@@ -115,7 +119,11 @@ class ExternalEvent:
                 raise ValueError("severity must be finite and in [0, 1]") from exc
             if not math.isfinite(severity) or not 0.0 <= severity <= 1.0:
                 raise ValueError("severity must be finite and in [0, 1]")
-        if isinstance(self.corroboration_count, bool) or self.corroboration_count < 1:
+        if (
+            isinstance(self.corroboration_count, bool)
+            or not isinstance(self.corroboration_count, int)
+            or self.corroboration_count < 1
+        ):
             raise ValueError("corroboration_count must be >= 1")
         if isinstance(self.revision, bool) or not isinstance(self.revision, int) or self.revision < 0:
             raise ValueError("revision must be a non-negative integer")
@@ -141,7 +149,8 @@ class ExternalEvent:
         return (self.source, self.event_id, self.revision)
 
     def is_available_at(self, decision_ts_ms: int) -> bool:
-        return int(decision_ts_ms) >= self.available_ts_ms
+        decision = _require_non_negative_int(decision_ts_ms, field_name="decision_ts_ms")
+        return decision >= self.available_ts_ms
 
     def to_r2_record(self) -> dict[str, object]:
         """Return an archive-friendly structured-event record without source text."""
@@ -192,6 +201,7 @@ class ExternalEventReplayGuard:
         *,
         decision_ts_ms: int,
     ) -> ExternalEventDecision:
+        _require_non_negative_int(decision_ts_ms, field_name="decision_ts_ms")
         if event.dedupe_key in self._seen:
             return ExternalEventDecision(False, "DUPLICATE_EVENT")
         if not event.is_available_at(decision_ts_ms):

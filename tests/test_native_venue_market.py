@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from hl_observer.collection.native_venue_market import (
     EXPLOITABLE,
     STALE,
@@ -46,6 +48,24 @@ def test_snapshot_derives_mid_spread_and_rejects_stale() -> None:
     )
     assert stale.quality == STALE
     assert stale.exploitable is False
+
+
+@pytest.mark.parametrize("field", ["exchange_ts_ms", "receive_ts_ms", "now_ms", "stale_after_ms"])
+def test_snapshot_rejects_fractional_causal_clocks(field: str) -> None:
+    values = {
+        "venue": "bybit",
+        "coin": "BTC",
+        "exchange_symbol": "BTCUSDT",
+        "bid": 100.0,
+        "ask": 100.1,
+        "exchange_ts_ms": 1_000,
+        "receive_ts_ms": 1_010,
+        "now_ms": 1_020,
+        "stale_after_ms": 500,
+    }
+    values[field] = 1_000.5
+    with pytest.raises(ValueError, match=field):
+        NativeMarketSnapshot.build(**values)
 
 
 def test_store_exposes_all_fresh_venues_to_cross_venue_and_lead_lag() -> None:

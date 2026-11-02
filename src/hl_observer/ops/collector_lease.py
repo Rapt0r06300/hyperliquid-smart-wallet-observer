@@ -9,6 +9,7 @@ expiry while preserving the launcher's existing anti-orphan contract.
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 import time
@@ -18,6 +19,27 @@ from typing import Any
 SCHEMA_VERSION = "hypersmart.collector_lease.v1"
 PURPOSE = "economic_evidence_collection"
 DEFAULT_RELPATH = Path("runtime") / "data" / "economic_collection_lease.json"
+
+
+def _finite_number(value: object, *, field: str) -> float:
+    """Return a real finite number without accepting coercible strings/bools."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a finite number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{field} must be a finite number")
+    return number
+
+
+def _exact_int(value: object, *, field: str, minimum: int | None = None) -> int:
+    """Return an integer JSON value without truncating strings or fractions."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be an integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{field} must be >= {minimum}")
+    return value
 
 
 def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
@@ -52,18 +74,23 @@ def create_lease(
 ) -> tuple[Path, dict[str, Any]]:
     """Create or replace one bounded campaign lease atomically."""
 
-    if not 30.0 <= float(duration_s) <= 7 * 24 * 60 * 60:
+    duration_value = _finite_number(duration_s, field="duration_s")
+    if not 30.0 <= duration_value <= 7 * 24 * 60 * 60:
         raise ValueError("collector lease duration must be between 30s and 7 days")
     root_path = Path(root).resolve()
-    issued_s = time.time() if now is None else float(now)
+    issued_s = _finite_number(time.time() if now is None else now, field="now")
+    issued_at_ms = round(issued_s * 1000)
+    expires_at_ms = round((issued_s + duration_value) * 1000)
+    if expires_at_ms <= issued_at_ms:
+        raise ValueError("collector lease expiration must be after issuance")
     payload = {
         "schema_version": SCHEMA_VERSION,
         "purpose": PURPOSE,
         "lease_id": "lease-" + secrets.token_hex(8),
         "token": token or secrets.token_hex(24),
         "root": str(root_path),
-        "issued_at_ms": int(issued_s * 1000),
-        "expires_at_ms": int((issued_s + float(duration_s)) * 1000),
+        "issued_at_ms": issued_at_ms,
+        "expires_at_ms": expires_at_ms,
         "paper_read_only": True,
         "real_execution": False,
     }
@@ -99,10 +126,18 @@ def validate_lease(
     if Path(str(payload.get("root") or "")).resolve() != Path(root).resolve():
         return False, "COLLECTOR_LEASE_ROOT_MISMATCH", payload
     try:
-        expires_at_ms = int(payload["expires_at_ms"])
+        expires_at_ms = _exact_int(
+            payload["expires_at_ms"], field="expires_at_ms", minimum=1
+        )
     except (KeyError, TypeError, ValueError):
         return False, "COLLECTOR_LEASE_EXPIRY_INVALID", payload
-    current_ms = int((time.time() if now is None else float(now)) * 1000)
+    try:
+        current_s = _finite_number(
+            time.time() if now is None else now, field="now"
+        )
+    except ValueError:
+        return False, "COLLECTOR_LEASE_CLOCK_INVALID", payload
+    current_ms = round(current_s * 1000)
     if expires_at_ms <= current_ms:
         return False, "COLLECTOR_LEASE_EXPIRED", payload
     return True, "", payload

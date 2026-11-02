@@ -18,8 +18,10 @@ from __future__ import annotations
 import bisect
 import gzip
 import json
+import math
 import random
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,42 @@ HORIZONS_MS = (60_000.0, 300_000.0, 900_000.0, 3_600_000.0)   # 1 min, 5 min, 15
 TOL_LOOKUP_MS = 90_000.0          # on n'apparie un prix que si un point de tape est à < 90 s de la cible
 FRAIS_SLIPPAGE_BPS = 12.0         # coût A/R conservateur (2× taker HL + spread alt + latence) — voir signaux
 MIN_EVENTS = 30                   # en-dessous : NEED_MORE_DATA (comme le lead-lag)
+
+
+def _strict_int(value: object, *, positive: bool = False) -> int | None:
+    """Parse a source integer without truncating floats, booleans or strings."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if positive and value <= 0:
+        return None
+    if not positive and value < 0:
+        return None
+    return value
+
+
+def _finite_positive(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) else None
+
+
+def _finite_positive_literal(value: str) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
 
 
 # ─────────────────────────────── chargement ───────────────────────────────
@@ -60,10 +98,15 @@ def charger_evenements(root: str | Path, *, seuil: float = SEUIL_MOVE_FRAC_NAV) 
             par_vault.setdefault(a, []).append(d)
     ev: list[dict] = []
     for adr, snaps in par_vault.items():
-        snaps.sort(key=lambda s: int(s.get("ts_ms") or 0))
-        for av, ap in zip(snaps, snaps[1:]):
-            nav = float(ap.get("nav_usd") or 0.0)
-            if nav <= 0:
+        valid_snaps = [
+            (ts, snapshot)
+            for snapshot in snaps
+            if (ts := _strict_int(snapshot.get("ts_ms"), positive=True)) is not None
+        ]
+        valid_snaps.sort(key=lambda item: item[0])
+        for (previous_ts, av), (current_ts, ap) in zip(valid_snaps, valid_snaps[1:]):
+            nav = _finite_positive(ap.get("nav_usd"))
+            if nav is None:
                 continue
             p0, p1 = _positions_par_coin(av), _positions_par_coin(ap)
             best_c, best_dnot, best_dszi = "", 0.0, 0.0
@@ -74,7 +117,7 @@ def charger_evenements(root: str | Path, *, seuil: float = SEUIL_MOVE_FRAC_NAV) 
                     best_c, best_dnot, best_dszi = c, dszi * px, dszi
             move_frac = abs(best_dnot) / nav
             if best_c and move_frac >= seuil:
-                ev.append({"ts_ms": int(ap.get("ts_ms") or 0), "vault": adr, "coin": best_c,
+                ev.append({"ts_ms": current_ts, "vault": adr, "coin": best_c,
                            "direction": 1 if best_dszi > 0 else -1, "move_frac": round(move_frac, 4)})
     return ev
 
@@ -95,12 +138,11 @@ def charger_prix_tape(root: str | Path) -> dict[str, list[tuple[int, float]]]:
             d = json.loads(l)
         except ValueError:
             continue
-        ts = int(d.get("ts_ms") or 0)
+        ts = _strict_int(d.get("ts_ms"), positive=True)
         for c, px in (d.get("mids") or {}).items():
-            try:
-                tape.setdefault(str(c).upper(), []).append((ts, float(px)))
-            except (TypeError, ValueError):
-                continue
+            price = _finite_positive(px)
+            if ts is not None and price is not None:
+                tape.setdefault(str(c).upper(), []).append((ts, price))
     for c in tape:
         tape[c].sort()
     return tape
@@ -136,6 +178,25 @@ def charger_prix_tape_ciblee(
     économique et reste exclusivement destiné au classement shadow.
     """
 
+    horizon = _strict_int(horizon_ms, positive=True)
+    tolerance = _strict_int(tolerance_ms)
+    max_total = _strict_int(max_evenements_total, positive=True)
+    max_per_coin = _strict_int(max_evenements_par_coin, positive=True)
+    delays = tuple(_strict_int(value) for value in delays_ms)
+    if (
+        horizon is None
+        or tolerance is None
+        or max_total is None
+        or max_per_coin is None
+        or any(value is None for value in delays)
+    ):
+        return {}, {
+            "mode": "EVENT_TARGETED_BOUNDED",
+            "status": "INVALID_INPUT",
+            "reason": "NON_EXACT_INTEGER_PARAMETER",
+            "cibles_prix": 0,
+            "cibles_appariees": 0,
+        }
     path = Path(root) / PRIX_TAPE_RELPATH
     normalisees: list[tuple[int, str]] = []
     for coin_raw, timestamps_raw in (cibles_par_coin or {}).items():
@@ -144,24 +205,21 @@ def charger_prix_tape_ciblee(
             continue
         timestamps: set[int] = set()
         for value in timestamps_raw or []:
-            try:
-                ts_ms = int(value)
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if ts_ms > 0:
+            ts_ms = _strict_int(value, positive=True)
+            if ts_ms is not None:
                 timestamps.add(ts_ms)
-        for ts_ms in sorted(timestamps)[-max(1, int(max_evenements_par_coin)):]:
+        for ts_ms in sorted(timestamps)[-max_per_coin:]:
             normalisees.append((ts_ms, coin))
 
     normalisees.sort(reverse=True)
-    normalisees = normalisees[:max(1, int(max_evenements_total))]
+    normalisees = normalisees[:max_total]
     retenues: dict[str, list[int]] = {}
     for ts_ms, coin in normalisees:
         retenues.setdefault(coin, []).append(ts_ms)
     for coin in retenues:
         retenues[coin] = sorted(set(retenues[coin]))
 
-    offsets = tuple(sorted({0, int(horizon_ms), *(max(0, int(value)) for value in delays_ms)}))
+    offsets = tuple(sorted({0, horizon, *(value for value in delays if value is not None)}))
     cibles: dict[str, list[int]] = {
         coin: sorted({event_ts + offset for event_ts in events for offset in offsets})
         for coin, events in retenues.items()
@@ -172,9 +230,9 @@ def charger_prix_tape_ciblee(
 
     def retenir(coin: str, ts_ms: int, price: float, source: str) -> None:
         targets = cibles.get(coin)
-        if not targets or price <= 0:
+        if not targets or not math.isfinite(price) or price <= 0:
             return
-        first = bisect.bisect_left(targets, ts_ms - tolerance_ms)
+        first = bisect.bisect_left(targets, ts_ms - tolerance)
         last = bisect.bisect_right(targets, ts_ms)
         for target in targets[first:last]:
             delay = ts_ms - target
@@ -218,14 +276,13 @@ def charger_prix_tape_ciblee(
                     if ts_match is None:
                         continue
                     ts_ms = int(ts_match.group(1))
-                    if ts_ms < first_target - tolerance_ms or ts_ms > last_target + tolerance_ms:
+                    if ts_ms < first_target - tolerance or ts_ms > last_target + tolerance:
                         continue
                     lignes_valides += 1
                     for price_match in price_pattern.finditer(line) if price_pattern is not None else ():
                         coin = encoded_coins[price_match.group(1)]
-                        try:
-                            price = float(price_match.group(2))
-                        except (ValueError, OverflowError):
+                        price = _finite_positive_literal(price_match.group(2))
+                        if price is None:
                             continue
                         retenir(coin, ts_ms, price, source_allmids)
 
@@ -265,8 +322,8 @@ def charger_prix_tape_ciblee(
                     shards.append((int(match.group(1)) // 1_000_000, candidate.resolve()))
         shards.sort(key=lambda item: (item[0], item[1].as_posix()))
         previous_end: int | None = None
-        lower = first_target - tolerance_ms
-        upper = last_target + tolerance_ms
+        lower = first_target - tolerance
+        upper = last_target + tolerance
         for end_ms, candidate in shards:
             start_ms = previous_end if previous_end is not None else end_ms - 15 * 60_000
             previous_end = end_ms
@@ -296,11 +353,22 @@ def charger_prix_tape_ciblee(
                 try:
                     record = json.loads(line)
                     coin = str(record.get("coin") or "").strip().upper()
-                    ts_ms = int(record.get("ts_wall_ms") or record.get("recv_wall_ts_ms") or 0)
-                    price = float(record.get("mid") or 0.0)
+                    ts_ms = _strict_int(
+                        record.get("ts_wall_ms")
+                        if record.get("ts_wall_ms") is not None
+                        else record.get("recv_wall_ts_ms"),
+                        positive=True,
+                    )
+                    price = _finite_positive(record.get("mid"))
                 except (AttributeError, TypeError, ValueError, OverflowError):
                     continue
-                if coin not in cibles or ts_ms < first_target - tolerance_ms or ts_ms > last_target + tolerance_ms:
+                if (
+                    ts_ms is None
+                    or price is None
+                    or coin not in cibles
+                    or ts_ms < first_target - tolerance
+                    or ts_ms > last_target + tolerance
+                ):
                     continue
                 bbo_valides += 1
                 retenir(coin, ts_ms, price, source_name)
@@ -332,11 +400,11 @@ def charger_prix_tape_ciblee(
         "source_details": source_details,
         "cibles_par_source": targets_by_source,
         "historique_bbo_active": bool(inclure_historique_bbo or sources_bbo is not None),
-        "horizon_ms": int(horizon_ms),
-        "delays_ms": list(offset for offset in offsets if offset not in (0, int(horizon_ms))),
-        "tolerance_ms": int(tolerance_ms),
-        "max_evenements_total": int(max_evenements_total),
-        "max_evenements_par_coin": int(max_evenements_par_coin),
+        "horizon_ms": horizon,
+        "delays_ms": list(offset for offset in offsets if offset not in (0, horizon)),
+        "tolerance_ms": tolerance,
+        "max_evenements_total": max_total,
+        "max_evenements_par_coin": max_per_coin,
         "evenements_demandes": sum(len(set(values or [])) for values in (cibles_par_coin or {}).values()),
         "evenements_retenus": len(normalisees),
         "coins_demandes": len(cibles),
@@ -370,11 +438,11 @@ def charger_prix_tape_candles(root: str | Path, *, intervalle: str = "1m") -> di
             continue
         try:
             c = str(d.get("coin") or "").upper()
-            t = int(d.get("t_ms"))
-            px = float(d.get("c"))
+            t = _strict_int(d.get("t_ms"), positive=True)
+            px = _finite_positive(d.get("c"))
         except (TypeError, ValueError):
             continue
-        if c and px > 0:
+        if c and t is not None and px is not None:
             tape.setdefault(c, []).append((t, px))
     for c in tape:
         tape[c].sort()
@@ -401,11 +469,16 @@ def _prix_a(serie: list[tuple[int, float]], cible_ms: int, *, tol_ms: float = TO
 def rendement_forward(ev: dict, serie: list[tuple[int, float]], horizon_ms: float) -> float | None:
     """Rendement forward (bps) du coin dans le SENS du changement, entre ts et ts+horizon. None si
     un des deux prix est inintrouvable (trou de tape) — jamais extrapolé."""
-    p0 = _prix_a(serie, ev["ts_ms"])
-    p1 = _prix_a(serie, int(ev["ts_ms"] + horizon_ms))
+    ts_ms = _strict_int(ev.get("ts_ms"), positive=True)
+    direction = ev.get("direction")
+    horizon = _finite_positive(horizon_ms)
+    if ts_ms is None or direction not in (-1, 1) or horizon is None:
+        return None
+    p0 = _prix_a(serie, ts_ms)
+    p1 = _prix_a(serie, int(ts_ms + horizon))
     if p0 is None or p1 is None or p0 <= 0:
         return None
-    return ev["direction"] * (p1 - p0) / p0 * 1e4
+    return direction * (p1 - p0) / p0 * 1e4
 
 
 def rendement_forward_candles(ev: dict, serie: list[tuple[int, float]], horizon_ms: float,
@@ -416,16 +489,22 @@ def rendement_forward_candles(ev: dict, serie: list[tuple[int, float]], horizon_
     une des deux bougies manque (jamais extrapolé)."""
     if not serie:
         return None
+    ts_ms = _strict_int(ev.get("ts_ms"), positive=True)
+    direction = ev.get("direction")
+    horizon = _finite_positive(horizon_ms)
+    delay = _finite_number(delai_ms)
+    if ts_ms is None or direction not in (-1, 1) or horizon is None or delay is None or delay < 0:
+        return None
     ts = [t for t, _ in serie]
-    t_sig = int(ev["ts_ms"] + delai_ms)
+    t_sig = int(ts_ms + delay)
     i = bisect.bisect_right(ts, t_sig)                             # 1re bougie qui COMMENCE après le signal+délai
-    j = bisect.bisect_right(ts, t_sig + int(horizon_ms))          # 1re bougie après signal+délai+horizon
+    j = bisect.bisect_right(ts, t_sig + int(horizon))              # 1re bougie après signal+délai+horizon
     if i >= len(serie) or j >= len(serie) or i == j:
         return None
     p_ent, p_sor = serie[i][1], serie[j][1]
     if p_ent <= 0:
         return None
-    return ev["direction"] * (p_sor - p_ent) / p_ent * 1e4
+    return direction * (p_sor - p_ent) / p_ent * 1e4
 
 
 def _placebo_forward(ev: dict, serie: list[tuple[int, float]], horizon_ms: float,
@@ -484,8 +563,15 @@ def geler(root: str | Path, horizon_ms: float, edge_brut_bps: float, *, edge_net
           source: str = "mesure") -> dict:
     """Gèle la config de copie VALIDÉE. On stocke l'edge BRUT (rendement forward mesuré) : le signal
     recalculera le NET avec le coût L2 RÉEL au moment d'ouvrir (pas de double-comptage des coûts)."""
-    cfg = {"horizon_ms": float(horizon_ms), "edge_brut_bps": float(edge_brut_bps),
-           "edge_net_mesure_bps": edge_net_mesure_bps, "source": source, "gele": True,
+    horizon = _finite_positive(horizon_ms)
+    edge_brut = _finite_number(edge_brut_bps)
+    edge_net = None if edge_net_mesure_bps is None else _finite_number(edge_net_mesure_bps)
+    if horizon is None or edge_brut is None or (edge_net_mesure_bps is not None and edge_net is None):
+        raise ValueError("configuration de copie non finie ou horizon invalide")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("source de configuration absente")
+    cfg = {"horizon_ms": horizon, "edge_brut_bps": edge_brut,
+           "edge_net_mesure_bps": edge_net, "source": source, "gele": True,
            "note": "Config copie gelée : edge BRUT mesuré sur forward historique (net recalculé au coût L2 réel), "
                    "à re-valider en forward paper causal."}
     dest = Path(root) / CONFIG_GELE_RELPATH
@@ -496,9 +582,21 @@ def geler(root: str | Path, horizon_ms: float, edge_brut_bps: float, *, edge_net
 
 def config_gelee(root: str | Path) -> dict | None:
     try:
-        return json.loads((Path(root) / CONFIG_GELE_RELPATH).read_text(encoding="utf-8"))
+        config = json.loads((Path(root) / CONFIG_GELE_RELPATH).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    if not isinstance(config, Mapping) or config.get("gele") is not True:
+        return None
+    if _finite_positive(config.get("horizon_ms")) is None:
+        return None
+    if _finite_number(config.get("edge_brut_bps")) is None:
+        return None
+    edge_net = config.get("edge_net_mesure_bps")
+    if edge_net is not None and _finite_number(edge_net) is None:
+        return None
+    if not isinstance(config.get("source"), str) or not config["source"].strip():
+        return None
+    return dict(config)
 
 
 __all__ = [

@@ -50,6 +50,12 @@ CAPACITY_SCENARIOS_USD = (10.0, 50.0, 100.0, 200.0, 400.0, 1_000.0, 2_000.0, 5_0
 REQUIRED_FUNDING_SEGMENTS = ("validation", "oos", "forward")
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def _first_action(metaorder: Mapping[str, Any]) -> str:
     members = list(metaorder.get("member_events") or ())
     if members and isinstance(members[0], Mapping):
@@ -78,13 +84,11 @@ def _reference_depth_features(
 ) -> tuple[float, float] | None:
     if not rows:
         return None
-    try:
-        timestamps = [int(row["ts_ms"]) for row in rows]
-        signal_ms = int(metaorder["signal_ts_ms"])
-    except (KeyError, TypeError, ValueError, OverflowError):
+    timestamps = [_strict_positive_int(row.get("ts_ms")) for row in rows]
+    signal_ms = _strict_positive_int(metaorder.get("signal_ts_ms"))
+    if any(timestamp is None for timestamp in timestamps) or signal_ms is None:
         return None
-    if signal_ms <= 0 or any(timestamp <= 0 for timestamp in timestamps):
-        return None
+    timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
     if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
         return None
     index = bisect.bisect_right(timestamps, signal_ms) - 1
@@ -106,9 +110,14 @@ def _reference_depth_features(
     bid_usd = sum(price * quantity for price, quantity in bids)
     ask_usd = sum(price * quantity for price, quantity in asks)
     total = bid_usd + ask_usd
-    direction = int(metaorder.get("direction") or 0)
+    direction = metaorder.get("direction")
     two_sided_capacity = min(bid_usd, ask_usd)
-    if total <= 0.0 or two_sided_capacity <= 0.0 or direction not in (-1, 1):
+    if (
+        total <= 0.0
+        or two_sided_capacity <= 0.0
+        or isinstance(direction, bool)
+        or direction not in (-1, 1)
+    ):
         return None
     return direction * (bid_usd - ask_usd) / total, two_sided_capacity
 
@@ -549,24 +558,27 @@ def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
             or notional > MAX_GROSS_EXPOSURE_USD
         ):
             raise ValueError("COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED")
-    try:
-        frozen_at_ms = int(row.get("frozen_at_ms") or 0)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("COPY_V21_FREEZE_TIMESTAMP_INVALID") from exc
-    if frozen_at_ms <= 0:
+    frozen_at_ms = _strict_positive_int(row.get("frozen_at_ms"))
+    if frozen_at_ms is None:
         raise ValueError("COPY_V21_FREEZE_TIMESTAMP_INVALID")
-    try:
-        bounds = parameters["bounds"]
-        if not isinstance(bounds, Mapping):
-            raise TypeError
-        train_start_ms = int(bounds["train_start_ms"])
-        train_end_ms = int(bounds["train_end_ms"])
-        validation_start_ms = int(bounds["validation_start_ms"])
-        validation_end_ms = int(bounds["validation_end_ms"])
-        oos_start_ms = int(bounds["oos_start_ms"])
-        oos_end_ms = int(bounds["oos_end_ms"])
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID") from exc
+    bounds = parameters.get("bounds")
+    if not isinstance(bounds, Mapping):
+        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID")
+    bound_values = {
+        name: _strict_positive_int(bounds.get(name))
+        for name in (
+            "train_start_ms", "train_end_ms", "validation_start_ms",
+            "validation_end_ms", "oos_start_ms", "oos_end_ms",
+        )
+    }
+    if any(value is None for value in bound_values.values()):
+        raise ValueError("COPY_V21_FREEZE_BOUNDS_INVALID")
+    train_start_ms = bound_values["train_start_ms"]
+    train_end_ms = bound_values["train_end_ms"]
+    validation_start_ms = bound_values["validation_start_ms"]
+    validation_end_ms = bound_values["validation_end_ms"]
+    oos_start_ms = bound_values["oos_start_ms"]
+    oos_end_ms = bound_values["oos_end_ms"]
     if (
         min(
             train_start_ms,
@@ -605,8 +617,11 @@ def _segment_candidates(
     audit: dict[str, int] = defaultdict(int)
     candidates: list[dict[str, Any]] = []
     for raw in metaorders:
-        signal_ms = int(raw.get("signal_ts_ms") or 0)
-        if signal_ms < int(start_ms) or (end_ms is not None and signal_ms > int(end_ms)):
+        signal_ms = _strict_positive_int(raw.get("signal_ts_ms"))
+        if signal_ms is None:
+            audit["SIGNAL_TIMESTAMP_UNMEASURABLE"] += 1
+            continue
+        if signal_ms < start_ms or (end_ms is not None and signal_ms > end_ms):
             continue
         audit["SIGNALS_IN_SEGMENT"] += 1
         row = dict(raw)

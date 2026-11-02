@@ -39,8 +39,11 @@ def event_canonique(e: Mapping[str, Any]) -> dict[str, Any] | None:
     if (
         not coin
         or side not in {"BUY", "SELL"}
+        or isinstance(ts_ms, bool)
+        or not isinstance(ts_ms, int)
+        or ts_ms <= 0
         or any(isinstance(value, bool) or not isinstance(value, (int, float))
-               or not math.isfinite(float(value)) for value in numeric)
+               or not math.isfinite(float(value)) for value in (px, sz))
         or float(px) <= 0
         or float(sz) <= 0
     ):

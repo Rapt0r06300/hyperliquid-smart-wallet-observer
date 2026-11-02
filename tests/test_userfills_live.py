@@ -46,6 +46,30 @@ def test_identite_instrument_native_est_preservee_dans_etat_snapshot_et_fill():
     assert set(positions) == {"kPEPE"}
 
 
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        {},
+        {"positions": [{"coin": "BTC", "entryPx": 100.0}]},
+        {"positions": [{"coin": "BTC", "szi": 1.0, "entryPx": float("nan")}]},
+        {"positions": [{"coin": "BTC", "szi": 1.0, "entryPx": 100.0},
+                        {"coin": " BTC ", "szi": 2.0, "entryPx": 101.0}]},
+    ],
+)
+def test_positions_snapshot_rejette_absence_non_fini_et_doublon(snapshot):
+    with pytest.raises(ValueError):
+        UL.positions_depuis_snapshot(snapshot)
+
+
+def test_appliquer_fill_ne_convertit_pas_un_etat_existant_incomplet_en_zero():
+    positions = {"BTC": {"szi": 2.0}}
+    before = {coin: dict(state) for coin, state in positions.items()}
+
+    UL.appliquer_fill(positions, {"coin": "BTC", "px": 101.0, "sz": 1.0, "signe": 1})
+
+    assert positions == before
+
+
 def test_appliquer_fill_short_add_est_aussi_pondere():
     pos = {"ETH": {"szi": -4.0, "entryPx": 100.0}}
     UL.appliquer_fill(pos, {"coin": "ETH", "px": 90.0, "sz": 6.0, "signe": -1})
@@ -59,6 +83,21 @@ def test_snapshot_depuis_positions_format():
     assert snap["vault"] == "0xA" and snap["source"] == "userfills_live" and snap["real_execution"] is False
     coins = {p["coin"] for p in snap["positions"]}
     assert coins == {"HYPE"} and snap["n_positions"] == 1
+
+
+@pytest.mark.parametrize(
+    ("vault", "positions", "nav_usd", "ts_ms"),
+    [
+        ("", {"BTC": {"szi": 1.0, "entryPx": 100.0}}, 100.0, 1),
+        ("0xA", {"BTC": {"szi": 1.0, "entryPx": 100.0}}, float("nan"), 1),
+        ("0xA", {"BTC": {"szi": 1.0, "entryPx": 100.0}}, 100.0, 0),
+        ("0xA", {"BTC": {"szi": 1.0, "entryPx": float("nan")}}, 100.0, 1),
+        ("0xA", {"BTC": {"szi": True, "entryPx": 100.0}}, 100.0, 1),
+    ],
+)
+def test_snapshot_depuis_positions_refuse_les_preuves_non_finis(vault, positions, nav_usd, ts_ms):
+    with pytest.raises(ValueError):
+        UL.snapshot_depuis_positions(vault, positions, nav_usd=nav_usd, ts_ms=ts_ms)
 
 
 def test_parser_message_userfills_separe_exchange_et_reception_ws():
@@ -76,6 +115,7 @@ def test_parser_message_userfills_separe_exchange_et_reception_ws():
     assert fill["tid"] == 7 and fill["oid"] == 11
     assert fill["frame_sequence"] == 42
     assert fill["isSnapshot"] is None
+    assert fill["is_snapshot"] is None
 
 
 def test_parser_userfills_preserve_la_casse_native_de_l_instrument():
@@ -94,6 +134,7 @@ def test_parser_preserves_unknown_snapshot_classification():
     ]}}
     [fill] = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1500)
     assert fill["isSnapshot"] is None
+    assert fill["is_snapshot"] is None
     assert UL.liquidations_confirmees([{
         **fill,
         "liquidation": {"liquidatedUser": "0xB"},

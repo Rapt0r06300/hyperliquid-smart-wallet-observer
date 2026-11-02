@@ -60,21 +60,32 @@ DATA_ACCUMULATION_REASONS = frozenset(
 )
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def _is_causal_leader_exit(row: Mapping[str, Any]) -> bool:
-    try:
-        event_ms = int(row.get("ts_ms") or 0)
-        observed_ms = int(row.get("observed_at_ms") or 0)
-        direction = int(row.get("direction") or 0)
-    except (TypeError, ValueError, OverflowError):
+    event_ms = _strict_positive_int(row.get("ts_ms"))
+    observed_ms = _strict_positive_int(row.get("observed_at_ms"))
+    received_ms = _strict_positive_int(row.get("received_at_ms"))
+    direction = row.get("direction")
+    if isinstance(direction, bool) or direction not in (-1, 1):
         return False
+    native_identity = str(row.get("event_id") or row.get("fill_id") or "").strip()
     return bool(
         str(row.get("action") or "").upper() in LEADER_EXIT_ACTIONS
         and str(row.get("source") or "") == "LIVE_WS"
         and row.get("is_snapshot") is False
-        and observed_ms >= event_ms > 0
-        and direction in (-1, 1)
-        and row.get("vault")
-        and row.get("coin")
+        and event_ms is not None
+        and observed_ms is not None
+        and received_ms is not None
+        and observed_ms >= event_ms
+        and received_ms >= observed_ms
+        and native_identity
+        and str(row.get("vault") or "").strip()
+        and str(row.get("coin") or "").strip()
     )
 
 
@@ -94,8 +105,6 @@ def index_causal_leader_exits(
         row["action"] = str(row["action"]).upper()
         row["coin"] = preserve_native_instrument_symbol(row["coin"])
         row["vault"] = str(row["vault"])
-        row["direction"] = int(row["direction"])
-        row["observed_at_ms"] = int(row["observed_at_ms"])
         indexed[(row["vault"], row["coin"], row["direction"])].append(row)
         actions[row["action"]] += 1
     for rows in indexed.values():

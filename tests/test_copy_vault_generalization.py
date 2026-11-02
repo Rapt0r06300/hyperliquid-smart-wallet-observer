@@ -68,6 +68,19 @@ def test_generalisation_refuse_frontiere_oos_absente() -> None:
     assert derive_heldout_vault_generalization([], oos_start_ms=None) is None
 
 
+def test_generalisation_refuse_frontiere_et_timestamps_non_entiers() -> None:
+    valid = _trade("B", 300, 1.0, "a")
+    assert derive_heldout_vault_generalization([valid], oos_start_ms=200.5) is None
+    assert derive_heldout_vault_generalization([valid], oos_start_ms=True) is None
+
+    for invalid_ts in (0, -1, 300.5, True, "300"):
+        row = {**valid, "signal_ts_ms": invalid_ts}
+        proof = derive_heldout_vault_generalization([row], oos_start_ms=200)
+        assert proof is not None
+        assert proof["sample_count"] == 0
+        assert proof["net_pnl_usd"] is None
+
+
 def test_generalisation_ne_confond_pas_les_symboles_native_case_sensitive():
     proof = derive_heldout_vault_generalization(
         [

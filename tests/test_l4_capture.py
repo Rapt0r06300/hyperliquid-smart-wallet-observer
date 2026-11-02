@@ -11,7 +11,7 @@ from hl_observer.collection import l4_capture as L4   # noqa: E402, I001
 
 def test_chantier4_capture_reconstruit_le_cycle(tmp_path):
     events = [
-        {"order_id": "o1", "ts_ms": 0, "type": "NEW", "coin": "BTC", "side": "BUY", "px": 100.0, "sz": 1, "mid": 100.0},
+        {"order_id": "o1", "ts_ms": 1, "type": "NEW", "coin": "BTC", "side": "BUY", "px": 100.0, "sz": 1, "mid": 100.0},
         {"order_id": "o1", "ts_ms": 50, "type": "MODIFY", "coin": "BTC", "side": "BUY", "px": 100.1, "sz": 1},
         {"order_id": "o1", "ts_ms": 90, "type": "PARTIAL", "coin": "BTC", "side": "BUY", "px": 100.1, "sz": 0.5},
         {"order_id": "o1", "ts_ms": 120, "type": "FILL", "coin": "BTC", "side": "BUY", "px": 100.1, "sz": 0.5},
@@ -40,6 +40,11 @@ def test_chantier4_rejette_les_observations_incompletes_ou_non_causales():
         "order_id": "o1", "ts_ms": 1, "type": "NEW", "coin": "BTC",
         "side": "BUY", "px": float("nan"), "sz": 1.0,
     }) is None
+    for invalid_ts in (0, -1, 1.5, True):
+        assert L4.event_canonique({
+            "order_id": "o1", "ts_ms": invalid_ts, "type": "NEW", "coin": "BTC",
+            "side": "BUY", "px": 100.0, "sz": 1.0,
+        }) is None
     result = L4.capturer([
         {"order_id": "o1", "ts_ms": 10, "type": "MODIFY", "coin": "BTC",
          "side": "BUY", "px": 100.0, "sz": 1.0},

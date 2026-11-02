@@ -58,6 +58,20 @@ def test_vnext_train_rows_never_credit_tolerated_overstatement() -> None:
     assert accepted[0]["net_pnl_usd"] <= 5.0
 
 
+def test_vnext_train_rows_refuse_timestamp_direction_and_numeric_bool_coercion() -> None:
+    base = _row(ts=1_000, vault="0xa")
+    for field, value in (
+        ("signal_ts_ms", 1_000.5),
+        ("signal_ts_ms", "1000"),
+        ("signal_ts_ms", True),
+        ("direction", True),
+        ("entry_price", True),
+    ):
+        row = dict(base)
+        row[field] = value
+        assert _train_rows({"trades": [row]}) == []
+
+
 def test_vnext_candidate_rank_uses_exact_net_when_lcb_and_float_tie(monkeypatch) -> None:
     import hl_observer.backtesting.copy_vault_vnext_train as module
 

@@ -95,6 +95,19 @@ def test_online_quality_invalid_candidate_timestamp_is_audited_not_raised() -> N
     assert invalid["reason"] == "INVALID_CANDIDATE_TIMESTAMP"
 
 
+def test_online_quality_rejects_boolean_history_pnl_as_unmeasurable() -> None:
+    history = _trade("history", vault="A", entry_ms=10, exit_ms=20, net=2.0)
+    history["net_pnl_usd"] = True
+    candidate = _trade("candidate", vault="A", entry_ms=30, exit_ms=40, net=-1.0)
+
+    selected, audit = apply_causal_online_leader_quality(
+        [candidate], [history], minimum_prior_closed=1, history_window=4
+    )
+
+    assert selected == []
+    assert audit["INSUFFICIENT_PRIOR_HISTORY_REJECTED"] == 1
+
+
 def test_online_quality_trace_binds_only_complete_causal_safe_prior_lineage() -> None:
     def ref(dataset: str, digest: str, ts: int, event: str) -> dict:
         return {

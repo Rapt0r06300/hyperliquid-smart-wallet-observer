@@ -15,6 +15,10 @@ _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _is_positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 def generate_request_id(
     operator_intent: str,
     main_code_sha: str,
@@ -22,6 +26,8 @@ def generate_request_id(
     campaign_kind: str,
     normalized_config: Mapping[str, Any],
 ) -> str:
+    if not _is_positive_int(requested_phase_epoch):
+        raise ValueError("requested_phase_epoch must be a positive integer")
     payload = {
         "operator_intent": operator_intent,
         "main_code_sha": main_code_sha,
@@ -80,10 +86,10 @@ def validate_dispatch_receipt(receipt: DispatchReceipt) -> None:
         raise ValueError("dispatch receipt requires an exact dataset repository SHA")
     if receipt.creation_phase not in {"IDLE", "COLLECT", "ANALYZE"}:
         raise ValueError("dispatch receipt has invalid creation phase")
-    if not isinstance(receipt.phase_epoch, int) or receipt.phase_epoch < 1:
+    if not _is_positive_int(receipt.phase_epoch):
         raise ValueError("dispatch receipt has invalid phase epoch")
     if receipt.creation_phase == "ANALYZE":
-        if not isinstance(receipt.source_collection_epoch, int) or isinstance(receipt.source_collection_epoch, bool) or receipt.source_collection_epoch < 1:
+        if not _is_positive_int(receipt.source_collection_epoch):
             raise ValueError("analysis dispatch requires source collection epoch")
     elif receipt.source_collection_epoch is not None:
         raise ValueError("non-analysis dispatch must not bind a source collection epoch")

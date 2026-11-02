@@ -66,6 +66,35 @@ def test_partition_assignment_is_deterministic_and_byte_balanced() -> None:
     assert sorted(sum(int(row["asset_bytes"]) for row in bucket) for bucket in first) == [13, 13, 13]
 
 
+@pytest.mark.parametrize("bad_size", [1.0, True, "1", -1])
+def test_member_identity_rejects_implicit_size_coercion(bad_size) -> None:
+    row = _row("dataset-a", "a.jsonl.gz", b"alpha")
+    row["bytes"] = bad_size
+    with pytest.raises(RestoreError, match="member size"):
+        verifier._member_line(row)
+
+
+def test_required_outer_identity_rejects_noncanonical_values() -> None:
+    rows = [_row("dataset-a", "a.jsonl.gz", b"alpha")]
+    with pytest.raises(RestoreError, match="asset size"):
+        verifier.build_outer_specs(
+            rows, {("release-1", "bundle.zip"): (11.0, "a" * 64)}
+        )
+    with pytest.raises(RestoreError, match="asset digest"):
+        verifier.build_outer_specs(
+            rows, {("release-1", "bundle.zip"): (11, b"a" * 32)}
+        )
+
+
+@pytest.mark.parametrize("bad_size", [1.0, True, "1", -1])
+def test_partition_assignment_rejects_noncanonical_asset_size(bad_size) -> None:
+    with pytest.raises(RestoreError, match="asset size"):
+        verifier.assign_partitions(
+            [{"release_tag": "r", "asset_name": "a", "asset_bytes": bad_size}],
+            1,
+        )
+
+
 def test_verify_file_checks_every_selected_zip_member(tmp_path: Path) -> None:
     spec = _specs()[0]
     archive = tmp_path / "bundle.zip"

@@ -40,11 +40,27 @@ def test_charger_evenements_detecte_le_changement_par_coin(tmp_path):
     assert ev[0]["ts_ms"] == T and ev[0]["move_frac"] >= 0.05          # 100×150 = 15 000 $ = 15 % du NAV
 
 
+def test_charger_evenements_rejette_timestamps_fractionnaires_et_nav_non_finis(tmp_path):
+    T = 1_000_000_000_000
+    _ecrire_snaps(tmp_path, [
+        {"vault": "0xA", "ts_ms": T - 300_000, "nav_usd": 100_000,
+         "positions": [{"coin": "SOL", "szi": 0.0, "entryPx": 150.0}]},
+        {"vault": "0xA", "ts_ms": float(T), "nav_usd": 100_000,
+         "positions": [{"coin": "SOL", "szi": 100.0, "entryPx": 150.0}]},
+        {"vault": "0xA", "ts_ms": T + 1, "nav_usd": float("nan"),
+         "positions": [{"coin": "SOL", "szi": 100.0, "entryPx": 150.0}]},
+    ])
+
+    assert CE.charger_evenements(tmp_path) == []
+
+
 def test_rendement_forward_signe(tmp_path):
     serie = [(1000, 100.0), (2000, 101.0)]                             # +100 bps entre les deux
     assert CE.rendement_forward({"ts_ms": 1000, "direction": 1}, serie, 1000) == 100.0
     assert CE.rendement_forward({"ts_ms": 1000, "direction": -1}, serie, 1000) == -100.0   # short -> inverse
     assert CE.rendement_forward({"ts_ms": 1000, "direction": 1}, serie, 999_999) is None   # trou -> None
+    assert CE.rendement_forward({"ts_ms": 1000.5, "direction": 1}, serie, 1000) is None
+    assert CE.rendement_forward({"ts_ms": 1000, "direction": 1}, serie, float("nan")) is None
 
 
 def test_mesurer_need_more_data_sur_peu_devenements(tmp_path):
@@ -115,6 +131,17 @@ def test_charger_prix_tape_ciblee_ne_conserve_que_les_points_utiles(tmp_path):
     assert "ETH" not in tape
     assert meta["mode"] == "EVENT_TARGETED_BOUNDED"
     assert meta["cibles_prix"] == meta["cibles_appariees"] == 2
+
+
+def test_charger_prix_tape_ciblee_refuse_parametres_tronquables(tmp_path):
+    tape, meta = CE.charger_prix_tape_ciblee(
+        tmp_path,
+        {"BTC": [1_000]},
+        horizon_ms=1_000.5,
+    )
+
+    assert tape == {}
+    assert meta["status"] == "INVALID_INPUT"
 
 
 def test_charger_prix_tape_ciblee_borne_les_evenements_les_plus_recents(tmp_path):
@@ -287,3 +314,21 @@ def test_geler_et_relire(tmp_path):
     CE.geler(tmp_path, horizon_ms=900_000.0, edge_brut_bps=45.0, edge_net_mesure_bps=33.0)
     cfg = CE.config_gelee(tmp_path)
     assert cfg["gele"] is True and cfg["edge_brut_bps"] == 45.0 and cfg["horizon_ms"] == 900_000.0
+
+
+def test_config_gelee_refuse_les_valeurs_non_finies(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError):
+        CE.geler(tmp_path, horizon_ms=float("nan"), edge_brut_bps=45.0)
+
+    path = tmp_path / "runtime" / "data" / "copy_edge_config_gele.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "gele": True,
+        "horizon_ms": 900_000.0,
+        "edge_brut_bps": float("nan"),
+        "edge_net_mesure_bps": None,
+        "source": "mesure",
+    }), encoding="utf-8", errors="strict")
+    assert CE.config_gelee(tmp_path) is None

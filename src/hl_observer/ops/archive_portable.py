@@ -22,6 +22,7 @@ Tout est en stdlib (zipfile/sqlite3/hashlib) : constructible et testable hors Wi
 from __future__ import annotations
 
 import io
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -362,6 +363,41 @@ def _dossier_a_elaguer(rel: str) -> bool:
     return any(avec_barre.startswith(prefixe) for prefixe in PREFIXES_EXCLUS)
 
 
+def _valider_fichier_deja_parcouru(root: Path, chemin: Path) -> str:
+    """Validate a file yielded by ``os.walk`` without repeating parent checks.
+
+    ``lister_pour_archive`` checks every directory before descending and uses
+    ``followlinks=False``. Re-running ``resolve()`` and ``lstat()`` for every
+    file made a large SAFE sessions tree needlessly quadratic in filesystem
+    metadata calls. The file itself is still checked for a symlink/reparse
+    point and its relative name is validated exactly as in the public helper.
+    """
+    rel = chemin.relative_to(root).as_posix()
+    if _est_reparse(chemin):
+        raise ArchiveRefuseeError("lien/jonction/reparse interdit: %s" % rel)
+    return valider_chemin_relatif(rel)
+
+
+def _refuser_cles_privees(root: Path, inclus: list[str]) -> None:
+    """Scan included files for private-key material without changing ordering.
+
+    This is an I/O-bound safety check over potentially very large SAFE trees.
+    Bounded batches avoid submitting millions of futures at once; ``map``
+    preserves input order, so the first refusal remains deterministic.
+    """
+    if not inclus:
+        return
+    workers = min(8, max(1, os.cpu_count() or 1))
+    taille_lot = 4096
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="archive-key-scan") as pool:
+        for debut in range(0, len(inclus), taille_lot):
+            lot = inclus[debut:debut + taille_lot]
+            trouve = pool.map(contient_cle_privee, (root / Path(rel) for rel in lot))
+            for rel, contient in zip(lot, trouve):
+                if contient:
+                    raise ArchiveRefuseeError("matiere de cle privee detectee: %s" % rel)
+
+
 def lister_pour_archive(root: str | Path) -> tuple[list[str], list[str]]:
     root = Path(root).resolve()
     inclus, exclus = [], []
@@ -385,7 +421,7 @@ def lister_pour_archive(root: str | Path) -> tuple[list[str], list[str]]:
             if est_exclu(rel):
                 exclus.append(rel)
                 continue
-            rel = valider_fichier_source(root, p)
+            rel = _valider_fichier_deja_parcouru(root, p)
             cle = rel.casefold()
             precedent = vus_casse.get(cle)
             if precedent is not None and precedent != rel:
@@ -393,9 +429,8 @@ def lister_pour_archive(root: str | Path) -> tuple[list[str], list[str]]:
                     "collision Windows insensible a la casse: %s / %s" % (precedent, rel)
                 )
             vus_casse[cle] = rel
-            if contient_cle_privee(p):
-                raise ArchiveRefuseeError("matiere de cle privee detectee: %s" % rel)
             inclus.append(rel)
+    _refuser_cles_privees(root, inclus)
     return inclus, sorted(exclus)
 
 

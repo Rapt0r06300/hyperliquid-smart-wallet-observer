@@ -143,6 +143,65 @@ def test_first_start_baselines_existing_fills_without_replaying_history(tmp_path
     assert state["clean_epoch_ms"] == 2_000
 
 
+def test_checkpoint_accepte_le_marqueur_is_snapshot_snake_case(tmp_path: Path) -> None:
+    now = [2_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    fill = _fill(now[0], event="snake-case")
+    fill.pop("isSnapshot")
+    fill["is_snapshot"] = False
+    _append(tmp_path / INPUT_RELPATH, fill)
+
+    result = engine.poll_once()
+
+    assert result["captured"] == 1
+    assert result["counters"]["valid_live_fills"] == 1
+
+
+def test_checkpoint_rejette_les_marqueurs_snapshot_contradictoires(tmp_path: Path) -> None:
+    now = [2_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    fill = _fill(now[0], event="conflicting-snapshot-markers")
+    fill["is_snapshot"] = True
+    _append(tmp_path / INPUT_RELPATH, fill)
+
+    result = engine.poll_once()
+
+    assert result["captured"] == 0
+    assert result["pending"] == 0
+    assert result["counters"]["invalid_rejected"] == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("signe", True), ("ts_ms", 1_000.5), ("received_at_ms", True)],
+)
+def test_checkpoint_rejette_direction_et_timestamps_non_stricts(
+    tmp_path: Path, field: str, value: object,
+) -> None:
+    now = [2_000]
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=lambda _coin: _book(now[0]),
+        clock_ms=lambda: now[0],
+    )
+    fill = _fill(now[0], event=f"invalid-{field}")
+    fill[field] = value
+    _append(tmp_path / INPUT_RELPATH, fill)
+
+    result = engine.poll_once()
+
+    assert result["captured"] == 0
+    assert result["counters"]["invalid_rejected"] == 1
+
+
 def test_forward_fill_captures_reference_entry_and_real_exit_without_lookahead(
     tmp_path: Path,
 ) -> None:

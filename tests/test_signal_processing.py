@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import random
 
+import pytest
+
 from hl_observer.backtesting.signal_processing import engle_granger_spread, haar_wavelet_transform
 from hl_observer.backtesting.safety_defaults import safe_default_decision
 
@@ -37,3 +39,10 @@ def test_cointegration_short_input_returns_conservative_default():
 def test_failsafe_default_no_trade():
     assert safe_default_decision(False)["decision"] == "NO_TRADE"
     assert safe_default_decision(True)["decision"] == "EVALUATE"
+
+
+def test_signal_transforms_reject_lossy_or_non_finite_inputs():
+    with pytest.raises(ValueError, match="even"):
+        haar_wavelet_transform([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="finite"):
+        engle_granger_spread([1.0, float("nan"), 3.0], [1.0, 2.0, 3.0])

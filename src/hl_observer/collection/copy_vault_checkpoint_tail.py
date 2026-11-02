@@ -55,6 +55,30 @@ BookFetcher = Callable[[str], Mapping[str, Any] | None]
 Clock = Callable[[], int]
 
 
+def _strict_int(value: Any, field: str) -> int:
+    if type(value) is bool or value is None:
+        raise ValueError(f"{field} missing or boolean")
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{field} must be integral")
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{field} invalid") from None
+
+
+def _snapshot_marker(fill: Mapping[str, Any]) -> Any:
+    markers = [
+        fill[name]
+        for name in ("isSnapshot", "is_snapshot")
+        if name in fill
+    ]
+    if not markers or any(type(marker) is not bool for marker in markers):
+        return None
+    if len(set(markers)) != 1:
+        return None
+    return markers[0]
+
+
 def _atomic_write(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
@@ -345,15 +369,16 @@ class CopyVaultCheckpointTail:
         try:
             vault = str(fill["vault"]).lower()
             coin = preserve_native_instrument_symbol(fill["coin"])
-            direction = int(fill.get("signe") or fill.get("sens") or 0)
-            fill_ts_ms = int(fill["ts_ms"])
-            received_at_ms = int(fill["received_at_ms"])
+            direction_raw = fill.get("signe") if "signe" in fill else fill.get("sens")
+            direction = _strict_int(direction_raw, "direction")
+            fill_ts_ms = _strict_int(fill["ts_ms"], "ts_ms")
+            received_at_ms = _strict_int(fill["received_at_ms"], "received_at_ms")
         except (KeyError, TypeError, ValueError, OverflowError):
             self.state["counters"]["invalid_rejected"] += 1
             return
         if (
             fill.get("source") != "LIVE_WS"
-            or fill.get("isSnapshot") is not False
+            or _snapshot_marker(fill) is not False
             or not ADDRESS_RE.fullmatch(vault)
             or not coin
             or direction not in (-1, 1)

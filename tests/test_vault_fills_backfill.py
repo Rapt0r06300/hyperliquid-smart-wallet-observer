@@ -225,6 +225,31 @@ def test_canonical_fill_id_est_source_independant_et_reproductible():
     assert len(VB.canonical_fill_id(live)) == 64
 
 
+@pytest.mark.parametrize("field", ["ts_ms", "px", "sz"])
+def test_identite_fill_refuse_les_champs_economiques_absents_ou_invalides(field):
+    fill = {
+        "vault": "0xA", "ts_ms": 1000, "coin": "SOL", "px": 150.0,
+        "sz": 2.0, "dir": "Open Long", "tid": 7,
+    }
+    fill.pop(field)
+
+    with pytest.raises(ValueError, match=field):
+        VB.canonical_fill_id(fill)
+    with pytest.raises(ValueError, match=field):
+        VB.fill_identity(fill)
+
+
+def test_dedup_prefere_la_preuve_live_avec_le_marqueur_snake_case():
+    common = {
+        "vault": "0xA", "ts_ms": 1000, "coin": "SOL", "px": 150.0,
+        "sz": 10.0, "dir": "Open Long", "hash": "0xfill",
+    }
+    live = {**common, "source": "LIVE_WS", "is_snapshot": False, "received_at_ms": 1002}
+    rest = {**common, "source": "REST_BACKFILL", "oid": 99, "tid": 7}
+
+    assert VB.dedupliquer([rest, live]) == [live]
+
+
 def test_identite_fill_et_episodes_ne_fusionnent_pas_les_symboles_de_casse_distincte():
     raw = [
         {"time": 1_000, "coin": "kPEPE", "px": "0.01", "sz": "1", "side": "B",

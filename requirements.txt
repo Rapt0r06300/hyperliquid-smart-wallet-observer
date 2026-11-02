@@ -6,7 +6,10 @@
 #     pip freeze > requirements.lock.txt
 
 # --- Runtime (inchangé, pins existants conservés) ---
-pytest>=8,<9
+# Keep the legacy/runtime test surface aligned with the CI security baseline.
+# pytest<9 is both incompatible with requirements-ci-tools.txt and carries a
+# pip-audit finding fixed in pytest 9.0.3.
+pytest>=9.0.3,<10
 httpx>=0.27,<1
 websockets>=10,<11
 

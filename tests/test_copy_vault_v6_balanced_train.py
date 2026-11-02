@@ -69,6 +69,20 @@ def test_daily_coin_budget_keeps_case_sensitive_instruments_separate():
     assert audit["COIN_DAILY_BUDGET_REJECTED"] == 0
 
 
+def test_daily_risk_budget_rejects_invalid_entry_timestamp_without_day_zero() -> None:
+    selected, audit = apply_causal_daily_risk_budget(
+        [
+            _trade("A", 1_000, "A", "BTC", 1.0),
+            {**_trade("B", 2_000, "B", "BTC", 1.0), "entry_ts_ms": 1_000.5},
+        ],
+        max_entries_per_vault_day=1,
+        max_entries_per_coin_day=1,
+    )
+
+    assert [row["trade_id"] for row in selected] == ["A"]
+    assert audit["INVALID_ENTRY_TIMESTAMP_REJECTED"] == 1
+
+
 def test_v6_empty_input_is_train_only_and_counts_parent_selection() -> None:
     result = explore_copy_vault_v6_balanced_train([], {}, [])
 

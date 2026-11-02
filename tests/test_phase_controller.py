@@ -144,3 +144,28 @@ def test_advance_analysis_stage(tmp_path: Path):
     assert ctrl.current_state.analysis_stage == "DONE"
     # Phase remains ANALYZE until operator sets IDLE
     assert ctrl.current_state.phase == "ANALYZE"
+
+
+def test_current_state_is_a_defensive_snapshot(tmp_path: Path):
+    ctrl = PhaseController(state_file_path=tmp_path / "alina-phase.json")
+    exposed = ctrl.current_state
+    exposed.phase = "ANALYZE"
+    exposed.epoch = 999
+
+    assert ctrl.current_state.phase == "IDLE"
+    assert ctrl.current_state.epoch == 1
+    assert ctrl._load_from_disk().phase == "IDLE"
+
+
+def test_phase_request_cannot_move_time_backwards(tmp_path: Path):
+    ctrl = PhaseController(state_file_path=tmp_path / "alina-phase.json")
+    ctrl.transition_to_collect(
+        request_id=REQ_1,
+        now_utc="2026-09-27T01:00:00Z",
+    )
+
+    with pytest.raises(ValueError, match="precedes the current state timestamp"):
+        ctrl.transition_to_analyze(
+            request_id=REQ_2,
+            now_utc="2026-09-27T00:59:59Z",
+        )

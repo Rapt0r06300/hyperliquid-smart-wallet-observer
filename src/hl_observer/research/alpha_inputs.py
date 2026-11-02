@@ -233,8 +233,12 @@ def event_wallet_action(fills: Sequence[Mapping[str, Any]]) -> list[dict[str, An
 
 
 # ════════════════════════ STATE featurizers ════════════════════════
+def _nombre_fini(x: Any) -> bool:
+    return type(x) in (int, float) and math.isfinite(float(x))
+
+
 def _bucket(x: float | None, bornes: Sequence[float]) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
+    if not _nombre_fini(x):
         return UNMEASURABLE
     for i, b in enumerate(bornes):
         if x < b:
@@ -242,18 +246,94 @@ def _bucket(x: float | None, bornes: Sequence[float]) -> str:
     return "b%d" % len(bornes)
 
 
-def state_buckets(quote: Mapping[str, Any], *, vol_bps: float | None = None) -> dict[str, str]:
+def _crowding_bucket(
+    quote: Mapping[str, Any],
+    metaorders: Sequence[Mapping[str, Any]] | None,
+    *,
+    window_ms: int = 60_000,
+) -> str:
+    """Return a causal crowding bucket, or ``UNMEASURABLE`` without a full tape."""
+
+    if metaorders is None or type(window_ms) is not int or window_ms <= 0:
+        return UNMEASURABLE
+    quote_ts = quote.get("ts_ms")
+    direction = quote.get("direction", quote.get("sens"))
+    coin = quote.get("coin")
+    quote_id = quote.get("metaorder_id", quote.get("event_id"))
+    if (
+        type(quote_ts) is not int or quote_ts <= 0
+        or type(direction) is not int or direction not in (-1, 1)
+        or not isinstance(coin, str) or not coin.strip()
+        or not isinstance(quote_id, (str, int)) or isinstance(quote_id, bool)
+        or not str(quote_id).strip()
+    ):
+        return UNMEASURABLE
+
+    seen_ids: set[str] = set()
+    concurrent = 0
+    normalized_coin = coin.strip()
+    for row in metaorders:
+        if not isinstance(row, Mapping):
+            return UNMEASURABLE
+        row_id = row.get("metaorder_id", row.get("event_id"))
+        if not isinstance(row_id, (str, int)) or isinstance(row_id, bool) or not str(row_id).strip():
+            return UNMEASURABLE
+        row_id_text = str(row_id).strip()
+        if row_id_text in seen_ids:
+            return UNMEASURABLE
+        seen_ids.add(row_id_text)
+        row_coin = row.get("coin")
+        start = row.get("t0", row.get("start_ts_ms"))
+        end = row.get("t1", row.get("end_ts_ms"))
+        row_direction = row.get("sens", row.get("direction"))
+        if (
+            not isinstance(row_coin, str) or not row_coin.strip()
+            or type(start) is not int or start <= 0
+            or type(end) is not int or end < start
+            or type(row_direction) is not int or row_direction not in (-1, 1)
+        ):
+            return UNMEASURABLE
+        if row_id_text == str(quote_id).strip() or row_coin.strip() != normalized_coin:
+            continue
+        if row_direction == direction and start <= quote_ts <= end + window_ms:
+            concurrent += 1
+    return "b0" if concurrent == 0 else "b1" if concurrent == 1 else "b2+"
+
+
+def state_buckets(
+    quote: Mapping[str, Any], *, vol_bps: float | None = None,
+    metaorders: Sequence[Mapping[str, Any]] | None = None,
+    crowding_window_ms: int = 60_000,
+) -> dict[str, str]:
     """Étiquette l'état marché d'un snapshot : spread / depth / imbalance / vol / coin / hour / (twap_stage, crowding)."""
     b, a, m = quote.get("bid"), quote.get("ask"), quote.get("mid")
-    spread_bps = (a - b) / m * 1e4 if (isinstance(b, (int, float)) and isinstance(a, (int, float)) and m) else None
+    spread_bps = (
+        (a - b) / m * 1e4
+        if _nombre_fini(b) and _nombre_fini(a) and _nombre_fini(m)
+        and m > 0 and a > b
+        else None
+    )
     bd, ad = quote.get("bid_depth"), quote.get("ask_depth")
-    depth = (bd + ad) if (isinstance(bd, (int, float)) and isinstance(ad, (int, float))) else None
+    depth = (
+        bd + ad
+        if _nombre_fini(bd) and _nombre_fini(ad) and bd >= 0 and ad >= 0
+        else None
+    )
     imb = quote.get("imbalance")
-    if not isinstance(imb, (int, float)):
+    if not _nombre_fini(imb):
         bs, as_ = quote.get("bid_size"), quote.get("ask_size")
-        imb = ((bs - as_) / (bs + as_)) if (isinstance(bs, (int, float)) and isinstance(as_, (int, float)) and (bs + as_) > 0) else None
-    ts = quote.get("ts") or quote.get("ts_ms")
-    hour = int((float(ts) / (3600 if (ts and ts < 1e12) else 3_600_000)) % 24) if ts else None
+        imb = (
+            (bs - as_) / (bs + as_)
+            if _nombre_fini(bs) and _nombre_fini(as_) and bs >= 0 and as_ >= 0
+            and (bs + as_) > 0
+            else None
+        )
+    ts = quote.get("ts")
+    if ts is None:
+        ts = quote.get("ts_ms")
+    hour = None
+    if _nombre_fini(ts) and ts > 0:
+        hour = int((float(ts) / (3600 if ts < 1e12 else 3_600_000)) % 24)
     return {
         "spread_bucket": _bucket(spread_bps, (0.5, 1.0, 2.0, 5.0)),
         "depth_bucket": _bucket(depth, (5e3, 5e4, 5e5, 5e6)),
@@ -262,7 +342,9 @@ def state_buckets(quote: Mapping[str, Any], *, vol_bps: float | None = None) -> 
         "coin": str(quote.get("coin", "?")),
         "hour_bucket": ("h%02d" % hour) if hour is not None else UNMEASURABLE,
         "twap_stage": str(quote.get("stade")) if quote.get("stade") else UNMEASURABLE,
-        "crowding": UNMEASURABLE,   # nécessite la densité de métaordres même-sens simultanés (à brancher)
+        "crowding": _crowding_bucket(
+            quote, metaorders, window_ms=crowding_window_ms,
+        ),
     }
 
 

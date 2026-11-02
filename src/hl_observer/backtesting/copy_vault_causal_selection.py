@@ -13,9 +13,65 @@ from hl_observer.backtesting.copy_vault_protocol import (
     canonical_metaorder_id,
     expected_open_direction,
 )
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
+
+
+def _snapshot_flag(row: Mapping[str, Any]) -> object:
+    """Read both collector and replay spellings without weakening bool checks."""
+
+    return row["is_snapshot"] if "is_snapshot" in row else row.get("isSnapshot")
+
+
+def _strict_positive_int(value: object) -> int | None:
+    if type(value) is bool or value is None:
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _local_receipt_timestamp_ms(row: Mapping[str, Any]) -> int | None:
+    """Return the one local receipt clock that the row actually provides.
+
+    ``received_at_ms`` is the canonical collector field.  Older replay-grade
+    rows use ``observed_at_ms`` for the same local receipt clock, so it remains
+    a valid fallback only when the canonical field is absent.  An explicitly
+    present malformed ``received_at_ms`` must not be bypassed by falling back
+    to another field.
+    """
+
+    if "received_at_ms" in row:
+        return _strict_positive_int(row.get("received_at_ms"))
+    return _strict_positive_int(row.get("observed_at_ms"))
+
+
+def causal_live_observation(row: Mapping[str, Any]) -> bool:
+    """Require a real local receipt timestamp for causal LIVE evidence."""
+
+    event_ts_ms = _strict_positive_int(row.get("ts_ms"))
+    received_at_ms = _local_receipt_timestamp_ms(row)
+    return bool(
+        row.get("source") == "LIVE_WS"
+        and _snapshot_flag(row) is False
+        and event_ts_ms is not None
+        and received_at_ms is not None
+        and received_at_ms >= event_ts_ms
+    )
 
 
 def _source_evidence_reference(row: Mapping[str, Any], *, event_id: str) -> dict[str, Any] | None:
@@ -23,7 +79,10 @@ def _source_evidence_reference(row: Mapping[str, Any], *, event_id: str) -> dict
     shard_sha256 = row.get("source_shard_sha256")
     raw_sha256 = row.get("source_raw_sha256")
     catalog_sha256 = row.get("source_catalog_sha256")
-    received_at_ms = row.get("received_at_ms", row.get("observed_at_ms"))
+    source = str(row.get("source") or "")
+    received_at_ms = row.get("received_at_ms")
+    if source != "LIVE_WS" and received_at_ms is None:
+        received_at_ms = row.get("observed_at_ms")
     event_ts_ms = row.get("ts_ms")
     if (
         not isinstance(dataset_id, str)
@@ -48,8 +107,7 @@ def _source_evidence_reference(row: Mapping[str, Any], *, event_id: str) -> dict
         and row.get("source_replay_compatible") is True
     )
     forward_allowed = bool(
-        row.get("source") == "LIVE_WS"
-        and row.get("is_snapshot") is False
+        causal_live_observation(row)
         and received_at_ms >= event_ts_ms
     )
     return {
@@ -63,7 +121,7 @@ def _source_evidence_reference(row: Mapping[str, Any], *, event_id: str) -> dict
         "event_id": event_id,
         "event_ts_ms": event_ts_ms,
         "received_at_ms": received_at_ms,
-        "source": str(row.get("source") or ""),
+        "source": source,
         "forward_evidence_allowed": forward_allowed,
     }
 
@@ -99,8 +157,9 @@ def cluster_metaorders(
     for raw in entries:
         input_events += 1
         try:
-            ts_ms = int(raw.get("ts_ms") or 0)
-            direction = int(raw.get("direction") or 0)
+            ts_ms = _strict_positive_int(raw.get("ts_ms")) or 0
+            direction_raw = raw.get("direction")
+            direction = int(direction_raw) if type(direction_raw) is not bool else 0
             coin = canonical_copy_vault_coin(raw.get("coin"))
             vault = str(raw.get("vault") or "")
         except (TypeError, ValueError, OverflowError):
@@ -117,21 +176,32 @@ def cluster_metaorders(
         if direction != expected_direction:
             direction_contradictions += 1
             continue
-        event_id = _event_identity(raw)
+        taille_usd = _finite_number(raw.get("taille_usd"))
+        if taille_usd is None:
+            price = _finite_number(raw.get("px"))
+            size = _finite_number(raw.get("sz"))
+            if price is not None and price > 0.0 and size is not None and size > 0.0:
+                taille_usd = price * size
+        move_frac = _finite_number(raw.get("move_frac"))
+        if move_frac is None:
+            move_frac = 0.0
+        if taille_usd is None or taille_usd <= 0.0 or move_frac < 0.0:
+            invalid_events += 1
+            continue
+        event_id = _event_identity({**raw, "taille_usd": taille_usd})
         if event_id in seen:
             duplicate_events += 1
             continue
         seen.add(event_id)
         observed_at_ms: int | None = None
-        try:
-            candidate = int(raw.get("observed_at_ms") or 0)
-            if candidate >= ts_ms:
-                observed_at_ms = candidate
-        except (TypeError, ValueError, OverflowError) as exc:
-            _noter_echec("backtesting/copy_vault_executable.py:observed_at_ms", exc)
+        candidate = _strict_positive_int(raw.get("observed_at_ms"))
+        received_at_ms = _strict_positive_int(raw.get("received_at_ms"))
+        if candidate is not None and candidate >= ts_ms:
+            observed_at_ms = candidate
+        elif received_at_ms is not None and received_at_ms >= ts_ms:
+            observed_at_ms = received_at_ms
         causal_live = (
-            raw.get("source") == "LIVE_WS"
-            and raw.get("is_snapshot") is False
+            causal_live_observation({**raw, "ts_ms": ts_ms})
             and observed_at_ms is not None
         )
         canonical.append({
@@ -139,11 +209,15 @@ def cluster_metaorders(
             "event_id": event_id,
             "ts_ms": ts_ms,
             "observed_at_ms": observed_at_ms,
+            "received_at_ms": received_at_ms,
             "causal_forward_eligible": causal_live,
             "direction": direction,
             "action": action,
             "coin": coin,
             "vault": vault,
+            "is_snapshot": _snapshot_flag(raw),
+            "taille_usd": taille_usd,
+            "move_frac": move_frac,
         })
     canonical.sort(key=lambda row: (row["ts_ms"], row["event_id"]))
 
@@ -193,8 +267,8 @@ def cluster_metaorders(
             active[key] = cluster
         cluster["last_fill_ts_ms"] = row["ts_ms"]
         cluster["fill_count"] += 1
-        cluster["leader_notional_usd"] += max(0.0, float(row.get("taille_usd") or 0.0))
-        cluster["move_frac_audit_sum"] += max(0.0, float(row.get("move_frac") or 0.0))
+        cluster["leader_notional_usd"] += float(row["taille_usd"])
+        cluster["move_frac_audit_sum"] += float(row["move_frac"])
         cluster["member_event_ids"].append(row["event_id"])
         evidence_ref = _source_evidence_reference(row, event_id=row["event_id"])
         if evidence_ref is None:
@@ -209,6 +283,7 @@ def cluster_metaorders(
             "event_id": row["event_id"],
             "ts_ms": row["ts_ms"],
             "observed_at_ms": row["observed_at_ms"],
+            "received_at_ms": row.get("received_at_ms"),
             "source": row.get("source") or "REST_BACKFILL",
             "causal_forward_eligible": row["causal_forward_eligible"],
             "action": row["action"],
@@ -219,7 +294,7 @@ def cluster_metaorders(
             "source_quality_status": row.get("source_quality_status"),
             "source_manifest_verified": row.get("source_manifest_verified") is True,
             "source_replay_compatible": row.get("source_replay_compatible") is True,
-            "taille_usd": max(0.0, float(row.get("taille_usd") or 0.0)),
+            "taille_usd": float(row["taille_usd"]),
             "cumulative_leader_notional_usd": cluster["leader_notional_usd"],
         })
     completed.extend(active.values())

@@ -67,13 +67,7 @@ class WorldMonitorEvent:
 
     @property
     def usable_for_signal(self) -> bool:
-        return self.coverage_state.casefold() not in {
-            "partial",
-            "stale",
-            "unavailable",
-            "error",
-            "disabled",
-        }
+        return self.coverage_state.casefold() in {"current", "complete"}
 
     def to_archive_record(self) -> dict[str, object]:
         """Return structured R1/R2-style facts, never source article expression."""
@@ -119,6 +113,13 @@ class WorldMonitorReadOnlyClient:
         base = str(base_url or "").strip().rstrip("/")
         if not base.startswith(("https://", "http://")):
             raise ValueError("base_url must be http(s)")
+        if (
+            isinstance(timeout_s, bool)
+            or not isinstance(timeout_s, (int, float))
+            or not math.isfinite(float(timeout_s))
+            or float(timeout_s) <= 0.0
+        ):
+            raise ValueError("timeout_s must be a finite positive number")
         self.base_url = base
         self._api_key = str(api_key or "").strip()
         self.timeout_s = float(timeout_s)
@@ -151,7 +152,9 @@ class WorldMonitorReadOnlyClient:
         category: str | None = None,
         query: str | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, object] = {"page_size": max(1, min(100, int(page_size)))}
+        if type(page_size) is not int or page_size <= 0:
+            raise ValueError("page_size must be a positive integer")
+        params: dict[str, object] = {"page_size": min(100, page_size)}
         if category:
             params["category"] = str(category)
         if query:
@@ -203,6 +206,7 @@ def normalize_cross_source_signals(
     received_ts_ms: int,
     methodology_version: str = "worldmonitor-cross-source-v1",
 ) -> list[WorldMonitorEvent]:
+    received = _require_received_ts_ms(received_ts_ms)
     rows = payload.get("signals")
     if not isinstance(rows, list):
         return []
@@ -212,11 +216,13 @@ def normalize_cross_source_signals(
             continue
         signal_id = str(row.get("id") or "").strip()
         detected_at = _positive_int(row.get("detectedAt"))
-        if not signal_id or detected_at is None or detected_at > int(received_ts_ms):
+        if not signal_id or detected_at is None or detected_at > received:
             continue
         raw_type = str(row.get("type") or "").strip()
         theater = str(row.get("theater") or "").strip()
         severity_name = str(row.get("severity") or "").strip()
+        if "signalCount" in row and _strict_non_negative_int(row.get("signalCount")) is None:
+            continue
         signal_count = max(1, _non_negative_int(row.get("signalCount"), default=1))
         severity_raw = _finite_or_none(row.get("severityScore"))
         event = ExternalEvent(
@@ -224,8 +230,8 @@ def normalize_cross_source_signals(
             source="worldmonitor.cross_source",
             event_type=_cross_source_event_type(raw_type),
             source_tier=SourceTier.AGGREGATOR,
-            retrieval_ts_ms=int(received_ts_ms),
-            ingest_ts_ms=int(received_ts_ms),
+            retrieval_ts_ms=received,
+            ingest_ts_ms=received,
             event_ts_ms=detected_at,
             methodology_version=methodology_version,
             raw_evidence_ref=f"{CROSS_SOURCE_PATH}#signal/{signal_id}",
@@ -258,6 +264,7 @@ def normalize_news_digest(
     received_ts_ms: int,
     methodology_version: str = "worldmonitor-news-digest-v1",
 ) -> list[WorldMonitorEvent]:
+    received = _require_received_ts_ms(received_ts_ms)
     categories = payload.get("categories")
     if not isinstance(categories, Mapping):
         return []
@@ -285,12 +292,18 @@ def normalize_news_digest(
             link = str(item.get("link") or "").strip()
             if not publisher or not title:
                 continue
-            published = _causal_optional_ts(item.get("publishedAt"), int(received_ts_ms))
+            if "isAlert" in item and not isinstance(item.get("isAlert"), bool):
+                continue
+            if "corroborationCount" in item and _strict_non_negative_int(
+                item.get("corroborationCount")
+            ) is None:
+                continue
+            published = _causal_optional_ts(item.get("publishedAt"), received)
             story_meta = item.get("storyMeta")
             story_meta = story_meta if isinstance(story_meta, Mapping) else {}
             first_seen = _causal_optional_ts(
                 story_meta.get("firstSeen"),
-                int(received_ts_ms),
+                received,
             )
             threat = item.get("threat")
             threat = threat if isinstance(threat, Mapping) else {}
@@ -301,6 +314,11 @@ def normalize_news_digest(
                 1,
                 _non_negative_int(story_meta.get("sourceCount"), default=1),
             )
+            if (
+                "sourceCount" in story_meta
+                and _strict_non_negative_int(story_meta.get("sourceCount")) is None
+            ):
+                continue
             corroboration = max(
                 source_count,
                 _non_negative_int(item.get("corroborationCount"), default=1),
@@ -326,8 +344,8 @@ def normalize_news_digest(
                 ),
                 source_tier=SourceTier.AGGREGATOR,
                 publication_ts_ms=published,
-                retrieval_ts_ms=int(received_ts_ms),
-                ingest_ts_ms=int(received_ts_ms),
+                retrieval_ts_ms=received,
+                ingest_ts_ms=received,
                 event_ts_ms=first_seen,
                 source_link=link,
                 regions=(location_name,) if location_name else (),
@@ -353,7 +371,7 @@ def normalize_news_digest(
                     source_count=source_count,
                     importance_score=_finite_or_none(item.get("importanceScore")),
                     credibility_score=_finite_or_none(item.get("credibilityScore")),
-                    is_alert=bool(item.get("isAlert")),
+                    is_alert=item.get("isAlert") is True,
                     coverage_state=coverage_state,
                 )
             )
@@ -369,10 +387,14 @@ class PredictionShiftTracker:
         min_abs_delta_pp: float = 5.0,
         min_volume_usd: float = 0.0,
     ) -> None:
-        if float(min_abs_delta_pp) <= 0.0:
+        delta = _finite_or_none(min_abs_delta_pp)
+        volume = _finite_or_none(min_volume_usd)
+        if delta is None or delta <= 0.0:
             raise ValueError("min_abs_delta_pp must be > 0")
-        self.min_abs_delta_pp = float(min_abs_delta_pp)
-        self.min_volume_usd = max(0.0, float(min_volume_usd))
+        if volume is None or volume < 0.0:
+            raise ValueError("min_volume_usd must be non-negative")
+        self.min_abs_delta_pp = delta
+        self.min_volume_usd = volume
         self._last: dict[tuple[str, str], tuple[int, float]] = {}
 
     def observe(
@@ -382,10 +404,11 @@ class PredictionShiftTracker:
         received_ts_ms: int,
         methodology_version: str = "worldmonitor-prediction-shift-v1",
     ) -> list[WorldMonitorEvent]:
+        received = _require_received_ts_ms(received_ts_ms)
         if payload.get("dataAvailable") is not True:
             return []
         fetched_at = _positive_int(payload.get("fetchedAt"))
-        if fetched_at is None or fetched_at > int(received_ts_ms):
+        if fetched_at is None or fetched_at > received:
             return []
         markets = payload.get("markets")
         if not isinstance(markets, list):
@@ -429,8 +452,8 @@ class PredictionShiftTracker:
                 source="worldmonitor.prediction",
                 event_type=ExternalEventType.PREDICTION,
                 source_tier=SourceTier.AGGREGATOR,
-                retrieval_ts_ms=int(received_ts_ms),
-                ingest_ts_ms=int(received_ts_ms),
+                retrieval_ts_ms=received,
+                ingest_ts_ms=received,
                 event_ts_ms=fetched_at,
                 source_link=link,
                 entities=tuple(value for value in (market_id, category) if value),
@@ -550,34 +573,39 @@ def _prediction_event_id(
     return f"wm:prediction:{digest}"
 
 
+def _strict_non_negative_int(value: Any) -> int | None:
+    if type(value) is int:
+        return value if value >= 0 else None
+    return None
+
+
+def _require_received_ts_ms(value: Any) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError("received_ts_ms must be a non-negative integer")
+    return value
+
+
 def _positive_int(value: Any) -> int | None:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
+    parsed = _strict_non_negative_int(value)
+    return parsed if parsed is not None and parsed > 0 else None
 
 
 def _non_negative_int(value: Any, *, default: int = 0) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return int(default)
-    return parsed if parsed >= 0 else int(default)
+    parsed = _strict_non_negative_int(value)
+    return parsed if parsed is not None else default
 
 
 def _causal_optional_ts(value: Any, received_ts_ms: int) -> int | None:
     parsed = _positive_int(value)
-    if parsed is None or parsed > int(received_ts_ms):
+    if parsed is None or parsed > received_ts_ms:
         return None
     return parsed
 
 
 def _finite_or_none(value: Any) -> float | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
+    parsed = float(value)
     return parsed if math.isfinite(parsed) else None
 
 

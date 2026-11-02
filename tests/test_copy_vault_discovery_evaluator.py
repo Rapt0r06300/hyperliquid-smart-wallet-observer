@@ -96,6 +96,40 @@ def test_feature_absente_echoue_ferme() -> None:
     assert "FEATURE_UNAVAILABLE" in result["candidate_reasons"]
 
 
+def test_metric_economique_manquante_ne_devient_pas_zero() -> None:
+    rows = _rows()
+    for row in rows:
+        row.pop("net_pnl_usd")
+
+    result = evaluate_feature_rows(
+        rows,
+        mechanism="BURST_ACCELERATION",
+        keep_fraction=0.5,
+        family_trial_count=24,
+    )
+
+    assert result["candidate_verdict"] == "REJECT"
+    assert "ECONOMIC_INPUT_UNMEASURABLE" in result["candidate_reasons"]
+    assert result["net_usd"] is None
+    assert result["roi"] is None
+
+
+def test_metric_economique_non_finie_echoue_ferme() -> None:
+    rows = _rows()
+    rows[0]["gross_pnl_usd"] = float("nan")
+
+    result = evaluate_feature_rows(
+        rows,
+        mechanism="BURST_ACCELERATION",
+        keep_fraction=0.5,
+        family_trial_count=24,
+    )
+
+    assert result["candidate_verdict"] == "REJECT"
+    assert "ECONOMIC_INPUT_UNMEASURABLE" in result["candidate_reasons"]
+    assert result["net_usd"] is None
+
+
 def test_entry_features_ne_lisent_pas_la_capacite_de_sortie_future() -> None:
     base = _rows()[0]
     low_exit = _enrich([{**base, "exit_capacity_usd": 1.0}])[0]

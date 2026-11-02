@@ -1,4 +1,5 @@
 """Unit tests for Campaign Manifest Schema V2 and Dispatch Receipts (Block 3 & 4 of spec)."""
+from dataclasses import replace
 import json
 
 import pytest
@@ -69,6 +70,51 @@ def test_v2_manifest_validation():
         CampaignManifest.from_dict(retired)
 
 
+def test_v2_manifest_rejects_boolean_epoch():
+    raw = {
+        "campaign_id": "c-bool-epoch",
+        "kind": "market_collection",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "a" * 40,
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "dataset_generation": "gen-1",
+        "config_sha256": "b" * 64,
+        "work_plan_sha256": "c" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "COLLECT",
+        "phase_epoch": True,
+    }
+    with pytest.raises(ValueError, match="positive integer phase_epoch"):
+        CampaignManifest.from_dict(raw)
+
+
+def test_manifest_execution_flags_must_be_real_booleans():
+    raw = {
+        "campaign_id": "c-unsafe-flags",
+        "kind": "market_collection",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "a" * 40,
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "dataset_generation": "gen-1",
+        "config_sha256": "b" * 64,
+        "work_plan_sha256": "c" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "COLLECT",
+        "phase_epoch": 1,
+        "paper_only": "true",
+    }
+    with pytest.raises(ValueError, match="unsafe execution flags"):
+        CampaignManifest.from_dict(raw)
+
+    raw["paper_only"] = True
+    raw["read_only"] = True
+    raw["real_execution"] = "false"
+    with pytest.raises(ValueError, match="unsafe execution flags"):
+        CampaignManifest.from_dict(raw)
+
+
 def test_v2_analyze_manifest_requires_cutoff_and_selection():
     raw_analyze = {
         "campaign_id": "c3",
@@ -134,6 +180,51 @@ def test_v2_lease_and_selection_epoch_enforcement():
     assert len(due_current) == 0
 
 
+def test_selection_rejects_invalid_controller_epoch_and_manifest() -> None:
+    raw_v2 = {
+        "campaign_id": "c-invalid-selection",
+        "kind": "market_collection",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "a" * 40,
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "dataset_generation": "gen-1",
+        "config_sha256": "b" * 64,
+        "work_plan_sha256": "c" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "COLLECT",
+        "phase_epoch": 1,
+    }
+    manifest = CampaignManifest.from_dict(raw_v2)
+    malformed = replace(manifest, expires_at="not-an-iso-date")
+
+    with pytest.raises(ValueError, match="current_epoch"):
+        select_due_campaigns([manifest], current_phase="COLLECT", current_epoch=1.5)
+    assert select_due_campaigns([malformed], current_phase="COLLECT", current_epoch=1) == []
+
+
+def test_lease_ttl_rejects_boolean_or_fractional_values():
+    raw = {
+        "campaign_id": "c-ttl",
+        "kind": "market_collection",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "a" * 40,
+        "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "dataset_generation": "gen-1",
+        "config_sha256": "b" * 64,
+        "work_plan_sha256": "c" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "COLLECT",
+        "phase_epoch": 1,
+    }
+    manifest = CampaignManifest.from_dict(raw)
+    with pytest.raises(ValueError, match="ttl_s must be a positive integer"):
+        acquire_lease(manifest, "run-bool", True)
+    with pytest.raises(ValueError, match="ttl_s must be a positive integer"):
+        acquire_lease(manifest, "run-float", 1.5)
+
+
 def test_dispatch_receipt_generation():
     req_id1 = generate_request_id(
         operator_intent="start_collection",
@@ -193,3 +284,26 @@ def test_save_expected_digest_uses_exact_on_disk_json(tmp_path):
 
     persisted = json.loads(path.read_text(encoding="utf-8"))
     assert persisted["campaign_id"] == "legacy-shape"
+
+
+def test_save_cleans_temporary_checkpoint_when_replace_fails(tmp_path, monkeypatch):
+    path = tmp_path / "campaign.json"
+    manifest = CampaignManifest(
+        campaign_id="atomic-save", kind="market_collection",
+        code_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        code_sha="a" * 40, dataset_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        dataset_generation="V2_FRESH", config_sha256="b" * 64,
+        work_plan_sha256="c" * 64, expires_at="2026-12-31T23:59:59Z",
+        schema_version=SCHEMA_VERSION_V2, creation_phase="COLLECT", phase_epoch=3,
+    )
+
+    def refuse_replace(_temporary, _target):
+        raise OSError("replace refused")
+
+    monkeypatch.setattr("tools.resumable_campaign.os.replace", refuse_replace)
+
+    with pytest.raises(OSError, match="replace refused"):
+        save(path, manifest)
+
+    assert not path.exists()
+    assert list(tmp_path.iterdir()) == []

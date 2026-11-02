@@ -225,6 +225,37 @@ def test_relocation_refuse_un_chemin_windows_superieur_a_259(tmp_path, monkeypat
     assert any("C:\\HyperSmart" in item for item in status.recommendations)
 
 
+def test_longest_project_path_reuses_unchanged_directory_cache(tmp_path, monkeypatch):
+    module = _load_module()
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(tmp_path / "cache"))
+    project = tmp_path / "project"
+    nested = project / "src" / "module"
+    nested.mkdir(parents=True)
+    (nested / "short.py").write_text("pass\n", encoding="utf-8")
+
+    first = module.longest_project_path(project)
+
+    def unexpected_scan(_path):
+        raise AssertionError("unchanged directory must use the exact metadata cache")
+
+    monkeypatch.setattr(module.os, "scandir", unexpected_scan)
+    assert module.longest_project_path(project) == first
+
+
+def test_longest_project_path_invalidates_cache_when_a_directory_changes(tmp_path, monkeypatch):
+    module = _load_module()
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(tmp_path / "cache"))
+    project = tmp_path / "project"
+    project.mkdir()
+    first = module.longest_project_path(project)
+    nested = project / "a" / "b"
+    nested.mkdir(parents=True)
+    (nested / "very-long-name.py").write_text("pass\n", encoding="utf-8")
+    second = module.longest_project_path(project)
+    assert second[0] > first[0]
+    assert second[1].endswith("a/b/very-long-name.py")
+
+
 def test_real_windows_launcher_can_dispatch_portable_check():
     if os.name != "nt":
         return

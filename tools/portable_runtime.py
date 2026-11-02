@@ -8,6 +8,7 @@ but it is never selected as a runtime and is never part of an official archive.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -26,6 +27,7 @@ PORTABLE_MANIFEST_RELATIVE = Path("tools") / "python" / "portable_runtime_manife
 LEGACY_PYTHON_RELATIVE = Path("portable_runtime") / "python"
 LEGACY_MANIFEST_RELATIVE = Path("portable_runtime") / "portable_runtime_manifest.json"
 MAX_WINDOWS_PATH = 259
+LONGEST_PATH_CACHE_VERSION = 1
 
 REQUIRED_IMPORTS: tuple[str, ...] = (
     "fastapi",
@@ -493,17 +495,42 @@ def longest_project_path(project_root: Path) -> tuple[int, str]:
     """
     root = _resolved(project_root)
     root_text = os.path.abspath(os.fspath(root))
-    longest_length = len(root_text)
-    longest_member = "."
-    pending: list[tuple[str, str]] = [(root_text, ".")]
-    while pending:
-        directory, relative_directory = pending.pop()
+    cache_path = _longest_path_cache_path(root_text)
+    cached = _load_longest_path_cache(cache_path, root_text)
+    entries = dict(cached.get("entries", {})) if cached else {}
+    visited: set[str] = set()
+
+    def scan(directory: str, relative_directory: str) -> tuple[int, str]:
         try:
-            entries = os.scandir(directory)
+            stat = os.stat(directory, follow_symlinks=False)
         except OSError:
-            continue
-        with entries:
-            for entry in entries:
+            return len(directory), relative_directory
+        key = os.path.normcase(directory)
+        signature = (int(stat.st_mtime_ns), int(stat.st_ctime_ns))
+        previous = entries.get(key)
+        if (
+            isinstance(previous, dict)
+            and tuple(previous.get("signature", ())) == signature
+            and isinstance(previous.get("longest_length"), int)
+            and isinstance(previous.get("longest_member"), str)
+        ):
+            visited.add(key)
+            return int(previous["longest_length"]), str(previous["longest_member"])
+
+        longest_length = len(directory)
+        longest_member = relative_directory
+        visited.add(key)
+        try:
+            scanner = os.scandir(directory)
+        except OSError:
+            entries[key] = {
+                "signature": list(signature),
+                "longest_length": longest_length,
+                "longest_member": longest_member,
+            }
+            return longest_length, longest_member
+        with scanner:
+            for entry in scanner:
                 path = entry.path
                 length = len(path)
                 if length > longest_length:
@@ -512,11 +539,68 @@ def longest_project_path(project_root: Path) -> tuple[int, str]:
                     longest_member = relative.replace(os.sep, "/")
                 try:
                     if entry.is_dir(follow_symlinks=False):
-                        relative = os.path.join(relative_directory, entry.name)
-                        pending.append((path, relative))
+                        child_relative = os.path.join(relative_directory, entry.name)
+                        child_length, child_member = scan(path, child_relative)
+                        if child_length > longest_length:
+                            longest_length, longest_member = child_length, child_member
                 except OSError:
                     continue
-    return longest_length, longest_member
+        entries[key] = {
+            "signature": list(signature),
+            "longest_length": longest_length,
+            "longest_member": longest_member,
+        }
+        return longest_length, longest_member
+
+    result = scan(root_text, ".")
+    _save_longest_path_cache(cache_path, root_text, {key: entries[key] for key in visited if key in entries})
+    return result
+
+
+def _longest_path_cache_path(root_text: str) -> Path:
+    identity = hashlib.sha256(os.path.normcase(root_text).encode("utf-8")).hexdigest()[:24]
+    return Path(tempfile.gettempdir()) / f"hypersmart-longest-path-{identity}.json"
+
+
+def _load_longest_path_cache(path: Path, root_text: str) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            payload.get("version") != LONGEST_PATH_CACHE_VERSION
+            or payload.get("root") != os.path.normcase(root_text)
+            or not isinstance(payload.get("entries"), dict)
+        ):
+            return None
+        return payload
+    except (OSError, ValueError, AttributeError, TypeError):
+        return None
+
+
+def _save_longest_path_cache(path: Path, root_text: str, entries: dict[str, object]) -> None:
+    payload = {
+        "version": LONGEST_PATH_CACHE_VERSION,
+        "root": os.path.normcase(root_text),
+        "entries": entries,
+    }
+    temporary: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(payload, stream, ensure_ascii=False, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def relocation_status(project_root: Path, *, check_writable: bool = True) -> RelocationStatus:

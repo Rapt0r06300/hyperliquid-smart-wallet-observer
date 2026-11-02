@@ -92,3 +92,47 @@ def test_state_buckets():
     assert s["coin"] == "BTC" and s["imbalance_bucket"] != I.UNMEASURABLE
     assert s["spread_bucket"].startswith("b") and s["hour_bucket"].startswith("h")
     assert s["crowding"] == I.UNMEASURABLE          # densité métaordres même-sens non branchée
+
+
+def test_state_buckets_refuse_non_finite_or_incoherent_market_context():
+    invalid = I.state_buckets({
+        "bid": 101.0, "ask": 100.0, "mid": float("nan"),
+        "bid_depth": float("inf"), "ask_depth": 1.0,
+        "imbalance": float("nan"), "bid_size": 0.0, "ask_size": 0.0,
+        "coin": "BTC", "ts_ms": float("nan"),
+    })
+    assert invalid["spread_bucket"] == I.UNMEASURABLE
+    assert invalid["depth_bucket"] == I.UNMEASURABLE
+    assert invalid["imbalance_bucket"] == I.UNMEASURABLE
+    assert invalid["hour_bucket"] == I.UNMEASURABLE
+
+
+def test_state_buckets_branche_crowding_causal_et_identifie():
+    quote = {
+        "bid": 100.0, "ask": 100.02, "mid": 100.01, "bid_size": 30, "ask_size": 10,
+        "bid_depth": 3000, "ask_depth": 1000, "coin": "BTC", "ts_ms": 1_000_000,
+        "direction": 1, "metaorder_id": "current",
+    }
+    metaorders = [
+        {"metaorder_id": "current", "coin": "BTC", "t0": 990_000, "t1": 1_000_000, "sens": 1},
+        {"metaorder_id": "same", "coin": "BTC", "t0": 995_000, "t1": 1_000_000, "sens": 1},
+        {"metaorder_id": "opposite", "coin": "BTC", "t0": 995_000, "t1": 1_000_000, "sens": -1},
+        {"metaorder_id": "other-coin", "coin": "ETH", "t0": 995_000, "t1": 1_000_000, "sens": 1},
+    ]
+
+    assert I.state_buckets(quote, metaorders=metaorders)["crowding"] == "b1"
+    assert I.state_buckets(
+        quote,
+        metaorders=metaorders + [{
+            "metaorder_id": "same-2", "coin": "BTC", "t0": 995_000,
+            "t1": 1_000_000, "sens": 1,
+        }],
+    )["crowding"] == "b2+"
+
+
+def test_state_buckets_crowding_reste_inmesurable_si_la_lignee_est_incomplete():
+    quote = {"coin": "BTC", "ts_ms": 1_000, "direction": 1, "metaorder_id": "current"}
+
+    assert I.state_buckets(quote, metaorders=[{
+        "coin": "BTC", "t0": 900, "t1": 1_000, "sens": 1,
+    }])["crowding"] == I.UNMEASURABLE

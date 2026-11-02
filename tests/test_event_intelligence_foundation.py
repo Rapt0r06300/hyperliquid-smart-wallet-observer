@@ -113,6 +113,22 @@ def test_external_event_rejects_non_causal_or_unsafe_contracts() -> None:
             real_execution=True,
         )
 
+    with pytest.raises(ValueError, match="corroboration_count"):
+        ExternalEvent(
+            event_id="bad",
+            source="source",
+            event_type=ExternalEventType.NEWS,
+            source_tier=SourceTier.WIRE,
+            retrieval_ts_ms=1_000,
+            ingest_ts_ms=1_000,
+            methodology_version="v1",
+            raw_evidence_ref="ref",
+            corroboration_count=1.5,
+        )
+
+    with pytest.raises(ValueError, match="decision_ts_ms"):
+        _event().is_available_at(999.5)
+
 
 def test_r2_record_contains_structured_facts_not_source_text() -> None:
     record = _event().to_r2_record()
