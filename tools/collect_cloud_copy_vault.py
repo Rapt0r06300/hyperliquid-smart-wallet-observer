@@ -20,6 +20,7 @@ import math
 import os
 import shutil
 import sys
+import subprocess
 import time
 import uuid
 from collections import defaultdict, deque
@@ -129,6 +130,27 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _git_head_sha() -> str | None:
+    """Return the exact collector source HEAD, or no claim when unavailable."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip().lower()
+    if result.returncode != 0 or len(value) != 40:
+        return None
+    if any(char not in "0123456789abcdef" for char in value):
+        return None
+    return value
 
 
 class RestWeightPacer:
@@ -4444,6 +4466,7 @@ async def collect(
     )
     summary = {
         "schema": "alina.copy_vault_cloud_window.v2",
+        "collector_head_sha": _git_head_sha(),
         "collection_run_id": run_id,
         "selection_ts_ms": selection_ts_ms,
         "collection_launch_ts_ms": collection_launch_ms,
