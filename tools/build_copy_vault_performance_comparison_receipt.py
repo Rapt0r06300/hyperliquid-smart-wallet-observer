@@ -110,6 +110,11 @@ def _run_trials(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     runs: list[dict[str, Any]] = []
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        value for value in (str(repo_root), existing_pythonpath) if value
+    )
     for index in range(trials):
         started = time.perf_counter_ns()
         try:
@@ -120,6 +125,7 @@ def _run_trials(
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
+                env=environment,
             )
             elapsed_ns = time.perf_counter_ns() - started
             runs.append({
