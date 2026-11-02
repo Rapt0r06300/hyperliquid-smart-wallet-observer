@@ -109,7 +109,11 @@ jobs:
   security-quality-verdict:
     name: Verdict sécurité et qualité
     needs: [scope, governance, supply-chain]
-    if: always()
+    # A superseded PR run can cancel scope before it produces an output.  Do
+    # not turn that obsolete run into a red verdict; the newer exact-SHA run
+    # is the authoritative check.  Any real scope failure still reaches the
+    # fail-closed verdict below.
+    if: ${{ always() && needs.scope.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
