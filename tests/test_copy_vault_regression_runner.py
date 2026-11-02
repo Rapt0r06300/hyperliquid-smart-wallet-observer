@@ -43,6 +43,20 @@ def test_copy_vault_evidence_tools_have_explicit_downstream_suites() -> None:
     assert selected == expected
 
 
+def test_known_copy_vault_receipt_and_hosted_workflows_have_explicit_suites() -> None:
+    selected = runner.select_tests([
+        "tools/build_copy_vault_live_probe_receipt.py",
+        ".github/workflows/ci.yml",
+        ".github/workflows/security-quality.yml",
+    ])
+
+    assert selected == sorted({
+        "tests/test_build_copy_vault_live_probe_receipt.py",
+        "tests/test_ci_workflows.py",
+        "tests/test_repository_governance.py",
+    })
+
+
 def test_unknown_critical_module_fails_closed() -> None:
     with pytest.raises(ValueError, match="no regression mapping"):
         runner.select_tests(["src/hl_observer/backtesting/future_engine.py"])

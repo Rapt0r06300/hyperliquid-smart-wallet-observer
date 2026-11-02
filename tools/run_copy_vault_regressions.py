@@ -63,6 +63,8 @@ MODULE_TESTS: dict[str, tuple[str, ...]] = {
     ),
     "tools/build_copy_vault_hosted_receipt.py":
         ("tests/test_copy_vault_hosted_receipt.py",),
+    "tools/build_copy_vault_live_probe_receipt.py":
+        ("tests/test_build_copy_vault_live_probe_receipt.py",),
     "tools/build_copy_vault_restoration_evidence.py":
         ("tests/test_build_copy_vault_restoration_evidence.py",),
     "tools/inventory_copy_vault_evidence.py":
@@ -77,6 +79,10 @@ MODULE_TESTS: dict[str, tuple[str, ...]] = {
         ("tests/test_copy_vault_task_closure_plans.py",),
     "tools/run_copy_vault_regressions.py":
         ("tests/test_copy_vault_regression_runner.py",),
+    ".github/workflows/ci.yml":
+        ("tests/test_ci_workflows.py",),
+    ".github/workflows/security-quality.yml":
+        ("tests/test_repository_governance.py",),
 }
 
 CRITICAL_PREFIXES = (
