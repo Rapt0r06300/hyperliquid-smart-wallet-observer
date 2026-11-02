@@ -1226,6 +1226,73 @@ def test_snapshot_and_live_userfills_are_separate_families() -> None:
     assert live_fills[0]["connection_id"] == "copy-test"
 
 
+def test_causal_live_row_requires_ack_epoch_identity_and_preserves_cutoff() -> None:
+    _, fills = C.userfills_envelope(
+        {
+            "channel": "userFills",
+            "data": {
+                "user": "0x" + "1" * 40,
+                "isSnapshot": False,
+                "fills": [
+                    {
+                        "coin": "BTC",
+                        "px": "101",
+                        "sz": "1",
+                        "side": "A",
+                        "time": 1_020,
+                        "dir": "Close Long",
+                        "hash": "0xlive",
+                        "tid": 2,
+                        "oid": 2,
+                    }
+                ],
+            },
+        },
+        vault="0x" + "1" * 40,
+        receive_wall_ms=1_025,
+        receive_mono_ns=456,
+        connection_id="copy-test",
+    )
+    row = C.causal_live_row(
+        fills[0],
+        vault="0x" + "1" * 40,
+        ack_received_at_ms=1_010,
+        capture_epoch="run:ws:1000",
+        cutoff_ms=2_000,
+    )
+    assert row is not None
+    assert row["source"] == "LIVE_WS"
+    assert row["ack_received_at_ms"] == 1_010
+    assert row["capture_epoch"] == "run:ws:1000"
+    assert row["post_ack"] is True
+    assert row["cutoff_ms"] == 2_000
+    assert row["stable_event_id"]
+
+
+def test_causal_live_row_rejects_missing_native_identity_or_ack_order() -> None:
+    base = {
+        "source": "LIVE_WS",
+        "isSnapshot": False,
+        "ts_ms": 1_020,
+        "received_at_ms": 1_025,
+        "coin": "BTC",
+        "tid": 2,
+        "stable_event_id": "event-1",
+    }
+    assert C.causal_live_row(
+        {**base, "received_at_ms": 1_000},
+        vault="0x" + "1" * 40,
+        ack_received_at_ms=1_010,
+        capture_epoch="run:ws:1000",
+    ) is None
+    assert C.causal_live_row(
+        {**base, "tid": None},
+        vault="0x" + "1" * 40,
+        ack_received_at_ms=1_010,
+        capture_epoch="run:ws:1000",
+    ) is None
+
+
 def test_empty_userfills_snapshot_is_preserved_as_a_snapshot_event() -> None:
     envelope, fills = C.userfills_envelope(
         {
