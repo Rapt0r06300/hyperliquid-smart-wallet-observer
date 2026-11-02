@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hypersmart-ci-${{ github.ref }}
+  group: hypersmart-ci-${{ github.ref }}-${{ github.sha }}
   # Keep main proofs durable; replace only obsolete PR runs to avoid queue deadlock.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
