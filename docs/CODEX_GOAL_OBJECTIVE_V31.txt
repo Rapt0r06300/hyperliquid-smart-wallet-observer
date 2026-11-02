@@ -1,6 +1,6 @@
 MODE OBJECTIF — Alina SmartFlow.
 
-But final : sur le même SHA de `main`, certifier séparément en PAPER `copy_vault`, `lead_lag` et `cross_venue_dislocation_v2` à >= +4.00 USD NET/jour chacune, sans compensation. Les gates machine du HEAD font foi ; `python tools/run_daily_economic_certification.py .` est l’autorité finale.
+But final : améliorer en continu l'économie PAPER de `copy_vault` seul, sans seuil quotidien fixe. Geler chaque progrès NET mesuré dans une preuve reproductible, y compris les gains modestes; une preuve exploratoire gelée ne devient un champion économique qu'après OOS/forward post-freeze et toutes les gates de causalité, frais, risque, liquidité et provenance. Les familles désactivées restent historiques.
 
 Au démarrage/reprise, lis `AGENTS.md`, `docs/CURRENT_STATE.md`, `docs/CODEX_GOAL_RUNBOOK.md`, `$alina-quant-research`, le ledger compact et le code de la famille active. Reprends l’existant ; ne repars pas de zéro et ne rescannes pas les 775/Git entier.
 
@@ -16,4 +16,4 @@ Ne stoppe pas un batch local parce que `origin/main` avance : termine-le puis in
 
 Toute validation/OOS/forward observée puis utilisée pour retuner devient exploratoire : refreeze puis preuve disjointe. Compte tous les essais. Ne baisse jamais coûts, sécurité, causalité, liquidabilité ou gates pour fabriquer un PASS.
 
-DONE uniquement quand les 3 familles passent la certification complète >= +4.00 USD NET/jour avec OOS, forward post-freeze, couverture/durée, coûts complets, positions closes, identités uniques, placebos/no-lookahead et gates techniques finales vertes. Si seul du temps/de nouvelles données manque, laisse les collecteurs locaux travailler et cesse les tours modèle inutiles.
+Contrat de progression : ne jamais arrêter la recherche parce qu'un montant de bénéfice est atteint. Après chaque amélioration, geler le résultat avec SHA, dataset, fenêtres, seed, coûts et configuration, puis poursuivre DISCOVERY. Une version ne devient CHAMPION_VERIFIED que sur preuves OOS et forward post-freeze disjointes, positions fermées, liquidatabilité, contrôles anti-biais, risques et gates techniques verts. Si seule la collecte de nouvelles données manque, arrêter les tours modèle inutiles tout en laissant continuer les collecteurs nécessaires.
