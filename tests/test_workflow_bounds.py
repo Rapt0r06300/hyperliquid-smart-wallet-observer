@@ -20,6 +20,13 @@ def test_critical_qualification_and_collector_proofs_are_not_starved_by_main_pus
         assert "self-hosted" not in text
 
 
+def test_security_quality_does_not_fail_obsolete_cancelled_pr_runs():
+    text = _workflow("security-quality.yml")
+    assert "if: ${{ always() && needs.scope.result != 'cancelled' }}" in text
+    assert "CHANGE_SCOPE: ${{ needs.scope.outputs.mode }}" in text
+    assert 'if [ "$CHANGE_SCOPE" = catalog ]' in text
+
+
 
 def test_legacy_long_collectors_are_manual_only():
     for name in (
