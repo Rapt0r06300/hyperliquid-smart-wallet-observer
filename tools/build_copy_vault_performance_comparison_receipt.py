@@ -261,6 +261,7 @@ def build_receipt(
         "real_execution": False,
         "full_dataset_certified": False,
         "comparison_context_sha256": _canonical_sha256(context),
+        "run_id": f"local-performance:{_canonical_sha256(context)}",
         "delta_usd_per_active_day": "NOT_MEASURED: performance-only comparison",
         "delta_runtime_ns_per_run": delta_ns,
         "threshold": "challenger median <= 95% of baseline median",
