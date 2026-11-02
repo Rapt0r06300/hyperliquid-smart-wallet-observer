@@ -293,10 +293,16 @@ def test_trame_non_classee_est_conservee_comme_preuve_brute(tmp_path):
         message=message,
         received_at_ms=1010,
         connection_id="ws-1",
+        ack_received_at_ms=1005,
+        capture_epoch="ws-1",
     )
     saved = json.loads((tmp_path / C.FILLS_UNCLASSIFIED).read_text(encoding="utf-8"))
     assert saved["raw_payload"] == message
     assert saved["reason"] == "IS_SNAPSHOT_FLAG_MISSING_OR_INVALID"
+    assert saved["ack_received_at_ms"] == 1005
+    assert saved["capture_epoch"] == "ws-1"
+    assert saved["post_ack_observed"] is True
+    assert saved["admission"] == "REJECTED_UNKNOWN_SNAPSHOT_FLAG"
     assert saved["read_only"] is True and saved["real_execution"] is False
 
 

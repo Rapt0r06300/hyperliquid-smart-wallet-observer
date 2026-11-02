@@ -1359,6 +1359,8 @@ def _journal_userfills_non_classe(
     message: dict,
     received_at_ms: int,
     connection_id: str,
+    ack_received_at_ms: int | None = None,
+    capture_epoch: str | None = None,
 ) -> None:
     """Persist raw WS evidence when its native snapshot/live marker is unknown."""
     path = root / FILLS_UNCLASSIFIED
@@ -1369,7 +1371,14 @@ def _journal_userfills_non_classe(
         "vault": vault,
         "received_at_ms": int(received_at_ms),
         "connection_id": connection_id,
+        "ack_received_at_ms": ack_received_at_ms,
+        "capture_epoch": capture_epoch,
+        "post_ack_observed": (
+            isinstance(ack_received_at_ms, int)
+            and int(received_at_ms) >= ack_received_at_ms
+        ),
         "reason": "IS_SNAPSHOT_FLAG_MISSING_OR_INVALID",
+        "admission": "REJECTED_UNKNOWN_SNAPSHOT_FLAG",
         "raw_payload": message,
         "read_only": True,
         "real_execution": False,
@@ -1608,6 +1617,14 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                                 message=msg,
                                 received_at_ms=recv_wall_ms,
                                 connection_id=connection_id,
+                                ack_received_at_ms=(
+                                    _HEARTBEAT_WS.get("ack_received_at_ms_by_vault", {})
+                                    .get(vault)
+                                ),
+                                capture_epoch=(
+                                    _HEARTBEAT_WS.get("capture_epoch_by_vault", {})
+                                    .get(vault)
+                                ),
                             )
                         except (OSError, TypeError, ValueError) as exc:
                             _HEARTBEAT_WS["unclassified_frame_write_failures"] = int(
