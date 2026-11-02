@@ -23,6 +23,22 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE = ROOT / "runtime" / "reports" / "roadmap_136" / "evidence"
 DEFAULT_OUTPUT = ROOT / "runtime" / "reports" / "roadmap_136" / "ROADMAP_136_STATUS_CURRENT.json"
 
+SECURITY_PREFLIGHT_TESTS = (
+    "tests/test_no_mainnet_execution.py",
+    "tests/test_hypersmart_paper_no_exchange.py",
+    "tests/test_hypersmart_safety.py",
+    "tests/test_safety_audit.py",
+    "tests/test_active_strategy_scope_v2.py",
+    "tests/test_scope_source_unique.py",
+    "tests/test_scope_flag_inventory.py",
+    "tests/test_copy_vault_normative_scope.py",
+    "tests/test_phase_controller.py",
+    "tests/test_apply_phase_requests.py",
+    "tests/test_collection_epoch_isolation.py",
+    "tests/test_collector_lease.py",
+    "tests/test_repository_governance.py",
+)
+
 
 def _git(*args: str) -> str:
     result = subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True)
@@ -203,6 +219,112 @@ def record_authority_preflight(evidence_dir: Path) -> dict[str, Any]:
     return {"head_sha": head_sha, "written": written, "tested": test}
 
 
+def record_security_preflight(evidence_dir: Path) -> dict[str, Any]:
+    """Record only security/orchestration tasks covered by live local tests.
+
+    This is deliberately narrower than the full roadmap.  It never treats a
+    source file's presence as proof and it never records economic or hosted
+    evidence.  The exact test command and the current code digest bind each
+    receipt to the observed local state.
+    """
+    validate_registry()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    head_sha = _git("rev-parse", "HEAD")
+    working_tree_code_sha256 = _working_tree_code_digest()
+    test = _run_readonly([sys.executable, "-m", "pytest", "-q", *SECURITY_PREFLIGHT_TESTS])
+    if test["returncode"] != 0:
+        raise RuntimeError("security/orchestration preflight failed; no receipts written")
+
+    common = {
+        "source_sha256": ROADMAP_SOURCE_SHA256,
+        "head_sha": head_sha,
+        "working_tree_code_sha256": working_tree_code_sha256,
+        "commands": [test["command"]],
+        "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
+    }
+    task_specs = {
+        "T009": (
+            "PAPER/READ-ONLY safety boundaries and no exchange/order path",
+            [
+                "src/hl_observer/security",
+                "tests/test_no_mainnet_execution.py",
+                "tests/test_hypersmart_paper_no_exchange.py",
+                "tests/test_hypersmart_safety.py",
+                "tests/test_safety_audit.py",
+            ],
+        ),
+        "T010": (
+            "copy_vault is the only strategy family materializing paper economics",
+            [
+                "src/hl_observer/strategies/active_scope.py",
+                "tests/test_active_strategy_scope_v2.py",
+                "tests/test_copy_vault_normative_scope.py",
+            ],
+        ),
+        "T011": (
+            "legacy execution and scope flags remain explicitly classified and fail closed",
+            [
+                "src/hl_observer/ops/scope_flag_inventory.py",
+                "tests/test_scope_flag_inventory.py",
+                "tests/test_scope_source_unique.py",
+            ],
+        ),
+        "T012": (
+            "invalid execution, safety and phase inputs are refused",
+            [
+                "src/hl_observer/security",
+                "src/hl_observer/control_plane/phase_state.py",
+                "tests/test_no_mainnet_execution.py",
+                "tests/test_hypersmart_safety.py",
+                "tests/test_phase_controller.py",
+                "tests/test_apply_phase_requests.py",
+            ],
+        ),
+        "T013": (
+            "phase state and transition contracts reject invalid phases and epochs",
+            [
+                "src/hl_observer/control_plane/phase_controller.py",
+                "src/hl_observer/control_plane/phase_state.py",
+                "tests/test_phase_controller.py",
+                "tests/test_apply_phase_requests.py",
+            ],
+        ),
+        "T014": (
+            "collection leases and phase epochs reject stale ownership",
+            [
+                "src/hl_observer/control_plane/resumable_campaign.py",
+                "src/hl_observer/ops/collector_lease.py",
+                "tests/test_collection_epoch_isolation.py",
+                "tests/test_collector_lease.py",
+            ],
+        ),
+        "T016": (
+            "repository governance and hosted workflow boundaries are checked locally",
+            [
+                ".github/workflows",
+                "tests/test_repository_governance.py",
+                "SECURITY.md",
+                "AGENTS.md",
+            ],
+        ),
+    }
+    written: list[str] = []
+    for task_id, (proof, files) in task_specs.items():
+        receipt = {
+            **common,
+            "task_id": task_id,
+            "status": "VERIFIED_DONE",
+            "files": files,
+            "proofs": [proof, "all listed tests passed in one read-only local preflight"],
+        }
+        path = evidence_dir / f"{task_id}-security-preflight-{head_sha[:12]}.json"
+        if path.exists():
+            continue
+        path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written.append(str(path.relative_to(ROOT)).replace(os.sep, "/"))
+    return {"head_sha": head_sha, "written": written, "tested": test}
+
+
 def build_report(evidence_dir: Path) -> dict[str, Any]:
     validate_registry()
     head_sha = _git("rev-parse", "HEAD")
@@ -265,11 +387,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--print", action="store_true", dest="print_report")
     parser.add_argument("--record-authority-preflight", action="store_true")
+    parser.add_argument("--record-security-preflight", action="store_true")
     args = parser.parse_args()
     try:
         preflight = None
         if args.record_authority_preflight:
             preflight = record_authority_preflight(args.evidence_dir)
+        if args.record_security_preflight:
+            preflight = record_security_preflight(args.evidence_dir)
         report = build_report(args.evidence_dir)
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         parser.error(str(exc))
