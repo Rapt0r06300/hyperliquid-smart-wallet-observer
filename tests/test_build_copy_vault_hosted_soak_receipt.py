@@ -40,5 +40,6 @@ def test_hosted_soak_receipt_requires_and_records_exact_provenance(tmp_path: Pat
     )
     assert receipt["evidence_status"] == "VERIFIED"
     assert receipt["claims"]["checkpoint_resume_proven"] is True
+    assert receipt["real_execution"] is False
     assert receipt["full_dataset_certified"] is False
     assert len(receipt["receipt_sha256"]) == 64
