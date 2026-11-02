@@ -459,7 +459,10 @@ def _launcher_is_relative(project_root: Path) -> bool:
     env_text = env.read_text(encoding="utf-8-sig", errors="replace").casefold()
     return (
         'cd /d "%~dp0"' in launcher_text
-        and 'call "%~dp0tools\\portable_env.cmd"' in launcher_text
+        and (
+            'call "%~dp0tools\\portable_env.cmd"' in launcher_text
+            or 'call "%alina_project_root%\\tools\\portable_env.cmd"' in launcher_text
+        )
         and "%~dp0" in env_text
         and "tools\\python\\python.exe" in env_text
     )
@@ -479,22 +482,40 @@ def _root_is_writable(project_root: Path) -> bool:
 
 
 def longest_project_path(project_root: Path) -> tuple[int, str]:
-    """Return the longest absolute path and its member without following links."""
+    """Return the longest absolute path and its member without following links.
+
+    This check intentionally covers the complete project tree, including
+    generated runtime/data/log files.  ``os.walk`` plus a ``Path`` allocation
+    for every entry was too expensive on large SAFE workspaces, so keep the
+    same fail-closed coverage with an explicit ``os.scandir`` stack and plain
+    strings.  We only materialize a relative path when a new maximum is
+    found; no directory or file is skipped.
+    """
     root = _resolved(project_root)
-    longest_length = len(str(root))
+    root_text = os.path.abspath(os.fspath(root))
+    longest_length = len(root_text)
     longest_member = "."
-    for directory, subdirectories, names in os.walk(root, topdown=True, followlinks=False):
-        current = Path(directory)
-        entries = tuple(subdirectories) + tuple(names)
-        for name in entries:
-            path = current / name
-            length = len(str(path.absolute()))
-            if length > longest_length:
-                longest_length = length
+    pending: list[tuple[str, str]] = [(root_text, ".")]
+    while pending:
+        directory, relative_directory = pending.pop()
+        try:
+            entries = os.scandir(directory)
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                path = entry.path
+                length = len(path)
+                if length > longest_length:
+                    longest_length = length
+                    relative = os.path.relpath(path, root_text)
+                    longest_member = relative.replace(os.sep, "/")
                 try:
-                    longest_member = path.relative_to(root).as_posix()
-                except ValueError:
-                    longest_member = str(path)
+                    if entry.is_dir(follow_symlinks=False):
+                        relative = os.path.join(relative_directory, entry.name)
+                        pending.append((path, relative))
+                except OSError:
+                    continue
     return longest_length, longest_member
 
 

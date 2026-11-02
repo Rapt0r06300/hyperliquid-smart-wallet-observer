@@ -90,7 +90,7 @@ def test_portable_git_installer_is_pinned_and_hash_verified() -> None:
     assert "git-for-windows/git/releases/download" in installer
     assert "MinGit-2.54.0-64-bit.zip" in installer
     assert "04F937E1F0918B17B9BE6F2294CB2BB66E96E1D9832D1C298E2DE088A1D0E668" in installer
-    assert "Get-FileHash" in installer
+    assert "System.Security.Cryptography.SHA256]::Create()" in installer
     assert "cmd\\git.exe" in installer
     assert r'for %%I in ("%~dp0..\..")' in bootstrap
     assert 'cd /d "%ALINA_PROJECT_ROOT%"' in bootstrap

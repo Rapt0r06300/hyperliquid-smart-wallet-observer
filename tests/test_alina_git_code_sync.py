@@ -263,6 +263,29 @@ def test_commit_subject_names_the_l4_and_entity_provenance_guard() -> None:
     ]) == "fix(copy-vault): guard L4 intent and entity provenance (5 paths)"
 
 
+def test_commit_subject_names_branch_promotion_from_changed_lines() -> None:
+    assert _commit_subject(
+        ["POUSSER-GITHUB-FORCE.cmd"],
+        "+set \"SYNC_OPTION=--promote-current-to-main\"\n"
+        "+promotion fast-forward securisee vers main",
+    ) == "fix(sync): promote current branch safely (1 paths)"
+
+
+def test_commit_subject_does_not_overclaim_a_mixed_batch() -> None:
+    subject = _commit_subject(
+        [
+            "POUSSER-GITHUB-FORCE.cmd",
+            "docs/release/README.md",
+            "runtime/reports/LAST_SYNC.json",
+            "tools/alina_git_code_sync.py",
+        ],
+        "+promotion fast-forward securisee vers main\n"
+        "+proposed_commit_message=semantic commit",
+    )
+
+    assert subject == "chore(repository): update repository tooling and safeguards (4 paths)"
+
+
 def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []
@@ -495,6 +518,22 @@ def test_converges_without_losing_either_author(repos):
     assert git(origin, "show", "main:tools/local.py") == "local = 1"
     assert (local / "docs/cloud.md").read_text() == "cloud\n"
     assert not git(local, "diff", "--name-only")
+
+
+def test_single_byte_source_change_is_committed_and_published(repos):
+    local, _, origin = repos
+    source = local / "src" / "base.py"
+    before = source.read_bytes()
+    source.write_bytes(before.replace(b"1", b"2", 1))
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0
+    assert receipt["local_commit_created"] is True
+    assert receipt["publishable_paths_seen"] == 1
+    assert receipt["commit_message"] == "chore(runtime): update base"
+    assert git(local, "show", "HEAD:src/base.py") == "base = 2"
+    assert git(origin, "show", "main:src/base.py") == "base = 2"
 
 
 def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
@@ -796,7 +835,7 @@ def test_clean_sync_short_circuits_history_fetch_when_remote_matches(repos):
     assert git(local, "rev-parse", "HEAD") == before
 
 
-def test_local_ahead_reuses_fast_path_fetch_for_preflight(repos):
+def test_local_ahead_reuses_matching_remote_snapshot_without_fetch(repos):
     local, _, origin = repos
     (local / "src" / "local.py").write_text("local = 1\n")
     git(local, "add", ".")
@@ -809,7 +848,8 @@ def test_local_ahead_reuses_fast_path_fetch_for_preflight(repos):
     assert sum(
         "Recevoir les objets Git de GitHub" in str(command["operation"])
         for command in task.report["git_commands"]
-    ) == 1
+    ) == 0
+    assert task.report["remote_snapshot_reused"] is True
     assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
 
 
@@ -1135,7 +1175,12 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
     assert 'call :download_source "tools/install_portable_git.ps1"' in source
     assert 'call :download_source "tools/alina_git_code_sync.py"' in source
-    assert "ALINA_BOOTSTRAP_REF=main" in source
+    assert "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202" in source
+    assert "ALINA_LOCAL_ENGINE_SHA256=00d2b3039e269883c6cf71d1e4476db0885f38a51de1329769430d324a986597" in source
+    assert "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b" in source
+    assert "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297" in source
+    assert "Get-FileHash" not in source
+    assert "System.Security.Cryptography.SHA256]::Create()" in source
     assert '-File "%ALINA_INSTALLER%"' in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
@@ -1162,17 +1207,19 @@ def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
 
     class LateEdit(Synchronizer):
         wrote = False
-        fetch_count = 0
 
         def _fast_path_if_clean(self):
             return False
 
+        def _fetch_remote_snapshot(self, observed_remote):
+            fetched = super()._fetch_remote_snapshot(observed_remote)
+            (local / "src" / "seed.py").write_text(
+                "seed = True\n", encoding="utf-8"
+            )
+            return fetched
+
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "fetch":
-                (local / "src" / "seed.py").write_text(
-                    "seed = True\n", encoding="utf-8"
-                )
             if args and args[0] == "commit" and not self.wrote:
                 self.wrote = True
                 (local / "src" / "added_during_fetch.py").write_text(
@@ -1198,17 +1245,19 @@ def test_late_invalid_python_saved_locally_never_pushed(repos):
 
     class LateInvalid(Synchronizer):
         wrote = False
-        fetch_count = 0
 
         def _fast_path_if_clean(self):
             return False
 
+        def _fetch_remote_snapshot(self, observed_remote):
+            fetched = super()._fetch_remote_snapshot(observed_remote)
+            (local / "src" / "seed.py").write_text(
+                "seed = True\n", encoding="utf-8"
+            )
+            return fetched
+
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "fetch":
-                (local / "src" / "seed.py").write_text(
-                    "seed = True\n", encoding="utf-8"
-                )
             if args and args[0] == "commit" and not self.wrote:
                 self.wrote = True
                 (local / "src" / "incomplete.py").write_text(
@@ -1236,15 +1285,18 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
         def _fast_path_if_clean(self):
             return False
 
+        def _fetch_remote_snapshot(self, observed_remote):
+            self.fetch_count += 1
+            fetched = super()._fetch_remote_snapshot(observed_remote)
+            if self.fetch_count == 1:
+                self.n += 1
+                (local / "src" / f"concurrent_{self.n}.py").write_text(
+                    f"value = {self.n}\n", encoding="utf-8"
+                )
+            return fetched
+
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "fetch":
-                self.fetch_count += 1
-                if self.fetch_count == 1:
-                    self.n += 1
-                    (local / "src" / f"concurrent_{self.n}.py").write_text(
-                        f"value = {self.n}\n", encoding="utf-8"
-                    )
             if args and args[0] == "commit":
                 self.n += 1
                 (local / "src" / f"concurrent_{self.n}.py").write_text(

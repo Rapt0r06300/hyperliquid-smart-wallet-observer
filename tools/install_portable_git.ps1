@@ -12,6 +12,19 @@ $archiveName = "MinGit-2.54.0-64-bit.zip"
 $downloadUrl = "https://github.com/git-for-windows/git/releases/download/v$version/$archiveName"
 $expectedSha256 = "04F937E1F0918B17B9BE6F2294CB2BB66E96E1D9832D1C298E2DE088A1D0E668"
 
+function Get-Sha256Hex([string]$Path) {
+    # Keep compatibility with minimal Windows PowerShell installations where
+    # Get-FileHash is unavailable, without weakening the hash gate.
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "")
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
+}
+
 $root = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd("\", "/")
 $tools = Join-Path $root "tools"
 $target = Join-Path $tools "git"
@@ -36,7 +49,7 @@ try {
     Invoke-WebRequest -Uri $downloadUrl -OutFile $archive -UseBasicParsing
 
     Write-Host "[2/4] Verification SHA-256..." -ForegroundColor Cyan
-    $actualSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToUpperInvariant()
+    $actualSha256 = (Get-Sha256Hex $archive).ToUpperInvariant()
     if ($actualSha256 -ne $expectedSha256) {
         throw "Archive MinGit refusee : SHA-256 inattendu ($actualSha256)."
     }

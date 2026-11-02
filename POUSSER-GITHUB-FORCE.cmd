@@ -12,13 +12,24 @@ rem Set HYPERSMART_PUSH_NO_PAUSE=1 for CI/automation or cmd /c callers.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
 set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-main"
-set "ALINA_BOOTSTRAP_REF=main"
+rem Bootstrap only from the reviewed exact commit that carries this engine build.
+rem The remote branch may advance independently; the hash check below keeps a
+rem stale or tampered helper from being executed.
+set "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202"
 set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13"
+rem The local engine is intentionally pinned too: a same-build but modified
+rem helper must not be executed silently.
+set "ALINA_LOCAL_ENGINE_SHA256=00d2b3039e269883c6cf71d1e4476db0885f38a51de1329769430d324a986597"
+set "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b"
+set "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
 set "SYNC_OPTION="
 set "RC=1"
+
+if /I "%~1"=="--help" goto :help
+if /I "%~1"=="-h" goto :help
 
 if /I "%~1"=="--dry-run" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="dry-run" set "SYNC_OPTION=--dry-run"
@@ -101,7 +112,11 @@ if not exist "%ALINA_ENGINE%" goto :get_engine
 rem Never overwrite local Codex/Claude changes to the sync engine.
 rem If it predates safe conflict kits, use pinned, isolated code in TEMP.
 findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%" >nul 2>nul
-if not errorlevel 1 goto :engine_ready
+if not errorlevel 1 (
+  powershell.exe -NoLogo -NoProfile -Command "$ErrorActionPreference='Stop'; $sha256=[System.Security.Cryptography.SHA256]::Create(); $stream=[System.IO.File]::OpenRead('%ALINA_ENGINE%'); try { $actual=([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-','').ToLowerInvariant() } finally { $stream.Dispose(); $sha256.Dispose() }; if ($actual -ne '%ALINA_LOCAL_ENGINE_SHA256%') { throw ('SHA-256 local inattendu: ' + $actual) }"
+  if errorlevel 1 goto :invalid_engine
+  goto :engine_ready
+)
 echo [INFO] Moteur local ancien conserve. Utilisation temporaire du moteur recent.
 
 :get_engine
@@ -126,10 +141,11 @@ if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check
 rem A double click from a Codex/WIP branch promotes it only by a guarded
 rem fast-forward. Dry-run and WIP modes stay branch-local/read-only.
 if not defined SYNC_OPTION (
+  set "ALINA_ACTIVE_BRANCH="
   for /f "delims=" %%B in ('"%HYPERSMART_GIT%" -C "%ALINA_ROOT%." branch --show-current 2^>nul') do (
     set "ALINA_ACTIVE_BRANCH=%%B"
-    if /I not "%%B"=="main" set "SYNC_OPTION=--promote-current-to-main"
   )
+  if defined ALINA_ACTIVE_BRANCH if /I not "%ALINA_ACTIVE_BRANCH%"=="main" set "SYNC_OPTION=--promote-current-to-main"
 )
 if /I "%SYNC_OPTION%"=="--promote-current-to-main" echo [INFO] Branche active %ALINA_ACTIVE_BRANCH%; promotion fast-forward securisee vers main.
 
@@ -161,6 +177,13 @@ goto :finish
 :bad_option
 echo [NO_GO] Option inconnue. Utiliser ce fichier en double clic sans argument.
 set "RC=2"
+goto :finish
+
+:help
+echo Usage : POUSSER-GITHUB-FORCE.cmd [--dry-run^|--wip-only^|--promote-current-to-main^|--portable-self-check]
+echo Par defaut, une branche non-main est promue vers main uniquement par fast-forward securise.
+echo Aucun force-push, reset, clean, stash, suppression ou telechargement de shard.
+set "RC=0"
 goto :finish
 
 :bad_location
@@ -199,12 +222,19 @@ if not exist "%ALINA_BOOTSTRAP%\" exit /b 43
 exit /b 0
 
 :download_source
-rem Bootstrap only from canonical GitHub main. The caller verifies the engine build.
+rem Bootstrap only from the pinned canonical GitHub commit. The caller verifies
+rem both the engine build and the downloaded file hash.
 rem Only tools/*.ps1 and *.py source can be requested by this CMD.
+set "ALINA_EXPECTED_SHA256="
+if /I "%~1"=="tools/alina_git_code_sync.py" set "ALINA_EXPECTED_SHA256=%ALINA_ENGINE_SHA256%"
+if /I "%~1"=="tools/install_portable_git.ps1" set "ALINA_EXPECTED_SHA256=%ALINA_INSTALLER_SHA256%"
 echo [INFO] Chargement du composant de code %~1
 powershell.exe -NoLogo -NoProfile -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 2 -Uri 'https://raw.githubusercontent.com/Rapt0r06300/hyperliquid-smart-wallet-observer/%ALINA_BOOTSTRAP_REF%/%~1' -OutFile '%~2'; if ((Get-Item -LiteralPath '%~2').Length -lt 500) { throw 'Fichier incomplet' }"
 if errorlevel 1 exit /b 44
 if not exist "%~2" exit /b 44
+if defined ALINA_EXPECTED_SHA256 powershell.exe -NoLogo -NoProfile -Command "$ErrorActionPreference='Stop'; $sha256=[System.Security.Cryptography.SHA256]::Create(); $stream=[System.IO.File]::OpenRead('%~2'); try { $actual=([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-','').ToLowerInvariant() } finally { $stream.Dispose(); $sha256.Dispose() }; if ($actual -ne '%ALINA_EXPECTED_SHA256%') { throw ('SHA-256 inattendu: ' + $actual) }"
+if errorlevel 1 exit /b 45
+set "ALINA_EXPECTED_SHA256="
 exit /b 0
 
 :finish

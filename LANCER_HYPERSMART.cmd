@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "ALINA_PROJECT_ROOT=%~dp0."
 REM item 9/10 : code de sortie propage de bout en bout. Jamais un exit /b 0 systematique en cas d'echec.
 set "RC=0"
 REM Un double-clic est une session interactive : meme si le moteur rend la main avec
@@ -9,7 +10,7 @@ set "HYPERSMART_INTERACTIVE_LAUNCH=0"
 if "%~1"=="" set "HYPERSMART_INTERACTIVE_LAUNCH=1"
 REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
 REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
-call "%~dp0tools\portable_env.cmd"
+call "%ALINA_PROJECT_ROOT%\tools\portable_env.cmd"
 if errorlevel 1 (
   echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
   set "RC=30"

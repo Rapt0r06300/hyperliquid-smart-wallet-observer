@@ -79,8 +79,36 @@ MODULE_TESTS: dict[str, tuple[str, ...]] = {
         ("tests/test_copy_vault_snapshot_contract.py",),
     "tools/verify_copy_vault_tasklist.py":
         ("tests/test_copy_vault_task_closure_plans.py",),
+    "tools/alina_git_code_sync.py": (
+        "tests/test_alina_git_code_sync.py",
+        "tests/test_push_github_launcher.py",
+        "tests/test_push_github_safe_contract.py",
+    ),
+    "tools/install_portable_git.ps1": (
+        "tests/test_portable_runtime.py",
+        "tests/test_portable_release_ci.py",
+        "tests/test_push_github_launcher.py",
+    ),
+    "tools/portable_runtime.py": (
+        "tests/test_portable_runtime.py",
+        "tests/test_portable_official_cmds.py",
+        "tests/test_portable_launchers.py",
+    ),
+    "src/hl_observer/cli.py": (
+        "tests/test_coverage_closure_cli_commands.py",
+        "tests/test_dependances_execution.py",
+        "tests/test_safety_audit.py",
+    ),
+    "requirements.txt": (
+        "tests/test_dependances_execution.py",
+        "tests/test_repository_governance.py",
+    ),
     "tools/run_copy_vault_regressions.py":
         ("tests/test_copy_vault_regression_runner.py",),
+    "tools/roadmap_136_registry.py":
+        ("tests/test_roadmap_136_registry.py",),
+    "tools/verify_roadmap_136.py":
+        ("tests/test_roadmap_136_registry.py",),
     ".github/workflows/ci.yml":
         ("tests/test_ci_workflows.py",),
     ".github/workflows/security-quality.yml":

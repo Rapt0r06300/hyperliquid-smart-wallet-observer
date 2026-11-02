@@ -21,6 +21,21 @@ from hl_observer.security.dependances import (
 )
 
 
+def test_manifest_runtime_n_installe_pas_de_client_d_execution():
+    """L'installation de base ne doit pas rendre une API d'ordre disponible."""
+    from pathlib import Path
+
+    requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(
+        encoding="utf-8"
+    )
+    declared = {
+        line.split("#", 1)[0].strip().split("[", 1)[0].split("=", 1)[0].split(">", 1)[0]
+        for line in requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert "ccxt" not in {item.casefold() for item in declared}
+
+
 def test_un_environnement_PROPRE_passe():
     """Ce qu'on utilise VRAIMENT : lire, parser, tester. Rien de tout ca ne signe quoi que ce soit."""
     v = auditer(["requests", "websockets", "pydantic", "fastapi", "numpy", "pytest", "sqlalchemy"])

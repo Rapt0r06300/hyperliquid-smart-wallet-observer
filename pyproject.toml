@@ -51,7 +51,7 @@ exclude = ["tests*", "data*", "logs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "tools"]
 filterwarnings = [
     "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
     "ignore:.*iscoroutinefunction.*is deprecated.*:DeprecationWarning",

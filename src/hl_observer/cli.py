@@ -322,7 +322,7 @@ app = typer.Typer(
 
 
 @lru_cache(maxsize=8)
-def _cached_safety_audit(root: str, runner_identity: int):
+def _cached_safety_audit(root: str, runner_identity: object):
     """Reuse one safety result during a single CLI process.
 
     The dynamic read-only CLI contract invokes commands through several
@@ -336,18 +336,18 @@ def _cached_safety_audit(root: str, runner_identity: int):
 
 
 def _current_safety_audit():
-    return _cached_safety_audit(str(Path.cwd()), id(run_safety_audit))
+    return _cached_safety_audit(str(Path.cwd()), run_safety_audit)
 
 
 @lru_cache(maxsize=8)
-def _cached_archive_audit(root: str, writer_identity: int):
+def _cached_archive_audit(root: str, writer_identity: object):
     """Avoid repeating the bounded archive walk in one CLI process."""
     del writer_identity
     return write_archive_audit_report(Path(root))
 
 
 def _current_archive_audit():
-    return _cached_archive_audit(str(Path.cwd()), id(write_archive_audit_report))
+    return _cached_archive_audit(str(Path.cwd()), write_archive_audit_report)
 
 
 def _settings() -> Settings:

@@ -63,7 +63,7 @@ HISTORY_DEEPEN_STEPS = (512,)
 # current code remains local; any missing object required by Git can be
 # fetched explicitly by Git itself, while SAFE/shard data is never bulk-read.
 HISTORY_FETCH_FILTER = "--filter=tree:0"
-HISTORY_FETCH_TIMEOUT_SECONDS = 90
+HISTORY_FETCH_TIMEOUT_SECONDS = 300
 MERGE_TREE_TIMEOUT_SECONDS = 30
 # A rebase is bounded and receives a small budget per local commit.  A fixed
 # five-minute wait made a double-click look hung when Git was waiting on a
@@ -85,7 +85,7 @@ REPLAY_WORKTREE_TIMEOUT_SECONDS = 30
 # forgets to pass an explicit timeout.  The launcher is code-only, so a
 # stalled authentication, SSH host-key prompt, or unreachable remote must
 # fail closed quickly instead of leaving a double-click apparently hung.
-DEFAULT_GIT_TIMEOUT_SECONDS = 90
+DEFAULT_GIT_TIMEOUT_SECONDS = 300
 REMOTE_READ_TIMEOUT_SECONDS = 20
 LOCAL_READ_TIMEOUT_SECONDS = 30
 # A second double-click should wait for a short, bounded hand-off instead of
@@ -151,6 +151,71 @@ def _common_filename_tokens(paths: list[str]) -> list[str]:
     return [token for token in token_lists[0] if token in common]
 
 
+def _changed_diff_signal(diff_text: str) -> str:
+    """Return only changed lines for semantic commit classification.
+
+    Git headers and unchanged context are intentionally excluded so a commit
+    subject cannot be chosen from a filename or an old comment alone.  The
+    raw signal is retained for unit calls that provide a compact marker list
+    instead of a complete unified diff.
+    """
+    raw = diff_text.casefold()
+    changed: list[str] = []
+    for line in raw.splitlines():
+        if line.startswith(("+++", "---")):
+            continue
+        if line.startswith(("+", "-")):
+            changed.append(line[1:])
+    return "\n".join(changed) if changed else raw
+
+
+def _semantic_subject(prefix: str, scope: str, detail: str, count: int) -> str:
+    """Build a Conventional-Commit subject with a bounded truthful suffix."""
+    suffix = f" ({count} paths)"
+    subject = f"{prefix}({scope}): {detail}{suffix}"
+    if len(subject) <= 72:
+        return subject
+    subject = f"{prefix}({scope}): {detail}"
+    if len(subject) <= 72:
+        return subject
+    return f"{prefix}({scope}): update ({count} paths)"
+
+
+def _mixed_batch_detail(paths: list[str], diff_signal: str) -> str | None:
+    """Return a truthful summary for a large batch with several repository areas.
+
+    A first-file fallback is misleading when a checkpoint contains tooling,
+    configuration, documentation and tests together.  This helper only runs
+    after the narrow path-specific rules, and it deliberately uses broad
+    safeguards rather than inventing a feature name from one path.
+    """
+    if len(paths) < 4:
+        return None
+    areas = {
+        "source" if any(path.startswith("src/") for path in paths) else None,
+        "tests" if any(path.startswith("tests/") for path in paths) else None,
+        "tooling" if any(
+            path.startswith("tools/") or path.endswith((".cmd", ".ps1"))
+            for path in paths
+        ) else None,
+        "docs" if any(path.startswith("docs/") for path in paths) else None,
+        "configuration" if any(
+            path in {"pyproject.toml", "requirements.txt"} for path in paths
+        ) else None,
+    }
+    areas.discard(None)
+    if len(areas) < 2:
+        return None
+    signal = diff_signal.casefold()
+    if "sync" in signal or "github" in signal:
+        if "portable" in signal or "launcher" in signal:
+            return "update sync and portability safeguards"
+        return "update synchronization safeguards"
+    if "portable" in signal or "launcher" in signal:
+        return "update portability safeguards"
+    return "update repository tooling and safeguards"
+
+
 def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     """Build a deterministic semantic subject from the staged code paths.
 
@@ -160,7 +225,7 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     local edits.
     """
     normalized = sorted(set(path.replace("\\", "/") for path in paths))
-    diff_signal = diff_text.casefold()
+    diff_signal = _changed_diff_signal(diff_text)
     if not normalized:
         return "chore(sync): checkpoint code changes"
 
@@ -270,6 +335,53 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    # Generic rules are deliberately restricted to small coherent changes.
+    # A large/mixed batch may contain several independent topics; choosing one
+    # marker from one file would produce a misleading commit subject.
+    semantic_rules = (
+        (
+            ("promote-current-to-main", "promotion fast-forward",
+             "promoted_current_branch", "branch_after"),
+            "promote current branch safely",
+        ),
+        (
+            ("commit_subject", "proposed_commit_message", "semantic commit",
+             "commit intent"),
+            "name commits from change intent",
+        ),
+        (
+            ("protected_local_changes", "safe data", "safe shards",
+             "shard conservation"),
+            "preserve SAFE data boundaries",
+        ),
+        (
+            ("dry-run", "dry_run", "read-only", "read only"),
+            "preserve read-only safeguards",
+        ),
+        (
+            ("timeout", "retry", "poll", "bounded wait"),
+            "bound synchronization waits",
+        ),
+        (
+            ("merge-base", "fast-forward", "rebase", "git replay"),
+            "reconcile Git history safely",
+        ),
+    )
+    if len(normalized) <= 3:
+        for markers, detail in semantic_rules:
+            if any(marker in diff_signal for marker in markers):
+                return _semantic_subject("fix", "sync", detail, len(normalized))
+
+    if (
+        len(normalized) <= 3
+        and
+        any(path.endswith("POUSSER-GITHUB-FORCE.cmd") for path in normalized)
+        and any(path.endswith("tools/alina_git_code_sync.py") for path in normalized)
+    ):
+        return _semantic_subject(
+            "fix", "sync", "harden safe GitHub launcher", len(normalized)
+        )
+
     if (
         len(normalized) == 2
         and any(path.endswith("tools/restore_alina.py") for path in normalized)
@@ -332,6 +444,10 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             subject = f"feat(copy-vault): {' '.join(common)} ({len(normalized)} paths)"
             if len(subject) <= 72:
                 return subject
+
+    mixed_detail = _mixed_batch_detail(normalized, diff_signal)
+    if mixed_detail:
+        return _semantic_subject(prefix, scope, mixed_detail, len(normalized))
 
     labels = [_human_path_label(path) for path in normalized]
     if len(labels) == 1:
@@ -659,6 +775,7 @@ class Synchronizer:
             "local_syntax_check": "NOT_RUN",
             "fast_path": None,
             "remote_sha_observed": None,
+            "remote_snapshot_reused": False,
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -1044,6 +1161,68 @@ class Synchronizer:
         patterns.extend(["/tools/git/", "/tools/python/"])
         return patterns
 
+    def _fetch_remote_snapshot(self, observed_remote: str) -> str:
+        """Use a current tracking ref when it already proves the remote SHA.
+
+        A large partial clone may spend several minutes indexing a tiny fetch.
+        The fresh ``ls-remote`` SHA is the authority; when the local tracking
+        ref already has that exact SHA, fetching again only repeats expensive
+        object/index work without changing the snapshot.
+        """
+        existing_remote = self.command(
+            "rev-parse", "refs/remotes/origin/main", check=False,
+        )
+        existing_sha = existing_remote.stdout.decode(
+            "ascii", errors="replace"
+        ).strip() if existing_remote.returncode == 0 else ""
+        if existing_sha and existing_sha == observed_remote:
+            # The remote snapshot still took time (ls-remote plus index/ref
+            # inspection); a user/editor may have changed code meanwhile.
+            self._inventory_cache = None
+            self._remote_snapshot_ready = True
+            self._remote_snapshot_sha = existing_sha
+            self.report["remote_snapshot_reused"] = True
+            self.say(
+                "[FETCH] SHA GitHub deja present dans origin/main; "
+                "aucun fetch supplementaire."
+            )
+            return existing_sha
+
+        # A local-ahead clone may already contain the exact remote commit in
+        # its object database while the tracking ref is absent or stale.  In
+        # that case a fetch only re-indexes the same objects and makes the
+        # safe launcher needlessly slow.  Prove the object exists first, then
+        # refresh only the local tracking ref; never manufacture a commit or
+        # accept a SHA that is not locally present.
+        object_present = self.command(
+            "cat-file", "-e", f"{observed_remote}^{{commit}}",
+            check=False, expected_returncodes=(1,),
+        ).returncode == 0
+        if object_present:
+            self.command(
+                "update-ref", "refs/remotes/origin/main", observed_remote,
+            )
+            self._inventory_cache = None
+            self._remote_snapshot_ready = True
+            self._remote_snapshot_sha = observed_remote
+            self.report["remote_snapshot_reused"] = True
+            self.say(
+                "[FETCH] Objet GitHub deja present localement; "
+                "ref origin/main rafraichi sans fetch supplementaire."
+            )
+            return observed_remote
+
+        self.command(
+            "fetch", "--progress", "--no-tags", "origin",
+            "refs/heads/main:refs/remotes/origin/main",
+        )
+        self._inventory_cache = None
+        fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
+        self._remote_snapshot_ready = True
+        self._remote_snapshot_sha = fetched_remote
+        self.report["remote_snapshot_reused"] = False
+        return fetched_remote
+
     def capture_preflight(self, *, fetch_remote: bool) -> None:
         """Persist exact local inventory before checkpointing or reconciling."""
         staged, tracked, untracked = self._inventory()
@@ -1101,16 +1280,9 @@ class Synchronizer:
                 "aucun second fetch identique."
             )
         else:
-            self.command(
-                "fetch", "--progress", "--no-tags", "origin",
-                "refs/heads/main:refs/remotes/origin/main",
-            )
             # A user/editor can change source files while fetch is in flight.
             # Never reuse the pre-fetch snapshot for the publishable checkpoint.
-            self._inventory_cache = None
-            fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
-            self._remote_snapshot_ready = True
-            self._remote_snapshot_sha = fetched_remote
+            fetched_remote = self._fetch_remote_snapshot(observed_remote)
         counts = self.text(
             "rev-list", "--left-right", "--count",
             f"{local_head}...{fetched_remote}",
@@ -1159,14 +1331,7 @@ class Synchronizer:
         local = str(self.report.get("head_before") or self.text("rev-parse", "HEAD"))
         observed_remote = self.remote_sha()
         if observed_remote != local:
-            self.command(
-                "fetch", "--progress", "--no-tags", "origin",
-                "refs/heads/main:refs/remotes/origin/main",
-            )
-            self._inventory_cache = None
-            fetched_remote = self.text("rev-parse", "refs/remotes/origin/main")
-            self._remote_snapshot_ready = True
-            self._remote_snapshot_sha = fetched_remote
+            fetched_remote = self._fetch_remote_snapshot(observed_remote)
             if fetched_remote == local:
                 self._assert_no_new_code_changes()
                 verified_remote = self.remote_sha()
