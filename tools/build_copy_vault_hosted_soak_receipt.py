@@ -103,7 +103,10 @@ def build_receipt(
         "run_status": "completed",
         "conclusion": "success" if completed else "failure",
         "paper_read_only": soak.get("paper_read_only") is True,
-        "real_execution": soak.get("real_execution") is False,
+        # Preserve the observed safety flag.  The hosted soak must remain
+        # paper/read-only; using ``is False`` here would invert the value in
+        # the emitted receipt and make a safe run look like real execution.
+        "real_execution": soak.get("real_execution"),
         "full_dataset_certified": bool(full_dataset_certified),
         "source": {
             "path": str(soak_path),
