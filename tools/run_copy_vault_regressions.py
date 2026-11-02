@@ -65,6 +65,8 @@ MODULE_TESTS: dict[str, tuple[str, ...]] = {
         ("tests/test_copy_vault_hosted_receipt.py",),
     "tools/build_copy_vault_live_probe_receipt.py":
         ("tests/test_build_copy_vault_live_probe_receipt.py",),
+    "tools/collect_cloud_copy_vault.py":
+        ("tests/test_collect_cloud_copy_vault.py",),
     "tools/build_copy_vault_restoration_evidence.py":
         ("tests/test_build_copy_vault_restoration_evidence.py",),
     "tools/inventory_copy_vault_evidence.py":
