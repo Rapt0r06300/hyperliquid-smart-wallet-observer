@@ -15,8 +15,8 @@ permissions:
 
 concurrency:
   group: security-quality-${{ github.ref }}
-  # Preserve a completed security verdict during rapid main updates.
-  cancel-in-progress: false
+  # Keep main verdicts durable; replace only obsolete PR runs to avoid queue deadlock.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONPATH: src:tools
