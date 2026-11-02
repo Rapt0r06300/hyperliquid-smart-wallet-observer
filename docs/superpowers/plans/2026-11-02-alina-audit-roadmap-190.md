@@ -565,6 +565,31 @@ Les tâches existantes **ASF-001..ASF-150 et AUD-001..AUD-040** restent inchang�
 
 **Pour valider une tâche :** test déterministe avec contre-exemple, contrôle du branchement réel, correctif minimal, non-régression sécurité/collecte, reçu exact SHA et, si économique, delta NET indépendant des preuves OOS/forward. Ne pas dupliquer systèmes/modules existants. Le launcher ne doit pas appeler de modèle IA pour décider d'un trade.
 
+
+### Triage initial : anomalies confirmées par lecture et hypothèses critiques (priorité d'exécution)
+
+Les constats suivants sont tirés du **code existant** (pas de tests Windows exécutés sur le PC). Chaque problème doit être reproduit sur GitHub-hosted Windows, corrigé minimalement puis validé sur un HEAD exact. **Critique** désigne la gravité *potentielle* jusqu'à preuve du branchement runtime.
+
+| Priorité | Statut | Point exact | Constat et impact à vérifier |
+|---|---|---|---|
+| **P0** | Défaut de contrôle de flux confirmé | `LANCER_HYPERSMART.cmd:79-80, 392-398` | Verrou acquis puis préflight final peut exécuter `pause` et `exit /b 2` sans `:stop_impl` ni `:fin`. Le verrou local peut rester après NO_GO, avec faux refus au redémarrage. |
+| **P0** | Chemin critique non fail-closed confirmé | `tools/start_hypersmart_simulation.ps1:816-865` | Les commandes `init-db`, `prepare-simulation-logs`, `discover-markets`, `scan-markets` peuvent échouer par code natif sans être bloquantes (aucun contrôle systématique de `$LASTEXITCODE`) avant lancement UI. |
+| **P0** | Collision de configuration confirmée | `LANCER_HYPERSMART.cmd:131, 352-359`; `tools/start_hypersmart_simulation.ps1:821`; `simulation/economic_objective.py` | Capital initial CMD à **100 USDT**, contrat économique à **200 USD**, voie opt-in reset à **1000** ; le capital effectif du ledger doit être audité, pas supposé. |
+| **P0** | Scope legacy actif par contrat, effet à tracer | `ops/runtime_contract.py:22-26`; `strategies/active_scope.py` | Le contrat exige `HYPERSMART_EXPERIMENTAL_PAPER=1`, `EXPLORATORY_PAPER=1` et `EXPERIMENTAL_CROSS_VENUE_GELE=0` bien que **Copy-Vault soit la seule famille économique active**. Contrôle que les autres familles ne puissent écrire de PnL, sans retirer les preuves historiques. |
+| **P0** | Commande stop potentiellement trop large confirmée | `LANCER_HYPERSMART.cmd:875,1068` | `restart-userfills` et `kill-userfills` sélectionnent des `python.exe` uniquement sur `*collecter_userfills_vaults.py*`, sans vérification explicite du root pour cette recherche ; risque de tuer un autre checkout sur le PC. |
+| **P0** | Comparaison de racine insuffisante confirmée | `tools/start_hypersmart_simulation.ps1:25,544-556` | `StartsWith(root)` et `IndexOf(root)` acceptent des chemins voisins ou des arguments textuels contenant le root comme simple sous-chaîne ; renforcer ownership de runtime/PID avant arrêt. |
+| **P1** | Exit codes non propagés confirmés | `LANCER_HYPERSMART.cmd:885-895,934-946,1026-1053` | Certaines commandes `collectors`, `test`, `audit`, `reset-paper`, `self-test`, `report` aboutissent au `:fin` avec `RC` laissé à 0. |
+| **P1** | Modification de dépendances en commande audit confirmée | `LANCER_HYPERSMART.cmd:942` | `audit` lance `pip install` sans en traiter le code d'échec, modifiant le runtime portable au lieu d'une validation pure. |
+| **P1** | Santé UI partielle confirmée | `tools/start_hypersmart_simulation.ps1:448-455,981-1008` | `Test-CommandCenter` vérifie seulement HTTP 200 sur un endpoint et peut annoncer UI active avec poller ou CopyVault incapable de produire une décision fraîche. |
+| **P1** | Branchement replay-grade distinct confirmé | `ops/collecteur_registry.py:80-94` | Le writer de checkpoints `copy-vault-checkpoints` est réservé aux campagnes et absent de HARVEST ; le launcher ne doit jamais annoncer qu'un flux HARVEST local suffit à une certification replay-grade. |
+| **P1** | Risque de double collecte à mesurer | `LANCER_HYPERSMART.cmd:388,447-463`; `tools/start_hypersmart_simulation.ps1:958-973` | HARVEST démarre `userfills-live` et PowerShell peut activer un second `stream_loop.ps1`; mesurer quotas WS, cohérence et dedup avant de réduire les sources. |
+| **P1** | Pilotage de recherche resté legacy | `LANCER_HYPERSMART.cmd:140-149,175,207-220,339-359` | Nombreux paramètres Cross-Venue/Carry, IA Ollama et paper expérimental restent dans le launcher ; leur inventaire doit distinguer historique, shadow, effectif et orphelin. |
+| **P1** | Divergence des profils obligatoires | `ops/collecteur_registry.py:177-191` | HARVEST exige `native-venues` en raison des anciennes familles Lead-Lag/Cross-Venue ; vérifier si cette dépendance doit réellement bloquer un runtime purement CopyVault. |
+| **P1** | Tests Windows récents non conclusifs | `.github/workflows/windows-full-nightly.yml`; `.github/workflows/portable-release-windows.yml` | Plusieurs runs GitHub récents étaient queued/in-progress/cancelled durant l'audit. Ne pas considérer les tests Windows PASS sur le HEAD inspecté. |
+
+**Contrat de décision :** correction de P0 opérationnel avant optimisation cosmétique. Vérifier non-régression de la collecte, de l'unicité des intents, de l'arrêt ciblé et de la séparation PAPER/read-only. Ne pas démarrer le lanceur sur le PC de l'utilisateur et ne pas interrompre les collecteurs GitHub-hosted.
+
+
 ### LCH lot 01 — Gouvernance et architecture du cerveau
 
 - [ ] **[LCH-001] Définir un contrat explicite du point d'entrée** — **Cibles :** `LANCER_HYPERSMART.cmd ; ops/runtime_contract.py`. **Test/critère :** Fixture de lancement montre quel service décide, observe, stocke, surveille ou analyse, sans second décideur. **Statut :** à investiguer / implémenter seulement si nécessaire.
@@ -832,7 +857,7 @@ Les tâches existantes **ASF-001..ASF-150 et AUD-001..AUD-040** restent inchang�
 - [ ] **[LCH-217] Détecter erreur de timezone entre batch et PowerShell** — **Cibles :** `tools/hypersmart_simulation_poll_loop.ps1 ; ops/clock_integrity.py`. **Test/critère :** UTC, timezone système et millisecondes alignés sur event, aucune date locale utilisée pour causalité. **Statut :** à investiguer / implémenter seulement si nécessaire.
 - [ ] **[LCH-218] Rendre déduplication source transactionnelle** — **Cibles :** `copy_vault/exactly_once_source_fill.py ; wallets/user_fills_live.py`. **Test/critère :** Redémarrage entre DB commit et cursor ack ne double pas les intents. **Statut :** à investiguer / implémenter seulement si nécessaire.
 - [ ] **[LCH-219] Tester provenance d'une réponse API invalide** — **Cibles :** `hyperliquid/rest_info_client.py ; wallets/backfill.py`. **Test/critère :** Page 2000, timestamp inclusive et archive 10000 récents ne provoquent pas perte silencieuse. **Statut :** à investiguer / implémenter seulement si nécessaire.
-- [ ] **[LCH-220] Vérifier horodatage avant et après reconstruction** — **Cibles :** `ops/global_observer_pipeline.py ; wallet/position_rebuilder.py`. **Test/critère :** Toute étiquette calculée avec futur reste hors décision et purement recherche. **Statut :** à investiguer / implémenter seulement si nécessaire.
+- [ ] **[LCH-220] Vérifier horodatage avant et après reconstruction** — **Cibles :** `ops/global_observer_pipeline.py ; wallets/position_rebuilder.py`. **Test/critère :** Toute étiquette calculée avec futur reste hors décision et purement recherche. **Statut :** à investiguer / implémenter seulement si nécessaire.
 ### LCH lot 23 — Moteur de risque et protections consolidées
 
 - [ ] **[LCH-221] Vérifier un moteur de risque autoritatif unique** — **Cibles :** `risk/risk_gate_runtime.py ; copying/pipeline_integrator.py`. **Test/critère :** Les différents appels de gate ne s'annulent pas entre pipelines. **Statut :** à investiguer / implémenter seulement si nécessaire.
