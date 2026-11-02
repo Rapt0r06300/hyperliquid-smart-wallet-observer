@@ -65,17 +65,35 @@ HISTORY_DEEPEN_STEPS = (512,)
 HISTORY_FETCH_FILTER = "--filter=tree:0"
 HISTORY_FETCH_TIMEOUT_SECONDS = 90
 MERGE_TREE_TIMEOUT_SECONDS = 30
-# A rebase is bounded, but this repository's large code/audit commits can
-# legitimately take more than a minute.  Give one reconciliation enough time
-# to finish instead of repeatedly replaying the same expensive history.
-REBASE_TIMEOUT_SECONDS = 300
+# A rebase is bounded and receives a small budget per local commit.  A fixed
+# five-minute wait made a double-click look hung when Git was waiting on a
+# conflict, hook, or missing object.  The budget is deliberately capped: a
+# slow or ambiguous replay must return a receipt and require an explicit
+# retry, never keep the launcher blocked indefinitely.
+REBASE_TIMEOUT_SECONDS = 60
+REBASE_MIN_TIMEOUT_SECONDS = 20
+REBASE_SECONDS_PER_COMMIT = 4
 REBASE_ABORT_TIMEOUT_SECONDS = 8
+# Git 2.54+ exposes ``git replay``.  It reconstructs a linear history while
+# leaving the index and worktree untouched, so it avoids the per-commit
+# checkout cost that made the classic rebase exceed the launcher budget on
+# this partial clone.  The command is experimental; older Git versions fall
+# back to the existing bounded rebase path.
+GIT_REPLAY_TIMEOUT_SECONDS = 30
+REPLAY_WORKTREE_TIMEOUT_SECONDS = 30
+# Keep every network-bound Git operation bounded even when a future call site
+# forgets to pass an explicit timeout.  The launcher is code-only, so a
+# stalled authentication, SSH host-key prompt, or unreachable remote must
+# fail closed quickly instead of leaving a double-click apparently hung.
+DEFAULT_GIT_TIMEOUT_SECONDS = 90
+REMOTE_READ_TIMEOUT_SECONDS = 20
+LOCAL_READ_TIMEOUT_SECONDS = 30
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
-GIT_SYNC_ENGINE_BUILD = "2026-10-31-verified-remote-receipt-v8"
+GIT_SYNC_ENGINE_BUILD = "2026-11-01-safe-main-promotion-v13"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -92,6 +110,21 @@ FORBIDDEN_HOSTED_CI_MARKERS = (
     'HYPERSMART_ENABLE_REAL_ORDERS: "1"',
     'ENABLE_REAL_ORDERS: "1"',
 )
+
+
+def _rebase_timeout_budget(replay_count: int) -> int:
+    """Return a bounded, deterministic timeout for a local replay.
+
+    The lower bound leaves Git enough time to start and finish a single
+    commit on Windows; the upper bound prevents a stalled rebase from making
+    the one-click launcher wait for minutes.  Invalid/negative counts are
+    treated conservatively as one commit.
+    """
+    count = max(1, int(replay_count))
+    return min(
+        REBASE_TIMEOUT_SECONDS,
+        max(REBASE_MIN_TIMEOUT_SECONDS, 12 + count * REBASE_SECONDS_PER_COMMIT),
+    )
 
 
 def _human_path_label(path: str) -> str:
@@ -165,9 +198,24 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
             f"({len(normalized)} paths)"
         )
 
+    if sync_engine_paths and "reapply-cherry-picks" in diff_signal:
+        return (
+            "fix(sync): avoid slow upstream rebase scans "
+            f"({len(normalized)} paths)"
+        )
+
+    if sync_engine_paths and any(marker in diff_signal for marker in (
+        "git replay", "git_replay_index_preserving", "replay_worktree_timeout",
+    )):
+        return (
+            "fix(sync): accelerate linear Git replay "
+            f"({len(normalized)} paths)"
+        )
+
     if sync_engine_paths and any(marker in diff_signal for marker in (
         "git_editor", "git_sequence_editor", "git_merge_autoedit",
-        "rebase_timeout", "rebase timeout", "verified-remote-receipt-v",
+        "rebase_timeout", "rebase timeout",
+        "verified-remote-receipt-v",
     )):
         return (
             "fix(sync): prevent interactive rebase stalls "
@@ -180,6 +228,15 @@ def _commit_subject(paths: list[str], diff_text: str = "") -> str:
     )):
         return (
             "fix(sync): wait for concurrent launcher safely "
+            f"({len(normalized)} paths)"
+        )
+
+    if sync_engine_paths and any(marker in diff_signal for marker in (
+        "unexpected internal sync error", "unexpected_engine_error",
+        "except exception", "fail closed on unexpected",
+    )):
+        return (
+            "fix(sync): fail closed on engine errors "
             f"({len(normalized)} paths)"
         )
 
@@ -391,7 +448,17 @@ def _git_operation_label(args: list[str]) -> str:
     if verb == "merge":
         return "Adopter GitHub main en avance rapide"
     if verb == "rebase":
+        if "--abort" in args:
+            return "Annuler le rebase inacheve"
+        if "--continue" in args:
+            return "Continuer le rebase sans choix automatique"
+        if "--skip" in args:
+            return "Ignorer le commit de rebase vide"
         return "Rejouer les commits locaux sans commit de fusion"
+    if verb == "replay":
+        return "Rejouer rapidement les commits sans toucher aux donnees"
+    if verb == "read-tree":
+        return "Mettre a jour le code apres le rejeu Git"
     if verb == "rev-list":
         return "Verifier les commits locaux a rejouer"
     if verb == "hash-object":
@@ -447,6 +514,13 @@ def _run_git(
     # fail closed instead of looking like a hung Git synchronization.
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "Never"
+    # HTTPS and SSH must both fail closed.  GIT_TERMINAL_PROMPT does not stop
+    # an SSH client from waiting for a host-key/passphrase prompt.  Respect a
+    # caller-provided command, but make the default non-interactive and short.
+    env.setdefault(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o ConnectTimeout=8",
+    )
     env["GIT_OPTIONAL_LOCKS"] = (
         "0" if args and args[0] in {"ls-files", "status", "diff"} else "1"
     )
@@ -547,11 +621,13 @@ def _mutex(git_dir: Path):
 
 class Synchronizer:
     def __init__(self, root: Path, git: str = "git", *, dry_run: bool = False,
-                 allow_test_remote: bool = False):
+                 allow_test_remote: bool = False,
+                 promote_current_to_main: bool = False):
         self.root = root.resolve()
         self.git = git
         self.dry_run = dry_run
         self.allow_test_remote = allow_test_remote
+        self.promote_current_to_main = promote_current_to_main
         self.changed_python_paths: list[str] = []
         self._inventory_cache: tuple[list[str], list[str], list[str]] | None = None
         self._remote_snapshot_ready = False
@@ -559,6 +635,7 @@ class Synchronizer:
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
+            "engine_build": GIT_SYNC_ENGINE_BUILD,
             "mode": "DRY_RUN" if dry_run else "SYNC",
             "status": "NOT_STARTED",
             "shard_downloads": False,
@@ -570,6 +647,12 @@ class Synchronizer:
             "history_deepen_steps": [],
             "local_commit_created": False,
             "commit_message": None,
+            "proposed_commit_message": None,
+            "branch_before": None,
+            "branch_after": None,
+            "promoted_current_branch": False,
+            "promoted_from_branch": None,
+            "promotion_sha": None,
             "merge_commits_created": 0,
             "rebases_performed": 0,
             "push_attempts": 0,
@@ -585,6 +668,15 @@ class Synchronizer:
                 expected_returncodes: tuple[int, ...] = ()
                 ) -> subprocess.CompletedProcess[bytes]:
         git_args = list(args)
+        if timeout == 300:
+            verb = git_args[0] if git_args else ""
+            timeout = (
+                REMOTE_READ_TIMEOUT_SECONDS
+                if verb in {"ls-remote", "remote"}
+                else DEFAULT_GIT_TIMEOUT_SECONDS
+                if verb in {"fetch", "push"}
+                else LOCAL_READ_TIMEOUT_SECONDS
+            )
         label = _git_operation_label(git_args)
         self._command_count += 1
         command_number = self._command_count
@@ -667,14 +759,25 @@ class Synchronizer:
         stamp = datetime.now().astimezone().strftime("%H:%M:%S")
         print(f"[{stamp}] {message}", flush=True)
 
-    def preflight(self, *, allow_shallow: bool = False) -> Path:
+    def preflight(
+        self, *, allow_shallow: bool = False, allow_non_main: bool = False,
+    ) -> Path:
         self.say("[MOTEUR 1/5] Controle du depot, de main et du remote autorise.")
         top = Path(self.text("rev-parse", "--show-toplevel")).resolve()
         if top != self.root:
             raise SyncBlocked(f"Lanceur hors racine du depot: {top}")
         branch = self.text("branch", "--show-current")
-        if branch != "main":
-            raise SyncBlocked("Seule main est autorisee; aucun checkout automatique.")
+        self.report["branch_before"] = branch or None
+        if not branch:
+            raise SyncBlocked(
+                "HEAD detache; impossible de promouvoir automatiquement vers main."
+            )
+        if branch != "main" and not allow_non_main:
+            raise SyncBlocked(
+                f"Branche active '{branch}' refusee: main est la seule branche "
+                "de livraison. Le lanceur peut la promouvoir automatiquement "
+                "avec --promote-current-to-main, sans force ni reset."
+            )
         shallow = self.text("rev-parse", "--is-shallow-repository") == "true"
         self.report["shallow_repository"] = shallow
         if shallow and not allow_shallow:
@@ -708,6 +811,64 @@ class Synchronizer:
             f"{str(self.report['head_before'])[:12]} | remote canonique confirme."
         )
         return gitdir
+
+    def _promote_current_branch_to_main(self, source_branch: str) -> None:
+        """Fast-forward local main from a clean, linear current branch."""
+        if source_branch == "main":
+            self.report["branch_after"] = "main"
+            return
+        source_sha = self.text("rev-parse", "HEAD")
+        main_sha = self.command(
+            "rev-parse", "--verify", "refs/heads/main", check=False,
+        )
+        if main_sha.returncode:
+            raise SyncBlocked("Branche locale main introuvable; promotion refusee.")
+        main_sha_text = main_sha.stdout.decode("ascii", errors="replace").strip()
+        ancestor = self.command(
+            "merge-base", "--is-ancestor", main_sha_text, source_sha,
+            check=False, expected_returncodes=(1,),
+        )
+        if ancestor.returncode != 0:
+            raise SyncBlocked(
+                f"Promotion refusee: main ({main_sha_text[:12]}) n'est pas "
+                f"un ancetre de {source_branch} ({source_sha[:12]}). "
+                "Aucune fusion automatique ni force-push."
+            )
+        dirty = self.command(
+            "status", "--porcelain=v1", "-z", "--untracked-files=no",
+        ).stdout
+        if dirty:
+            raise SyncBlocked(
+                "Promotion refusee: des modifications suivies restent presentes "
+                "apres le checkpoint; donnees conservees, aucune bascule."
+            )
+        self.say(
+            f"[PROMOTION] Fast-forward local de main depuis {source_branch} "
+            f"({source_sha[:12]}); aucun reset, clean ou merge de conflit."
+        )
+        switched = False
+        try:
+            self.command("switch", "main")
+            switched = True
+            self.command("merge", "--ff-only", source_branch)
+        except Exception:
+            if switched:
+                self.command("switch", source_branch, check=False)
+            raise
+        promoted_sha = self.text("rev-parse", "HEAD")
+        if promoted_sha != source_sha:
+            raise SyncBlocked(
+                "Promotion refusee: le SHA de main ne correspond pas au SHA "
+                "source apres fast-forward."
+            )
+        self.report["branch_after"] = "main"
+        self.report["promoted_current_branch"] = True
+        self.report["promoted_from_branch"] = source_branch
+        self.report["promotion_sha"] = promoted_sha
+        self.say(
+            f"[PROMOTION OK] main local={promoted_sha[:12]} | "
+            "branche active finale=main."
+        )
 
     def _ensure_full_history(self) -> None:
         """Deepen only until local and remote history have a common ancestor.
@@ -1382,6 +1543,17 @@ class Synchronizer:
         # Detect high-confidence private-key material BEFORE writing Git blobs.
         for path in eligible:
             self._check_file_payload(path, self.root / path)
+        if self.dry_run and eligible:
+            proposed_diff = self.command(
+                "diff", "HEAD", "--no-ext-diff", "--unified=0", "--",
+                *eligible, check=False,
+            )
+            proposed_message = _commit_subject(
+                eligible,
+                proposed_diff.stdout.decode("utf-8", errors="replace"),
+            )
+            self.report["proposed_commit_message"] = proposed_message
+            self.say(f"[DRY-RUN] Commit propose: {proposed_message}")
         if self.dry_run or not eligible:
             if self.dry_run:
                 self.say("[DRY-RUN] Aucun fichier prepare ou committe.")
@@ -1807,7 +1979,11 @@ class Synchronizer:
         recovery loop.  The abort is itself bounded and never deletes a Git
         lock; if Git cannot prove the abort completed, fail closed.
         """
-        self.report["rebase_timeout_seconds"] = REBASE_TIMEOUT_SECONDS
+        budget = int(
+            self.report.get("rebase_timeout_budget_seconds")
+            or REBASE_TIMEOUT_SECONDS
+        )
+        self.report["rebase_timeout_seconds"] = budget
         self.report["rebase_timeout_count"] = (
             int(self.report.get("rebase_timeout_count", 0)) + 1
         )
@@ -1819,7 +1995,7 @@ class Synchronizer:
         except subprocess.TimeoutExpired as abort_timeout:
             raise SyncBlocked(
                 "Rebase depassee apres "
-                f"{REBASE_TIMEOUT_SECONDS}s; git rebase --abort a aussi "
+                f"{budget}s; git rebase --abort a aussi "
                 f"depasse {REBASE_ABORT_TIMEOUT_SECONDS}s. Intervention "
                 "manuelle requise; aucun push force."
             ) from abort_timeout
@@ -1843,10 +2019,124 @@ class Synchronizer:
         )
         raise SyncBlocked(
             "Rebase depassee apres "
-            f"{REBASE_TIMEOUT_SECONDS}s; rebase annulee proprement."
+            f"{budget}s; rebase annulee proprement."
         ) from timeout
 
-    def _run_rebase(self, remote: str) -> subprocess.CompletedProcess[bytes]:
+    def _try_git_replay(
+        self, remote: str, local: str, base: str,
+    ) -> bool:
+        """Use Git's index-preserving replay when the installed Git supports it.
+
+        ``git replay`` creates the rebased commit objects without changing the
+        current ref, index, or worktree.  We only publish its printed,
+        old-value-guarded ref update after materialising the new tree with
+        ``read-tree -u``.  If the ref update loses a race, the old tree is
+        restored and the operation fails closed.  Git versions without this
+        experimental command, or a replay with conflicts, return ``False`` so
+        the established bounded rebase/resolver remains the compatibility
+        path.
+        """
+        outcome = self.command(
+            "replay", f"--onto={remote}", "--ref=refs/heads/main",
+            "--ref-action=print", f"{base}..refs/heads/main",
+            check=False,
+            timeout=GIT_REPLAY_TIMEOUT_SECONDS,
+            expected_returncodes=(1, 129),
+        )
+        detail = "\n".join(
+            part.decode("utf-8", errors="replace")
+            for part in (outcome.stdout or b"", outcome.stderr or b"")
+            if part
+        ).strip()
+        if outcome.returncode:
+            lowered = detail.casefold()
+            if outcome.returncode == 1:
+                self.report["replay_fallback"] = "GIT_REPLAY_CONFLICT"
+                return False
+            if outcome.returncode == 129 and any(marker in lowered for marker in (
+                "is not a git command", "unknown command", "unknown subcommand",
+            )):
+                self.report["replay_fallback"] = "GIT_REPLAY_UNAVAILABLE"
+                return False
+            raise SyncBlocked(
+                "git replay a echoue sans resultat exploitable: "
+                + (detail[:900] or f"code {outcome.returncode}")
+            )
+
+        updates = []
+        for line in detail.splitlines():
+            fields = line.split()
+            if (
+                len(fields) == 4
+                and fields[0] == "update"
+                and fields[1] == "refs/heads/main"
+                and re.fullmatch(r"[0-9a-f]{40,64}", fields[2])
+                and re.fullmatch(r"[0-9a-f]{40,64}", fields[3])
+            ):
+                updates.append((fields[2], fields[3]))
+        if len(updates) != 1:
+            raise SyncBlocked(
+                "git replay a repondu sans une mise a jour unique de main; "
+                "aucun ref ni push modifie."
+            )
+        new_tip, expected_old = updates[0]
+        if expected_old != local or new_tip == local:
+            raise SyncBlocked(
+                "git replay a produit une ancienne base inattendue; "
+                "aucun ref ni push modifie."
+            )
+
+        # The replay itself did not touch the worktree.  Recheck the code
+        # inventory immediately before applying the new tracked tree so a
+        # concurrent editor cannot be overwritten silently.
+        self._assert_no_new_code_changes()
+        self.command(
+            "read-tree", "-u", "-m", new_tip,
+            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+        )
+        updated = self.command(
+            "update-ref", "refs/heads/main", new_tip, local,
+            check=False,
+        )
+        if updated.returncode:
+            restored = self.command(
+                "read-tree", "-u", "-m", local,
+                check=False,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+            if restored.returncode:
+                raise SyncBlocked(
+                    "Mise a jour atomique de main refusee et restauration du "
+                    "code impossible; intervention manuelle requise."
+                )
+            raise SyncBlocked(
+                "Mise a jour atomique de main refusee; code local restaure."
+            )
+
+        if self.text("rev-parse", "HEAD") != new_tip:
+            raise SyncBlocked(
+                "HEAD local ne confirme pas le rejeu Git; aucun push lance."
+            )
+        clean = self.command(
+            "diff", "--quiet", "HEAD", check=False,
+            expected_returncodes=(1,),
+        )
+        if clean.returncode:
+            raise SyncBlocked(
+                "Le rejeu Git a laisse une difference tracked inattendue; "
+                "aucun push lance."
+            )
+        self.report["replay_engine"] = "GIT_REPLAY_INDEX_PRESERVING"
+        self.report["local_rebased_onto"] = remote
+        self.say(
+            "[INTEGRATION RAPIDE] git replay a rejoue les commits sans "
+            "rebase checkout; code local aligne."
+        )
+        return True
+
+    def _run_rebase(
+        self, remote: str, *, timeout_seconds: int | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
         """Run the bounded rebase without ever returning an unbound outcome.
 
         The timeout handler normally raises ``SyncBlocked`` after confirming
@@ -1866,10 +2156,17 @@ class Synchronizer:
         os.environ["GIT_EDITOR"] = "true"
         os.environ["GIT_SEQUENCE_EDITOR"] = "true"
         os.environ["GIT_MERGE_AUTOEDIT"] = "no"
+        budget = int(timeout_seconds or REBASE_TIMEOUT_SECONDS)
+        self.report["rebase_timeout_budget_seconds"] = budget
+        self.report["rebase_strategy"] = (
+            "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN_NO_FORK_POINT"
+        )
         try:
             return self.command(
-                "rebase", "--no-autostash", remote, check=False,
-                timeout=REBASE_TIMEOUT_SECONDS,
+                "rebase", "--no-autostash", "--reapply-cherry-picks",
+                "--no-fork-point", remote,
+                check=False,
+                timeout=budget,
             )
         except subprocess.TimeoutExpired as timeout:
             self._abort_rebase_after_timeout(timeout)
@@ -1948,13 +2245,19 @@ class Synchronizer:
         replay_count = self.command(
             "rev-list", "--count", f"{remote}..{local}", check=False
         )
-        if replay_count.returncode:
+        replay_count_text = replay_count.stdout.decode(
+            "ascii", errors="replace"
+        ).strip()
+        if replay_count.returncode or not replay_count_text.isdecimal():
             raise SyncBlocked("Comptage des commits locaux a rejouer impossible.")
+        replay_count_value = int(replay_count_text)
+        rebase_budget = _rebase_timeout_budget(replay_count_value)
         self.say(
             "[INTEGRATION LINEAIRE] Rejeu de "
-            f"{replay_count.stdout.decode('ascii', errors='replace').strip()} "
-            "commit(s) local(aux) sur GitHub main; aucun commit de fusion."
+            f"{replay_count_value} commit(s) local(aux) sur GitHub main; "
+            f"budget rebase={rebase_budget}s; aucun commit de fusion."
         )
+        base = self.text("merge-base", local, remote)
         predicted = self._predict_merge_conflicts(remote, local)
         unsupported = [
             path for path in predicted
@@ -1968,7 +2271,14 @@ class Synchronizer:
             )
         rebase_resolved = False
         with self._preserve_local_protected_index():
-            outcome = self._run_rebase(remote)
+            if not predicted and self._try_git_replay(remote, local, base):
+                self.report["rebases_performed"] = (
+                    int(self.report["rebases_performed"]) + 1
+                )
+                return
+            outcome = self._run_rebase(
+                remote, timeout_seconds=rebase_budget,
+            )
             if outcome.returncode:
                 rebase_resolved = self._continue_rebase_after_known_ci_conflicts(
                     outcome,
@@ -2167,10 +2477,20 @@ class Synchronizer:
             # synchronisation path expands it inside the Git mutex before
             # comparing or replaying history; dry-run/checkpoint modes never
             # fetch and therefore remain read-only.
-            gitdir = self.preflight(allow_shallow=True)
+            gitdir = self.preflight(
+                allow_shallow=True,
+                allow_non_main=(
+                    self.dry_run or wip_only or self.promote_current_to_main
+                ),
+            )
             with _mutex(gitdir):
+                active_branch = self.text("branch", "--show-current")
+                promotion_needed = (
+                    self.promote_current_to_main
+                    and active_branch != "main"
+                )
                 fast_path = False
-                if not self.dry_run and not wip_only:
+                if not self.dry_run and not wip_only and not promotion_needed:
                     fast_path = self._fast_path_if_clean()
                 if fast_path:
                     pass
@@ -2181,6 +2501,8 @@ class Synchronizer:
                         fetch_remote=not self.dry_run and not wip_only,
                     )
                     self.checkpoint()
+                    if promotion_needed:
+                        self._promote_current_branch_to_main(active_branch)
                 if self.dry_run:
                     remote_sha = self.remote_sha()
                     self.report["remote_sha_observed"] = remote_sha
@@ -2206,7 +2528,8 @@ class Synchronizer:
                     self.report["status"] = "LOCAL_CHECKPOINT_ONLY"
                     self.report["head_after"] = self.text("rev-parse", "HEAD")
                     self.say(
-                        "[CHECKPOINT LOCAL TERMINE] Travail conserve sur main; "
+                        "[CHECKPOINT LOCAL TERMINE] Travail conserve sur la "
+                        f"branche {self.text('branch', '--show-current')}; "
                         "aucun acces GitHub ni push."
                     )
                 elif not fast_path:
@@ -2219,6 +2542,23 @@ class Synchronizer:
             self.report["status"] = "NO_GO"
             self.report["error"] = str(exc)
             self.say("[NO_GO] " + str(exc))
+            self.say(
+                "Aucun shard telecharge; aucun push force, reset ou clean."
+            )
+            result_code = 2
+        except Exception as exc:  # pragma: no cover - regression guard below
+            # The synchronizer is a safety boundary. A future programming
+            # regression must never escape as a traceback while leaving a
+            # stale NOT_STARTED receipt that looks inconclusive to the CMD.
+            # Do not attempt recovery, cleanup, rebase or push here: the
+            # finally block only records the fail-closed outcome.
+            self.report["status"] = "NO_GO"
+            self.report["error_type"] = type(exc).__name__
+            self.report["error"] = str(exc) or type(exc).__name__
+            self.say(
+                "[NO_GO] Unexpected internal sync error: "
+                + (str(exc) or type(exc).__name__)
+            )
             self.say(
                 "Aucun shard telecharge; aucun push force, reset ou clean."
             )
@@ -2245,10 +2585,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--git", default="git")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--wip-only", action="store_true")
+    parser.add_argument(
+        "--promote-current-to-main", action="store_true",
+        help="promouvoir la branche active vers main par fast-forward seulement",
+    )
     parser.add_argument("--test-remote", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
     if options.dry_run and options.wip_only:
         parser.error("Modes --dry-run et --wip-only incompatibles.")
+    if options.promote_current_to_main and (options.dry_run or options.wip_only):
+        parser.error(
+            "La promotion automatique est incompatible avec --dry-run et --wip-only."
+        )
     print(
         "ALINA CODE SYNC - main local <-> GitHub main - ZERO shard - sans force",
         flush=True,
@@ -2256,6 +2604,7 @@ def main(argv: list[str] | None = None) -> int:
     return Synchronizer(
         options.root, options.git, dry_run=options.dry_run,
         allow_test_remote=options.test_remote,
+        promote_current_to_main=options.promote_current_to_main,
     ).run(wip_only=options.wip_only)
 
 

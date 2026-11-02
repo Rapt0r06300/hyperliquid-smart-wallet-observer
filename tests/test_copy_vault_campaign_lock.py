@@ -66,7 +66,9 @@ def _campaign_inputs(workspace: Path, repository_root: Path) -> None:
     )
 
 
-def _install_campaign_stubs() -> None:
+def _install_campaign_stubs(
+    monkeypatch: pytest.MonkeyPatch | None = None,
+) -> None:
     signal_times = [
         (10 + day) * 86_400_000 + 60_000 for day in range(12)
     ]
@@ -85,11 +87,12 @@ def _install_campaign_stubs() -> None:
                 "historical_fill_rows": 0,
             }
 
-    lab._load_pipeline = lambda: Pipeline()
-    lab._campaign_engine_source_sha256 = lambda _pipeline: "d" * 64
-    lab.cv.cluster_metaorders = lambda _entries: (metaorders, {})
-    lab.cv.load_observed_books = lambda *_args, **_kwargs: (books, {})
-    lab.evaluate_frozen_v21_segment = lambda *_args, **_kwargs: {
+    set_attr = monkeypatch.setattr if monkeypatch is not None else setattr
+    set_attr(lab, "_load_pipeline", lambda: Pipeline())
+    set_attr(lab, "_campaign_engine_source_sha256", lambda _pipeline: "d" * 64)
+    set_attr(lab.cv, "cluster_metaorders", lambda _entries: (metaorders, {}))
+    set_attr(lab.cv, "load_observed_books", lambda *_args, **_kwargs: (books, {}))
+    set_attr(lab, "evaluate_frozen_v21_segment", lambda *_args, **_kwargs: {
         "eligible": False,
         "reasons": ["temporary lock fixture"],
         "candidate_count": 0,
@@ -101,7 +104,7 @@ def _install_campaign_stubs() -> None:
             "daily_net_pnl_usd": [0.0],
             "daily_net_pnl_usd_exact_decimal": ["0"],
         },
-    }
+    })
 
 
 def _run_blocked_campaign(
@@ -248,12 +251,14 @@ def test_os_lock_is_released_after_owner_crash_without_replacing_lock_path(tmp_p
     assert lock_path.is_file()
 
 
-def test_run_local_campaign_rejects_concurrent_process_before_trial_work(tmp_path):
+def test_run_local_campaign_rejects_concurrent_process_before_trial_work(
+    tmp_path, monkeypatch,
+):
     workspace = tmp_path / "workspace"
     repository_root = tmp_path / "repo"
     workspace.mkdir()
     _campaign_inputs(workspace, repository_root)
-    _install_campaign_stubs()
+    _install_campaign_stubs(monkeypatch)
 
     context = multiprocessing.get_context("spawn")
     acquired = context.Event()
@@ -292,7 +297,7 @@ def test_run_local_campaign_releases_lock_after_unexpected_exception(tmp_path, m
     repository_root = tmp_path / "repo"
     workspace.mkdir()
     _campaign_inputs(workspace, repository_root)
-    _install_campaign_stubs()
+    _install_campaign_stubs(monkeypatch)
 
     def raise_unexpected_exception(_repository_root, *, exclude_selection_digest):
         raise AssertionError("injected campaign failure")

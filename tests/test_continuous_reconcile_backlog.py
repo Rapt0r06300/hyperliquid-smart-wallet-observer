@@ -41,6 +41,15 @@ def test_malformed_inventory_rejected() -> None:
         pending("../attack\ttrue", {"shards": []}, set())
 
 
+def test_conflicting_duplicate_inventory_is_rejected() -> None:
+    with pytest.raises(ValueError, match="conflicting release inventory"):
+        pending(
+            "data-v2-next\tfalse\ndata-v2-next\ttrue\n",
+            {"shards": []},
+            set(),
+        )
+
+
 def test_git_pack_failure_not_confused_with_concurrent_main_update() -> None:
     assert PACK.search("remote unpack failed: index-pack failed")
     assert PACK.search("tree too large")
@@ -70,6 +79,10 @@ def test_hosted_termination_uses_explicit_metadata_only() -> None:
         log_text="The hosted runner was shut down by infrastructure",
     ) == "INFRASTRUCTURE_STOP"
     assert classify_hosted_termination(
+        returncode=143, status="completed", conclusion="failure",
+        log_text="The runner has received a shutdown signal",
+    ) == "INFRASTRUCTURE_STOP"
+    assert classify_hosted_termination(
         returncode=0, status="completed", conclusion="success",
     ) == "COMPLETE"
 
@@ -92,6 +105,124 @@ def test_remote_contains_head_checks_exact_git_ancestry(monkeypatch):
     assert module.remote_contains_head()
     assert ("git", "fetch", "origin", "main") in seen
     assert ("git", "merge-base", "--is-ancestor", "a" * 40, "origin/main") in seen
+
+
+def test_synced_uses_non_destructive_fast_forward_only(monkeypatch):
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    module.synced()
+
+    assert ("git", "fetch", "origin", "main") in seen
+    assert ("git", "merge", "--ff-only", "origin/main") in seen
+    assert not any(args[:2] == ("git", "reset") for args in seen)
+    assert not any(args[:2] == ("git", "clean") for args in seen)
+
+
+def test_synced_refuses_dirty_or_partial_checkout_without_cleanup(monkeypatch):
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(args)
+        if args[:3] == ("git", "diff", "--quiet"):
+            return subprocess.CompletedProcess(args, 1, "", "tracked changes")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    with pytest.raises(RuntimeError, match="refusing destructive cleanup"):
+        module.synced()
+    assert not any(args[:2] == ("git", "reset") for args in seen)
+    assert not any(args[:2] == ("git", "clean") for args in seen)
+
+
+def test_synced_refuses_untracked_quarantine_or_rejected_artifacts(monkeypatch):
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(args)
+        if args[:4] == ("git", "ls-files", "--others", "--exclude-standard"):
+            return subprocess.CompletedProcess(
+                args, 0, b"datasets/quarantine/incomplete.manifest.json\0", "",
+            )
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    with pytest.raises(RuntimeError, match="refusing destructive cleanup"):
+        module.synced()
+    ls_files = next(args for args in seen if args[:3] == (
+        "git", "ls-files", "--others",
+    ))
+    assert "datasets/quarantine" in ls_files
+    assert "datasets/rejected" in ls_files
+    assert "datasets/sharded/quarantine" in ls_files
+    assert "datasets/sharded/rejected" in ls_files
+    assert "datasets/sharded/safe" not in ls_files
+    assert not any(args[:2] == ("git", "reset") for args in seen)
+    assert not any(args[:2] == ("git", "clean") for args in seen)
+
+
+@pytest.mark.parametrize(
+    "boundary", ["inventory", "validation", "commit", "remote_receipt"],
+)
+def test_historical_publish_never_claims_partial_wave(
+    boundary, monkeypatch, tmp_path, capsys,
+):
+    """Every durable boundary must fail closed before a publication claim."""
+    import subprocess
+
+    import tools.continuous_reconcile_backlog as module
+
+    manifest = tmp_path / "data-v2-release" / "RUN_MANIFEST.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}\n", encoding="utf-8")
+
+    def fake_run(*args, **kwargs):
+        if boundary == "inventory" and args[:2] == (
+            "python", "tools/index_run_manifest.py",
+        ):
+            return subprocess.CompletedProcess(args, 1, "", "injected inventory stop")
+        if boundary == "validation" and args[:2] == (
+            "python", "tools/check_dataset_quality.py",
+        ):
+            return subprocess.CompletedProcess(args, 1, "", "injected validation stop")
+        if boundary == "commit" and args[:2] == ("git", "commit"):
+            return subprocess.CompletedProcess(args, 1, "", "injected commit stop")
+        if args[:3] == ("git", "diff", "--cached"):
+            return subprocess.CompletedProcess(args, 1, "", "")
+        if args[:2] == ("git", "hash-object"):
+            return subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    monkeypatch.setattr(module, "synced", lambda: None)
+    monkeypatch.setattr(module, "enforce_quarantine_before_import", lambda _: None)
+    monkeypatch.setattr(module, "write_historical_wave_checkpoint", lambda _: None)
+    monkeypatch.setattr(
+        module, "time", type("NoSleep", (), {"sleep": staticmethod(lambda _: None)}),
+    )
+    if boundary == "remote_receipt":
+        monkeypatch.setattr(module, "remote_contains_head", lambda: False)
+        monkeypatch.setattr(module, "try_disjoint_campaign_rebase", lambda: (False, False))
+
+    with pytest.raises(RuntimeError):
+        module.publish([manifest])
+    assert "HISTORICAL_BATCH_PUBLISHED" not in capsys.readouterr().out
 
 
 def test_historical_wave_checkpoint_is_deterministic_and_idempotent(tmp_path):

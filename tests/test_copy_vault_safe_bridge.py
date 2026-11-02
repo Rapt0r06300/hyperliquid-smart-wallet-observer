@@ -190,6 +190,19 @@ def test_bridge_uses_real_safe_envelopes_and_reports_provenance(tmp_path: Path) 
     assert build_safe_copy_workspace(tmp_path)["workspace"] == str(workspace)
 
 
+def test_bridge_can_bind_an_explicit_current_recovery_and_catalog(
+    tmp_path: Path,
+) -> None:
+    recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    report = build_safe_copy_workspace(
+        tmp_path,
+        recovery_dir=recovery,
+        catalog_path=tmp_path / "catalog" / "DATA_INDEX.json",
+    )
+    assert report["status"] == "SAFE_COPY_WORKSPACE_READY"
+    assert report["selected_shards"] == 2
+
+
 def test_bridge_preserves_native_market_case_and_l2_gap_identity(tmp_path: Path) -> None:
     from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
 

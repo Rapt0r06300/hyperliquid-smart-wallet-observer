@@ -1,14 +1,52 @@
 import json
+import os
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 from pathlib import Path
 
-from tools.partitioned_data_index import read_index
+import pytest
+
+from tools.partitioned_data_index import iter_index_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 REG = json.loads((ROOT / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
 CAT = json.loads((ROOT / "catalog/DATA_CATALOG.json").read_text())
-# Every consumer must reconstruct and SHA-verify the complete partitioned
-# catalog; a root without inline shards must never be mistaken for NO_DATA.
-INDEX = read_index(ROOT / "catalog/DATA_INDEX.json")
+INDEX_PATH = ROOT / "catalog/DATA_INDEX.json"
+INDEX_ROOT = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+MANIFEST_WORKERS = max(64, min(128, (os.cpu_count() or 8) * 8))
+MANIFEST_BATCH_SIZE = 16384
+
+
+def _index_rows():
+    """Stream the complete verified index without retaining 1.85M rows."""
+    return iter_index_rows(INDEX_PATH)
+
+
+def _validate_manifest(row):
+    path = ROOT / row["manifest_path"]
+    # Reading is the authoritative existence/type check.  Avoid a redundant
+    # stat() before read_bytes(): every indexed path is still opened, and any
+    # missing, directory, or unreadable manifest fails closed at the read.
+    manifest = json.loads(path.read_bytes())
+    assert manifest["dataset_id"] == row["dataset_id"]
+    assert manifest["quality_status"] == row["quality_status"]
+    assert manifest["validation_allowed"] is (row["quality_status"] == "SAFE")
+
+
+@pytest.fixture(scope="module")
+def indexed_catalog_audit():
+    """Exhaustively verify the index and manifests once for related assertions."""
+    counts = Counter()
+    observed = 0
+    rows = _index_rows()
+    with ThreadPoolExecutor(max_workers=MANIFEST_WORKERS) as pool:
+        while batch := list(islice(rows, MANIFEST_BATCH_SIZE)):
+            counts.update(row["quality_status"] for row in batch)
+            for _ in pool.map(_validate_manifest, batch):
+                pass
+            observed += len(batch)
+    return counts, observed
 
 
 def test_safe_only_validation():
@@ -16,13 +54,13 @@ def test_safe_only_validation():
 
 
 def test_active_status_matches_index():
-    shards = INDEX.get("shards") or []
+    shard_count = INDEX_ROOT.get("shard_count")
     expected = (
         "SAFE"
-        if any(row["quality_status"] == "SAFE" for row in shards)
-        else ("PARTIAL" if shards else "NO_DATA")
+        if INDEX_ROOT["active_data_status"] == "SAFE"
+        else ("PARTIAL" if shard_count else "NO_DATA")
     )
-    assert INDEX["active_data_status"] == expected
+    assert INDEX_ROOT["active_data_status"] == expected
     assert REG["active_dataset"]["status"] == expected
     assert REG["active_dataset"]["validation_allowed"] is (expected == "SAFE")
     # SAFE means replay/validation data quality only. It must never be promoted
@@ -30,12 +68,11 @@ def test_active_status_matches_index():
     assert REG["active_dataset"]["proof_of_pnl_allowed"] is False
 
 
-def test_every_status_counter_is_index_bound():
-    from collections import Counter
-
-    counts = Counter(row["quality_status"] for row in INDEX.get("shards") or [])
+def test_every_status_counter_is_index_bound(indexed_catalog_audit):
+    counts, observed = indexed_catalog_audit
     assert set(counts).issubset({"SAFE", "PARTIAL", "REJECT", "STALE"})
-    assert sum(counts.values()) == CAT["indexed_shard_count"]
+    assert observed == CAT["indexed_shard_count"]
+    assert sum(counts.values()) == observed
     assert REG["active_dataset"]["indexed_shards"] == CAT["indexed_shard_count"]
     for status, catalog_key, registry_key in (
         ("SAFE", "safe_shard_count", "safe_count"),
@@ -48,8 +85,8 @@ def test_every_status_counter_is_index_bound():
 
 
 def test_empty_repository_is_no_data():
-    if not (INDEX.get("shards") or []):
-        assert INDEX["active_data_status"] == "NO_DATA"
+    if not INDEX_ROOT.get("shard_count"):
+        assert INDEX_ROOT["active_data_status"] == "NO_DATA"
 
 
 def test_no_legacy_import():
@@ -68,14 +105,9 @@ def test_no_pc_runner():
     assert REG["policy"]["user_pc_forbidden"] is True
 
 
-def test_every_indexed_manifest_exists_and_matches_status():
-    for row in INDEX.get("shards") or []:
-        path = ROOT / row["manifest_path"]
-        assert path.is_file()
-        manifest = json.loads(path.read_text())
-        assert manifest["dataset_id"] == row["dataset_id"]
-        assert manifest["quality_status"] == row["quality_status"]
-        assert manifest["validation_allowed"] is (row["quality_status"] == "SAFE")
+def test_every_indexed_manifest_exists_and_matches_status(indexed_catalog_audit):
+    _counts, observed = indexed_catalog_audit
+    assert observed == CAT["indexed_shard_count"]
 
 
 def test_dataset_quality_ci_budget_covers_full_catalog_validation():

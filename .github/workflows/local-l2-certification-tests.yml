@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: local-l2-certification-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   offline-l2-test:
     strategy:
@@ -34,11 +38,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          # These tests build temporary SAFE fixtures; never hydrate the raw
+          # multi-GB dataset reservoir on a hosted code/test job.
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /src/
+            /tools/
+            /tests/
+            /pyproject.toml
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
-      - name: Install pytest
-        run: python -m pip install --disable-pip-version-check pytest
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic websockets
       - name: Offline L2 and Copy-Vault SAFE bridge tests
         run: |
           python -m py_compile tools/copy_vault_safe_bridge.py tools/alina_quant_lab_console.py

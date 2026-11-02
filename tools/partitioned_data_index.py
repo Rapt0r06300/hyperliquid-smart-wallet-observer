@@ -129,6 +129,9 @@ def load_partitioned_index(
     global_digest = hashlib.sha256()
     global_digest.update(b"[")
     has_global_rows = False
+    parts_dir = index_path.parent / "data-index-parts"
+    if parts_dir.is_symlink():
+        raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
     for i, descriptor in enumerate(parts, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -137,21 +140,18 @@ def load_partitioned_index(
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
         if path != f"data-index-parts/part-{i:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
-        # Do not let a partition directory symlink redirect a supposedly
-        # canonical read outside catalog/, even when the inner file is regular.
-        parts_dir = index_path.parent / "data-index-parts"
-        if parts_dir.is_symlink():
-            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         file_path = index_path.parent / path
-        if not file_path.resolve().is_relative_to(index_path.parent.resolve()):
-            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         if file_path.is_symlink() or not file_path.is_file():
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
-        size = file_path.stat().st_size
+        # Read once and derive the size from the exact bytes being hashed and
+        # decoded.  This removes a filesystem stat per partition without
+        # weakening the size/hash/parity checks (and avoids a TOCTOU gap
+        # between stat() and read_bytes()).
+        data = file_path.read_bytes()
+        size = len(data)
         if (isinstance(descriptor.get("bytes"), bool)
                 or descriptor.get("bytes") != size or size > limit):
             raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
-        data = file_path.read_bytes()
         if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
             raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
         part_rows = _validate_rows(json.loads(data))
@@ -188,6 +188,114 @@ def load_partitioned_index(
     reconstructed["schema"] = legacy_schema
     reconstructed["shards"] = rows
     return reconstructed
+
+
+def iter_index_rows(
+    index_path: Path, *, progress_callback: Callable[[int, int], None] | None = None,
+):
+    """Yield every verified row without materializing a partitioned catalogue.
+
+    The iterator validates each partition as it is consumed and validates the
+    global count, dataset-id uniqueness, and SHA-bound concatenation before it
+    is exhausted.  Callers that need a fully verified result must consume the
+    iterator to completion; no partial catalogue is ever returned as a valid
+    result.
+    """
+    index_path = Path(index_path)
+    raw = json.loads(index_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("DATA_INDEX_INVALID_ROOT")
+    if raw.get("schema") != SCHEMA:
+        if "partitions" in raw or not isinstance(raw.get("shards"), list):
+            raise ValueError("DATA_INDEX_UNKNOWN_OR_PARTIAL_LAYOUT")
+        _validate_rows(raw["shards"])
+        yield from raw["shards"]
+        return
+
+    limit = raw.get("partition_max_bytes")
+    count = raw.get("shard_count")
+    parts = raw.get("partitions")
+    expected_digest = raw.get("shards_sha256")
+    legacy_schema = raw.get("legacy_schema")
+    if (
+        isinstance(limit, bool) or not isinstance(limit, int)
+        or not 4 <= limit <= MAX_PARTITION_BYTES
+        or isinstance(count, bool) or not isinstance(count, int) or count < 0
+        or not isinstance(parts, list)
+        or not isinstance(legacy_schema, str) or not legacy_schema
+        or not isinstance(expected_digest, str)
+    ):
+        raise ValueError("PARTITION_PARITY_INVALID_METADATA")
+
+    parts_dir = index_path.parent / "data-index-parts"
+    if parts_dir.is_symlink():
+        raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
+    seen: set[str] = set()
+    observed_count = 0
+    global_digest = hashlib.sha256(b"[")
+    has_global_rows = False
+    for number, descriptor in enumerate(parts, 1):
+        if not isinstance(descriptor, dict):
+            raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
+        relative = descriptor.get("path")
+        if not isinstance(relative, str) or not _PART_PATH.fullmatch(relative):
+            raise ValueError("PARTITION_PARITY_INVALID_PATH")
+        if relative != f"data-index-parts/part-{number:06d}.json":
+            raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
+        part_path = index_path.parent / relative
+        if (
+            part_path.is_symlink() or not part_path.is_file()
+        ):
+            raise ValueError("PARTITION_PARITY_MISSING_FILE")
+        # Read once and derive the size from the exact bytes being hashed and
+        # decoded.  This removes a filesystem stat per partition without
+        # weakening the size/hash/parity checks (and avoids a TOCTOU gap
+        # between stat() and read_bytes()).
+        data = part_path.read_bytes()
+        size = len(data)
+        if (
+            isinstance(descriptor.get("bytes"), bool)
+            or descriptor.get("bytes") != size or size > limit
+        ):
+            raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
+        if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
+            raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
+        if not data.startswith(b"[") or not data.endswith(b"]\n"):
+            raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
+        part_rows = json.loads(data)
+        if (
+            not isinstance(part_rows, list) or not part_rows
+            or isinstance(descriptor.get("row_count"), bool)
+            or len(part_rows) != descriptor.get("row_count")
+        ):
+            raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
+        for item in part_rows:
+            if not isinstance(item, Mapping):
+                raise ValueError("PARTITION_PARITY_INVALID_ROW")
+            # json.loads already returns plain dictionaries.  Avoid copying
+            # 1.85M rows while streaming; callers receive fresh decoded data,
+            # and the SHA/count checks below remain bound to the raw bytes.
+            row = item
+            identity = row.get("dataset_id")
+            if not isinstance(identity, str) or not identity or identity in seen:
+                raise ValueError("PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID")
+            seen.add(identity)
+            observed_count += 1
+            yield row
+        if has_global_rows:
+            global_digest.update(b",")
+        global_digest.update(memoryview(data)[1:-2])
+        has_global_rows = True
+        if observed_count > count:
+            raise ValueError("PARTITION_PARITY_COUNT_MISMATCH")
+        if progress_callback is not None and (
+            number == 1 or number % 10 == 0 or number == len(parts)
+        ):
+            progress_callback(number, len(parts))
+
+    global_digest.update(b"]\n")
+    if observed_count != count or global_digest.hexdigest() != expected_digest:
+        raise ValueError("PARTITION_PARITY_GLOBAL_MISMATCH")
 
 
 
@@ -252,6 +360,9 @@ def select_index_rows(
     global_digest = hashlib.sha256()
     global_digest.update(b"[")
     has_global_rows = False
+    parts_dir = index_path.parent / "data-index-parts"
+    if parts_dir.is_symlink():
+        raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
     for index, descriptor in enumerate(descriptors, 1):
         if not isinstance(descriptor, dict):
             raise ValueError("PARTITION_PARITY_INVALID_DESCRIPTOR")
@@ -260,22 +371,22 @@ def select_index_rows(
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
         if relative != f"data-index-parts/part-{index:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
-        parts_dir = index_path.parent / "data-index-parts"
-        if parts_dir.is_symlink():
-            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         part_path = index_path.parent / relative
         if (
-            not part_path.resolve().is_relative_to(index_path.parent.resolve())
-            or part_path.is_symlink() or not part_path.is_file()
+            part_path.is_symlink() or not part_path.is_file()
         ):
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
-        size = part_path.stat().st_size
+        # Read once and derive the size from the exact bytes being hashed and
+        # decoded.  This removes a filesystem stat per partition without
+        # weakening the size/hash/parity checks (and avoids a TOCTOU gap
+        # between stat() and read_bytes()).
+        data = part_path.read_bytes()
+        size = len(data)
         if (
             isinstance(descriptor.get("bytes"), bool)
             or descriptor.get("bytes") != size or size > limit
         ):
             raise ValueError("PARTITION_PARITY_SIZE_MISMATCH")
-        data = part_path.read_bytes()
         if hashlib.sha256(data).hexdigest() != descriptor.get("sha256"):
             raise ValueError("PARTITION_PARITY_DIGEST_MISMATCH")
         if not data.startswith(b"[") or not data.endswith(b"]\n"):

@@ -6,6 +6,9 @@ from hl_observer.backtesting.lead_lag_book_confirmation import (
     book_confirmation_trial_count,
     confirm_shocks_with_causal_book,
 )
+from hl_observer.backtesting.lead_lag_microstructure_confirmation import (
+    MECHANISM as MICROSTRUCTURE_MECHANISM,
+)
 
 
 def _book(
@@ -163,12 +166,24 @@ def test_book_confirmation_family_is_wired_and_counted_before_replay(
         tmp_path, [], candidate_coins=("SOL",)
     )
 
-    assert report["fixed_grid"]["trial_count"] == 37
+    # The fixed grid includes both causal confirmation families.  The book
+    # family contributes 36 trials and the newer book+flow family contributes
+    # 72 trials; the empty research grid still reserves one base trial.
+    assert report["fixed_grid"]["trial_count"] == 109
     assert report["fixed_grid"]["book_confirmation_hypothesis"]["trial_count"] == 36
-    assert len(report["variants"]) == 36
-    assert {row["mechanism"] for row in report["variants"]} == {MECHANISM}
+    assert report["fixed_grid"]["microstructure_confirmation_hypothesis"]["trial_count"] == 72
+    assert len(report["variants"]) == 108
+    assert {row["mechanism"] for row in report["variants"]} == {
+        MECHANISM,
+        MICROSTRUCTURE_MECHANISM,
+    }
     assert {row["book_imbalance_threshold"] for row in report["variants"]} == {
         0.15,
         0.35,
     }
-    assert all(value == {"SOL": [(trigger_ns, 1.0)]} for value in replayed)
+    assert all(
+        value == {"SOL": [(trigger_ns, 1.0)]} for value in replayed[:36]
+    )
+    # The fixture intentionally contains fewer than the three trades required
+    # by the book+flow family, so that family must fail closed with no shocks.
+    assert all(value == {"SOL": []} for value in replayed[36:])

@@ -2,13 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 
 import pytest
-
-from tools.partitioned_data_index import read_index
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_verify_metrics_source_rejects_stale_index_even_when_schema_is_valid(tmp_path):
@@ -110,14 +105,28 @@ def test_replayable_totals_exclude_non_safe_compatible_shards(tmp_path, monkeypa
 def test_metrics_file_is_machine_readable_and_counts_shards(tmp_path, monkeypatch):
     import tools.build_catalog_metrics as metrics
 
-    # A read/shape test must never rewrite the canonical metrics as a side
-    # effect, especially in sparse checkouts where historical manifests are
-    # intentionally absent.
+    # A read/shape test must never scan or rewrite the multi-million-row
+    # canonical catalogue as a side effect.  The full partition/parity
+    # contract is covered by test_partitioned_data_index.py; this test only
+    # needs a bounded representative index and metrics output.
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({
+        "shards": [
+            {"dataset_id": "shape-a", "family": "bbo", "record_count": 2},
+            {"dataset_id": "shape-b", "family": "trades", "record_count": 3},
+        ]
+    }), encoding="utf-8")
+    monkeypatch.setattr(metrics, "INDEX", index_path)
     monkeypatch.setattr(metrics, "METRICS", tmp_path / "DATA_METRICS.json")
+    for name in (
+        "TRADE_COUNT_PATCH", "UNIQUE_PATCH", "RECORD_PATCH", "UNCOMPRESSED_PATCH",
+    ):
+        patch_path = tmp_path / name
+        patch_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(metrics, name, patch_path)
     out = metrics.build()
-    idx = read_index(ROOT / "catalog" / "DATA_INDEX.json")
     totals = out["totals"]
-    assert totals["TOTAL_SHARDS"] == len(idx.get("shards") or [])
+    assert totals["TOTAL_SHARDS"] == 2
     assert "TOTAL_TRADES_COLLECTED" in totals
     assert "TOTAL_TRADES_REPLAYABLE" in totals
     assert "TRADE_SHARDS_WITH_EXACT_COUNT" in totals

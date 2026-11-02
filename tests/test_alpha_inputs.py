@@ -25,6 +25,44 @@ def test_adapter_l4_blocked():
     assert I.adapter_l4()["statut"] == I.BLOCKED
 
 
+def test_adapter_l4_loads_only_provenance_bound_capture(tmp_path):
+    p = tmp_path / "l4.jsonl"
+    provenance = {
+        "provider": "public-node",
+        "capture_run_id": "run-real-1",
+        "native_event_id": "native-1",
+        "received_at_ms": 1001,
+    }
+    p.write_text(json.dumps({
+        "order_id": "order-1", "ts_ms": 1000, "type": "NEW", "coin": "BTC",
+        "side": "BUY", "px": 100.0, "sz": 1.0, "provenance": provenance,
+        "paper_read_only": True, "real_execution": False,
+    }) + "\n", encoding="utf-8")
+
+    result = I.adapter_l4(str(p))
+
+    assert result["statut"] == I.UNMEASURABLE
+    assert result["real_l4_session"] is True
+    assert result["provenance_by_provider_coin"] is True
+    assert result["paired_public_fills"] is False
+    assert result["events"][0]["native_event_id"] == "native-1"
+
+
+def test_adapter_l4_quarantines_unproven_rows(tmp_path):
+    p = tmp_path / "l4.jsonl"
+    p.write_text(json.dumps({
+        "order_id": "order-1", "ts_ms": 1000, "type": "NEW", "coin": "BTC",
+        "side": "BUY", "px": 100.0, "sz": 1.0,
+        "paper_read_only": True, "real_execution": False,
+    }) + "\n", encoding="utf-8")
+
+    result = I.adapter_l4(str(p))
+
+    assert result["events"] == []
+    assert result["quarantaine"] == 1
+    assert result["statut"] == I.UNMEASURABLE
+
+
 def test_event_binance_shock():
     bbo = [{"bin_mid": 100.0}, {"bin_mid": 100.0}, {"bin_mid": 100.2}]  # +20 bps au pas 2
     assert I.event_binance_shock(bbo, seuil_bps=10.0) == [2]

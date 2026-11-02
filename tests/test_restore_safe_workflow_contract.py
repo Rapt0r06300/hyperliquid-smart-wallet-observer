@@ -38,3 +38,18 @@ def test_windows_checkout_includes_workflow_source_used_by_contract_tests() -> N
     sparse_checkout = workflow[sparse_start:sparse_end]
 
     assert "            .github/workflows\n" in sparse_checkout
+
+
+def test_fresh_clone_contract_is_exact_ref_and_sha_bound() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "alina-restore-safe-regression.yml").read_text(
+        encoding="utf-8"
+    )
+
+    start = workflow.index("- name: Perform a real normal clone and verify complete Git objects")
+    end = workflow.index("      - name: Exercise the one-file SAFE restore launcher", start)
+    step = workflow[start:end]
+
+    assert 'git clone --branch "$GITHUB_REF_NAME" --single-branch' in step
+    assert 'test "$(git branch --show-current)" = "$GITHUB_REF_NAME"' in step
+    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in step
+    assert 'git merge-base --is-ancestor "$GITHUB_SHA" HEAD' not in step

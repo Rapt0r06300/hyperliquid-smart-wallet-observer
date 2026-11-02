@@ -163,6 +163,56 @@ def test_les_shards_gzip_sont_relus(tmp_path):
     assert inv["ticks_retenus"] == 20  # courant + shard archivé
 
 
+def test_les_ticks_partitionnes_sont_relus_recursivement(tmp_path):
+    d = tmp_path / "ticks" / "provider" / "venue" / "coin"
+    _ecrire_ticks(d, n=10)
+
+    ticks, inv = MTR.load_ticks(tmp_path / "ticks")
+
+    assert len(ticks) == 10
+    assert inv["ticks_retenus"] == 10
+    assert inv["instruments"] == ["BTC"]
+
+
+def test_un_manifest_permet_de_ne_pas_parcourir_les_shards_non_declares(tmp_path):
+    d = tmp_path / "ticks" / "provider" / "venue" / "coin"
+    _ecrire_ticks(d, n=10)
+    current = next(d.glob("*.current.jsonl"))
+    shards = d / "shards"
+    shards.mkdir(exist_ok=True)
+    (shards / "publie.jsonl").write_text(
+        current.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (shards / "non-declare.jsonl").write_text(
+        current.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (d / "ticks.manifest.json").write_text(
+        json.dumps(
+            {
+                "current_path": f"runtime/data/market_ticks/provider/venue/coin/{current.name}",
+                "immutable_shards": ["publie.jsonl"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ticks, inv = MTR.load_ticks(tmp_path / "ticks")
+
+    assert len(ticks) == 20
+    assert inv["ticks_retenus"] == 20
+
+
+def test_une_sonde_bornee_est_explicitement_marquee_tronquee(tmp_path):
+    d = tmp_path / "ticks"
+    _ecrire_ticks(d, n=40)
+
+    ticks, inv = MTR.load_ticks(d, max_records=7)
+
+    assert len(ticks) == 7
+    assert inv["input_truncated"] is True
+    assert inv["max_records"] == 7
+
+
 def test_rapport_ecrit_sur_disque_et_cli_rend_zero(tmp_path):
     d = tmp_path / "ticks"
     _ecrire_ticks(d)

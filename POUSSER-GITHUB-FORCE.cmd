@@ -7,11 +7,13 @@ if errorlevel 1 goto :bad_location
 rem One-click code-only bidirectional Git reconciliation.
 rem AlinaSync alone downloads/validates/unpacks SAFE shards.
 rem No forced push, reset, clean, stash or automatic deletion of data.
+rem A double-click window stays open by default so failures remain visible.
+rem Set HYPERSMART_PUSH_NO_PAUSE=1 for CI/automation or cmd /c callers.
 set "GIT_LFS_SKIP_SMUDGE=1"
 set "ALINA_ROOT=%~dp0"
 set "ALINA_BOOTSTRAP=%TEMP%\alina-code-sync-bootstrap-main"
 set "ALINA_BOOTSTRAP_REF=main"
-set "ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v8"
+set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13"
 set "HYPERSMART_GIT="
 set "HYPERSMART_PYTHON="
 set "HYPERSMART_PY_ARGS="
@@ -22,6 +24,7 @@ if /I "%~1"=="--dry-run" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="dry-run" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="--wip-only" set "SYNC_OPTION=--wip-only"
 if /I "%~1"=="wip" set "SYNC_OPTION=--wip-only"
+if /I "%~1"=="--promote-current-to-main" set "SYNC_OPTION=--promote-current-to-main"
 if /I "%~1"=="--portable-self-check" set "SYNC_OPTION=--portable-self-check"
 if not "%~1"=="" if not defined SYNC_OPTION goto :bad_option
 if not "%~2"=="" goto :bad_option
@@ -120,6 +123,16 @@ echo [OK] Version du moteur et syntaxe Python valides
 
 if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check
 
+rem A double click from a Codex/WIP branch promotes it only by a guarded
+rem fast-forward. Dry-run and WIP modes stay branch-local/read-only.
+if not defined SYNC_OPTION (
+  for /f "delims=" %%B in ('"%HYPERSMART_GIT%" -C "%ALINA_ROOT%." branch --show-current 2^>nul') do (
+    set "ALINA_ACTIVE_BRANCH=%%B"
+    if /I not "%%B"=="main" set "SYNC_OPTION=--promote-current-to-main"
+  )
+)
+if /I "%SYNC_OPTION%"=="--promote-current-to-main" echo [INFO] Branche active %ALINA_ACTIVE_BRANCH%; promotion fast-forward securisee vers main.
+
 echo.
 echo [LANCEUR 5/6] Demarrage du moteur; chaque commande Git sera detaillee ci-dessous
 "%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%
@@ -141,6 +154,7 @@ goto :finish
 
 :self_check
 echo [OK] Git et moteur Python disponibles et syntaxiquement valides.
+echo PORTABLE_GITHUB_PUSH_CHECK_OK
 set "RC=0"
 goto :finish
 
@@ -188,7 +202,7 @@ exit /b 0
 rem Bootstrap only from canonical GitHub main. The caller verifies the engine build.
 rem Only tools/*.ps1 and *.py source can be requested by this CMD.
 echo [INFO] Chargement du composant de code %~1
-powershell.exe -NoLogo -NoProfile -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Rapt0r06300/hyperliquid-smart-wallet-observer/%ALINA_BOOTSTRAP_REF%/%~1' -OutFile '%~2'; if ((Get-Item -LiteralPath '%~2').Length -lt 500) { throw 'Fichier incomplet' }"
+powershell.exe -NoLogo -NoProfile -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 2 -Uri 'https://raw.githubusercontent.com/Rapt0r06300/hyperliquid-smart-wallet-observer/%ALINA_BOOTSTRAP_REF%/%~1' -OutFile '%~2'; if ((Get-Item -LiteralPath '%~2').Length -lt 500) { throw 'Fichier incomplet' }"
 if errorlevel 1 exit /b 44
 if not exist "%~2" exit /b 44
 exit /b 0
@@ -196,6 +210,8 @@ exit /b 0
 :finish
 echo [LANCEUR 6/6] Fin du lanceur - code retour %RC%
 if exist "%ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json" echo Rapport detaille : %ALINA_ROOT%runtime\reports\git-sync\LAST_SYNC.json
-if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
+if /I "%HYPERSMART_PUSH_NO_PAUSE%"=="1" goto :finish_cleanup
+pause
+:finish_cleanup
 popd
 endlocal & exit /b %RC%

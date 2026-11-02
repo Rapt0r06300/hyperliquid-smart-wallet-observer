@@ -48,7 +48,7 @@ def test_context_receipt_is_unmeasurable_when_provenance_is_missing() -> None:
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["license"]
+    assert receipt["missing_evidence"] == ["SOURCE_FILES_MISSING", "license"]
 
 
 def test_context_receipt_requires_reproducible_model_and_tokenizer_hashes() -> None:
@@ -58,7 +58,10 @@ def test_context_receipt_requires_reproducible_model_and_tokenizer_hashes() -> N
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["MODEL_SHA256_INVALID"]
+    assert receipt["missing_evidence"] == [
+        "MODEL_SHA256_INVALID",
+        "SOURCE_FILES_MISSING",
+    ]
 
 
 def test_context_receipt_requires_exact_repository_commit() -> None:
@@ -68,7 +71,41 @@ def test_context_receipt_requires_exact_repository_commit() -> None:
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["REPOSITORY_COMMIT_INVALID"]
+    assert receipt["missing_evidence"] == [
+        "REPOSITORY_COMMIT_INVALID",
+        "SOURCE_FILES_MISSING",
+    ]
+
+
+def test_context_receipt_rejects_invalid_provenance_types_and_cutoff() -> None:
+    metadata = _metadata()
+    metadata["model"] = 7
+    metadata["dependencies"] = ["numpy"]
+    metadata["training_cutoff"] = "2026-01-01"
+
+    receipt = build_context_receipt(metadata)
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == [
+        "DEPENDENCIES_INVALID",
+        "MODEL_INVALID",
+        "SOURCE_FILES_MISSING",
+        "TRAINING_CUTOFF_INVALID",
+    ]
+
+
+def test_context_receipt_rejects_invalid_source_files_container() -> None:
+    receipt = build_context_receipt(_metadata(), source_files=[])  # type: ignore[arg-type]
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["SOURCE_FILES_INVALID"]
+
+
+def test_context_receipt_rejects_empty_source_files_mapping() -> None:
+    receipt = build_context_receipt(_metadata(), source_files={})
+
+    assert receipt["status"] == "UNMEASURABLE"
+    assert receipt["missing_evidence"] == ["SOURCE_FILES_EMPTY"]
 
 
 def test_context_receipt_fails_closed_on_noncanonical_metadata() -> None:
@@ -78,7 +115,10 @@ def test_context_receipt_fails_closed_on_noncanonical_metadata() -> None:
     receipt = build_context_receipt(metadata)
 
     assert receipt["status"] == "UNMEASURABLE"
-    assert receipt["missing_evidence"] == ["PARAMETERS_NOT_CANONICAL"]
+    assert receipt["missing_evidence"] == [
+        "PARAMETERS_NOT_CANONICAL",
+        "SOURCE_FILES_MISSING",
+    ]
     assert receipt["provenance"]["parameters"] is None
     assert len(receipt["receipt_sha256"]) == 64
 
@@ -138,6 +178,49 @@ def test_preregistered_comparison_fails_closed_on_forbidden_tuning() -> None:
     assert result["reasons"] == ["OOS_TUNING_FORBIDDEN"]
 
 
+def test_preregistered_comparison_rejects_invalid_or_duplicate_protocol_inputs() -> None:
+    result = preregister_comparison(
+        train_window={"start_ms": 20, "end_ms": 20},
+        conditions=("without_kronos", "without_kronos"),
+        baselines=("copy_vault_current", ""),
+        seed=7,
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reasons"] == [
+        "TRAIN_WINDOW_INVALID",
+        "COMPARISON_CONDITIONS_DUPLICATE",
+        "BASELINE_INVALID",
+    ]
+
+
+def test_preregistered_comparison_rejects_non_sequence_protocol_inputs() -> None:
+    result = preregister_comparison(
+        train_window={"start_ms": 10, "end_ms": 20},
+        conditions="without_kronos",  # type: ignore[arg-type]
+        baselines=None,  # type: ignore[arg-type]
+        seed=7,
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reasons"] == [
+        "COMPARISON_CONDITIONS_INSUFFICIENT",
+        "BASELINE_MISSING",
+    ]
+
+
+def test_preregistered_comparison_fails_closed_on_unhashable_conditions() -> None:
+    result = preregister_comparison(
+        train_window={"start_ms": 10, "end_ms": 20},
+        conditions=(["without_kronos"], ["with_kronos"]),  # type: ignore[arg-type]
+        baselines=("copy_vault_current",),
+        seed=7,
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reasons"] == ["COMPARISON_CONDITION_INVALID"]
+
+
 def test_causal_context_requires_regular_post_cutoff_safe_rows() -> None:
     result = validate_causal_context_rows(
         [
@@ -168,3 +251,17 @@ def test_causal_context_rejects_lookahead_gap_and_non_safe_rows() -> None:
 
     assert result["status"] == "UNMEASURABLE"
     assert result["reasons"] == ["LOOKAHEAD_TIMESTAMP", "SAFE_PROVENANCE_REQUIRED", "TIMESTAMP_GAP"]
+
+
+def test_causal_context_rejects_non_positive_timestamps() -> None:
+    result = validate_causal_context_rows(
+        [
+            {"timestamp_ms": 0, "safe": True, "open": "10", "high": "12", "low": "9", "close": "11"},
+        ],
+        decision_cutoff_ms=20,
+        training_cutoff_ms=-10,
+        interval_ms=10,
+    )
+
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reasons"] == ["TIMESTAMP_NON_POSITIVE"]

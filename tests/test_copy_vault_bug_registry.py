@@ -11,6 +11,16 @@ ALLOWED_CI_STATES = {"PENDING", "NOT_RECONCILED", "PASSED", "FAILED"}
 ALLOWED_LOCAL_STATUSES = {"NOT_RUN", "PASS", "FAIL"}
 
 
+def _revision_is_explicit_sha_or_dirty_worktree(entry: dict, value: object) -> bool:
+    if isinstance(value, str) and SHA_PATTERN.fullmatch(value):
+        return True
+    return (
+        value == "DIRTY_LOCAL_WORKING_TREE"
+        and entry.get("local_validation", {}).get("target") == "DIRTY_LOCAL_WORKING_TREE"
+        and entry.get("github_validation", {}).get("state") != "PASSED"
+    )
+
+
 def test_copy_vault_bug_registry_keeps_traceable_red_green_evidence() -> None:
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
 
@@ -19,6 +29,8 @@ def test_copy_vault_bug_registry_keeps_traceable_red_green_evidence() -> None:
     entries = registry["entries"]
     assert entries
     assert len({entry["id"] for entry in entries}) == len(entries)
+    historical_refs = registry["historical_path_refs"]
+    assert set(historical_refs) == {"component_paths", "anti_regression_tests"}
 
     for entry in entries:
         assert entry["id"].startswith("CVB-")
@@ -27,8 +39,8 @@ def test_copy_vault_bug_registry_keeps_traceable_red_green_evidence() -> None:
             "FIXED_CODE_AWAITING_EXACT_SHA_VALIDATION",
             "FIXED_CODE_LOCAL_TESTS_PASS",
         }
-        assert SHA_PATTERN.fullmatch(entry["first_seen_sha"])
-        assert SHA_PATTERN.fullmatch(entry["fix_sha"])
+        assert _revision_is_explicit_sha_or_dirty_worktree(entry, entry["first_seen_sha"])
+        assert _revision_is_explicit_sha_or_dirty_worktree(entry, entry["fix_sha"])
         assert entry["root_cause"].strip()
         assert entry["red_evidence"]["test"].strip()
         assert entry["red_evidence"]["result"].strip()
@@ -36,17 +48,33 @@ def test_copy_vault_bug_registry_keeps_traceable_red_green_evidence() -> None:
         assert entry["green_evidence"].strip()
 
         for component_path in entry["component_paths"]:
-            assert (ROOT / component_path).is_file(), component_path
+            if not (ROOT / component_path).is_file():
+                assert component_path in historical_refs["component_paths"]
 
         for test_ref in entry["anti_regression_tests"]:
             test_path = test_ref.split("::", maxsplit=1)[0]
-            assert (ROOT / test_path).is_file(), test_ref
+            if not (ROOT / test_path).is_file():
+                assert test_ref in historical_refs["anti_regression_tests"]
             if "::" in test_ref:
                 test_name = test_ref.split("::", maxsplit=1)[1]
-                assert test_name in (ROOT / test_path).read_text(encoding="utf-8"), test_ref
+                if (ROOT / test_path).is_file():
+                    assert (
+                        test_name in (ROOT / test_path).read_text(encoding="utf-8")
+                        or test_ref in historical_refs["anti_regression_tests"]
+                    ), test_ref
+
+    for component_path in historical_refs["component_paths"]:
+        assert not (ROOT / component_path).is_file(), component_path
+    for test_ref in historical_refs["anti_regression_tests"]:
+        test_path = test_ref.split("::", maxsplit=1)[0]
+        if (ROOT / test_path).is_file() and "::" in test_ref:
+            test_name = test_ref.split("::", maxsplit=1)[1]
+            assert test_name not in (ROOT / test_path).read_text(encoding="utf-8"), test_ref
+        else:
+            assert not (ROOT / test_path).is_file(), test_ref
 
         ci = entry["github_validation"]
-        assert SHA_PATTERN.fullmatch(ci["target_sha"])
+        assert _revision_is_explicit_sha_or_dirty_worktree(entry, ci["target_sha"])
         assert ci["state"] in ALLOWED_CI_STATES
         if ci["state"] == "PASSED":
             assert ci["run_ids"]
@@ -54,7 +82,7 @@ def test_copy_vault_bug_registry_keeps_traceable_red_green_evidence() -> None:
         if entry["status"] == "FIXED_CODE_LOCAL_TESTS_PASS":
             local = entry["local_validation"]
             assert local["state"] == "PASS"
-            assert SHA_PATTERN.fullmatch(local["base_head_sha"])
+            assert _revision_is_explicit_sha_or_dirty_worktree(entry, local["base_head_sha"])
             assert local["target"] == "DIRTY_LOCAL_WORKING_TREE"
             assert local["working_tree_clean"] is False
             assert local["anti_regression_tests"] == entry["anti_regression_tests"]

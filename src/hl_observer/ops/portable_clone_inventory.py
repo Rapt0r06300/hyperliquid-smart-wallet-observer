@@ -114,8 +114,13 @@ def _durable_artifact_summary(files: dict[str, dict[str, object]]) -> dict[str, 
 
 def machine_fingerprint() -> str:
     """Return a privacy-preserving identifier used only to prove PC A != PC B."""
-    parts = [platform.node(), os.environ.get("COMPUTERNAME", ""), str(uuid.getnode())]
-    if os.name == "nt":
+    computer_name = os.environ.get("COMPUTERNAME", "")
+    parts = [platform.node(), computer_name, str(uuid.getnode())]
+    # MachineGuid is a supplemental Windows signal for normal named hosts.
+    # Keeping the fallback to the portable node/UUID pair makes the helper
+    # deterministic in stripped-down Windows environments and in fixtures that
+    # intentionally remove COMPUTERNAME.
+    if os.name == "nt" and computer_name.strip():
         try:
             import winreg
 

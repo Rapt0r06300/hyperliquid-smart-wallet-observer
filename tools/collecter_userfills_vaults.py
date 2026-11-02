@@ -22,6 +22,7 @@ import threading
 import time
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
@@ -87,6 +88,8 @@ WS_KEYS_CAP = 6000                          # borne par vault (couvre très larg
 _DEMARRAGE_MS = 0.0                          # instant de démarrage : _WS_KEYS ne peut contenir QUE des fills reçus après
 _HEARTBEAT_WS = {"messages": 0, "fills": 0, "acks": 0, "reconnects": 0,
                  "persisted_fills": 0, "acknowledged_userfills": set(),
+                 "ack_received_at_ms_by_vault": {},
+                 "capture_epoch_by_vault": {},
                  "invalid_fill_rows": 0,
                  "invalid_subscription_acks": 0, "pre_ack_userfills_frames": 0,
                  "invalid_json_frames": 0, "unexpected_userfills_channels": 0,
@@ -1270,10 +1273,21 @@ def _vault_du_message(msg, connus_par_lc: dict) -> str | None:
 def _invalidate_userfills_subscription_acks(vaults: list[str] | tuple[str, ...]) -> None:
     acknowledged = _HEARTBEAT_WS.setdefault("acknowledged_userfills", set())
     acknowledged.difference_update(vaults)
+    ack_times = _HEARTBEAT_WS.setdefault("ack_received_at_ms_by_vault", {})
+    epochs = _HEARTBEAT_WS.setdefault("capture_epoch_by_vault", {})
+    for vault in vaults:
+        ack_times.pop(vault, None)
+        epochs.pop(vault, None)
     _HEARTBEAT_WS["acks"] = len(acknowledged)
 
 
-def _record_userfills_subscription_ack(message: dict, vaults: list[str]) -> str | None:
+def _record_userfills_subscription_ack(
+    message: dict,
+    vaults: list[str],
+    *,
+    ack_received_at_ms: int | None = None,
+    capture_epoch: str | None = None,
+) -> str | None:
     data = message.get("data") if isinstance(message, dict) else None
     subscription = data.get("subscription") if isinstance(data, dict) else None
     user = subscription.get("user") if isinstance(subscription, dict) else None
@@ -1296,6 +1310,10 @@ def _record_userfills_subscription_ack(message: dict, vaults: list[str]) -> str 
         return None
     acknowledged = _HEARTBEAT_WS.setdefault("acknowledged_userfills", set())
     acknowledged.add(matched)
+    if isinstance(ack_received_at_ms, int) and not isinstance(ack_received_at_ms, bool) and ack_received_at_ms > 0:
+        _HEARTBEAT_WS.setdefault("ack_received_at_ms_by_vault", {})[matched] = ack_received_at_ms
+    if isinstance(capture_epoch, str) and capture_epoch.strip():
+        _HEARTBEAT_WS.setdefault("capture_epoch_by_vault", {})[matched] = capture_epoch.strip()
     _HEARTBEAT_WS["acks"] = len(acknowledged)
     return matched
 
@@ -1341,6 +1359,8 @@ def _journal_userfills_non_classe(
     message: dict,
     received_at_ms: int,
     connection_id: str,
+    ack_received_at_ms: int | None = None,
+    capture_epoch: str | None = None,
 ) -> None:
     """Persist raw WS evidence when its native snapshot/live marker is unknown."""
     path = root / FILLS_UNCLASSIFIED
@@ -1351,7 +1371,14 @@ def _journal_userfills_non_classe(
         "vault": vault,
         "received_at_ms": int(received_at_ms),
         "connection_id": connection_id,
+        "ack_received_at_ms": ack_received_at_ms,
+        "capture_epoch": capture_epoch,
+        "post_ack_observed": (
+            isinstance(ack_received_at_ms, int)
+            and int(received_at_ms) >= ack_received_at_ms
+        ),
         "reason": "IS_SNAPSHOT_FLAG_MISSING_OR_INVALID",
+        "admission": "REJECTED_UNKNOWN_SNAPSHOT_FLAG",
         "raw_payload": message,
         "read_only": True,
         "real_execution": False,
@@ -1451,7 +1478,21 @@ def _parse_userfills_frame(
         })
         if int(_HEARTBEAT_WS.get("integrity_diagnostic_write_failures") or 0) > failures_before:
             return []
-    return fills
+    ack_received_at_ms = _HEARTBEAT_WS.get("ack_received_at_ms_by_vault", {}).get(vault)
+    capture_epoch = _HEARTBEAT_WS.get("capture_epoch_by_vault", {}).get(vault)
+    enriched: list[dict] = []
+    for fill in fills:
+        row = dict(fill)
+        row["ack_received_at_ms"] = ack_received_at_ms
+        row["capture_epoch"] = capture_epoch
+        row["post_ack"] = (
+            row.get("isSnapshot") is False
+            and isinstance(ack_received_at_ms, int)
+            and isinstance(row.get("received_at_ms"), int)
+            and row["received_at_ms"] >= ack_received_at_ms
+        )
+        enriched.append(row)
+    return enriched
 
 
 async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, socket_id: str = "A") -> None:
@@ -1506,7 +1547,12 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                             or subscription.get("type") != "userFills"
                         ):
                             continue
-                        matched_vault = _record_userfills_subscription_ack(msg, vaults)
+                        matched_vault = _record_userfills_subscription_ack(
+                            msg,
+                            vaults,
+                            ack_received_at_ms=recv_wall_ms,
+                            capture_epoch=connection_id,
+                        )
                         if matched_vault is not None:
                             print(
                                 "[userfills] socket %s ACK userFills %s (%d/%d)"
@@ -1571,6 +1617,14 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                                 message=msg,
                                 received_at_ms=recv_wall_ms,
                                 connection_id=connection_id,
+                                ack_received_at_ms=(
+                                    _HEARTBEAT_WS.get("ack_received_at_ms_by_vault", {})
+                                    .get(vault)
+                                ),
+                                capture_epoch=(
+                                    _HEARTBEAT_WS.get("capture_epoch_by_vault", {})
+                                    .get(vault)
+                                ),
                             )
                         except (OSError, TypeError, ValueError) as exc:
                             _HEARTBEAT_WS["unclassified_frame_write_failures"] = int(
@@ -2604,6 +2658,8 @@ async def _boucle(root: Path) -> None:
         "persisted_fills": 0,
         "acks": 0,
         "acknowledged_userfills": set(),
+        "ack_received_at_ms_by_vault": {},
+        "capture_epoch_by_vault": {},
         "invalid_subscription_acks": 0,
         "pre_ack_userfills_frames": 0,
         "invalid_json_frames": 0,

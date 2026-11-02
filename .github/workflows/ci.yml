@@ -14,9 +14,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: hypersmart-ci-${{ github.ref }}
-  # Keep one running CI proof; newer main commits replace only the pending run.
-  cancel-in-progress: false
+  group: hypersmart-ci-${{ github.ref }}-${{ github.sha }}
+  # Keep main proofs durable; replace only obsolete PR runs to avoid queue deadlock.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONPATH: src:tools
@@ -38,6 +38,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+          fetch-tags: false
+          filter: blob:none
       - name: Compare all changed files, fail closed if history is missing
         id: classify
         shell: bash
@@ -66,6 +68,10 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Environnement Python CI isole
+        run: |
+          python -m venv .ci-venv
+          echo "$GITHUB_WORKSPACE/.ci-venv/bin" >> "$GITHUB_PATH"
       - name: Dependances fail-closed
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
@@ -131,6 +137,10 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Environnement Python CI isole
+        run: |
+          python -m venv .ci-venv
+          echo "$GITHUB_WORKSPACE/.ci-venv/bin" >> "$GITHUB_PATH"
       - name: Dependances fail-closed
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
@@ -166,6 +176,11 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Environnement Python CI isole
+        shell: pwsh
+        run: |
+          python -m venv .ci-venv
+          "$env:GITHUB_WORKSPACE\.ci-venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Dependances fail-closed
         shell: pwsh
         run: |
@@ -236,6 +251,10 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Environnement Python CI isole
+        run: |
+          python -m venv .ci-venv
+          echo "$GITHUB_WORKSPACE/.ci-venv/bin" >> "$GITHUB_PATH"
       - name: Dependances fail-closed
         run: |
           python -m pip install --require-hashes -r requirements-ci-bootstrap.txt

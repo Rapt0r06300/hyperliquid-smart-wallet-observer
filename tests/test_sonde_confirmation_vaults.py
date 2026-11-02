@@ -62,7 +62,7 @@ def test_fills_rest_preserve_native_instrument_identity():
 
 def test_retard_detecte_fill_plus_recent_que_curseur_et_assez_vieux():
     now = 10_000_000.0
-    fills = S.fills_rest_normalises(V, [{"coin": "SOL", "px": "1", "sz": "1", "time": int(now - 60_000), "hash": "hx"}])
+    fills = S.fills_rest_normalises(V, [{"coin": "SOL", "px": "1", "sz": "1", "time": int(now - 60_000), "side": "B", "hash": "hx"}])
     # curseur = now-120s : le fill (now-60s) est plus récent que le curseur ET vieux de 60s (≥ 45s) -> RETARD
     retard = S.fills_rest_en_retard(fills, now - 120_000, maintenant_ms=now)
     assert len(retard) == 1                                       # le WS a raté un fill que REST voit -> défaillant

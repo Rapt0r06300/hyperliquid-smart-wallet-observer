@@ -181,12 +181,30 @@ def test_commit_subject_names_noninteractive_rebase_guard_from_staged_diff() -> 
     )
 
 
+def test_commit_subject_names_upstream_rebase_scan_optimization() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "GIT_SEQUENCE_EDITOR --reapply-cherry-picks") == (
+        "fix(sync): avoid slow upstream rebase scans (2 paths)"
+    )
+
+
 def test_commit_subject_names_the_mutex_collision_guard_from_staged_diff() -> None:
     assert _commit_subject([
         "tools/alina_git_code_sync.py",
         "tests/test_alina_git_code_sync.py",
     ], "MUTEX_WAIT_SECONDS _lock_mutex_handle") == (
         "fix(sync): wait for concurrent launcher safely (2 paths)"
+    )
+
+
+def test_commit_subject_names_unexpected_engine_error_guard() -> None:
+    assert _commit_subject([
+        "tools/alina_git_code_sync.py",
+        "tests/test_alina_git_code_sync.py",
+    ], "except Exception fail closed on unexpected internal sync error") == (
+        "fix(sync): fail closed on engine errors (2 paths)"
     )
 
 
@@ -505,6 +523,16 @@ def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
     assert ("rebase", "--skip") in commands
 
 
+@pytest.mark.parametrize(
+    ("replay_count", "expected"),
+    [(0, 20), (2, 20), (6, 36), (20, 60)],
+)
+def test_rebase_timeout_budget_is_short_and_bounded(
+    replay_count: int, expected: int,
+) -> None:
+    assert sync_module._rebase_timeout_budget(replay_count) == expected
+
+
 def test_rebase_timeout_is_aborted_and_reported(tmp_path):
     task = Synchronizer(tmp_path)
     commands: list[tuple[str, ...]] = []
@@ -550,6 +578,36 @@ def test_rebase_timeout_handler_cannot_leave_an_unbound_outcome(
         task._run_rebase("refs/remotes/origin/main")
 
 
+def test_unexpected_engine_error_is_fail_closed_and_receipted(
+    repos, monkeypatch, capsys,
+) -> None:
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+    task = Synchronizer(local, allow_test_remote=True)
+
+    def unexpected_error(*_args, **_kwargs):
+        raise UnboundLocalError("outcome")
+
+    monkeypatch.setattr(task, "preflight", unexpected_error)
+
+    assert task.run() == 2
+    receipt = json.loads(
+        (local / "runtime/reports/git-sync/LAST_SYNC.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert receipt["status"] == "NO_GO"
+    assert receipt["error_type"] == "UnboundLocalError"
+    assert receipt["error"] == "outcome"
+    assert receipt["exit_code"] == 2
+    assert git(local, "rev-parse", "HEAD") == before
+    assert git(origin, "rev-parse", "main") == before
+    output = capsys.readouterr().out
+    assert "Unexpected internal sync error: outcome" in output
+    assert "Traceback" not in output
+
+
 def test_rebase_disables_interactive_editors_and_restores_environment(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -582,9 +640,98 @@ def test_rebase_disables_interactive_editors_and_restores_environment(
     assert os.environ["GIT_MERGE_AUTOEDIT"] == "yes"
 
 
+def test_rebase_avoids_scanning_all_upstream_cherry_picks(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    task = Synchronizer(tmp_path)
+    captured: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **kwargs):
+        captured.append(args)
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(task, "command", fake_command)
+
+    result = task._run_rebase("refs/remotes/origin/main", timeout_seconds=20)
+
+    assert result.returncode == 0
+    assert captured == [(
+        "rebase", "--no-autostash", "--reapply-cherry-picks",
+        "--no-fork-point",
+        "refs/remotes/origin/main",
+    )]
+    assert task.report["rebase_strategy"] == (
+        "REAPPLY_CHERRY_PICKS_NO_UPSTREAM_SCAN_NO_FORK_POINT"
+    )
+
+
+def test_git_replay_print_plan_is_applied_without_ref_race(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+    old = "1" * 40
+    new = "2" * 40
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **kwargs):
+        commands.append(args)
+        if args[0] == "replay":
+            return subprocess.CompletedProcess(
+                args, 0, f"update refs/heads/main {new} {old}\n".encode(), b"",
+            )
+        if args[0] == "update-ref":
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if args[:2] == ("rev-parse", "HEAD"):
+            return subprocess.CompletedProcess(args, 0, f"{new}\n".encode(), b"")
+        if args[:2] == ("diff", "--quiet"):
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    task._assert_no_new_code_changes = lambda: None  # type: ignore[method-assign]
+
+    assert task._try_git_replay("remote", old, "base") is True
+    assert task.report["replay_engine"] == "GIT_REPLAY_INDEX_PRESERVING"
+    assert commands[:3] == [
+        (
+            "replay", "--onto=remote", "--ref=refs/heads/main",
+            "--ref-action=print", "base..refs/heads/main",
+        ),
+        ("read-tree", "-u", "-m", new),
+        ("update-ref", "refs/heads/main", new, old),
+    ]
+
+
+def test_git_replay_falls_back_on_unsupported_git(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **kwargs):
+        assert args[0] == "replay"
+        return subprocess.CompletedProcess(
+            args, 129, b"", b"git: 'replay' is not a git command.\n",
+        )
+
+    task.command = fake_command  # type: ignore[method-assign]
+    assert task._try_git_replay("remote", "1" * 40, "base") is False
+    assert task.report["replay_fallback"] == "GIT_REPLAY_UNAVAILABLE"
+
+
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
-    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 300
+    assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120
+    assert sync_module._rebase_timeout_budget(1) == 20
+    assert sync_module._rebase_timeout_budget(6) == 36
+    assert sync_module._rebase_timeout_budget(100) == 60
+
+
+def test_rebase_operation_labels_explain_abort_and_continue() -> None:
+    assert sync_module._git_operation_label(["rebase", "--abort"]) == (
+        "Annuler le rebase inacheve"
+    )
+    assert sync_module._git_operation_label(["rebase", "--continue"]) == (
+        "Continuer le rebase sans choix automatique"
+    )
+    assert sync_module._git_operation_label(["rebase", "--skip"]) == (
+        "Ignorer le commit de rebase vide"
+    )
 
 
 def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch):
@@ -613,6 +760,9 @@ def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch)
     env = captured["env"]
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GCM_INTERACTIVE"] == "Never"
+    assert env["GIT_SSH_COMMAND"] == (
+        "ssh -o BatchMode=yes -o ConnectTimeout=8"
+    )
 
 
 def test_clean_sync_never_commits_empty(repos):
@@ -751,6 +901,8 @@ def test_dry_run_does_not_mutate_git(repos):
     remote_head = git(origin, "rev-parse", "main")
     rc, receipt = run_sync(local, dry=True)
     assert rc == 0 and receipt["status"] == "DRY_RUN_ONLY"
+    assert receipt["engine_build"] == sync_module.GIT_SYNC_ENGINE_BUILD
+    assert receipt["proposed_commit_message"] == "chore(runtime): update local"
     assert git(local, "rev-parse", "HEAD") == local_head
     assert git(origin, "rev-parse", "main") == remote_head
     assert git(local, "diff", "--cached", "--name-only") == ""
@@ -806,6 +958,48 @@ def test_main_branch_is_mandatory(repos):
     git(local, "checkout", "-b", "another-branch")
     rc, receipt = run_sync(local)
     assert rc == 2 and receipt["status"] == "NO_GO"
+
+
+def test_non_main_branch_is_promoted_by_fast_forward_only(repos):
+    local, _, origin = repos
+    git(local, "checkout", "-b", "codex/wip")
+    (local / "src" / "promotion.py").write_text("promoted = True\n")
+    safe = local / "runtime" / "safe" / "observation.json"
+    safe.parent.mkdir(parents=True)
+    safe.write_text('{"safe": true}\n', encoding="utf-8")
+
+    task = Synchronizer(
+        local, allow_test_remote=True, promote_current_to_main=True,
+    )
+    assert task.run() == 0
+    receipt = json.loads(
+        (local / "runtime/reports/git-sync/LAST_SYNC.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert receipt["status"] == "SYNCHRONIZED"
+    assert receipt["promoted_current_branch"] is True
+    assert receipt["promoted_from_branch"] == "codex/wip"
+    assert receipt["branch_after"] == "main"
+    assert git(local, "branch", "--show-current") == "main"
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+    assert (local / "runtime/safe/observation.json").read_text() == '{"safe": true}\n'
+    assert git(origin, "show", "main:src/promotion.py") == "promoted = True"
+
+
+def test_non_main_promotion_checkpoints_dirty_tracked_worktree(repos):
+    local, _, origin = repos
+    git(local, "checkout", "-b", "codex/dirty")
+    (local / "src" / "base.py").write_text("uncommitted = True\n")
+    task = Synchronizer(
+        local, allow_test_remote=True, promote_current_to_main=True,
+    )
+    assert task.run() == 0
+    assert task.report["status"] == "SYNCHRONIZED"
+    assert task.report["local_commit_created"] is True
+    assert git(local, "branch", "--show-current") == "main"
+    assert git(origin, "show", "main:src/base.py") == "uncommitted = True"
 
 
 def test_exact_historical_jsonl_relocation_syncs_with_concurrent_cloud_change(repos):
@@ -946,7 +1140,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
     assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-10-31-verified-remote-receipt-v8' in source
+    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
     assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
     assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
@@ -956,6 +1150,10 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert "[LANCEUR 1/6]" in source
     assert "[LANCEUR 6/6]" in source
     assert "DRY-RUN TERMINE" in source
+    assert 'if /I "%HYPERSMART_PUSH_NO_PAUSE%"=="1" goto :finish_cleanup' in source
+    assert "pause" in source
+    assert "PORTABLE_GITHUB_PUSH_CHECK_OK" in source
+    assert "-TimeoutSec 20" in source
 
 
 def test_new_edit_during_fetch_is_checkpointed_and_published(repos):

@@ -49,3 +49,115 @@ def test_fix55_factory_observable_linux_et_windows():
               "actions/upload-artifact", "test_run_factory.py", "test_factory_coverage.py"]:
         assert b in txt, f"dimension Factory manquante dans alpha-factory.yml: {b}"
     assert "push:" in txt and "branches: [main]" in txt      # Factory aussi observable au HEAD
+
+
+def test_ci_jobs_runtime_utilisent_un_python_isole():
+    txt = _texte("ci.yml")
+    for job in ["securite:", "tests-linux:", "tests-windows:", "runtime-replay:"]:
+        bloc = txt.split(f"  {job}", 1)[1]
+        assert "python -m venv .ci-venv" in bloc, f"venv manquant dans {job}"
+        assert "GITHUB_PATH" in bloc, f"PATH CI non isole dans {job}"
+
+
+def test_copy_vault_hosted_jobs_ne_telechargent_pas_le_reservoir_brut():
+    """Les jobs code-only gardent le dépôt utile sans hydrater 1.8M shards bruts."""
+    for nom in ("hyperlab-ci.yml", "labo-continu-ci.yml"):
+        txt = _texte(nom)
+        assert "filter: blob:none" in txt, f"clone blobless manquant dans {nom}"
+        assert "sparse-checkout-cone-mode: false" in txt, f"mode sparse explicite manquant dans {nom}"
+    hyperlab = _texte("hyperlab-ci.yml")
+    assert "!/datasets/" in hyperlab and "/*" in hyperlab
+
+
+def test_labo_continu_sparse_checkout_ne_garde_que_ses_surfaces_utiles():
+    txt = _texte("labo-continu-ci.yml")
+    for required in (
+        "            /src/",
+        "            /tools/",
+        "            /tests/",
+        "            /conftest.py",
+        "            /pyproject.toml",
+        "            /requirements-ci-bootstrap.txt",
+        "            /requirements-recherche.txt",
+    ):
+        assert required in txt
+    assert "            /*" not in txt
+    assert "            !/datasets/" not in txt
+
+
+def test_labo_continu_installs_runtime_import_dependencies():
+    txt = _texte("labo-continu-ci.yml")
+    assert "python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic websockets" in txt
+
+
+def test_local_l2_hosted_job_installs_import_dependencies():
+    txt = _texte("local-l2-certification-tests.yml")
+    assert "python -m pip install --disable-pip-version-check pytest PyYAML httpx pydantic websockets" in txt
+
+
+def test_local_l2_hosted_job_avoids_raw_dataset_checkout():
+    txt = _texte("local-l2-certification-tests.yml")
+    for required in (
+        "filter: blob:none",
+        "sparse-checkout-cone-mode: false",
+        "            /src/",
+        "            /tools/",
+        "            /tests/",
+        "            /pyproject.toml",
+    ):
+        assert required in txt
+
+
+def test_continuous_lab_runs_the_fail_closed_copy_vault_closure_gate():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tests/test_copy_vault_closure_gate.py" in txt
+
+
+def test_labo_hosted_job_runs_read_only_evidence_inventory():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tests/test_copy_vault_evidence_inventory.py" in txt
+
+
+def test_labo_hosted_job_runs_the_all_ten_task_closure_audit():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tests/test_copy_vault_task_closure_plans.py" in txt
+
+
+def test_labo_hosted_job_publishes_an_exact_sha_bound_junit_receipt():
+    txt = _texte("labo-continu-ci.yml")
+    assert "--junitxml=reports/labo-continu.xml" in txt
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in txt
+    assert "labo-continu-junit-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}" in txt
+    assert "if-no-files-found: error" in txt
+
+
+def test_labo_hosted_job_publishes_the_fail_closed_ten_task_report():
+    txt = _texte("labo-continu-ci.yml")
+    assert "tools/verify_copy_vault_tasklist.py" in txt
+    assert "--head-sha \"${COPY_VAULT_HEAD_SHA}\"" in txt
+    assert "--evidence-dir /tmp/copy-vault-no-evidence" in txt
+    assert "copy-vault-tasklist-closure-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}" in txt
+
+
+def test_labo_hosted_job_publishes_a_strict_exact_sha_receipt():
+    txt = _texte("labo-continu-ci.yml")
+    for required in (
+        "COPY_VAULT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+        "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+        "id: test-suite",
+        "pytest_exit_code=$status",
+        "id: publish-junit",
+        "id: publish-closure",
+        "tools/build_copy_vault_hosted_receipt.py",
+        "--head-sha \"${COPY_VAULT_HEAD_SHA}\"",
+        "--junit-artifact-digest",
+        "--closure-artifact-digest",
+        "copy-vault-hosted-receipt-${{ github.run_id }}-${{ env.COPY_VAULT_HEAD_SHA }}",
+    ):
+        assert required in txt, f"reçu hosted exact-SHA incomplet: {required}"
+
+
+def test_local_l2_cancels_only_obsolete_same_ref_runs():
+    txt = _texte("local-l2-certification-tests.yml")
+    assert "group: local-l2-certification-tests-${{ github.ref }}" in txt
+    assert "cancel-in-progress: true" in txt

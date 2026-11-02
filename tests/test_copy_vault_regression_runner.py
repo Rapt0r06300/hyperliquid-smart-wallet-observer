@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tools import run_copy_vault_regressions as runner
+from tools.verify_copy_vault_tasklist import _read_receipts
 
 
 def test_executable_has_only_current_existing_downstream_suites() -> None:
@@ -12,6 +13,50 @@ def test_executable_has_only_current_existing_downstream_suites() -> None:
 
     assert selected == sorted(runner.COPY_VAULT_EXECUTABLE_SUITES)
     assert all((runner.ROOT / path).is_file() for path in selected)
+
+
+def test_local_lab_and_pipeline_have_explicit_downstream_suites() -> None:
+    local_lab = runner.select_tests([
+        "src/hl_observer/backtesting/copy_vault_local_lab.py",
+    ])
+    pipeline = runner.select_tests(["tools/pipeline_copie_reel.py"])
+
+    assert local_lab == sorted(runner.COPY_VAULT_LOCAL_LAB_SUITES)
+    assert pipeline == sorted(runner.COPY_VAULT_PIPELINE_SUITES)
+
+
+def test_copy_vault_evidence_tools_have_explicit_downstream_suites() -> None:
+    expected = sorted({
+        *runner.COPY_VAULT_EVIDENCE_SUITES,
+        "tests/test_collect_cloud_copy_vault.py",
+    })
+    selected = runner.select_tests([
+        "tools/audit_live_ws_causal_capture.py",
+        "tools/build_copy_vault_hosted_receipt.py",
+        "tools/collect_cloud_copy_vault.py",
+        "tools/build_copy_vault_restoration_evidence.py",
+        "tools/inventory_copy_vault_evidence.py",
+        "tools/verify_copy_vault_closure_matrix.py",
+        "tools/verify_copy_vault_causal_receipt.py",
+        "tools/verify_copy_vault_snapshot_contract.py",
+        "tools/verify_copy_vault_tasklist.py",
+    ])
+
+    assert selected == expected
+
+
+def test_known_copy_vault_receipt_and_hosted_workflows_have_explicit_suites() -> None:
+    selected = runner.select_tests([
+        "tools/build_copy_vault_live_probe_receipt.py",
+        ".github/workflows/ci.yml",
+        ".github/workflows/security-quality.yml",
+    ])
+
+    assert selected == sorted({
+        "tests/test_build_copy_vault_live_probe_receipt.py",
+        "tests/test_ci_workflows.py",
+        "tests/test_repository_governance.py",
+    })
 
 
 def test_unknown_critical_module_fails_closed() -> None:
@@ -53,3 +98,26 @@ def test_changed_paths_includes_workflows(monkeypatch) -> None:
     monkeypatch.setattr(runner.subprocess, "run", fake_run)
     assert runner.changed_paths() == [".github/workflows/copy-vault.yml"]
     assert calls[1][-1] == ".github/workflows"
+
+
+def test_tasklist_reader_includes_append_only_exact_sha_receipts(tmp_path) -> None:
+    (tmp_path / "H-T95.json").write_text(
+        '[{"head_sha":"old","evidence_status":"UNMEASURABLE"}]',
+        encoding="utf-8",
+    )
+    (tmp_path / "H-T95-restoration-current-newsha-r1.json").write_text(
+        '[{"head_sha":"newsha","evidence_status":"VERIFIED"}]',
+        encoding="utf-8",
+    )
+    (tmp_path / "H-T95-restoration-current-newsha-r2.json").write_text(
+        '{"head_sha":"newsha-2","evidence_status":"UNMEASURABLE"}',
+        encoding="utf-8",
+    )
+
+    receipts = _read_receipts(tmp_path)
+
+    assert receipts["H-T95"] == [
+        {"head_sha": "old", "evidence_status": "UNMEASURABLE"},
+        {"head_sha": "newsha", "evidence_status": "VERIFIED"},
+        {"head_sha": "newsha-2", "evidence_status": "UNMEASURABLE"},
+    ]

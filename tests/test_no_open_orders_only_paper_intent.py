@@ -33,7 +33,6 @@ from hyper_smart_observer.hyperliquid_client.info_client import PaginationResult
 from hyper_smart_observer.storage.database import get_connection
 from hyper_smart_observer.storage.repositories import paper_trades_repo
 
-
 GOOD_ADDRESS = "0x" + "d" * 40
 
 

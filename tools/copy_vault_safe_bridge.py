@@ -14,6 +14,7 @@ import math
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -48,6 +49,26 @@ def _digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _git_head_sha(root: Path) -> str | None:
+    """Return the exact local HEAD when *root* is a Git checkout.
+
+    Evidence must never guess a SHA.  Temporary fixture roots used by the
+    contract tests are intentionally reported as unbound instead.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sha = result.stdout.strip().lower()
+    return sha if result.returncode == 0 and len(sha) == 40 else None
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -365,10 +386,25 @@ def _safe_registry_rows(
     ]
 
 
-def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
+def build_safe_copy_workspace(
+    root: Path,
+    *,
+    recovery_dir: Path | None = None,
+    catalog_path: Path | None = None,
+) -> dict[str, Any]:
     root = Path(root).resolve()
-    recovery = root / "runtime" / "recovery" / "full"
-    catalog, registry = _safe_registry_rows(recovery, root / "catalog" / "DATA_INDEX.json")
+    git_head_sha = _git_head_sha(root)
+    recovery = (
+        Path(recovery_dir).resolve()
+        if recovery_dir is not None
+        else root / "runtime" / "recovery" / "full"
+    )
+    active_catalog_path = (
+        Path(catalog_path).resolve()
+        if catalog_path is not None
+        else root / "catalog" / "DATA_INDEX.json"
+    )
+    catalog, registry = _safe_registry_rows(recovery, active_catalog_path)
     parent = root / "runtime" / "research_lab" / "copy_vault_safe"
     if parent.is_symlink():
         raise SafeBridgeError("unsafe Copy-Vault workspace parent")
@@ -580,6 +616,7 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
         admitted_inputs = [row for row in inputs if row["admitted_frames"]]
         provenance = {
             "schema": bridge_schema,
+            "git_sha": git_head_sha,
             "source_kind": "alina-sync-safe-unpacked",
             "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "catalog_sha256": catalog,
@@ -648,6 +685,7 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
             diagnostic = {
                 "schema": "hypersmart.copy_vault_safe_no_go.v1",
                 "status": "SAFE_COPY_NO_GO",
+                "git_sha": git_head_sha,
                 "catalog_sha256": catalog,
                 "processed_shards": processed_shards,
                 "total_shards": total,
@@ -680,9 +718,27 @@ def build_safe_copy_workspace(root: Path) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(ROOT))
+    parser.add_argument(
+        "--recovery-dir",
+        help=(
+            "Exact SAFE recovery directory to audit; defaults to "
+            "<root>/runtime/recovery/full."
+        ),
+    )
+    parser.add_argument(
+        "--catalog-path",
+        help=(
+            "Exact DATA_INDEX.json bound to --recovery-dir; defaults to "
+            "<root>/catalog/DATA_INDEX.json."
+        ),
+    )
     args = parser.parse_args(argv)
     try:
-        result = build_safe_copy_workspace(Path(args.root))
+        result = build_safe_copy_workspace(
+            Path(args.root),
+            recovery_dir=Path(args.recovery_dir) if args.recovery_dir else None,
+            catalog_path=Path(args.catalog_path) if args.catalog_path else None,
+        )
     except (SafeBridgeError, OSError, ValueError, TypeError) as exc:
         print(f"SAFE_COPY_NO_GO: {exc}", flush=True)
         return 2

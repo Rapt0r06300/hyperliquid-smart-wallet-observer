@@ -22,10 +22,15 @@ EXCLUDED_DIRS = {
     ".git",
     ".venv",
     ".venv-portable",
+    ".ci-venv",
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
     "data",
+    # SAFE datasets are immutable evidence, not executable/source material;
+    # their integrity is checked by manifests and hashes, not by this text
+    # secret scanner. Pruning them keeps CLI audits bounded on full clones.
+    "datasets",
     "logs",
     "node_modules",
     "portable_runtime",

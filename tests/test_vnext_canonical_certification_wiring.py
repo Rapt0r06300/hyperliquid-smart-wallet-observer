@@ -5,7 +5,7 @@ from hl_observer.ops import final_economic_certification as certification
 
 def _otherwise_certifiable_vnext_payload() -> dict[str, object]:
     return {
-        "family": "lead_lag",
+        "family": "copy_vault",
         "economic_contract": {},
         "assumption_snapshot_hash": "a" * 64,
         "objective_status": "ATTEINT",
@@ -17,7 +17,7 @@ def _otherwise_certifiable_vnext_payload() -> dict[str, object]:
         "liquidatable_net": True,
         "dataset_provenance": {"dataset_fingerprint": "d" * 64},
         "parameter_freeze": {
-            "campaign_id": "freeze-lead-lag",
+        "campaign_id": "freeze-copy-vault",
             "frozen_at_ms": 1_000,
             "selected_before_final_evaluation": True,
             "parameters_sha256": "e" * 64,
@@ -55,7 +55,7 @@ def test_canonical_certification_rejects_train_only_vnext_candidate(monkeypatch)
     )
 
     result = certification.certify_campaign(
-        "lead_lag", _otherwise_certifiable_vnext_payload()
+        "copy_vault", _otherwise_certifiable_vnext_payload()
     )
 
     assert result["certified"] is False

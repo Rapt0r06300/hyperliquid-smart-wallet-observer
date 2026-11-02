@@ -20,6 +20,13 @@ def test_critical_qualification_and_collector_proofs_are_not_starved_by_main_pus
         assert "self-hosted" not in text
 
 
+def test_security_quality_does_not_fail_obsolete_cancelled_pr_runs():
+    text = _workflow("security-quality.yml")
+    assert "if: ${{ always() && needs.scope.result != 'cancelled' }}" in text
+    assert "CHANGE_SCOPE: ${{ needs.scope.outputs.mode }}" in text
+    assert 'if [ "$CHANGE_SCOPE" = catalog ]' in text
+
+
 
 def test_legacy_long_collectors_are_manual_only():
     for name in (
@@ -422,7 +429,7 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'resume_attempt:' in text
     assert 'default: "0"' in text
     assert "historical-retry:" in text
-    assert "needs.historical.result == 'failure'" in text
+    assert "needs.historical.result == 'failure' || needs.historical.result == 'cancelled'" in text
     assert "fromJSON(inputs.resume_attempt || '0') < 2" in text
     assert "gh workflow run reconcile-v2-catalog.yml" in text
     assert 'next=$((current + 1))' in text
@@ -433,8 +440,20 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'gh run view "$GITHUB_RUN_ID"' in retry
     assert 'historical_job_id' in retry
     assert '--log-failed' in retry
-    assert "grep -Eiq" in retry
-    assert "No explicit hosted-runner interruption evidence" in retry
+    assert "classify_hosted_termination" in retry
+    assert 'termination_class" != "INFRASTRUCTURE_STOP"' in retry
+    assert "No explicit hosted-runner interruption evidence" not in retry
+    assert "exit( code)? 143" not in retry
+
+
+def test_reconcile_does_not_delete_untracked_historical_artifacts_on_retry():
+    text = _workflow("reconcile-v2-catalog.yml")
+    commit = text.split("      - name: Commit reconciled catalog", 1)[1]
+    assert "git clean -fd -- catalog/data-index-parts" not in commit
+    assert "git ls-files --others --exclude-standard" in commit
+    assert "datasets/quarantine datasets/rejected" in commit
+    assert "datasets/sharded/quarantine datasets/sharded/rejected" in commit
+    assert "require manual quarantine review" in commit
 
 
 def test_reconcile_rebuilds_and_sha_verifies_metrics_after_mutating_tests():

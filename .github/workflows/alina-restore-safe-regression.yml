@@ -50,13 +50,17 @@ jobs:
         run: |
           set -euo pipefail
           export GIT_LFS_SKIP_SMUDGE=1
-          git clone --branch main --single-branch \
+          # A manually dispatched evidence run may target a non-main branch.
+          # Clone the exact ref that produced this run; cloning main here made
+          # feature-branch SHAs unverifiable and failed before the SAFE checks.
+          test -n "${GITHUB_REF_NAME:?missing GITHUB_REF_NAME}"
+          git clone --branch "$GITHUB_REF_NAME" --single-branch \
             "https://github.com/${GITHUB_REPOSITORY}.git" \
             "$RUNNER_TEMP/alina-fresh-clone"
           cd "$RUNNER_TEMP/alina-fresh-clone"
-          test "$(git branch --show-current)" = main
+          test "$(git branch --show-current)" = "$GITHUB_REF_NAME"
           git cat-file -e "${GITHUB_SHA}^{commit}"
-          git merge-base --is-ancestor "$GITHUB_SHA" HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fsck --full
           test -z "$(git status --porcelain)"
       - name: Exercise the one-file SAFE restore launcher from the fresh clone

@@ -26,6 +26,15 @@ MAX_RELEASE_WINDOW = 96
 TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PACK = re.compile(r"remote unpack failed|index-pack failed|tree.{0,80}too large|pack exceeds|pack.{0,80}too large|unpacker error", re.I)
 HISTORICAL_CHECKPOINT_DIR = Path("catalog/historical-reconcile-checkpoints")
+HISTORICAL_UNTRACKED_PATHS = (
+    "datasets/quarantine",
+    "datasets/rejected",
+    "datasets/sharded/quarantine",
+    "datasets/sharded/rejected",
+    "catalog/data-index-parts",
+    "catalog/quarantine-audit-parts",
+    str(HISTORICAL_CHECKPOINT_DIR),
+)
 
 
 def classify_hosted_termination(
@@ -60,8 +69,10 @@ def classify_hosted_termination(
             "runner shutdown",
             "runner was shut down",
             "runner is shutting down",
+            "runner has received a shutdown",
             "hosted runner stopped",
             "infrastructure shutdown",
+            "shutdown signal",
         )
     ):
         return "INFRASTRUCTURE_STOP"
@@ -84,7 +95,8 @@ def pending(inventory: str, index: dict, quarantine: set[str]) -> list[str]:
         tag = row.get("release_tag")
         if tag and (row.get("release_repository") or index.get("release_repository_default")) == REPO:
             known.add(str(row.get("run_manifest_release_tag") or aliases.get(tag) or tag))
-    found, result = set(), []
+    found: dict[str, str] = {}
+    result = []
     for line in inventory.splitlines():
         parts = line.split("\t")
         if len(parts) != 2:
@@ -92,9 +104,13 @@ def pending(inventory: str, index: dict, quarantine: set[str]) -> list[str]:
         tag, has_manifest = parts
         if not TAG.fullmatch(tag) or has_manifest not in ("true", "false"):
             raise ValueError("invalid release identity")
-        if tag not in found and has_manifest == "true" and tag.startswith(PREFIX) and tag not in known and tag not in quarantine:
+        previous = found.get(tag)
+        if previous is not None and previous != has_manifest:
+            raise ValueError("conflicting release inventory")
+        if previous is None:
+            found[tag] = has_manifest
+        if previous is None and has_manifest == "true" and tag.startswith(PREFIX) and tag not in known and tag not in quarantine:
             result.append(tag)
-        found.add(tag)
     return result
 
 
@@ -106,11 +122,33 @@ def run(*argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 
 def synced() -> None:
+    """Refresh ``origin/main`` without deleting interrupted-run evidence.
+
+    Historical reconciliation may be resumed after a hosted interruption.  A
+    hard reset or a path-scoped ``git clean`` would silently erase generated
+    receipts or shard material that has not yet been admitted as SAFE.  The
+    runner is disposable, but the checkout is still an evidence boundary: a
+    dirty or partially materialized checkout must fail closed and be replaced
+    by a fresh hosted checkout.
+    """
     run("git", "fetch", "origin", "main")
-    run("git", "reset", "--hard", "origin/main")
-    # Only untracked generated receipts in this ephemeral GitHub-hosted checkout.
-    run("git", "clean", "-fd", "--", "datasets/sharded", "catalog/data-index-parts",
-        "catalog/quarantine-audit-parts")
+    for diff_args, reason in (
+        (("git", "diff", "--quiet"), "unstaged tracked changes"),
+        (("git", "diff", "--cached", "--quiet"), "staged tracked changes"),
+    ):
+        if run(*diff_args, check=False).returncode != 0:
+            raise RuntimeError(
+                f"dirty historical checkout ({reason}); refusing destructive cleanup"
+            )
+    untracked = run(
+        "git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+        *HISTORICAL_UNTRACKED_PATHS,
+    ).stdout
+    if untracked:
+        raise RuntimeError(
+            "partial historical artifacts in checkout; refusing destructive cleanup"
+        )
+    run("git", "merge", "--ff-only", "origin/main")
 
 
 def remote_contains_head() -> bool:

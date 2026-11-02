@@ -153,6 +153,38 @@ def _git_head_blob(path: Path) -> bytes | None:
         return None
 
 
+def _git_head_sha(path: Path) -> str | None:
+    """Return the exact Git HEAD for *path*, or ``None`` outside a checkout.
+
+    Restore receipts must bind to the source checkout that launched the run.
+    Missing Git metadata remains explicitly absent; it is never replaced with a
+    guessed, cached, or user-supplied SHA.
+    """
+    try:
+        resolved = Path(path).resolve(strict=True)
+        root_result = subprocess.run(
+            ["git", "-C", str(resolved), "rev-parse", "--show-toplevel"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        if root_result.returncode != 0:
+            return None
+        root = Path(root_result.stdout.strip()).resolve(strict=True)
+        head_result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        sha = head_result.stdout.strip().lower()
+        return sha if head_result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
 def _matches_provenance_sha256(path: Path, expected_sha: str) -> bool:
     """Match exact bytes, or a Git-proven LF blob checked out as CRLF.
 
@@ -3742,10 +3774,16 @@ def restore_everything(
         else {}
     )
 
+    source_git_sha = _git_head_sha(Path.cwd())
     report: dict[str, Any] = {
         "schema": "alina.full_restore_report.v1",
         "repository": repository,
         "profile": profile,
+        # Bind the receipt to the checkout that launched this run.  Outside a
+        # Git checkout this stays null and the evidence adapter remains
+        # fail-closed.
+        "git_sha": source_git_sha,
+        "source_sha": source_git_sha,
         "preflight_verification_mode": preflight_verification_mode,
         "source_inventory_sha256": source_inventory_sha256,
         "destination": str(destination),

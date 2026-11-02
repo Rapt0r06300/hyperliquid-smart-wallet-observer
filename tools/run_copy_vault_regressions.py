@@ -23,9 +23,68 @@ COPY_VAULT_EXECUTABLE_SUITES: tuple[str, ...] = (
     "tests/test_copy_vault_v21_frozen.py",
 )
 
+COPY_VAULT_LOCAL_LAB_SUITES: tuple[str, ...] = (
+    "tests/test_alina_quant_lab_console.py",
+    "tests/test_copy_vault_campaign_lock.py",
+    "tests/test_copy_vault_leader_review.py",
+    "tests/test_copy_vault_local_lab.py",
+)
+
+COPY_VAULT_PIPELINE_SUITES: tuple[str, ...] = (
+    "tests/test_copy_vault_local_lab.py",
+    "tests/test_pipeline_copie_reel.py",
+)
+
+COPY_VAULT_EVIDENCE_SUITES: tuple[str, ...] = (
+    "tests/test_audit_live_ws_causal_capture.py",
+    "tests/test_build_copy_vault_restoration_evidence.py",
+    "tests/test_copy_vault_causal_evidence_contract.py",
+    "tests/test_copy_vault_closure_gate.py",
+    "tests/test_copy_vault_evidence_inventory.py",
+    "tests/test_copy_vault_hosted_receipt.py",
+    "tests/test_copy_vault_snapshot_contract.py",
+    "tests/test_copy_vault_task_closure_plans.py",
+)
+
 MODULE_TESTS: dict[str, tuple[str, ...]] = {
     "src/hl_observer/backtesting/copy_vault_executable.py":
         COPY_VAULT_EXECUTABLE_SUITES,
+    "src/hl_observer/backtesting/copy_vault_local_lab.py":
+        COPY_VAULT_LOCAL_LAB_SUITES,
+    "src/hl_observer/collection/l4_capture.py": (
+        "tests/test_l4_capture.py",
+        "tests/test_order_intent.py",
+    ),
+    "tools/pipeline_copie_reel.py":
+        COPY_VAULT_PIPELINE_SUITES,
+    "tools/audit_live_ws_causal_capture.py": (
+        "tests/test_audit_live_ws_causal_capture.py",
+        "tests/test_copy_vault_causal_evidence_contract.py",
+    ),
+    "tools/build_copy_vault_hosted_receipt.py":
+        ("tests/test_copy_vault_hosted_receipt.py",),
+    "tools/build_copy_vault_live_probe_receipt.py":
+        ("tests/test_build_copy_vault_live_probe_receipt.py",),
+    "tools/collect_cloud_copy_vault.py":
+        ("tests/test_collect_cloud_copy_vault.py",),
+    "tools/build_copy_vault_restoration_evidence.py":
+        ("tests/test_build_copy_vault_restoration_evidence.py",),
+    "tools/inventory_copy_vault_evidence.py":
+        ("tests/test_copy_vault_evidence_inventory.py",),
+    "tools/verify_copy_vault_closure_matrix.py":
+        ("tests/test_copy_vault_closure_gate.py",),
+    "tools/verify_copy_vault_causal_receipt.py":
+        ("tests/test_copy_vault_causal_evidence_contract.py",),
+    "tools/verify_copy_vault_snapshot_contract.py":
+        ("tests/test_copy_vault_snapshot_contract.py",),
+    "tools/verify_copy_vault_tasklist.py":
+        ("tests/test_copy_vault_task_closure_plans.py",),
+    "tools/run_copy_vault_regressions.py":
+        ("tests/test_copy_vault_regression_runner.py",),
+    ".github/workflows/ci.yml":
+        ("tests/test_ci_workflows.py",),
+    ".github/workflows/security-quality.yml":
+        ("tests/test_repository_governance.py",),
 }
 
 CRITICAL_PREFIXES = (

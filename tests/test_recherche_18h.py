@@ -216,7 +216,7 @@ def test_start_cree_run_sous_overnight_18h_et_resume_idempotent(tmp_path, monkey
 def test_preservation_14h_intacte():
     # le 14h ne doit pas être référencé/écrasé par le 18h
     root = Path(__file__).resolve().parents[1]
-    assert (root / "LANCER-RECHERCHE-14H.cmd").exists()
+    assert (root / "tools" / "launchers" / "LANCER-RECHERCHE-14H.cmd").exists()
     assert (root / "tools" / "recherche_14h.py").exists()
     txt = (root / "tools" / "recherche_18h.py").read_text(encoding="utf-8")
     assert "overnight_18h" in txt and "overnight_14h" not in txt

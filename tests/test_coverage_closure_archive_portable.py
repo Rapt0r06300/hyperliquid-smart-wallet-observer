@@ -104,6 +104,11 @@ def test_exclusion_policy_and_directory_pruning() -> None:
     assert not archive.est_exclu("tools/python/python311.zip")
     assert archive._dossier_a_elaguer("runtime/other")
     assert archive._dossier_a_elaguer("logs")
+    # GitHub-hosted workflows create a disposable virtualenv at this exact
+    # path. It is generated runner state, not portable runtime input, and may
+    # contain platform reparse links (for example lib64 on Linux).
+    assert archive._dossier_a_elaguer(".ci-venv")
+    assert archive._dossier_a_elaguer(".ci-venv/lib64")
     assert not archive._dossier_a_elaguer("runtime")
     assert not archive._dossier_a_elaguer("runtime/data")
     assert not archive._dossier_a_elaguer("runtime/data/sessions/run")
@@ -141,6 +146,27 @@ def test_listing_detects_inclusions_exclusions_private_key_and_case_collision(tm
     monkeypatch.setattr(archive.os, "walk", walk_with_case_collision)
     with pytest.raises(archive.ArchiveRefuseeError, match="collision Windows"):
         archive.lister_pour_archive(tmp_path)
+
+
+def test_listing_prunes_ci_virtualenv_before_reparse_guard(tmp_path) -> None:
+    """A hosted runner's disposable .ci-venv must never poison the archive scan."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    ci_venv = tmp_path / ".ci-venv"
+    (ci_venv / "lib").mkdir(parents=True)
+    (ci_venv / "lib" / "generated.py").write_text("# runner state\n", encoding="utf-8")
+    lib64 = ci_venv / "lib64"
+    try:
+        lib64.symlink_to(ci_venv / "lib", target_is_directory=True)
+    except OSError:
+        # The assertion below is still platform-independent; Windows runners
+        # and locked-down local filesystems may disallow symlink creation.
+        pass
+
+    inclus, exclus = archive.lister_pour_archive(tmp_path)
+    assert "src/main.py" in inclus
+    assert ".ci-venv/" in exclus
+    assert all(not item.startswith(".ci-venv/") for item in inclus)
 
 
 def test_metadata_neutralization_and_absolute_residuals(tmp_path) -> None:

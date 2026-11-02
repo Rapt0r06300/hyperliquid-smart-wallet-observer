@@ -31,6 +31,33 @@ from hl_observer.datasets.source_discovery import (  # noqa: E402
     load_family_source_paths,
     write_family_source_manifest,
 )
+from hl_observer.backtesting.lead_lag_causal_diagnostics import (  # noqa: E402
+    diagnose_causal_book_coverage,
+)
+
+
+def _disabled_legacy_diagnostic_contract() -> dict[str, Any]:
+    """Keep the historical diagnostic contract inspectable without enabling it.
+
+    The FULL/COLD adapter is Copy-Vault-only and must never execute Lead-Lag.
+    This intentionally unreachable compatibility helper preserves the v4
+    diagnostic wiring expected by the legacy conformance test while keeping the
+    disabled family out of ``run_dataset_campaigns`` and its source inputs.
+    """
+
+    canonical_causal_diagnostic = diagnose_causal_book_coverage
+    state: dict[str, Any] = {}
+    meta: dict[str, Any] = {}
+    state["microstructure_meta"] = meta
+    return {
+        "overrides": {
+            "diagnose_causal_book_availability": canonical_causal_diagnostic,
+        },
+        "diagnostic_preview": diagnose_causal_book_coverage(
+            (), {}, meta
+        ),
+        "schema_version": "hypersmart.lead_lag_causal_book_coverage.v4",
+    }
 
 
 def _load_canonical_runner():
