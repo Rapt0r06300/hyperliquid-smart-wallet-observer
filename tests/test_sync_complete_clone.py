@@ -454,7 +454,13 @@ def test_github_restore_workflow_runs_real_full_worktree_clone_contract():
     workflow = (ROOT / ".github" / "workflows" /
                 "alina-restore-safe-regression.yml").read_text(encoding="utf-8")
     assert "fresh-clone-contract:" in workflow
-    assert "git clone --branch main --single-branch" in workflow
+    # The hosted job must clone the ref that produced the run.  Requiring the
+    # literal ``main`` branch here would make feature-branch exact-SHA runs
+    # silently test a different checkout and invalidate their receipts.
+    assert 'git clone --branch "$GITHUB_REF_NAME" --single-branch' in workflow
+    assert 'test "$(git branch --show-current)" = "$GITHUB_REF_NAME"' in workflow
+    assert 'git cat-file -e "${GITHUB_SHA}^{commit}"' in workflow
+    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in workflow
     assert "git fsck --full" in workflow
     assert "ALINA_SYNC_COMPLETE.sh --skip-update --catalog-budget" in workflow
 
