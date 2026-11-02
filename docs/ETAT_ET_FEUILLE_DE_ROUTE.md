@@ -8,7 +8,7 @@
 
 La feuille de route d'audit et de correction la plus récente est :
 [`docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190.md`](superpowers/plans/2026-11-02-alina-audit-roadmap-190.md).
-Elle recense désormais **390 tâches distinctes** : 150 tâches ASF-001 à ASF-150, 40 tâches AUD-001 à AUD-040, et 200 tâches Copy-Vault ECO-001 à ECO-200 issues d'un audit économique et de recherches. Chaque tag a un objectif, un ancrage et une preuve attendue; aucune nouvelle tâche n'est présumée terminée. Le nom historique du fichier en `190.md` est conservé pour maintenir le lien, mais sa feuille de route active couvre bien 390 tâches. Le moteur économique doit geler chaque amélioration nette mesurée et continuer les recherches, sans cible fixe en dollars par jour. La spec canonique reste l'unique autorité normative.
+La feuille de route contient désormais **422 tâches distinctes** : 150 tâches ASF-001 à ASF-150, 72 constats d'audit AUD-001 à AUD-072, et 200 tâches économiques Copy-Vault ECO-001 à ECO-200. Le dernier audit (3 novembre 2026) a ajouté 32 constats, classés en bugs confirmés dans le code, blocages de preuve ou risques à reproduire. Chaque tâche conserve son tag et sa preuve exigée. Aucun nouveau tag n'est présumé réalisé. Le nom historique du fichier en `190.md` est conservé pour assurer la stabilité du lien, mais le document actif couvre 422 tâches. Le moteur économique doit geler chaque amélioration nette mesurée et continuer les recherches, sans cible fixe en dollars par jour. La spec canonique reste l'unique autorité normative.
 
 ## Autorités actuelles
 
