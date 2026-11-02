@@ -3,6 +3,15 @@ name: copy-vault-v2-smoke
 on:
   # Explicit diagnostic only; never auto-collect on a code push.
   workflow_dispatch:
+    inputs:
+      duration_s:
+        description: "Bounded real-observation duration in seconds"
+        required: false
+        default: "300"
+      max_vaults:
+        description: "Maximum number of vaults to observe"
+        required: false
+        default: "5"
 
 permissions:
   contents: write
@@ -15,6 +24,8 @@ jobs:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
       GH_TOKEN: ${{ github.token }}
+      INPUT_DURATION_S: "${{ github.event.inputs.duration_s || '300' }}"
+      INPUT_MAX_VAULTS: "${{ github.event.inputs.max_vaults || '5' }}"
       HL_ENABLE_MAINNET_EXECUTION: "0"
       REAL_MAINNET_TRADING: "false"
       HYPERSMART_ENABLE_REAL_ORDERS: "0"
@@ -25,7 +36,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: Rapt0r06300/hyperliquid-smart-wallet-observer
-          ref: main
+          ref: ${{ github.ref }}
           path: alina
           fetch-depth: 1
           persist-credentials: false
@@ -43,8 +54,19 @@ jobs:
           PYTHONPATH: alina/src:alina/tools:alina
         run: |
           set -euo pipefail
+          case "$INPUT_DURATION_S" in ''|*[!0-9]*) echo "duration_s must be an integer" >&2; exit 2 ;; esac
+          case "$INPUT_MAX_VAULTS" in ''|*[!0-9]*) echo "max_vaults must be an integer" >&2; exit 2 ;; esac
+          if [ "$INPUT_DURATION_S" -lt 90 ] || [ "$INPUT_DURATION_S" -gt 600 ]; then
+            echo "duration_s must be between 90 and 600 seconds" >&2
+            exit 2
+          fi
+          if [ "$INPUT_MAX_VAULTS" -lt 1 ] || [ "$INPUT_MAX_VAULTS" -gt 20 ]; then
+            echo "max_vaults must be between 1 and 20" >&2
+            exit 2
+          fi
           SOURCE_SHA="$(git -C alina rev-parse HEAD)"
-          python alina/tools/collect_cloud_copy_vault.py             --output "$RUNNER_TEMP/copy-vault-v2-smoke"             --duration-s 90             --collector-version "$SOURCE_SHA"             --max-vaults 5             --rotate-mb 16
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          python alina/tools/collect_cloud_copy_vault.py             --output "$RUNNER_TEMP/copy-vault-v2-smoke"             --duration-s "$INPUT_DURATION_S"             --collector-version "$SOURCE_SHA"             --max-vaults "$INPUT_MAX_VAULTS"             --rotate-mb 16
 
       # Validation is a collector finalization stage. Refresh only this policy
       # code after capture so a long-running collector cannot publish through a
@@ -53,7 +75,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: Rapt0r06300/hyperliquid-smart-wallet-observer
-          ref: main
+          ref: ${{ github.ref }}
           path: current-publisher
           fetch-depth: 1
           persist-credentials: false
@@ -63,5 +85,7 @@ jobs:
           PYTHONPATH: current-publisher/src
         run: |
           set -euo pipefail
+          POLICY_SHA="$(git -C current-publisher rev-parse HEAD)"
+          test "$POLICY_SHA" = "$GITHUB_SHA"
           TAG="copy-vault-smoke-v2-${GITHUB_RUN_ID}"
           python current-publisher/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/copy-vault-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Copy-Vault V2 smoke ${GITHUB_RUN_ID}"
