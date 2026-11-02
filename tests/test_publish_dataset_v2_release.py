@@ -1388,3 +1388,9 @@ def test_all_collection_publication_workflows_refresh_current_policy() -> None:
     assert "path: current-publisher" in copy_smoke
     assert "current-publisher/tools/publish_dataset_v2_release.py" in copy_smoke
     assert "python alina/tools/publish_dataset_v2_release.py" not in copy_smoke
+    assert 'duration_s:' in copy_smoke
+    assert 'max_vaults:' in copy_smoke
+    assert 'ref: ${{ github.ref }}' in copy_smoke
+    assert 'test "$SOURCE_SHA" = "$GITHUB_SHA"' in copy_smoke
+    assert 'test "$POLICY_SHA" = "$GITHUB_SHA"' in copy_smoke
+    assert 'duration_s must be between 90 and 600 seconds' in copy_smoke
