@@ -447,6 +447,21 @@ def test_network_git_commands_stream_progress_to_terminal(
     assert calls[0][1]["live_stderr"] is True
 
 
+def test_commit_command_uses_long_checkpoint_timeout(tmp_path: Path, monkeypatch):
+    calls = []
+
+    def fake_run_git(root, git, args, **kwargs):
+        calls.append((tuple(args), kwargs))
+        return subprocess.CompletedProcess([git, *args], 0, b"", None)
+
+    monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
+    task = Synchronizer(tmp_path)
+
+    task.command("commit", "-m", "checkpoint")
+
+    assert calls[0][1]["timeout"] == sync_module.COMMIT_TIMEOUT_SECONDS
+
+
 def git(root: Path, *args: str, allow_error: bool = False) -> str:
     completed = subprocess.run(
         ["git", *args], cwd=root, capture_output=True,
@@ -1176,7 +1191,7 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'call :download_source "tools/install_portable_git.ps1"' in source
     assert 'call :download_source "tools/alina_git_code_sync.py"' in source
     assert "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202" in source
-    assert "ALINA_LOCAL_ENGINE_SHA256=00d2b3039e269883c6cf71d1e4476db0885f38a51de1329769430d324a986597" in source
+    assert "ALINA_LOCAL_ENGINE_SHA256=514a9a39415cc0d63434b27169888bb38b8bec1ca6e5b057e8f9e127a82c32c4" in source
     assert "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b" in source
     assert "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297" in source
     assert "Get-FileHash" not in source

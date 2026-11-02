@@ -86,6 +86,10 @@ REPLAY_WORKTREE_TIMEOUT_SECONDS = 30
 # stalled authentication, SSH host-key prompt, or unreachable remote must
 # fail closed quickly instead of leaving a double-click apparently hung.
 DEFAULT_GIT_TIMEOUT_SECONDS = 300
+# A checkpoint may run Git LFS hooks and re-index a large partial clone.  It
+# must not inherit the short local-read budget, otherwise a completed commit
+# can be reported as failed after its ref was already advanced.
+COMMIT_TIMEOUT_SECONDS = 300
 REMOTE_READ_TIMEOUT_SECONDS = 20
 LOCAL_READ_TIMEOUT_SECONDS = 30
 # A second double-click should wait for a short, bounded hand-off instead of
@@ -776,6 +780,7 @@ class Synchronizer:
             "fast_path": None,
             "remote_sha_observed": None,
             "remote_snapshot_reused": False,
+            "commit_timeout_recovered": False,
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -790,6 +795,8 @@ class Synchronizer:
             timeout = (
                 REMOTE_READ_TIMEOUT_SECONDS
                 if verb in {"ls-remote", "remote"}
+                else COMMIT_TIMEOUT_SECONDS
+                if verb == "commit"
                 else DEFAULT_GIT_TIMEOUT_SECONDS
                 if verb in {"fetch", "push"}
                 else LOCAL_READ_TIMEOUT_SECONDS
@@ -1187,30 +1194,6 @@ class Synchronizer:
                 "aucun fetch supplementaire."
             )
             return existing_sha
-
-        # A local-ahead clone may already contain the exact remote commit in
-        # its object database while the tracking ref is absent or stale.  In
-        # that case a fetch only re-indexes the same objects and makes the
-        # safe launcher needlessly slow.  Prove the object exists first, then
-        # refresh only the local tracking ref; never manufacture a commit or
-        # accept a SHA that is not locally present.
-        object_present = self.command(
-            "cat-file", "-e", f"{observed_remote}^{{commit}}",
-            check=False, expected_returncodes=(1,),
-        ).returncode == 0
-        if object_present:
-            self.command(
-                "update-ref", "refs/remotes/origin/main", observed_remote,
-            )
-            self._inventory_cache = None
-            self._remote_snapshot_ready = True
-            self._remote_snapshot_sha = observed_remote
-            self.report["remote_snapshot_reused"] = True
-            self.say(
-                "[FETCH] Objet GitHub deja present localement; "
-                "ref origin/main rafraichi sans fetch supplementaire."
-            )
-            return observed_remote
 
         self.command(
             "fetch", "--progress", "--no-tags", "origin",
@@ -1744,10 +1727,35 @@ class Synchronizer:
             commit_message = _commit_subject(eligible, staged_diff)
             self.report["commit_message"] = commit_message
             self.say(f"Commit semantique du code admissible: {commit_message}")
-            self.command(
-                "commit", "-m",
-                commit_message,
-            )
+            try:
+                self.command(
+                    "commit", "-m",
+                    commit_message,
+                    timeout=COMMIT_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired as commit_timeout:
+                # Git can advance HEAD and then spend the remaining time in a
+                # post-commit/LFS hook.  Before declaring failure, re-inventory
+                # the exact admissible paths.  If none remain and HEAD moved,
+                # the checkpoint is already complete and it is safe to resume.
+                self._inventory_cache = None
+                post_staged, post_tracked, post_untracked = self._inventory()
+                post_eligible = self._check_candidates(
+                    post_staged, post_tracked, post_untracked,
+                    allow_protected_local=bool(allow_protected_local),
+                )
+                head_after = self.text("rev-parse", "HEAD")
+                head_before = str(self.report.get("head_before") or "")
+                if head_after == head_before or post_eligible:
+                    raise SyncBlocked(
+                        "Commit Git depasse; le checkpoint n'est pas confirme. "
+                        "Les changements restent conserves localement, aucun push."
+                    ) from commit_timeout
+                self.report["commit_timeout_recovered"] = True
+                self.say(
+                    "[CHECKPOINT] Commit Git confirme apres timeout de hook; "
+                    "reprise securisee avec le SHA local avance."
+                )
             self.report["local_commit_created"] = True
             self.report["checkpoint_sha"] = self.text("rev-parse", "HEAD")
             self.command(
