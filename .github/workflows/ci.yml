@@ -38,6 +38,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+          fetch-tags: false
+          filter: blob:none
       - name: Compare all changed files, fail closed if history is missing
         id: classify
         shell: bash
