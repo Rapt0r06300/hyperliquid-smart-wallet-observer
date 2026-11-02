@@ -1,13 +1,13 @@
 {
-  "matrix_digest": "91d8d19e0017785c54536ea9d2db06593bef3859b4a15d99c1657076eabf70db",
+  "matrix_digest": "3838e45508af7deb35fb196547922f90f9e6343b571d312dfbd99b9d87464591",
   "policy": "FILE_PRESENT and registry.wired are not IMPORT_OK, COLLECTOR_ACTIVE, SOURCE_HEALTHY, REPLAY_COMPATIBLE or PNL_READY",
   "runtime_evidence": {
-    "github_run_id": "41354681330",
-    "github_sha": "6437633c5d1b8ea5580ec24c3f466975ca7454d3",
+    "github_run_id": "41544869146",
+    "github_sha": "e27117e912dc30f943459b278b0bb3d2cba3ebe6",
     "paper_read_only": true,
     "path": "docs/source-capability-runtime.json",
     "real_execution": false,
-    "receipt_digest": "3e13c82c64e34e4b67671c6ae0ef4f21d24ecd285b10153302e7a16a8c638e20",
+    "receipt_digest": "1600af4e804966cca86ebee888f48c4fc1e72078319e4e207ac9a83b4e230999",
     "runner_kind": "github-hosted"
   },
   "schema_version": "alina.source_capability_matrix.v4",
@@ -51,6 +51,7 @@
             "src/hl_observer/alerts/coverage_runtime.py",
             "src/hl_observer/audit/pre_run_101_200.py",
             "src/hl_observer/backtesting/copy_vault_book_loader.py",
+            "src/hl_observer/backtesting/copy_vault_causal_selection.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/cross_venue_v5_persistence_train.py",
             "src/hl_observer/backtesting/lead_lag_bbo_repricing_train.py",
@@ -66,8 +67,7 @@
             "src/hl_observer/collection/hyperliquid_funding_history.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/collection/tick_dataset.py",
-            "src/hl_observer/collection/trade_reconciliation.py",
-            "src/hl_observer/config/frais_venues.py"
+            "src/hl_observer/collection/trade_reconciliation.py"
           ],
           "runtime_reason": "HYPERLIQUID_META_OK:235",
           "runtime_status": "HEALTHY",
@@ -379,7 +379,7 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-01T22:12:37.755969Z",
+      "runtime_observed_at_utc": "2026-11-02T23:44:16.862700Z",
       "runtime_reason": "HYPERLIQUID_META_OK:235",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
@@ -410,7 +410,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/archive_library.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -437,7 +437,7 @@
             "src/hl_observer/hyperliquid/rest_info_client.py",
             "src/hl_observer/ops/pre_run_cross_venue_466_545.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -464,7 +464,7 @@
             "src/hl_observer/datasets/archive_library.py",
             "src/hl_observer/datasets/catalog_profiler.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -491,7 +491,7 @@
             "src/hl_observer/ops/lead_lag_causal_gap_diagnostic.py",
             "src/hl_observer/ops/validation_portable.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -518,7 +518,7 @@
             "src/hl_observer/ops/edge_decay.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -545,7 +545,7 @@
             "src/hl_observer/collection/tick_dataset.py",
             "src/hl_observer/collection/trade_reconciliation.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -572,7 +572,7 @@
             "src/hl_observer/collection/binance_market_context.py",
             "src/hl_observer/collection/hf_recorder_multiplex.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -599,7 +599,7 @@
             "src/hl_observer/collection/trade_reconciliation.py",
             "src/hl_observer/config/settings.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -626,7 +626,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/data_sources/official_archive_backfill.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -746,8 +746,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-01T22:12:37.755969Z",
-      "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=58:l2_full=205:l2_partial=0:l2_exploitable=205",
+      "runtime_observed_at_utc": "2026-11-02T23:44:16.862700Z",
+      "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=60:l2_full=216:l2_partial=0:l2_exploitable=216",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "binance"
@@ -772,7 +772,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -792,7 +792,7 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -819,7 +819,7 @@
             "src/hl_observer/research/multi_venue.py",
             "src/hl_observer/research/run_factory.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -837,7 +837,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -860,7 +860,7 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -887,7 +887,7 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -914,7 +914,7 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -941,7 +941,7 @@
             "src/hl_observer/hyperliquid/rest_info_client.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -966,7 +966,7 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1030,8 +1030,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-01T22:12:37.755969Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793571104636;channels=bbo:25815,l2:34814,trades:9321",
+      "runtime_observed_at_utc": "2026-11-02T23:44:16.862700Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999021;channels=bbo:1060,l2:1522,trades:214",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "bybit"
@@ -1056,7 +1056,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1073,13 +1073,14 @@
             "src/hl_observer/data_sources/official_archive_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "l2": {
           "evidence": [
             "src/hl_observer/autoscan.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/collection/market_capture_tiers.py",
             "src/hl_observer/collection/native_market_tape.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
@@ -1098,7 +1099,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1114,12 +1115,13 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "recovery": {
           "evidence": [
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/collection/__init__.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/collection/okx_market_data.py",
@@ -1135,12 +1137,13 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
           "evidence": [
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/collection/native_market_tape.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/collection/native_venue_market.py",
@@ -1159,15 +1162,15 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/markets/venues/symbols.py",
             "src/hl_observer/ops/lab_alpha.py",
-            "src/hl_observer/venues/okx.py",
-            "src/hl_observer/venues/registre_venues.py"
+            "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
           "evidence": [
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/collection/market_capture_tiers.py",
             "src/hl_observer/collection/native_funding_history.py",
             "src/hl_observer/collection/native_market_tape.py",
@@ -1186,15 +1189,15 @@
             "src/hl_observer/markets/venues/okx.py",
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/ops/preuve_de_vie.py",
-            "src/hl_observer/research/multi_venue.py",
-            "src/hl_observer/research/run_factory.py"
+            "src/hl_observer/research/multi_venue.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "trades": {
           "evidence": [
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/collection/market_capture_tiers.py",
             "src/hl_observer/collection/native_market_tape.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
@@ -1213,16 +1216,16 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/ops/preuve_de_vie.py",
-            "src/hl_observer/research/multi_venue.py",
-            "src/hl_observer/research/run_factory.py"
+            "src/hl_observer/research/multi_venue.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
           "evidence": [
             "src/hl_observer/autoscan.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/collection/native_funding_history.py",
             "src/hl_observer/collection/native_market_tape.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
@@ -1238,13 +1241,14 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
       },
       "evidence_files": [
         "src/hl_observer/autoscan.py",
+        "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
         "src/hl_observer/collection/__init__.py",
         "src/hl_observer/collection/market_capture_tiers.py",
         "src/hl_observer/collection/native_funding_history.py",
@@ -1294,8 +1298,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-01T22:12:37.755969Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817991;channels=bbo:1346,l2:1083,trades:1629",
+      "runtime_observed_at_utc": "2026-11-02T23:44:16.862700Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662999025;channels=bbo:1368,l2:1371,trades:479",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "okx"
@@ -1316,10 +1320,9 @@
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/collection/native_venue_market.py",
             "src/hl_observer/collection/okx_market_data.py",
-            "src/hl_observer/control_plane/campaign_adapters.py",
-            "src/hl_observer/data_sources/market_backfill.py"
+            "src/hl_observer/control_plane/campaign_adapters.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1346,7 +1349,7 @@
             "src/hl_observer/collection/native_venue_market.py",
             "src/hl_observer/collection/okx_market_data.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1359,9 +1362,11 @@
             "src/hl_observer/arbitrage/hyperliquid_cex_spread_scanner.py",
             "src/hl_observer/audit/pre_run_001_100.py",
             "src/hl_observer/backtesting/ab_flag_replay.py",
+            "src/hl_observer/backtesting/copy_vault_closure_gate.py",
             "src/hl_observer/backtesting/copy_vault_executable.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
             "src/hl_observer/backtesting/cross_venue_v5_experiment.py",
             "src/hl_observer/backtesting/lead_lag_causal_autopsy.py",
@@ -1369,11 +1374,9 @@
             "src/hl_observer/backtesting/lead_lag_multiasset_tape.py",
             "src/hl_observer/backtesting/lead_lag_queue_replay.py",
             "src/hl_observer/backtesting/scenario_search.py",
-            "src/hl_observer/cli.py",
-            "src/hl_observer/collection/binance_depth_live.py",
-            "src/hl_observer/collection/coin_universe.py"
+            "src/hl_observer/cli.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1384,6 +1387,7 @@
             "src/hl_observer/audit/pre_run_001_100.py",
             "src/hl_observer/audit/pre_run_101_200.py",
             "src/hl_observer/backtesting/ab_flag_replay.py",
+            "src/hl_observer/backtesting/copy_vault_closure_gate.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py",
             "src/hl_observer/backtesting/lead_lag_causal_autopsy.py",
@@ -1397,10 +1401,9 @@
             "src/hl_observer/collection/trade_reconciliation.py",
             "src/hl_observer/config/frais_venues.py",
             "src/hl_observer/config/settings.py",
-            "src/hl_observer/control_plane/campaign_adapters.py",
-            "src/hl_observer/data_sources/__init__.py"
+            "src/hl_observer/control_plane/campaign_adapters.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1412,6 +1415,7 @@
             "src/hl_observer/backtesting/copy_vault_executable.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/backtesting/lead_lag.py",
             "src/hl_observer/backtesting/lead_lag_causal_diagnostic.py",
             "src/hl_observer/backtesting/lead_lag_causal_diagnostics.py",
@@ -1424,10 +1428,9 @@
             "src/hl_observer/collection/partitioned_tick_dataset.py",
             "src/hl_observer/collection/tick_dataset.py",
             "src/hl_observer/config/settings.py",
-            "src/hl_observer/control_plane/campaign_adapters.py",
-            "src/hl_observer/copying/v9_paper_pipeline.py"
+            "src/hl_observer/control_plane/campaign_adapters.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1443,18 +1446,18 @@
             "src/hl_observer/backtest/runtime_parity.py",
             "src/hl_observer/backtesting/ab_flag_replay.py",
             "src/hl_observer/backtesting/boucle_objectif_replay.py",
+            "src/hl_observer/backtesting/copy_vault_closure_gate.py",
             "src/hl_observer/backtesting/copy_vault_executable.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/backtesting/copy_vault_universe_integrity.py",
             "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
             "src/hl_observer/backtesting/copy_vault_vnext_integrity.py",
             "src/hl_observer/backtesting/copy_vault_vnext_train.py",
-            "src/hl_observer/backtesting/lead_lag_causal_autopsy.py",
-            "src/hl_observer/backtesting/lead_lag_evidence.py",
-            "src/hl_observer/backtesting/lead_lag_multiasset_tape.py"
+            "src/hl_observer/backtesting/lead_lag_causal_autopsy.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1468,20 +1471,20 @@
             "src/hl_observer/backtesting/anti_lookahead_pipeline.py",
             "src/hl_observer/backtesting/anti_overfit_gate.py",
             "src/hl_observer/backtesting/backtest_live_parity.py",
+            "src/hl_observer/backtesting/copy_vault_closure_gate.py",
             "src/hl_observer/backtesting/copy_vault_executable.py",
             "src/hl_observer/backtesting/copy_vault_generalization.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/backtesting/copy_vault_universe_integrity.py",
             "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
             "src/hl_observer/backtesting/copy_vault_vnext_integrity.py",
             "src/hl_observer/backtesting/copy_vault_vnext_train.py",
             "src/hl_observer/backtesting/economic_vnext_pack.py",
-            "src/hl_observer/backtesting/lead_lag.py",
-            "src/hl_observer/backtesting/lead_lag_causal_autopsy.py",
-            "src/hl_observer/backtesting/lead_lag_causal_diagnostic.py"
+            "src/hl_observer/backtesting/lead_lag.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1498,17 +1501,17 @@
             "src/hl_observer/backtesting/anti_lookahead_pipeline.py",
             "src/hl_observer/backtesting/anti_overfit_gate.py",
             "src/hl_observer/backtesting/backtest_live_parity.py",
+            "src/hl_observer/backtesting/copy_vault_closure_gate.py",
             "src/hl_observer/backtesting/copy_vault_executable.py",
             "src/hl_observer/backtesting/copy_vault_generalization.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
             "src/hl_observer/backtesting/copy_vault_vnext_integrity.py",
-            "src/hl_observer/backtesting/copy_vault_vnext_train.py",
-            "src/hl_observer/backtesting/cross_venue_v5_experiment.py",
-            "src/hl_observer/backtesting/experiment_harness.py"
+            "src/hl_observer/backtesting/copy_vault_vnext_train.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1517,8 +1520,13 @@
             "src/hl_observer/agent_tools/readonly_inspectors.py",
             "src/hl_observer/analysis/negative_pnl_auditor.py",
             "src/hl_observer/audit/pre_run_001_100.py",
+            "src/hl_observer/backtesting/copy_vault_closure_gate.py",
+            "src/hl_observer/backtesting/copy_vault_evidence_inventory.py",
             "src/hl_observer/backtesting/copy_vault_executable.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
+            "src/hl_observer/backtesting/copy_vault_performance_contract.py",
+            "src/hl_observer/backtesting/copy_vault_snapshot_contract.py",
+            "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
             "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
             "src/hl_observer/backtesting/copy_vault_vnext_train.py",
             "src/hl_observer/backtesting/cross_venue_v5_experiment.py",
@@ -1528,14 +1536,9 @@
             "src/hl_observer/backtesting/lead_lag_queue_replay.py",
             "src/hl_observer/backtesting/lead_lag_shadow.py",
             "src/hl_observer/backtesting/lead_lag_shadow_economics.py",
-            "src/hl_observer/backtesting/train_statistics.py",
-            "src/hl_observer/cli.py",
-            "src/hl_observer/collection/binance_depth_live.py",
-            "src/hl_observer/collection/binance_funding_history.py",
-            "src/hl_observer/collection/binance_market_context.py",
-            "src/hl_observer/collection/depth_capacity.py"
+            "src/hl_observer/backtesting/train_statistics.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1560,10 +1563,15 @@
         "src/hl_observer/backtesting/anti_overfit_gate.py",
         "src/hl_observer/backtesting/backtest_live_parity.py",
         "src/hl_observer/backtesting/boucle_objectif_replay.py",
+        "src/hl_observer/backtesting/copy_vault_closure_gate.py",
+        "src/hl_observer/backtesting/copy_vault_evidence_inventory.py",
         "src/hl_observer/backtesting/copy_vault_executable.py",
         "src/hl_observer/backtesting/copy_vault_generalization.py",
         "src/hl_observer/backtesting/copy_vault_local_lab.py",
+        "src/hl_observer/backtesting/copy_vault_performance_contract.py",
         "src/hl_observer/backtesting/copy_vault_protocol.py",
+        "src/hl_observer/backtesting/copy_vault_snapshot_contract.py",
+        "src/hl_observer/backtesting/copy_vault_task_closure_plans.py",
         "src/hl_observer/backtesting/copy_vault_universe_integrity.py",
         "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
         "src/hl_observer/backtesting/copy_vault_vnext_integrity.py",
@@ -1635,12 +1643,7 @@
         "src/hl_observer/copying/signal_detector.py",
         "src/hl_observer/copying/simulation_pipeline.py",
         "src/hl_observer/copying/v9_paper_pipeline.py",
-        "src/hl_observer/copying/viral_bot_engine.py",
-        "src/hl_observer/data_quality/gate_v5.py",
-        "src/hl_observer/data_sources/__init__.py",
-        "src/hl_observer/data_sources/acquisition_engine.py",
-        "src/hl_observer/data_sources/historical_backfill_engine.py",
-        "src/hl_observer/data_sources/market_backfill.py"
+        "src/hl_observer/copying/viral_bot_engine.py"
       ],
       "native_entrypoints": [
         "src/hl_observer/venues/gate.py"
@@ -1655,8 +1658,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-01T22:12:37.755969Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570808086;channels=bbo:1486,l2:918,trades:547",
+      "runtime_observed_at_utc": "2026-11-02T23:44:16.862700Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998962;channels=bbo:1318,l2:1065,trades:82",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "gate"
@@ -1673,7 +1676,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1688,7 +1691,7 @@
             "src/hl_observer/config/frais_venues.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1703,7 +1706,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1716,7 +1719,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1730,7 +1733,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1747,7 +1750,7 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1765,7 +1768,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1782,7 +1785,7 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1799,7 +1802,7 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1836,8 +1839,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-01T22:12:37.755969Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793570817943;channels=bbo:1329,l2:1005,trades:1737",
+      "runtime_observed_at_utc": "2026-11-02T23:44:16.862700Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1793662998985;channels=bbo:1009,l2:1127,trades:1273",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "bitget"
