@@ -4,6 +4,12 @@
 >
 > L'ancien contenu de ce fichier, daté de juillet 2026, était devenu contradictoire avec le code, les 775 optimisations scellées, le scope V2 et les campagnes économiques ajoutées depuis. Il reste intégralement disponible dans l'historique Git antérieur à cette mise à jour, mais ne doit plus être utilisé comme état courant.
 
+## Nouvelle feuille de route d'exécution (2 novembre 2026)
+
+La feuille de route d'audit et de correction la plus récente est :
+[`docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190.md`](superpowers/plans/2026-11-02-alina-audit-roadmap-190.md).
+Elle recense **150 tâches principales (ASF-001 à ASF-150)** et **40 tâches issues de l'audit GitHub (AUD-001 à AUD-040)**, avec action et preuve exigée. Aucun de ces tags n'est présumé terminé. Le moteur économique doit geler chaque amélioration nette mesurée et continuer les recherches, sans cible fixe en dollars par jour. La spec canonique reste l'unique autorité normative.
+
 ## Autorités actuelles
 
 1. **État lisible courant** : `docs/CURRENT_STATE.md`.
