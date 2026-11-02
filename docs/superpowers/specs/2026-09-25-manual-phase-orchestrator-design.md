@@ -33,13 +33,7 @@ reactivation; stored evidence never makes a paused family active. Environment
 variables cannot broaden this scope. The contract remains PAPER / READ-ONLY /
 FAIL-CLOSED and does not stop collectors or restoration processes.
 
-The only current economic target is **at least +5 USD net/day for Copy-Vault
-with 200 USD paper capital**. Evaluate it only at the terminal economic gate,
-after technical corrections and OOS/forward-paper evidence. This target is not
-a prerequisite for earlier work to report completion, cannot be forced by
-changing costs or evidence gates, and is never a profit guarantee. Use only the
-honest verdicts `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, and
-`REJECTED`.
+**Current economic research objective (superseding historical fixed targets):** Copy-Vault is improved continuously, with **no fixed USD/day profit target and no terminal profit threshold**. Preserve every measured positive after-cost improvement, however small, as an immutable, reproducible `FREEZE_EXPLORATORY` record bound to exact code SHA, data identity, configuration, windows, seed, risk and complete execution costs. Such a freeze is research evidence, **not** proof of profitability. Promote to `CHAMPION_VERIFIED` only with independent frozen OOS and strictly post-freeze forward-paper evidence, adequate coverage, closed/liquidable positions, causal event timing, placebo/no-lookahead tests and all applicable safety/economic gates. Continue Discovery after every freeze or failure; preserve previous champions and negative trials without rewriting history. The legacy +4/+5 USD/day milestones and capital illustrations below are historical research references only, **not** current stop conditions or automatic promotion thresholds. Existing hard-coded target-dependent tooling must be reconciled and tested before it can implement this updated policy. Use only the honest verdicts `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, and `REJECTED`; do not lower requirements to force a pass.
 
 ### Operator launchers and durable research history
 
