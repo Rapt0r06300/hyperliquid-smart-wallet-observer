@@ -112,6 +112,8 @@ def build_receipt(
         missing.append("SELECTION_FILE_MISSING")
 
     causal_audit: dict[str, Any] | None = None
+    collector_head_sha = str(summary.get("collector_head_sha") or "").lower()
+    collector_sha_matches = collector_head_sha == head_sha.lower()
     if causal_rows_path is not None:
         causal_audit = audit_live_ws_causal_capture(causal_rows_path)
 
@@ -126,9 +128,12 @@ def build_receipt(
         evidence_kind == "safe_replay"
         and causal_audit is not None
         and causal_audit.get("validation", {}).get("status") == "PROVEN"
+        and collector_sha_matches
     )
     if not causal_proven:
         missing.append("ROW_LEVEL_CAUSAL_LIVE_WS_RECEIPT_MISSING")
+        if causal_rows_path is not None and not collector_sha_matches:
+            missing.append("COLLECTOR_HEAD_SHA_MISSING_OR_MISMATCH")
         if causal_audit is not None:
             missing.append("CAUSAL_ROW_LEVEL_AUDIT_NOT_PROVEN")
     missing.append("L4_POINT_IN_TIME_PAIRING_MISSING")
@@ -152,6 +157,8 @@ def build_receipt(
                 "selection_file_sha256": selection_sha,
                 "causal_rows_path": str(causal_rows_path),
                 "causal_rows_sha256": causal_audit["capture"]["source_sha256"],
+                "collector_head_sha": collector_head_sha or None,
+                "collector_head_sha_matches": collector_sha_matches,
                 "causal_row_count": causal_rows,
                 "causal_audit": causal_audit,
             },
@@ -199,6 +206,8 @@ def build_receipt(
                 if causal_audit is not None
                 else None
             ),
+            "collector_head_sha": collector_head_sha or None,
+            "collector_head_sha_matches": collector_sha_matches,
             "causal_audit": causal_audit,
             "missing_evidence": sorted(set(missing)),
         },

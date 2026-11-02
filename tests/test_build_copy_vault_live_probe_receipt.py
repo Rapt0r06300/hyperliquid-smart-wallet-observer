@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from tools.build_copy_vault_live_probe_receipt import build_receipt
@@ -116,21 +117,26 @@ def test_proven_causal_rows_bind_a_safe_replay_receipt(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    summary = {
+        "schema": "alina.copy_vault_cloud_window.v2",
+        "collection_run_id": "run-1",
+        "collector_head_sha": head_sha,
+        "read_only": True,
+        "real_execution": False,
+        "live_fill_counts": {"vault": 1},
+        "l2_frames": 1,
+        "l2_diagnostics": {},
+        "subscription_diagnostics": {},
+    }
     receipt = build_receipt(
-        {
-            "schema": "alina.copy_vault_cloud_window.v2",
-            "collection_run_id": "run-1",
-            "read_only": True,
-            "real_execution": False,
-            "live_fill_counts": {"vault": 1},
-            "l2_frames": 1,
-            "l2_diagnostics": {},
-            "subscription_diagnostics": {},
-        },
+        summary,
         summary_path=summary_path,
         selection_path=selection_path,
         causal_rows_path=causal_path,
-        head_sha="a" * 40,
+        head_sha=head_sha,
     )
     assert receipt["schema"] == "hypersmart.copy_vault_live_ws_causal_receipt.v1"
     assert receipt["evidence_status"] == "PROVEN"
