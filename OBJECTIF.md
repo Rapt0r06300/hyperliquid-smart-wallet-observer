@@ -22,7 +22,7 @@ Ce sont les rôles attendus. Le nom d'un lanceur ne prouve pas à lui seul que s
 
 Le labo conserve chaque mesure et variante avec paramètres, identité des données, fenêtre, seed, coûts, rapport et statut ; une meilleure variante ne supprime pas les précédentes. Ne jamais inventer un prix, fill, frais, timestamp, zéro ou PnL. Les statuts restent `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE` ou `REJECTED`.
 
-Le parcours canonique est `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le +5 USD net/jour sur 200 USD paper est la cible économique terminale, évaluée après les réparations et contrôles ; ce n'est ni une promesse ni un seuil qui autorise à relâcher les gates. Un backtest positif, un candidat gelé ou un workflow vert ne prouve pas la rentabilité.
+Le parcours canonique est `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Aucun montant de bénéfice quotidien n'est une cible terminale : geler chaque amélioration nette mesurée puis continuer la recherche. Un gel exploratoire n'est pas une certification; seul un champion validé après OOS/forward post-freeze et coûts complets est promouvable. Les anciennes cibles à +4/+5 USD sont historiques. Un backtest positif, un candidat gelé ou un workflow vert ne prouve pas la rentabilité.
 
 ## Travail local
 
