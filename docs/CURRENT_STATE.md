@@ -78,9 +78,7 @@ Au gel de certification du 12/08/2026, sous un ancien périmètre multi-familles
 - Lead-Lag : `MORE_DATA` ;
 - Cross-Venue v2 : `KILL`.
 
-Ces verdicts ne décrivent pas l'état économique actuel. La cible active est
-Copy-Vault seul : **au moins +5 USD nets/jour sur 200 USD paper**, à mesurer
-uniquement après réparations techniques et preuves OOS/forward complètes.
+Ces verdicts ne décrivent pas l'état économique actuel. L'objectif économique actif est **l'amélioration continue de Copy-Vault, sans seuil quotidien fixe**. Chaque gain NET mesuré est gelé comme expérience reproductible; seuls les champions validés par OOS et forward post-freeze disjoints, coûts complets, causalité et gates de risque sont promouvables. La recherche reprend après chaque gel.
 Un résultat exploratoire, TRAIN, synthétique ou simplement observé n'est pas
 une preuve de PnL ; le statut actuel doit venir du dernier rapport valide.
 
