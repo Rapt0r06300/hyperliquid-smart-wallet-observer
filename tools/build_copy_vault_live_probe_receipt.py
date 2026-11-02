@@ -16,7 +16,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.audit_live_ws_causal_capture import audit as audit_live_ws_causal_capture
+
 SCHEMA = "hypersmart.copy_vault_live_probe_receipt.v1"
+CAUSAL_SCHEMA = "hypersmart.copy_vault_live_ws_causal_receipt.v1"
 
 
 def _sha256(path: Path) -> str:
@@ -63,6 +69,7 @@ def build_receipt(
     selection_path: Path | None,
     head_sha: str,
     evidence_kind: str = "safe_replay",
+    causal_rows_path: Path | None = None,
 ) -> dict[str, Any]:
     if evidence_kind not in {"safe_replay", "l4_capture"}:
         raise ValueError("evidence_kind must be safe_replay or l4_capture")
@@ -104,11 +111,55 @@ def build_receipt(
     if selection_path is None:
         missing.append("SELECTION_FILE_MISSING")
 
+    causal_audit: dict[str, Any] | None = None
+    if causal_rows_path is not None:
+        causal_audit = audit_live_ws_causal_capture(causal_rows_path)
+
     # A cloud summary does not contain row-level ACK/epoch/native identity.
-    # Even a positive live_fill_counts value is therefore not causal proof.
-    causal_rows = 0
-    missing.append("ROW_LEVEL_CAUSAL_LIVE_WS_RECEIPT_MISSING")
+    # A separate row-level audit is accepted only for the safe-replay role and
+    # only when that audit itself is PROVEN.  No count is inferred from the
+    # summary and an empty/invalid file remains UNMEASURABLE.
+    causal_rows = int(
+        (causal_audit or {}).get("capture", {}).get("causal_row_count") or 0
+    )
+    causal_proven = bool(
+        evidence_kind == "safe_replay"
+        and causal_audit is not None
+        and causal_audit.get("validation", {}).get("status") == "PROVEN"
+    )
+    if not causal_proven:
+        missing.append("ROW_LEVEL_CAUSAL_LIVE_WS_RECEIPT_MISSING")
+        if causal_audit is not None:
+            missing.append("CAUSAL_ROW_LEVEL_AUDIT_NOT_PROVEN")
     missing.append("L4_POINT_IN_TIME_PAIRING_MISSING")
+
+    if causal_proven:
+        claims = dict(causal_audit["claims"])
+        receipt: dict[str, Any] = {
+            "schema": CAUSAL_SCHEMA,
+            "kind": evidence_kind,
+            "head_sha": head_sha,
+            "collection_run_id": run_id,
+            "evidence_status": "PROVEN",
+            "conclusion": "PROVEN",
+            "paper_read_only": True,
+            "real_execution": False,
+            "claims": claims,
+            "observation": {
+                "summary_path": str(summary_path),
+                "summary_sha256": _sha256(summary_path),
+                "selection_path": str(selection_path) if selection_path is not None else None,
+                "selection_file_sha256": selection_sha,
+                "causal_rows_path": str(causal_rows_path),
+                "causal_rows_sha256": causal_audit["capture"]["source_sha256"],
+                "causal_row_count": causal_rows,
+                "causal_audit": causal_audit,
+            },
+            "receipt_sha256": "",
+        }
+        receipt["receipt_sha256"] = _digest(receipt)
+        return receipt
+
     receipt: dict[str, Any] = {
         "schema": SCHEMA,
         "kind": evidence_kind,
@@ -142,6 +193,13 @@ def build_receipt(
             "l2_diagnostics": l2 if isinstance(l2, dict) else None,
             "subscription_diagnostics": subscription if isinstance(subscription, dict) else None,
             "causal_row_count": causal_rows,
+            "causal_rows_path": str(causal_rows_path) if causal_rows_path is not None else None,
+            "causal_rows_sha256": (
+                causal_audit.get("capture", {}).get("source_sha256")
+                if causal_audit is not None
+                else None
+            ),
+            "causal_audit": causal_audit,
             "missing_evidence": sorted(set(missing)),
         },
         "next_safe_action": (
@@ -158,6 +216,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--selection-file", type=Path)
+    parser.add_argument(
+        "--causal-rows",
+        type=Path,
+        help="Optional row-level causal LIVE_WS JSONL emitted by the collector.",
+    )
     parser.add_argument(
         "--evidence-kind",
         choices=("safe_replay", "l4_capture"),
@@ -177,6 +240,7 @@ def main() -> int:
             selection_path=args.selection_file,
             head_sha=_git_head(args.repo_root),
             evidence_kind=args.evidence_kind,
+            causal_rows_path=args.causal_rows,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(
