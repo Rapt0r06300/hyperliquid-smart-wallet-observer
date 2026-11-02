@@ -107,6 +107,7 @@ MAX_ACCOUNTING_BACKFILL_REQUESTS_PER_CHANNEL = 8
 MAX_L2_DIAGNOSTIC_RECORDS = 256
 SUBSCRIPTION_ACK_TIMEOUT_S = 10.0
 SUBSCRIPTION_TIMEOUT_POLL_S = 0.1
+MAX_CAUSAL_LIVE_ROWS = 100_000
 
 
 def _windows_io_path(path: str | Path) -> Path:
@@ -120,6 +121,14 @@ def _windows_io_path(path: str | Path) -> Path:
     if absolute.startswith("\\\\"):
         return Path("\\\\?\\UNC\\" + absolute[2:])
     return Path("\\\\?\\" + absolute)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class RestWeightPacer:
@@ -460,6 +469,72 @@ def userfills_envelope(
         ),
         fills,
     )
+
+
+def causal_live_row(
+    fill: Mapping[str, Any],
+    *,
+    vault: str,
+    ack_received_at_ms: int,
+    capture_epoch: str,
+    cutoff_ms: int | None = None,
+) -> dict[str, Any] | None:
+    """Return one bounded causal LIVE_WS row, or ``None`` when unverifiable.
+
+    The row is emitted only after the collector has already separated the
+    snapshot, checked the native fill identity and rejected duplicates.  The
+    function deliberately does not infer missing timestamps or identities.
+    """
+    if not isinstance(fill, Mapping):
+        return None
+    if fill.get("source") != "LIVE_WS" or fill.get("isSnapshot") is not False:
+        return None
+    try:
+        ack_ms = int(ack_received_at_ms)
+        ts_ms = int(fill.get("ts_ms"))
+        received_ms = int(fill.get("received_at_ms"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if min(ack_ms, ts_ms, received_ms) <= 0 or received_ms < ack_ms:
+        return None
+    epoch = str(capture_epoch or "").strip()
+    if not epoch:
+        return None
+    native_fields = ("coin", "tid")
+    if any(fill.get(field) in (None, "") for field in native_fields):
+        return None
+    stable_event_id = str(fill.get("stable_event_id") or "").strip()
+    if not stable_event_id:
+        return None
+    row = {
+        "source": "LIVE_WS",
+        "vault": str(vault).strip().lower(),
+        "coin": fill.get("coin"),
+        "px": fill.get("px"),
+        "sz": fill.get("sz"),
+        "dir": fill.get("dir"),
+        "ts_ms": ts_ms,
+        "received_at_ms": received_ms,
+        "ack_received_at_ms": ack_ms,
+        "capture_epoch": epoch,
+        "post_ack": received_ms >= ack_ms,
+        "isSnapshot": False,
+        "hash": fill.get("hash"),
+        "tid": fill.get("tid"),
+        "oid": fill.get("oid"),
+        "stable_event_id": stable_event_id,
+        "connection_id": fill.get("connection_id"),
+        "frame_sequence": fill.get("frame_sequence"),
+        "event_index_in_frame": fill.get("event_index_in_frame"),
+        "snapshot_excluded": True,
+        "anti_double_count_checked": True,
+    }
+    if cutoff_ms is not None:
+        try:
+            row["cutoff_ms"] = int(cutoff_ms)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return row
 
 
 def _valid_l2_levels(levels: Any) -> bool:
@@ -2614,12 +2689,16 @@ async def _socket_group(
     subscription_diagnostics: dict[str, int],
     snapshot_fill_ids: dict[str, set[str]] | None = None,
     connection_heartbeats: dict[str, Any] | None = None,
+    causal_live_rows: dict[str, list[dict[str, Any]]] | None = None,
+    capture_epoch: str | None = None,
 ) -> None:
     attempt = 0
     known = {vault.lower(): vault.lower() for vault in vaults}
     snapshot_fill_ids = snapshot_fill_ids if snapshot_fill_ids is not None else {}
+    causal_live_rows = causal_live_rows if causal_live_rows is not None else {}
     for vault in vaults:
         snapshot_fill_ids.setdefault(vault, set())
+        causal_live_rows.setdefault(vault, [])
     while True:
         connection_id = f"copy-vault-{uuid.uuid4().hex}"
         connection_attempts: dict[tuple[str, str], dict[str, Any]] = {}
@@ -3042,6 +3121,29 @@ async def _socket_group(
                                 continue
                             live_ids[vault].add(fill_id)
                             live_fill_counts[vault] += 1
+                            if capture_epoch is not None:
+                                causal_row = causal_live_row(
+                                    fill,
+                                    vault=vault,
+                                    ack_received_at_ms=int(start_ms),
+                                    capture_epoch=capture_epoch,
+                                )
+                                if causal_row is not None:
+                                    rows = causal_live_rows[vault]
+                                    if len(rows) < MAX_CAUSAL_LIVE_ROWS:
+                                        rows.append(causal_row)
+                                    else:
+                                        subscription_diagnostics[
+                                            "causal_live_rows_truncated"
+                                        ] = subscription_diagnostics.get(
+                                            "causal_live_rows_truncated", 0
+                                        ) + 1
+                                else:
+                                    subscription_diagnostics[
+                                        "causal_live_rows_rejected"
+                                    ] = subscription_diagnostics.get(
+                                        "causal_live_rows_rejected", 0
+                                    ) + 1
                 finally:
                     stop_watchdog.set()
                     active_tasks = [
@@ -4183,6 +4285,7 @@ async def collect(
     subscription_attempts_dropped: dict[str, int] = {}
     subscription_diagnostics: dict[str, int] = {}
     snapshot_fill_ids: dict[str, set[str]] = defaultdict(set)
+    causal_live_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
     l2_request_queue: asyncio.Queue[str] = asyncio.Queue()
     l2_known_coins: set[str] = set()
     l2_state = new_l2_state()
@@ -4215,6 +4318,8 @@ async def collect(
                 subscription_diagnostics=subscription_diagnostics,
                 snapshot_fill_ids=snapshot_fill_ids,
                 connection_heartbeats=l2_state["connection_heartbeats"],
+                causal_live_rows=causal_live_rows,
+                capture_epoch=f"{run_id}:ws:{selection_ts_ms}",
             )
         )
         for group in groups
@@ -4296,6 +4401,31 @@ async def collect(
     await writer_task
     await asyncio.to_thread(writer.rotate_all)
 
+    causal_rows_path = output / "causal_live_ws_fills.jsonl"
+    causal_rows = [
+        row
+        for vault in sorted(causal_live_rows)
+        for row in causal_live_rows[vault]
+    ]
+    for row in causal_rows:
+        row["cutoff_ms"] = end_ms
+    causal_rows.sort(
+        key=lambda row: (
+            int(row.get("received_at_ms") or 0),
+            str(row.get("vault") or ""),
+            str(row.get("stable_event_id") or ""),
+        )
+    )
+    causal_rows_path.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in causal_rows
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    causal_rows_sha256 = _sha256(causal_rows_path)
+
     index = await asyncio.to_thread(
         build_copy_vault_bundle,
         raw_root,
@@ -4358,6 +4488,12 @@ async def collect(
         "backpressure_events": sink.backpressure_events,
         "queue_drops": sum(int(v) for v in sink.drops.values()),
         "live_fill_counts": dict(sorted(live_fill_counts.items())),
+        "causal_live_rows": {
+            "path": causal_rows_path.name,
+            "sha256": causal_rows_sha256,
+            "count": len(causal_rows),
+            "max_rows": MAX_CAUSAL_LIVE_ROWS,
+        },
         "unclassified_userfills_fill_counts": dict(sorted(unclassified_fill_counts.items())),
         "reconnect_counts": dict(sorted(reconnect_counts.items())),
         "reconciliation": reports,
