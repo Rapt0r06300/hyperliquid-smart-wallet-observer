@@ -29,5 +29,10 @@ def test_github_worker_durable_publish_heredoc_and_bash_syntax():
     assert "SAFE_ONLY_PUBLICATION_OK" in shell
     if shutil.which("bash") is None:
         pytest.skip("bash unavailable: Windows developer machine")
-    check = subprocess.run(["bash", "-n"], input=shell, capture_output=True, text=True)
-    assert check.returncode == 0, check.stderr
+    # Passing text through the Windows WSL ``bash.exe`` wrapper transparently
+    # changes LF to CRLF on stdin.  Send bytes so the exact YAML shell payload
+    # is validated on Windows and Linux alike.
+    check = subprocess.run(
+        ["bash", "-n"], input=shell.encode("utf-8"), capture_output=True
+    )
+    assert check.returncode == 0, check.stderr.decode("utf-8", errors="replace")
