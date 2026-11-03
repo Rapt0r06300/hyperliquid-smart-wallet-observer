@@ -10,7 +10,7 @@ set "HYPERSMART_INTERACTIVE_LAUNCH=0"
 if "%~1"=="" set "HYPERSMART_INTERACTIVE_LAUNCH=1"
 REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
 REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
-call "%ALINA_PROJECT_ROOT%\tools\portable_env.cmd"
+call "%~dp0tools\portable_env.cmd"
 if errorlevel 1 (
   echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
   set "RC=30"

@@ -24,6 +24,8 @@ env:
   PYTHONIOENCODING: utf-8
   HL_ENABLE_MAINNET_EXECUTION: "0"
   HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "0"
+  TESTNET_EXECUTION_ENABLED: "0"
 
 jobs:
   scope:
@@ -49,6 +51,7 @@ jobs:
             /pyproject.toml
             /.env.example
             /requirements*.txt
+            /.gitignore
             /SECURITY.md
             /.github/CODEOWNERS
             /.github/workflows/security-quality.yml
@@ -90,6 +93,7 @@ jobs:
             /pyproject.toml
             /.env.example
             /requirements*.txt
+            /.gitignore
             /SECURITY.md
             /.github/CODEOWNERS
             /.github/workflows/security-quality.yml
@@ -129,6 +133,7 @@ jobs:
             /pyproject.toml
             /.env.example
             /requirements*.txt
+            /.gitignore
             /SECURITY.md
             /.github/CODEOWNERS
             /.github/workflows/security-quality.yml
