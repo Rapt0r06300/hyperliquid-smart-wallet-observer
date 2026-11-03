@@ -26,7 +26,7 @@ def _sample(**kwargs: object) -> str:
 
 def test_live_master_roadmap_has_full_tracking_metadata() -> None:
     actual = inspect_roadmap(DEFAULT_ROADMAP.read_text(encoding="utf-8"))
-    assert actual["total"] == actual["present"] == 722
+    assert actual["total"] == actual["present"] == 800
     assert actual["errors"] == []
 
 
