@@ -26,7 +26,7 @@ def _sample(**kwargs: object) -> str:
 
 def test_live_master_roadmap_has_full_tracking_metadata() -> None:
     actual = inspect_roadmap(DEFAULT_ROADMAP.read_text(encoding="utf-8"))
-    assert actual["total"] == actual["present"] == 800
+    assert actual["total"] == actual["present"] == 1100
     assert actual["errors"] == []
 
 
@@ -71,3 +71,11 @@ def test_duplicate_identity_detected() -> None:
     data = _sample() + _task("ASF-001")
     result = inspect_roadmap(data, expected={"ASF": 2})
     assert "DUPLICATE_ID:ASF-001" in result["errors"]
+
+
+def test_bug_prefix_supported_and_reported() -> None:
+    data = _task("BUG-001")
+    result = inspect_roadmap(data, expected={"BUG": 1})
+    assert result["errors"] == []
+    assert result["present"] == 1
+    assert result["groups"]["BUG"]["total"] == 1
