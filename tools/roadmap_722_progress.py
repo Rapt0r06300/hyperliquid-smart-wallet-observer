@@ -1,4 +1,4 @@
-"""Deterministic fail-closed progress reader for the canonical 722-task Codex roadmap.
+"""Deterministic fail-closed progress reader for the canonical 800-task Codex roadmap.
 
 The Markdown checkboxes and their adjacent Codex metadata are the sole tracking
 source. This script never changes files, executes strategies or accesses a network.
@@ -13,8 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROADMAP = ROOT / "docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190.md"
-EXPECTED = {"ASF": 150, "AUD": 72, "ECO": 200, "LCH": 300}
-TASK = re.compile(r"^- \[([ xX])\] \*\*\[((?:ASF|AUD|ECO|LCH)-\d{3})\] ([^*]+)\*\*")
+EXPECTED = {"ASF": 150, "AUD": 72, "ECO": 200, "LCH": 300, "PNL": 78}
+TASK = re.compile(r"^- \[([ xX])\] \*\*\[((?:ASF|AUD|ECO|LCH|PNL)-\d{3})\] ([^*]+)\*\*")
 META = re.compile(r"^  - \*\*Suivi Codex :\*\* `([A-Z_]+)`")
 PRIORITY = re.compile(r"\*\*Priorité :\*\* `(P[0-3])`")
 RECEIPT = re.compile(r"\*\*Reçu de clôture :\*\* (.*?)(?=\s+\*\*|$)")
@@ -107,7 +107,7 @@ def format_progress(result: dict) -> str:
     pct = result["verified_pct"]
     filled = min(30, round(pct * 30 / 100))
     lines = [
-        "ALINA CODEX — FEUILLE DE ROUTE 722 TÂCHES",
+        "ALINA CODEX — FEUILLE DE ROUTE 800 TÂCHES",
         f"VÉRIFIÉ : {result['verified']}/{result['total']} ({pct:.2f} %)",
         f"[{'█' * filled}{'░' * (30 - filled)}] {pct:.2f} %",
         f"TRAITÉ / CLASSÉ : {result['handled']}/{result['total']} ({result['handled_pct']:.2f} %) — distinct du travail vérifié",
