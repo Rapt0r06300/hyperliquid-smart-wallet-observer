@@ -1,4 +1,4 @@
-# Alina Smart Flow — feuille de route auditée (1100 tâches : 150 ASF + 72 AUD + 200 ECO + 300 LCH + 78 PNL + 300 BUG)
+# Alina Smart Flow — feuille de route auditée (2100 tâches : 1100 existantes + 1000 HVR)
 
 > Plan d'exécution Codex; création du plan ≠ réparation du logiciel. Audit source du 2 novembre 2026, HEAD initial `8be80f71ac0bad22bb5166882d6d59c7c59c82d1`. Relire le HEAD avant chaque correction.
 
@@ -6,9 +6,11 @@
 
 **Objectif économique :** plus de seuil fixe +4/+5 USD nets/jour. Geler toute amélioration nette observée avec provenance/seed/coûts/config, même petite; ne promouvoir un **champion validé** qu'après OOS/forward post-freeze, preuves nettes, causalité, liquidatabilité et gates intactes. Après un gel, recommencer la découverte. Les anciennes preuves et essais ne s'effacent jamais.
 
-**Anti-saut :** appliquer les mêmes règles aux 1 100 tags, y compris ECO-001 à ECO-200. Statut par tag `TODO`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `VERIFIED_DONE`, `HISTORICAL`, `DUPLICATE`, `SUPERSEDED`, `OUT_OF_SCOPE`; à chaque tâche associer fichiers, tests positifs/négatifs, commande et exit code, diff réel, evidence et SHA exact. Pas de DONE pour simple présence de code, rapport ancien ou job vert. Ne pas supprimer ou renuméroter le registre ancien 136 tâches. Maintenir collecte en fonctionnement pendant les corrections sûres.
+**Anti-saut :** appliquer les mêmes règles aux 2 100 tags, y compris ECO-001 à ECO-200. Statut par tag `TODO`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `VERIFIED_DONE`, `HISTORICAL`, `DUPLICATE`, `SUPERSEDED`, `OUT_OF_SCOPE`; à chaque tâche associer fichiers, tests positifs/négatifs, commande et exit code, diff réel, evidence et SHA exact. Pas de DONE pour simple présence de code, rapport ancien ou job vert. Ne pas supprimer ou renuméroter le registre ancien 136 tâches. Maintenir collecte en fonctionnement pendant les corrections sûres.
 
-## SUIVI D'EXÉCUTION CODEX — 1100 CASES, TAGS, NOMS, CHEMINS ET CORRECTIFS
+**ANNEXE INTÉGRÉE — HVR-0001 à HVR-1000 :** [1 000 contrôles adversariaux ciblés sur 50 modules réels](2026-11-02-alina-audit-roadmap-190-hvr-1000.md). Cette annexe appartient au **même plan** et doit être exécutée, classée et comptée avec les 1 100 contrôles de ce fichier. Les HVR sont des hypothèses de test et non des bugs prouvés; aucune nouvelle architecture ni nouvelle spec. `tools/roadmap_722_progress.py` doit compter les deux fichiers (2100 tâches) avec preuves de clôture individuelles.
+
+## SUIVI D'EXÉCUTION CODEX — 2100 CASES, TAGS, NOMS, CHEMINS ET CORRECTIFS
 
 **Le registre ci-dessous est la checklist intégrale.** Chaque tâche conserve sa **case carrée `- [ ]`**, son **tag unique ASF/AUD/ECO/LCH/PNL**, son **nom lisible**, sa priorité, une ligne **Fichiers vérifiés HEAD** et un **correctif attendu**. Les fichiers ont été vérifiés dans l'arbre GitHub le 3 novembre 2026 ; ce sont des points d'entrée réels à inspecter, **pas des preuves que chaque fichier est défectueux**. Codex doit retrouver le véritable appelant/consommateur et identifier ensuite le fichier autoritatif à modifier. Les pistes historiques `Cibles` et `Ancrage` pouvant mentionner des noms anciens ne sont pas des cibles vérifiées.
 
