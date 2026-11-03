@@ -1,4 +1,4 @@
-"""Deterministic fail-closed progress reader for the canonical 2100-task Codex roadmap.
+"""Deterministic fail-closed progress reader for the canonical 3120-task Codex roadmap.
 
 The Markdown checkboxes and their adjacent Codex metadata are the sole tracking
 source. This script never changes files, executes strategies or accesses a network.
@@ -14,8 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROADMAP = ROOT / "docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190.md"
 HVR_APPENDIX = ROOT / "docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190-hvr-1000.md"
-EXPECTED = {"ASF": 150, "AUD": 72, "ECO": 200, "LCH": 300, "PNL": 78, "BUG": 300, "HVR": 1000}
-TASK = re.compile(r"^- \[([ xX])\] \*\*\[((?:ASF|AUD|ECO|LCH|PNL|BUG|HVR)-\d{3,4})\] ([^*]+)\*\*")
+INT_INDEX = ROOT / "docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190-hvr-int-1020.md"
+INT_LOTS = tuple(ROOT / f"docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190-int-{i:02d}.md" for i in range(1, 11))
+EXPECTED = {"ASF": 150, "AUD": 72, "ECO": 200, "LCH": 300, "PNL": 78, "BUG": 300, "HVR": 1000, "ASF-HVR-INT": 1000, "ASF-RIG": 20}
+TASK = re.compile(r"^- \[([ xX])\] \*\*\[((?:ASF-HVR-INT|ASF-RIG|ASF|AUD|ECO|LCH|PNL|BUG|HVR)-\d{3,4})\] ([^*]+)\*\*")
 META = re.compile(r"^  - \*\*Suivi Codex :\*\* `([A-Z_]+)`")
 PRIORITY = re.compile(r"\*\*Priorité :\*\* `(P[0-3])`")
 RECEIPT = re.compile(r"\*\*Reçu de clôture :\*\* (.*?)(?=\s+\*\*|$)")
@@ -61,8 +63,8 @@ def inspect_roadmap(content: str, *, expected: dict[str, int] | None = None) -> 
                 item["reason"] = line.split("**Motif Codex :**", 1)[1].strip()
             current = None
     for prefix, n in expected.items():
-        actual = sorted(i for i in items if i.startswith(prefix + "-"))
-        wanted = [(f"{prefix}-{k:04d}" if prefix == "HVR" else f"{prefix}-{k:03d}") for k in range(1, n + 1)]
+        actual = sorted(i for i in items if re.fullmatch(rf"{re.escape(prefix)}-\d{{3,4}}", i))
+        wanted = [(f"{prefix}-{k:04d}" if prefix in {"HVR", "ASF-HVR-INT"} else f"{prefix}-{k:03d}") for k in range(1, n + 1)]
         if actual != wanted:
             issues.append(f"MISSING_OR_BAD_IDS:{prefix}:{len(actual)}/{n}")
     for ident, item in items.items():
@@ -88,7 +90,7 @@ def inspect_roadmap(content: str, *, expected: dict[str, int] | None = None) -> 
     handled = sum(v["state"] in CLASSIFIED for v in items.values())
     by_group = {}
     for group, expected_count in expected.items():
-        group_items = [v for k, v in items.items() if k.startswith(group + "-")]
+        group_items = [v for k, v in items.items() if re.fullmatch(rf"{re.escape(group)}-\d{{3,4}}", k)]
         by_group[group] = {
             "verified": sum(v["state"] == "VERIFIED_DONE" and v["checked"] for v in group_items),
             "handled": sum(v["state"] in CLASSIFIED for v in group_items),
@@ -132,6 +134,9 @@ def main() -> int:
         content = args.roadmap.read_text(encoding="utf-8")
         if args.roadmap.resolve() == DEFAULT_ROADMAP.resolve():
             content += "\n" + HVR_APPENDIX.read_text(encoding="utf-8")
+            content += "\n" + INT_INDEX.read_text(encoding="utf-8")
+            for lot in INT_LOTS:
+                content += "\n" + lot.read_text(encoding="utf-8")
         result = inspect_roadmap(content)
     except OSError as exc:
         print(f"ROADMAP_UNAVAILABLE: {exc}")
