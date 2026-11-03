@@ -129,6 +129,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roadmap", type=Path, default=DEFAULT_ROADMAP)
     parser.add_argument("--json", action="store_true", help="Emit structured metrics")
+    parser.add_argument("--export-md", type=Path, help="Write one merged Markdown with all 3120 tagged tasks")
     args = parser.parse_args()
     try:
         content = args.roadmap.read_text(encoding="utf-8")
@@ -138,6 +139,12 @@ def main() -> int:
             for lot in INT_LOTS:
                 content += "\n" + lot.read_text(encoding="utf-8")
         result = inspect_roadmap(content)
+        if args.export_md is not None and not result["errors"]:
+            args.export_md.parent.mkdir(parents=True, exist_ok=True)
+            args.export_md.write_text(
+                "# Alina Smart Flow — 3120 tâches Codex (export déterministe)\n\n" + content,
+                encoding="utf-8",
+            )
     except OSError as exc:
         print(f"ROADMAP_UNAVAILABLE: {exc}")
         return 2

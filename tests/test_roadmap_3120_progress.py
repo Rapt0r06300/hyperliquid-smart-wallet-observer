@@ -59,3 +59,20 @@ def test_false_verification_and_duplicate_are_denied() -> None:
     result = inspect_roadmap(line + line, expected={"ASF": 1})
     assert any(issue.startswith("DUPLICATE_ID:ASF-001") for issue in result["errors"])
     assert any(issue.startswith("INVALID_VERIFIED_RECEIPT:ASF-001") for issue in result["errors"])
+
+
+def test_one_file_export_is_complete(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    target = tmp_path / "ALINA_ROADMAP_3120.md"
+    result = subprocess.run(
+        [sys.executable, str(DEFAULT_ROADMAP.parents[3] / "tools" / "roadmap_722_progress.py"),
+         "--export-md", str(target)],
+        check=False, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    merged = target.read_text(encoding="utf-8")
+    assert "ASF-001" in merged and "HVR-1000" in merged
+    assert "ASF-HVR-INT-1000" in merged and "ASF-RIG-020" in merged
+    assert len(merged) > 100_000

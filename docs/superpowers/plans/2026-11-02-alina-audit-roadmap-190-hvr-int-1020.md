@@ -15,6 +15,8 @@
 
 **Codex :** lire `AGENTS.md`, puis la source principale, HVR, les dix lots INT et les 20 RIG ; traiter tous les IDs et saisir un reçu vérifiable par tag. Une piste HVR/INT/BUG est une hypothèse à falsifier, pas un bug d’emblée. Statuts : `TODO`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `VERIFIED_DONE`, `DUPLICATE`, `SUPERSEDED`, `HISTORICAL`, `OUT_OF_SCOPE`. Cocher `[x]` seulement avec `VERIFIED_DONE` et test, SHA, preuve de branchement, exit code. Classer les hypothèses non pertinentes avec motif sans les compter comme implémentées.
 
+**Export en un seul fichier pour Codex :** `python tools/roadmap_722_progress.py --export-md ALINA_ROADMAP_3120.md`. L'export regroupe les 13 fichiers sources sans changer leurs IDs ni statuts. Il n'est généré que si le registre passe le contrôle d'intégrité.
+
 **Progression :** `python tools/roadmap_722_progress.py` — afficher `VERIFIED_DONE/3120` et `traitées/3120`, ainsi que P0 non vérifiés, anomalies et groupes. Les 775 optimisations historiques scellées restent un registre distinct; aucune ancienne certification n’est recopiée automatiquement.
 
 ## Dix lots INT (100 scénarios chacun)
