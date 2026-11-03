@@ -40,7 +40,7 @@ Famille active unique : **Copy-Vault**.
 
 Lead-Lag, Cross-Venue Dislocation, arbitrage, Carry/Funding Carry, shadow/research-only et toute famille économique non attribuée : **DISABLED_BY_SCOPE**. Ce verrou couvre simulation UI/moteur principal, labo, replays/backtests, OOS/forward, preuve PnL, certification et scoreboard. Conserver leur code et leurs preuves historiques sans les exécuter ni les promouvoir; aucune variable d'environnement ne peut élargir le scope.
 
-Cible de recherche : au moins +5 USD net/jour pour Copy-Vault, avec 200 USD de capital paper. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
+Cible de recherche : toute amélioration NETTE mesurée et reproductible pour Copy-Vault, avec 200 USD de capital paper de référence ; l'ancien seuil +5 USD/jour n'est ni un critère terminal ni une condition de certification. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
 
 ## Repères opérateur permanents
 
@@ -63,6 +63,12 @@ Phases : `IDLE -> COLLECT -> ANALYZE`.
 Respecter strictement les phase epochs, `source_collection_epoch`, cutoff figé, manifests, migrations, leases, checkpoints, resume, watchdogs, anti split-brain et idempotence cross-repo.
 
 Seuls les shards du dépôt principal explicitement `SAFE`, replay-compatible, vérifiés par taille/hash, avec exact counts et unique counts globaux peuvent alimenter les preuves. Les collecteurs/normalizers doivent conserver timestamps source/réception, identité native, provenance, clock sync, L2/BBO/trades, gaps et recovery.
+
+## Feuille de route d'exécution Codex — 722 tâches
+
+Pour la mission d'implémentation exhaustive, la **checklist autoritative** est `docs/superpowers/plans/2026-11-02-alina-audit-roadmap-190.md` (150 ASF, 72 AUD, 200 ECO, 300 LCH). Chaque identifiant possède un nom, une case GitHub, une priorité, des points d'entrée de code vérifiés, un correctif visé et une preuve à renseigner. **Ne pas s'arrêter à la lecture du plan, au diagnostic, au premier commit ou au premier test vert.** Traiter chaque ID, réutiliser les composants existants, corriger puis valider les branchements et la conformité scientifique jusqu'au périmètre entièrement réalisé ou explicitement bloqué.
+
+Exécuter `python tools/roadmap_722_progress.py` au démarrage et après chaque lot : afficher à l'utilisateur la barre et les deux pourcentages **VERIFIED_DONE/722** (implémentation vérifiée) et **traitées/722** (classification documentée), avec les P0 restants. Cocher `[x]` seulement avec `VERIFIED_DONE` et reçu comprenant SHA/test/preuve réelle ; consigner les blocages/doublons avec justification sans les compter comme faits. Ni le `.cmd` ni sa feuille de route ne prouvent un bénéfice ; seuls les replays causaux, backtests financiers honnêtes, OOS et forward post-freeze peuvent fonder une certification.
 
 ## Discipline d’implémentation
 
