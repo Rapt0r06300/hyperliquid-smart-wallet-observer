@@ -387,7 +387,10 @@ def _refuser_cles_privees(root: Path, inclus: list[str]) -> None:
     """
     if not inclus:
         return
-    workers = min(8, max(1, os.cpu_count() or 1))
+    # The check remains exhaustive and fail-closed; only the bounded I/O
+    # concurrency changes.  Eight workers underutilised fast local disks on
+    # large SAFE session trees, while an unbounded pool could exhaust handles.
+    workers = min(32, max(8, (os.cpu_count() or 1) * 2))
     taille_lot = 4096
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="archive-key-scan") as pool:
         for debut in range(0, len(inclus), taille_lot):

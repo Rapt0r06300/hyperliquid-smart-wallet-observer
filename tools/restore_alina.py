@@ -1264,8 +1264,32 @@ def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
 class _SafeShardRegistry:
     """Durable AlinaSync-owned cache of byte-verified replay-ready shards."""
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
     WRITE_BATCH_SIZE = 1_000
+    CREATE_SAFE_SHARDS_SQL = """
+        CREATE TABLE IF NOT EXISTS safe_shards (
+            dataset_id TEXT NOT NULL,
+            release_tag TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            bytes INTEGER NOT NULL,
+            sha256 TEXT NOT NULL,
+            -- Windows st_dev/st_ino can exceed SQLite's signed INTEGER range.
+            -- Preserve the exact decimal identity instead of overflowing or
+            -- silently coercing it to an imprecise REAL value.
+            stat_dev TEXT NOT NULL,
+            stat_ino TEXT NOT NULL,
+            stat_mtime_ns TEXT NOT NULL,
+            stat_ctime_ns TEXT NOT NULL,
+            catalog_sha256 TEXT NOT NULL,
+            validation_owner TEXT NOT NULL,
+            quality_status TEXT NOT NULL,
+            replayable INTEGER NOT NULL,
+            backtestable INTEGER NOT NULL,
+            catalog_active INTEGER NOT NULL,
+            verified_at_ns INTEGER NOT NULL,
+            PRIMARY KEY (dataset_id, release_tag)
+        )
+    """
     UPSERT_SQL = """
         INSERT INTO safe_shards (
             dataset_id, release_tag, relative_path, bytes, sha256,
@@ -1290,6 +1314,53 @@ class _SafeShardRegistry:
             verified_at_ns=excluded.verified_at_ns
     """
 
+    @classmethod
+    def _migrate_stat_identity_columns(cls, connection: sqlite3.Connection) -> None:
+        """Migrate the v2 integer identity columns without losing SAFE rows."""
+        columns = {
+            str(row[1]): str(row[2] or "").upper()
+            for row in connection.execute("PRAGMA table_info(safe_shards)")
+        }
+        identity_columns = ("stat_dev", "stat_ino", "stat_mtime_ns", "stat_ctime_ns")
+        if not columns or all(columns.get(name) == "TEXT" for name in identity_columns):
+            return
+
+        connection.execute("DROP VIEW IF EXISTS current_safe_shards")
+        connection.execute("ALTER TABLE safe_shards RENAME TO safe_shards_v2_legacy")
+        connection.execute(cls.CREATE_SAFE_SHARDS_SQL)
+        connection.execute(
+            """
+            INSERT INTO safe_shards (
+                dataset_id, release_tag, relative_path, bytes, sha256,
+                stat_dev, stat_ino, stat_mtime_ns, stat_ctime_ns,
+                catalog_sha256, validation_owner, quality_status,
+                replayable, backtestable, catalog_active, verified_at_ns
+            )
+            SELECT dataset_id, release_tag, relative_path, bytes, sha256,
+                   CAST(stat_dev AS TEXT), CAST(stat_ino AS TEXT),
+                   CAST(stat_mtime_ns AS TEXT), CAST(stat_ctime_ns AS TEXT),
+                   catalog_sha256, validation_owner, quality_status,
+                   replayable, backtestable, catalog_active, verified_at_ns
+              FROM safe_shards_v2_legacy
+            """
+        )
+        old_count = int(
+            connection.execute("SELECT COUNT(*) FROM safe_shards_v2_legacy").fetchone()[0]
+        )
+        new_count = int(
+            connection.execute("SELECT COUNT(*) FROM safe_shards").fetchone()[0]
+        )
+        if old_count != new_count:
+            raise sqlite3.DatabaseError(
+                "SAFE shard registry migration changed row count: "
+                f"old={old_count} new={new_count}"
+            )
+        connection.execute("DROP TABLE safe_shards_v2_legacy")
+
+    @staticmethod
+    def _sqlite_identity(value: int) -> str:
+        return str(int(value))
+
     def __init__(self, destination: Path) -> None:
         self.destination = Path(destination)
         self.path = self.destination / "SAFE_SHARDS.sqlite3"
@@ -1302,29 +1373,8 @@ class _SafeShardRegistry:
             )
             self.connection.execute("PRAGMA journal_mode=WAL")
             self.connection.execute("PRAGMA synchronous=FULL")
-            self.connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS safe_shards (
-                    dataset_id TEXT NOT NULL,
-                    release_tag TEXT NOT NULL,
-                    relative_path TEXT NOT NULL,
-                    bytes INTEGER NOT NULL,
-                    sha256 TEXT NOT NULL,
-                    stat_dev INTEGER NOT NULL,
-                    stat_ino INTEGER NOT NULL,
-                    stat_mtime_ns INTEGER NOT NULL,
-                    stat_ctime_ns INTEGER NOT NULL,
-                    catalog_sha256 TEXT NOT NULL,
-                    validation_owner TEXT NOT NULL,
-                    quality_status TEXT NOT NULL,
-                    replayable INTEGER NOT NULL,
-                    backtestable INTEGER NOT NULL,
-                    catalog_active INTEGER NOT NULL,
-                    verified_at_ns INTEGER NOT NULL,
-                    PRIMARY KEY (dataset_id, release_tag)
-                )
-                """
-            )
+            self.connection.execute(self.CREATE_SAFE_SHARDS_SQL)
+            self._migrate_stat_identity_columns(self.connection)
             self.connection.execute(
                 "CREATE INDEX IF NOT EXISTS safe_shards_active_idx "
                 "ON safe_shards(catalog_active, quality_status, replayable, backtestable)"
@@ -1458,7 +1508,10 @@ class _SafeShardRegistry:
             return False, False
         matches = stored[:-1] == (
             self._relative(display_path), expected_size, expected_sha,
-            identity[1], identity[2], identity[3], identity[4],
+            self._sqlite_identity(identity[1]),
+            self._sqlite_identity(identity[2]),
+            self._sqlite_identity(identity[3]),
+            self._sqlite_identity(identity[4]),
             "ALINA_SYNC", "SAFE", 1, 1,
         )
         return matches, bool(matches and stored[-1] != catalog_sha256)
@@ -1483,7 +1536,10 @@ class _SafeShardRegistry:
             str(row.get("release_tag") or ""),
             self._relative(display_path), identity[0],
             str(row.get("sha256") or "").lower(),
-            identity[1], identity[2], identity[3], identity[4],
+            self._sqlite_identity(identity[1]),
+            self._sqlite_identity(identity[2]),
+            self._sqlite_identity(identity[3]),
+            self._sqlite_identity(identity[4]),
             catalog_sha256, now_ns,
         ))
         if len(self._pending_writes) >= self.WRITE_BATCH_SIZE:

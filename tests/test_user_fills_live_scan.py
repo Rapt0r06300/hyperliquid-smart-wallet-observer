@@ -29,6 +29,9 @@ def _user_fill_message(*, snapshot: bool = False, fill_time_ms: int | None = Non
                     {
                         "coin": "BTC",
                         "dir": "Open Long",
+                        # Hyperliquid's economic side is authoritative; the runtime
+                        # must not infer it from the display-only ``dir`` label.
+                        "side": "B",
                         "px": "100",
                         "sz": "1",
                         "fee": "0.01",
