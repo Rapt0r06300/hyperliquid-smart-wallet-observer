@@ -6,6 +6,7 @@ Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 UNMEASURABLE = "UNMEASURABLE"
 
@@ -18,6 +19,15 @@ def taille_paper(leader_fill: Any, *, notre_equity: Any, leader_equity: Any) -> 
         return {"taille": UNMEASURABLE, "refuse": True, "raison": "EQUITY_LEADER_NON_POSITIVE"}
     ratio = float(notre_equity) / float(leader_equity)
     return {"taille": round(float(leader_fill) * ratio, 12), "ratio_equity": round(ratio, 8), "refuse": False}
+
+
+def equity_ratio_receipt(*, leader_fill: Any, our_equity: Any, leader_equity: Any) -> dict[str, Any]:
+    """Require finite positive leader equity before fractional paper replication."""
+
+    result = taille_paper(leader_fill, notre_equity=our_equity, leader_equity=leader_equity)
+    if result.get("refuse") or not isinstance(result.get("taille"), (int, float)) or not math.isfinite(float(result["taille"])):
+        return {"status": "UNMEASURABLE", "reason": result.get("raison", "EQUITY_INPUT_INVALID")}
+    return {"status": "PROVEN", **result}
 
 
 __all__ = ["taille_paper", "UNMEASURABLE"]

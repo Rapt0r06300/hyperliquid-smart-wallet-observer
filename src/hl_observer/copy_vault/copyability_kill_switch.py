@@ -44,4 +44,24 @@ class KillSwitchCopyabilite:
         return {"nouvelles_entrees_suspendues": False, "reset": True}
 
 
-__all__ = ["KillSwitchCopyabilite"]
+def copyability_veto_receipt(
+    observations: list[tuple[Any, Any]], *, consecutive_threshold: int = 3
+) -> dict[str, Any]:
+    """Apply the latched veto to measured shortfall/alpha pairs only."""
+    if isinstance(consecutive_threshold, bool) or not isinstance(consecutive_threshold, int) or consecutive_threshold < 1:
+        return {"status": "UNMEASURABLE", "reason": "invalid_consecutive_threshold"}
+    switch = KillSwitchCopyabilite(seuil_consecutif=consecutive_threshold)
+    for shortfall_value, alpha_value in observations:
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+                   for value in (shortfall_value, alpha_value)):
+            return {"status": "UNMEASURABLE", "reason": "shortfall_or_alpha_missing"}
+        switch.observer(shortfall_value, alpha_value)
+    if not observations:
+        return {"status": "MORE_DATA", "reason": "no_observations"}
+    state = switch._etat("FINAL_AUDIT")
+    return {"status": "PROVEN", "new_entries_suspended": state["nouvelles_entrees_suspendues"],
+            "existing_position_management_allowed": state["gestion_existant_autorisee"],
+            "breaches": state["breaches"], "latched": state["nouvelles_entrees_suspendues"]}
+
+
+__all__ = ["KillSwitchCopyabilite", "copyability_veto_receipt"]

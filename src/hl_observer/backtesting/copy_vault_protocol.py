@@ -215,6 +215,31 @@ def protocol_signature() -> dict[str, Any]:
     }
 
 
+def same_timestamp_direction_receipt(
+    rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    """Preserve native event order for opposing fills at equal timestamps."""
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        timestamp = row.get("ts_ms", row.get("timestamp_ms"))
+        event_id = str(row.get("event_id", row.get("fill_id", ""))).strip()
+        direction = str(row.get("direction", row.get("side", ""))).strip().upper()
+        if type(timestamp) is not int or timestamp <= 0 or not event_id or direction not in {"BUY", "SELL", "LONG", "SHORT"}:
+            return {"status": "UNMEASURABLE", "reason": "fill_identity_timestamp_or_direction_invalid"}
+        normalized.append({"ts_ms": timestamp, "event_id": event_id, "direction": direction})
+    if len({row["event_id"] for row in normalized}) != len(normalized):
+        return {"status": "UNMEASURABLE", "reason": "duplicate_fill_id"}
+    ordered = sorted(normalized, key=lambda row: (row["ts_ms"], row["event_id"]))
+    return {
+        "status": "PROVEN",
+        "ordered_fills": tuple((row["event_id"], row["direction"]) for row in ordered),
+        "same_timestamp_tie_break": "native_event_id_lexicographic",
+        "opposing_directions_preserved": len({row["direction"] for row in ordered}) > 1,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "CHECKPOINT_COLLECTOR_PROTOCOL",
     "CHECKPOINT_INTEGRITY_SCHEMA",
@@ -244,5 +269,6 @@ __all__ = [
     "canonical_metaorder_id",
     "classify_live_entry_action",
     "expected_open_direction",
+    "same_timestamp_direction_receipt",
     "protocol_signature",
 ]

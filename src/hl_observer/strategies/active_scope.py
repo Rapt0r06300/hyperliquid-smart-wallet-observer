@@ -144,10 +144,58 @@ def build_official_scope_environment(env: dict[str, str] | None = None) -> dict[
     return values
 
 
+def paper_read_only_scope_receipt(env: dict[str, str] | None = None) -> dict[str, object]:
+    values = dict(env or {})
+    valid = values.get("PAPER_ONLY") is True and values.get("READ_ONLY") is True and values.get("LIVE_TRADING") is False
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "PAPER_READ_ONLY_ENFORCED" if valid else "PAPER_READ_ONLY_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def copy_vault_only_receipt(families: tuple[str, ...]) -> dict[str, object]:
+    normalized = {canonical_strategy_family(value) for value in families}
+    valid = normalized == {OFFICIAL_SCOPE_FAMILY}
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "COPY_VAULT_ONLY" if valid else "SCOPE_WIDENED", "families": sorted(normalized), "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def experimental_flags_receipt(env: dict[str, str] | None = None) -> dict[str, object]:
+    values = dict(env or {})
+    forbidden = {key: value for key, value in values.items() if key.startswith("HYPERSMART_") and key not in {"HYPERSMART_ACTIVE_STRATEGY_SCOPE"} and str(value).strip()}
+    valid = not forbidden
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "EXPERIMENTAL_FLAGS_BOUNDED" if valid else "EXPERIMENTAL_FLAG_PRESENT", "forbidden": sorted(forbidden), "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def fail_closed_scope_receipt(family: str) -> dict[str, object]:
+    canonical = canonical_strategy_family(family)
+    valid = canonical != OFFICIAL_SCOPE_FAMILY and not strategy_can_materialize(canonical)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "SCOPE_REFUSES_DISABLED_FAMILY" if valid else "SCOPE_ALLOWS_UNSAFE_FAMILY", "family": canonical, "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def phase_contract_receipt(phase: str, allowed_phases: tuple[str, ...]) -> dict[str, object]:
+    valid = phase in allowed_phases
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "PHASE_CONTRACT_VALID" if valid else "PHASE_CONTRACT_INVALID", "phase": phase, "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def lease_epoch_receipt(*, lease_epoch: int, phase_epoch: int, lease_active: bool) -> dict[str, object]:
+    valid = isinstance(lease_epoch, int) and isinstance(phase_epoch, int) and lease_epoch == phase_epoch and bool(lease_active)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "LEASE_EPOCH_BOUND" if valid else "LEASE_EPOCH_MISMATCH", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def continuous_collection_receipt(*, checkpoint_age_ms: int, max_age_ms: int, collection_active: bool) -> dict[str, object]:
+    valid = isinstance(checkpoint_age_ms, int) and isinstance(max_age_ms, int) and 0 <= checkpoint_age_ms <= max_age_ms and bool(collection_active)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "COLLECTION_CONTINUITY_BOUNDED" if valid else "COLLECTION_CONTINUITY_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def cloud_path_receipt(*, runner_kind: str, self_hosted: bool, local_dependency: bool) -> dict[str, object]:
+    valid = runner_kind == "github-hosted" and not bool(self_hosted) and not bool(local_dependency)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "CLOUD_PATH_AUTHORIZED" if valid else "CLOUD_PATH_UNAUTHORIZED", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
 __all__ = [
     "StrategyScopeStatus", "StrategyScopeEntry", "OFFICIAL_SCOPE_VERSION",
     "OFFICIAL_SCOPE_FAMILY", "canonical_strategy_family", "authoritative_strategy_scope",
     "active_strategy_families", "strategy_can_materialize", "require_active_strategy",
     "strategy_scope_status", "strategy_scope_refusal", "strategy_scope_payload",
     "verify_official_runtime_scope", "build_official_scope_environment",
+    "paper_read_only_scope_receipt", "copy_vault_only_receipt", "experimental_flags_receipt",
+    "fail_closed_scope_receipt", "phase_contract_receipt", "lease_epoch_receipt",
+    "continuous_collection_receipt", "cloud_path_receipt",
 ]

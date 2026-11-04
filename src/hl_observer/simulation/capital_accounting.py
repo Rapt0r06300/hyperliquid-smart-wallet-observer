@@ -296,6 +296,8 @@ def _ratio(numerator: float | None, denominator: float) -> float | None:
 
 
 def _finite(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
     try:
         parsed = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -307,8 +309,22 @@ def _finite_positive(value: object) -> bool:
     return _finite(value) and float(value) > 0
 
 
+def equity_after_fill_fee_receipt(*, starting_equity_usd: object, realized_pnl_usd: object, fee_usd: object) -> dict[str, object]:
+    """Reconcile paper equity after each observed fill and its fee."""
+
+    try:
+        starting, pnl, fee = float(starting_equity_usd), float(realized_pnl_usd), float(fee_usd)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "ACCOUNTING_INPUT_INVALID"}
+    if not all(_finite(value) for value in (starting, pnl, fee)) or starting < 0.0 or fee < 0.0:
+        return {"status": "UNMEASURABLE", "reason": "ACCOUNTING_INPUT_INVALID"}
+    equity = starting + pnl - fee
+    return {"status": "PROVEN", "equity_usd": round(equity, 10), "real_execution": False}
+
+
 __all__ = [
     "CapitalAccountingSnapshot",
     "CapitalAccountingTracker",
     "PositionCapitalInput",
+    "equity_after_fill_fee_receipt",
 ]

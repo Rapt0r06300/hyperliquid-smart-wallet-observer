@@ -141,3 +141,11 @@ def format_top500_report(result: Top500BootstrapResult) -> str:
     for wallet in result.selected_wallets[:10]:
         lines.append(f"- {wallet.wallet_address} rank={wallet.rank} score={wallet.score:.1f}")
     return "\n".join(lines)
+
+
+def retain_outside_top500(addresses: list[str], *, top_limit: int = 500) -> dict[str, object]:
+    """Keep observed candidates outside the current leaderboard for later discovery."""
+    if type(top_limit) is not int or top_limit <= 0:
+        return {"status": "UNMEASURABLE", "reason": "TOP_LIMIT_INVALID", "paper_read_only": True}
+    unique = list(dict.fromkeys(str(address).strip().lower() for address in addresses if str(address).strip()))
+    return {"status": "PROVEN" if unique else "UNMEASURABLE", "retained": unique[top_limit:], "top_count": min(len(unique), top_limit), "paper_read_only": True, "real_execution": False}

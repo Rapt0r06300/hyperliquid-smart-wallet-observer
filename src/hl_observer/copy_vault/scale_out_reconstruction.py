@@ -41,4 +41,13 @@ def reconstruire(fills: list[dict[str, Any]]) -> dict[str, Any]:
     return {"legs": len(legs), "qte_retiree": round(qte, 8), "vwap_sortie": vwap, "ferme": ferme}
 
 
-__all__ = ["reconstruire", "UNMEASURABLE"]
+def scale_out_receipt(fills: list[dict[str, Any]]) -> dict[str, Any]:
+    """Expose realized size only from observed REDUCE/CLOSE legs."""
+
+    result = reconstruire(fills)
+    proven = result.get("legs", 0) > 0 and result.get("qte_retiree") != UNMEASURABLE
+    return {"status": "PROVEN" if proven else "UNMEASURABLE", "scale_out": proven,
+            "realized_quantity": result.get("qte_retiree"), "detail": result, "paper_read_only": True}
+
+
+__all__ = ["reconstruire", "scale_out_receipt", "UNMEASURABLE"]

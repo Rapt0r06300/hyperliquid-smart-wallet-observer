@@ -113,6 +113,7 @@ def parse_bybit_linear_instruments(payload: dict[str, object]) -> list[tuple[str
 class BybitMarketState:
     symbol: str
     stale_after_ms: int = 1_000
+    stream_depth: int | None = None
     bids: dict[float, float] = field(default_factory=dict)
     asks: dict[float, float] = field(default_factory=dict)
     has_snapshot: bool = False
@@ -120,6 +121,8 @@ class BybitMarketState:
     sequence: int | None = None
     exchange_ts_ms: int = 0
     receive_ts_ms: int = 0
+    orderbook_exchange_ts_ms: int = 0
+    orderbook_receive_ts_ms: int = 0
     quality: str = UNMEASURABLE
     reason: str = "NO_SNAPSHOT"
     last: float | None = None
@@ -143,6 +146,21 @@ class BybitMarketState:
         message_symbol = str(data.get("s") or self.symbol).upper()
         if message_symbol != self.symbol.upper():
             return self._desync("SYMBOL_MISMATCH")
+        topic = payload.get("topic")
+        topic_depth: int | None = None
+        if topic is not None:
+            parts = str(topic).split(".")
+            if (
+                len(parts) != 3
+                or parts[0] != "orderbook"
+                or parts[2].upper() != self.symbol.upper()
+                or not parts[1].isdigit()
+                or int(parts[1]) < 1
+            ):
+                return self._desync("UNEXPECTED_ORDERBOOK_TOPIC")
+            topic_depth = int(parts[1])
+            if self.stream_depth is not None and topic_depth != self.stream_depth:
+                return self._desync("ORDERBOOK_DEPTH_CHANGED")
 
         meta = _transport(payload)
         received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
@@ -153,6 +171,9 @@ class BybitMarketState:
         )
         if connection_changed:
             self.has_snapshot = False
+            self.stream_depth = None
+            self.orderbook_exchange_ts_ms = 0
+            self.orderbook_receive_ts_ms = 0
             self.bids.clear()
             self.asks.clear()
         rtt = _float(meta.get("transport_rtt_ms"))
@@ -164,6 +185,8 @@ class BybitMarketState:
         if kind == "snapshot":
             self.bids.clear()
             self.asks.clear()
+            if topic_depth is not None:
+                self.stream_depth = topic_depth
             self._apply_side(self.bids, data.get("b"))
             self._apply_side(self.asks, data.get("a"))
             self.has_snapshot = True
@@ -196,8 +219,6 @@ class BybitMarketState:
                 receive_mono_ns=receive_mono,
             )
             if "DUPLICATE_SEQUENCE" in reasons:
-                self.receive_ts_ms = received
-                self.receive_mono_ns = receive_mono
                 return self.quality
             if not ok:
                 return self._desync(reasons[0] if reasons else "FEED_INTEGRITY")
@@ -212,6 +233,8 @@ class BybitMarketState:
         self.sequence = sequence if sequence is not None else self.sequence
         self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
         self.receive_ts_ms = received
+        self.orderbook_exchange_ts_ms = exchange_ts or self.orderbook_exchange_ts_ms
+        self.orderbook_receive_ts_ms = received
         self.receive_mono_ns = receive_mono
         self.connection_id = connection_id or self.connection_id
         self.transport_rtt_ms = rtt if rtt is not None else self.transport_rtt_ms
@@ -253,8 +276,11 @@ class BybitMarketState:
         return self.quality
 
     def snapshot(self, *, now_ms: int | None = None, depth: int = 200) -> NativeMarketSnapshot:
-        bids = _levels(((p, s) for p, s in self.bids.items()), reverse=True)[:depth]
-        asks = _levels(((p, s) for p, s in self.asks.items()), reverse=False)[:depth]
+        effective_depth = int(depth)
+        if self.stream_depth is not None:
+            effective_depth = min(effective_depth, self.stream_depth)
+        bids = _levels(((p, s) for p, s in self.bids.items()), reverse=True)[:effective_depth]
+        asks = _levels(((p, s) for p, s in self.asks.items()), reverse=False)[:effective_depth]
         bid = bids[0].price if bids else 0.0
         ask = asks[0].price if asks else 0.0
         return NativeMarketSnapshot.build(
@@ -265,8 +291,8 @@ class BybitMarketState:
             ask=ask,
             bids=bids,
             asks=asks,
-            exchange_ts_ms=self.exchange_ts_ms,
-            receive_ts_ms=self.receive_ts_ms,
+            exchange_ts_ms=self.orderbook_exchange_ts_ms,
+            receive_ts_ms=self.orderbook_receive_ts_ms,
             now_ms=now_ms,
             stale_after_ms=self.stale_after_ms,
             quality=self.quality if self.quality in {DESYNC, UNMEASURABLE} else None,
@@ -315,6 +341,8 @@ class BybitMarketState:
         # After a true sequence failure the old book is not replay-grade.
         # A fresh exchange SNAPSHOT, not later incremental deltas, must rearm it.
         self.has_snapshot = False
+        self.orderbook_exchange_ts_ms = 0
+        self.orderbook_receive_ts_ms = 0
         self.bids.clear()
         self.asks.clear()
         self.quality = DESYNC

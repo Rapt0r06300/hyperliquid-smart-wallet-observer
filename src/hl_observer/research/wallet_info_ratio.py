@@ -153,4 +153,62 @@ def compare_markout_to_pnl_score(
     }
 
 
-__all__ = ["info_ratio", "classer", "compare_markout_to_pnl_score", "UNMEASURABLE"]
+def markout_predictive_value_receipt(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    min_rows_per_bucket: int = 3,
+) -> dict[str, Any]:
+    """Compare markout and historical PnL scores on the same frozen OOS outcomes."""
+    result = compare_markout_to_pnl_score(
+        train_rows,
+        oos_rows,
+        cutoff_ms=cutoff_ms,
+        min_rows_per_bucket=min_rows_per_bucket,
+    )
+    return {
+        **result,
+        "verdict": "PROVEN" if result.get("status") == "COMPARABLE" else "UNMEASURABLE",
+        "same_oos_outcome": result.get("same_oos_outcome") is True,
+        "prior_profitability_not_causal_claim": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def segment_edge_by_latency_regime(rows: Sequence[Mapping[str, Any]], *, min_rows_per_bucket: int = 3) -> dict[str, Any]:
+    """Segment observed net edge by regime and latency decile with missing-data gates."""
+    if isinstance(min_rows_per_bucket, bool) or not isinstance(min_rows_per_bucket, int) or min_rows_per_bucket < 1:
+        return {"status": UNMEASURABLE, "reason": "invalid_minimum"}
+    parsed: list[tuple[str, float, float]] = []
+    for row in rows or ():
+        if not isinstance(row, Mapping):
+            return {"status": UNMEASURABLE, "reason": "invalid_row"}
+        regime = str(row.get("regime") or "").strip()
+        latency = row.get("latency_ms")
+        net = row.get("net_bps")
+        if not regime or isinstance(latency, bool) or not isinstance(latency, (int, float)) or not math.isfinite(float(latency)) or latency < 0 or isinstance(net, bool) or not isinstance(net, (int, float)) or not math.isfinite(float(net)):
+            return {"status": UNMEASURABLE, "reason": "latency_regime_observation_missing"}
+        parsed.append((regime, float(latency), float(net)))
+    if not parsed:
+        return {"status": "MORE_DATA", "reason": "rows_missing"}
+    parsed.sort(key=lambda item: item[1])
+    buckets: dict[str, list[float]] = {}
+    for index, (regime, _latency, net) in enumerate(parsed):
+        decile = min(9, index * 10 // len(parsed))
+        buckets.setdefault(f"{regime}:d{decile}", []).append(net)
+    segments: dict[str, Any] = {}
+    enough = True
+    for key, values in buckets.items():
+        mean = sum(values) / len(values)
+        variance = sum((value - mean) ** 2 for value in values) / max(1, len(values) - 1)
+        half_width = 1.96 * math.sqrt(variance / len(values)) if len(values) > 1 else None
+        enough = enough and len(values) >= min_rows_per_bucket
+        segments[key] = {"count": len(values), "mean_net_bps": round(mean, 8),
+                         "ci95_half_width_bps": None if half_width is None else round(half_width, 8)}
+    return {"status": "PROVEN" if enough else "MORE_DATA", "segments": segments,
+            "min_rows_per_bucket": min_rows_per_bucket, "confidence_interval": "95_percent"}
+
+
+__all__ = ["info_ratio", "classer", "compare_markout_to_pnl_score", "markout_predictive_value_receipt", "segment_edge_by_latency_regime", "UNMEASURABLE"]

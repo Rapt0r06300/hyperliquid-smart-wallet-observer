@@ -7,6 +7,33 @@ from hl_observer.simulation.fee_model import compute_fee_usdc
 from hl_observer.simulation.slippage_model import SlippageEstimate, estimate_orderbook_slippage
 
 
+def walk_book_levels(*, side: str, requested_notional_usdc: object, levels: list[tuple[float, float]] | tuple[tuple[float, float], ...]) -> dict[str, object]:
+    """Walk observed levels in order and never reuse a displayed level."""
+
+    if str(side).upper() not in {"BUY", "SELL"}:
+        return {"status": "REJECTED", "reason": "SIDE_INVALID"}
+    try:
+        requested = float(requested_notional_usdc)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "NOTIONAL_INVALID"}
+    if isinstance(requested_notional_usdc, bool) or not math.isfinite(requested) or requested <= 0.0:
+        return {"status": "UNMEASURABLE", "reason": "NOTIONAL_INVALID"}
+    filled, levels_used = 0.0, 0
+    for raw_price, raw_size in levels:
+        try:
+            price, size = float(raw_price), float(raw_size)
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "UNMEASURABLE", "reason": "LEVEL_INVALID"}
+        if not math.isfinite(price) or not math.isfinite(size) or price <= 0.0 or size <= 0.0:
+            return {"status": "UNMEASURABLE", "reason": "LEVEL_INVALID"}
+        filled += min(requested - filled, price * size)
+        levels_used += 1
+        if filled >= requested:
+            break
+    missed = max(0.0, requested - filled)
+    return {"status": "PROVEN", "filled_notional_usdc": round(filled, 10), "missed_notional_usdc": round(missed, 10), "levels_used": levels_used, "partial": bool(0.0 < filled < requested)}
+
+
 @dataclass(frozen=True, slots=True)
 class OrderbookExecutionResult:
     side: str
@@ -143,3 +170,4 @@ def simulate_orderbook_execution(
 
 
 __all__ = ["OrderbookExecutionResult", "simulate_orderbook_execution"]
+__all__.append("walk_book_levels")

@@ -11,6 +11,7 @@ from hl_observer.ops.pnl_improvement_lab import (
     compute_metrics,
     evaluate_candidate_rules,
     extract_historical_trades,
+    prioritize_falsifiable_experiments,
     write_lab_outputs,
 )
 from hl_observer.simulation.accounting_truth import ACCOUNTING_SCHEMA_VERSION
@@ -60,6 +61,29 @@ def test_regime_ablation_refuse_future_train_and_duplicate_episode() -> None:
         [_regime_row("HIGH", 3_000, "episode-2", "trial-b", 5.0, 1.0)],
         cutoff_ms=1_000,
     )["status"] == "UNMEASURABLE"
+
+
+def test_experiment_priority_prefers_information_gain_and_removes_repeat_sweeps():
+    result = prioritize_falsifiable_experiments(
+        [
+            {"experiment_id": "E-2", "sweep_signature": "s2", "hypothesis": "h2", "validation_protocol": "oos", "information_gain": 2.0, "falsification_cost": 1.0},
+            {"experiment_id": "E-1", "sweep_signature": "s1", "hypothesis": "h1", "validation_protocol": "oos", "information_gain": 3.0, "falsification_cost": 0.0},
+        ],
+        limit=1,
+    )
+    assert result["status"] == "PROVEN"
+    assert [row["experiment_id"] for row in result["selected"]] == ["E-1"]
+    assert result["selected"][0]["information_gain_per_cost"] == 3.0
+
+
+def test_experiment_priority_rejects_repeated_sweep_signature():
+    result = prioritize_falsifiable_experiments(
+        [
+            {"experiment_id": "E-1", "sweep_signature": "same", "hypothesis": "h1", "validation_protocol": "oos", "information_gain": 1.0, "falsification_cost": 1.0},
+            {"experiment_id": "E-2", "sweep_signature": "same", "hypothesis": "h2", "validation_protocol": "oos", "information_gain": 2.0, "falsification_cost": 1.0},
+        ]
+    )
+    assert result["status"] == "UNMEASURABLE"
 
     duplicate = _regime_row("HIGH", 100, "episode-1", "trial-a", 5.0, 1.0)
     duplicate_2 = _regime_row("HIGH", 110, "episode-1", "trial-b", 5.0, 1.0)

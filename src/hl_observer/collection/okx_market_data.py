@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
+import zlib
 
 import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
+from hl_observer.collection.coin_universe import validate_okx_linear_usdt_swap
 from hl_observer.collection.feed_integrity import FeedIntegrityState, estimate_clock_sync
 from hl_observer.collection.market_capture_tiers import CaptureTier, capture_profile
 from hl_observer.collection.native_venue_market import (
@@ -36,9 +39,10 @@ BUSINESS_WS_URL = "wss://ws.okx.com:8443/ws/v5/business"
 
 def _float(value: object) -> float | None:
     try:
-        return float(value)  # type: ignore[arg-type]
+        parsed = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _int(value: object) -> int | None:
@@ -63,17 +67,40 @@ def parse_okx_swap_instruments(payload: dict[str, object]) -> list[tuple[str, st
         if not isinstance(item, dict):
             continue
         inst_id = str(item.get("instId") or "").upper()
-        inst_type = str(item.get("instType") or "SWAP").upper()
-        settle = str(item.get("settleCcy") or "").upper()
-        state = str(item.get("state") or "live").lower()
-        if inst_type != "SWAP" or state != "live" or not inst_id.endswith("-USDT-SWAP"):
-            continue
-        if settle and settle != "USDT":
+        eligible, _ = validate_okx_linear_usdt_swap(item)
+        if not eligible:
             continue
         coin = str(item.get("ctValCcy") or canonical_coin(inst_id)).upper()
         if coin:
             rows.append((coin, inst_id))
     return sorted(set(rows))
+
+
+def okx_book_checksum(bids: object, asks: object, *, depth: int = 25) -> int | None:
+    """Return signed OKX CRC32 over alternating bid/ask tokens in venue order."""
+    tokens: list[str] = []
+    bid_rows = bids if isinstance(bids, list) else []
+    ask_rows = asks if isinstance(asks, list) else []
+    for index in range(max(0, int(depth))):
+        if index < len(bid_rows):
+            row = bid_rows[index]
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                tokens.extend((str(row[0]), str(row[1])))
+        if index < len(ask_rows):
+            row = ask_rows[index]
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                tokens.extend((str(row[0]), str(row[1])))
+    if not tokens:
+        return None
+    unsigned = zlib.crc32(":".join(tokens).encode("utf-8"))
+    return unsigned if unsigned < 2**31 else unsigned - 2**32
+
+
+def _checksum_value(value: object) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_levels(raw: object, *, reverse: bool) -> list[MarketLevel]:
@@ -116,6 +143,10 @@ class OkxMarketState:
     transport_rtt_ms: float | None = None
     clock_offset_ms: float | None = None
     integrity: FeedIntegrityState = field(default_factory=FeedIntegrityState)
+    book_channel: str | None = None
+    book_source: str | None = None
+    subscription_epoch: int | None = None
+    awaiting_snapshot_reset: bool = False
 
     def apply(self, payload: dict[str, object], *, receive_ts_ms: int | None = None) -> str:
         arg = payload.get("arg")
@@ -152,7 +183,11 @@ class OkxMarketState:
                 receive_ts_ms=received,
                 receive_mono_ns=self.receive_mono_ns,
                 connection_reset=connection_reset,
+                subscription_epoch=_int(meta.get("subscription_epoch")),
+                book_source=str(meta.get("book_source") or "ws").lower(),
             )
+        if str(payload.get("event") or "").lower() in {"notice", "maintenance"}:
+            return self.quality
         if channel == "tickers":
             self.last = _coalesce(item.get("last"), self.last)
             self.volume_24h = _coalesce(item.get("vol24h"), self.volume_24h)
@@ -184,6 +219,8 @@ class OkxMarketState:
         receive_ts_ms: int,
         receive_mono_ns: int | None = None,
         connection_reset: bool = False,
+        subscription_epoch: int | None = None,
+        book_source: str = "ws",
     ) -> str:
         seq = _int(item.get("seqId"))
         prev = _int(item.get("prevSeqId"))
@@ -192,9 +229,49 @@ class OkxMarketState:
         is_snapshot = action == "snapshot" or not incremental
 
         if connection_reset:
-            self.book_ready = False
-            self.book_bids.clear()
-            self.book_asks.clear()
+            self._clear_book()
+            self.book_channel = None
+            self.book_source = None
+            self.subscription_epoch = None
+
+        if self.book_channel is not None and channel != self.book_channel:
+            self._clear_book()
+            return self._desync("CHANNEL_CHANGED")
+        if self.book_source is not None and book_source != self.book_source:
+            self._clear_book()
+            return self._desync("BOOK_SOURCE_CHANGED")
+
+        if (
+            subscription_epoch is not None
+            and self.subscription_epoch is not None
+            and subscription_epoch < self.subscription_epoch
+        ):
+            self._clear_book()
+            return self._desync("STALE_SUBSCRIPTION_SNAPSHOT")
+        if (
+            subscription_epoch is not None
+            and self.subscription_epoch is not None
+            and subscription_epoch > self.subscription_epoch
+        ):
+            if not is_snapshot:
+                self._clear_book()
+                return self._desync("SUBSCRIPTION_EPOCH_WITHOUT_SNAPSHOT")
+            self._clear_book()
+            self.awaiting_snapshot_reset = True
+        self.book_channel = channel
+        self.book_source = book_source
+        if subscription_epoch is not None:
+            self.subscription_epoch = subscription_epoch
+
+        if seq is not None and prev is not None and seq == prev:
+            self._clear_book()
+            return self._desync("SEQUENCE_EQUALS_PREVIOUS")
+        prev_discordant = (
+            not connection_reset
+            and self.sequence is not None
+            and prev is not None
+            and prev not in {self.sequence, -1}
+        )
 
         if incremental and not is_snapshot and not self.book_ready:
             return self._desync("DELTA_BEFORE_SNAPSHOT")
@@ -205,19 +282,38 @@ class OkxMarketState:
             exchange_ts_ms=exchange_ts,
             receive_ts_ms=receive_ts_ms,
             receive_mono_ns=receive_mono_ns,
-            reset=connection_reset or (incremental and is_snapshot and self.book_ready),
+            # A stream that was explicitly quarantined may re-anchor only on
+            # its next snapshot; ordinary books5 snapshots still retain the
+            # existing sequence-chain checks above.
+            reset=connection_reset
+            or (self.awaiting_snapshot_reset and is_snapshot)
+            or (incremental and is_snapshot and self.book_ready),
         )
         if "DUPLICATE_SEQUENCE" in reasons and incremental and not is_snapshot:
             self.receive_ts_ms = receive_ts_ms
             return self.quality
+        if "DUPLICATE_SEQUENCE" in reasons and not incremental:
+            self._clear_book()
+            return self._desync("DUPLICATE_SNAPSHOT_SEQUENCE")
         if not ok:
-            self.book_ready = False if incremental else self.book_ready
-            if incremental:
-                self.book_bids.clear()
-                self.book_asks.clear()
-            return self._desync(reasons[0] if reasons else "FEED_INTEGRITY")
+            self._clear_book()
+            return self._desync(
+                "PREV_SEQUENCE_DISCORDANT"
+                if prev_discordant
+                else (reasons[0] if reasons else "FEED_INTEGRITY")
+            )
 
         if incremental:
+            candidate_bids = {} if is_snapshot else dict(self.book_bids)
+            candidate_asks = {} if is_snapshot else dict(self.book_asks)
+            self._apply_delta_side(candidate_bids, item.get("bids"))
+            self._apply_delta_side(candidate_asks, item.get("asks"))
+            if not self._checksum_valid(
+                item.get("checksum"),
+                self._checksum_from_maps(candidate_bids, candidate_asks),
+            ):
+                self._clear_book()
+                return self._desync("CHECKSUM_MISMATCH")
             if is_snapshot:
                 self.book_bids.clear()
                 self.book_asks.clear()
@@ -236,11 +332,18 @@ class OkxMarketState:
                 for price, size in sorted(self.book_asks.items())[:400]
             )
         else:
+            if not self._checksum_valid(
+                item.get("checksum"),
+                okx_book_checksum(item.get("bids"), item.get("asks")),
+            ):
+                self._clear_book()
+                return self._desync("CHECKSUM_MISMATCH")
             self.bids = tuple(_parse_levels(item.get("bids"), reverse=True))
             self.asks = tuple(_parse_levels(item.get("asks"), reverse=False))
             self.book_ready = bool(self.bids and self.asks)
 
         self.sequence = seq if seq is not None else self.sequence
+        self.awaiting_snapshot_reset = False
         self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms
         if self._valid_bbo():
@@ -265,6 +368,35 @@ class OkxMarketState:
                 side.pop(price, None)
             else:
                 side[price] = size
+
+    @staticmethod
+    def _checksum_from_maps(
+        bids: dict[float, float], asks: dict[float, float]
+    ) -> int | None:
+        bid_rows = [
+            [format(price, "g"), format(size, "g")]
+            for price, size in sorted(bids.items(), reverse=True)[:25]
+        ]
+        ask_rows = [
+            [format(price, "g"), format(size, "g")]
+            for price, size in sorted(asks.items())[:25]
+        ]
+        return okx_book_checksum(bid_rows, ask_rows)
+
+    @staticmethod
+    def _checksum_valid(expected: object, actual: int | None) -> bool:
+        if expected is None:
+            return True
+        parsed = _checksum_value(expected)
+        return parsed is not None and actual is not None and parsed == actual
+
+    def _clear_book(self) -> None:
+        self.book_ready = False
+        self.bids = ()
+        self.asks = ()
+        self.book_bids.clear()
+        self.book_asks.clear()
+        self.awaiting_snapshot_reset = True
 
     def snapshot(self, *, now_ms: int | None = None) -> NativeMarketSnapshot:
         bid = self.bids[0].price if self.bids else 0.0
@@ -380,6 +512,17 @@ class OkxPublicClient:
             (business if arg["channel"] == "trades-all" else public).append(arg)
         return public, business
 
+    def subscription_batches(
+        self,
+        inst_ids: Iterable[str],
+        *,
+        max_args: int = 100,
+    ) -> list[list[dict[str, str]]]:
+        """Split deterministic subscriptions before a venue rate-limit boundary."""
+        limit = max(1, int(max_args))
+        args = self.subscription_args(inst_ids)
+        return [args[start : start + limit] for start in range(0, len(args), limit)]
+
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         with httpx.Client(timeout=timeout_s) as client:
             response = client.get(
@@ -483,7 +626,10 @@ class OkxPublicClient:
                 connection_id = f"{connection_prefix}-{uuid.uuid4().hex}"
                 session_started = time.monotonic()
                 async with websockets.connect(url, ping_interval=20, ping_timeout=10) as socket:
-                    await socket.send(json.dumps({"op": "subscribe", "args": args}))
+                    for start in range(0, len(args), 100):
+                        await socket.send(
+                            json.dumps({"op": "subscribe", "args": args[start : start + 100]})
+                        )
                     attempt = 0
                     async for raw in socket:
                         receive_mono_ns = time.monotonic_ns()
@@ -520,5 +666,6 @@ __all__ = [
     "PUBLIC_WS_URL",
     "REST_BASE_URL",
     "SCHEMA_VERSION",
+    "okx_book_checksum",
     "parse_okx_swap_instruments",
 ]

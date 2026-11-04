@@ -28,4 +28,19 @@ def decomposer(position_avant: Any, position_cible: Any) -> dict[str, Any]:
     return {"flip": False, "operations": [{"op": op, "quantite": round(abs(delta), 12)}], "raison": "RESIZE"}
 
 
-__all__ = ["decomposer", "FERMER", "OUVRIR", "UNMEASURABLE"]
+def flip_cost_receipt(*, position_avant: Any, position_cible: Any, close_cost: Any, open_cost: Any) -> dict[str, Any]:
+    """Keep close and open costs separate for a flip; invalid costs fail closed."""
+
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (close_cost, open_cost)):
+        return {"status": "UNMEASURABLE", "two_legs": False, "reason": "COST_INPUT_INVALID", "paper_read_only": True}
+    result = decomposer(position_avant, position_cible)
+    if result.get("flip") is not True:
+        return {"status": "PROVEN", "two_legs": False, "total_cost": 0.0,
+                "reason": "NOT_A_FLIP", "paper_read_only": True}
+    return {"status": "PROVEN", "two_legs": True,
+            "close_cost": float(close_cost), "open_cost": float(open_cost),
+            "total_cost": float(close_cost) + float(open_cost),
+            "reason": "CLOSE_THEN_OPEN", "paper_read_only": True}
+
+
+__all__ = ["decomposer", "flip_cost_receipt", "FERMER", "OUVRIR", "UNMEASURABLE"]

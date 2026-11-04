@@ -50,3 +50,16 @@ def test_drift_detector_demote():
     assert DD.detecter_drift(serie, fenetre=20)["statut"] == "DEMOTE"
     stable = [10.0] * 40
     assert DD.detecter_drift(stable, fenetre=20)["statut"] == "OK"
+
+
+def test_drift_detector_suspend_ouvertures_si_preuve_perimee():
+    result = DD.detecter_drift(
+        [10.0] * 40,
+        fenetre=20,
+        evidence_timestamp_ms=1_000,
+        now_ms=10_000,
+        proof_ttl_ms=1_000,
+    )
+    assert result["statut"] == "PAUSE"
+    assert result["proof_stale"] is True
+    assert result["nouvelles_entrees_suspendues"] is True

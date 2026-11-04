@@ -7,6 +7,7 @@ from hl_observer.ops.entrypoint_topology import (
     OFFICIAL_ENTRYPOINTS,
     EntrypointRole,
     audit_entrypoint_topology,
+    runtime_authority_summary,
     render_entrypoint_topology_report,
 )
 
@@ -81,3 +82,10 @@ def test_official_research_rejects_server_duplication(tmp_path: Path) -> None:
     issues = audit_entrypoint_topology(tmp_path)
 
     assert any(issue.code == "RESEARCH_SERVER_DUPLICATION" for issue in issues)
+
+
+def test_runtime_authority_summary_is_single_and_paper_only() -> None:
+    result = runtime_authority_summary(Path(__file__).resolve().parents[1])
+    assert result["status"] == "PROVEN"
+    assert result["runtime_authority"] == "LANCER_HYPERSMART.cmd"
+    assert result["legacy_runtime_is_authority"] is False

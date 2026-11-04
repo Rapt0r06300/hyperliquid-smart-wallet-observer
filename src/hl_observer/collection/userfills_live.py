@@ -130,6 +130,20 @@ def userfill_required_fields_reason(
     return None
 
 
+def build_receive_time_evidence(fill: Mapping[str, Any]) -> dict[str, Any]:
+    """Require native source and local receipt clocks for causal matching."""
+    source = fill.get("time")
+    received = fill.get("received_at_ms")
+    native = fill.get("hash") or fill.get("tid")
+    if any(type(value) is not int or value <= 0 for value in (source, received)):
+        return {"status": "UNMEASURABLE", "reason": "SOURCE_OR_RECEIVE_TIME_MISSING", "paper_read_only": True}
+    if received < source:
+        return {"status": "REJECTED", "reason": "RECEIVE_TIME_BEFORE_SOURCE", "paper_read_only": True}
+    if not str(native or "").strip():
+        return {"status": "UNMEASURABLE", "reason": "NATIVE_IDENTITY_MISSING", "paper_read_only": True}
+    return {"status": "PROVEN", "source_ts_ms": source, "received_at_ms": received, "native_id": str(native), "paper_read_only": True, "real_execution": False}
+
+
 def positions_depuis_snapshot(snap: dict) -> dict[str, dict]:
     """{coin: {szi, entryPx}} depuis un snapshot vault (seed de l'état live)."""
     if not isinstance(snap, Mapping) or not isinstance(snap.get("positions"), list):
@@ -441,5 +455,5 @@ def liquidations_confirmees(fills: list[dict]) -> list[dict]:
     return out
 
 
-__all__ = ["positions_depuis_snapshot", "appliquer_fill", "snapshot_depuis_positions",
+__all__ = ["positions_depuis_snapshot", "appliquer_fill", "snapshot_depuis_positions", "build_receive_time_evidence",
            "parser_message_userfills", "liquidations_confirmees"]

@@ -205,10 +205,23 @@ def couverture(coin: str, attendues: Iterable[CleS3],
                              n_obtenues=presentes, n_manquantes=len(att) - presentes)
 
 
+def compare_archive_native_coverage(archive: Mapping[str, object], native: Mapping[str, object]) -> dict[str, object]:
+    """Compare two observed coverage manifests; never assumes absent data exists."""
+    fields = ("events", "fills", "l2")
+    missing = [field for field in fields if field not in archive or field not in native]
+    if missing:
+        return {"status": "UNMEASURABLE", "reason": "COVERAGE_FIELD_MISSING", "missing": missing, "paper_read_only": True}
+    try:
+        deltas = {field: int(archive[field]) - int(native[field]) for field in fields}
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "COVERAGE_FIELD_INVALID", "paper_read_only": True}
+    return {"status": "PROVEN", "deltas": deltas, "same_observation_basis": True, "paper_read_only": True, "real_execution": False}
+
+
 __all__ = [
     "BUCKET_MARCHE", "BUCKET_NOEUD", "JEUX_MARCHE", "JEUX_NOEUD", "VARIABLES_AWS",
     "MOTIF_JEU_INCONNU", "MOTIF_SANS_IDENTIFIANTS",
     "CleS3", "CouvertureArchive", "IdentifiantsAbsents", "JeuDeDonneesInconnu",
     "cle_asset_ctxs", "cle_l2_book", "couverture", "exiger_identifiants",
-    "identifiants_presents", "plan_l2_book", "prefixe_noeud",
+    "compare_archive_native_coverage", "identifiants_presents", "plan_l2_book", "prefixe_noeud",
 ]

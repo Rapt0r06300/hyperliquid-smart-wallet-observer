@@ -194,3 +194,15 @@ def _ws_within_limits(request: ReadOnlyBudgetRequest) -> bool:
         and max(0, int(request.ws_unique_users)) <= WS_MAX_UNIQUE_USERS
         and max(0, int(request.ws_messages_per_minute)) <= WS_MAX_MESSAGES_PER_MINUTE
     )
+
+
+def merge_readonly_budget_plans(rest_budget: Mapping[str, object], ws_budget: Mapping[str, object]) -> dict[str, object]:
+    """Combine REST and WS reservations under one deny-by-default budget."""
+    try:
+        rest = int(rest_budget["remaining"])
+        ws = int(ws_budget["remaining"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "BUDGET_REMAINING_MISSING", "paper_read_only": True}
+    if rest < 0 or ws < 0:
+        return {"status": "REJECTED", "reason": "BUDGET_NEGATIVE", "paper_read_only": True}
+    return {"status": "PROVEN", "shared_remaining": min(rest, ws), "rest_remaining": rest, "ws_remaining": ws, "paper_read_only": True, "real_execution": False}

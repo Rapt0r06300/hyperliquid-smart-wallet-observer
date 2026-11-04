@@ -190,6 +190,19 @@ def read_chain(path: Path) -> LedgerReadResult:
     return LedgerReadResult(status=LEDGER_OK, events=verified)
 
 
+def ledger_integrity_receipt(events: Iterable[dict[str, Any]], *, session_id: str) -> dict[str, object]:
+    """Seal and verify an in-memory paper ledger without writing it to disk."""
+    rows = list(events)
+    if not rows or not isinstance(session_id, str) or not session_id.strip():
+        return {"status": "UNMEASURABLE", "reason": "LEDGER_INPUT_INVALID"}
+    try:
+        sealed = seal_chain(rows, session_id=session_id.strip())
+        verified = verify_chain(sealed)
+    except (TypeError, ValueError):
+        return {"status": "REJECTED", "reason": "LEDGER_CHAIN_INVALID"}
+    return {"status": "PROVEN", "event_count": len(verified), "unique_event_ids": len({row['event_id'] for row in verified}), "hash_chained": True, "real_execution": False}
+
+
 def latest_checkpoint(events: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
     for row in reversed(tuple(events)):
         if row.get("record_type") == "STATE_CHECKPOINT" and isinstance(row.get("state"), dict):
@@ -221,4 +234,5 @@ __all__ = [
     "stable_event_id",
     "verify_chain",
     "write_chain_atomic",
+    "ledger_integrity_receipt",
 ]

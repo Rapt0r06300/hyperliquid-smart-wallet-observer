@@ -5,6 +5,7 @@ débouclage. Une exposition paper qui ne correspond plus à aucune position lead
 from __future__ import annotations
 
 from typing import Any
+import math
 
 _TOL = 1e-9
 
@@ -26,4 +27,12 @@ def detecter(position_vault: Any, notre_position_paper: Any) -> dict[str, Any]:
     return {"orphelin": False, "raison": "COHERENT"}
 
 
-__all__ = ["detecter"]
+def orphan_sweep_receipt(position_vault: Any, notre_position_paper: Any) -> dict[str, Any]:
+    """Return a fail-closed orphan detection receipt for observed paper positions."""
+    values = (position_vault, notre_position_paper)
+    if any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) for value in values):
+        return {"status": "UNMEASURABLE", "reason": "POSITION_OBSERVATION_INVALID"}
+    return {"status": "PROVEN", **detecter(position_vault, notre_position_paper), "real_execution": False}
+
+
+__all__ = ["detecter", "orphan_sweep_receipt"]

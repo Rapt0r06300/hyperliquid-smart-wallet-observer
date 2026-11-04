@@ -1,6 +1,7 @@
 from hl_observer.research.auto_discovery import (
     generer_features, penalite_complexite, regression_symbolique,
-    recherche_genetique, ArchiveMapElites, quarantaine_generateur, QUARANTAINE)
+    recherche_genetique, ArchiveMapElites, quarantaine_generateur, QUARANTAINE,
+    restart_discovery_after_promotion)
 
 
 def test_generer_features_nomme_et_trace():
@@ -36,3 +37,16 @@ def test_map_elites_garde_le_meilleur_par_niche():
 def test_quarantaine_bloque_la_promotion():
     q = quarantaine_generateur([{"id": "h1"}, {"id": "h2"}])
     assert all(h["statut"] == QUARANTAINE and h["promotion_autorisee"] is False for h in q)
+
+
+def test_promotion_relaunches_discovery_and_pivots_after_two_parameter_cycles():
+    result = restart_discovery_after_promotion(
+        [
+            {"status": "VERIFIED_CHAMPION"},
+            {"status": "ITERATE", "change_class": "PARAMETER_ONLY"},
+            {"status": "ITERATE", "change_class": "PARAMETER_ONLY"},
+        ]
+    )
+    assert result["status"] == "PIVOT_REQUIRED"
+    assert result["phase"] == "DISCOVERY"
+    assert result["cpu_only"] is True and result["ai_in_cpu_loop"] is False

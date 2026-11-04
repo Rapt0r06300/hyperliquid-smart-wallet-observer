@@ -30,6 +30,9 @@ jobs:
       copy_count: ${{ steps.due.outputs.copy_count }}
       other_matrix: ${{ steps.due.outputs.other_matrix }}
       other_count: ${{ steps.due.outputs.other_count }}
+      due_count: ${{ steps.due.outputs.due_count }}
+      selected_count: ${{ steps.due.outputs.selected_count }}
+      selection_state: ${{ steps.due.outputs.selection_state }}
       phase: ${{ steps.due.outputs.phase }}
       phase_epoch: ${{ steps.due.outputs.phase_epoch }}
     steps:
@@ -93,15 +96,22 @@ jobs:
           if not selected:
               canary_ids = [campaign_id for campaign_id in due if campaign_id.startswith("canary-market-")]
               selected = canary_ids + [campaign_id for campaign_id in due if campaign_id not in canary_ids]
-          Path(sys.argv[2]).write_text("".join(f"{campaign_id}\n" for campaign_id in selected[:128]), encoding="utf-8")
+          selected = selected[:128]
+          Path(sys.argv[2]).write_text("".join(f"{campaign_id}\n" for campaign_id in selected), encoding="utf-8")
+          Path(str(sys.argv[2]) + ".meta").write_text(
+              json.dumps({"due_count": len(due), "selected_count": len(selected)}, separators=(",", ":")),
+              encoding="utf-8",
+          )
           PY
           python - <<'PY' "$RUNNER_TEMP/due.txt" "$PHASE_EPOCH" >> "$GITHUB_OUTPUT"
           import json,sys
           from pathlib import Path
           phase_epoch=int(sys.argv[2])
           ids=[line.strip() for line in open(sys.argv[1],encoding="utf-8") if line.strip()]
+          meta=json.load(open(str(sys.argv[1]) + ".meta",encoding="utf-8"))
           copy_ids=[]
           other_rows=[]
+          resume_proof_count=0
           for order,campaign_id in enumerate(ids):
               path=Path("catalog/campaigns")/(campaign_id+".json")
               try:
@@ -115,6 +125,7 @@ jobs:
               # two-segment fresh-runner workflow.  Excluding them here prevents
               # the normal controller from racing the proof segments.
               if cursor.get("resume_proof") is True:
+                  resume_proof_count += 1
                   continue
               if kind=="copy_vault_collection":
                   copy_ids.append(campaign_id)
@@ -191,6 +202,10 @@ jobs:
           print("copy_matrix="+json.dumps({"campaign_id":copy_ids},separators=(",",":")))
           print("other_count="+str(len(other_ids)))
           print("other_matrix="+json.dumps({"campaign_id":other_ids},separators=(",",":")))
+          print("due_count="+str(meta.get("due_count", 0)))
+          print("selected_count="+str(len(ids)))
+          print("selection_state="+("NO_DUE_WORK" if not ids else ("RUNNABLE" if (copy_ids or other_ids) else "PROOF_ONLY")))
+          print("resume_proof_count="+str(resume_proof_count))
           PY
 
 

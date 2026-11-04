@@ -78,4 +78,11 @@ class ApiBudget:
             }
 
 
-__all__ = ["hl_request_weight", "ApiBudget"]
+def starvation_receipt(*, requested_weight: int, wait_ms: float, max_wait_ms: float) -> dict[str, object]:
+    """Classify a low-priority wallet starvation risk without consuming budget."""
+    if requested_weight <= 0 or wait_ms < 0 or max_wait_ms < 0:
+        return {"status": "UNMEASURABLE", "reason": "BUDGET_INPUT_INVALID", "paper_read_only": True}
+    return {"status": "PROVEN", "requested_weight": requested_weight, "wait_ms": float(wait_ms), "starved": wait_ms > max_wait_ms, "paper_read_only": True, "real_execution": False}
+
+
+__all__ = ["hl_request_weight", "ApiBudget", "starvation_receipt"]

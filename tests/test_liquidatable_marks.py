@@ -97,6 +97,21 @@ def test_couverture_compte_les_unmeasurable():
     assert cov["n_unmeasurable"] == 1 and cov["couverture"] == 0.5
 
 
+def test_liquidatable_marks_report_expose_explicit_no_mid_fallback():
+    positions = [
+        {"position_id": "p1", "coin": "BTC", "side": "LONG"},
+        {"position_id": "p2", "coin": "SOL", "side": "LONG"},
+    ]
+    report = LM.liquidatable_marks_report(
+        positions,
+        {"BTC": {"bid": 101.0, "ask": 102.0}},
+    )
+    assert report["status"] == "UNMEASURABLE"
+    assert report["equity_basis"] == "EXECUTABLE_EXIT_BID_ASK_ONLY"
+    assert report["mid_price_fallback"] is False
+    assert report["marks"] == {"p1": 101.0}
+
+
 # --- INVARIANT bout-en-bout sur le vrai ledger ------------------------------
 def _ledger_avec_position(side, mid_favorable, entry=100.0):
     led = PaperLedger(starting_balance_usdc=1_000.0)

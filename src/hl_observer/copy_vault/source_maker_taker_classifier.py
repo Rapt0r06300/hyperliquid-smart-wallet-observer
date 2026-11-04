@@ -30,4 +30,13 @@ def classer(fill: dict[str, Any]) -> dict[str, Any]:
     return {"classe": UNMEASURABLE, "raison": "AUCUN_SIGNAL_LIQUIDITE"}
 
 
-__all__ = ["classer", "MAKER", "TAKER", "UNMEASURABLE"]
+def maker_taker_receipt(fill: dict[str, Any]) -> dict[str, Any]:
+    """Expose maker/taker only when the source provides an explicit liquidity signal."""
+    result = classer(fill)
+    if result["classe"] == UNMEASURABLE:
+        return {"status": "MORE_DATA", **result}
+    return {"status": "PROVEN", "classification": result["classe"],
+            "source": result["source"], "maker_advantage_assumed": False}
+
+
+__all__ = ["classer", "maker_taker_receipt", "MAKER", "TAKER", "UNMEASURABLE"]

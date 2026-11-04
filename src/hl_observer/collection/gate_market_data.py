@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterable, Mapping
@@ -29,13 +30,15 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 REST_BASE_URL = "https://api.gateio.ws/api/v4"
 PUBLIC_WS_URL = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 VWAP_TARGET_QUOTE_NOTIONALS_USD = (10, 25, 50, 100, 250, 500, 1000)
+MAX_BOOK_LEVELS = 400
 
 
 def _f(v: Any) -> float | None:
     try:
-        return float(v)
+        parsed = float(v)
     except (TypeError, ValueError):
         return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _i(v: Any) -> int | None:
@@ -57,17 +60,60 @@ def _epoch_ms(v: Any) -> int | None:
     return int(value)
 
 
+def _gate_timestamp_ms(payload: Mapping[str, Any]) -> int | None:
+    """Decode Gate's explicitly named milliseconds or seconds fields."""
+    if "time_ms" in payload:
+        try:
+            parsed = int(str(payload.get("time_ms")).strip())
+        except (TypeError, ValueError):
+            return None
+        return parsed if 100_000_000_000 <= parsed <= 100_000_000_000_000 else None
+    for key in ("t", "time"):
+        if key in payload:
+            try:
+                seconds = float(payload.get(key))
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(seconds) or seconds <= 0 or seconds >= 100_000_000_000:
+                return None
+            return int(seconds * 1000.0)
+    return None
+
+
+def validate_gate_contract(item: Mapping[str, Any]) -> tuple[bool, str]:
+    """Admit only a live direct USDT perpetual with coherent size metadata."""
+    symbol = str(item.get("name") or item.get("contract") or "").strip().upper()
+    if not symbol.endswith("_USDT"):
+        return False, "NOT_USDT_PERPETUAL"
+    if item.get("in_delisting") in (True, "true"):
+        return False, "IN_DELISTING"
+    if str(item.get("type") or "direct").lower() not in {"direct", ""}:
+        return False, "NOT_DIRECT_CONTRACT"
+    expected_base = canonical_coin(symbol)
+    declared_base = item.get("base_currency") or item.get("base")
+    if declared_base not in (None, "") and str(declared_base).upper() != expected_base:
+        return False, "CONTRACT_BASE_MISMATCH"
+    size_currency = item.get("contract_size_currency") or item.get("quanto_currency")
+    if size_currency not in (None, "") and str(size_currency).upper() != expected_base:
+        return False, "CONTRACT_SIZE_CURRENCY_MISMATCH"
+    raw_size = item.get("contract_size") or item.get("quanto_multiplier")
+    if raw_size not in (None, ""):
+        size = _f(raw_size)
+        if size is None or size <= 0:
+            return False, "INVALID_CONTRACT_SIZE"
+    return True, "OK"
+
+
 def parse_gate_contracts(payload: Any) -> list[tuple[str, str]]:
     rows = payload.get("data", payload) if isinstance(payload, dict) else payload
     out = []
     for item in rows or []:
         if not isinstance(item, dict):
             continue
+        eligible, _ = validate_gate_contract(item)
+        if not eligible:
+            continue
         symbol = str(item.get("name") or item.get("contract") or "").upper()
-        if not symbol or item.get("in_delisting") in (True, "true"):
-            continue
-        if str(item.get("type") or "direct").lower() not in {"direct", ""}:
-            continue
         out.append((canonical_coin(symbol), symbol))
     return sorted({x for x in out if x[0]})
 
@@ -99,6 +145,9 @@ class GateMarketState:
     duplicate_count: int = 0
     regression_count: int = 0
     last_ws_delta_signature: str | None = None
+    book_source: str | None = None
+    last_exchange_ts_ms: int | None = None
+    funding_ts_ms: int | None = None
 
     def apply_book(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
         meta = payload.get("_alina_transport")
@@ -110,6 +159,19 @@ class GateMarketState:
         # sequence rather than comparing against a prior incremental epoch.
         # Historical gap counters are retained as evidence.
         is_full_snapshot = payload.get("full") is True
+        source = "rest" if payload.get("_alina_rest_anchor") is True else "ws"
+        if (
+            self.book_source is not None
+            and source != self.book_source
+            and is_full_snapshot
+            and payload.get("_alina_rest_anchor") is not True
+        ):
+            self.quality, self.reason = DESYNC, "BOOK_SOURCE_CHANGED"
+            self.bids.clear()
+            self.asks.clear()
+            self.sequence = None
+            self.rest_anchor_pending = False
+            return self.quality
         connection = str(transport.get("connection_id") or "")
         if connection and self.connection_id and connection != self.connection_id:
             # An old, seemingly contiguous update number cannot prove that a
@@ -120,6 +182,8 @@ class GateMarketState:
                 self.last_ws_delta_signature = None
                 self.bids.clear()
                 self.asks.clear()
+                self.book_source = None
+                self.last_exchange_ts_ms = None
                 self.gap_count += 1
                 self.connection_id = connection
                 self.quality, self.reason = DESYNC, "WS_RECONNECT_REQUIRES_SNAPSHOT"
@@ -152,6 +216,22 @@ class GateMarketState:
                 self.bids.clear()
                 self.asks.clear()
             return self.quality
+        exchange_ts = _gate_timestamp_ms(payload)
+        if ("time_ms" in payload or "t" in payload or "time" in payload) and exchange_ts is None:
+            self.quality, self.reason = UNMEASURABLE, "TIMESTAMP_NOT_MILLISECONDS_OR_SECONDS"
+            return self.quality
+        if (
+            exchange_ts is not None
+            and self.last_exchange_ts_ms is not None
+            and exchange_ts < self.last_exchange_ts_ms
+        ):
+            self.regression_count += 1
+            self.quality, self.reason = DESYNC, "EXCHANGE_TIMESTAMP_REGRESSION"
+            self.bids.clear()
+            self.asks.clear()
+            self.sequence = None
+            self.last_ws_delta_signature = None
+            return self.quality
         if is_full_snapshot:
             bids = payload.get("b") or payload.get("bids")
             asks = payload.get("a") or payload.get("asks")
@@ -161,6 +241,7 @@ class GateMarketState:
                 # preserve the prior book only for diagnostics, not execution.
                 return self.quality
             self.rest_anchor_pending = payload.get("_alina_rest_anchor") is True
+            self.book_source = source
             self.last_ws_delta_signature = None
             if self.rest_anchor_pending:
                 # A new REST baseline does not belong to the old WS connection.
@@ -180,6 +261,7 @@ class GateMarketState:
                 return self.quality
             if first <= self.sequence + 1:
                 self.rest_anchor_pending = False
+                self.book_source = "ws"
         signature = None
         if not is_full_snapshot:
             signature = json.dumps(
@@ -241,10 +323,15 @@ class GateMarketState:
                     target.pop(price, None)
                 else:
                     target[price] = size
+        if len(self.bids) > MAX_BOOK_LEVELS:
+            self.bids = dict(sorted(self.bids.items(), reverse=True)[:MAX_BOOK_LEVELS])
+        if len(self.asks) > MAX_BOOK_LEVELS:
+            self.asks = dict(sorted(self.asks.items())[:MAX_BOOK_LEVELS])
         self.sequence = last if last is not None else self.sequence
         if not is_full_snapshot:
             self.last_ws_delta_signature = signature
-        self.exchange_ts_ms = _epoch_ms(payload.get("time_ms") or payload.get("t") or payload.get("time")) or self.exchange_ts_ms
+        self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
+        self.last_exchange_ts_ms = exchange_ts or self.last_exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
         self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
         self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
@@ -264,7 +351,18 @@ class GateMarketState:
         self.volume_24h = _f(payload.get("volume_24h_base") or payload.get("volume_24h")) or self.volume_24h
         self.open_interest = _f(payload.get("total_size") or payload.get("open_interest")) or self.open_interest
         if payload.get("funding_rate") is not None:
-            self.funding_rate = _f(payload.get("funding_rate"))
+            funding_ts = _epoch_ms(
+                payload.get("funding_time_ms")
+                or payload.get("funding_time")
+                or payload.get("funding_timestamp")
+            )
+            parsed_rate = _f(payload.get("funding_rate"))
+            if funding_ts is None or parsed_rate is None:
+                self.funding_rate = None
+                self.funding_ts_ms = None
+            else:
+                self.funding_rate = parsed_rate
+                self.funding_ts_ms = funding_ts
         return self.quality
 
     def snapshot(self, *, now_ms: int | None = None, depth: int = 100) -> NativeMarketSnapshot:
@@ -481,6 +579,8 @@ __all__ = [
     "GatePublicClient",
     "PUBLIC_WS_URL",
     "REST_BASE_URL",
+    "MAX_BOOK_LEVELS",
     "VWAP_TARGET_QUOTE_NOTIONALS_USD",
     "parse_gate_contracts",
+    "validate_gate_contract",
 ]

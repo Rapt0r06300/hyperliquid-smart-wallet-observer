@@ -136,4 +136,30 @@ def refine_discovery_score(base_discovery_score: float, quality: WalletQuality) 
     return round(_clamp(float(base_discovery_score) * quality.multiplier, 0.0, 100.0), 4)
 
 
-__all__ = ["FLAG", "WalletQuality", "quality_scoring_enabled", "compute_wallet_quality", "refine_discovery_score"]
+def survivorship_adjustment(*, active_count: int, delisted_count: int) -> dict[str, object]:
+    """Measure the active-only survivorship bias without fabricating delistings."""
+    values = (active_count, delisted_count)
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+        return {"status": "UNMEASURABLE", "reason": "counts_must_be_integers"}
+    if any(value < 0 for value in values):
+        return {"status": "UNMEASURABLE", "reason": "counts_must_be_non_negative"}
+    total_count = active_count + delisted_count
+    if total_count == 0:
+        return {"status": "MORE_DATA", "reason": "empty_universe"}
+    active_share = active_count / total_count
+    result = {
+        "status": "PROVEN" if delisted_count > 0 else "MORE_DATA",
+        "active_count": active_count,
+        "delisted_count": delisted_count,
+        "total_count": total_count,
+        "survivorship_factor": round(active_share, 8),
+        "survivorship_penalty": round(1.0 - active_share, 8),
+        "reason": "delisted_population_observed" if delisted_count > 0 else "delisted_population_missing",
+    }
+    return result
+
+
+__all__ = [
+    "FLAG", "WalletQuality", "quality_scoring_enabled", "compute_wallet_quality",
+    "refine_discovery_score", "survivorship_adjustment",
+]

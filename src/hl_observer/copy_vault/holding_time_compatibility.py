@@ -33,4 +33,14 @@ def evaluer(duree_holding_s: Any, *, latence_copie_s: float = 1.0,
     return {"etat": etat, "ratio_latence_holding": round(ratio, 6)}
 
 
-__all__ = ["evaluer", "COMPATIBLE", "DEGRADE", "INCOMPATIBLE", "UNMEASURABLE"]
+def holding_time_receipt(*, holding_seconds: Any, copy_latency_seconds: float = 1.0,
+                         degrade_ratio: float = 0.2) -> dict[str, Any]:
+    """Classify whether an observed holding horizon can survive copy latency."""
+    result = evaluer(holding_seconds, latence_copie_s=copy_latency_seconds, ratio_degrade=degrade_ratio)
+    if result["etat"] == UNMEASURABLE:
+        return {"status": "MORE_DATA", **result}
+    return {"status": "PROVEN", "compatibility": result["etat"],
+            "latency_holding_ratio": result["ratio_latence_holding"]}
+
+
+__all__ = ["evaluer", "holding_time_receipt", "COMPATIBLE", "DEGRADE", "INCOMPATIBLE", "UNMEASURABLE"]

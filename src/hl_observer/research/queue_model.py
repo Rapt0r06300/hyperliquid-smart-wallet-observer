@@ -9,6 +9,7 @@ Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 UNMEASURABLE = "UNMEASURABLE"
 
@@ -35,6 +36,19 @@ def comparer(queue_ahead: Any, volume_traversant: Any, *, cancels_devant: float 
     return {"risk_averse": fill_risk_averse(queue_ahead, volume_traversant),
             "probabiliste": fill_probabiliste(queue_ahead, volume_traversant, cancels_devant=cancels_devant),
             "note": "calibrer contre trade-through/cancellations reels ; priorite exacte requiert L4"}
+
+
+def queue_model_limits_receipt(*, queue_ahead: object, volume_traversant: object, cancels_devant: object) -> dict[str, Any]:
+    """Compare queue models only within observed non-negative limits."""
+
+    try:
+        queue, volume, cancels = float(queue_ahead), float(volume_traversant), float(cancels_devant)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "QUEUE_INPUT_INVALID"}
+    if not all(math.isfinite(value) for value in (queue, volume, cancels)) or min(queue, volume, cancels) < 0.0:
+        return {"status": "UNMEASURABLE", "reason": "QUEUE_INPUT_INVALID"}
+    result = comparer(queue, volume, cancels_devant=cancels)
+    return {"status": "PROVEN", "risk_averse": result["risk_averse"], "probabiliste": result["probabiliste"], "paper_only": True}
 
 
 __all__ = ["fill_risk_averse", "fill_probabiliste", "comparer", "UNMEASURABLE"]

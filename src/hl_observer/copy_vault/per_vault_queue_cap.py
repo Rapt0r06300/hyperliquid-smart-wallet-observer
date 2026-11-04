@@ -30,4 +30,19 @@ class LimiteurQueueVault:
         self._profondeur[str(vault)] = max(0, self._profondeur.get(str(vault), 0) - 1)
 
 
+def queue_cap_receipt(events_by_vault: dict[str, int], *, cap_per_vault: int = 100) -> dict[str, Any]:
+    """Report per-vault accepted/dropped backlog instead of silently losing bursts."""
+    if isinstance(cap_per_vault, bool) or not isinstance(cap_per_vault, int) or cap_per_vault < 1:
+        return {"status": "UNMEASURABLE", "reason": "cap_must_be_positive_integer"}
+    if not isinstance(events_by_vault, dict) or any(isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in events_by_vault.values()):
+        return {"status": "UNMEASURABLE", "reason": "event_counts_invalid"}
+    accepted: dict[str, int] = {}
+    dropped: dict[str, int] = {}
+    for vault, count in events_by_vault.items():
+        accepted[str(vault)] = min(count, cap_per_vault)
+        dropped[str(vault)] = max(0, count - cap_per_vault)
+    return {"status": "PROVEN", "cap_per_vault": cap_per_vault, "accepted": accepted,
+            "dropped": dropped, "diagnostic_preserved": True}
+
+
 __all__ = ["LimiteurQueueVault"]

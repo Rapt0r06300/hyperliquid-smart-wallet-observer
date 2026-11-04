@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import statistics
+from copy import deepcopy
 from itertools import combinations
 from typing import Callable, Mapping, Sequence
 
@@ -136,3 +137,26 @@ def verdict_promotion(*, borne_basse: float | None, edge_positif: bool, drift_st
         raisons.append("GATES_ECHOUEES")
     return {"verdict": PROMOTION_POSITIVE if not raisons else NO_PROMOTION,
             "raisons": raisons, "real_execution": False}
+
+
+def preserve_incumbent_after_failed_challenge(
+    incumbent: Mapping[str, object],
+    challenger: Mapping[str, object],
+    *,
+    challenge_verdict: str,
+) -> dict:
+    """Record a failed challenge while preserving the incumbent byte-for-byte in memory."""
+    if not isinstance(incumbent, Mapping) or not isinstance(challenger, Mapping):
+        raise ValueError("incumbent and challenger must be mappings")
+    if challenge_verdict == PROMOTION_POSITIVE:
+        raise ValueError("a positive challenge is not a failed challenge")
+    return {
+        "status": "REJECTED",
+        "challenge_verdict": challenge_verdict,
+        "promoted": False,
+        "incumbent_preserved": True,
+        "incumbent": deepcopy(dict(incumbent)),
+        "challenger": deepcopy(dict(challenger)),
+        "paper_only": True,
+        "real_execution": False,
+    }

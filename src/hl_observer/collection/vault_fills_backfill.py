@@ -144,6 +144,32 @@ def plan_de_requetes(start_ms: int, end_ms: int, *, fenetre_ms: int = 24 * MS_PA
     return out
 
 
+def pagination_boundary_receipt(pages: list[list[Mapping[str, Any]]]) -> dict[str, Any]:
+    """Merge pages deterministically without dropping distinct fills at one millisecond."""
+
+    if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+        return {"status": "UNMEASURABLE", "fills": [], "reason": "PAGES_INVALID", "paper_read_only": True}
+    rows: list[Mapping[str, Any]] = [fill for page in pages for fill in page]
+    keys: set[tuple[Any, ...]] = set()
+    retained: list[Mapping[str, Any]] = []
+    for fill in rows:
+        if not isinstance(fill, Mapping):
+            return {"status": "UNMEASURABLE", "fills": [], "reason": "FILL_INVALID", "paper_read_only": True}
+        timestamp = fill.get("ts_ms", fill.get("time"))
+        native = next((fill.get(name) for name in ("tid", "hash", "oid") if fill.get(name) not in (None, "")), None)
+        if type(timestamp) is not int or timestamp <= 0 or native is None:
+            return {"status": "UNMEASURABLE", "fills": [], "reason": "BOUNDARY_IDENTITY_MISSING", "paper_read_only": True}
+        key = (timestamp, str(native), str(fill.get("coin") or ""))
+        if key in keys:
+            continue
+        keys.add(key)
+        retained.append(dict(fill))
+    retained.sort(key=lambda fill: (int(fill.get("ts_ms", fill.get("time"))), str(fill.get("tid") or fill.get("hash") or fill.get("oid")), str(fill.get("coin") or "")))
+    return {"status": "PROVEN", "fills": retained, "input_count": len(rows),
+            "retained_count": len(retained), "removed_duplicates": len(rows) - len(retained),
+            "paper_read_only": True}
+
+
 def split_inclusive_window(start_ms: int, end_ms: int) -> tuple[tuple[int, int], tuple[int, int]] | None:
     """Split inclusive integer-ms bounds into adjacent, non-overlapping children."""
     start_ms = int(start_ms)
@@ -640,6 +666,6 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
             "par_vault": vaults}
 
 
-__all__ = ["plan_de_requetes", "split_inclusive_window", "parser_fills", "parser_fills_with_audit", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
+__all__ = ["plan_de_requetes", "pagination_boundary_receipt", "split_inclusive_window", "parser_fills", "parser_fills_with_audit", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
            "reconstruire_episodes", "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture",
            "CAP_USERFILLS", "RETENTION_USERFILLS", "MS_PAR_HEURE"]

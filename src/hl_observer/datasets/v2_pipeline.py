@@ -372,6 +372,18 @@ def admission_rejection(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def partial_recovery_receipt(manifest: Mapping[str, Any]) -> dict[str, object]:
+    """Allow repair only for explicitly recoverable PARTIAL reasons."""
+    if not isinstance(manifest, Mapping) or str(manifest.get("quality_status") or "").upper() != "PARTIAL":
+        return {"status": "UNMEASURABLE", "reason": "NOT_PARTIAL"}
+    reasons = {str(reason).upper() for reason in (manifest.get("quality_reasons") or []) if str(reason).strip()}
+    if not reasons:
+        return {"status": "UNMEASURABLE", "reason": "PARTIAL_REASON_MISSING"}
+    forbidden = {reason for reason in reasons if any(token in reason for token in ("GAP", "DESYNC", "REGRESSION", "INVALID", "NON_PUBLIC", "MISMATCH", "QUEUE"))}
+    recoverable = not forbidden
+    return {"status": "PROVEN" if recoverable else "REJECTED", "recoverable": recoverable, "reasons": sorted(reasons), "forbidden_reasons": sorted(forbidden), "no_payload_rewrite": True}
+
+
 def summarize_admission_rejections(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     counts: Counter[str] = Counter()
     for row in rows:
@@ -704,6 +716,7 @@ __all__ = [
     "infer_reconciliation_status",
     "locally_replay_admissible",
     "admission_rejection",
+    "partial_recovery_receipt",
     "summarize_admission_rejections",
     "verify_remote_asset",
 ]

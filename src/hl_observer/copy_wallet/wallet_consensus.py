@@ -120,4 +120,27 @@ def consensus(
     return None
 
 
-__all__ = ["QUORUM_DEFAUT", "consensus"]
+def dependency_aware_consensus_receipt(
+    signals: Iterable[dict],
+    *,
+    as_of_ms: int,
+    min_wallets: int = QUORUM_DEFAUT,
+) -> dict[str, Any]:
+    """Require point-in-time entity evidence before counting wallet votes."""
+    result = consensus(
+        signals,
+        min_wallets=min_wallets,
+        exiger_independance_mesuree=True,
+        as_of_ms=as_of_ms,
+    )
+    return {
+        "status": "PROVEN" if result is not None else "UNMEASURABLE",
+        "reason": None if result is not None else "DEPENDENT_OR_UNMEASURED_WALLETS",
+        "consensus": result,
+        "independence_required": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["QUORUM_DEFAUT", "consensus", "dependency_aware_consensus_receipt"]

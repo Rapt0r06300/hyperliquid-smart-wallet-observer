@@ -11,6 +11,29 @@ from typing import Any
 from .economic_objective import CANONICAL_FAMILIES, TARGET_NET_USD, canonical_family, evaluate_objective
 
 
+def separate_technical_and_economic_certification(
+    technical: Mapping[str, Any] | None,
+    economic: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep green CI/connected code separate from economic proof."""
+    technical_certified = (
+        isinstance(technical, Mapping)
+        and technical.get("technical_certified") is True
+    )
+    economic_certified = (
+        isinstance(economic, Mapping)
+        and economic.get("economic_certified") is True
+    )
+    return {
+        "technical_certified": technical_certified,
+        "economic_certified": economic_certified,
+        "proven": technical_certified and economic_certified,
+        "status": "PROVEN" if technical_certified and economic_certified else "NO_GO",
+        "technical_only_never_economic": technical_certified and not economic_certified,
+        "real_execution": False,
+    }
+
+
 def evaluate_all_families(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Évalue les familles canoniques et échoue fermé sur toute ambiguïté."""
     by_family: dict[str, Mapping[str, Any]] = {}
@@ -69,4 +92,4 @@ def evaluate_all_families(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-__all__ = ["evaluate_all_families"]
+__all__ = ["evaluate_all_families", "separate_technical_and_economic_certification"]

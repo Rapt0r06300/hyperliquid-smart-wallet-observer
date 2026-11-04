@@ -5,6 +5,7 @@ coin, produire un delta NET +$30 au lieu d'exécuter deux trades coûteux qui se
 from __future__ import annotations
 
 from collections.abc import Iterable
+import math
 from typing import Any
 
 
@@ -24,4 +25,39 @@ def netter(intents: Iterable[dict[str, Any]]) -> dict[str, Any]:
     return {"net_par_coin": net, "brut_par_coin": brut, "economie_par_coin": economie}
 
 
-__all__ = ["netter"]
+def netting_attribution_receipt(intents: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Validate observed intents before measuring netting and source attribution."""
+    rows = list(intents)
+    if not rows:
+        return {"status": "UNMEASURABLE", "reason": "NO_INTENTS"}
+    for row in rows:
+        if not isinstance(row, dict):
+            return {"status": "UNMEASURABLE", "reason": "INTENT_INVALID"}
+        coin = row.get("coin")
+        amount = row.get("montant_signe")
+        vault = row.get("vault_id", row.get("vault"))
+        if (
+            not isinstance(coin, str)
+            or not coin.strip()
+            or isinstance(amount, bool)
+            or not isinstance(amount, (int, float))
+            or not math.isfinite(float(amount))
+            or not isinstance(vault, str)
+            or not vault.strip()
+        ):
+            return {"status": "UNMEASURABLE", "reason": "INTENT_ATTRIBUTION_INVALID"}
+    result = netter(rows)
+    sources: dict[str, list[str]] = {}
+    for row in rows:
+        coin = str(row["coin"]).upper()
+        vault = str(row.get("vault_id", row.get("vault")))
+        sources.setdefault(coin, []).append(vault)
+    return {
+        "status": "PROVEN",
+        **result,
+        "attribution_by_coin": {coin: sorted(values) for coin, values in sorted(sources.items())},
+        "real_execution": False,
+    }
+
+
+__all__ = ["netter", "netting_attribution_receipt"]

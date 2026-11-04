@@ -49,4 +49,18 @@ def leader_hotness(
     return LeaderHotness(round(hot, 6), round(winrate, 6), trend, len(recent_trades))
 
 
-__all__ = ["LeaderHotness", "leader_hotness"]
+def separate_activity_quality(*, recent_trade_count: int, quality_score: object) -> dict[str, object]:
+    """Keep recency/activity separate from leader-quality evidence."""
+    if type(recent_trade_count) is not int or recent_trade_count < 0:
+        return {"status": "UNMEASURABLE", "reason": "ACTIVITY_COUNT_INVALID", "paper_read_only": True}
+    try:
+        quality = float(quality_score)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "QUALITY_MISSING", "paper_read_only": True}
+    import math
+    if not math.isfinite(quality):
+        return {"status": "UNMEASURABLE", "reason": "QUALITY_INVALID", "paper_read_only": True}
+    return {"status": "PROVEN", "recent_trade_count": recent_trade_count, "quality_score": quality, "paper_read_only": True, "real_execution": False}
+
+
+__all__ = ["LeaderHotness", "leader_hotness", "separate_activity_quality"]

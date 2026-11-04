@@ -523,9 +523,18 @@ def clear() -> None:
         _book_cache.clear()
 
 
+def causal_snapshot_allowed(*, snapshot_ts_ms: object, received_ts_ms: object, signal_ts_ms: object) -> dict[str, object]:
+    """Reject an L2 snapshot received after the signal that would use it."""
+    if any(type(value) is not int or value <= 0 for value in (snapshot_ts_ms, received_ts_ms, signal_ts_ms)):
+        return {"status": "UNMEASURABLE", "reason": "CAUSAL_CLOCK_MISSING", "paper_read_only": True}
+    if received_ts_ms > signal_ts_ms or snapshot_ts_ms > signal_ts_ms:
+        return {"status": "NO_TRADE", "reason": "BOOK_AFTER_SIGNAL", "paper_read_only": True, "real_execution": False}
+    return {"status": "PROVEN", "snapshot_ts_ms": snapshot_ts_ms, "received_ts_ms": received_ts_ms, "signal_ts_ms": signal_ts_ms, "paper_read_only": True, "real_execution": False}
+
+
 __all__ = [
     "CONSUME_FLAG", "POLLER_FLAG", "compute_book_costs", "compute_book_costs_with_reason", "push_costs",
     "live_costs_for", "live_execution_truth_for", "live_execution_truth_refusal_for", "push_book",
     "parse_l2book", "poll_once", "ensure_started", "clear",
-    "coins_a_sonder", "DEFAUT_COINS", "DEFAUT_COINS_ENV", "BALAYAGE_FLAG",
+    "coins_a_sonder", "causal_snapshot_allowed", "DEFAUT_COINS", "DEFAUT_COINS_ENV", "BALAYAGE_FLAG",
 ]

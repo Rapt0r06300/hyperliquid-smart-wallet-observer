@@ -34,6 +34,46 @@ class VerdictPromotion:
     real_execution: bool = False       # invariant : cette porte ne déclenche aucun ordre réel
 
 
+def audit_oos_retuning_isolation(
+    *,
+    previous_oos_id: str | None,
+    previous_oos_window_id: str | None,
+    replacement_oos_id: str | None,
+    replacement_oos_window_id: str | None,
+) -> dict[str, Any]:
+    """Require a new OOS evidence object and a disjoint window after retuning."""
+    values = (
+        previous_oos_id,
+        previous_oos_window_id,
+        replacement_oos_id,
+        replacement_oos_window_id,
+    )
+    if any(not str(value or "").strip() for value in values):
+        return {
+            "status": "UNMEASURABLE",
+            "retuning_isolated": False,
+            "reason": "NEW_OOS_FREEZE_AND_WINDOW_REQUIRED",
+        }
+    if (
+        str(previous_oos_id) == str(replacement_oos_id)
+        or str(previous_oos_window_id) == str(replacement_oos_window_id)
+    ):
+        return {
+            "status": "REJECTED",
+            "retuning_isolated": False,
+            "reason": "OOS_REUSED_FOR_RETUNING",
+        }
+    return {
+        "status": "PROVEN",
+        "retuning_isolated": True,
+        "reason": None,
+        "previous_oos_id": str(previous_oos_id),
+        "replacement_oos_id": str(replacement_oos_id),
+        "previous_oos_window_id": str(previous_oos_window_id),
+        "replacement_oos_window_id": str(replacement_oos_window_id),
+    }
+
+
 def decision_promotion(
     *,
     pnl_paper: float | None,
@@ -48,6 +88,8 @@ def decision_promotion(
     observed_at_ms: int | None = None,
     replay_pipeline_hash: str | None = None,
     forward_pipeline_hash: str | None = None,
+    retuning: bool = False,
+    oos_retuning_audit: dict[str, Any] | None = None,
     criteres: CriteresPromotion = CriteresPromotion(),
 ) -> VerdictPromotion:
     """Compose les critères. Tout critère non satisfait OU manquant -> RESTE_PAPER (deny-by-default)."""
@@ -91,9 +133,15 @@ def decision_promotion(
         or replay_pipeline_hash != forward_pipeline_hash
     ):
         motifs.append("PARITE_MOTEUR_EVENEMENTS_NON_PROUVEE")
+    if retuning and (
+        not isinstance(oos_retuning_audit, dict)
+        or oos_retuning_audit.get("status") != "PROVEN"
+        or oos_retuning_audit.get("retuning_isolated") is not True
+    ):
+        motifs.append("OOS_REUTILISEE_OU_NOUVEAU_FREEZE_MANQUANT")
     decision = PROMOUVOIR_TESTNET if not motifs else RESTE_PAPER
     return VerdictPromotion(decision=decision, motifs=tuple(motifs), real_execution=False)
 
 
 __all__ = ["PROMOUVOIR_TESTNET", "RESTE_PAPER", "CriteresPromotion", "VerdictPromotion",
-           "decision_promotion"]
+           "decision_promotion", "audit_oos_retuning_isolation"]

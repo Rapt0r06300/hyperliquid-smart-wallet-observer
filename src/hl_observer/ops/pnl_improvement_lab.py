@@ -366,6 +366,82 @@ def compare_regime_ablation(
     }
 
 
+def prioritize_falsifiable_experiments(
+    experiments: Iterable[Mapping[str, Any]], *, limit: int = 5
+) -> dict[str, Any]:
+    """Select high-information falsifiable tests without repeating a sweep."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_sweeps: set[str] = set()
+    for raw in experiments:
+        if not isinstance(raw, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_EXPERIMENT", "paper_read_only": True, "real_execution": False}
+        experiment_id = raw.get("experiment_id")
+        hypothesis = raw.get("hypothesis")
+        protocol = raw.get("validation_protocol")
+        sweep = str(raw.get("sweep_signature") or experiment_id or "").strip()
+        try:
+            information_gain = float(raw.get("information_gain"))
+            falsification_cost = float(raw.get("falsification_cost"))
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_INFORMATION_OR_COST", "paper_read_only": True, "real_execution": False}
+        if (
+            not isinstance(experiment_id, str) or not experiment_id.strip()
+            or experiment_id in seen_ids or not isinstance(hypothesis, str) or not hypothesis.strip()
+            or not isinstance(protocol, str) or not protocol.strip()
+            or not sweep or sweep in seen_sweeps
+            or not math.isfinite(information_gain) or information_gain < 0
+            or not math.isfinite(falsification_cost) or falsification_cost < 0
+        ):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_OR_REPEATED_EXPERIMENT", "paper_read_only": True, "real_execution": False}
+        seen_ids.add(experiment_id)
+        seen_sweeps.add(sweep)
+        row = dict(raw)
+        row["information_gain_per_cost"] = information_gain / (1.0 + falsification_cost)
+        rows.append(row)
+    rows.sort(key=lambda item: (-item["information_gain_per_cost"], str(item["experiment_id"])))
+    return {
+        "status": "PROVEN" if rows else "UNMEASURABLE",
+        "selected": rows[:limit],
+        "candidate_count": len(rows),
+        "repeat_sweeps_removed": len(seen_sweeps) - len(rows),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def rank_correction_bottlenecks(
+    bottlenecks: Iterable[Mapping[str, Any]], *, limit: int = 10
+) -> dict[str, Any]:
+    """Rank measured bottlenecks by correction cost and falsifiability only."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    rows: list[dict[str, Any]] = []
+    for raw in bottlenecks:
+        if not isinstance(raw, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_BOTTLENECK", "paper_read_only": True}
+        name = str(raw.get("name") or "").strip()
+        try:
+            cost = float(raw.get("correction_cost"))
+            priority = float(raw.get("falsification_priority"))
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_COST_OR_PRIORITY", "paper_read_only": True}
+        if not name or not math.isfinite(cost) or cost < 0 or not math.isfinite(priority) or priority < 0:
+            return {"status": "UNMEASURABLE", "reason": "INVALID_BOTTLENECK_FIELDS", "paper_read_only": True}
+        rows.append({"name": name, "correction_cost": cost, "falsification_priority": priority})
+    rows.sort(key=lambda row: (-row["falsification_priority"], row["correction_cost"], row["name"]))
+    return {
+        "status": "PROVEN" if rows else "UNMEASURABLE",
+        "bottlenecks": rows[:limit],
+        "candidate_count": len(rows),
+        "future_gain_used": False,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class HistoricalTrade:
     trade_id: str
@@ -2052,6 +2128,7 @@ __all__ = [
     "evaluate_candidate_rules",
     "extract_historical_trades",
     "learn_train_only_markout_filter",
+    "rank_correction_bottlenecks",
     "main",
     "rule_matches",
     "write_lab_outputs",

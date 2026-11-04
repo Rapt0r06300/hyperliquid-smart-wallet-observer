@@ -38,4 +38,20 @@ def valider(ts: Any, *, unite_attendue: str = "ms") -> dict[str, Any]:
             "raison": None if conforme else "UNITE_INATTENDUE"}
 
 
-__all__ = ["detecter_unite", "valider"]
+def normaliser_ms(ts: Any, *, allow_relative: bool = False) -> dict[str, Any]:
+    """Normalize a timestamp only when its unit is provable.
+
+    Relative test clocks are accepted only when the caller explicitly opts in;
+    modern epoch values in seconds, microseconds, or nanoseconds are never
+    silently converted into milliseconds.
+    """
+
+    if allow_relative and isinstance(ts, int) and not isinstance(ts, bool) and 0 < ts < 100_000_000_000:
+        return {"conforme": True, "timestamp_ms": ts, "unite_detectee": "relative_ms"}
+    result = valider(ts, unite_attendue="ms")
+    if not result.get("conforme"):
+        return {**result, "timestamp_ms": None}
+    return {**result, "timestamp_ms": int(ts)}
+
+
+__all__ = ["detecter_unite", "normaliser_ms", "valider"]

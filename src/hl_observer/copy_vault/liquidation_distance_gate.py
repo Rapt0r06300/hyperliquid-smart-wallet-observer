@@ -28,4 +28,12 @@ def peut_augmenter(distance_liquidation_pct: Any, *, seuil_pct: float = 5.0) -> 
             "raison": ("OK" if ok else "TROP_PROCHE_LIQUIDATION")}
 
 
-__all__ = ["peut_augmenter"]
+def liquidation_distance_receipt(distance_liquidation_pct: Any, *, seuil_pct: float = 5.0) -> dict[str, Any]:
+    """Return a paper gate receipt; unknown liquidation distance remains fail closed."""
+    result = peut_augmenter(distance_liquidation_pct, seuil_pct=seuil_pct)
+    if "distance_pct" not in result:
+        return {"status": "UNMEASURABLE", "reason": result["raison"], "peut_reduire": True}
+    return {"status": "PROVEN", **result, "real_execution": False}
+
+
+__all__ = ["peut_augmenter", "liquidation_distance_receipt"]

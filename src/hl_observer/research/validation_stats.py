@@ -9,6 +9,107 @@ import random
 from typing import Any, Mapping, Sequence
 
 
+def purge_train_oos_overlap(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    signal_ts_field: str = "signal_ts_ms",
+    outcome_ts_field: str = "outcome_ts_ms",
+    episode_id_field: str = "episode_id",
+    embargo_ms: int = 0,
+) -> dict[str, Any]:
+    """Audit temporal separation before any TRAIN/OOS statistic is computed.
+
+    Each interval is observed evidence.  Any overlap or embargo collision is
+    rejected; rows are never silently dropped to manufacture a clean split.
+    """
+    if isinstance(embargo_ms, bool) or not isinstance(embargo_ms, int) or embargo_ms < 0:
+        return {"status": "UNMEASURABLE", "reason": "invalid_embargo", "paper_read_only": True}
+
+    def _parse(rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
+        parsed: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows or ():
+            if not isinstance(row, Mapping):
+                return [], "invalid_row"
+            key = str(row.get(episode_id_field) or "").strip()
+            start = row.get(signal_ts_field)
+            end = row.get(outcome_ts_field)
+            if (
+                not key or key in seen or isinstance(start, bool) or not isinstance(start, int)
+                or isinstance(end, bool) or not isinstance(end, int) or start < 0 or end < start
+            ):
+                return [], "invalid_interval_or_duplicate"
+            seen.add(key)
+            parsed.append({"episode_id": key, "start": start, "end": end, "row": dict(row)})
+        return parsed, None
+
+    train, train_error = _parse(train_rows)
+    oos, oos_error = _parse(oos_rows)
+    if train_error or oos_error or not train or not oos:
+        return {
+            "status": "UNMEASURABLE", "reason": train_error or oos_error or "empty_split",
+            "paper_read_only": True, "real_execution": False,
+        }
+    collisions: list[dict[str, str]] = []
+    for left in train:
+        for right in oos:
+            if left["start"] <= right["end"] + embargo_ms and right["start"] <= left["end"] + embargo_ms:
+                collisions.append({"train_episode": left["episode_id"], "oos_episode": right["episode_id"]})
+    return {
+        "status": "PROVEN" if not collisions else "REJECTED",
+        "verdict": "DISJOINT_TEMPORAL_SPLIT" if not collisions else "OVERLAP_REJECTED",
+        "reason": None if not collisions else "train_oos_overlap_or_embargo_collision",
+        "train_rows": len(train), "oos_rows": len(oos), "collisions": collisions,
+        "embargo_ms": embargo_ms, "purge_applied": True,
+        "paper_read_only": True, "real_execution": False,
+    }
+
+
+def block_position_bootstrap_receipt(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    day_field: str = "day_id",
+    position_field: str = "position_id",
+    value_field: str = "net_pnl_bps",
+    n_resamples: int = 1000,
+    seed: int = 7,
+) -> dict[str, Any]:
+    """Bootstrap whole day blocks while retaining within-day position order."""
+    if isinstance(n_resamples, bool) or not isinstance(n_resamples, int) or n_resamples < 1:
+        return {"status": "UNMEASURABLE", "reason": "invalid_resample_count", "paper_read_only": True}
+    grouped: dict[str, list[tuple[str, float]]] = {}
+    for row in rows or ():
+        if not isinstance(row, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "invalid_row", "paper_read_only": True}
+        day = str(row.get(day_field) or "").strip()
+        position = str(row.get(position_field) or "").strip()
+        try:
+            value = float(row.get(value_field))
+        except (TypeError, ValueError):
+            return {"status": "UNMEASURABLE", "reason": "missing_value", "paper_read_only": True}
+        if not day or not position or not math.isfinite(value):
+            return {"status": "UNMEASURABLE", "reason": "invalid_block_metadata", "paper_read_only": True}
+        grouped.setdefault(day, []).append((position, value))
+    if len(grouped) < 2:
+        return {"status": "MORE_DATA", "reason": "need_at_least_two_day_blocks", "day_blocks": len(grouped), "paper_read_only": True}
+    rng = random.Random(seed)
+    days = sorted(grouped)
+    means: list[float] = []
+    for _ in range(n_resamples):
+        sampled = [rng.choice(days) for _ in days]
+        values = [value for day in sampled for _, value in sorted(grouped[day])]
+        means.append(sum(values) / len(values))
+    return {
+        "status": "PROVEN", "verdict": "DAY_BLOCK_POSITION_BOOTSTRAP",
+        "day_blocks": len(days), "observations": sum(len(v) for v in grouped.values()),
+        "n_resamples": n_resamples, "seed": seed,
+        "mean_of_resample_means": sum(means) / len(means),
+        "min_resample_mean": min(means), "max_resample_mean": max(means),
+        "paper_read_only": True, "real_execution": False,
+    }
+
+
 def pbo_all_attempts(
     attempts: Sequence[Mapping[str, Any]],
     *,

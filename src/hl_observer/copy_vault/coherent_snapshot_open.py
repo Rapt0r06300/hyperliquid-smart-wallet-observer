@@ -18,4 +18,14 @@ def open_autorise(*, version_equity: Any, version_positions: Any) -> dict[str, A
             "raison": ("OK" if ok else "SNAPSHOT_INCOHERENT_VERSIONS_DIFFERENTES")}
 
 
-__all__ = ["open_autorise"]
+def snapshot_version_receipt(*, version_equity: Any, version_positions: Any) -> dict[str, Any]:
+    """Expose a paper/read-only version gate for OPEN/ADD sizing."""
+
+    if version_equity is None or version_positions is None:
+        return {"status": "PROVEN", "open_allowed": False, "reason": "VERSION_MISSING", "paper_read_only": True}
+    same = version_equity == version_positions
+    return {"status": "PROVEN", "open_allowed": same,
+            "reason": "VERSION_MATCH" if same else "VERSION_DIVERGENCE", "paper_read_only": True}
+
+
+__all__ = ["open_autorise", "snapshot_version_receipt"]

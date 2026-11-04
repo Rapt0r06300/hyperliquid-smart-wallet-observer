@@ -1,7 +1,9 @@
 from hl_observer.research.validation_promotion import (
     reconstruire_chemins_cpcv, spa_test, stepm_romano_wolf, leave_one_out_cv,
     borne_basse_nette, protocole_sans_edge, verdict_promotion,
+    preserve_incumbent_after_failed_challenge,
     PROMOTION_POSITIVE, NO_PROMOTION)
+from copy import deepcopy
 
 
 def test_cpcv_reconstruit_les_chemins():
@@ -52,3 +54,16 @@ def test_verdict_promotion_deny_by_default():
     assert ok["verdict"] == PROMOTION_POSITIVE and ok["raisons"] == []
     ko = verdict_promotion(borne_basse=-0.1, edge_positif=True, drift_stable=False)
     assert ko["verdict"] == NO_PROMOTION and "BORNE_BASSE_NETTE_NON_POSITIVE" in ko["raisons"] and "DRIFT_INSTABLE" in ko["raisons"]
+
+
+def test_failed_challenge_preserves_incumbent():
+    incumbent = {"name": "old", "metrics": {"net": 1.0}}
+    challenger = {"name": "new", "metrics": {"net": -1.0}}
+    original = deepcopy(incumbent)
+    result = preserve_incumbent_after_failed_challenge(
+        incumbent, challenger, challenge_verdict=NO_PROMOTION
+    )
+    assert result["status"] == "REJECTED"
+    assert result["promoted"] is False
+    assert result["incumbent"] == original
+    assert incumbent == original

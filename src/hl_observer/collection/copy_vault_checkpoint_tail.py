@@ -185,6 +185,26 @@ def _event_identity(fill: Mapping[str, Any]) -> str:
     return canonical_fill_id(fill)
 
 
+def coverage_receipt(counters: Mapping[str, Any], *, expected_lines: int) -> dict[str, Any]:
+    """Summarize exact checkpoint coverage without assuming missing lines."""
+    if isinstance(expected_lines, bool) or not isinstance(expected_lines, int) or expected_lines < 0:
+        return {"status": "UNMEASURABLE", "reason": "EXPECTED_LINES_INVALID", "paper_read_only": True}
+    actual = counters.get("complete_lines")
+    captured = counters.get("checkpoints_captured")
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in (actual, captured)):
+        return {"status": "UNMEASURABLE", "reason": "COUNTER_INVALID", "paper_read_only": True}
+    gaps = int(counters.get("reconnect_backfill_blocked") or 0) + int(counters.get("invalid_rejected") or 0)
+    return {
+        "status": "PROVEN" if actual == expected_lines and gaps == 0 else "UNMEASURABLE",
+        "expected_lines": expected_lines,
+        "complete_lines": actual,
+        "checkpoints_captured": captured,
+        "gap_count": gaps,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def _trim(values: list[str], limit: int) -> list[str]:
     return values[-max(1, int(limit)) :]
 
@@ -714,5 +734,6 @@ __all__ = [
     "OUTPUT_RELPATH",
     "SCHEMA_VERSION",
     "STATE_RELPATH",
+    "coverage_receipt",
     "fetch_hyperliquid_l2_book",
 ]

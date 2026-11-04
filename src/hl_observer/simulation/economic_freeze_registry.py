@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,100 @@ from .economic_campaigns import REPORT_DIR
 from .economic_objective import canonical_family
 
 SCHEMA = "hypersmart.economic_parameter_freeze.v1"
+_SHA256_HEX = frozenset("0123456789abcdef")
 
 
 def parameter_hash(parameters: Mapping[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(dict(parameters), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _sha256_digest(value: object, field_name: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise ValueError(f"{field_name} must be a 64-character SHA-256 digest")
+    digest = value.lower()
+    if any(char not in _SHA256_HEX for char in digest):
+        raise ValueError(f"{field_name} must be a hexadecimal SHA-256 digest")
+    return digest
+
+
+def build_immutable_freeze_revision(
+    previous_freeze: Mapping[str, Any],
+    *,
+    data_sha256: str,
+    config_sha256: str,
+    seed: int,
+    costs: Mapping[str, Any],
+    frozen_at_ms: int,
+) -> dict[str, Any]:
+    """Build an append-only revision without mutating the prior freeze.
+
+    A revision is a new immutable evidence boundary, never an in-place edit of
+    the incumbent freeze.  The material hash binds the predecessor, data,
+    configuration, seed, costs and timestamp so any change is auditable.
+    """
+    if not isinstance(previous_freeze, Mapping) or not previous_freeze:
+        raise ValueError("previous_freeze must be a non-empty mapping")
+    predecessor = previous_freeze.get("freeze_hash")
+    if predecessor is None:
+        predecessor = hashlib.sha256(
+            json.dumps(dict(previous_freeze), sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+    predecessor = _sha256_digest(predecessor, "previous_freeze_hash")
+    data_sha256 = _sha256_digest(data_sha256, "data_sha256")
+    config_sha256 = _sha256_digest(config_sha256, "config_sha256")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError("seed must be an integer")
+    if not isinstance(frozen_at_ms, int) or isinstance(frozen_at_ms, bool) or frozen_at_ms <= 0:
+        raise ValueError("frozen_at_ms must be a positive integer")
+    if not isinstance(costs, Mapping) or not costs:
+        raise ValueError("costs must be a non-empty mapping")
+    normalized_costs: dict[str, float] = {}
+    for key, value in costs.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("cost names must be non-empty strings")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("costs must be finite numbers") from exc
+        if not math.isfinite(number):
+            raise ValueError("costs must be finite numbers")
+        normalized_costs[key] = number
+    try:
+        revision = int(previous_freeze.get("revision") or 1) + 1
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("previous revision must be an integer") from exc
+    material = {
+        "previous_freeze_hash": predecessor,
+        "data_sha256": data_sha256,
+        "config_sha256": config_sha256,
+        "seed": seed,
+        "costs": normalized_costs,
+        "frozen_at_ms": frozen_at_ms,
+        "paper_only": True,
+        "real_execution": False,
+    }
+    freeze_hash = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema_version": SCHEMA,
+        "family": previous_freeze.get("family"),
+        "revision": revision,
+        "freeze_hash": freeze_hash,
+        "supersedes_freeze_hash": predecessor,
+        "data_sha256": data_sha256,
+        "config_sha256": config_sha256,
+        "seed": seed,
+        "costs": normalized_costs,
+        "frozen_at_ms": frozen_at_ms,
+        "selected_before_final_evaluation": True,
+        "parameters": dict(previous_freeze.get("parameters") or {}),
+        "parameters_sha256": previous_freeze.get("parameters_sha256"),
+        "paper_only": True,
+        "real_execution": False,
+    }
 
 
 def _valid(payload: object, family: str) -> bool:
@@ -140,6 +229,7 @@ def split_pre_post_freeze(
 
 __all__ = [
     "SCHEMA",
+    "build_immutable_freeze_revision",
     "first_compatible_freeze",
     "first_freeze",
     "list_freezes",

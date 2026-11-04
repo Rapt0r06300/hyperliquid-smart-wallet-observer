@@ -26,4 +26,16 @@ def decision(action: Any, age_ms: Any, *, ttl_ms: float) -> dict[str, Any]:
     return {"decision": TRAITER, "age_ms": round(float(age_ms), 3), "raison": "DANS_LE_TTL"}
 
 
-__all__ = ["decision", "TRAITER", "DROP"]
+def stale_action_receipt(*, action: Any, age_ms: Any, ttl_ms: float) -> dict[str, Any]:
+    """Make stale OPEN/ADD a measured drop while preserving reduction handling."""
+    action_name = str(action).upper()
+    if action_name not in _AUGMENTE and action_name not in {"CLOSE", "REDUCE"}:
+        return {"status": "UNMEASURABLE", "reason": "unknown_action"}
+    result = decision(action, age_ms, ttl_ms=ttl_ms)
+    if action_name in _AUGMENTE and not isinstance(age_ms, (int, float)):
+        return {"status": "MORE_DATA", **result}
+    return {"status": "PROVEN", "admissible": result["decision"] == TRAITER,
+            "reduction_preserved": action_name in {"CLOSE", "REDUCE"}, **result}
+
+
+__all__ = ["decision", "stale_action_receipt", "TRAITER", "DROP"]

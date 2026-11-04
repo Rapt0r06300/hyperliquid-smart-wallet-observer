@@ -386,6 +386,20 @@ def format_user_fills_live_report(result: UserFillsLiveResult) -> str:
     return "\n".join(lines)
 
 
+def classify_snapshot_fill_entry(*, is_snapshot: Any, fill_count: int = 1) -> dict[str, Any]:
+    """Classify a userFills payload without allowing a snapshot to open exposure."""
+
+    if type(is_snapshot) is not bool or type(fill_count) is not int or fill_count < 0:
+        return {"status": "UNMEASURABLE", "accept_new_entry": False,
+                "reason": "SNAPSHOT_CLASSIFICATION_INVALID", "paper_read_only": True}
+    if is_snapshot:
+        return {"status": "PROVEN", "accept_new_entry": False,
+                "reason": "SNAPSHOT_STATE_ONLY", "paper_read_only": True}
+    return {"status": "PROVEN", "accept_new_entry": fill_count > 0,
+            "reason": "LIVE_EVENT" if fill_count else "LIVE_EVENT_EMPTY",
+            "paper_read_only": True}
+
+
 # ---------------------------------------------------------------------------
 # V16 — PERSISTENT real-time userFills stream (fast data, FREE, sub-second).
 # The 15s polled snapshot scan above leaves entries ~10s stale (the edge lives
@@ -582,6 +596,7 @@ async def stream_user_fills_ws(
 __all__ = [
     "UserFillsLiveResult", "normalize_user_fill_wallets", "user_fills_from_message",
     "user_fills_subscription_ack",
+    "classify_snapshot_fill_entry",
     "scan_user_fills_ws", "store_user_fills_live_result", "format_user_fills_live_report",
     "StreamStats", "stream_user_fills_ws",
 ]

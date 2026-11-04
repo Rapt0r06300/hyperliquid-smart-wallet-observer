@@ -57,6 +57,35 @@ INDEPENDENT_AUDIT_SCHEMA = "hypersmart.independent_economic_audit.v1"
 AUDIT_JSON = "HYPERSMART_ECONOMIC_PROOF_AUDIT.json"
 AUDIT_MARKDOWN = "HYPERSMART_ECONOMIC_PROOF_AUDIT.md"
 
+
+def classify_non_measurable_reasons(
+    *,
+    dataset_available: bool,
+    cost_model_known: bool,
+    oos_available: bool,
+    raw_trade_count: int | None = None,
+) -> dict[str, Any]:
+    """Return explicit evidence gaps; never turn absent measurements into zero."""
+    reasons: list[str] = []
+    if not dataset_available:
+        reasons.append("DATASET_MISSING")
+    if not cost_model_known:
+        reasons.append("COST_MODEL_UNKNOWN")
+    if not oos_available:
+        reasons.append("OOS_EVIDENCE_MISSING")
+    if raw_trade_count is None:
+        reasons.append("RAW_TRADE_COUNT_UNKNOWN")
+    elif raw_trade_count < 1:
+        reasons.append("RAW_TRADES_MISSING")
+    return {
+        "status": "PROVEN" if not reasons else "UNMEASURABLE",
+        "reasons": reasons,
+        "missing_measurements": reasons,
+        "none_is_zero": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
 def audit_family(
     campaign: Mapping[str, Any],
     raw: Mapping[str, Any],
@@ -525,6 +554,7 @@ __all__ = [
     "INDEPENDENT_AUDIT_SCHEMA",
     "SCHEMA_VERSION",
     "audit_family",
+    "classify_non_measurable_reasons",
     "audit_reports",
     "render_markdown",
     "write_audit",

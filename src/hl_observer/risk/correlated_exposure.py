@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Mapping, Sequence
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
@@ -57,4 +58,59 @@ def correlated_exposure_check(
     return ExposureVerdict(True, None, round(cluster, 2), round(net_beta, 2))
 
 
-__all__ = ["Position", "ExposureVerdict", "correlated_exposure_check"]
+def correlated_exposure_receipt(
+    positions: Sequence[Position],
+    new_position: Position,
+    *,
+    correlation_groups: Mapping[str, str] | None = None,
+    max_cluster_notional_usd: float = 300.0,
+    max_net_beta_usd: float = 600.0,
+) -> dict[str, object]:
+    """Return a fail-closed, paper-only receipt for the concentration check."""
+    if not isinstance(positions, Sequence) or not isinstance(new_position, Position):
+        return {"status": "UNMEASURABLE", "reason": "POSITIONS_INVALID"}
+    all_positions = [*positions, new_position]
+    if any(
+        not isinstance(position, Position)
+        or not isinstance(position.coin, str)
+        or not position.coin.strip()
+        or not isinstance(position.side, str)
+        or not position.side.strip()
+        or isinstance(position.notional_usd, bool)
+        or not isinstance(position.notional_usd, (int, float))
+        or not math.isfinite(float(position.notional_usd))
+        or isinstance(position.beta, bool)
+        or not isinstance(position.beta, (int, float))
+        or not math.isfinite(float(position.beta))
+        for position in all_positions
+    ):
+        return {"status": "UNMEASURABLE", "reason": "POSITION_OBSERVATION_INVALID"}
+    if (
+        isinstance(max_cluster_notional_usd, bool)
+        or not isinstance(max_cluster_notional_usd, (int, float))
+        or not math.isfinite(float(max_cluster_notional_usd))
+        or float(max_cluster_notional_usd) < 0
+        or isinstance(max_net_beta_usd, bool)
+        or not isinstance(max_net_beta_usd, (int, float))
+        or not math.isfinite(float(max_net_beta_usd))
+        or float(max_net_beta_usd) < 0
+    ):
+        return {"status": "UNMEASURABLE", "reason": "CAP_INVALID"}
+    verdict = correlated_exposure_check(
+        positions,
+        new_position,
+        correlation_groups=correlation_groups,
+        max_cluster_notional_usd=float(max_cluster_notional_usd),
+        max_net_beta_usd=float(max_net_beta_usd),
+    )
+    return {
+        "status": "PROVEN",
+        "allowed": verdict.ok,
+        "reason": verdict.reason,
+        "cluster_notional_usd": verdict.cluster_notional_usd,
+        "net_beta": verdict.net_beta,
+        "real_execution": False,
+    }
+
+
+__all__ = ["Position", "ExposureVerdict", "correlated_exposure_check", "correlated_exposure_receipt"]

@@ -43,6 +43,23 @@ STRAT_ABSENTE = "STRATEGIE_ABSENTE"
 STRAT_AMBIGUE = "STRATEGIE_AMBIGUE"
 
 
+def validate_scoreboard_lineage(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Require event/epoch/data lineage before scoreboard certification."""
+    refs = _refs(row)
+    missing = [key for key in ("event_id", "phase_epoch", "data_sha") if not str(refs.get(key) or "").strip()]
+    if refs.get("paper_read_only") is not True:
+        missing.append("paper_read_only")
+    return {
+        "status": "PROVEN" if not missing else "UNMEASURABLE",
+        "missing": missing,
+        "event_id": refs.get("event_id"),
+        "phase_epoch": refs.get("phase_epoch"),
+        "data_sha": refs.get("data_sha"),
+        "paper_read_only": refs.get("paper_read_only"),
+        "real_execution": False,
+    }
+
+
 def _token(value: object) -> str:
     return "".join(c for c in str(value or "").upper() if c.isalnum())
 
@@ -301,4 +318,5 @@ def depuis_fichier_ledger(
 __all__ = [
     "SCHEMA_VERSION", "STRAT_ABSENTE", "STRAT_AMBIGUE",
     "ResultatScoreboard", "lignes_depuis_ledger", "depuis_fichier_ledger",
+    "validate_scoreboard_lineage",
 ]

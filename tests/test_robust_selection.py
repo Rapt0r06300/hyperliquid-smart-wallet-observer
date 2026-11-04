@@ -22,6 +22,7 @@ Aucun reseau, aucun ordre : donnees synthetiques.
 from __future__ import annotations
 
 from hl_observer.backtesting.robust_selection import (
+    bootstrap_blocs_journees_positions,
     coin_breakdown,
     select_for_test,
     worst_coin_net,
@@ -126,3 +127,27 @@ def test_la_selection_est_deterministe() -> None:
     a = select_for_test(scored, top_k=3, controle_k=5)
     b = select_for_test(scored, top_k=3, controle_k=5)
     assert [s.name for s in a["a_tester"]] == [s.name for s in b["a_tester"]]
+
+
+def test_bootstrap_hierarchique_conserve_jours_et_positions() -> None:
+    observations = {
+        "day-1": {"p1": 2.0, "p2": 4.0},
+        "day-2": {"p3": 1.0, "p4": 3.0},
+    }
+    a = bootstrap_blocs_journees_positions(observations, n=200, seed=11)
+    b = bootstrap_blocs_journees_positions(observations, n=200, seed=11)
+    assert a == b
+    assert a["status"] == "PROVEN"
+    assert a["n_days"] == 2 and a["n_positions"] == 4
+    assert a["n_bootstrap"] == 200
+    assert a["ci_low"] <= a["observed_mean"] <= a["ci_high"]
+
+
+def test_bootstrap_refuse_valeur_manquante_sans_fabriquer_zero() -> None:
+    result = bootstrap_blocs_journees_positions([
+        {"day_id": "d1", "position_id": "p1", "net_usd": 1.0},
+        {"day_id": "d2", "position_id": "p2", "net_usd": None},
+    ])
+    assert result["status"] == "UNMEASURABLE"
+    assert result["observed_mean"] is None
+    assert result["n_rows"] == 2

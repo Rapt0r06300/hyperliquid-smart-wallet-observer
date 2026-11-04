@@ -199,5 +199,32 @@ def comparer_sortie_autonome_et_suivi_aveugle(
     }
 
 
+def blind_exit_ablation_receipt(
+    chemins: Sequence[Sequence[float]], *,
+    regle_autonome: str | None,
+    regle_aveugle: str = "HORIZON_FIXE",
+    cost_bps: float = 0.0,
+    risk_penalty_bps: float = 0.0,
+    **params: Any,
+) -> dict[str, Any]:
+    """Expose the frozen-exit versus blind-follow comparison as a closure receipt."""
+    result = comparer_sortie_autonome_et_suivi_aveugle(
+        chemins,
+        regle_autonome=regle_autonome,
+        regle_aveugle=regle_aveugle,
+        cost_bps=cost_bps,
+        risk_penalty_bps=risk_penalty_bps,
+        **params,
+    )
+    return {
+        **result,
+        "verdict": "PROVEN" if result.get("status") == "COMPARABLE" else "UNMEASURABLE",
+        "same_costs": True,
+        "same_risk_penalty": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = ["EXITS", "simuler_exit", "comparer_exits", "choisir_regle_gelee", "mesurer_regle_gelee",
-           "factory_exit", "comparer_sortie_autonome_et_suivi_aveugle"]
+           "factory_exit", "comparer_sortie_autonome_et_suivi_aveugle", "blind_exit_ablation_receipt"]

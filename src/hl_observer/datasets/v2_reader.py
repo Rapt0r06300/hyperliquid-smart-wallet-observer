@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 import shutil
 import zipfile
@@ -311,6 +312,18 @@ def materialize_safe_shards(
     return result
 
 
+def recount_shard_lines_receipt(path: str | Path, *, expected_event_count: object) -> dict[str, object]:
+    """Recount non-empty gzip JSONL rows after indexing and compare exactly."""
+    if isinstance(expected_event_count, bool) or not isinstance(expected_event_count, int) or expected_event_count < 0:
+        return {"status": "UNMEASURABLE", "reason": "EXPECTED_COUNT_INVALID"}
+    try:
+        with gzip.open(Path(path), "rt", encoding="utf-8") as handle:
+            actual = sum(1 for line in handle if line.strip())
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
+        return {"status": "REJECTED", "reason": f"SHARD_READ_FAILED:{exc}"}
+    return {"status": "PROVEN" if actual == expected_event_count else "REJECTED", "actual_event_count": actual, "expected_event_count": expected_event_count, "exact": actual == expected_event_count}
+
+
 def _int(value: Any) -> int | None:
     try:
         return int(value) if value is not None and not isinstance(value, bool) else None
@@ -335,4 +348,5 @@ __all__ = [
     "list_run_releases",
     "load_run_manifest",
     "materialize_safe_shards",
+    "recount_shard_lines_receipt",
 ]

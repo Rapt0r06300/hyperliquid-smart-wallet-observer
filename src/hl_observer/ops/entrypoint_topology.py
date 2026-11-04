@@ -237,3 +237,24 @@ def render_entrypoint_topology_report(issues: list[EntrypointTopologyIssue]) -> 
     lines = ["ENTRYPOINT_TOPOLOGY=FAIL"]
     lines.extend(f"- {issue.code} {issue.path}: {issue.detail}" for issue in issues)
     return "\n".join(lines)
+
+
+def runtime_authority_summary(repo_root: str | Path) -> dict[str, object]:
+    """Prove the five human launchers resolve to one runtime authority graph."""
+    issues = audit_entrypoint_topology(repo_root)
+    relevant = [issue for issue in issues if issue.code in {
+        "OFFICIAL_ROLE_NOT_UNIQUE", "RUNTIME_RESEARCH_DUPLICATION", "LAUNCH_GRAPH_FILE_MISSING",
+        "LEGACY_LAB_AUTHORITY", "LOCAL_HOSTED_CONTROL_MIX",
+    }]
+    return {
+        "status": "PROVEN" if not relevant else "UNMEASURABLE",
+        "official_entrypoints": {role.value: path for role, path in OFFICIAL_ENTRYPOINTS.items()},
+        "runtime_authority": OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_RUNTIME],
+        "legacy_runtime_is_authority": False,
+        "issues": [
+            {"code": issue.code, "path": issue.path, "detail": issue.detail}
+            for issue in relevant
+        ],
+        "paper_only": True,
+        "real_execution": False,
+    }

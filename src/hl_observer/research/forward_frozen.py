@@ -70,8 +70,54 @@ class ForwardFrozen:
         cid = str(candidat_id)
         if cid not in self._scelles:
             raise KeyError("candidat non scellé : %s" % cid)
-        self._obs[cid].append(dict(mesure))
-        self._append({"type": "OBS", "candidat": cid, "mesure": dict(mesure)})
+        observation = dict(mesure)
+        config = self._scelles[cid].get("config")
+        frozen_at = config.get("frozen_at_ms") if isinstance(config, Mapping) else None
+        observed_at = observation.get("observed_at_ms", observation.get("timestamp_ms"))
+        if frozen_at is not None or observed_at is not None:
+            try:
+                frozen_value = int(frozen_at)
+                observed_value = int(observed_at)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("FORWARD_OBSERVATION_CLOCK_INVALID") from None
+            if observed_value <= frozen_value:
+                raise ValueError("FORWARD_OBSERVATION_NOT_POST_FREEZE")
+            observation["forward_admissible"] = True
+        self._obs[cid].append(observation)
+        self._append({"type": "OBS", "candidat": cid, "mesure": observation})
+
+    def observer_forward(self, candidat_id: str, mesure: Mapping[str, Any]) -> None:
+        """Record an observation only when its wall-clock is strictly post-freeze."""
+        cid = str(candidat_id)
+        if cid not in self._scelles:
+            raise KeyError("candidat non scellé : %s" % cid)
+        config = self._scelles[cid].get("config")
+        frozen_at = config.get("frozen_at_ms") if isinstance(config, Mapping) else None
+        observed_at = mesure.get("observed_at_ms", mesure.get("timestamp_ms"))
+        if frozen_at is None or observed_at is None:
+            raise ValueError("FORWARD_FREEZE_CLOCK_REQUIRED")
+        self.observer(cid, {**dict(mesure), "forward_admissible": True})
+
+    def etat_forward(self, candidat_id: str) -> dict[str, Any]:
+        """Return only observations explicitly admitted as post-freeze forward."""
+        cid = str(candidat_id)
+        observations = [
+            observation
+            for observation in self._obs.get(cid, [])
+            if observation.get("forward_admissible") is True
+        ]
+        nets = [
+            observation["net_bps"]
+            for observation in observations
+            if isinstance(observation.get("net_bps"), (int, float))
+        ]
+        return {
+            "candidat": cid,
+            "config_hash": self._scelles.get(cid, {}).get("config_hash"),
+            "n_observations": len(observations),
+            "net_moyen_forward_bps": round(sum(nets) / len(nets), 4) if nets else None,
+            "post_freeze_only": True,
+        }
 
     def etat(self, candidat_id: str) -> dict[str, Any]:
         cid = str(candidat_id)

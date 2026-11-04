@@ -29,4 +29,16 @@ def profile_copy_latency(latencies_ms: Iterable[int], *, stale_threshold_ms: int
     )
 
 
-__all__ = ["LatencyProfile", "profile_copy_latency"]
+def decision_after_receive_receipt(*, received_at_ms: int, decision_at_ms: int) -> dict[str, object]:
+    """Prove the decision clock never precedes the local receive clock."""
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in (received_at_ms, decision_at_ms)):
+        return {"status": "UNMEASURABLE", "reason": "timestamps_must_be_integers"}
+    if received_at_ms < 0 or decision_at_ms < 0:
+        return {"status": "UNMEASURABLE", "reason": "timestamps_must_be_non_negative"}
+    if decision_at_ms < received_at_ms:
+        return {"status": "UNMEASURABLE", "reason": "decision_before_receive"}
+    return {"status": "PROVEN", "received_at_ms": received_at_ms, "decision_at_ms": decision_at_ms,
+            "queue_latency_ms": decision_at_ms - received_at_ms}
+
+
+__all__ = ["LatencyProfile", "profile_copy_latency", "decision_after_receive_receipt"]

@@ -24,4 +24,15 @@ def capturer(mode: Any) -> dict[str, Any]:
     return {"margin_mode": UNKNOWN, "connu": False, "raison": "MODE_NON_RECONNU"}
 
 
-__all__ = ["capturer", "ISOLATED", "CROSS", "UNKNOWN"]
+def margin_sizing_receipt(mode: Any) -> dict[str, Any]:
+    """Permit sizing only for an observed cross/isolated mode."""
+
+    captured = capturer(mode)
+    known = bool(captured.get("connu"))
+    return {"status": "PROVEN", "sizing_allowed": known,
+            "margin_mode": captured["margin_mode"],
+            "reason": "MARGIN_MODE_OBSERVED" if known else "MARGIN_MODE_UNKNOWN",
+            "paper_read_only": True}
+
+
+__all__ = ["capturer", "margin_sizing_receipt", "ISOLATED", "CROSS", "UNKNOWN"]

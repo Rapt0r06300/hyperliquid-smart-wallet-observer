@@ -101,7 +101,20 @@ def test_okx_sequence_gap_is_fail_closed() -> None:
 def test_okx_discovery_keeps_live_usdt_swaps_only() -> None:
     payload = {
         "data": [
-            {"instId": "BTC-USDT-SWAP", "instType": "SWAP", "settleCcy": "USDT", "ctValCcy": "BTC", "state": "live"},
+            {
+                "instId": "BTC-USDT-SWAP",
+                "instType": "SWAP",
+                "settleCcy": "USDT",
+                "quoteCcy": "USDT",
+                "ctValCcy": "BTC",
+                "ctType": "linear",
+                "ctVal": "0.01",
+                "ctMult": "1",
+                "lotSz": "1",
+                "minSz": "1",
+                "tickSz": "0.1",
+                "state": "live",
+            },
             {"instId": "ETH-USDC-SWAP", "instType": "SWAP", "settleCcy": "USDC", "ctValCcy": "ETH", "state": "live"},
             {"instId": "SOL-USDT-SWAP", "instType": "SWAP", "settleCcy": "USDT", "ctValCcy": "SOL", "state": "suspend"},
         ]

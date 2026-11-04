@@ -148,4 +148,39 @@ def compare_selectivity_vs_volume(
     }
 
 
-__all__ = ["net_edge_per_margin_hour", "comparer", "compare_selectivity_vs_volume", "UNMEASURABLE"]
+def selectivity_vs_volume_receipt(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    min_oos_selected: int = 1,
+) -> dict[str, Any]:
+    """Return the ECO-160 contract without turning trade selectivity into promotion.
+
+    The underlying comparison is costed and uses one frozen OOS universe.  A
+    ``PROVEN`` result means only that the comparison was auditable; it is not a
+    profitability claim and cannot activate a strategy.
+    """
+    result = compare_selectivity_vs_volume(
+        train_rows,
+        oos_rows,
+        cutoff_ms=cutoff_ms,
+        min_oos_selected=min_oos_selected,
+    )
+    result.update(
+        contract="ECO-160-selectivity-not-volume",
+        selection_is_predeclared=True,
+        same_oos_universe=True,
+        paper_read_only=True,
+        promotion="DISABLED_UNTIL_REVIEW",
+    )
+    if result.get("status") == "COMPARABLE":
+        result["status"] = "PROVEN"
+        result["verdict"] = "COMPARISON_AUDITABLE"
+    return result
+
+
+__all__ = [
+    "net_edge_per_margin_hour", "comparer", "compare_selectivity_vs_volume",
+    "selectivity_vs_volume_receipt", "UNMEASURABLE",
+]

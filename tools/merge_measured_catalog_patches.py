@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,6 +23,25 @@ TABLES = (
     ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", "alina.uncompressed_size_patch.v2"),
     ("RECORD_COUNT_PATCH.json", "records", "alina.record_count_patch.v1"),
 )
+
+
+def _atomic_write_utf8(target: Path, payload: str) -> None:
+    """Write a measured catalog without exposing a partial JSON document."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".merge.tmp", dir=target.parent
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -145,14 +165,12 @@ def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
         updated = merge_patch(
             _load(target), measured, index_rows=rows, kind=kind, schema=schema
         )
-        tmp = target.with_suffix(target.suffix + ".merge.tmp")
         # Legacy indented JSON exceeded GitHub's 100 MB blob limit.
         # Compact serialization preserves all exact SHA-bound measurements.
         payload = json.dumps(updated, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
         if len(payload.encode("utf-8")) >= 95_000_000:
             raise ValueError(f"CATALOG_PATCH_NEEDS_PARTITION: {file_name} exceeds 95 MB")
-        tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, target)
+        _atomic_write_utf8(target, payload)
         out[kind] = {
             "exact": updated["exact_assets"],
             "remaining": updated["remaining_assets"],

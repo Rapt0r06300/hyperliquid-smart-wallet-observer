@@ -115,4 +115,20 @@ def _timestamp(value: Any) -> int | None:
         return None
 
 
-__all__ = ["ImmutableGzipShardWriter", "ShardManifest"]
+def hash_transformation_receipt(raw_payload: bytes, transformed_payload: bytes, *, source: str) -> dict[str, Any]:
+    """Bind raw and transformed bytes without claiming semantic equivalence."""
+    if not isinstance(raw_payload, bytes) or not isinstance(transformed_payload, bytes) or not str(source or "").strip():
+        return {"status": "UNMEASURABLE", "reason": "HASH_INPUT_INVALID", "paper_read_only": True}
+    return {
+        "status": "PROVEN",
+        "source": str(source),
+        "raw_sha256": hashlib.sha256(raw_payload).hexdigest(),
+        "transformed_sha256": hashlib.sha256(transformed_payload).hexdigest(),
+        "raw_bytes": len(raw_payload),
+        "transformed_bytes": len(transformed_payload),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["ImmutableGzipShardWriter", "ShardManifest", "hash_transformation_receipt"]

@@ -21,4 +21,14 @@ def verifier(fills_live: Iterable[Any], fills_officiels: Iterable[Any]) -> dict[
             "raison": ("OK" if coherent else "DIVERGENCE_LIVE_VS_OFFICIEL")}
 
 
-__all__ = ["verifier"]
+def independent_state_receipt(fills_live: Iterable[Any], fills_officiels: Iterable[Any]) -> dict[str, Any]:
+    """Turn the two-source comparison into an explicit open gate."""
+
+    result = verifier(fills_live, fills_officiels)
+    return {"status": "PROVEN", "open_allowed": bool(result["coherent"]),
+            "missing": result["manquants"], "extra": result["en_trop"],
+            "reason": "SOURCES_AGREE" if result["coherent"] else "SOURCES_CONFLICT",
+            "paper_read_only": True}
+
+
+__all__ = ["verifier", "independent_state_receipt"]

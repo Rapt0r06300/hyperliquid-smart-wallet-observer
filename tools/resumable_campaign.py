@@ -33,6 +33,7 @@ from hl_observer.control_plane.resumable_campaign import (
     validate_manifest,
     verify_lease,
 )
+from hl_observer.ops.runtime_contract import campaign_diagnostic_receipt
 
 
 def load(path: str | Path) -> CampaignManifest:
@@ -189,7 +190,16 @@ def main() -> int:
                 # One corrupt historical manifest must not starve all unrelated
                 # campaigns.  Fail it closed by excluding it and emit a stable
                 # diagnostic for operator repair.
-                print(f"invalid_campaign={item.name}:{type(exc).__name__}", file=sys.stderr)
+                diagnostic = campaign_diagnostic_receipt(
+                    manifest_path=item.name,
+                    reason_code=type(exc).__name__,
+                    phase_epoch=None,
+                )
+                print(
+                    "invalid_campaign="
+                    + json.dumps(diagnostic, sort_keys=True, separators=(",", ":")),
+                    file=sys.stderr,
+                )
                 continue
             manifests.append(manifest)
         print("\n".join(item.campaign_id for item in select_due_campaigns(

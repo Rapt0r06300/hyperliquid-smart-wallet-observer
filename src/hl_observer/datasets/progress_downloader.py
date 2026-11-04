@@ -100,6 +100,25 @@ def cache_transfer_plan(
     }
 
 
+def resume_transfer_receipt(
+    root: Path,
+    assets: Mapping[str, ReleaseAsset],
+    names: Iterable[str],
+) -> dict[str, object]:
+    """Describe resumable partial assets without downloading or deleting anything."""
+    try:
+        plan = cache_transfer_plan(root, assets, names)
+    except DatasetBridgeError as exc:
+        return {"status": "UNMEASURABLE", "reason": str(exc)}
+    return {
+        "status": "PROVEN",
+        "partial_names": list(plan["partial_cache_names"]),
+        "remaining_network_bytes": int(plan["remaining_network_bytes"]),
+        "verified_cache_bytes": int(plan["verified_cache_bytes"]),
+        "non_destructive": True,
+    }
+
+
 def _progress_heartbeat(
     *,
     temporary: Path,
@@ -291,6 +310,7 @@ def download_needed_assets_with_progress(
 
 __all__ = [
     "cache_transfer_plan",
+    "resume_transfer_receipt",
     "download_needed_assets_with_progress",
     "human_bytes",
     "human_eta",

@@ -43,4 +43,16 @@ def decomposer_latence(
     }
 
 
-__all__ = ["decomposer_latence", "COMPOSANTES"]
+def latency_components_receipt(*, feed_ms: float | None, order_ms: float | None,
+                               inter_leg_ms: float | None) -> dict:
+    """Bind the copy timestamp to all observed non-negative latency components."""
+    result = decomposer_latence(feed_ms=feed_ms, order_ms=order_ms, inter_leg_ms=inter_leg_ms)
+    if result["invalides"]:
+        return {"status": "UNMEASURABLE", **result}
+    if not result["mesurable"]:
+        return {"status": "MORE_DATA", **result}
+    return {"status": "PROVEN", "total_ms": result["total_ms"],
+            "components": result["composantes"], "non_negative": True}
+
+
+__all__ = ["decomposer_latence", "latency_components_receipt", "COMPOSANTES"]

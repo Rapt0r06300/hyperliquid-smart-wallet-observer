@@ -686,3 +686,28 @@ def _to_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def trace_event_decision_path(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Require one event ID to survive ingestion → ledger without stage loss."""
+    required = {"INGESTION", "SIGNAL", "REFUSAL", "PAPER", "LEDGER"}
+    paths: defaultdict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        if not isinstance(row, dict):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_ROW", "paper_only": True, "real_execution": False}
+        event_id = row.get("event_id")
+        stage = str(row.get("stage") or "").strip().upper()
+        if not isinstance(event_id, str) or not event_id.strip() or stage not in required:
+            return {"status": "UNMEASURABLE", "reason": "MISSING_EVENT_ID_OR_STAGE", "paper_only": True, "real_execution": False}
+        if stage in paths[event_id]:
+            return {"status": "UNMEASURABLE", "reason": "DUPLICATE_EVENT_STAGE", "paper_only": True, "real_execution": False}
+        paths[event_id].add(stage)
+    missing = {event_id: sorted(required - stages) for event_id, stages in paths.items() if required - stages}
+    return {
+        "status": "PROVEN" if paths and not missing else "UNMEASURABLE",
+        "event_count": len(paths),
+        "paths": {event_id: sorted(stages) for event_id, stages in paths.items()},
+        "missing_stages": missing,
+        "paper_only": True,
+        "real_execution": False,
+    }

@@ -59,10 +59,13 @@ class PositionDeltaRecord(BaseModel):
 def safe_float(value: Any) -> float | None:
     if value is None:
         return None
+    if isinstance(value, bool):
+        return None
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def first_present(payload: dict[str, Any], *keys: str) -> Any:
@@ -89,7 +92,16 @@ def position_side(size: float | None) -> PositionSide:
 
 
 def fill_timestamp(fill: dict[str, Any]) -> int:
-    return int(first_present(fill, "time", "timestamp") or 0)
+    raw = first_present(fill, "time", "timestamp")
+    if raw is None or isinstance(raw, bool):
+        return 0
+    try:
+        parsed = float(raw)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(parsed) or parsed < 0 or not parsed.is_integer():
+        return 0
+    return int(parsed)
 
 
 def fill_coin(fill: dict[str, Any]) -> str:
@@ -211,6 +223,75 @@ def classify_lifecycle(
     return base
 
 
+def fill_identity(fill: dict[str, Any]) -> str | None:
+    """Return a venue-native identity, never a locally invented fallback."""
+
+    if not isinstance(fill, dict):
+        return None
+    for key in ("tid", "tradeId", "trade_id", "id", "hash"):
+        value = fill.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def is_public_trade_fill(fill: dict[str, Any]) -> bool:
+    """Reject order/status records that do not carry a completed trade identity."""
+
+    if not isinstance(fill, dict) or fill_identity(fill) is None:
+        return False
+    if any(str(fill.get(key) or "").casefold() in {"order", "open", "cancel", "cancelled", "canceled"}
+           for key in ("type", "event", "status", "state")):
+        return False
+    return fill_size(fill) is not None and fill_price(fill) is not None and fill_timestamp(fill) > 0
+
+
+def deduplicate_trade_fills(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one immutable observation per native trade identity, in stable order.
+
+    A missing native identity is fail-closed and therefore excluded rather than
+    guessed from timestamps or prices.  This prevents duplicate openings and
+    prevents an order cancellation from becoming a trade.
+    """
+
+    accepted: dict[str, dict[str, Any]] = {}
+    for fill in fills:
+        if not is_public_trade_fill(fill):
+            continue
+        identity = fill_identity(fill)
+        if identity is not None and identity not in accepted:
+            accepted[identity] = public_fill_payload(fill)
+    return sorted(
+        accepted.values(),
+        key=lambda item: (fill_timestamp(item), fill_identity(item) or ""),
+    )
+
+
+def classify_same_timestamp_transitions(
+    previous_size: float,
+    fills: list[dict[str, Any]],
+) -> list[PositionDeltaRecord]:
+    """Classify same-timestamp fills deterministically without double opening.
+
+    Native order/trade identity is mandatory.  Fills are applied in venue/order
+    sequence when available, otherwise by native identity.  If the sequence
+    cannot establish a causal close-then-open order, the whole batch is marked
+    UNKNOWN rather than silently promoting an opposite-side flip.
+    """
+
+    unique = deduplicate_trade_fills(fills)
+    if not unique:
+        return []
+    current = previous_size
+    records: list[PositionDeltaRecord] = []
+    for fill in unique:
+        record = build_position_delta_from_fill("", fill, previous_size=current)
+        records.append(record)
+        if record.action not in {PositionAction.UNKNOWN, PositionAction.LIQUIDATION}:
+            current = record.new_size
+    return records
+
+
 def confidence_for_fill(fill: dict[str, Any], *, direction_unclear: bool, has_start_position: bool) -> tuple[float, list[str]]:
     notes: list[str] = []
     if direction_unclear:
@@ -247,6 +328,7 @@ def build_position_delta_from_fill(
     invalid_start = raw_start is not None and start is None
     direction_unclear = signed_size is None or invalid_start
 
+    position_known = has_start or previous_size is not None
     if has_start:
         effective_previous = start
     elif previous_size is not None:
@@ -254,11 +336,8 @@ def build_position_delta_from_fill(
     else:
         effective_previous = 0.0
 
-    effective_new = (
-        effective_previous
-        if direction_unclear
-        else effective_previous + signed_size
-    )
+    direction_unclear = direction_unclear or not position_known
+    effective_new = effective_previous if direction_unclear else effective_previous + signed_size
     price = fill_price(fill)
     size = abs(signed_size) if signed_size is not None else fill_size(fill)
     delta_notional = (
@@ -273,6 +352,8 @@ def build_position_delta_from_fill(
     )
     if invalid_start:
         notes.append("start_position_invalid")
+    if not position_known:
+        notes.append("initial_position_unknown")
     direction_validation = fill_direction_validation(fill)
     if direction_validation == "FILL_SIDE_DIR_CONTRADICTION":
         notes.append("side_dir_contradiction")
@@ -287,7 +368,7 @@ def build_position_delta_from_fill(
     return PositionDeltaRecord(
         wallet_address=wallet_address,
         coin=fill_coin(fill),
-        previous_side=position_side(effective_previous),
+        previous_side=position_side(effective_previous) if position_known else PositionSide.UNKNOWN,
         new_side=position_side(effective_new) if not direction_unclear else PositionSide.UNKNOWN,
         previous_size=effective_previous,
         new_size=effective_new,

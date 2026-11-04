@@ -9,6 +9,8 @@ panneau lit un champ réel du status, sinon état vide honnête.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -21,6 +23,30 @@ CANONICAL_STATUS_FIELDS = (
     "paper_ledger", "fusion_runtime", "scanner", "engine_running", "server_running",
     "read_only", "equity",
 )
+
+
+def separate_dashboard_data_lanes(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Separate PAPER, SYNTHETIC and LIVE rows and never promise a return."""
+    lanes: dict[str, list[dict[str, object]]] = {"PAPER": [], "SYNTHETIC": [], "LIVE": []}
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "INVALID_ROW", "paper_only": True, "real_execution": False}
+        origin = str(raw.get("data_origin") or raw.get("origin") or "").strip().upper()
+        if origin not in lanes:
+            return {"status": "UNMEASURABLE", "reason": "MISSING_OR_UNKNOWN_DATA_ORIGIN", "paper_only": True, "real_execution": False}
+        row = dict(raw)
+        for key, value in row.items():
+            if isinstance(value, float) and not math.isfinite(value):
+                return {"status": "UNMEASURABLE", "reason": "NONFINITE_METRIC", "paper_only": True, "real_execution": False}
+        lanes[origin].append(row)
+    return {
+        "status": "PROVEN",
+        "lanes": lanes,
+        "economics_certified": False,
+        "return_promise": None,
+        "paper_only": True,
+        "real_execution": False,
+    }
 
 _PAGE = r"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

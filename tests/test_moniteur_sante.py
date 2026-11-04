@@ -37,3 +37,11 @@ def test_une_passe_lit_l_etat_reel_vide_sans_crash(tmp_path):
     tab = MS.une_passe(tmp_path, SRCS, now_ms=NOW * 1000, pid_vivant=lambda p: True,
                        precedent=None, horodatage="H0")
     assert len(tab.lignes) == 1 and tab.lignes[0].etat == "MANQUE"
+
+
+def test_health_failure_blocks_new_entries_but_keeps_recovery_monitoring():
+    decision = MS.health_fail_closed_decision({"stale": True, "gaps_critiques": 2})
+    assert decision["status"] == "PAUSE_NEW_ENTRIES"
+    assert decision["allow_new_entries"] is False
+    assert decision["monitor_recovery"] is True
+    assert MS.health_fail_closed_decision({"stale": False, "gaps": 0})["allow_new_entries"] is True

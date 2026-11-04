@@ -148,9 +148,66 @@ def remaining_flow_probability(*, stade: str, executed_fraction: Any, cadence_re
     return {"p_continuation": round(p, 4), "favorable_EARLY_LARGE_RESIDUAL_LOW_CROWDING": favorable}
 
 
+def markout_by_signal_age_receipt(
+    train_rows: Sequence[Mapping[str, Any]], oos_rows: Sequence[Mapping[str, Any]], *, min_rows: int = 3
+) -> dict[str, Any]:
+    """Summarize markout by signal age on disjoint TRAIN/OOS observations."""
+    if isinstance(min_rows, bool) or not isinstance(min_rows, int) or min_rows < 1:
+        return {"status": UNMEASURABLE, "reason": "invalid_min_rows"}
+    bands = ((0, 100), (100, 500), (500, 1000), (1000, None))
+    def summarize(rows: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Any], str | None]:
+        out: dict[str, Any] = {}
+        for lower, upper in bands:
+            values: list[float] = []
+            for row in rows or ():
+                if not isinstance(row, Mapping):
+                    return {}, "invalid_row"
+                age = _finite(row.get("signal_age_ms"))
+                markout = _finite(row.get("net_markout_bps"))
+                if age is None or markout is None or age < 0 or (upper is not None and age >= upper) or age < lower:
+                    continue
+                values.append(markout)
+            key = f"{lower}_{upper if upper is not None else 'plus'}"
+            out[key] = {"count": len(values), "mean_net_markout_bps": round(sum(values) / len(values), 8) if values else None}
+        return out, None
+    train, train_error = summarize(train_rows)
+    oos, oos_error = summarize(oos_rows)
+    if train_error or oos_error:
+        return {"status": UNMEASURABLE, "reason": train_error or oos_error}
+    enough = all(bucket["count"] >= min_rows for split in (train, oos) for bucket in split.values())
+    return {"status": "PROVEN" if enough else "MORE_DATA", "train": train, "oos": oos,
+            "min_rows": min_rows, "lookahead_free": True}
+
+
+def metaorder_aggregation_receipt(
+    metaorders: Sequence[Mapping[str, Any]],
+    fills: Sequence[Mapping[str, Any]],
+    *,
+    value_field: str = "net_pnl_bps",
+    weight_field: str = "notional_usd",
+) -> dict[str, Any]:
+    """Compare aggregated metaorders with isolated fills without inventing matches."""
+    result = compare_metaorders_to_isolated_fills(
+        metaorders,
+        fills,
+        value_field=value_field,
+        weight_field=weight_field,
+    )
+    comparable = result.get("status") == "COMPARABLE" and result.get("all_matched") is True
+    return {
+        **result,
+        "verdict": "PROVEN" if comparable else "UNMEASURABLE",
+        "aggregation_is_causal": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "flux_residuel",
     "remaining_flow_probability",
     "compare_metaorders_to_isolated_fills",
+    "markout_by_signal_age_receipt",
+    "metaorder_aggregation_receipt",
     "UNMEASURABLE",
 ]

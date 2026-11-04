@@ -18,6 +18,8 @@ Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 import json
+import math
+import random
 import statistics
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
@@ -199,5 +201,145 @@ def classer_population(path: str, *, cout_bps: float = FRAIS_TAKER_ROUNDTRIP_BPS
             "n_clusters_entite": len(clusters), "classement": lignes}
 
 
+def bootstrap_population_by_vault_regime(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    vault_field: str = "vault_id",
+    regime_field: str = "regime_id",
+    value_field: str = "net_usd",
+    confidence: float = 0.95,
+    n_bootstrap: int = 1000,
+    seed: int = 7,
+    min_vaults: int = 3,
+    min_regimes: int = 2,
+) -> dict[str, Any]:
+    """Bootstrap observed vaults and regimes without over-counting fragments.
+
+    Each vault is one population unit in a draw; a regime cell is first
+    reduced to its observed mean, so repeated rows in one vault/regime cannot
+    make that vault look like a larger independent population. Bootstrap
+    draws sample vaults with replacement and then one observed regime cell
+    within each selected vault. The result is a structural uncertainty
+    interval only; it never certifies an economic edge or real execution.
+    """
+    result: dict[str, Any] = {
+        "status": "UNMEASURABLE",
+        "verdict": "INSUFFICIENT_DATA",
+        "reason": None,
+        "real_execution": False,
+        "n_vaults": 0,
+        "n_regimes": 0,
+        "n_vault_regime_cells": 0,
+        "n_observations": 0,
+        "observed_mean": None,
+        "bootstrap_ci_low": None,
+        "bootstrap_ci_high": None,
+        "vault_means": {},
+        "regime_counts": {},
+    }
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        result["reason"] = "confidence_invalide"
+        return result
+    confidence = float(confidence)
+    if not 0.0 < confidence < 1.0:
+        result["reason"] = "confidence_invalide"
+        return result
+    if isinstance(n_bootstrap, bool) or not isinstance(n_bootstrap, int) or n_bootstrap < 1:
+        result["reason"] = "n_bootstrap_invalide"
+        return result
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        result["reason"] = "seed_invalide"
+        return result
+    if isinstance(min_vaults, bool) or not isinstance(min_vaults, int) or min_vaults < 2:
+        result["reason"] = "min_vaults_invalide"
+        return result
+    if isinstance(min_regimes, bool) or not isinstance(min_regimes, int) or min_regimes < 1:
+        result["reason"] = "min_regimes_invalide"
+        return result
+
+    cells: dict[str, dict[str, list[float]]] = {}
+    for row in list(rows or []):
+        if not isinstance(row, Mapping):
+            result["reason"] = "ligne_invalide"
+            return result
+        vault = str(row.get(vault_field) or "").strip()
+        regime = str(row.get(regime_field) or "").strip()
+        value = row.get(value_field)
+        if not vault or not regime or isinstance(value, bool):
+            result["reason"] = "champ_manquant"
+            return result
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            result["reason"] = "valeur_invalide"
+            return result
+        if not math.isfinite(numeric):
+            result["reason"] = "valeur_non_finie"
+            return result
+        cells.setdefault(vault, {}).setdefault(regime, []).append(numeric)
+
+    if len(cells) < min_vaults:
+        result["reason"] = "vaults_insuffisants"
+        return result
+    all_regimes = {regime for regimes in cells.values() for regime in regimes}
+    if len(all_regimes) < min_regimes:
+        result["reason"] = "regimes_insuffisants"
+        return result
+    if any(not regimes for regimes in cells.values()):
+        result["reason"] = "regime_manquant"
+        return result
+
+    cell_means = {
+        vault: {regime: statistics.fmean(values) for regime, values in regimes.items()}
+        for vault, regimes in cells.items()
+    }
+    vault_ids = sorted(cell_means)
+    vault_means = {
+        vault: statistics.fmean(regimes.values())
+        for vault, regimes in cell_means.items()
+    }
+    observed = statistics.fmean(vault_means.values())
+    rng = random.Random(seed)
+    bootstrap_means: list[float] = []
+    for _ in range(n_bootstrap):
+        sampled_values: list[float] = []
+        for _ in vault_ids:
+            vault = rng.choice(vault_ids)
+            regime_ids = sorted(cell_means[vault])
+            sampled_values.append(cell_means[vault][rng.choice(regime_ids)])
+        bootstrap_means.append(statistics.fmean(sampled_values))
+
+    ordered = sorted(bootstrap_means)
+    alpha = (1.0 - confidence) / 2.0
+
+    def quantile(q: float) -> float:
+        position = (len(ordered) - 1) * q
+        lower = math.floor(position)
+        upper = math.ceil(position)
+        if lower == upper:
+            return ordered[lower]
+        return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+    regime_counts = {
+        regime: sum(regime in regimes for regimes in cell_means.values())
+        for regime in sorted(all_regimes)
+    }
+    result.update(
+        status="PROVEN",
+        verdict="POPULATION_REGIME_BOOTSTRAP_MEASURED",
+        n_vaults=len(vault_ids),
+        n_regimes=len(regime_counts),
+        n_vault_regime_cells=sum(len(regimes) for regimes in cell_means.values()),
+        n_observations=sum(len(values) for regimes in cells.values() for values in regimes.values()),
+        observed_mean=observed,
+        bootstrap_ci_low=quantile(alpha),
+        bootstrap_ci_high=quantile(1.0 - alpha),
+        vault_means=vault_means,
+        regime_counts=regime_counts,
+    )
+    return result
+
+
 __all__ = ["flux_fills", "archetype", "independance_entite", "fingerprint_wallet",
-           "fingerprints_similaires", "clusters_entite", "classer_population"]
+           "fingerprints_similaires", "clusters_entite", "classer_population",
+           "bootstrap_population_by_vault_regime"]

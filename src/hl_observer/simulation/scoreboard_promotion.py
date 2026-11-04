@@ -81,6 +81,37 @@ def _gate_true_ou_missing(value: object) -> str:
     return PASS if value is True else MISSING
 
 
+def absolute_net_progress_gate(
+    challenger_net_pnl: object,
+    baseline_net_pnl: object | None = None,
+) -> dict[str, Any]:
+    """Require an absolute positive challenger result, not relative loss reduction."""
+    challenger = _fini(challenger_net_pnl)
+    baseline = _fini(baseline_net_pnl) if baseline_net_pnl is not None else None
+    loss_reduction_only = bool(
+        baseline is not None and baseline < 0 and challenger is not None and baseline < challenger <= 0
+    )
+    if challenger is None:
+        status = "UNMEASURABLE"
+        reason = "CHALLENGER_NET_PNL_MISSING_OR_NONFINITE"
+    elif challenger <= 0:
+        status = "REJECTED"
+        reason = "CHALLENGER_NET_PNL_NOT_POSITIVE"
+    else:
+        status = "PROVEN"
+        reason = None
+    return {
+        "status": status,
+        "challenger_net_pnl": challenger,
+        "baseline_net_pnl": baseline,
+        "relative_only": False,
+        "loss_reduction_without_positive_pnl": loss_reduction_only,
+        "reason": reason,
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ScoreboardPromotionEvidence:
     ledger_trusted: bool | None = None
@@ -202,5 +233,6 @@ __all__ = [
     "SCHEMA_VERSION", "PROMOTE", "KILL", "MORE_DATA", "PASS", "FAIL", "MISSING",
     "N_INDEP_MIN", "MIN_JOURS", "MIN_REGIMES", "CONCENTRATION_MAX",
     "ScoreboardPromotionEvidence", "ScoreboardPromotionVerdict",
+    "absolute_net_progress_gate",
     "evaluer_promotion_scoreboard", "promotion_finale",
 ]

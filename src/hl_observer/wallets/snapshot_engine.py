@@ -8,6 +8,7 @@ from hl_observer.storage.models import WalletSnapshot
 from hl_observer.wallets.position_delta_engine import (
     PositionAction,
     PositionDeltaRecord,
+    PositionSide,
     classify_action,
     position_side,
     signed_fill_size,
@@ -28,6 +29,10 @@ class SnapshotData(BaseModel):
     stopped_reason: str | None = None
     errors: list[str] = Field(default_factory=list)
     raw_json: dict[str, Any] = Field(default_factory=dict)
+    source_identity: str | None = None
+    scope: str = "copy_vault"
+    cycle_id: str | None = None
+    phase_epoch: int | None = None
 
 
 class SnapshotComparisonResult(BaseModel):
@@ -73,6 +78,38 @@ class SnapshotEngine:
         if previous is None:
             result.is_baseline = True
             return result
+        if current.wallet_address.casefold() != previous.wallet_address.casefold():
+            result.refused = True
+            result.refusal_reason = "WALLET_IDENTITY_MISMATCH"
+            return result
+        if current.scope != "copy_vault" or previous.scope != "copy_vault":
+            result.refused = True
+            result.refusal_reason = "ECONOMIC_SCOPE_NOT_COPY_VAULT"
+            return result
+        if (current.cycle_id is None) != (previous.cycle_id is None):
+            result.refused = True
+            result.refusal_reason = "CYCLE_ID_MISSING"
+            return result
+        if current.cycle_id is not None and current.cycle_id != previous.cycle_id:
+            result.refused = True
+            result.refusal_reason = "STALE_CYCLE"
+            return result
+        if (
+            current.phase_epoch is not None
+            and previous.phase_epoch is not None
+            and current.phase_epoch != previous.phase_epoch
+        ):
+            result.refused = True
+            result.refusal_reason = "STALE_PHASE_EPOCH"
+            return result
+        if (
+            current.source_identity is not None
+            and previous.source_identity is not None
+            and current.source_identity != previous.source_identity
+        ):
+            result.refused = True
+            result.refusal_reason = "SOURCE_IDENTITY_MISMATCH"
+            return result
         if current.exchange_ts is not None and previous.exchange_ts is not None:
             result.time_gap_ms = current.exchange_ts - previous.exchange_ts
             if result.time_gap_ms > self.max_staleness_ms:
@@ -87,8 +124,34 @@ class SnapshotEngine:
         for coin in sorted(set(current_positions) | set(previous_positions)):
             current_payload = current_positions.get(coin, {})
             previous_payload = previous_positions.get(coin, {})
-            current_size = _safe_float(current_payload.get("szi"), 0.0)
-            previous_size = _safe_float(previous_payload.get("szi"), 0.0)
+            current_size = (
+                0.0 if coin not in current_positions else _safe_float(current_payload.get("szi"))
+            )
+            previous_size = (
+                0.0 if coin not in previous_positions else _safe_float(previous_payload.get("szi"))
+            )
+            if current_size is None or previous_size is None:
+                result.warnings.append(f"{coin}:POSITION_SIZE_UNKNOWN")
+                result.deltas.append(
+                    PositionDeltaRecord(
+                        wallet_address=current.wallet_address,
+                        coin=coin,
+                        previous_side=position_side(previous_size) if previous_size is not None else PositionSide.UNKNOWN,
+                        new_side=position_side(current_size) if current_size is not None else PositionSide.UNKNOWN,
+                        previous_size=previous_size if previous_size is not None else 0.0,
+                        new_size=current_size if current_size is not None else 0.0,
+                        delta_size=0.0,
+                        action=PositionAction.UNKNOWN,
+                        exchange_ts=current.exchange_ts,
+                        confidence_score=0.0,
+                        is_paper_eligible=False,
+                        proofs={"position_size_known": False},
+                        source="snapshot",
+                        notes=["position_size_unknown"],
+                        raw={"current": current_payload, "previous": previous_payload},
+                    )
+                )
+                continue
             if current_size == previous_size:
                 continue
 
@@ -118,7 +181,9 @@ class SnapshotEngine:
                 action = PositionAction.UNKNOWN
                 result.warnings.append(f"{coin}:FILLS_POSITION_CONTRADICTION")
             confidence = 0.0 if action == PositionAction.UNKNOWN else _confidence_from_proofs(proofs)
-            price = _weighted_fill_price(fills) or _safe_float(current.all_mids.get(coin))
+            price_from_fill = _weighted_fill_price(fills)
+            price = price_from_fill or _safe_float(current.all_mids.get(coin))
+            proofs["price_from_fill"] = price_from_fill is not None
             delta = PositionDeltaRecord(
                 wallet_address=current.wallet_address,
                 coin=coin,
@@ -133,7 +198,12 @@ class SnapshotEngine:
                 price=price,
                 fill_size=abs(fill_delta) if fills else None,
                 confidence_score=confidence,
-                is_paper_eligible=action != PositionAction.UNKNOWN and confidence >= 0.7,
+                is_paper_eligible=(
+                    action != PositionAction.UNKNOWN
+                    and confidence >= 0.7
+                    and proofs["price_from_fill"]
+                    and proofs["temporal_consistency"]
+                ),
                 proofs=proofs,
                 source="snapshot",
                 notes=notes,
@@ -176,6 +246,8 @@ def _position_map(positions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def _fills_for_coin(fills: list[dict[str, Any]], coin: str, *, after_ts: int | None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for fill in fills:
+        if not _is_completed_trade(fill):
+            continue
         if str(fill.get("coin") or fill.get("coinName") or "").upper() != coin:
             continue
         fill_ts = _safe_int(fill.get("time") or fill.get("timestamp")) or 0
@@ -212,14 +284,36 @@ def _confidence_from_proofs(proofs: dict[str, bool]) -> float:
 
 
 def _safe_float(value: Any, default: float | None = None) -> float | None:
+    if isinstance(value, bool):
+        return default
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return default
+    import math
+    return parsed if math.isfinite(parsed) else default
 
 
 def _safe_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
     try:
-        return int(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
+    import math
+    if not math.isfinite(parsed) or not parsed.is_integer():
+        return None
+    return int(parsed)
+
+
+def _is_completed_trade(fill: dict[str, Any]) -> bool:
+    """Do not interpret open/cancel/order status records as completed fills."""
+
+    if not isinstance(fill, dict):
+        return False
+    for key in ("type", "event", "status", "state"):
+        value = str(fill.get(key) or "").casefold()
+        if value in {"order", "open", "cancel", "cancelled", "canceled", "resting"}:
+            return False
+    return True

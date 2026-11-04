@@ -64,6 +64,27 @@ def une_passe(root: str | Path, sources: Sequence[SourceAttendue], *, now_ms: fl
                               precedent=precedent, horodatage=horodatage)
 
 
+def health_fail_closed_decision(health: Mapping[str, Any]) -> dict[str, Any]:
+    """Block new entries on stale/gapped feeds while preserving recovery monitoring."""
+    if not isinstance(health, Mapping):
+        return {"status": "UNMEASURABLE", "allow_new_entries": False, "monitor_recovery": True, "paper_only": True, "real_execution": False}
+    stale = bool(health.get("stale") or health.get("stale_events"))
+    gaps = int(health.get("gaps") or health.get("gaps_critiques") or 0)
+    out_of_order = int(health.get("out_of_order") or health.get("hors_ordre") or 0)
+    degraded = stale or gaps > 0 or out_of_order > 0
+    return {
+        "status": "PAUSE_NEW_ENTRIES" if degraded else "HEALTHY",
+        "allow_new_entries": not degraded,
+        "monitor_recovery": True,
+        "preserve_recovery": True,
+        "stale": stale,
+        "gaps": gaps,
+        "out_of_order": out_of_order,
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
 def boucle(root: str | Path, sources: Sequence[SourceAttendue] = SOURCES_HARVEST, *, passes: int,
            intervalle_s: float, horloge: Callable[[], float], dormir: Callable[[float], None],
            sortie: Callable[[str], None], lecteur: Callable[[], tuple[dict, dict, dict]] | None = None,

@@ -59,4 +59,11 @@ def merge_wallet_sources(refs: Sequence[WalletRef]) -> list[MergedWallet]:
     return merged
 
 
-__all__ = ["KNOWN_SOURCES", "WalletRef", "MergedWallet", "merge_wallet_sources"]
+def compare_discovery_sources(refs: Sequence[WalletRef]) -> dict[str, object]:
+    """Report source disagreement without selecting an address not observed."""
+    merged = merge_wallet_sources(refs)
+    disagreements = [item.address for item in merged if item.n_sources > 1 and item.best_score < 0.5]
+    return {"status": "PROVEN" if merged else "UNMEASURABLE", "wallet_count": len(merged), "disagreement_addresses": disagreements, "paper_read_only": True, "real_execution": False}
+
+
+__all__ = ["KNOWN_SOURCES", "WalletRef", "MergedWallet", "compare_discovery_sources", "merge_wallet_sources"]

@@ -135,3 +135,17 @@ def test_to_dict_expose_les_portes():
     assert d["verdict"] == G.PROMOTE and d["real_execution"] is False
     noms = {g["gate"] for g in d["gates"]}
     assert {"net_bps>0", "placebo_beaten", "pbo_robuste", "costs_measured", "capacity_measured"} <= noms
+
+
+def test_absolute_net_gate_rejette_une_simple_reduction_de_perte():
+    result = G.absolute_net_progress_gate(-1.0, -3.0)
+    assert result["status"] == "REJECTED"
+    assert result["loss_reduction_without_positive_pnl"] is True
+    assert result["relative_only"] is False
+
+
+def test_absolute_net_gate_exige_un_challenger_positif():
+    assert G.absolute_net_progress_gate(None)["status"] == "UNMEASURABLE"
+    result = G.absolute_net_progress_gate(0.1, -1.0)
+    assert result["status"] == "PROVEN"
+    assert result["real_execution"] is False

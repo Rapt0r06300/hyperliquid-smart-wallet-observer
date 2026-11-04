@@ -17,6 +17,7 @@ from hl_observer.backtesting.train_statistics import (
     select_unambiguous_lcb_candidate,
     stable_hash,
     summarize_complete_utc_days,
+    summarize_independent_train_rows,
     summarize_daily_values,
     summarize_train_rows,
     top_positive_share,
@@ -163,6 +164,35 @@ def test_train_statistics_reject_invalid_rows_and_hash_payload_stably() -> None:
     assert result["bonferroni_trial_count"] == 1
     assert result["daily_mean_lcb_usd"] is None
     assert result["total_lcb_usd"] is None
+
+
+def test_independent_train_statistics_collapses_fragments_before_counting():
+    result = summarize_independent_train_rows(
+        [
+            {"episode_id": "meta-A", "fragment_id": "A-1", "ts": 86_400_001, "net": 1.0},
+            {"episode_id": "meta-A", "fragment_id": "A-2", "ts": 86_400_002, "net": 2.0},
+            {"episode_id": "meta-A", "fragment_id": "A-3", "ts": 86_400_003, "net": -0.5},
+            {"episode_id": "meta-B", "fragment_id": "B-1", "ts": 2 * 86_400_001, "net": 1.5},
+        ],
+        trial_count=1,
+    )
+    assert result["status"] == "MEASURED"
+    assert result["independent_episode_count"] == 2
+    assert result["fragment_count"] == 4
+    assert result["collapsed_fragment_count"] == 2
+    assert result["sample_count"] == 2
+    assert result["net_pnl_usd"] == 4.0
+    assert result["fragment_counts"] == {"meta-A": 3, "meta-B": 1}
+
+
+def test_independent_train_statistics_refuses_missing_identity_without_zero():
+    result = summarize_independent_train_rows(
+        [{"fragment_id": "A-1", "ts": 86_400_001, "net": 2.0}],
+        trial_count=1,
+    )
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "MISSING_EPISODE_ID"
+    assert result["net_pnl_usd"] is None
 
 
 def test_train_statistics_preserves_exact_decimal_net_and_daily_totals() -> None:

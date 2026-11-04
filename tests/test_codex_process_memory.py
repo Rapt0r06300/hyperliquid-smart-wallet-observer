@@ -9,6 +9,7 @@ from hl_observer.research.process_memory import (
     combine_process_records,
     load_process_records,
     process_memory_summary,
+    pivot_on_headroom_stagnation,
     validate_process_record,
 )
 
@@ -171,3 +172,21 @@ def test_combining_memory_sources_rejects_duplicate_record_ids():
 
     with pytest.raises(ProcessMemoryValidationError, match="duplicate record_id PM-DUP"):
         combine_process_records(historical, runtime)
+
+
+def test_two_parameter_only_headroom_stalls_force_a_mechanism_pivot():
+    result = pivot_on_headroom_stagnation(
+        [
+            {"record_id": "PM-1", "change_class": "PARAMETER_ONLY", "headroom_delta_usd_per_day": 0.0},
+            {"record_id": "PM-2", "change_class": "PARAMETER_ONLY", "headroom_delta_usd_per_day": -0.1},
+        ]
+    )
+    assert result["status"] == "PIVOT_REQUIRED"
+    assert result["next_action"] == "TRY_DIFFERENT_MECHANISM"
+
+
+def test_headroom_pivot_fails_closed_when_delta_is_missing():
+    result = pivot_on_headroom_stagnation(
+        [{"record_id": "PM-1", "change_class": "PARAMETER_ONLY"}]
+    )
+    assert result["status"] == "UNMEASURABLE"

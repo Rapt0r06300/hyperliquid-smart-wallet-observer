@@ -184,6 +184,14 @@ def validate_record(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise HypothesisValidationError("economic_progress must be a JSON object")
     economic_progress = _finite_json(dict(economic_progress), "economic_progress")
 
+    def optional_digest(name: str) -> str | None:
+        value = payload.get(name)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+            raise HypothesisValidationError(f"{name} must be a 64-character hex digest")
+        return value.lower()
+
     return {
         "schema_version": SCHEMA_VERSION,
         "record_id": record_id,
@@ -221,6 +229,8 @@ def validate_record(payload: Mapping[str, Any]) -> dict[str, Any]:
         "baseline": baseline,
         "base_sha": base_sha,
         "controller_action": controller_action,
+        "retest_context_signature": optional_digest("retest_context_signature"),
+        "retest_data_signature": optional_digest("retest_data_signature"),
     }
 
 
@@ -453,6 +463,47 @@ def challenger_required(history: Iterable[Mapping[str, Any]], hypothesis_id: str
     return False
 
 
+def retest_requires_new_context_or_data(
+    history: Iterable[Mapping[str, Any]],
+    hypothesis_id: str,
+    *,
+    context_signature: str,
+    data_signature: str,
+) -> dict[str, Any]:
+    """Allow a killed/rejected hypothesis to retest only on new context or data."""
+    if not isinstance(context_signature, str) or not _SHA256_RE.fullmatch(context_signature):
+        raise HypothesisValidationError("context_signature must be a 64-character hex digest")
+    if not isinstance(data_signature, str) or not _SHA256_RE.fullmatch(data_signature):
+        raise HypothesisValidationError("data_signature must be a 64-character hex digest")
+    normalized = [validate_record(item) for item in history]
+    ids = _lineage_ids(normalized, hypothesis_id)
+    terminal = [
+        item for item in normalized
+        if item["hypothesis_id"] in ids
+        and (str(item.get("verdict") or "").upper() in {"KILL", "REJECT", "REJECTED"} or item["stage"] == "REJECTED")
+    ]
+    terminal.sort(key=lambda item: (item["created_at_utc"], item["record_id"]))
+    if not terminal:
+        return {"status": "UNMEASURABLE", "allowed": False, "reason": "NO_KILLED_HYPOTHESIS", "paper_only": True, "real_execution": False}
+    prior = terminal[-1]
+    prior_context = prior.get("retest_context_signature")
+    prior_data = prior.get("retest_data_signature")
+    if prior_context is None or prior_data is None:
+        return {"status": "UNMEASURABLE", "allowed": False, "reason": "PRIOR_RETEST_SIGNATURES_MISSING", "paper_only": True, "real_execution": False}
+    changed_context = prior_context != context_signature.lower()
+    changed_data = prior_data != data_signature.lower()
+    allowed = changed_context or changed_data
+    return {
+        "status": "PROVEN" if allowed else "REJECTED",
+        "allowed": allowed,
+        "reason": "NEW_CONTEXT_OR_DATA" if allowed else "SAME_CONTEXT_AND_DATA",
+        "changed_context": changed_context,
+        "changed_data": changed_data,
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
 def compact_status(history: Iterable[Mapping[str, Any]], family: str | None = None) -> dict[str, Any]:
     """Return a compact machine-readable research-state summary."""
     if family is not None and family not in FAMILIES:
@@ -519,6 +570,7 @@ __all__ = [
     "load_records",
     "novelty_score",
     "rediscovery_required",
+    "retest_requires_new_context_or_data",
     "semantic_fingerprint",
     "validate_record",
 ]

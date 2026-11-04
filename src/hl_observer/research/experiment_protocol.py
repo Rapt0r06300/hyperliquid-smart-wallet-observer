@@ -12,7 +12,7 @@ import math
 import os
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -316,6 +316,33 @@ def result_dir(runtime_root: Path, experiment_id: str) -> Path:
     except ValueError as exc:
         raise SpecValidationError("experiment output escapes runtime root") from exc
     return candidate
+
+
+def validate_candidate_lifecycle(
+    current_state: str,
+    *,
+    oos_paths: Sequence[str] = (),
+    forward_paths: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Keep HYPOTHESIS, FROZEN and VERIFIED_CHAMPION as distinct states."""
+    allowed = {"HYPOTHESIS", "FROZEN", "VERIFIED_CHAMPION"}
+    if current_state not in allowed:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_LIFECYCLE_STATE", "paper_only": True, "real_execution": False}
+    oos = [str(item).strip() for item in oos_paths if isinstance(item, str) and item.strip()]
+    forward = [str(item).strip() for item in forward_paths if isinstance(item, str) and item.strip()]
+    if current_state == "VERIFIED_CHAMPION" and not oos:
+        return {"status": "REJECTED", "reason": "CHAMPION_REQUIRES_OOS_PATHS", "promotable": False, "paper_only": True, "real_execution": False}
+    if current_state == "HYPOTHESIS" and not oos:
+        return {"status": "BLOCKED", "reason": "HYPOTHESIS_HAS_NO_OOS_PATHS", "promotable": False, "paper_only": True, "real_execution": False}
+    return {
+        "status": "PROVEN" if current_state == "VERIFIED_CHAMPION" else "FROZEN",
+        "state": current_state,
+        "promotable": current_state == "VERIFIED_CHAMPION",
+        "oos_paths": oos,
+        "forward_paths": forward,
+        "paper_only": True,
+        "real_execution": False,
+    }
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:

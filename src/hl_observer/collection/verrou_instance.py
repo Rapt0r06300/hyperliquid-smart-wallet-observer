@@ -104,4 +104,18 @@ def liberer(root: Path, nom: str, info: dict) -> None:
             _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
 
 
-__all__ = ["acquerir", "heartbeat", "liberer", "TTL_MS"]
+def lease_conflict_receipt(current: dict | None, candidate: dict, *, now_ms: int, ttl_ms: int = TTL_MS) -> dict:
+    """Report whether a second worker may proceed without touching the lease."""
+    if type(now_ms) is not int or now_ms < 0 or type(ttl_ms) is not int or ttl_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "LEASE_CLOCK_INVALID", "paper_read_only": True}
+    if not current:
+        return {"status": "ACQUIRE_ALLOWED", "reason": "NO_ACTIVE_LEASE", "paper_read_only": True}
+    heartbeat_ms = current.get("heartbeat_ms")
+    if type(heartbeat_ms) is not int:
+        return {"status": "UNMEASURABLE", "reason": "LEASE_HEARTBEAT_MISSING", "paper_read_only": True}
+    if now_ms - heartbeat_ms < ttl_ms:
+        return {"status": "CONFLICT", "reason": "ACTIVE_LEASE", "owner": current.get("run_id"), "paper_read_only": True, "real_execution": False}
+    return {"status": "ACQUIRE_ALLOWED", "reason": "LEASE_EXPIRED", "owner": current.get("run_id"), "paper_read_only": True, "real_execution": False}
+
+
+__all__ = ["acquerir", "heartbeat", "liberer", "lease_conflict_receipt", "TTL_MS"]

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import random
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -172,6 +173,77 @@ def freeze_regime_allowlist_from_train(
     }
 
 
+def regime_ablation_receipt(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    min_trades_per_regime: int = 3,
+) -> dict[str, Any]:
+    """Apply a TRAIN-frozen regime allow-list to a disjoint OOS sample."""
+    frozen = freeze_regime_allowlist_from_train(
+        train_rows,
+        min_trades_per_regime=min_trades_per_regime,
+    )
+    allowed = set(frozen.get("allowed_regimes", ()))
+    parsed = [row for row in oos_rows or () if isinstance(row, Mapping)]
+    if any(not str(row.get("regime") or "").strip() for row in parsed):
+        return {"status": "UNMEASURABLE", "reason": "OOS_REGIME_MISSING", "paper_read_only": True}
+    selected = [row for row in parsed if str(row.get("regime")).strip() in allowed]
+    status = "PROVEN" if frozen.get("status") == "TRAIN_REGIMES_FROZEN" and selected else "MORE_DATA"
+    return {
+        "status": status,
+        "allowed_regimes": sorted(allowed),
+        "oos_rows": len(parsed),
+        "selected_oos_rows": len(selected),
+        "selection_scope": "TRAIN_ONLY_COSTED",
+        "costs_fixed_before_ablation": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def vault_regime_resample_receipt(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    vault_field: str = "vault",
+    regime_field: str = "regime",
+    value_field: str = "net_pnl_bps",
+    n_resamples: int = 500,
+    seed: int = 7,
+) -> dict[str, Any]:
+    """ECO-169 deterministic stratified resampling by vault and regime."""
+    if isinstance(n_resamples, bool) or not isinstance(n_resamples, int) or n_resamples < 1:
+        return {"status": "UNMEASURABLE", "reason": "invalid_resample_count", "paper_read_only": True}
+    strata: dict[tuple[str, str], list[float]] = {}
+    for row in rows or ():
+        if not isinstance(row, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "invalid_row", "paper_read_only": True}
+        vault = str(row.get(vault_field) or "").strip()
+        regime = str(row.get(regime_field) or "").strip()
+        try:
+            value = float(row.get(value_field))
+        except (TypeError, ValueError):
+            return {"status": "UNMEASURABLE", "reason": "missing_value", "paper_read_only": True}
+        if not vault or not regime or not math.isfinite(value):
+            return {"status": "UNMEASURABLE", "reason": "invalid_stratum", "paper_read_only": True}
+        strata.setdefault((vault, regime), []).append(value)
+    if len(strata) < 2:
+        return {"status": "MORE_DATA", "reason": "need_two_vault_regime_strata", "strata": len(strata), "paper_read_only": True}
+    rng = random.Random(seed)
+    means: list[float] = []
+    keys = sorted(strata)
+    for _ in range(n_resamples):
+        values = [rng.choice(strata[key]) for key in keys]
+        means.append(sum(values) / len(values))
+    return {
+        "status": "PROVEN", "verdict": "VAULT_REGIME_STRATIFIED_RESAMPLE",
+        "strata": len(keys), "observations": sum(len(values) for values in strata.values()),
+        "n_resamples": n_resamples, "seed": seed,
+        "mean_of_resample_means": sum(means) / len(means),
+        "paper_read_only": True, "real_execution": False,
+    }
+
+
 __all__ = [
     "HAUTE_VOL",
     "BASSE_VOL",
@@ -182,4 +254,6 @@ __all__ = [
     "etiqueter",
     "trades_etiquetes",
     "freeze_regime_allowlist_from_train",
+    "regime_ablation_receipt",
+    "vault_regime_resample_receipt",
 ]

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+import hashlib
+import json
 
 from hl_observer.ops.paper_canonique import STRATEGIES_ACTIVES, runtime_truth
 from hl_observer.ops.paper_pipeline_e2e import PipelineCanonique
@@ -61,4 +63,20 @@ class ProducerConsumer:
         return self._consumers.get(strat)
 
 
-__all__ = ["ProducerConsumer"]
+def golden_performance_receipt(*, baseline_ms: float, optimized_ms: float,
+                               baseline_output: Any, optimized_output: Any) -> dict[str, Any]:
+    """Prove measured speedup only when the golden output is byte-equivalent."""
+    values = (baseline_ms, optimized_ms)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0 for value in values):
+        return {"status": "UNMEASURABLE", "reason": "timings_must_be_positive"}
+    baseline_digest = hashlib.sha256(json.dumps(baseline_output, sort_keys=True, default=str).encode()).hexdigest()
+    optimized_digest = hashlib.sha256(json.dumps(optimized_output, sort_keys=True, default=str).encode()).hexdigest()
+    identical = baseline_digest == optimized_digest
+    speedup = float(baseline_ms) / float(optimized_ms)
+    return {"status": "PROVEN" if identical else "REJECTED", "baseline_ms": float(baseline_ms),
+            "optimized_ms": float(optimized_ms), "speedup": round(speedup, 8),
+            "golden_outputs_identical": identical, "semantic_drift": not identical,
+            "automatic_activation": False}
+
+
+__all__ = ["ProducerConsumer", "golden_performance_receipt"]

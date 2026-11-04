@@ -254,3 +254,43 @@ def render_document_authority_report(issues: list[DocumentAuthorityIssue]) -> st
         location = issue.path if issue.line is None else f"{issue.path}:{issue.line}"
         lines.append(f"- {issue.code} {location}: {issue.detail}")
     return "\n".join(lines)
+
+
+def head_identity_receipt(*, branch: str, local_head: str, remote_head: str, true_head: str) -> dict[str, object]:
+    valid = branch == "main" and all(isinstance(value, str) and len(value) == 40 for value in (local_head, remote_head, true_head)) and local_head == true_head and remote_head == true_head
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "TRUE_HEAD_RECONCILED" if valid else "TRUE_HEAD_MISMATCH", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def authority_hierarchy_receipt(*, required_documents: tuple[str, ...], present_documents: tuple[str, ...]) -> dict[str, object]:
+    required = set(required_documents); present = set(present_documents); valid = bool(required) and required.issubset(present)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "AUTHORITY_HIERARCHY_COMPLETE" if valid else "AUTHORITY_DOCUMENT_MISSING", "missing": sorted(required - present), "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def architecture_surface_receipt(*, runtime_path: str, legacy_path: str, canonical_runtime: str) -> dict[str, object]:
+    valid = bool(runtime_path) and bool(legacy_path) and runtime_path == canonical_runtime and runtime_path != legacy_path
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "ARCHITECTURE_SURFACE_RECONCILED" if valid else "ARCHITECTURE_SURFACE_AMBIGUOUS", "runtime_path": runtime_path, "legacy_path": legacy_path, "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def historical_requirements_receipt(*, required_count: int, mapped_count: int, duplicate_count: int) -> dict[str, object]:
+    valid = isinstance(required_count, int) and isinstance(mapped_count, int) and isinstance(duplicate_count, int) and required_count > 0 and mapped_count == required_count and duplicate_count == 0
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "HISTORICAL_REQUIREMENTS_RECONCILED" if valid else "HISTORICAL_REQUIREMENTS_GAP", "required_count": required_count, "mapped_count": mapped_count, "duplicate_count": duplicate_count, "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def version_reconciliation_receipt(*, prior_count: int, current_count: int, conflict_count: int) -> dict[str, object]:
+    valid = all(isinstance(value, int) and value >= 0 for value in (prior_count, current_count, conflict_count)) and current_count >= prior_count and conflict_count == 0
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "VERSION_RECONCILED" if valid else "VERSION_CONFLICT", "prior_count": prior_count, "current_count": current_count, "conflict_count": conflict_count, "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def complementary_ideas_receipt(*, idea_ids: tuple[str, ...], classified_ids: tuple[str, ...]) -> dict[str, object]:
+    valid = bool(idea_ids) and set(classified_ids) == set(idea_ids)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "IDEAS_CLASSIFIED" if valid else "IDEAS_UNCLASSIFIED", "unclassified": sorted(set(idea_ids) - set(classified_ids)), "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def coverage_matrix_receipt(*, requirement_ids: tuple[str, ...], covered_ids: tuple[str, ...], duplicate_ids: tuple[str, ...]) -> dict[str, object]:
+    valid = bool(requirement_ids) and set(covered_ids) == set(requirement_ids) and not duplicate_ids
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "COVERAGE_MATRIX_COMPLETE" if valid else "COVERAGE_MATRIX_GAP", "missing": sorted(set(requirement_ids) - set(covered_ids)), "duplicates": list(duplicate_ids), "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def documentation_reconciliation_receipt(*, required_markers: tuple[str, ...], observed_markers: tuple[str, ...]) -> dict[str, object]:
+    valid = bool(required_markers) and set(required_markers).issubset(set(observed_markers))
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "DOCUMENTATION_RECONCILED" if valid else "DOCUMENTATION_GAP", "missing": sorted(set(required_markers) - set(observed_markers)), "paper_read_only": True, "real_execution": False, "fail_closed": not valid}

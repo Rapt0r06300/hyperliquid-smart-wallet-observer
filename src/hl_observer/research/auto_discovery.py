@@ -112,3 +112,30 @@ def quarantaine_generateur(hypotheses: Sequence[Mapping]) -> list[dict]:
     """Toute hypothese AUTO-GENEREE est QUARANTAINEE : non promouvable tant qu'elle n'a pas passe la
     validation hors-echantillon. Empeche un generateur de s'auto-valider (data-mining)."""
     return [{**dict(h), "statut": QUARANTAINE, "promotion_autorisee": False} for h in hypotheses]
+
+
+def restart_discovery_after_promotion(
+    records: Sequence[Mapping], *, profit_stop_fixed: bool = False
+) -> dict:
+    """Require a fresh Discovery cycle after every promotion, CPU-only and paper-only."""
+    normalized = [dict(row) for row in records]
+    for row in normalized:
+        if not isinstance(row.get("status"), str) or not row["status"].strip():
+            return {"status": "UNMEASURABLE", "reason": "INVALID_DISCOVERY_RECORD", "paper_only": True, "real_execution": False}
+    promoted = [row for row in normalized if row["status"] in {"PROMOTED", "VERIFIED_CHAMPION"}]
+    if not promoted:
+        return {"status": "NO_RESTART", "reason": "NO_PROMOTION", "paper_only": True, "real_execution": False}
+    tail = normalized[-2:]
+    two_without_stop = len(tail) == 2 and all(
+        row.get("change_class") == "PARAMETER_ONLY" for row in tail
+    ) and not profit_stop_fixed
+    return {
+        "status": "PIVOT_REQUIRED" if two_without_stop else "DISCOVERY_RESTART_REQUIRED",
+        "phase": "DISCOVERY",
+        "reason": "POST_PROMOTION_RESTART",
+        "cpu_only": True,
+        "ai_in_cpu_loop": False,
+        "profit_stop_fixed": bool(profit_stop_fixed),
+        "paper_only": True,
+        "real_execution": False,
+    }

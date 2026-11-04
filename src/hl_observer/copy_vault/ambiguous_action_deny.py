@@ -43,4 +43,16 @@ def decision(action_determinee: Any, *, confiance: Any = None, seuil_confiance: 
             "raison": ("CONFIANCE_INSUFFISANTE" if a in _CLAIR_AUGMENTE else "ACTION_AMBIGUE")}
 
 
-__all__ = ["decision"]
+def decision_with_pre_state(action_determinee: Any, *, pre_state: Any, confiance: Any = None,
+                            seuil_confiance: float = 0.7) -> dict[str, Any]:
+    """Refuse any action when the source pre-state is absent or unknown."""
+
+    state = str(pre_state or "").upper()
+    if state not in {"FLAT", "OPEN", "LONG", "SHORT"}:
+        return {"status": "PROVEN", "nouvelle_exposition": False, "autorise_reduction": False,
+                "raison": "PRE_STATE_MISSING_OR_UNKNOWN", "paper_read_only": True}
+    result = decision(action_determinee, confiance=confiance, seuil_confiance=seuil_confiance)
+    return {"status": "PROVEN", **result, "pre_state": state, "paper_read_only": True}
+
+
+__all__ = ["decision", "decision_with_pre_state"]

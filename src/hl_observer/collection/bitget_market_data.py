@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 import uuid
+import zlib
 from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -27,13 +29,25 @@ from hl_observer.collection.native_venue_market import (
 REST_BASE_URL = "https://api.bitget.com"
 PUBLIC_WS_URL = "wss://ws.bitget.com/v2/ws/public"
 PUBLIC_UTA_WS_URL = "wss://ws.bitget.com/v3/ws/public"
+BITGET_INST_TYPE = "USDT-FUTURES"
+APP_PING_INTERVAL_S = 25.0
+HTTP_RETRY_ATTEMPTS = 3
 
 
 def _f(v: Any) -> float | None:
     try:
-        return float(v)
+        parsed = float(v)
     except (TypeError, ValueError):
         return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _timestamp_ms(v: Any) -> int | None:
+    try:
+        parsed = int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if 100_000_000_000 <= parsed <= 100_000_000_000_000 else None
 
 
 def _i(v: Any) -> int | None:
@@ -43,6 +57,39 @@ def _i(v: Any) -> int | None:
         return None
 
 
+def bitget_book_checksum(
+    bids: Mapping[float, float] | Iterable[tuple[float, float]],
+    asks: Mapping[float, float] | Iterable[tuple[float, float]],
+    *,
+    depth: int = 25,
+) -> int | None:
+    """Return Bitget's interleaved top-of-book CRC32 input when levels are valid."""
+
+    try:
+        bid_rows = list(bids.items()) if isinstance(bids, Mapping) else list(bids)
+        ask_rows = list(asks.items()) if isinstance(asks, Mapping) else list(asks)
+        if depth <= 0:
+            return None
+        bid_rows = sorted(bid_rows, key=lambda row: float(row[0]), reverse=True)[:depth]
+        ask_rows = sorted(ask_rows, key=lambda row: float(row[0]))[:depth]
+        if not bid_rows or not ask_rows:
+            return None
+        tokens: list[str] = []
+        for index in range(max(len(bid_rows), len(ask_rows))):
+            if index < len(bid_rows):
+                tokens.extend((str(bid_rows[index][0]), str(bid_rows[index][1])))
+            if index < len(ask_rows):
+                tokens.extend((str(ask_rows[index][0]), str(ask_rows[index][1])))
+        return zlib.crc32(":".join(tokens).encode("utf-8"))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _optional_number(value: Any) -> float | None:
+    parsed = _f(value)
+    return parsed if parsed is not None else None
+
+
 def parse_bitget_instruments(payload: dict[str, Any]) -> list[tuple[str, str]]:
     out = []
     for x in payload.get("data", []) if isinstance(payload, dict) else []:
@@ -50,11 +97,20 @@ def parse_bitget_instruments(payload: dict[str, Any]) -> list[tuple[str, str]]:
             not isinstance(x, dict)
             or str(x.get("quoteCoin", "")).upper() != "USDT"
             or str(x.get("symbolStatus", "normal")).lower() not in {"normal", "listed"}
+            or (
+                x.get("productType") is not None
+                and str(x.get("productType")).upper() != BITGET_INST_TYPE
+            )
+            or (
+                x.get("instType") is not None
+                and str(x.get("instType")).upper() != BITGET_INST_TYPE
+            )
         ):
             continue
         symbol = str(x.get("symbol") or "").upper()
-        base = str(x.get("baseCoin") or canonical_coin(symbol)).upper()
-        if symbol and base:
+        expected_base = canonical_coin(symbol)
+        base = str(x.get("baseCoin") or expected_base).upper()
+        if symbol and base and base == expected_base:
             out.append((base, symbol))
     return sorted(set(out))
 
@@ -82,6 +138,8 @@ class BitgetMarketState:
     clock_offset_ms: float | None = None
     gap_count: int = 0
     regression_count: int = 0
+    last_exchange_ts_ms: int | None = None
+    last_checksum: int | None = None
 
     def apply(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
         arg = payload.get("arg") or {}
@@ -92,12 +150,37 @@ class BitgetMarketState:
         if str(arg.get("instId") or self.symbol).upper() != self.symbol.upper():
             self.quality, self.reason = DESYNC, "SYMBOL_MISMATCH"
             return self.quality
+        inst_type = arg.get("instType")
+        if inst_type is not None and str(inst_type).upper() != BITGET_INST_TYPE:
+            self.quality, self.reason = DESYNC, "INST_TYPE_MISMATCH"
+            return self.quality
         channel = str(arg.get("channel", "")).lower()
         if channel in {"books", "books1", "books5", "books15"}:
             seq = _i(item.get("seq") or item.get("seqId"))
             prev = _i(item.get("pseq") or item.get("prevSeqId"))
             action = str(payload.get("action") or "").lower()
-            snapshot_push = action == "snapshot" or channel in {"books1", "books5", "books15"}
+            implicit_snapshot = (
+                not action
+                and self.sequence is None
+                and bool(item.get("bids"))
+                and bool(item.get("asks"))
+            )
+            snapshot_push = (
+                action == "snapshot"
+                or channel in {"books1", "books5", "books15"}
+                or implicit_snapshot
+            )
+
+            if snapshot_push and seq is None:
+                self.bids.clear()
+                self.asks.clear()
+                self.quality, self.reason = UNMEASURABLE, "MISSING_SNAPSHOT_SEQUENCE"
+                return self.quality
+            if not snapshot_push and self.sequence is None:
+                self.bids.clear()
+                self.asks.clear()
+                self.quality, self.reason = UNMEASURABLE, "DELTA_BEFORE_SNAPSHOT"
+                return self.quality
 
             if not snapshot_push and self.sequence is not None and seq is not None:
                 if prev is not None and prev != self.sequence:
@@ -136,13 +219,43 @@ class BitgetMarketState:
                 self.bids = next_bids
                 self.asks = next_asks
             self.sequence = seq if seq is not None else self.sequence
+            checksum = _i(item.get("checksum") or payload.get("checksum"))
+            checksum_claimed = bool(
+                item.get("checksum_required")
+                or item.get("checksum_verified")
+                or item.get("checksumValid")
+                or payload.get("checksum_required")
+                or payload.get("checksum_verified")
+                or payload.get("checksumValid")
+            )
+            if checksum_claimed and checksum is None:
+                self.quality, self.reason = UNMEASURABLE, "CHECKSUM_MISSING"
+                self.bids.clear()
+                self.asks.clear()
+                return self.quality
+            if checksum is not None:
+                actual_checksum = bitget_book_checksum(self.bids, self.asks)
+                if actual_checksum is None or checksum != actual_checksum:
+                    self.quality, self.reason = DESYNC, "BOOK_CHECKSUM_MISMATCH"
+                    self.bids.clear()
+                    self.asks.clear()
+                    return self.quality
+                self.last_checksum = checksum
             self.quality = (
                 EXPLOITABLE
                 if self.bids and self.asks and max(self.bids) <= min(self.asks)
                 else UNMEASURABLE
             )
             self.reason = "" if self.quality == EXPLOITABLE else "INVALID_BBO"
-        self.exchange_ts_ms = _i(item.get("ts")) or self.exchange_ts_ms
+        exchange_ts = _timestamp_ms(item.get("ts"))
+        if exchange_ts is not None and self.last_exchange_ts_ms is not None and exchange_ts < self.last_exchange_ts_ms:
+            self.regression_count += 1
+            self.bids.clear()
+            self.asks.clear()
+            self.quality, self.reason = DESYNC, "EXCHANGE_TIMESTAMP_REGRESSION"
+            return self.quality
+        self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
+        self.last_exchange_ts_ms = exchange_ts or self.last_exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
         self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
         self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
@@ -150,12 +263,16 @@ class BitgetMarketState:
             self.transport_rtt_ms = _f(transport.get("transport_rtt_ms"))
         if transport.get("clock_offset_ms") is not None:
             self.clock_offset_ms = _f(transport.get("clock_offset_ms"))
-        self.last = _f(item.get("lastPr") or item.get("lastPrice")) or self.last
-        self.mark = _f(item.get("markPrice")) or self.mark
-        self.index = _f(item.get("indexPrice")) or self.index
+        last = _optional_number(item.get("lastPr") if item.get("lastPr") is not None else item.get("lastPrice"))
+        mark = _optional_number(item.get("markPrice"))
+        index = _optional_number(item.get("indexPrice"))
+        self.last = last if last is not None else self.last
+        self.mark = mark if mark is not None else self.mark
+        self.index = index if index is not None else self.index
         if item.get("fundingRate") is not None:
             self.funding_rate = _f(item.get("fundingRate"))
-        self.open_interest = _f(item.get("holdingAmount")) or self.open_interest
+        open_interest = _optional_number(item.get("holdingAmount"))
+        self.open_interest = open_interest if open_interest is not None else self.open_interest
         return self.quality
 
     def snapshot(self, *, now_ms: int | None = None) -> NativeMarketSnapshot:
@@ -207,6 +324,36 @@ class BitgetPublicClient:
         self.capture_tiers_by_symbol: dict[str, CaptureTier] = {}
         self.last_instrument_metadata: list[dict[str, Any]] = []
 
+    @staticmethod
+    def _retry_after_seconds(response: httpx.Response) -> float | None:
+        value = response.headers.get("Retry-After")
+        try:
+            parsed = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed is not None and math.isfinite(parsed) and parsed >= 0 else None
+
+    def _get_json_with_retry(
+        self,
+        client: httpx.Client,
+        url: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+    ) -> Any:
+        for attempt in range(HTTP_RETRY_ATTEMPTS):
+            response = client.get(url, params=params)
+            if response.status_code not in {429, 500, 502, 503, 504}:
+                response.raise_for_status()
+                return response.json()
+            if attempt + 1 >= HTTP_RETRY_ATTEMPTS:
+                response.raise_for_status()
+            retry_after = self._retry_after_seconds(response)
+            delay = retry_after if retry_after is not None else compute_backoff_delay(
+                attempt=attempt, shard_key="bitget-rest"
+            ).delay_seconds
+            time.sleep(min(max(0.0, delay), 5.0))
+        raise RuntimeError("Bitget REST retry loop exhausted")
+
     def set_capture_profile(self, tier: CaptureTier | str) -> None:
         self.capture_tier = capture_profile("bitget", tier).tier
 
@@ -228,12 +375,11 @@ class BitgetPublicClient:
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0):
         with httpx.Client(timeout=timeout_s) as client:
-            response = client.get(
+            payload = self._get_json_with_retry(
+                client,
                 f"{self.rest_base_url}/api/v2/mix/market/contracts",
-                params={"productType": "USDT-FUTURES"},
+                params={"productType": BITGET_INST_TYPE},
             )
-            response.raise_for_status()
-            payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         self.last_instrument_metadata = [dict(row) for row in (data or []) if isinstance(row, dict)]
         return parse_bitget_instruments(payload)
@@ -270,7 +416,17 @@ class BitgetPublicClient:
                 async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
-                    async for raw in socket:
+                    last_app_ping = time.monotonic()
+                    while True:
+                        try:
+                            raw = await asyncio.wait_for(socket.recv(), timeout=APP_PING_INTERVAL_S)
+                        except asyncio.TimeoutError:
+                            await socket.send("ping")
+                            last_app_ping = time.monotonic()
+                            continue
+                        if time.monotonic() - last_app_ping >= APP_PING_INTERVAL_S:
+                            await socket.send("ping")
+                            last_app_ping = time.monotonic()
                         receive_mono_ns = time.monotonic_ns()
                         receive_wall_ts_ms = int(time.time() * 1000)
                         if raw == "pong":
@@ -287,7 +443,7 @@ class BitgetPublicClient:
                         }
                         yield payload
                         if time.monotonic() - session_started >= self.session_refresh_s:
-                            return
+                            break
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -312,7 +468,17 @@ class BitgetPublicClient:
                         )
                     )
                     attempt = 0
-                    async for raw in socket:
+                    last_app_ping = time.monotonic()
+                    while True:
+                        try:
+                            raw = await asyncio.wait_for(socket.recv(), timeout=APP_PING_INTERVAL_S)
+                        except asyncio.TimeoutError:
+                            await socket.send("ping")
+                            last_app_ping = time.monotonic()
+                            continue
+                        if time.monotonic() - last_app_ping >= APP_PING_INTERVAL_S:
+                            await socket.send("ping")
+                            last_app_ping = time.monotonic()
                         receive_mono_ns = time.monotonic_ns()
                         receive_wall_ts_ms = int(time.time() * 1000)
                         if raw == "pong":
@@ -343,7 +509,7 @@ class BitgetPublicClient:
                                 },
                             }
                         if time.monotonic() - session_started >= self.session_refresh_s:
-                            return
+                            break
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -378,6 +544,9 @@ class BitgetPublicClient:
 __all__ = [
     "BitgetMarketState",
     "BitgetPublicClient",
+    "APP_PING_INTERVAL_S",
+    "BITGET_INST_TYPE",
+    "bitget_book_checksum",
     "PUBLIC_UTA_WS_URL",
     "PUBLIC_WS_URL",
     "REST_BASE_URL",

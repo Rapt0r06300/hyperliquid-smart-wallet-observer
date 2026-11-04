@@ -5,6 +5,7 @@ import pytest
 from hl_observer.simulation.vnext_promotion_protocol import (
     build_freeze_manifest,
     consume_post_freeze_once,
+    validate_candidate_cost_parity,
     verify_freeze_manifest,
 )
 
@@ -47,3 +48,17 @@ def test_post_freeze_oos_is_one_shot_per_freeze_hash() -> None:
 
     with pytest.raises(RuntimeError, match="different freeze"):
         consume_post_freeze_once(first, freeze_hash="a" * 64)
+
+
+def test_cost_parity_requires_same_capital_quotes_and_costs():
+    champion = {
+        "capital_usd": 200,
+        "quote_currency": "USDC",
+        "cost_bps": 4,
+        "slippage_bps": 2,
+    }
+    challenger = dict(champion)
+    assert validate_candidate_cost_parity(champion, challenger)["status"] == "PROVEN"
+    mismatch = validate_candidate_cost_parity(champion, {**challenger, "cost_bps": 5})
+    assert mismatch["status"] == "UNMEASURABLE"
+    assert mismatch["mismatched_fields"] == ["cost_bps"]

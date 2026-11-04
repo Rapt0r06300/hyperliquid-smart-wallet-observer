@@ -256,4 +256,58 @@ def materialize_records_streaming(
     }
 
 
-__all__ = ["materialize_records_streaming"]
+def materialization_safety_receipt(
+    output_root: Path,
+    records: Iterable[DatasetRecord],
+    *,
+    max_total_bytes: int = 2_000_000_000,
+) -> dict[str, object]:
+    """Preflight member paths and declared sizes before any materialization."""
+    rows = list(records)
+    if max_total_bytes < 0:
+        return {"status": "UNMEASURABLE", "reason": "MAX_BYTES_INVALID"}
+    total = 0
+    seen: set[str] = set()
+    try:
+        for record in rows:
+            if record.relative_path in seen or not record.relative_path:
+                return {"status": "REJECTED", "reason": "DUPLICATE_OR_EMPTY_MEMBER"}
+            seen.add(record.relative_path)
+            if record.size < 0:
+                return {"status": "REJECTED", "reason": "NEGATIVE_MEMBER_SIZE"}
+            _safe_destination(output_root, record.relative_path)
+            total += int(record.size)
+            if total > int(max_total_bytes):
+                return {"status": "REJECTED", "reason": "DECLARED_EXPANSION_LIMIT_EXCEEDED"}
+    except DatasetBridgeError as exc:
+        return {"status": "REJECTED", "reason": str(exc)}
+    return {"status": "PROVEN", "member_count": len(rows), "declared_bytes": total, "paths_checked": True, "zipbomb_guarded": True}
+
+
+def streaming_codec_receipt(
+    records: Iterable[Mapping[str, object]], *, codec: str,
+) -> dict[str, object]:
+    """Validate extraction order for supported codecs without decoding guesses."""
+    normalized_codec = str(codec).strip().lower()
+    if normalized_codec not in {"none", "identity", "gzip"}:
+        return {"status": "UNMEASURABLE", "reason": "CODEC_UNSUPPORTED"}
+    rows = list(records)
+    sequence: list[int] = []
+    for row in rows:
+        value = row.get("sequence")
+        if type(value) is not int or value < 0:
+            return {"status": "UNMEASURABLE", "reason": "SEQUENCE_INVALID"}
+        sequence.append(value)
+    ordered = sequence == sorted(sequence) and len(sequence) == len(set(sequence))
+    return {
+        "status": "PROVEN" if ordered else "REJECTED",
+        "reason": "CODEC_ORDER_PRESERVED" if ordered else "CODEC_ORDER_OR_DUPLICATE_MISMATCH",
+        "codec": normalized_codec,
+        "records": len(rows),
+        "sequence": tuple(sequence),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["materialize_records_streaming", "materialization_safety_receipt", "streaming_codec_receipt"]

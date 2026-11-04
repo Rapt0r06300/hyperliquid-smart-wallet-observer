@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.promotion_gate import (
-    PROMOUVOIR_TESTNET, RESTE_PAPER, CriteresPromotion, decision_promotion,
+    PROMOUVOIR_TESTNET, RESTE_PAPER, CriteresPromotion, audit_oos_retuning_isolation,
+    decision_promotion,
 )
 
 
@@ -81,3 +82,22 @@ def test_jamais_mainnet():
         d = decision_promotion(**_ok(pnl_paper=pnl)).decision
         assert d in (PROMOUVOIR_TESTNET, RESTE_PAPER)
         assert "MAINNET" not in d.upper() and "REAL" not in d.upper()
+
+
+def test_retuning_exige_un_nouvel_oos_sur_fenetre_disjointe():
+    reuse = audit_oos_retuning_isolation(
+        previous_oos_id="oos-1",
+        previous_oos_window_id="window-1",
+        replacement_oos_id="oos-1",
+        replacement_oos_window_id="window-1",
+    )
+    assert reuse["status"] == "REJECTED"
+    assert decision_promotion(**_ok(retuning=True)).decision == RESTE_PAPER
+    isolated = audit_oos_retuning_isolation(
+        previous_oos_id="oos-1",
+        previous_oos_window_id="window-1",
+        replacement_oos_id="oos-2",
+        replacement_oos_window_id="window-2",
+    )
+    assert isolated["status"] == "PROVEN"
+    assert decision_promotion(**_ok(retuning=True, oos_retuning_audit=isolated)).decision == PROMOUVOIR_TESTNET

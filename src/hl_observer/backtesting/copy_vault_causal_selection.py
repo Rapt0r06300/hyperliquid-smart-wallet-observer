@@ -599,4 +599,51 @@ def select_causal_protocol_inputs(
     }
 
 
-__all__ = ["causal_live_observation", "confirmed_causal_l2_observation", "select_causal_protocol_inputs"]
+def freeze_cutoff_receipt(rows: Iterable[Mapping[str, Any]], *, cutoff_ms: int) -> dict[str, Any]:
+    """Freeze availability at cutoff and return deterministic admitted identities."""
+    cutoff = _strict_positive_int(cutoff_ms)
+    if cutoff is None:
+        return {"status": "UNMEASURABLE", "reason": "cutoff_must_be_positive_integer"}
+    admitted: list[str] = []
+    rejected = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "row_must_be_mapping"}
+        timestamp = _strict_positive_int(row.get("signal_ts_ms", row.get("ts_ms")))
+        if timestamp is None:
+            return {"status": "UNMEASURABLE", "reason": "row_timestamp_missing"}
+        if timestamp <= cutoff:
+            identity = str(row.get("event_id", row.get("metaorder_id", ""))).strip()
+            if not identity:
+                return {"status": "UNMEASURABLE", "reason": "row_identity_missing"}
+            admitted.append(identity)
+        else:
+            rejected += 1
+    return {"status": "PROVEN", "cutoff_ms": cutoff, "admitted_ids": tuple(admitted),
+            "post_cutoff_rejected": rejected, "deterministic": True}
+
+
+def stable_event_order_receipt(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Canonicalize equal-timestamp events without relying on input order."""
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "row_must_be_mapping"}
+        timestamp = _strict_positive_int(row.get("ts_ms", row.get("signal_ts_ms")))
+        identity = str(row.get("event_id", row.get("metaorder_id", ""))).strip()
+        if timestamp is None or not identity:
+            return {"status": "UNMEASURABLE", "reason": "timestamp_or_identity_missing"}
+        normalized.append({"ts_ms": timestamp, "event_id": identity})
+    if len({row["event_id"] for row in normalized}) != len(normalized):
+        return {"status": "UNMEASURABLE", "reason": "duplicate_event_id"}
+    ordered = sorted(normalized, key=lambda row: (row["ts_ms"], row["event_id"]))
+    return {
+        "status": "PROVEN",
+        "ordered_event_ids": tuple(row["event_id"] for row in ordered),
+        "same_timestamp_tie_break": "event_id_lexicographic",
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["causal_live_observation", "confirmed_causal_l2_observation", "select_causal_protocol_inputs", "freeze_cutoff_receipt", "stable_event_order_receipt"]

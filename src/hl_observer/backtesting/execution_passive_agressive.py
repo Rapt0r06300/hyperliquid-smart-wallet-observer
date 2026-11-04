@@ -11,6 +11,8 @@ Module PUR. Une décision d'exécution n'est pas un ordre ; le noyau garde l'aut
 """
 from __future__ import annotations
 
+import math
+
 RESTER_MAKER = "RESTER_MAKER"
 CHASSER_TAKER = "CHASSER_TAKER"
 ANNULER = "ANNULER"
@@ -31,4 +33,16 @@ def decision_execution(edge_initial_bps: float, mouvement_adverse_bps: float, *,
     return ANNULER
 
 
-__all__ = ["RESTER_MAKER", "CHASSER_TAKER", "ANNULER", "decision_execution"]
+def same_context_execution_receipt(*, edge_bps: object, adverse_move_bps: object, maker_cost_bps: object, taker_cost_bps: object) -> dict[str, object]:
+    """Compare passive/aggressive choices using the same observed context."""
+
+    try:
+        edge, move, maker, taker = (float(value) for value in (edge_bps, adverse_move_bps, maker_cost_bps, taker_cost_bps))
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "CONTEXT_INVALID"}
+    if not all(math.isfinite(value) for value in (edge, move, maker, taker)) or min(edge, move, maker, taker) < 0.0:
+        return {"status": "UNMEASURABLE", "reason": "CONTEXT_INVALID"}
+    return {"status": "PROVEN", "maker_edge_bps": round(edge - move - maker, 8), "taker_edge_bps": round(edge - move - taker, 8)}
+
+
+__all__ = ["RESTER_MAKER", "CHASSER_TAKER", "ANNULER", "decision_execution", "same_context_execution_receipt"]

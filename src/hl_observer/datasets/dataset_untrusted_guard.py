@@ -94,10 +94,24 @@ def assert_workspace_safe(
     }
 
 
+def untrusted_provenance_receipt(
+    workspace: str | Path,
+    *,
+    trusted_file_sha256: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Classify a dataset workspace only after the full safety scan succeeds."""
+    try:
+        result = assert_workspace_safe(workspace, trusted_file_sha256=trusted_file_sha256)
+    except DatasetUntrustedError as exc:
+        return {"status": "REJECTED", "reason": str(exc), "paper_only": True, "real_execution": False}
+    return {"status": "PROVEN", **result}
+
+
 __all__ = [
     "DatasetUntrustedError",
     "FORBIDDEN_EXTENSIONS",
     "MAX_RELATIVE_PATH",
     "assert_workspace_safe",
+    "untrusted_provenance_receipt",
     "validate_relative_member",
 ]

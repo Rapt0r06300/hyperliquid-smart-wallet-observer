@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from hl_observer.simulation.economic_freeze_registry import (
+    build_immutable_freeze_revision,
     first_compatible_freeze,
     first_freeze,
     list_freezes,
@@ -11,6 +12,39 @@ from hl_observer.simulation.economic_freeze_registry import (
     reuse_or_create_freeze,
     split_pre_post_freeze,
 )
+
+
+def test_immutable_freeze_revision_binds_inputs_without_mutating_previous():
+    previous = {
+        "family": "copy_vault",
+        "revision": 3,
+        "freeze_hash": "a" * 64,
+        "parameters": {"horizon_ms": 1000},
+        "parameters_sha256": parameter_hash({"horizon_ms": 1000}),
+    }
+    before = json.loads(json.dumps(previous))
+    revision = build_immutable_freeze_revision(
+        previous,
+        data_sha256="b" * 64,
+        config_sha256="c" * 64,
+        seed=7,
+        costs={"fees_bps": 1.0, "slippage_bps": 2.0},
+        frozen_at_ms=1234,
+    )
+    assert previous == before
+    assert revision["revision"] == 4
+    assert revision["supersedes_freeze_hash"] == "a" * 64
+    assert len(revision["freeze_hash"]) == 64
+    assert revision["paper_only"] is True and revision["real_execution"] is False
+    changed = build_immutable_freeze_revision(
+        previous,
+        data_sha256="d" * 64,
+        config_sha256="c" * 64,
+        seed=7,
+        costs={"fees_bps": 1.0, "slippage_bps": 2.0},
+        frozen_at_ms=1234,
+    )
+    assert changed["freeze_hash"] != revision["freeze_hash"]
 
 
 def _write(root: Path, family: str, name: str, ts: int, params: dict) -> None:

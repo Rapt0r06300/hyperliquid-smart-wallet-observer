@@ -196,7 +196,6 @@ jobs:
       - id: unit
         name: Run one bounded real unit
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -361,7 +360,6 @@ jobs:
       - id: durable
         name: Persist collection data or analysis evidence (SAFE certification first)
         if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
-        continue-on-error: true
         shell: bash
         env:
           UNIT_KIND: "${{ steps.unit.outputs.kind }}"

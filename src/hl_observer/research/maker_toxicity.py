@@ -8,6 +8,7 @@ fill reste positive après coûts. Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 UNMEASURABLE = "UNMEASURABLE"
 
@@ -46,6 +47,16 @@ def esperance_pnl_fill_bps(edge_brut_bps: float, toxicity: Any, *, spread_captur
 def maker_autorise(e_pnl_fill_bps: Any) -> bool:
     """Maker autorisé seulement si E[PnL|fill] > 0 (jamais 'price touched = fill')."""
     return isinstance(e_pnl_fill_bps, (int, float)) and e_pnl_fill_bps > 0
+
+
+def maker_toxicity_receipt(*, aggr_flow_norm: Any, absorption: Any, queue_depletion: Any, microprice_tilt_bps: Any, spread_widening: Any) -> dict[str, Any]:
+    """Require finite observed maker-toxic inputs before a paper diagnostic."""
+
+    values = (aggr_flow_norm, absorption, queue_depletion, microprice_tilt_bps, spread_widening)
+    if any(isinstance(value, bool) for value in values) or not all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in values):
+        return {"status": "UNMEASURABLE", "reason": "TOXICITY_INPUT_INCOMPLETE"}
+    result = toxicity_score(aggr_flow_norm=aggr_flow_norm, absorption=absorption, queue_depletion=queue_depletion, microprice_tilt_bps=microprice_tilt_bps, spread_widening=spread_widening)
+    return {"status": "PROVEN", **result}
 
 
 __all__ = ["toxicity_score", "esperance_pnl_fill_bps", "maker_autorise", "UNMEASURABLE"]

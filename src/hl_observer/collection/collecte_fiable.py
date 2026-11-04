@@ -207,5 +207,16 @@ def collecter_proprement(enrs: Iterable[dict], *, source: str, champs_cle: Seque
     return propres
 
 
+def reconnect_recovery_plan(*, last_seen_ts_ms: object, reconnect_ts_ms: object, backfill_available: object) -> dict[str, Any]:
+    """Choose continuation or fail-closed backfill without inventing a gap."""
+    if any(type(value) is not int or value <= 0 for value in (last_seen_ts_ms, reconnect_ts_ms)):
+        return {"status": "UNMEASURABLE", "reason": "RECOVERY_CLOCK_MISSING", "paper_read_only": True}
+    if reconnect_ts_ms < last_seen_ts_ms:
+        return {"status": "REJECTED", "reason": "RECOVERY_CLOCK_REVERSED", "paper_read_only": True}
+    if backfill_available is True:
+        return {"status": "BACKFILL_REQUIRED", "from_ts_ms": last_seen_ts_ms, "to_ts_ms": reconnect_ts_ms, "paper_read_only": True, "real_execution": False}
+    return {"status": "UNMEASURABLE", "reason": "BACKFILL_EVIDENCE_MISSING", "paper_read_only": True, "real_execution": False}
+
+
 __all__ = ["cle_dedup", "CacheDedup", "append_jsonl", "ecrire_atomique", "backoff_jitter",
-           "Limiteur", "estampiller", "qualite_ok", "collecter_proprement"]
+           "Limiteur", "estampiller", "qualite_ok", "collecter_proprement", "reconnect_recovery_plan"]

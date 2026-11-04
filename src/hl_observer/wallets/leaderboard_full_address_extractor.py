@@ -68,3 +68,11 @@ def _dedupe(values: list[str]) -> list[str]:
         seen.add(key)
         deduped.append(value)
     return deduped
+
+
+def address_observation_receipt(payload: Any) -> dict[str, object]:
+    """Reject a leaderboard payload that exposes only truncated wallet labels."""
+    extracted = extract_wallet_address_values(payload)
+    if extracted.full_addresses:
+        return {"status": "PROVEN", "full_count": len(extracted.full_addresses), "truncated_count": len(extracted.truncated_addresses), "paper_read_only": True, "real_execution": False}
+    return {"status": "UNMEASURABLE", "reason": "NO_FULL_ADDRESS_OBSERVED", "truncated_count": len(extracted.truncated_addresses), "paper_read_only": True}

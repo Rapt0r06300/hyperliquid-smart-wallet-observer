@@ -228,3 +228,28 @@ def compare_copy_vault_liquidity_veto(
         "real_execution": False,
         "promotion": "DISABLED_UNTIL_REVIEW",
     }
+
+
+def market_quality_veto_receipt(
+    train_rows: Sequence[Mapping],
+    oos_rows: Sequence[Mapping],
+    *,
+    cutoff_ms: int,
+    max_spread_bps: float = 15.0,
+    min_depth_usd: float = 1_000.0,
+) -> dict:
+    """Expose the causal spread/depth veto comparison as a closure receipt."""
+    result = compare_copy_vault_liquidity_veto(
+        train_rows,
+        oos_rows,
+        cutoff_ms=cutoff_ms,
+        max_spread_bps=max_spread_bps,
+        min_depth_usd=min_depth_usd,
+    )
+    return {
+        **result,
+        "verdict": "PROVEN" if result.get("status") == "COMPARABLE" else "UNMEASURABLE",
+        "causal_veto_required": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }

@@ -54,4 +54,11 @@ def acceptable(slippage_bps: Any, action: Any, *, budget_open_bps: float = 8.0,
     return {"acceptable": bool(ok), "budget_bps": b, "raison": ("OK" if ok else "SLIPPAGE_HORS_BUDGET")}
 
 
-__all__ = ["budget_slippage_bps", "acceptable"]
+def action_slippage_receipt(slippage_bps: Any, action: Any, *, budget_open_bps: float = 8.0, budget_close_bps: float = 25.0) -> dict[str, Any]:
+    """Return an explicit paper-only status for action-dependent slippage."""
+
+    result = acceptable(slippage_bps, action, budget_open_bps=budget_open_bps, budget_close_bps=budget_close_bps)
+    return {"status": "PROVEN" if result.get("raison") in {"OK", "SLIPPAGE_HORS_BUDGET"} else "UNMEASURABLE", **result}
+
+
+__all__ = ["budget_slippage_bps", "acceptable", "action_slippage_receipt"]

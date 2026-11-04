@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.survival_gate import (
-    porte_de_survie, survit_oos, survit_regime, survit_liquidite_reduite, survit_couts_stresses,
+    porte_de_survie, survit_oos, survit_regime, survit_liquidite_reduite,
+    survit_couts_stresses, survit_sans_trades_extremes,
 )
 
 
@@ -30,3 +31,13 @@ def test_helpers():
     assert survit_couts_stresses([5.0, 2.0, 0.5]) is True        # positif meme au pire cout
     assert survit_couts_stresses([5.0, -1.0]) is False
     assert survit_couts_stresses([]) is False
+
+
+def test_survie_sans_trades_extremes_preserve_lordre_et_refuse_un_gain_isole():
+    result = survit_sans_trades_extremes(
+        [100.0, -1.0, -1.0, -1.0, -1.0, -1.0],
+        top_fraction=0.2,
+    )
+    assert result["survit"] is False
+    assert result["removed_extreme_count"] == 2
+    assert result["order_preserved"] is True

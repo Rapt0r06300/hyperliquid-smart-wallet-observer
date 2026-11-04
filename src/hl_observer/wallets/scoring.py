@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 from hl_observer.hyperliquid.schemas import SignalDecision, WalletProfile, WalletScore, WalletStyle
 from hl_observer.utils.math import clamp
 
@@ -109,3 +111,30 @@ def score_wallet(profile: WalletProfile) -> WalletScore:
             "flags": len(flags),
         },
     )
+
+
+def net_fee_score_receipt(*, raw_score: float, fees: float, gross_pnl: float) -> dict[str, object]:
+    """Re-express a raw score using observed fee-adjusted PnL.
+
+    Raw score and PnL are kept as separate units.  ``net_score`` is a bounded
+    proportional score, so a positive gross result cannot hide fees that erase
+    it.  Invalid observations never become zeros.
+    """
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(float(value))
+           for value in (raw_score, fees, gross_pnl)):
+        return {"status": "UNMEASURABLE", "reason": "non_finite_numeric_observation"}
+    if raw_score < 0 or fees < 0 or gross_pnl <= 0:
+        return {"status": "MORE_DATA", "reason": "positive_gross_pnl_and_non_negative_fees_required"}
+    net_pnl = gross_pnl - fees
+    net_ratio = max(0.0, min(1.0, net_pnl / gross_pnl))
+    return {
+        "status": "PROVEN",
+        "raw_score": float(raw_score),
+        "gross_pnl": float(gross_pnl),
+        "fees": float(fees),
+        "net_pnl": round(net_pnl, 8),
+        "net_score": round(float(raw_score) * net_ratio, 8),
+        "net_positive": net_pnl > 0,
+        "decision": "RETAIN" if net_pnl > 0 else "REJECT_NET_NEGATIVE",
+        "prioritize_net": True,
+    }

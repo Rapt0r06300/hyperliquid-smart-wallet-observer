@@ -5,6 +5,7 @@ from hl_observer.ops.daily_economic_certification import (
     MIN_FORWARD_OBSERVATION_SECONDS,
     TARGET_NET_USD_PER_DAY,
     apply_daily_gate,
+    forward_coverage_gate,
 )
 
 FREEZE_MS = 1_800_000_000_000
@@ -49,6 +50,13 @@ def test_daily_gate_accepts_five_net_dollars_per_day_over_proven_window() -> Non
     assert result["forward_net_pnl_usd_per_day"] == 5.0
     assert result["daily_target_reached"] is True
     assert result["reasons"] == []
+
+
+def test_forward_coverage_gate_is_target_independent():
+    result = forward_coverage_gate(_payload(net=-10.0, seconds=30 * 86_400.0))
+    assert result["status"] == "PROVEN"
+    assert result["temporal_quality_proven"] is True
+    assert result["target_independent"] is True
 
 
 def test_daily_gate_refuses_short_window_even_if_annualized_rate_looks_large() -> None:

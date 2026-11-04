@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -131,3 +133,31 @@ def score_discovery_candidate(
         decision=decision,
         reasons=reasons,
     )
+
+
+def short_history_receipt(
+    *,
+    trades_count: int,
+    estimated_score: float,
+    min_trades: int = 30,
+) -> dict[str, object]:
+    """Prevent one lucky trade from receiving full-confidence discovery weight."""
+    if isinstance(trades_count, bool) or not isinstance(trades_count, int) or trades_count < 0:
+        return {"status": "UNMEASURABLE", "reason": "trades_count_must_be_non_negative_integer"}
+    if isinstance(min_trades, bool) or not isinstance(min_trades, int) or min_trades <= 0:
+        return {"status": "UNMEASURABLE", "reason": "min_trades_must_be_positive_integer"}
+    if isinstance(estimated_score, bool) or not isinstance(estimated_score, (int, float)) or not isfinite(float(estimated_score)):
+        return {"status": "UNMEASURABLE", "reason": "estimated_score_must_be_finite"}
+    confidence = min(1.0, trades_count / min_trades)
+    adjusted_score = float(estimated_score) * confidence
+    known = trades_count >= min_trades
+    return {
+        "status": "PROVEN" if known else "MORE_DATA",
+        "trades_count": trades_count,
+        "min_trades": min_trades,
+        "confidence": round(confidence, 8),
+        "estimated_score": float(estimated_score),
+        "adjusted_score": round(adjusted_score, 8),
+        "score_known": known,
+        "reason": "minimum_history_met" if known else "history_too_short",
+    }

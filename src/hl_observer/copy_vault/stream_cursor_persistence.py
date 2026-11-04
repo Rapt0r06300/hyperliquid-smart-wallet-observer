@@ -32,4 +32,21 @@ class CurseurStream:
         return {"avance": True, "dernier": self._dernier, "raison": "OK"}
 
 
-__all__ = ["CurseurStream"]
+def atomic_cursor_fill_receipt(*, fill_id: Any, cursor_before: Any, cursor_after: Any,
+                               fill_persisted: Any, cursor_persisted: Any) -> dict[str, Any]:
+    """Allow resume only when fill and cursor persistence form one complete commit."""
+
+    valid = (
+        isinstance(fill_id, str) and bool(fill_id.strip())
+        and type(cursor_before) is int and type(cursor_after) is int
+        and cursor_after >= cursor_before
+        and type(fill_persisted) is bool and type(cursor_persisted) is bool
+    )
+    if not valid:
+        return {"status": "UNMEASURABLE", "committed": False, "resume_allowed": False, "reason": "ATOMICITY_INPUT_INVALID", "paper_read_only": True}
+    committed = fill_persisted and cursor_persisted
+    return {"status": "PROVEN", "committed": committed, "resume_allowed": committed,
+            "reason": "COMMIT_COMPLETE" if committed else "COMMIT_INCOMPLETE", "paper_read_only": True}
+
+
+__all__ = ["CurseurStream", "atomic_cursor_fill_receipt"]

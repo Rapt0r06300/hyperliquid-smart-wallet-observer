@@ -18,7 +18,8 @@ def _fini(x: Any) -> bool:
 
 
 def taille_minimale_economique(edge_leader_bps: Any, *, cout_fixe: Any, spread_bps: Any,
-                               slippage_bps: Any, prix: Any = None) -> dict[str, Any]:
+                               slippage_bps: Any, prix: Any = None, min_notional: Any = None,
+                               tick_size: Any = None, visible_depth: Any = None) -> dict[str, Any]:
     """Marge variable par dollar de notional = (edge_leader_bps - spread_bps - slippage_bps)/10000. Il faut
     qu'elle soit > 0, sinon aucune taille ne couvre les coûts variables. notional_min = cout_fixe / marge.
     Si prix fourni (>0), qty_min = notional_min / prix. cout_fixe < 0 ou entrées non finies → UNMEASURABLE."""
@@ -30,11 +31,30 @@ def taille_minimale_economique(edge_leader_bps: Any, *, cout_fixe: Any, spread_b
                 "raison": "EDGE_NE_COUVRE_PAS_COUTS_VARIABLES"}
     marge_fraction = marge_bps / 10_000.0
     notional_min = float(cout_fixe) / marge_fraction
+    for name, value in (("min_notional", min_notional), ("tick_size", tick_size), ("visible_depth", visible_depth)):
+        if value is not None and (not _fini(value) or value < 0 or (name == "tick_size" and value == 0)):
+            return {"notional_min": UNMEASURABLE, "raison": f"{name.upper()}_INVALIDE"}
+    if min_notional is not None:
+        notional_min = max(notional_min, float(min_notional))
+    if tick_size is not None:
+        notional_min = math.ceil(notional_min / float(tick_size)) * float(tick_size)
+    if visible_depth is not None and float(visible_depth) < notional_min:
+        return {"notional_min": AUCUNE_TAILLE_RENTABLE, "marge_variable_bps": round(marge_bps, 6),
+                "raison": "PROFONDEUR_VISIBLE_INSUFFISANTE", "decision": "NO_TRADE"}
     res: dict[str, Any] = {"notional_min": round(notional_min, 6),
                            "marge_variable_bps": round(marge_bps, 6)}
+    if any(value is not None for value in (min_notional, tick_size, visible_depth)):
+        res["decision"] = "PAPER_CANDIDATE"
     if _fini(prix) and prix > 0:
         res["qty_min"] = round(notional_min / float(prix), 8)
     return res
+
+
+def minimum_economic_size_receipt(*, edge_bps: Any, fixed_cost: Any, spread_bps: Any, slippage_bps: Any) -> dict[str, Any]:
+    """Expose a paper-only minimum size result without converting no-edge to zero."""
+
+    result = taille_minimale_economique(edge_bps, cout_fixe=fixed_cost, spread_bps=spread_bps, slippage_bps=slippage_bps)
+    return {"status": "PROVEN" if result.get("notional_min") not in {UNMEASURABLE, AUCUNE_TAILLE_RENTABLE} else "UNMEASURABLE", **result}
 
 
 __all__ = ["taille_minimale_economique", "UNMEASURABLE", "AUCUNE_TAILLE_RENTABLE"]

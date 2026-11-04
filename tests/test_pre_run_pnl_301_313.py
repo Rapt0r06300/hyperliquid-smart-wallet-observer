@@ -11,7 +11,10 @@ from hl_observer.ops.canonical_775_guard import (
     ROADMAP_TOTAL,
     validate_manifest,
 )
-from hl_observer.simulation.economic_family_gate import evaluate_all_families
+from hl_observer.simulation.economic_family_gate import (
+    evaluate_all_families,
+    separate_technical_and_economic_certification,
+)
 from hl_observer.simulation.economic_objective import TARGET_NET_USD
 
 
@@ -72,6 +75,16 @@ def test_301_couts_copy_vault_incomplets_interdisent_la_promotion():
     assert result["objective_status"] == "NON_ATTEINT"
     assert result["all_families_independently_reached"] is False
     assert "FAMILY_TARGET_NOT_REACHED:copy_vault" in result["objective_reasons"]
+
+
+def test_technical_ci_does_not_become_economic_proof():
+    result = separate_technical_and_economic_certification(
+        {"technical_certified": True},
+        {"economic_certified": False},
+    )
+    assert result["technical_only_never_economic"] is True
+    assert result["proven"] is False
+    assert result["status"] == "NO_GO"
 
 
 def test_cible_cinq_dollars_s_applique_a_copy_vault_uniquement():

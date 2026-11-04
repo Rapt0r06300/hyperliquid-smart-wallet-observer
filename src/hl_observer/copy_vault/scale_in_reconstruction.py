@@ -38,4 +38,13 @@ def reconstruire(fills: list[dict[str, Any]]) -> dict[str, Any]:
             "sens": legs[0].get("sens")}
 
 
-__all__ = ["reconstruire", "UNMEASURABLE"]
+def scale_in_receipt(fills: list[dict[str, Any]]) -> dict[str, Any]:
+    """Expose a measured scale-in reconstruction without inventing a missing leg."""
+
+    result = reconstruire(fills)
+    proven = result.get("legs", 0) > 0 and result.get("qte_cumulee") != UNMEASURABLE
+    return {"status": "PROVEN" if proven else "UNMEASURABLE", "scale_in": proven,
+            "detail": result, "paper_read_only": True}
+
+
+__all__ = ["reconstruire", "scale_in_receipt", "UNMEASURABLE"]

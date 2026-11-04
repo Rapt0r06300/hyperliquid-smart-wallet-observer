@@ -1,5 +1,11 @@
 from hl_observer.research.experiment_design import (
-    plan_factoriel, suite_basse_discrepance, successive_halving, classer_par_information_gain)
+    classer_par_information_gain,
+    decaler_signaux_controle_negatif,
+    plan_factoriel,
+    shift_signal_times_as_negative_control,
+    suite_basse_discrepance,
+    successive_halving,
+)
 
 
 def test_plan_factoriel_produit_cartesien():
@@ -24,3 +30,27 @@ def test_information_gain_ordonne_par_incertitude():
                                       {"id": "b", "incertitude": 0.9},
                                       {"id": "c", "incertitude": 0.5}])
     assert [d["id"] for d in r] == ["b", "c", "a"] and r[0]["rang"] == 1
+
+
+def test_signal_decale_dans_le_futur_est_rejete_et_jamais_proven():
+    rows = [
+        {"episode_id": "e1", "signal_ts_ms": 100, "outcome_ts_ms": 200, "net_usd": 3.0},
+        {"episode_id": "e2", "signal_ts_ms": 110, "outcome_ts_ms": 210, "net_usd": -1.0},
+    ]
+    result = shift_signal_times_as_negative_control(rows, shift_ms=150)
+    assert result["status"] == "REJECTED"
+    assert result["reason"] == "signal_futur_non_causal"
+    assert result["proven"] is False
+    assert result["n_future_shifted"] == 2
+    assert result["shifted_rows"][0]["signal_ts_ms"] == 250
+    assert rows[0]["signal_ts_ms"] == 100
+    assert decaler_signaux_controle_negatif(rows, shift_ms=150) == result
+
+
+def test_decalage_ne_fabrique_pas_un_controle_si_aucun_signal_ne_devient_futur():
+    result = shift_signal_times_as_negative_control(
+        [{"episode_id": "e1", "signal_ts_ms": 100, "outcome_ts_ms": 1000}],
+        shift_ms=10,
+    )
+    assert result["status"] == "UNMEASURABLE"
+    assert result["proven"] is False

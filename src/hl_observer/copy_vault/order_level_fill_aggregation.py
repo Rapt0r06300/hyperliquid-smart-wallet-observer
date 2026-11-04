@@ -35,4 +35,22 @@ class AgregateurOrdres:
         return len(self._ordres)
 
 
-__all__ = ["AgregateurOrdres"]
+def deduplicate_partial_fills(fills: list[dict[str, Any]]) -> dict[str, Any]:
+    """Drop strict duplicates while preserving partials with distinct native tids."""
+
+    if not isinstance(fills, list) or any(not isinstance(fill, dict) for fill in fills):
+        return {"status": "UNMEASURABLE", "fills": [], "reason": "FILL_LIST_INVALID", "paper_read_only": True}
+    seen: set[tuple[Any, ...]] = set()
+    retained: list[dict[str, Any]] = []
+    for index, fill in enumerate(fills):
+        native = (fill.get("oid"), fill.get("tid"), fill.get("hash"))
+        key = native if any(value not in (None, "") for value in native) else ("UNIDENTIFIABLE", index)
+        if key in seen:
+            continue
+        seen.add(key)
+        retained.append(dict(fill))
+    return {"status": "PROVEN", "fills": retained, "retained_count": len(retained),
+            "removed_duplicates": len(fills) - len(retained), "paper_read_only": True}
+
+
+__all__ = ["AgregateurOrdres", "deduplicate_partial_fills"]

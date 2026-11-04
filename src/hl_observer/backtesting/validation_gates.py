@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Mapping
 from typing import Any
 
 from hl_observer.backtest.walk_forward import split_walk_forward
@@ -199,6 +200,69 @@ def lookahead_gate(events, *, min_gap_ms: int = 0) -> dict:
         }
 
 
+def dataset_cutoff_gate(
+    rows: Any,
+    *,
+    cutoff_ms: object,
+    publication_timestamp_key: str = "published_at_ms",
+) -> dict:
+    """Reject evaluation data whose publication timestamp crosses the cutoff."""
+    try:
+        cutoff = int(cutoff_ms)
+    except (TypeError, ValueError, OverflowError):
+        cutoff = 0
+    if cutoff <= 0 or isinstance(cutoff_ms, bool):
+        return {
+            "gate": "dataset_cutoff",
+            "passed": False,
+            "skipped": False,
+            "reason": "invalid_evaluation_cutoff",
+            "post_cutoff_count": None,
+        }
+    observations = list(rows or [])
+    if not observations:
+        return {
+            "gate": "dataset_cutoff",
+            "passed": False,
+            "skipped": False,
+            "reason": "dataset_rows_missing",
+            "post_cutoff_count": None,
+        }
+    post_cutoff = 0
+    invalid = 0
+    for row in observations:
+        if not isinstance(row, Mapping):
+            invalid += 1
+            continue
+        raw = row.get(publication_timestamp_key)
+        if isinstance(raw, bool):
+            invalid += 1
+            continue
+        try:
+            timestamp = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            invalid += 1
+            continue
+        if timestamp <= 0:
+            invalid += 1
+        elif timestamp > cutoff:
+            post_cutoff += 1
+    passed = invalid == 0 and post_cutoff == 0
+    return {
+        "gate": "dataset_cutoff",
+        "passed": passed,
+        "skipped": False,
+        "reason": None if passed else (
+            "INVALID_DATASET_TIMESTAMP" if invalid else "DATASET_EVENT_AFTER_CUTOFF"
+        ),
+        "n_rows": len(observations),
+        "invalid_timestamp_count": invalid,
+        "post_cutoff_count": post_cutoff,
+        "cutoff_ms": cutoff,
+        "publication_timestamp_key": publication_timestamp_key,
+    }
+
+
 def monte_carlo_drawdown_gate(pnls, *, runs: int = 1000, seed: int = 7, max_p95_dd_over_net: float = 2.0) -> dict:
     if (isinstance(runs, bool) or int(runs) < 1
             or isinstance(max_p95_dd_over_net, bool)
@@ -227,7 +291,8 @@ def monte_carlo_drawdown_gate(pnls, *, runs: int = 1000, seed: int = 7, max_p95_
 
 def run_validation_gates(
     trades, *, events=None, min_trades: int = 30, min_pf: float = 1.1,
-    min_oos_pf: float = 1.0, seed: int = 7,
+    min_oos_pf: float = 1.0, seed: int = 7, dataset_rows=None,
+    evaluation_cutoff_ms: object = None,
 ) -> dict:
     """Rapport unifié : lance tous les gates, verdict global. DEPLOY_CANDIDATE seulement
     si tous les gates critiques (non skippés) passent. Verdict de recherche, paper-only."""
@@ -242,6 +307,22 @@ def run_validation_gates(
         lookahead_gate(events),
         monte_carlo_drawdown_gate(pnls, seed=seed),
     ]
+    if dataset_rows is not None or evaluation_cutoff_ms is not None:
+        gates.append(
+            dataset_cutoff_gate(
+                dataset_rows,
+                cutoff_ms=evaluation_cutoff_ms,
+            )
+        )
+    else:
+        gates.append(
+            {
+                "gate": "dataset_cutoff",
+                "passed": True,
+                "skipped": True,
+                "reason": "dataset_cutoff_not_supplied",
+            }
+        )
     critical = [g for g in gates if not g.get("skipped")]
     passed_all = bool(critical) and all(g["passed"] for g in critical)
     return {
@@ -258,4 +339,5 @@ __all__ = [
     "run_validation_gates", "profit_factor", "max_drawdown", "sample_size_gate",
     "profit_factor_gate", "out_of_sample_gate", "regime_robustness_gate",
     "lookahead_gate", "monte_carlo_drawdown_gate", "economic_integrity_gate",
+    "dataset_cutoff_gate",
 ]

@@ -40,4 +40,13 @@ def evaluer(fill_action: Any, position_avant: Any, position_apres: Any, *,
             "penalite_qualite": penalite if contradiction else 0.0, "raison": raison}
 
 
-__all__ = ["evaluer"]
+def contradiction_receipt(*, fill_action: Any, position_before: Any, position_after: Any,
+                          penalty: float = 0.25) -> dict[str, Any]:
+    """Expose contradiction as a non-certifying gate, never as a repaired state."""
+    result = evaluer(fill_action, position_before, position_after, penalite=penalty)
+    if result["raison"] in {"POSITION_INVALIDE", "ACTION_INCONNUE"}:
+        return {"status": "UNMEASURABLE", **result, "certification_allowed": False}
+    return {"status": "PROVEN", **result, "certification_allowed": not result["contradiction"]}
+
+
+__all__ = ["evaluer", "contradiction_receipt"]

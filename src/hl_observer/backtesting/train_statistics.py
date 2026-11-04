@@ -509,6 +509,125 @@ def summarize_train_rows(
     }
 
 
+def summarize_independent_train_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    episode_id_key: str = "episode_id",
+    value_key: str = "net",
+    timestamp_key: str = "ts",
+    trial_count: int,
+    family_alpha: float = 0.05,
+    fragment_id_key: str | None = "fragment_id",
+) -> dict[str, Any]:
+    """Summarise one observation per independent episode, not per fragment.
+
+    Fragments sharing an episode ID are summed exactly before the common TRAIN
+    statistics are applied. The earliest valid timestamp anchors the episode.
+    Missing or invalid identity/value/time data fails closed instead of
+    silently dropping a fragment or replacing it with zero.
+    """
+    grouped: dict[str, dict[str, Any]] = {}
+    seen_fragments: set[str] = set()
+    fragment_count = 0
+
+    def failure(reason: str) -> dict[str, Any]:
+        summary = summarize_train_rows(
+            [],
+            value_key=value_key,
+            timestamp_key=timestamp_key,
+            trial_count=trial_count,
+            family_alpha=family_alpha,
+        )
+        summary.update(
+            status="UNMEASURABLE",
+            reason=reason,
+            independence_unit=episode_id_key,
+            independent_episode_count=len(grouped),
+            fragment_count=fragment_count,
+            collapsed_fragment_count=max(0, fragment_count - len(grouped)),
+        )
+        return summary
+
+    for row in rows:
+        if not isinstance(row, Mapping):
+            return failure("INVALID_INDEPENDENT_EPISODE_ROW")
+        raw_episode = row.get(episode_id_key)
+        episode_id = str(raw_episode or "").strip()
+        if not episode_id or isinstance(raw_episode, bool):
+            return failure("MISSING_EPISODE_ID")
+        exact_value = row.get(f"{value_key}_exact_decimal")
+        value = decimal_value(
+            exact_value if exact_value is not None else row.get(value_key)
+        )
+        timestamp = decimal_value(row.get(timestamp_key))
+        if (
+            value is None
+            or isinstance(row.get(value_key), bool)
+            or timestamp is None
+            or isinstance(row.get(timestamp_key), bool)
+            or timestamp <= 0
+            or timestamp != timestamp.to_integral_value()
+        ):
+            return failure("INVALID_INDEPENDENT_EPISODE_ROW")
+        if fragment_id_key:
+            raw_fragment = row.get(fragment_id_key)
+            fragment_id = str(raw_fragment or "").strip()
+            if not fragment_id or isinstance(raw_fragment, bool) or fragment_id in seen_fragments:
+                return failure("DUPLICATE_OR_MISSING_FRAGMENT_ID")
+            seen_fragments.add(fragment_id)
+        fragment_count += 1
+        timestamp_int = int(timestamp)
+        if episode_id not in grouped:
+            grouped[episode_id] = {
+                "value": value,
+                "timestamp": timestamp_int,
+                "fragments": 1,
+            }
+            continue
+        total = decimal_sum((grouped[episode_id]["value"], value))
+        if total is None:
+            return failure("INDEPENDENT_EPISODE_SUM_FAILED")
+        grouped[episode_id]["value"] = total
+        grouped[episode_id]["timestamp"] = min(
+            grouped[episode_id]["timestamp"], timestamp_int
+        )
+        grouped[episode_id]["fragments"] += 1
+
+    if not grouped:
+        return failure("NO_INDEPENDENT_EPISODES")
+    canonical_rows = [
+        {
+            "episode_id": episode_id,
+            value_key: float_not_above(data["value"]),
+            f"{value_key}_exact_decimal": format(data["value"], "f"),
+            timestamp_key: data["timestamp"],
+        }
+        for episode_id, data in sorted(grouped.items())
+    ]
+    if any(row[value_key] is None for row in canonical_rows):
+        return failure("NUMERIC_UNREPRESENTABLE")
+    summary = summarize_train_rows(
+        canonical_rows,
+        value_key=value_key,
+        timestamp_key=timestamp_key,
+        trial_count=trial_count,
+        family_alpha=family_alpha,
+    )
+    summary.update(
+        status="MEASURED",
+        reason=None,
+        independence_unit=episode_id_key,
+        independent_episode_count=len(grouped),
+        fragment_count=fragment_count,
+        collapsed_fragment_count=fragment_count - len(grouped),
+        fragment_counts={
+            episode_id: data["fragments"]
+            for episode_id, data in sorted(grouped.items())
+        },
+    )
+    return summary
+
+
 def summarize_daily_values(
     daily_values: Iterable[object],
     *,
@@ -740,6 +859,7 @@ __all__ = [
     "select_unambiguous_lcb_candidate",
     "stable_hash",
     "summarize_train_rows",
+    "summarize_independent_train_rows",
     "summarize_daily_values",
     "summarize_complete_utc_days",
     "top_positive_share",

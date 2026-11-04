@@ -27,4 +27,20 @@ class FilePrioriteFermeture:
         return [it for _, _, it in sorted(self._items, key=lambda x: (x[0], x[1]))]
 
 
-__all__ = ["FilePrioriteFermeture"]
+def close_priority_receipt(intents: list[dict[str, Any]]) -> dict[str, Any]:
+    """Prove stable close/reduce precedence over open/add in the paper queue."""
+    if not isinstance(intents, list) or any(not isinstance(item, dict) for item in intents):
+        return {"status": "UNMEASURABLE", "reason": "INTENTS_INVALID"}
+    actions = [str(item.get("action", "")).upper() for item in intents]
+    if any(action not in _PRIORITE for action in actions):
+        return {"status": "UNMEASURABLE", "reason": "ACTION_INVALID"}
+    queue = FilePrioriteFermeture()
+    for item in intents:
+        queue.ajouter(item)
+    ordered = queue.ordonner()
+    priorities = [_PRIORITE[str(item["action"]).upper()] for item in ordered]
+    stable = priorities == sorted(priorities)
+    return {"status": "PROVEN" if stable else "REJECTED", "order": ordered, "priority_preserved": stable}
+
+
+__all__ = ["FilePrioriteFermeture", "close_priority_receipt"]

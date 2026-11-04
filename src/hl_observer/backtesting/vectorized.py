@@ -71,3 +71,29 @@ def fast_rolling_vol(prices, *, window: int = 20, use_numpy: bool = True):
         else:
             out.append(0.0)
     return out
+
+
+def vectorized_parity_receipt(
+    entries, exits, sides, *, notional: float = 500.0, cost_bps: float = 6.0,
+) -> dict[str, object]:
+    """Check the optimized path against the CPU reference without promotion."""
+    try:
+        reference = fast_pnl(entries, exits, sides, notional=notional, cost_bps=cost_bps, use_numpy=False)
+        optimized = fast_pnl(entries, exits, sides, notional=notional, cost_bps=cost_bps, use_numpy=True)
+    except (TypeError, ValueError, OverflowError, ZeroDivisionError) as exc:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": f"VECTOR_INPUT_INVALID:{type(exc).__name__}",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    parity = reference == optimized
+    return {
+        "status": "PROVEN" if parity else "REJECTED",
+        "reason": "VECTOR_CPU_PARITY" if parity else "VECTOR_CPU_MISMATCH",
+        "compared": len(reference),
+        "trade_hash_reference": __import__("hashlib").sha256(repr(reference).encode()).hexdigest(),
+        "trade_hash_optimized": __import__("hashlib").sha256(repr(optimized).encode()).hexdigest(),
+        "paper_read_only": True,
+        "real_execution": False,
+    }

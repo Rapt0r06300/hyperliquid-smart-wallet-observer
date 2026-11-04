@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from .execution_delay_model import apply_execution_delay
 
@@ -35,4 +35,39 @@ def replay_events_with_delay(events: Iterable[dict[str, object]], *, delay_secon
     ))
 
 
-__all__ = ["replay_events_with_delay"]
+def replay_determinism_receipt(
+    events: Iterable[dict[str, object]], *, delay_seconds: float,
+) -> dict[str, Any]:
+    """Prove deterministic replay without claiming cross-platform execution.
+
+    The contract compares the canonical replay of the supplied SAFE rows with
+    the canonical replay of the same rows in reverse input order.  It never
+    fills missing rows or turns an invalid tape into a passing result.
+    """
+    rows = [dict(row) for row in events]
+    try:
+        forward = replay_events_with_delay(rows, delay_seconds=delay_seconds)
+        reversed_input = replay_events_with_delay(
+            reversed(rows), delay_seconds=delay_seconds,
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": f"REPLAY_INPUT_INVALID:{type(exc).__name__}",
+            "compared": 0,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    stable = forward == reversed_input
+    return {
+        "status": "PROVEN" if stable else "REJECTED",
+        "reason": "CANONICAL_REPLAY_ORDER_STABLE" if stable else "REPLAY_ORDER_MISMATCH",
+        "compared": len(forward),
+        "event_ids": tuple(str(row["event_id"]) for row in forward),
+        "delay_seconds": float(delay_seconds),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["replay_events_with_delay", "replay_determinism_receipt"]

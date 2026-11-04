@@ -12,6 +12,7 @@ doute). Cette porte PRODUIT le `survit` que consomme F30 (promotion paper->testn
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Mapping, Sequence
 
 SURVIT = "SURVIT"
@@ -63,5 +64,41 @@ def survit_couts_stresses(pnls_par_multiplicateur: Sequence[float] | None, *, mi
     return min(float(v) for v in pnls_par_multiplicateur) > float(min_pnl)
 
 
+def survit_sans_trades_extremes(
+    pnls: Sequence[float] | None,
+    *,
+    top_fraction: float = 0.1,
+    min_remaining: int = 5,
+    min_pnl: float = 0.0,
+) -> dict[str, object]:
+    """Remove the largest positive observations without changing their order."""
+    values: list[float] = []
+    for value in pnls or ():
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "UNMEASURABLE", "survit": False, "reason": "INVALID_PNL"}
+        if not math.isfinite(numeric):
+            return {"status": "UNMEASURABLE", "survit": False, "reason": "NON_FINITE_PNL"}
+        values.append(numeric)
+    if not 0.0 < float(top_fraction) < 1.0 or len(values) < int(min_remaining):
+        return {"status": "UNMEASURABLE", "survit": False, "reason": "INSUFFICIENT_DATA"}
+    remove_count = max(1, int(math.ceil(len(values) * float(top_fraction))))
+    selected = set(sorted(range(len(values)), key=lambda index: values[index], reverse=True)[:remove_count])
+    remaining = [value for index, value in enumerate(values) if index not in selected]
+    net = sum(remaining)
+    return {
+        "status": "MEASURED",
+        "survit": len(remaining) >= int(min_remaining) and net > float(min_pnl),
+        "original_count": len(values),
+        "removed_extreme_count": remove_count,
+        "remaining_count": len(remaining),
+        "remaining_net": net,
+        "order_preserved": True,
+        "real_execution": False,
+    }
+
+
 __all__ = ["SURVIT", "NE_SURVIT_PAS", "VerdictSurvie", "porte_de_survie",
-           "survit_oos", "survit_regime", "survit_liquidite_reduite", "survit_couts_stresses"]
+           "survit_oos", "survit_regime", "survit_liquidite_reduite",
+           "survit_couts_stresses", "survit_sans_trades_extremes"]

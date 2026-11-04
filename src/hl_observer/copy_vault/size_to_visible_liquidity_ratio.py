@@ -25,4 +25,14 @@ def ratio(taille: Any, liquidite_visible: Any, *, seuil_impact: float = 0.1) -> 
     return {"ratio": round(r, 6), "impact_notable": r >= seuil_impact}
 
 
+def visible_liquidity_cap_receipt(*, requested_size: Any, visible_liquidity: Any, max_ratio: Any = 0.1) -> dict[str, Any]:
+    """Cap a paper request by the depth observed at the decision timestamp."""
+
+    base = ratio(requested_size, visible_liquidity, seuil_impact=float(max_ratio))
+    if base.get("ratio") == UNMEASURABLE or not _fini(max_ratio) or float(max_ratio) <= 0.0:
+        return {"status": "UNMEASURABLE", "reason": "LIQUIDITY_INPUT_INVALID"}
+    cap = float(visible_liquidity) * float(max_ratio)
+    return {"status": "PROVEN", "requested": float(requested_size), "cap": round(cap, 12), "accepted": float(requested_size) <= cap, "ratio": base["ratio"]}
+
+
 __all__ = ["ratio", "UNMEASURABLE"]

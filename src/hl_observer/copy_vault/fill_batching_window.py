@@ -37,4 +37,20 @@ class FenetreBatch:
         return agg
 
 
-__all__ = ["FenetreBatch"]
+def stable_causal_order(fills: list[dict[str, Any]]) -> dict[str, Any]:
+    """Order a burst deterministically, including distinct native identities at equal timestamps."""
+
+    if not isinstance(fills, list) or any(not isinstance(fill, dict) for fill in fills):
+        return {"status": "UNMEASURABLE", "fills": [], "reason": "FILL_LIST_INVALID", "paper_read_only": True}
+    ordered: list[dict[str, Any]] = []
+    for fill in fills:
+        timestamp = fill.get("ts_ms", fill.get("time"))
+        native = next((fill.get(name) for name in ("tid", "hash", "oid") if fill.get(name) not in (None, "")), None)
+        if type(timestamp) is not int or timestamp <= 0 or native is None:
+            return {"status": "UNMEASURABLE", "fills": [], "reason": "CAUSAL_ORDER_KEY_MISSING", "paper_read_only": True}
+        ordered.append(dict(fill))
+    ordered.sort(key=lambda fill: (int(fill.get("ts_ms", fill.get("time"))), str(fill.get("tid") or fill.get("hash") or fill.get("oid")), str(fill.get("coin") or "")))
+    return {"status": "PROVEN", "fills": ordered, "deterministic": True, "paper_read_only": True}
+
+
+__all__ = ["FenetreBatch", "stable_causal_order"]

@@ -427,3 +427,17 @@ def build_status(
         "local_asset_cache_dir": str(root / "data" / "hypersmart_datasets" / "assets"),
         "local_materialized_dir": str(root / "data" / "hypersmart_datasets" / "materialized"),
     }
+
+
+def release_publication_receipt(
+    release: Mapping[str, object],
+    required_assets: Sequence[str],
+) -> dict[str, object]:
+    """Validate publication metadata without treating an incomplete release as SAFE."""
+    assets = release_assets(release)
+    required = tuple(dict.fromkeys(str(name) for name in required_assets if str(name).strip()))
+    missing = [name for name in required if name not in assets]
+    invalid = [asset.name for asset in assets.values() if asset.asset_id <= 0 or asset.size < 0 or not asset.sha256]
+    if missing or invalid or not str(release.get("tag_name") or "").strip() or release.get("draft") is True:
+        return {"status": "REJECTED", "missing_assets": missing, "invalid_assets": invalid, "safe_published": False}
+    return {"status": "PROVEN", "asset_count": len(assets), "required_assets": list(required), "safe_published": True, "repository": DEFAULT_REPOSITORY, "tag_name": str(release.get("tag_name"))}

@@ -13,6 +13,7 @@ from hl_observer.research.experiment_protocol import (
     ExperimentSpec,
     SpecValidationError,
     load_cached_summary,
+    validate_candidate_lifecycle,
     write_goal_state_atomic,
     write_summary_atomic,
 )
@@ -48,6 +49,13 @@ def test_spec_validates_and_signature_is_deterministic() -> None:
     second = ExperimentSpec.from_mapping(deepcopy(spec_payload()))
     assert first.signature() == second.signature()
     assert len(first.signature()) == 64
+
+
+def test_candidate_champion_requires_oos_paths():
+    assert validate_candidate_lifecycle("HYPOTHESIS")["status"] == "BLOCKED"
+    assert validate_candidate_lifecycle("VERIFIED_CHAMPION")["status"] == "REJECTED"
+    result = validate_candidate_lifecycle("VERIFIED_CHAMPION", oos_paths=["oos/receipt.json"])
+    assert result["status"] == "PROVEN" and result["promotable"] is True
 
 
 @pytest.mark.parametrize(

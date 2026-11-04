@@ -33,4 +33,16 @@ def direction_reduction(position_courante: Any, quantite: Any) -> dict[str, Any]
     return {"direction": base["direction"], "quantite": round(q, 12), "cote": base["cote"]}
 
 
-__all__ = ["direction_fermeture", "direction_reduction", "ACHAT", "VENTE"]
+def authoritative_close_receipt(position_courante: Any, quantite: Any) -> dict[str, Any]:
+    """Prove that reduction direction is derived from current position, paper-only."""
+    if not isinstance(position_courante, (int, float)) or isinstance(position_courante, bool):
+        return {"status": "UNMEASURABLE", "reason": "POSITION_INVALID"}
+    if not isinstance(quantite, (int, float)) or isinstance(quantite, bool):
+        return {"status": "UNMEASURABLE", "reason": "QUANTITY_INVALID"}
+    result = direction_reduction(position_courante, quantite)
+    if result.get("direction") is None:
+        return {"status": "UNMEASURABLE", "reason": result.get("raison", "NO_CLOSE_DIRECTION")}
+    return {"status": "PROVEN", **result, "real_execution": False}
+
+
+__all__ = ["direction_fermeture", "direction_reduction", "authoritative_close_receipt", "ACHAT", "VENTE"]

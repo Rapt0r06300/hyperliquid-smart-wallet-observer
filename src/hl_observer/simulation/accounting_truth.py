@@ -30,6 +30,8 @@ def first_not_none(*values: T | None) -> T | None:
 def finite_number(value: object) -> float | None:
     """Parse a finite number; unknown and non-finite values stay unknown."""
 
+    if isinstance(value, bool):
+        return None
     try:
         parsed = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):
@@ -102,6 +104,23 @@ def round_trip_net_pnl_usdc(
         return None
     net = gross - entry - exit_cost - funding
     return net if math.isfinite(net) else None
+
+
+def fee_token_to_pnl_currency_receipt(
+    *, fee_amount: object, fee_token: object, pnl_currency: object, token_to_pnl_rate: object | None
+) -> dict[str, object]:
+    """Convert a fee token explicitly; never add unlike tokens as if they were USD."""
+    amount = finite_number(fee_amount)
+    if amount is None or amount < 0 or not isinstance(fee_token, str) or not fee_token.strip() or not isinstance(pnl_currency, str) or not pnl_currency.strip():
+        return {"status": "UNMEASURABLE", "reason": "FEE_CURRENCY_INPUT_INVALID"}
+    if fee_token.strip().upper() == pnl_currency.strip().upper():
+        if token_to_pnl_rate is not None and (finite_number(token_to_pnl_rate) is None or float(token_to_pnl_rate) != 1.0):
+            return {"status": "UNMEASURABLE", "reason": "IDENTITY_RATE_INVALID"}
+        return {"status": "PROVEN", "fee_pnl_currency": amount, "conversion_rate": 1.0, "fee_token": fee_token.strip(), "pnl_currency": pnl_currency.strip()}
+    rate = finite_number(token_to_pnl_rate)
+    if rate is None or rate < 0:
+        return {"status": "UNMEASURABLE", "reason": "CONVERSION_RATE_MISSING"}
+    return {"status": "PROVEN", "fee_pnl_currency": round(amount * rate, 10), "conversion_rate": rate, "fee_token": fee_token.strip(), "pnl_currency": pnl_currency.strip()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,5 +197,6 @@ __all__ = [
     "named_roi_metrics",
     "read_session_starting_equity",
     "round_trip_net_pnl_usdc",
+    "fee_token_to_pnl_currency_receipt",
     "separate_entry_cost_usdc",
 ]

@@ -5,7 +5,8 @@ fill exploitable → profil UNMEASURABLE. Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
-from typing import Any
+import math
+from typing import Any, Mapping
 
 from hl_observer.copy_vault.source_maker_taker_classifier import classer, MAKER, TAKER
 
@@ -39,4 +40,23 @@ def profiler(fills: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-__all__ = ["profiler", "UNMEASURABLE"]
+def execution_style_change_receipt(
+    previous: Mapping[str, Any], current: Mapping[str, Any], *, threshold: float = 0.20
+) -> dict[str, Any]:
+    """Require revalidation when observed maker/taker or partial-fill style changes."""
+    if not isinstance(previous, Mapping) or not isinstance(current, Mapping):
+        return {"status": "UNMEASURABLE", "reason": "profiles_must_be_mappings"}
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not math.isfinite(float(threshold)) or threshold < 0:
+        return {"status": "UNMEASURABLE", "reason": "threshold_must_be_non_negative_finite"}
+    keys = ("taux_maker", "taux_taker", "part_partial")
+    if any(not isinstance(previous.get(key), (int, float)) or isinstance(previous.get(key), bool)
+           or not isinstance(current.get(key), (int, float)) or isinstance(current.get(key), bool)
+           or not math.isfinite(float(previous[key])) or not math.isfinite(float(current[key])) for key in keys):
+        return {"status": "MORE_DATA", "reason": "style_field_missing"}
+    changes = {key: round(float(current[key]) - float(previous[key]), 8) for key in keys}
+    changed = any(abs(value) > threshold for value in changes.values())
+    return {"status": "PROVEN", "style_changed": changed, "revalidate_score": changed,
+            "changes": changes}
+
+
+__all__ = ["profiler", "execution_style_change_receipt", "UNMEASURABLE"]

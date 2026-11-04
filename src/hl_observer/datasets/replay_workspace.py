@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from hl_observer.datasets.dataset_untrusted_guard import assert_workspace_safe
@@ -12,6 +13,24 @@ REQUIRED_TOOL_FILES = (
     "pipeline_copie_reel.py",
     "backtest_dislocation_2jambes.py",
 )
+
+
+def deduplicate_release_sessions(sessions: Iterable[Mapping[str, object]]) -> dict[str, object]:
+    """Keep the first verified session for each release/tag identity."""
+    rows = list(sessions)
+    kept: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "SESSION_INVALID"}
+        key = (str(raw.get("release_id") or ""), str(raw.get("tag_name") or ""))
+        if not key[0] or not key[1]:
+            return {"status": "UNMEASURABLE", "reason": "SESSION_IDENTITY_MISSING"}
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(dict(raw))
+    return {"status": "PROVEN", "input_count": len(rows), "unique_count": len(kept), "sessions": kept}
 
 
 def default_materialized_root(project_root: Path) -> Path:

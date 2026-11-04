@@ -531,10 +531,34 @@ def compare_long_short_net_edge(
     }
 
 
+def long_short_edge_receipt(
+    train_rows: Iterable[Mapping[str, Any]],
+    oos_rows: Iterable[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    min_oos_trades_per_side: int = 3,
+) -> dict[str, Any]:
+    """Expose the fully costed long/short OOS split without promotion."""
+    result = compare_long_short_net_edge(
+        train_rows,
+        oos_rows,
+        cutoff_ms=cutoff_ms,
+        min_oos_trades_per_side=min_oos_trades_per_side,
+    )
+    return {
+        **result,
+        "verdict": "PROVEN" if result.get("status") == "COMPARABLE" else "UNMEASURABLE",
+        "both_directions_costed": result.get("funding_signed_and_measured") is True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "ONE_BIG_WIN_SHARE",
     "ONE_BIG_WIN_SHARE_DECIMAL",
     "VAULT_CONFLICT_WINDOW_MS",
     "compare_long_short_net_edge",
+    "long_short_edge_receipt",
     "derive_heldout_vault_generalization",
 ]

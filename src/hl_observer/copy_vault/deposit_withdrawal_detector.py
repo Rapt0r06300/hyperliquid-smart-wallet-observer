@@ -24,4 +24,14 @@ def detecter(*, equity_avant: Any, equity_apres: Any, pnl_trading: Any, toleranc
     return {"detecte": False, "raison": "VARIATION_EXPLIQUEE_PAR_TRADING"}
 
 
-__all__ = ["detecter"]
+def transfer_exclusion_receipt(*, equity_avant: Any, equity_apres: Any, pnl_trading: Any) -> dict[str, Any]:
+    """Ensure an unexplained equity move cannot become PnL or a fill."""
+
+    result = detecter(equity_avant=equity_avant, equity_apres=equity_apres, pnl_trading=pnl_trading)
+    detected = bool(result.get("detecte"))
+    return {"status": "PROVEN", "counts_as_pnl": not detected, "creates_fill": False,
+            "reason": "TRANSFER_EXCLUDED" if detected else "TRADING_EXPLAINS_DELTA",
+            "detail": result, "paper_read_only": True}
+
+
+__all__ = ["detecter", "transfer_exclusion_receipt"]

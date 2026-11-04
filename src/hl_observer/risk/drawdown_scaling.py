@@ -22,4 +22,17 @@ def facteur_capital(drawdown_frac: float, *, dd_debut: float = DD_DEBUT, dd_plan
     return 1.0 - frac * (1.0 - float(taille_min))
 
 
+def drawdown_stress_receipt(drawdowns: list[float] | tuple[float, ...]) -> dict[str, object]:
+    """Verify that increasing observed drawdown never increases paper size."""
+
+    try:
+        values = [float(value) for value in drawdowns]
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "DRAWDOWN_INVALID"}
+    if not values or any(not __import__("math").isfinite(value) or value < 0.0 for value in values):
+        return {"status": "UNMEASURABLE", "reason": "DRAWDOWN_INVALID"}
+    factors = [facteur_capital(value) for value in values]
+    return {"status": "PROVEN", "factors": [round(value, 8) for value in factors], "monotonic_non_increasing": all(a >= b for a, b in zip(factors, factors[1:]))}
+
+
 __all__ = ["DD_DEBUT", "DD_PLANCHER", "facteur_capital"]

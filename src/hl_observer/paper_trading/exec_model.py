@@ -716,6 +716,8 @@ def _directional_cost_bps(fill_price: float, reference_price: float, side: str) 
 
 
 def _finite_positive(value: object, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
     parsed = float(value)
     if not math.isfinite(parsed) or parsed <= 0:
         raise ValueError(f"{name} must be finite and positive")
@@ -723,6 +725,8 @@ def _finite_positive(value: object, name: str) -> float:
 
 
 def _finite_non_negative(value: object, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and non-negative")
     parsed = float(value)
     if not math.isfinite(parsed) or parsed < 0:
         raise ValueError(f"{name} must be finite and non-negative")

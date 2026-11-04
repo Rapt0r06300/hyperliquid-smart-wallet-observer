@@ -124,4 +124,15 @@ def capture_profile(venue: str, tier: CaptureTier | str) -> CaptureProfile:
         raise ValueError(f"unsupported capture venue: {venue_key}") from exc
 
 
-__all__ = ["CaptureProfile", "CaptureTier", "MarketCaptureEvidence", "capture_profile", "capture_score", "decide_capture_tier"]
+def classify_l2_frequency(timestamps_ms: Sequence[object], *, max_interval_ms: int) -> dict[str, object]:
+    """Measure useful L2 cadence from observed timestamps only."""
+    if type(max_interval_ms) is not int or max_interval_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "INTERVAL_INVALID", "paper_read_only": True}
+    values = [value for value in timestamps_ms if type(value) is int and value > 0]
+    if len(values) < 2 or values != sorted(values):
+        return {"status": "UNMEASURABLE", "reason": "TIMESTAMPS_INSUFFICIENT_OR_UNORDERED", "paper_read_only": True}
+    gaps = [b - a for a, b in zip(values, values[1:])]
+    return {"status": "PROVEN" if max(gaps) <= max_interval_ms else "MORE_DATA", "sample_count": len(values), "min_interval_ms": min(gaps), "max_interval_ms": max(gaps), "mean_interval_ms": sum(gaps) / len(gaps), "paper_read_only": True, "real_execution": False}
+
+
+__all__ = ["CaptureProfile", "CaptureTier", "MarketCaptureEvidence", "capture_profile", "capture_score", "classify_l2_frequency", "decide_capture_tier"]

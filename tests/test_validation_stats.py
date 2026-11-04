@@ -6,6 +6,7 @@ from hl_observer.research.validation_stats import (
     pbo_all_attempts,
     stationary_bootstrap,
 )
+from hl_observer.research.deflated_sharpe import deflated_sharpe_all_attempts
 
 
 def test_stationary_bootstrap_taille_et_determinisme():
@@ -57,3 +58,27 @@ def test_pbo_refuse_une_tentative_incomplete_sans_zero_implicit():
     assert result["n_attempts_total"] == 2
     assert result["n_attempts_used"] == 1
     assert result["invalid_attempt_ids"] == ["missing"]
+
+
+def test_dsr_compare_tous_les_essais_et_compte_la_selection():
+    attempts = [
+        {"attempt_id": "a", "returns": [2, 1, 2, 1]},
+        {"attempt_id": "b", "returns": [1, 1, 1, 2]},
+        {"attempt_id": "c", "returns": [0, 1, 0, 1]},
+    ]
+    result = deflated_sharpe_all_attempts(attempts)
+    assert result["status"] == "PROVEN"
+    assert result["n_trials"] == result["n_attempts_total"] == 3
+    assert result["candidate_id"] == "a"
+    assert result["dsr"] is not None
+
+
+def test_dsr_refuse_une_tentative_non_alignee_sans_la_supprimer():
+    result = deflated_sharpe_all_attempts([
+        {"attempt_id": "a", "returns": [2, 1, 2, 1]},
+        {"attempt_id": "b", "returns": [1, 1, 1]},
+    ])
+    assert result["status"] == "UNMEASURABLE"
+    assert result["dsr"] is None
+    assert result["n_attempts_total"] == 2
+    assert result["n_trials"] == 1

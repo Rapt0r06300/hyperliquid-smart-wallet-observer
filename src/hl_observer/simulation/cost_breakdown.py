@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from hl_observer.simulation.decision_replay_analyzer import ReplayAnalysis
+from hl_observer.simulation.cost_components import slippage_bps as _slippage_bps
+from hl_observer.simulation.cost_components import spread_bps as _spread_bps
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,4 +48,26 @@ def format_cost_breakdown(costs: CostBreakdown) -> str:
     ]
     lines.extend(f"note={note}" for note in costs.notes)
     return "\n".join(lines)
+
+
+def spread_not_double_counted_receipt(
+    *, mid_decision: object, best_touch: object, avg_fill_price: object, side: object
+) -> dict[str, object]:
+    """Check that spread plus depth impact equals the single mid-to-fill cost."""
+    try:
+        mid = float(mid_decision)
+        touch = float(best_touch)
+        fill = float(avg_fill_price)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "PRICE_OBSERVATION_INVALID"}
+    if any(not __import__("math").isfinite(value) or value <= 0 for value in (mid, touch, fill)):
+        return {"status": "UNMEASURABLE", "reason": "PRICE_OBSERVATION_INVALID"}
+    spread = _spread_bps(mid, touch, side)
+    slippage = _slippage_bps(touch, fill, side, mid=mid)
+    direction = 1.0 if str(side).upper() in {"BUY", "B", "LONG", "BID"} else -1.0 if str(side).upper() in {"SELL", "S", "SHORT", "ASK"} else 0.0
+    direct = direction * (fill - mid) / mid * 10_000.0 if direction else None
+    if spread is None or slippage is None or direct is None:
+        return {"status": "UNMEASURABLE", "reason": "SIDE_OR_COST_COMPONENT_INVALID"}
+    reconciles = abs((spread + slippage) - direct) <= 1e-5
+    return {"status": "PROVEN" if reconciles else "REJECTED", "spread_bps": spread, "slippage_bps": slippage, "mid_to_fill_bps": round(direct, 6), "spread_count": 1, "reconciles": reconciles}
 

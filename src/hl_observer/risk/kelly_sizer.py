@@ -98,4 +98,11 @@ def kelly_size_paper(
     return KellySizingDecision(True, round(notional, 8), round(full, 8), round(used_fraction, 8), round(p, 8), round(b, 8))
 
 
+def kelly_uncertainty_receipt(*, win_probability_low: object, win_loss_ratio_low: object, equity_usdt: object) -> dict[str, object]:
+    """Size from conservative lower bounds, never from an optimistic point estimate."""
+
+    decision = kelly_size_paper(win_probability=float(win_probability_low), win_loss_ratio=float(win_loss_ratio_low), equity_usdt=float(equity_usdt)) if all(_finite(value) is not None for value in (win_probability_low, win_loss_ratio_low, equity_usdt)) else _reject("KELLY_INPUT_INVALID")
+    return {"status": "PROVEN" if decision.accepted else "UNMEASURABLE", "decision": decision}
+
+
 __all__ = ["KellySizerConfig", "KellySizingDecision", "kelly_size_paper"]

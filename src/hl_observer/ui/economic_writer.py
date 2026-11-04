@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import threading
 import time
+import math
+from collections.abc import Mapping
 from typing import Any
 
 from sqlalchemy import desc, select
@@ -73,6 +75,44 @@ def latest_local_market_marks(
         return bbo
     db_marks = status_helpers._latest_market_marks_from_snapshots(snapshots)
     return status_helpers._merge_market_marks(bbo, db_marks)
+
+
+def ledger_economic_payload(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose ledger PnL/costs without turning missing costs into optimistic zeroes."""
+    if not isinstance(record, Mapping):
+        return {"status": "UNMEASURABLE", "reason": "INVALID_RECORD", "paper_only": True, "real_execution": False}
+    cost_fields = ("fee_cost_usdc", "spread_cost_usdc", "slippage_cost_usdc", "latency_cost_usdc")
+    costs: dict[str, float] = {}
+    unknown: list[str] = []
+    for field in cost_fields:
+        value = record.get(field)
+        if value is None:
+            unknown.append(field)
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            unknown.append(field)
+            continue
+        if not math.isfinite(number) or number < 0:
+            unknown.append(field)
+            continue
+        costs[field] = number
+    pnl = record.get("net_pnl_usdc")
+    try:
+        pnl = float(pnl) if pnl is not None else None
+    except (TypeError, ValueError, OverflowError):
+        pnl = None
+    if pnl is not None and not math.isfinite(pnl):
+        pnl = None
+    return {
+        "status": "PROVEN" if pnl is not None and not unknown else "UNMEASURABLE",
+        "net_pnl_usdc": pnl,
+        "costs": costs,
+        "unknown_costs": unknown,
+        "paper_only": True,
+        "real_execution": False,
+    }
 
 
 class EconomicWriter:
@@ -196,4 +236,4 @@ class EconomicWriter:
             }
 
 
-__all__ = ["EconomicWriter", "latest_local_market_marks"]
+__all__ = ["EconomicWriter", "latest_local_market_marks", "ledger_economic_payload"]

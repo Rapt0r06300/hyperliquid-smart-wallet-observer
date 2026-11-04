@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,9 @@ import requests
 API_ROOT = "https://api.github.com"
 DEFAULT_TIMEOUT = (30.0, 300.0)
 DATASET_TOKEN_ENV = "HYPERSMART_DATASET_TOKEN"
+MAX_TRANSIENT_ATTEMPTS = 4
+MAX_RETRY_DELAY_S = 8.0
+_RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 _CONTENT_RANGE_RE = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$", re.IGNORECASE)
 
 
@@ -88,18 +92,20 @@ def get_json(path: str) -> Any:
     if not github_token():
         return _gh_json_fallback(path)
     try:
-        response = requests.get(
+        response = _get_with_bounded_retries(
             _api_url(path),
             headers=_headers(),
             timeout=DEFAULT_TIMEOUT,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+            return response.json()
+        finally:
+            _close_response(response)
     except requests.RequestException as exc:
         raise GitHubTransportError(
             f"Lecture HTTPS GitHub impossible pour {path}: {type(exc).__name__}"
         ) from exc
-    try:
-        return response.json()
     except ValueError as exc:
         raise GitHubTransportError("GitHub a renvoyé un JSON illisible.") from exc
 
@@ -154,6 +160,63 @@ def _content_range_start(response: object) -> int | None:
     return int(match.group(1))
 
 
+def _close_response(response: object) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()
+
+
+def _retry_delay(response: object, attempt: int) -> float:
+    headers = getattr(response, "headers", None)
+    retry_after = headers.get("Retry-After") if hasattr(headers, "get") else None
+    if retry_after is not None:
+        try:
+            return min(max(0.0, float(str(retry_after).strip())), MAX_RETRY_DELAY_S)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return min(float(2**attempt), MAX_RETRY_DELAY_S)
+
+
+def _get_with_bounded_retries(url: str, *, headers: dict[str, str], **kwargs: Any) -> object:
+    """Return one non-transient response or fail closed after bounded retries.
+
+    A transient HTTP response is never handed to callers as a successful
+    release/API response.  This matters for immutable assets: an absent asset
+    after a 429/5xx is an error, not an empty or complete dataset.
+    """
+
+    last_error: requests.RequestException | None = None
+    for attempt in range(MAX_TRANSIENT_ATTEMPTS):
+        try:
+            response = requests.get(url, headers=headers, **kwargs)
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt + 1 >= MAX_TRANSIENT_ATTEMPTS:
+                raise GitHubTransportError(
+                    f"Lecture HTTPS GitHub impossible après {MAX_TRANSIENT_ATTEMPTS} tentatives: {type(exc).__name__}"
+                ) from exc
+            time.sleep(min(float(2**attempt), MAX_RETRY_DELAY_S))
+            continue
+
+        status_code = _response_status_code(response)
+        if status_code not in _RETRYABLE_HTTP_STATUS:
+            return response
+        if attempt + 1 >= MAX_TRANSIENT_ATTEMPTS:
+            _close_response(response)
+            raise GitHubTransportError(
+                f"GitHub a renvoyé HTTP {status_code} après {MAX_TRANSIENT_ATTEMPTS} tentatives; réponse transitoire refusée."
+            )
+        delay = _retry_delay(response, attempt)
+        _close_response(response)
+        time.sleep(delay)
+
+    if last_error is not None:
+        raise GitHubTransportError(
+            f"Lecture HTTPS GitHub impossible après {MAX_TRANSIENT_ATTEMPTS} tentatives: {type(last_error).__name__}"
+        ) from last_error
+    raise GitHubTransportError("Transport GitHub terminé sans réponse exploitable.")
+
+
 def download_release_asset(
     *,
     repository: str,
@@ -184,13 +247,14 @@ def download_release_asset(
         headers["Range"] = f"bytes={existing}-"
 
     try:
-        with requests.get(
+        response = _get_with_bounded_retries(
             _api_url(path),
             headers=headers,
             timeout=DEFAULT_TIMEOUT,
             stream=True,
             allow_redirects=True,
-        ) as response:
+        )
+        try:
             status_code = _response_status_code(response)
             if status_code == 416 and existing > 0:
                 # Potentiellement déjà complet. Ne jamais détruire des Gio ici;
@@ -220,6 +284,8 @@ def download_release_asset(
                         target.write(chunk)
                 target.flush()
                 os.fsync(target.fileno())
+        finally:
+            _close_response(response)
     except (requests.RequestException, OSError) as exc:
         # Le partiel déjà présent ou nouvellement écrit est conservé pour une
         # prochaine tentative. Aucune suppression destructive sur erreur réseau.

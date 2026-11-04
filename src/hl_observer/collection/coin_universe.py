@@ -34,6 +34,9 @@ from __future__ import annotations
 
 import threading
 import time
+import math
+from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from typing import Any
 
 # Bornes : un registre non borne finirait par faire sonder 300 marches toutes les 30 s.
@@ -102,4 +105,109 @@ def clear() -> None:
         _vus.clear()
 
 
-__all__ = ["MAX_COINS", "TTL_S", "clear", "coins", "health", "is_empty", "note_coin", "note_coins"]
+def validate_okx_linear_usdt_swap(item: Mapping[str, object]) -> tuple[bool, str]:
+    """Validate the immutable contract metadata used by the active OKX feed."""
+    inst_id = str(item.get("instId") or "").strip().upper()
+    if not inst_id.endswith("-USDT-SWAP"):
+        return False, "NOT_USDT_SWAP"
+    if str(item.get("instType") or "").strip().upper() != "SWAP":
+        return False, "NOT_SWAP"
+    if str(item.get("state") or "").strip().lower() != "live":
+        return False, "NOT_LIVE"
+    if str(item.get("ctType") or "").strip().lower() != "linear":
+        return False, "NOT_LINEAR"
+    if str(item.get("settleCcy") or "").strip().upper() != "USDT":
+        return False, "SETTLEMENT_CURRENCY_MISMATCH"
+    if str(item.get("quoteCcy") or "").strip().upper() != "USDT":
+        return False, "QUOTE_CURRENCY_MISMATCH"
+    base = inst_id.split("-", 1)[0]
+    if str(item.get("ctValCcy") or "").strip().upper() != base:
+        return False, "NOMINAL_CURRENCY_MISMATCH"
+
+    parsed: dict[str, float] = {}
+    for field in ("ctVal", "ctMult", "lotSz", "minSz", "tickSz"):
+        try:
+            value = float(item.get(field))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False, f"INVALID_{field.upper()}"
+        if not math.isfinite(value) or value <= 0.0:
+            return False, f"INVALID_{field.upper()}"
+        parsed[field] = value
+
+    lot = parsed["lotSz"]
+    minimum = parsed["minSz"]
+    lots = minimum / lot
+    if minimum < lot or not math.isclose(lots, round(lots), rel_tol=1e-9, abs_tol=1e-9):
+        return False, "MIN_SIZE_NOT_ALIGNED_TO_LOT"
+    for field in ("listTime", "expTime"):
+        if field in item and item.get(field) not in (None, ""):
+            if validate_okx_timestamp_ms(item.get(field))[0] is False:
+                return False, f"INVALID_{field.upper()}"
+    return True, "OK"
+
+
+def validate_okx_timestamp_ms(value: object) -> tuple[bool, str]:
+    """Accept only finite epoch timestamps expressed in milliseconds."""
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return False, "INVALID_TIMESTAMP"
+    if parsed < 100_000_000_000 or parsed > 100_000_000_000_000:
+        return False, "TIMESTAMP_NOT_MILLISECONDS"
+    return True, "OK"
+
+
+def validate_okx_paper_notional(
+    item: Mapping[str, object],
+    *,
+    reference_price: object,
+    paper_notional_usd: object = 200.0,
+) -> tuple[bool, str]:
+    """Reject a contract whose minimum size cannot fit the paper notional."""
+    try:
+        price = float(reference_price)
+        budget = float(paper_notional_usd)
+        minimum = float(item.get("minSz"))  # type: ignore[arg-type]
+        contract_value = float(item.get("ctVal"))  # type: ignore[arg-type]
+        multiplier = float(item.get("ctMult"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False, "PAPER_NOTIONAL_INPUT_MISSING"
+    if not all(math.isfinite(v) and v > 0.0 for v in (price, budget, minimum, contract_value, multiplier)):
+        return False, "PAPER_NOTIONAL_INPUT_INVALID"
+    required = minimum * contract_value * multiplier * price
+    return (True, "OK") if required <= budget else (False, "MIN_SIZE_EXCEEDS_PAPER_NOTIONAL")
+
+
+def quantize_okx_price(
+    price: object,
+    tick_size: object,
+    *,
+    side: str = "buy",
+) -> float | None:
+    """Quantize a repriced value to the venue tick without float drift."""
+    try:
+        value = Decimal(str(price))
+        tick = Decimal(str(tick_size))
+    except (InvalidOperation, ValueError):
+        return None
+    if not value.is_finite() or not tick.is_finite() or value <= 0 or tick <= 0:
+        return None
+    units = value / tick
+    rounding = ROUND_CEILING if str(side).lower() == "sell" else ROUND_FLOOR
+    return float(units.to_integral_value(rounding=rounding) * tick)
+
+
+__all__ = [
+    "MAX_COINS",
+    "TTL_S",
+    "clear",
+    "coins",
+    "health",
+    "is_empty",
+    "note_coin",
+    "note_coins",
+    "quantize_okx_price",
+    "validate_okx_linear_usdt_swap",
+    "validate_okx_paper_notional",
+    "validate_okx_timestamp_ms",
+]

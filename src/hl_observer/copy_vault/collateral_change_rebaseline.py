@@ -25,4 +25,17 @@ def nouvelle_reference(equity_apres_changement: Any) -> Any:
     return round(float(equity_apres_changement), 8)
 
 
-__all__ = ["doit_rebaseline", "nouvelle_reference", "UNMEASURABLE"]
+def rebaseline_receipt(*, collateral_changed: Any, equity_after: Any) -> dict[str, Any]:
+    """Require a new positive reference before subsequent sizing."""
+
+    if type(collateral_changed) is not bool:
+        return {"status": "UNMEASURABLE", "sizing_allowed": False, "reason": "CHANGE_FLAG_INVALID", "paper_read_only": True}
+    reference = nouvelle_reference(equity_after) if collateral_changed else None
+    ready = not collateral_changed or reference != UNMEASURABLE
+    return {"status": "PROVEN", "sizing_allowed": ready, "reference": reference,
+            "historical_returns_unchanged": True,
+            "reason": "REBASELINE_READY" if ready else "REBASELINE_REQUIRED",
+            "paper_read_only": True}
+
+
+__all__ = ["doit_rebaseline", "nouvelle_reference", "rebaseline_receipt", "UNMEASURABLE"]

@@ -42,3 +42,11 @@ def add_to_auto_watchlist(
     )
     session.add(item)
     return item
+
+
+def discovery_to_scanner_receipt(*, discovered: int, selected: int, persisted: int) -> dict[str, object]:
+    """Verify discovery-to-watchlist counts without asserting scanner execution."""
+    values = (discovered, selected, persisted)
+    if any(type(value) is not int or value < 0 for value in values) or selected > discovered or persisted > selected:
+        return {"status": "UNMEASURABLE", "reason": "DISCOVERY_COUNT_INVALID", "paper_read_only": True}
+    return {"status": "PROVEN", "discovered": discovered, "selected": selected, "persisted": persisted, "paper_read_only": True, "real_execution": False}

@@ -45,6 +45,98 @@ def _load_campaign(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def forward_coverage_gate(
+    payload: Mapping[str, Any] | None,
+    *,
+    min_observation_seconds: float = MIN_FORWARD_OBSERVATION_SECONDS,
+    min_coverage_ratio: float = MIN_FORWARD_COVERAGE_RATIO,
+    min_trade_count: int = MIN_FORWARD_TRADE_COUNT,
+) -> dict[str, Any]:
+    """Validate temporal forward quality without looking at a PnL target."""
+    forward = payload.get("forward") if isinstance(payload, Mapping) else None
+    forward = forward if isinstance(forward, Mapping) else {}
+    freeze = payload.get("parameter_freeze") if isinstance(payload, Mapping) else None
+    freeze = freeze if isinstance(freeze, Mapping) else {}
+    reasons: list[str] = []
+    seconds = _number(forward.get("observation_seconds"))
+    start_ms = _number(forward.get("observation_start_ms"))
+    end_ms = _number(forward.get("observation_end_ms"))
+    freeze_ms = _number(freeze.get("frozen_at_ms"))
+    coverage_ratio = _number(forward.get("observation_coverage_ratio"))
+    trade_count = _number(forward.get("sample_count"))
+    if seconds is None or seconds <= 0:
+        reasons.append("FORWARD_OBSERVATION_DURATION_INVALID")
+    if start_ms is None or end_ms is None or end_ms <= start_ms:
+        reasons.append("FORWARD_OBSERVATION_CLOCK_INVALID")
+    if freeze_ms is None or start_ms is None or start_ms <= freeze_ms:
+        reasons.append("FORWARD_OBSERVATION_NOT_STRICTLY_POST_FREEZE")
+    if forward.get("post_freeze") is not True:
+        reasons.append("FORWARD_DAILY_POST_FREEZE_FLAG_MISSING")
+    if coverage_ratio is None or not 0.0 <= coverage_ratio <= 1.0:
+        reasons.append("FORWARD_OBSERVATION_COVERAGE_INVALID")
+    elif coverage_ratio < float(min_coverage_ratio):
+        reasons.append("FORWARD_OBSERVATION_COVERAGE_TOO_LOW")
+    if trade_count is None or trade_count < int(min_trade_count):
+        reasons.append("FORWARD_TRADE_COUNT_TOO_SMALL")
+    if not str(forward.get("observation_source") or "").strip():
+        reasons.append("FORWARD_OBSERVATION_SOURCE_MISSING")
+    if seconds is not None and start_ms is not None and end_ms is not None and end_ms > start_ms:
+        clock_seconds = (end_ms - start_ms) / 1000.0
+        if not math.isclose(seconds, clock_seconds, rel_tol=0.0, abs_tol=1e-3):
+            reasons.append("FORWARD_OBSERVATION_DURATION_MISMATCH")
+        elif clock_seconds < float(min_observation_seconds):
+            reasons.append("FORWARD_DAILY_PROOF_WINDOW_TOO_SHORT")
+    return {
+        "status": "PROVEN" if not reasons else "UNMEASURABLE",
+        "temporal_quality_proven": not reasons,
+        "reasons": list(dict.fromkeys(reasons)),
+        "observation_seconds": seconds,
+        "observation_start_ms": start_ms,
+        "observation_end_ms": end_ms,
+        "frozen_at_ms": freeze_ms,
+        "coverage_ratio": coverage_ratio,
+        "trade_count": int(trade_count) if trade_count is not None else None,
+        "target_independent": True,
+    }
+
+
+def classify_daily_target_evidence(
+    payload: Mapping[str, Any] | None,
+    *,
+    target_net_usd_per_day: float = TARGET_NET_USD_PER_DAY,
+) -> dict[str, Any]:
+    """Classify measured progress without weakening the certification gate."""
+    target = _number(target_net_usd_per_day)
+    gate = forward_coverage_gate(payload)
+    forward = payload.get("forward") if isinstance(payload, Mapping) else None
+    forward = forward if isinstance(forward, Mapping) else {}
+    net = _number(forward.get("net_pnl_usd"))
+    seconds = _number(gate.get("observation_seconds"))
+    rate = None
+    if gate["temporal_quality_proven"] and net is not None and seconds is not None and seconds > 0:
+        rate = net / (seconds / 86_400.0)
+    if target is None or target < 0:
+        status, reason = "UNMEASURABLE", "TARGET_INVALID"
+    elif not gate["temporal_quality_proven"] or rate is None:
+        status, reason = "UNMEASURABLE", "FORWARD_NET_UNMEASURED"
+    elif rate >= target:
+        status, reason = "PROVEN", None
+    elif rate > 0:
+        status, reason = "PROMISING", "POSITIVE_BELOW_TARGET"
+    else:
+        status, reason = "REJECTED", "NON_POSITIVE_FORWARD_RATE"
+    return {
+        "status": status,
+        "reason": reason,
+        "forward_net_pnl_usd_per_day": round(rate, 8) if rate is not None else None,
+        "target_net_usd_per_day": target,
+        "target_gate_unchanged": True,
+        "temporal_quality": gate,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def apply_daily_gate(
     base_result: Mapping[str, Any],
     payload: Mapping[str, Any] | None,
@@ -58,6 +150,8 @@ def apply_daily_gate(
     result = dict(base_result)
     reasons = [str(value) for value in result.get("reasons", []) if str(value)]
     evidence = payload if isinstance(payload, Mapping) else {}
+    temporal_gate = forward_coverage_gate(evidence)
+    reasons.extend(temporal_gate["reasons"])
     forward = evidence.get("forward") if isinstance(evidence.get("forward"), Mapping) else {}
     freeze = (
         evidence.get("parameter_freeze")
@@ -154,19 +248,7 @@ def apply_daily_gate(
         and rate >= float(target_net_usd_per_day)
     )
     structural_daily_gate_reached = bool(
-        verified_seconds is not None
-        and verified_seconds >= float(min_forward_observation_seconds)
-        and freeze_ms is not None
-        and start_ms is not None
-        and start_ms > freeze_ms
-        and forward.get("post_freeze") is True
-        and coverage_verified
-        and coverage_ratio is not None
-        and coverage_ratio >= float(min_forward_coverage_ratio)
-        and observation_source
-        and trade_count is not None
-        and trade_count >= MIN_FORWARD_TRADE_COUNT
-        and rate is not None
+        temporal_gate["temporal_quality_proven"] and rate is not None
     )
     positive_forward_net = bool(rate is not None and rate > 0.0)
     quality_certified = bool(
@@ -204,6 +286,7 @@ def apply_daily_gate(
             "positive_forward_net": positive_forward_net,
             "historical_target_reached": daily_target_reached,
             "structural_daily_gate_reached": structural_daily_gate_reached,
+            "temporal_quality_gate": temporal_gate,
             "daily_target_reached": daily_target_reached,
             "reasons": list(dict.fromkeys(reasons)),
         }
@@ -260,6 +343,8 @@ __all__ = [
     "MIN_FORWARD_COVERAGE_RATIO",
     "MIN_FORWARD_OBSERVATION_SECONDS",
     "MIN_FORWARD_TRADE_COUNT",
+    "forward_coverage_gate",
+    "classify_daily_target_evidence",
     "SCHEMA",
     "TARGET_NET_USD_PER_DAY",
     "apply_daily_gate",

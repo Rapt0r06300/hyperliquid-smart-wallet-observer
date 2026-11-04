@@ -464,6 +464,42 @@ def process_memory_summary(
     }
 
 
+def pivot_on_headroom_stagnation(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Force a mechanism pivot after two parameter-only non-progress cycles."""
+    rows = [dict(record) for record in records]
+    seen: set[str] = set()
+    parsed: list[dict[str, Any]] = []
+    for row in rows:
+        record_id = row.get("record_id")
+        change_class = row.get("change_class")
+        delta = row.get("headroom_delta_usd_per_day")
+        if not isinstance(record_id, str) or not record_id.strip() or record_id in seen:
+            return {"status": "UNMEASURABLE", "reason": "INVALID_OR_DUPLICATE_RECORD_ID", "paper_only": True, "real_execution": False}
+        if change_class == "PARAMETER_ONLY":
+            try:
+                value = float(delta)
+            except (TypeError, ValueError, OverflowError):
+                return {"status": "UNMEASURABLE", "reason": "MISSING_HEADROOM_DELTA", "paper_only": True, "real_execution": False}
+            if not math.isfinite(value):
+                return {"status": "UNMEASURABLE", "reason": "NONFINITE_HEADROOM_DELTA", "paper_only": True, "real_execution": False}
+        else:
+            value = None
+        seen.add(record_id)
+        parsed.append({"record_id": record_id, "change_class": change_class, "delta": value})
+    tail = parsed[-2:]
+    stagnated = len(tail) == 2 and all(
+        item["change_class"] == "PARAMETER_ONLY" and item["delta"] <= 0 for item in tail
+    )
+    return {
+        "status": "PIVOT_REQUIRED" if stagnated else "CONTINUE",
+        "parameter_only_cycles": sum(item["change_class"] == "PARAMETER_ONLY" for item in tail),
+        "headroom_stagnated": stagnated,
+        "next_action": "TRY_DIFFERENT_MECHANISM" if stagnated else "CONTINUE_CURRENT_PLAN",
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "OUTCOMES",
     "PROVENANCE",
@@ -474,5 +510,6 @@ __all__ = [
     "combine_process_records",
     "load_process_records",
     "process_memory_summary",
+    "pivot_on_headroom_stagnation",
     "validate_process_record",
 ]

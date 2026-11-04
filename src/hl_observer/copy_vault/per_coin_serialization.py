@@ -31,4 +31,19 @@ class VerrouParCoin:
         return self._cle(vault, coin) in self._detenus
 
 
-__all__ = ["VerrouParCoin"]
+def serialization_receipt(*, vault: str, coin: str) -> dict[str, Any]:
+    """Prove local same-key exclusion and release without performing any I/O."""
+    if not isinstance(vault, str) or not vault.strip() or not isinstance(coin, str) or not coin.strip():
+        return {"status": "UNMEASURABLE", "reason": "KEY_INVALID"}
+    lock = VerrouParCoin()
+    first = lock.acquerir(vault, coin)
+    second = lock.acquerir(vault, coin)
+    held_before_release = lock.detenu(vault, coin)
+    lock.liberer(vault, coin)
+    released = not lock.detenu(vault, coin)
+    if first.get("ok") is not True or second.get("ok") is not False or not held_before_release or not released:
+        return {"status": "REJECTED", "reason": "SERIALIZATION_CONTRACT_FAILED"}
+    return {"status": "PROVEN", "first_acquire": first, "reentrant_acquire": second, "released": released}
+
+
+__all__ = ["VerrouParCoin", "serialization_receipt"]

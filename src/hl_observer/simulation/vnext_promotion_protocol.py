@@ -169,6 +169,30 @@ def validate_temporal_disjointness(
     return True
 
 
+def validate_candidate_cost_parity(
+    champion: Mapping[str, Any],
+    challenger: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Require identical capital, quote and explicit cost configuration."""
+    fields = ("capital_usd", "quote_currency", "cost_bps", "slippage_bps")
+    missing = [
+        field for field in fields
+        if field not in champion or field not in challenger
+    ]
+    mismatched = [
+        field for field in fields
+        if field in champion and field in challenger and champion[field] != challenger[field]
+    ]
+    return {
+        "status": "PROVEN" if not missing and not mismatched else "UNMEASURABLE",
+        "cost_parity": not missing and not mismatched,
+        "missing_fields": missing,
+        "mismatched_fields": mismatched,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
     """Allow certification namespace entry only for complete, safe evidence."""
 
@@ -244,6 +268,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "build_freeze_manifest",
     "consume_post_freeze_once",
+    "validate_candidate_cost_parity",
     "validate_certification_entry",
     "validate_temporal_disjointness",
     "verify_freeze_manifest",

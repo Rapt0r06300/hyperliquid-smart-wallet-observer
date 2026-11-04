@@ -82,6 +82,29 @@ def receipt_is_verified(
     )
 
 
+def progress_by_family(
+    tasks: list[dict[str, Any]], verified_ids: set[str]
+) -> dict[str, dict[str, Any]]:
+    """Return auditable progress per roadmap family without changing closure rules."""
+
+    family_progress: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        task_id = str(task["id"])
+        family = task_id.split("-", 1)[0]
+        bucket = family_progress.setdefault(family, {"total": 0, "verified_done": 0})
+        bucket["total"] += 1
+        if task_id in verified_ids:
+            bucket["verified_done"] += 1
+    for bucket in family_progress.values():
+        bucket["percent"] = round(
+            100.0 * bucket["verified_done"] / bucket["total"], 2
+        ) if bucket["total"] else 0.0
+        bucket["closure_allowed"] = (
+            bucket["verified_done"] == bucket["total"] and bucket["total"] > 0
+        )
+    return family_progress
+
+
 def report(
     manifest_path: Path,
     receipt_path: Path,
@@ -105,6 +128,7 @@ def report(
     verified_ids &= known_ids
     total = len(tasks)
     verified = len(verified_ids)
+    family_progress = progress_by_family(tasks, verified_ids)
     return {
         "roadmap_id": payload["roadmap_id"],
         "source_sha256": payload["source_sha256"],
@@ -113,6 +137,7 @@ def report(
         "verified_done": verified,
         "percent": round(100.0 * verified / total, 2) if total else 0.0,
         "closure_allowed": verified == total and total > 0,
+        "family_progress": family_progress,
         "receipts_file": str(receipt_path),
         "unknown_receipt_ids": sorted(set(receipts) - known_ids),
     }

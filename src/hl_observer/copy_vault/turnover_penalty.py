@@ -28,4 +28,16 @@ def penalite(notional_traite: Any, equity: Any, *, seuil_turnover: float = 5.0,
     return {"penalite": round(pen, 6), "turnover": round(turnover, 6), "au_dessus_seuil": True}
 
 
+def turnover_cost_receipt(*, notional_traded: Any, equity: Any, fee_bps: Any) -> dict[str, Any]:
+    """Compute churn cost only from finite observed notional and fee inputs."""
+
+    try:
+        notional, capital, fee = float(notional_traded), float(equity), float(fee_bps)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "TURNOVER_INPUT_INVALID"}
+    if not all(math.isfinite(value) for value in (notional, capital, fee)) or notional < 0.0 or capital <= 0.0 or fee < 0.0:
+        return {"status": "UNMEASURABLE", "reason": "TURNOVER_INPUT_INVALID"}
+    return {"status": "PROVEN", "fee_cost": round(notional * fee / 10_000.0, 10), "penalty": penalite(notional, capital)}
+
+
 __all__ = ["penalite", "UNMEASURABLE"]

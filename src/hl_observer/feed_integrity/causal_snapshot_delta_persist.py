@@ -5,6 +5,8 @@ l'ordre de réception. On refuse toute écriture hors ordre causal. Pur, 0 rése
 """
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from typing import Any
 
 SNAPSHOT = "SNAPSHOT"
@@ -22,13 +24,26 @@ class PersistanceCausale:
     def ajouter(self, *, type_entree: str, seq: Any, payload: Any = None) -> dict[str, Any]:
         """Ajoute une entrée. Le seq doit être strictement > au dernier (ordre causal). Un DELTA avant tout
         SNAPSHOT est refusé (rien à quoi l'appliquer)."""
-        if not isinstance(seq, (int, float)):
+        if isinstance(seq, bool) or not isinstance(seq, (int, float)) or not math.isfinite(float(seq)):
+            return {"ok": False, "raison": "SEQ_INVALIDE"}
+        if int(seq) != seq or int(seq) < 0:
             return {"ok": False, "raison": "SEQ_INVALIDE"}
         t = str(type_entree).upper()
+        if t not in {SNAPSHOT, DELTA}:
+            return {"ok": False, "raison": "TYPE_INVALIDE"}
         if int(seq) <= self._dernier_seq:
             return {"ok": False, "raison": "ECRITURE_HORS_ORDRE_CAUSAL", "dernier_seq": self._dernier_seq}
         if t == DELTA and not self._a_snapshot:
             return {"ok": False, "raison": "DELTA_SANS_SNAPSHOT_PREALABLE"}
+        if isinstance(payload, Mapping):
+            exchange = payload.get("exchange_ts_ms")
+            receive = payload.get("recv_wall_ts_ms", payload.get("received_ts_ms"))
+            if exchange is not None and receive is not None:
+                try:
+                    if int(exchange) > int(receive):
+                        return {"ok": False, "raison": "EVENT_AFTER_RECEIVE"}
+                except (TypeError, ValueError, OverflowError):
+                    return {"ok": False, "raison": "HORLOGE_INVALIDE"}
         if t == SNAPSHOT:
             self._a_snapshot = True
         self._entrees.append({"type": t, "seq": int(seq), "payload": payload})

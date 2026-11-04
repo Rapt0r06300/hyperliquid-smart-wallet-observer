@@ -20,6 +20,7 @@ from hl_observer.backtesting.overfit_selection import (
     VERDICT_BRUIT,
     VERDICT_SIGNAL,
     borne_du_hasard,
+    compare_leaders_to_activity_placebos,
     permuter_les_sens,
     selection_par_maximum,
     selection_par_plateau,
@@ -227,3 +228,32 @@ def test_la_permutation_change_VRAIMENT_les_sens():
     faux = permuter_les_sens(cands, seed=3)
     shorts = sum(1 for c in faux if c["direction"] == "SHORT")
     assert 60 < shorts < 140, f"repartition suspecte ({shorts}/200) : la permutation ne melange pas"
+
+
+def test_placebos_meme_cohorte_activite_et_couts():
+    leaders = [
+        {"wallet_id": "L1", "cohort_id": "2026-01", "activity_count": 4, "net_usd": 10.0, "cost_usd": 1.0},
+        {"wallet_id": "L2", "cohort_id": "2026-01", "activity_count": 4, "net_usd": 6.0, "cost_usd": 1.0},
+    ]
+    placebos = [
+        {"wallet_id": "P1", "cohort_id": "2026-01", "activity_count": 4, "net_usd": 2.0, "cost_usd": 1.0},
+        {"wallet_id": "P2", "cohort_id": "2026-01", "activity_count": 4, "net_usd": 1.0, "cost_usd": 1.0},
+        {"wallet_id": "P3", "cohort_id": "2026-01", "activity_count": 3, "net_usd": 99.0, "cost_usd": 1.0},
+    ]
+    result = compare_leaders_to_activity_placebos(leaders, placebos, seed=3)
+    assert result["status"] == "PROVEN"
+    assert result["n_pairs"] == 2
+    assert result["same_cohort"] and result["same_activity"] and result["same_costs"]
+    assert result["delta_mean_net_usd"] > 0
+
+
+def test_placebo_incompatible_ne_devient_pas_une_preuve():
+    result = compare_leaders_to_activity_placebos(
+        [{"wallet_id": "L1", "cohort_id": "d1", "activity_count": 2, "net_usd": 1.0, "cost_usd": 1.0},
+         {"wallet_id": "L2", "cohort_id": "d1", "activity_count": 2, "net_usd": 2.0, "cost_usd": 1.0}],
+        [{"wallet_id": "P1", "cohort_id": "d2", "activity_count": 2, "net_usd": 0.0, "cost_usd": 1.0},
+         {"wallet_id": "P2", "cohort_id": "d2", "activity_count": 2, "net_usd": 0.0, "cost_usd": 1.0}],
+    )
+    assert result["status"] == "UNMEASURABLE"
+    assert result["n_pairs"] == 0
+    assert result["delta_mean_net_usd"] is None

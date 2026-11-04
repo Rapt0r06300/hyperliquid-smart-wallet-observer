@@ -39,4 +39,20 @@ def apply_execution_delay(event_id: str, ts_ms: int, *, delay_seconds: float) ->
     )
 
 
-__all__ = ["DelayedEvent", "apply_execution_delay"]
+def requote_during_delay_receipt(*, side: str, reference_price: object, delayed_price: object) -> dict[str, object]:
+    """Measure a requote between decision and delayed execution from observed prices."""
+
+    if str(side).upper() not in {"BUY", "SELL"}:
+        return {"status": "UNMEASURABLE", "reason": "SIDE_INVALID"}
+    try:
+        reference, delayed = float(reference_price), float(delayed_price)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "PRICE_INVALID"}
+    if not all(math.isfinite(value) and value > 0.0 for value in (reference, delayed)):
+        return {"status": "UNMEASURABLE", "reason": "PRICE_INVALID"}
+    signed_bps = (delayed - reference) / reference * 10_000.0
+    adverse_bps = signed_bps if str(side).upper() == "BUY" else -signed_bps
+    return {"status": "PROVEN", "requote_bps": round(signed_bps, 8), "adverse_bps": round(max(0.0, adverse_bps), 8)}
+
+
+__all__ = ["DelayedEvent", "apply_execution_delay", "requote_during_delay_receipt"]

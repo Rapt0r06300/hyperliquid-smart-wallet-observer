@@ -395,4 +395,42 @@ def rank_semantic_plans(
     return selected
 
 
-__all__ = ["generate_semantic_plans", "load_catalog", "rank_semantic_plans"]
+def summarize_semantic_trials(evaluated_records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Account for every evaluated trial before any semantic deduplication.
+
+    Semantic keys may be grouped for reporting, but trial IDs remain distinct
+    inputs to multiple-testing controls such as PBO and DSR.
+    """
+    rows = [dict(record) for record in evaluated_records]
+    seen_trials: set[str] = set()
+    counts: Counter[str] = Counter()
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        trial_id = row.get("trial_id")
+        semantic_key = row.get("semantic_key")
+        outcome = row.get("outcome", row.get("verdict"))
+        if not isinstance(trial_id, str) or not trial_id.strip():
+            raise ValueError("each semantic trial requires a non-empty trial_id")
+        if trial_id in seen_trials:
+            raise ValueError(f"duplicate trial_id: {trial_id}")
+        if not isinstance(semantic_key, str) or not semantic_key.strip():
+            raise ValueError("each semantic trial requires a non-empty semantic_key")
+        if not isinstance(outcome, str) or not outcome.strip():
+            raise ValueError("each semantic trial requires an outcome or verdict")
+        seen_trials.add(trial_id)
+        counts[semantic_key] += 1
+        normalized.append(row)
+    return {
+        "trial_count": len(normalized),
+        "trial_ids": [row["trial_id"] for row in normalized],
+        "semantic_key_counts": dict(sorted(counts.items())),
+        "duplicate_semantic_keys": sorted(key for key, count in counts.items() if count > 1),
+        "all_attempts": normalized,
+        "pbo_trial_count": len(normalized),
+        "dsr_trial_count": len(normalized),
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["generate_semantic_plans", "load_catalog", "rank_semantic_plans", "summarize_semantic_trials"]

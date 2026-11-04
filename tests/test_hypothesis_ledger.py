@@ -13,6 +13,7 @@ from hl_observer.research.hypothesis_ledger import (
     load_records,
     novelty_score,
     rediscovery_required,
+    retest_requires_new_context_or_data,
     semantic_fingerprint,
     validate_record,
 )
@@ -292,3 +293,27 @@ def test_ledger_is_jsonl_machine_readable(tmp_path: Path) -> None:
     line = ledger.read_text(encoding="utf-8").strip()
     decoded = json.loads(line)
     assert decoded["record_id"] == "R-1"
+
+
+def test_killed_hypothesis_requires_new_context_or_data():
+    old_context = "a" * 64
+    old_data = "b" * 64
+    killed = record(record_id="R-kill", stage="REJECTED", verdict="KILL")
+    killed["retest_context_signature"] = old_context
+    killed["retest_data_signature"] = old_data
+    same = retest_requires_new_context_or_data(
+        [killed], "H-1", context_signature=old_context, data_signature=old_data
+    )
+    assert same["status"] == "REJECTED" and same["allowed"] is False
+    changed = retest_requires_new_context_or_data(
+        [killed], "H-1", context_signature="c" * 64, data_signature=old_data
+    )
+    assert changed["status"] == "PROVEN" and changed["allowed"] is True
+
+
+def test_killed_hypothesis_without_prior_signatures_is_unmeasurable():
+    killed = record(record_id="R-kill", stage="REJECTED", verdict="KILL")
+    result = retest_requires_new_context_or_data(
+        [killed], "H-1", context_signature="a" * 64, data_signature="b" * 64
+    )
+    assert result["status"] == "UNMEASURABLE" and result["allowed"] is False

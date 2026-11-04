@@ -58,3 +58,10 @@ async def scrape_leaderboard(
 
 def scrape_leaderboard_sync(*args, **kwargs) -> LeaderboardResult:
     return asyncio.run(scrape_leaderboard(*args, **kwargs))
+
+
+def source_provenance_receipt(*, method: object, source_url: object, captured_at_ms: object) -> dict[str, object]:
+    """Require method, source and capture clock before using leaderboard evidence."""
+    if not str(method or "").strip() or not str(source_url or "").strip() or type(captured_at_ms) is not int or captured_at_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "LEADERBOARD_PROVENANCE_MISSING", "paper_read_only": True}
+    return {"status": "PROVEN", "method": str(method), "source_url": str(source_url), "captured_at_ms": captured_at_ms, "paper_read_only": True, "real_execution": False}

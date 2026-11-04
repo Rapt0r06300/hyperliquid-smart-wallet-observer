@@ -294,12 +294,39 @@ def comparer_signaux_paper_replay(
     }
 
 
+def paper_replay_parity_receipt(
+    paper_signals: Iterable[Mapping[str, Any]],
+    replay_signals: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return an explicit proof envelope for signal parity.
+
+    A mismatch, duplicate, or incomplete input stays non-promotable.  This
+    wrapper makes the closure status machine-readable without converting a
+    missing PAPER or replay observation into a false zero-difference result.
+    """
+    result = comparer_signaux_paper_replay(paper_signals, replay_signals)
+    status = result.get("status")
+    if status == "PARITY" and result.get("parity") is True:
+        verdict = "PROVEN"
+    elif status == "MISMATCH":
+        verdict = "REJECTED"
+    else:
+        verdict = "UNMEASURABLE"
+    return {
+        **result,
+        "verdict": verdict,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "MAX_EXPOSITION_NETTE", "MAX_PART_PAR_COIN", "MAX_POSITIONS_PAR_COIN", "MAX_POSITIONS_TOTAL",
     "MOTIF_BASELINE_CHANGEE", "MOTIF_CONCENTRATION", "MOTIF_DEJA_UNE_POSITION",
     "MOTIF_EXPOSITION", "MOTIF_OK", "MOTIF_TROP_DE_POSITIONS",
     "MOTIF_SIGNAL_PARITY", "MOTIF_SIGNAL_PARITY_MISMATCH",
     "Baseline", "CompteurRefus", "Position",
-    "comparer", "comparer_signaux_paper_replay", "empreinte", "le_live_accepterait",
+    "comparer", "comparer_signaux_paper_replay", "paper_replay_parity_receipt",
+    "empreinte", "le_live_accepterait",
     "rejouer_sans_empilement", "sceller",
 ]

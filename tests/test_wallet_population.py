@@ -64,3 +64,31 @@ def test_classer_population_streaming(tmp_path):
     assert out["n_wallets"] == 2 and out["n_evalues"] == 2
     assert out["classement"][0]["wallet"] == "0xWIN"
     assert "archetype" in out["classement"][0] and "entite_potentiellement_liee" in out["classement"][0]
+
+
+def test_bootstrap_population_vault_regime_ne_compte_pas_les_fragments_comme_vaults():
+    rows = [
+        {"vault_id": "A", "regime_id": "calm", "net_usd": 1.0},
+        {"vault_id": "A", "regime_id": "calm", "net_usd": 3.0},
+        {"vault_id": "A", "regime_id": "volatile", "net_usd": 2.0},
+        {"vault_id": "B", "regime_id": "calm", "net_usd": 2.0},
+        {"vault_id": "B", "regime_id": "volatile", "net_usd": 4.0},
+        {"vault_id": "C", "regime_id": "calm", "net_usd": 3.0},
+        {"vault_id": "C", "regime_id": "volatile", "net_usd": 5.0},
+    ]
+    out = P.bootstrap_population_by_vault_regime(rows, n_bootstrap=200, seed=11)
+    assert out["status"] == "PROVEN"
+    assert out["n_vaults"] == 3
+    assert out["n_vault_regime_cells"] == 6
+    assert out["n_observations"] == len(rows)
+    assert out["vault_means"]["A"] == 2.0
+    assert out["bootstrap_ci_low"] <= out["observed_mean"] <= out["bootstrap_ci_high"]
+
+
+def test_bootstrap_population_vault_regime_refuse_donnees_incompletes():
+    out = P.bootstrap_population_by_vault_regime(
+        [{"vault_id": "A", "regime_id": "calm", "net_usd": 1.0}],
+        min_vaults=2,
+    )
+    assert out["status"] == "UNMEASURABLE"
+    assert out["reason"] == "vaults_insuffisants"

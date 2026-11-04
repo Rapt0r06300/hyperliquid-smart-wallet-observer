@@ -5,6 +5,7 @@ faire perdre. Donnée manquante → UNMEASURABLE. Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 UNMEASURABLE = "UNMEASURABLE"
@@ -20,4 +21,23 @@ def shortfall(leader_return_bps: Any, notre_return_apres_couts_bps: Any) -> dict
             "fidelite_bps": round(float(notre_return_apres_couts_bps), 4)}
 
 
-__all__ = ["shortfall", "UNMEASURABLE"]
+def shortfall_attribution_receipt(
+    *, leader_return_bps: Any, our_return_after_costs_bps: Any,
+    cost_bps: Any, latency_bps: Any, capacity_bps: Any, tolerance_bps: float = 1e-6
+) -> dict[str, Any]:
+    """Require the measured shortfall to reconcile to cost, latency and capacity."""
+    values = (leader_return_bps, our_return_after_costs_bps, cost_bps, latency_bps, capacity_bps, tolerance_bps)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in values):
+        return {"status": UNMEASURABLE, "reason": "non_finite_shortfall_observation"}
+    components = (cost_bps, latency_bps, capacity_bps)
+    if any(value < 0 for value in components) or tolerance_bps < 0:
+        return {"status": UNMEASURABLE, "reason": "invalid_attribution_components"}
+    measured = float(leader_return_bps) - float(our_return_after_costs_bps)
+    attributed = sum(float(value) for value in components)
+    reconciled = math.isclose(measured, attributed, abs_tol=float(tolerance_bps))
+    return {"status": "PROVEN" if reconciled else "UNMEASURABLE", "measured_shortfall_bps": round(measured, 8),
+            "attributed_shortfall_bps": round(attributed, 8), "reconciled": reconciled,
+            "components": {"cost_bps": float(cost_bps), "latency_bps": float(latency_bps), "capacity_bps": float(capacity_bps)}}
+
+
+__all__ = ["shortfall", "shortfall_attribution_receipt", "UNMEASURABLE"]

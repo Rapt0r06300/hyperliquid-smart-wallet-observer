@@ -42,6 +42,16 @@ def test_forward_frozen_persistant_reprise(tmp_path):
         ff2.promouvoir("cand", {"seuil": 99})
 
 
+def test_forward_frozen_refuse_observation_pre_freeze_et_expose_forward_admissible():
+    ff = FF.ForwardFrozen()
+    ff.promouvoir("cand", {"seuil": 5, "frozen_at_ms": 1_000})
+    with pytest.raises(ValueError, match="FORWARD_OBSERVATION_NOT_POST_FREEZE"):
+        ff.observer_forward("cand", {"observed_at_ms": 1_000, "net_bps": 6.0})
+    ff.observer_forward("cand", {"observed_at_ms": 1_001, "net_bps": 6.0})
+    assert ff.etat_forward("cand")["n_observations"] == 1
+    assert ff.etat_forward("cand")["net_moyen_forward_bps"] == 6.0
+
+
 def test_purged_cv():
     folds = PC.splits_purged(100, n_folds=5, horizon=2, embargo=1)
     assert len(folds) == 5

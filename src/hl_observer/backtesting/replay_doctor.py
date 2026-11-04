@@ -170,6 +170,30 @@ def exiger_suffisant(rapport: RapportSante) -> None:
         raise DonneesReplayInsuffisantes("; ".join(rapport.raisons) or "DONNEES_REPLAY_INSUFFISANTES")
 
 
+def no_trade_classification_receipt(
+    candidates: Iterable[dict], marks: Iterable[dict],
+) -> dict[str, Any]:
+    """Distinguish an honest NO_TRADE from a technical data failure."""
+    report = diagnostiquer(candidates, marks)
+    if report.suffisant:
+        status = "READY"
+        reason = "REPLAY_DATA_SUFFICIENT"
+    elif report.n_candidats == 0 or report.n_marks == 0:
+        status = "UNMEASURABLE"
+        reason = "TECHNICAL_DATA_MISSING"
+    else:
+        status = "NO_TRADE"
+        reason = "SAFE_DATA_INSUFFICIENT_FOR_TRADE"
+    return {
+        "status": status,
+        "reason": reason,
+        "report": report.as_dict(),
+        "zero_trade_is_not_performance": status != "READY",
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def diagnostiquer_base(base: str, **kw) -> RapportSante:
     """W6 pratique : agrège les shards puis diagnostique, en une passe."""
     cands, marks = charger_replay_depuis_base(base)
@@ -215,6 +239,6 @@ def format_rapport(rapport: RapportSante) -> str:
 __all__ = [
     "DonneesReplayInsuffisantes", "RapportSante", "charger_replay_depuis_base", "diagnostiquer",
     "diagnostiquer_base", "exiger_suffisant", "gagnant_robuste", "trier_deterministe",
-    "cout_total_bps", "format_rapport", "MIN_CANDIDATS", "MIN_MARKS", "MIN_COINS",
+    "no_trade_classification_receipt", "cout_total_bps", "format_rapport", "MIN_CANDIDATS", "MIN_MARKS", "MIN_COINS",
     "MIN_COUVERTURE_MARKS", "MIN_TRADES_GAGNANT",
 ]

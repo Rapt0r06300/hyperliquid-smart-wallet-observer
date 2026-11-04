@@ -4421,8 +4421,48 @@ def run_historical_trade_replay(
     }
 
 
+def evaluate_objective_independent(net_usd_per_day: object, *, target_usd_per_day: object = OBJECTIVE_USD_PER_DAY) -> dict[str, Any]:
+    """Record small measured gains without using the target as a discovery filter."""
+    if (
+        isinstance(net_usd_per_day, bool)
+        or not isinstance(net_usd_per_day, (int, float))
+        or not math.isfinite(float(net_usd_per_day))
+        or isinstance(target_usd_per_day, bool)
+        or not isinstance(target_usd_per_day, (int, float))
+        or not math.isfinite(float(target_usd_per_day))
+    ):
+        return {"status": "UNMEASURABLE", "reason": "NON_FINITE_OBJECTIVE_INPUT", "paper_read_only": True, "real_execution": False}
+    value = float(net_usd_per_day)
+    target = float(target_usd_per_day)
+    return {
+        "status": "PROVEN" if value >= target else "PROMISING" if value > 0 else "REJECTED",
+        "net_usd_per_day": value,
+        "target_usd_per_day": target,
+        "target_reached": value >= target,
+        "discovery_filter_applied": False,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def hash_cache_invalidation_receipt(
+    *, previous_asset_sha256: object, current_asset_sha256: object, cached_asset_sha256: object | None
+) -> dict[str, object]:
+    """Require cache invalidation when a SAFE asset identity changes."""
+    values = (previous_asset_sha256, current_asset_sha256)
+    if any(not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdefABCDEF" for char in value) for value in values):
+        return {"status": "UNMEASURABLE", "reason": "ASSET_HASH_INVALID"}
+    if cached_asset_sha256 is not None and (not isinstance(cached_asset_sha256, str) or len(cached_asset_sha256) != 64):
+        return {"status": "UNMEASURABLE", "reason": "CACHE_HASH_INVALID"}
+    changed = previous_asset_sha256.lower() != current_asset_sha256.lower()
+    invalidated = changed and (cached_asset_sha256 is None or cached_asset_sha256.lower() != current_asset_sha256.lower())
+    return {"status": "PROVEN" if (not changed or invalidated) else "REJECTED", "asset_changed": changed, "cache_invalidated": invalidated, "real_execution": False}
+
+
 __all__ = [
     "OBJECTIVE_USD_PER_DAY", "PAPER_CAPITAL_USD", "evaluate_current_copy_vault",
+    "evaluate_objective_independent",
+    "hash_cache_invalidation_receipt",
     "load_improvement_history", "materialize_safe_workspace", "record_frozen_candidate",
     "run_historical_trade_replay", "run_local_campaign",
 ]

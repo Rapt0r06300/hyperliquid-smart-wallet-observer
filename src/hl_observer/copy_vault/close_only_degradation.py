@@ -28,4 +28,16 @@ def action_autorisee(action: Any, *, donnees_completes: bool) -> dict[str, Any]:
     return {"autorise": False, "raison": "ACTION_INCONNUE_DONNEES_INCOMPLETES"}
 
 
-__all__ = ["action_autorisee", "OPEN", "ADD", "REDUCE", "CLOSE"]
+def close_only_receipt(action: Any, *, donnees_completes: bool) -> dict[str, Any]:
+    """Return a paper receipt for close-only degradation and fail closed on bad flags."""
+    if not isinstance(donnees_completes, bool):
+        return {"status": "UNMEASURABLE", "reason": "COMPLETENESS_FLAG_INVALID"}
+    result = action_autorisee(action, donnees_completes=donnees_completes)
+    if str(action).upper() not in (*_AUGMENTE, *_REDUIT):
+        status = "UNMEASURABLE"
+    else:
+        status = "PROVEN"
+    return {"status": status, "allowed": result["autorise"], "reason": result["raison"], "close_only": not donnees_completes}
+
+
+__all__ = ["action_autorisee", "close_only_receipt", "OPEN", "ADD", "REDUCE", "CLOSE"]

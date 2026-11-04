@@ -52,7 +52,10 @@ from __future__ import annotations
 
 import math
 import random
+import statistics
 from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 SELECTION_MAX = "SELECTION_PAR_MAXIMUM"          # ce que fait le code aujourd'hui
 SELECTION_PLATEAU = "SELECTION_PAR_PLATEAU"      # ce qu'on propose
@@ -233,10 +236,139 @@ def borne_du_hasard(
     )
 
 
+def compare_leaders_to_activity_placebos(
+    leaders: Sequence[Mapping[str, Any]],
+    placebo_wallets: Sequence[Mapping[str, Any]],
+    *,
+    cohort_field: str = "cohort_id",
+    activity_field: str = "activity_count",
+    net_field: str = "net_usd",
+    cost_field: str = "cost_usd",
+    identity_field: str = "wallet_id",
+    seed: int = 7,
+) -> dict[str, Any]:
+    """Compare leaders with distinct placebo wallets in the same cohort and cost bucket.
+
+    A placebo is eligible only when its temporal cohort, activity count and exact
+    observed cost match the leader. Matching is without replacement and deterministic
+    under ``seed``; duplicate identities, missing values or an under-sized placebo
+    bucket fail closed. The result is a PAPER/read-only comparison and never a claim
+    of economic causality.
+    """
+    base: dict[str, Any] = {
+        "status": "UNMEASURABLE",
+        "verdict": "INSUFFICIENT_DATA",
+        "reason": None,
+        "n_leaders": len(leaders or []),
+        "n_placebos": len(placebo_wallets or []),
+        "n_pairs": 0,
+        "leader_mean_net_usd": None,
+        "placebo_mean_net_usd": None,
+        "delta_mean_net_usd": None,
+        "paired_differences_usd": [],
+        "missing_match_groups": [],
+        "same_cohort": True,
+        "same_activity": True,
+        "same_costs": True,
+        "selection": "seeded_without_replacement",
+        "real_execution": False,
+    }
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        base["reason"] = "seed_invalide"
+        return base
+    if not leaders or not placebo_wallets:
+        base["reason"] = "leaders_ou_placebos_absents"
+        return base
+
+    fields = (cohort_field, activity_field, net_field, cost_field, identity_field)
+
+    def normalize(rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, Mapping) or any(field not in row for field in fields):
+                return [], "champ_manquant"
+            identity = row[identity_field]
+            cohort = row[cohort_field]
+            activity = row[activity_field]
+            net = row[net_field]
+            cost = row[cost_field]
+            if identity is None or cohort is None or isinstance(activity, bool) or not isinstance(activity, int) or activity < 1:
+                return [], "identifiant_ou_activite_invalide"
+            if isinstance(identity, (list, dict, set)) or isinstance(cohort, (list, dict, set)):
+                return [], "identifiant_ou_cohorte_invalide"
+            identity_key = str(identity)
+            if not identity_key or identity_key in seen:
+                return [], "identite_dupliquee"
+            seen.add(identity_key)
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
+                   for value in (net, cost)) or float(cost) < 0.0:
+                return [], "net_ou_cout_invalide"
+            normalized.append({
+                "identity": identity_key,
+                "cohort": cohort,
+                "activity": activity,
+                "net": float(net),
+                "cost": float(cost),
+            })
+        return normalized, None
+
+    leader_rows, error = normalize(leaders)
+    if error:
+        base["reason"] = f"leaders:{error}"
+        return base
+    placebo_rows, error = normalize(placebo_wallets)
+    if error:
+        base["reason"] = f"placebos:{error}"
+        return base
+    leaders_ids = {row["identity"] for row in leader_rows}
+    buckets: dict[tuple[Any, int, float], list[dict[str, Any]]] = {}
+    for row in placebo_rows:
+        if row["identity"] not in leaders_ids:
+            buckets.setdefault((row["cohort"], row["activity"], row["cost"]), []).append(row)
+
+    rng = random.Random(seed)
+    differences: list[float] = []
+    missing: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for leader in leader_rows:
+        key = (leader["cohort"], leader["activity"], leader["cost"])
+        candidates = [row for row in buckets.get(key, []) if row["identity"] not in used]
+        if not candidates:
+            missing.append({"cohort": leader["cohort"], "activity": leader["activity"], "cost": leader["cost"]})
+            continue
+        chosen = rng.choice(candidates)
+        used.add(chosen["identity"])
+        differences.append(leader["net"] - chosen["net"])
+
+    base["n_pairs"] = len(differences)
+    base["paired_differences_usd"] = [round(value, 12) for value in differences]
+    base["missing_match_groups"] = missing
+    if missing or len(differences) < 2:
+        base["reason"] = "placebo_apparie_insuffisant"
+        return base
+    leader_nets = [row["net"] for row in leader_rows]
+    selected_placebo_nets = [leader["net"] - delta for leader, delta in zip(leader_rows, differences, strict=False)]
+    base.update(
+        status="PROVEN",
+        verdict="MESURE_PLACEBO_APPARIEE",
+        leader_mean_net_usd=statistics.fmean(leader_nets),
+        placebo_mean_net_usd=statistics.fmean(selected_placebo_nets),
+        delta_mean_net_usd=statistics.fmean(differences),
+    )
+    return base
+
+
+def comparer_leaders_placebos_activite(leaders: Sequence[Mapping[str, Any]], placebo_wallets: Sequence[Mapping[str, Any]], **kwargs: Any) -> dict[str, Any]:
+    """French alias for ``compare_leaders_to_activity_placebos``."""
+    return compare_leaders_to_activity_placebos(leaders, placebo_wallets, **kwargs)
+
+
 __all__ = [
     "SELECTION_MAX", "SELECTION_PLATEAU",
     "VERDICT_BRUIT", "VERDICT_SIGNAL", "VERDICT_INSUFFISANT",
     "BorneDuHasard",
     "selection_par_maximum", "selection_par_plateau",
     "permuter_les_sens", "borne_du_hasard",
+    "compare_leaders_to_activity_placebos", "comparer_leaders_placebos_activite",
 ]

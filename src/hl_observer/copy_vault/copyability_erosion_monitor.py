@@ -41,4 +41,23 @@ class MoniteurErosion:
                 "gap_ancien": round(vieux, 8), "raison": "EROSION_COPYABILITE" if declasse else None}
 
 
-__all__ = ["MoniteurErosion"]
+def erosion_receipt(
+    observations: list[tuple[Any, Any]], *, min_samples: int = 4, threshold: float = 0.0
+) -> dict[str, Any]:
+    """Compare old/recent net gaps and remain MORE_DATA below the sample gate."""
+    if isinstance(min_samples, bool) or not isinstance(min_samples, int) or min_samples < 2:
+        return {"status": "UNMEASURABLE", "reason": "min_samples_must_be_at_least_two"}
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not math.isfinite(float(threshold)):
+        return {"status": "UNMEASURABLE", "reason": "threshold_must_be_finite"}
+    monitor = MoniteurErosion(min_echantillons=min_samples, seuil_hausse=float(threshold))
+    for leader_edge, copy_edge in observations:
+        observed = monitor.observer(leader_edge, copy_edge)
+        if not observed.get("ok"):
+            return {"status": "UNMEASURABLE", "reason": observed["raison"]}
+    verdict = monitor.verdict()
+    return {"status": "PROVEN" if len(observations) >= min_samples else "MORE_DATA",
+            "samples": len(observations), "copyability_erosion": bool(verdict.get("declasse")),
+            "verdict": verdict}
+
+
+__all__ = ["MoniteurErosion", "erosion_receipt"]

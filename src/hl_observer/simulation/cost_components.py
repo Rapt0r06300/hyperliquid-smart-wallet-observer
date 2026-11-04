@@ -31,6 +31,8 @@ _BPS = 10_000.0
 
 def _pos(x) -> float | None:
     """Nombre fini strictement positif, sinon None (un prix/mid <= 0 n'est pas mesurable)."""
+    if isinstance(x, bool):
+        return None
     try:
         v = float(x)
     except (TypeError, ValueError):
@@ -138,7 +140,7 @@ def decompose_execution(
             if (best_touch is not None and avg_fill_price is not None) else None)
     lat = latency_bps(mid_decision, mid_at_fill, side) if (mid_decision is not None and mid_at_fill is not None) else None
     fees = None
-    if fee_bps is not None:
+    if fee_bps is not None and not isinstance(fee_bps, bool):
         try:
             fv = float(fee_bps)
             fees = round(fv, 6) if math.isfinite(fv) else None
@@ -192,8 +194,27 @@ def depuis_carnet_causal(
     )
 
 
+def mark_mid_cost_receipt(
+    *,
+    side: object,
+    mid_decision: object,
+    best_touch: object,
+    avg_fill_price: object,
+    mid_at_fill: object,
+    fee_bps: object,
+) -> dict[str, Any]:
+    """Require observed depth and fill timing before certifying a mid-marked trade."""
+    values = (mid_decision, best_touch, avg_fill_price, mid_at_fill, fee_bps)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in values):
+        return {"status": "UNMEASURABLE", "reason": "CAUSAL_COST_INPUT_MISSING"}
+    components = decompose_execution(side=side, mid_decision=float(mid_decision), best_touch=float(best_touch), avg_fill_price=float(avg_fill_price), mid_at_fill=float(mid_at_fill), fee_bps=float(fee_bps))
+    if components.total_bps is None:
+        return {"status": "UNMEASURABLE", "reason": "CAUSAL_COST_COMPONENT_MISSING", **components.to_dict()}
+    return {"status": "PROVEN", "depth_observed": True, "spread_included": True, **components.to_dict()}
+
+
 __all__ = [
     "SCHEMA_VERSION", "DEFAULT_MAX_OBSERVATION_AGE_MS", "CostComponents",
     "spread_bps", "slippage_bps", "latency_bps",
-    "decompose_execution", "depuis_carnet_causal",
+    "decompose_execution", "depuis_carnet_causal", "mark_mid_cost_receipt",
 ]

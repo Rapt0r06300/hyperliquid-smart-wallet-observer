@@ -187,3 +187,20 @@ def build_release_status(
         "local_asset_cache_dir": str(dataset_asset_cache_dir(root)),
         "local_materialized_dir": str(dataset_materialized_dir(root)),
     }
+
+
+def release_asset_verification_receipt(
+    path: Path,
+    asset: ReleaseAsset,
+    *,
+    repository: str,
+    release_tag: str,
+) -> dict[str, object]:
+    """Certify a local asset only when its release identity and SHA match."""
+    if not str(repository).strip() or not str(release_tag).strip():
+        return {"status": "UNMEASURABLE", "reason": "RELEASE_IDENTITY_INVALID"}
+    try:
+        verify_asset(path, asset)
+    except DatasetBridgeError as exc:
+        return {"status": "REJECTED", "reason": str(exc)}
+    return {"status": "PROVEN", "repository": repository, "release_tag": release_tag, "asset": asset.name, "sha256": asset.sha256}

@@ -319,10 +319,45 @@ def explore_copy_vault_v8_entry_efficiency_train(
     }
 
 
+def train_only_markout_receipt(
+    train_rows: Sequence[Mapping[str, Any]],
+    candidate_rows: Sequence[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    min_history: int = 5,
+) -> dict[str, Any]:
+    """Freeze a markout filter on TRAIN and apply it without reading candidate outcomes."""
+    if isinstance(cutoff_ms, bool) or not isinstance(cutoff_ms, int) or cutoff_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_CUTOFF", "paper_read_only": True}
+    def _ts(row: Mapping[str, Any]) -> int | None:
+        value = row.get("entry_ts_ms")
+        return value if type(value) is int and value > 0 else None
+    if any(_ts(row) is None or int(_ts(row)) > cutoff_ms for row in train_rows or ()):
+        return {"status": "UNMEASURABLE", "reason": "TRAIN_CUTOFF_VIOLATION", "paper_read_only": True}
+    if any(_ts(row) is None or int(_ts(row)) <= cutoff_ms for row in candidate_rows or ()):
+        return {"status": "UNMEASURABLE", "reason": "CANDIDATE_CUTOFF_VIOLATION", "paper_read_only": True}
+    selected, audit = learn_train_only_markout_filter(
+        train_rows, candidate_rows, min_history=min_history,
+    )
+    frozen = audit.get("status") == "TRAIN_FILTER_FROZEN"
+    return {
+        "status": "PROVEN" if frozen else "MORE_DATA",
+        "reason": None if frozen else str(audit.get("status") or "TRAIN_FILTER_NOT_FROZEN"),
+        "selected_candidates": len(selected),
+        "audit": audit,
+        "train_only": True,
+        "candidate_future_markout_ignored": audit.get("candidate_future_markout_ignored") is True,
+        "cutoff_ms": cutoff_ms,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "MECHANISM",
     "SCHEMA_VERSION",
     "entry_efficiency_score",
     "explore_copy_vault_v8_entry_efficiency_train",
     "select_entry_efficiency",
+    "train_only_markout_receipt",
 ]

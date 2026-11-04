@@ -40,4 +40,19 @@ def attribuer(prix_fill_leader: Any, prix_marche_reference: Any, sens: Any, *,
             "verdict": ("EDGE_EXECUTION_NON_REPLICABLE" if exceptionnel else "PRIX_REPLICABLE")}
 
 
-__all__ = ["attribuer", "UNMEASURABLE"]
+def price_quality_receipt(
+    *, prix_fill_leader: Any, prix_marche_reference: Any, sens: Any, seuil_bps: float = 5.0
+) -> dict[str, Any]:
+    """Return an explicit copyability verdict for a causal leader price."""
+    result = attribuer(prix_fill_leader, prix_marche_reference, sens, seuil_bps=seuil_bps)
+    if result.get("avantage_execution_bps") == UNMEASURABLE:
+        return {"status": UNMEASURABLE, **result}
+    return {
+        "status": "PROVEN",
+        "execution_edge_bps": result["avantage_execution_bps"],
+        "copyable": bool(result["replicable"]),
+        "verdict": result["verdict"],
+    }
+
+
+__all__ = ["attribuer", "price_quality_receipt", "UNMEASURABLE"]

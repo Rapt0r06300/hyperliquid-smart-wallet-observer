@@ -34,4 +34,16 @@ class Bootstrap:
         return {"ok": bool(self._pret), "raison": ("OK" if self._pret else "BOOTSTRAP_NON_FAIT")}
 
 
-__all__ = ["Bootstrap"]
+def bootstrap_entry_receipt(*, bootstrap_ready: Any, live_action: Any) -> dict[str, Any]:
+    """Refuse a synthetic OPEN when startup begins in an already-open position."""
+
+    if type(bootstrap_ready) is not bool or not isinstance(live_action, str):
+        return {"status": "UNMEASURABLE", "new_entry": False, "reason": "BOOTSTRAP_INPUT_INVALID", "paper_read_only": True}
+    action = live_action.strip().upper()
+    if not bootstrap_ready:
+        return {"status": "PROVEN", "new_entry": False, "reason": "BOOTSTRAP_REQUIRED", "paper_read_only": True}
+    return {"status": "PROVEN", "new_entry": action in {"OPEN", "ADD"},
+            "reason": "BOOTSTRAP_READY", "paper_read_only": True}
+
+
+__all__ = ["Bootstrap", "bootstrap_entry_receipt"]

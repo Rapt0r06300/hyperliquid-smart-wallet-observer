@@ -66,6 +66,19 @@ from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 
 
+def causal_book_receipt(
+    *, book_ts_ms: object, visible_ts_ms: object,
+    decision_ts_ms: object, source_reception_ts_ms: object,
+) -> dict[str, Any]:
+    """Refuse a book that could not have been visible before the decision."""
+
+    values = (book_ts_ms, visible_ts_ms, decision_ts_ms, source_reception_ts_ms)
+    if any(type(value) is not int or value <= 0 for value in values):
+        return {"allowed": False, "status": "UNMEASURABLE", "reason": "TIMESTAMP_INCOMPLETE"}
+    allowed = bool(source_reception_ts_ms <= visible_ts_ms <= decision_ts_ms and book_ts_ms <= decision_ts_ms)
+    return {"allowed": allowed, "status": "PROVEN" if allowed else "REJECTED", "reason": "OK" if allowed else "BOOK_NOT_CAUSAL"}
+
+
 def _strict_positive_timestamp(value: object) -> int | None:
     """Require an observed integer timestamp; do not parse or truncate input."""
     if type(value) is not int or value <= 0:
@@ -1292,6 +1305,7 @@ def evaluate_frozen(
 
 
 __all__ = [
+    "causal_book_receipt",
     "CHECKPOINT_COLLECTOR_PROTOCOL", "COPY_DELAY_MS", "HORIZONS_MS", "MAX_OPEN_POSITIONS",
     "MAX_TARGET_LAG_MS", "METAORDER_GAP_MS", "NOTIONAL_USD", "SCHEMA_VERSION",
     "calibrate_train_only", "canonical_metaorder_id", "classify_live_entry_action",

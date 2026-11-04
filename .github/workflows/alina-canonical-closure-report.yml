@@ -46,6 +46,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   report:
+    # A report commit must never retrigger its own publication loop.  Scheduled
+    # and manual runs remain available; bot-created pushes are terminal no-ops.
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 FRAC_MAX_PAR_STRAT_DEFAUT = 0.5     # aucune piste ne prend plus de la moitié du capital
@@ -95,6 +96,19 @@ def allouer(
         motif="ALLOUE_PAR_EDGE_SUR_RISQUE_PLAFONNE",
         ecartees=tuple(ecartees),
     )
+
+
+def capital_allocation_receipt(strategies: Sequence[Strategie], *, capital_usd: Any) -> dict[str, Any]:
+    """Return allocation only when capital and strategy names are finite and unique."""
+
+    try:
+        capital = float(capital_usd)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "CAPITAL_INVALID"}
+    if not math.isfinite(capital) or capital < 0.0 or len({s.nom for s in strategies}) != len(strategies):
+        return {"status": "UNMEASURABLE", "reason": "ALLOCATION_INPUT_INVALID"}
+    allocation = allouer(strategies)
+    return {"status": "PROVEN", "allocation": allocation.as_dict(), "amounts": allocation.montants(capital), "sum_fraction": round(sum(allocation.poids.values()) + allocation.cash_frac, 12)}
 
 
 __all__ = [

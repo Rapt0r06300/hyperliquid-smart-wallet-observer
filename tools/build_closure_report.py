@@ -23,6 +23,27 @@ def load(path: Path, default=None):
         return default
 
 
+def unique_trade_count_receipt(*, trade_ids: list[str], unique_trade_ids: list[str], declared_total: int) -> dict[str, object]:
+    unique = set(unique_trade_ids)
+    valid = bool(trade_ids) and len(unique) == declared_total and len(unique) <= len(trade_ids) and all(str(value).strip() for value in trade_ids)
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "UNIQUE_TRADE_COUNT_RECONCILED" if valid else "UNIQUE_TRADE_COUNT_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def global_closure_evidence_receipt(*, required_sections: tuple[str, ...], observed_sections: tuple[str, ...], evidence_digest: str) -> dict[str, object]:
+    valid = bool(required_sections) and set(required_sections).issubset(set(observed_sections)) and len(evidence_digest) == 64
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "GLOBAL_CLOSURE_EVIDENCE_COMPLETE" if valid else "GLOBAL_CLOSURE_EVIDENCE_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def scoreboard_evidence_receipt(*, scoreboard_sha: str, campaign_id: str, phase_epoch: int, source_collection_epoch: int) -> dict[str, object]:
+    valid = len(scoreboard_sha) == 64 and bool(campaign_id) and isinstance(phase_epoch, int) and phase_epoch > 0 and isinstance(source_collection_epoch, int) and source_collection_epoch > 0
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "SCOREBOARD_EVIDENCE_BOUND" if valid else "SCOREBOARD_EVIDENCE_UNBOUND", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+def terminal_campaign_receipt(*, campaign_id: str, status: str, phase: str, epoch: int) -> dict[str, object]:
+    valid = bool(campaign_id) and status == "COMPLETE" and phase == "ANALYZE" and isinstance(epoch, int) and epoch > 0
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "CAMPAIGN_TERMINAL" if valid else "CAMPAIGN_NON_TERMINAL", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
 def digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.validation_gates import (
+    dataset_cutoff_gate,
     out_of_sample_gate,
     profit_factor,
     regime_robustness_gate,
@@ -73,3 +74,21 @@ def test_lookahead_rejects_future_data_event():
     assert lk["violation_count"] == 1
     assert r["verdict"] == "REJECT"
     assert r["real_execution"] is False
+
+
+def test_dataset_cutoff_gate_rejects_post_cutoff_publication():
+    assert dataset_cutoff_gate(
+        [{"published_at_ms": 1_000}, {"published_at_ms": 2_000}],
+        cutoff_ms=1_500,
+    )["passed"] is False
+    good = dataset_cutoff_gate(
+        [{"published_at_ms": 1_000}, {"published_at_ms": 1_500}],
+        cutoff_ms=1_500,
+    )
+    assert good["passed"] is True and good["post_cutoff_count"] == 0
+
+
+def test_dataset_cutoff_gate_is_fail_closed_for_missing_timestamp():
+    result = dataset_cutoff_gate([{"published_at_ms": None}], cutoff_ms=1_500)
+    assert result["passed"] is False
+    assert result["reason"] == "INVALID_DATASET_TIMESTAMP"

@@ -22,6 +22,7 @@ Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 import json
+import math
 import statistics
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -181,5 +182,64 @@ def classer_population(path: str, *, cout_bps: float = FRAIS_TAKER_ROUNDTRIP_BPS
     return lignes
 
 
+def temporal_placebo_receipt(*, observed_net_bps: float, placebo_net_bps: float,
+                             observed_count: int, placebo_count: int, min_samples: int = 30) -> dict[str, Any]:
+    """Compare the observed copy edge with an activity-matched temporal placebo."""
+    values = (observed_net_bps, placebo_net_bps)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in values):
+        return {"status": UNMEASURABLE, "reason": "net_markout_missing"}
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in (observed_count, placebo_count)):
+        return {"status": UNMEASURABLE, "reason": "sample_counts_invalid"}
+    if isinstance(min_samples, bool) or not isinstance(min_samples, int) or min_samples <= 0:
+        return {"status": UNMEASURABLE, "reason": "min_samples_invalid"}
+    if observed_count < min_samples or placebo_count < min_samples:
+        return {"status": "MORE_DATA", "reason": "placebo_or_observed_sample_insufficient"}
+    edge_vs_placebo = float(observed_net_bps) - float(placebo_net_bps)
+    return {"status": "PROVEN", "observed_net_bps": float(observed_net_bps),
+            "placebo_net_bps": float(placebo_net_bps), "edge_vs_placebo_bps": round(edge_vs_placebo, 8),
+            "beats_placebo": edge_vs_placebo > 0,
+            "decision": "CANDIDATE" if edge_vs_placebo > 0 else "REJECTED"}
+
+
+def compare_l2_confirmation_receipt(
+    oos_rows: Sequence[Mapping[str, Any]], *, cutoff_ms: int,
+) -> dict[str, Any]:
+    """Compare immediate versus confirmed-L2 entries on paired OOS episodes."""
+    if isinstance(cutoff_ms, bool) or not isinstance(cutoff_ms, int) or cutoff_ms <= 0:
+        return {"status": UNMEASURABLE, "reason": "invalid_cutoff", "paper_read_only": True}
+    pairs: dict[str, dict[str, float]] = {}
+    for row in oos_rows or ():
+        if not isinstance(row, Mapping):
+            return {"status": UNMEASURABLE, "reason": "invalid_row", "paper_read_only": True}
+        episode = str(row.get("episode_id") or "").strip()
+        mode = str(row.get("entry_mode") or "").strip().upper()
+        ts = row.get("signal_ts_ms")
+        try:
+            net_bps = float(row.get("net_bps"))
+        except (TypeError, ValueError):
+            return {"status": UNMEASURABLE, "reason": "missing_net_bps", "paper_read_only": True}
+        if not episode or mode not in {"IMMEDIATE", "L2_CONFIRMED"} or isinstance(ts, bool) or not isinstance(ts, int) or ts <= cutoff_ms or not math.isfinite(net_bps):
+            return {"status": UNMEASURABLE, "reason": "invalid_oos_split_or_mode", "paper_read_only": True}
+        bucket = pairs.setdefault(episode, {})
+        if mode in bucket:
+            return {"status": UNMEASURABLE, "reason": "duplicate_episode_mode", "paper_read_only": True}
+        bucket[mode] = net_bps
+    complete = [bucket for bucket in pairs.values() if set(bucket) == {"IMMEDIATE", "L2_CONFIRMED"}]
+    if not complete or len(complete) != len(pairs):
+        return {"status": UNMEASURABLE, "reason": "unpaired_oos_episode", "paper_read_only": True}
+    delta = sum(item["L2_CONFIRMED"] - item["IMMEDIATE"] for item in complete) / len(complete)
+    return {
+        "status": "COMPARABLE",
+        "paired_oos_episodes": len(complete),
+        "mean_delta_net_bps": round(delta, 8),
+        "same_oos_episodes": True,
+        "costs_already_net_of_observation": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+    }
+
+
 __all__ = ["charger_forward", "markout_bps", "evaluer_wallet", "classer_population",
+           "temporal_placebo_receipt", "compare_l2_confirmation_receipt",
            "FRAIS_TAKER_ROUNDTRIP_BPS", "UNMEASURABLE"]

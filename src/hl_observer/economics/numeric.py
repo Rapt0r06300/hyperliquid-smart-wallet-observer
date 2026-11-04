@@ -45,6 +45,18 @@ def decimal_difference(left: object, right: object) -> Decimal | None:
     return decimal_sum((left_value, right_value.copy_negate()))
 
 
+def bps_to_quote_usd_receipt(*, notional_usd: object, bps: object) -> dict[str, object]:
+    """Convert measured basis points to quote USD with Decimal arithmetic."""
+    notional = decimal_value(notional_usd)
+    points = decimal_value(bps)
+    if notional is None or points is None or notional < 0 or points < 0:
+        return {"status": "UNMEASURABLE", "reason": "NUMERIC_INPUT_INVALID"}
+    with localcontext() as context:
+        context.prec = max(28, len(notional.as_tuple().digits) + len(points.as_tuple().digits) + 8)
+        quote = notional * points / Decimal("10000")
+    return {"status": "PROVEN", "quote_usd": format(quote, "f"), "notional_usd": format(notional, "f"), "bps": format(points, "f")}
+
+
 def float_not_above(value: Decimal) -> float | None:
     """Convert Decimal to float while never rounding PnL upward."""
     return _conservative_float(value, upward=False)

@@ -124,3 +124,19 @@ def _safe_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
 
+
+def coin_sample_receipt(*, fills_count: int, min_fills: int = 3) -> dict[str, object]:
+    """Keep per-coin edge unknown until its independent sample is sufficient."""
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in (fills_count, min_fills)):
+        return {"status": "UNMEASURABLE", "reason": "counts_must_be_integers"}
+    if fills_count < 0 or min_fills <= 0:
+        return {"status": "UNMEASURABLE", "reason": "invalid_sample_bounds"}
+    known = fills_count >= min_fills
+    return {
+        "status": "PROVEN" if known else "MORE_DATA",
+        "fills_count": fills_count,
+        "min_fills": min_fills,
+        "score_known": known,
+        "reason": "minimum_coin_sample_met" if known else "coin_sample_insufficient",
+    }
+

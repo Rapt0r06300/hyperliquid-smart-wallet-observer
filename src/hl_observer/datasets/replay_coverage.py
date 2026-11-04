@@ -92,6 +92,22 @@ def build_safe_coverage_matrix(
     }
 
 
+def safe_coverage_receipt(
+    manifests: Iterable[Mapping[str, Any]],
+    *,
+    required_start_ts_ms: object,
+    required_end_ts_ms: object,
+) -> dict[str, Any]:
+    """Certify a requested window only when one SAFE interval covers it."""
+    start = _int(required_start_ts_ms)
+    end = _int(required_end_ts_ms)
+    if start is None or end is None or end < start:
+        return {"status": "UNMEASURABLE", "reason": "WINDOW_INVALID"}
+    matrix = build_safe_coverage_matrix(manifests)
+    matching = [row for row in matrix["rows"] if int(row["start_ts_ms"]) <= start and int(row["end_ts_ms"]) >= end]
+    return {"status": "PROVEN" if matching else "UNMEASURABLE", "window_start_ts_ms": start, "window_end_ts_ms": end, "covering_partitions": len(matching), "authoritative_for_replay": False}
+
+
 def _merge_intervals(intervals: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
     rows = sorted(
         (int(start), int(end))
@@ -117,4 +133,4 @@ def _int(value: Any) -> int | None:
         return None
 
 
-__all__ = ["build_safe_coverage_matrix"]
+__all__ = ["build_safe_coverage_matrix", "safe_coverage_receipt"]

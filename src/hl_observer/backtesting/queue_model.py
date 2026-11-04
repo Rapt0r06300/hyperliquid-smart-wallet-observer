@@ -146,3 +146,27 @@ def fill_borne_par_100(
         if etat.rempli and not modele_100_rempli:
             return False   # on serait rempli AVANT le modèle 100 % → invariant violé
     return True
+
+
+def maker_fill_bound_receipt(*, queue_ahead: object, trade_volume: object, observed_l2_delta: object) -> dict[str, Any]:
+    """Bound unknown maker fills by observed FIFO queue volume, never by price touch."""
+
+    try:
+        queue, trades, delta = float(queue_ahead), float(trade_volume), float(observed_l2_delta)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "QUEUE_OBSERVATION_INVALID"}
+    if not all(math.isfinite(value) for value in (queue, trades, delta)) or min(queue, trades) < 0.0:
+        return {"status": "UNMEASURABLE", "reason": "QUEUE_OBSERVATION_INVALID"}
+    return {"status": "PROVEN", "fill_upper_bound": bool(trades > queue), "cancellation_component": cancels_nets(delta, trades), "double_counting": False}
+
+
+def reconcile_trade_and_delta_receipt(*, book_change: object, trade_volume: object) -> dict[str, Any]:
+    """Expose one reconciliation so trade volume is not counted twice with the L2 delta."""
+
+    try:
+        change, trade = float(book_change), float(trade_volume)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "L2_VOLUME_INVALID"}
+    if not math.isfinite(change) or not math.isfinite(trade) or trade < 0.0:
+        return {"status": "UNMEASURABLE", "reason": "L2_VOLUME_INVALID"}
+    return {"status": "PROVEN", "trade_volume": trade, "net_cancellation": cancels_nets(change, trade), "counted_once": True}

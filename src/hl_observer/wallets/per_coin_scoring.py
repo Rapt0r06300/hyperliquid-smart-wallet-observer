@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 from pydantic import BaseModel, Field
 
 from hl_observer.wallets.wallet_coin_profile import WalletCoinProfile
@@ -67,4 +69,25 @@ def score_wallet_coin(profile: WalletCoinProfile) -> WalletCoinScore:
         decision=decision,
         reasons=reasons,
     )
+
+
+def normalize_coin_risk_receipt(*, score: float, liquidity: float, volatility: float) -> dict[str, object]:
+    """Normalize coin scores so thin/deeply volatile instruments are comparable."""
+    values = (score, liquidity, volatility)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(float(value))
+           for value in values):
+        return {"status": "UNMEASURABLE", "reason": "non_finite_numeric_observation"}
+    if score < 0 or liquidity <= 0 or volatility < 0:
+        return {"status": "UNMEASURABLE", "reason": "positive_liquidity_and_non_negative_volatility_required"}
+    liquidity_factor = min(1.0, liquidity / 100.0)
+    normalized_score = max(0.0, min(100.0, score * liquidity_factor / (1.0 + volatility)))
+    return {
+        "status": "PROVEN",
+        "score": float(score),
+        "liquidity": float(liquidity),
+        "volatility": float(volatility),
+        "liquidity_factor": round(liquidity_factor, 8),
+        "normalized_score": round(normalized_score, 8),
+        "risk_adjusted": normalized_score <= score,
+    }
 

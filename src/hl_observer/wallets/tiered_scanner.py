@@ -94,7 +94,16 @@ def apply_promotions(
     return moves
 
 
+def tier_fairness_receipt(plans: tuple[WalletTierPlan, ...], *, max_ws: int) -> dict[str, object]:
+    """Expose tier capacity and discovery starvation before any scanner acts."""
+    if type(max_ws) is not int or max_ws <= 0:
+        return {"status": "UNMEASURABLE", "reason": "MAX_WS_INVALID", "paper_read_only": True}
+    hot = sum(1 for plan in plans if plan.tier == HOT)
+    discovery = sum(1 for plan in plans if plan.tier == DISCOVERY)
+    return {"status": "PROVEN", "hot_count": hot, "discovery_count": discovery, "ws_capacity_ok": hot <= max_ws, "starvation": discovery > 0 and hot >= max_ws, "paper_read_only": True, "real_execution": False}
+
+
 __all__ = [
     "HOT", "WARM", "COLD", "DISCOVERY", "WalletTierPlan",
-    "assign_tiers", "ws_subscription_count", "due_for_refresh", "apply_promotions",
+    "assign_tiers", "ws_subscription_count", "due_for_refresh", "apply_promotions", "tier_fairness_receipt",
 ]

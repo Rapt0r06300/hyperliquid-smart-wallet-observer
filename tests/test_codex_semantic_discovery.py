@@ -11,6 +11,7 @@ from hl_observer.research.semantic_discovery import (
     generate_semantic_plans,
     load_catalog,
     rank_semantic_plans,
+    summarize_semantic_trials,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +96,30 @@ def test_generation_is_deterministic_structured_deduplicated_and_filters_invalid
         for p in first
     )
     assert all("data_feasibility" in p for p in first)
+
+
+def test_trial_accounting_keeps_duplicate_semantic_attempts_for_multiple_testing():
+    result = summarize_semantic_trials(
+        [
+            {"trial_id": "T-1", "semantic_key": "same", "outcome": "REJECTED"},
+            {"trial_id": "T-2", "semantic_key": "same", "outcome": "PROVEN"},
+        ]
+    )
+    assert result["trial_count"] == 2
+    assert result["pbo_trial_count"] == 2
+    assert result["dsr_trial_count"] == 2
+    assert result["semantic_key_counts"] == {"same": 2}
+    assert result["duplicate_semantic_keys"] == ["same"]
+
+
+def test_trial_accounting_rejects_duplicate_trial_id():
+    with pytest.raises(ValueError, match="duplicate trial_id"):
+        summarize_semantic_trials(
+            [
+                {"trial_id": "T-1", "semantic_key": "a", "outcome": "REJECTED"},
+                {"trial_id": "T-1", "semantic_key": "b", "outcome": "REJECTED"},
+            ]
+        )
 
 
 def test_disabled_family_is_refused_before_semantic_generation():

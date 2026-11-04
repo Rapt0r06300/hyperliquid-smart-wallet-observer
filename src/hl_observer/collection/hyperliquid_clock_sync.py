@@ -178,6 +178,20 @@ def _server_time_from_message(message: Mapping[str, Any]) -> int | None:
         return None
 
 
+def classify_clock_skew(evidence: Mapping[str, Any], *, max_abs_skew_ms: float = 250.0) -> dict[str, Any]:
+    """Classify a measured exchange/local clock offset; absent samples stay missing."""
+    value = evidence.get("clock_offset_ms")
+    try:
+        skew = float(value)
+        limit = float(max_abs_skew_ms)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "CLOCK_SKEW_MISSING", "paper_read_only": True}
+    import math
+    if not math.isfinite(skew) or not math.isfinite(limit) or limit < 0:
+        return {"status": "UNMEASURABLE", "reason": "CLOCK_SKEW_INVALID", "paper_read_only": True}
+    return {"status": "PROVEN" if abs(skew) <= limit else "REJECTED", "clock_offset_ms": skew, "max_abs_skew_ms": limit, "paper_read_only": True, "real_execution": False}
+
+
 __all__ = [
     "CLOCK_PROBE_USER",
     "DEFAULT_MAX_PROBE_RTT_MS",
@@ -185,4 +199,5 @@ __all__ = [
     "DEFAULT_REFRESH_INTERVAL_MS",
     "DEFAULT_REQUEST_TIMEOUT_MS",
     "HyperliquidClockSyncProbe",
+    "classify_clock_skew",
 ]

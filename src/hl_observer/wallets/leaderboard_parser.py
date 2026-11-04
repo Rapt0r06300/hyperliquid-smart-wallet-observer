@@ -115,3 +115,13 @@ def _coerce_record(item: Any) -> dict[str, Any]:
     if isinstance(item, dict):
         return item
     return {"address": str(item)}
+
+
+def schema_drift_receipt(records: list[dict[str, Any]], *, expected_fields: set[str]) -> dict[str, object]:
+    """Expose missing/extra leaderboard fields instead of silently coercing drift."""
+    if not isinstance(expected_fields, set) or not records:
+        return {"status": "UNMEASURABLE", "reason": "SCHEMA_OBSERVATION_MISSING", "paper_read_only": True}
+    observed = set().union(*(record.keys() for record in records if isinstance(record, dict)))
+    missing = sorted(expected_fields - observed)
+    extra = sorted(observed - expected_fields)
+    return {"status": "PROVEN" if not missing else "UNMEASURABLE", "missing": missing, "extra": extra, "observed_fields": sorted(observed), "paper_read_only": True, "real_execution": False}

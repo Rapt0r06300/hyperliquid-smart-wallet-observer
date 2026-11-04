@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import math
 from typing import Any
 
 
@@ -16,11 +18,25 @@ def _optional_int(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return int(float(value))
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric != int(numeric):
+            return None
+        return int(numeric)
     except (TypeError, ValueError, OverflowError):
         return None
 
 
+def _strict_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        numeric = float(value)
+        parsed = int(numeric)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(numeric) or numeric <= 0 or numeric != parsed:
+        return None
+    return parsed
 @dataclass(frozen=True, slots=True)
 class CausalTimestamp:
     exchange_ts_ms: int | None
@@ -30,6 +46,7 @@ class CausalTimestamp:
     event_id: str | None = None
     connection_id: str | None = None
     sequence: int | None = None
+    clock_source: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -48,6 +65,12 @@ class CausalTimestamp:
             and self.write_wall_ts_ms < self.recv_wall_ts_ms
         ):
             raise ValueError("write_wall_ts_ms cannot precede recv_wall_ts_ms")
+        if (
+            self.exchange_ts_ms is not None
+            and self.recv_wall_ts_ms is not None
+            and self.exchange_ts_ms > self.recv_wall_ts_ms
+        ):
+            raise ValueError("exchange_ts_ms cannot exceed recv_wall_ts_ms")
 
     @property
     def observable_at_ms(self) -> int | None:
@@ -76,6 +99,19 @@ class CausalTimestamp:
             self.recv_mono_ns,
         )
 
+    def stable_order_key(self) -> tuple[int, int, int, str]:
+        """Return a durable deterministic key for equal wall-clock timestamps."""
+
+        observable = self.observable_at_ms
+        if observable is None:
+            raise ValueError("missing durable timestamp")
+        return (
+            observable,
+            -1 if self.sequence is None else self.sequence,
+            -1 if self.recv_mono_ns is None else self.recv_mono_ns,
+            self.event_id or "",
+        )
+
 
 def causal_timestamp_from_record(record: Mapping[str, Any]) -> CausalTimestamp:
     """Read canonical names first and legacy aliases only for compatibility."""
@@ -95,6 +131,16 @@ def causal_timestamp_from_record(record: Mapping[str, Any]) -> CausalTimestamp:
             str(record["connection_id"]) if record.get("connection_id") else None
         ),
         sequence=_optional_int(record.get("sequence")),
+        clock_source=(
+            str(
+                record.get(
+                    "clock_source",
+                    record.get("clock_provenance", record.get("time_source")),
+                )
+            )
+            if record.get("clock_source", record.get("clock_provenance", record.get("time_source")))
+            else None
+        ),
     )
 
 
@@ -121,6 +167,91 @@ def current_record_age_ms(
     return None
 
 
+def causal_clock_skew_ms(
+    *, exchange_ts_ms: Any, receive_ts_ms: Any
+) -> float | None:
+    """Return measured exchange-to-receive skew; missing evidence stays missing."""
+
+    exchange = _strict_positive_int(exchange_ts_ms)
+    receive = _strict_positive_int(receive_ts_ms)
+    if exchange is None or receive is None:
+        return None
+    return float(receive - exchange)
+
+
+def causal_event_admission(
+    *,
+    event_ts_ms: Any,
+    receive_ts_ms: Any,
+    decision_ts_ms: Any,
+    feature_cutoff_ts_ms: Any | None = None,
+    max_age_ms: Any | None = None,
+) -> dict[str, Any]:
+    """Admit only observations that were available before the decision/cutoff."""
+
+    event = _strict_positive_int(event_ts_ms)
+    receive = _strict_positive_int(receive_ts_ms)
+    decision = _strict_positive_int(decision_ts_ms)
+    cutoff = (
+        _strict_positive_int(feature_cutoff_ts_ms)
+        if feature_cutoff_ts_ms is not None
+        else None
+    )
+    max_age = _strict_positive_int(max_age_ms) if max_age_ms is not None else None
+    if event is None or receive is None or decision is None or (
+        feature_cutoff_ts_ms is not None and cutoff is None
+    ) or (max_age_ms is not None and max_age is None):
+        return {"status": "UNMEASURABLE", "reason": "CAUSAL_CLOCK_MISSING", "real_execution": False}
+    if event > receive:
+        return {"status": "UNMEASURABLE", "reason": "EVENT_AFTER_RECEIVE", "real_execution": False}
+    if event > decision or receive > decision:
+        return {"status": "NO_TRADE", "reason": "EVENT_AFTER_DECISION", "real_execution": False}
+    if cutoff is not None and (event > cutoff or receive > cutoff):
+        return {"status": "NO_TRADE", "reason": "EVENT_AFTER_CUTOFF", "real_execution": False}
+    if max_age is not None and receive - event > max_age:
+        return {"status": "NO_TRADE", "reason": "RECEIVE_LATENCY_EXCEEDED", "real_execution": False}
+    return {
+        "status": "PROVEN",
+        "event_ts_ms": event,
+        "receive_ts_ms": receive,
+        "decision_ts_ms": decision,
+        "feature_cutoff_ts_ms": cutoff,
+        "real_execution": False,
+    }
+
+
+def parse_utc_epoch_ms(value: Any) -> int | None:
+    """Parse an ISO timestamp only when it carries an explicit UTC offset."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return int(parsed.astimezone(timezone.utc).timestamp() * 1000)
+
+
+def bounded_asof_match(
+    *, event_ts_ms: Any, candidate_ts_ms: Any, tolerance_ms: Any
+) -> dict[str, Any]:
+    """Match only a candidate at-or-before an event within a finite tolerance."""
+
+    event = _strict_positive_int(event_ts_ms)
+    candidate = _strict_positive_int(candidate_ts_ms)
+    tolerance = _strict_positive_int(tolerance_ms)
+    if event is None or candidate is None or tolerance is None:
+        return {"status": "UNMEASURABLE", "reason": "ASOF_CLOCK_MISSING", "real_execution": False}
+    if candidate > event:
+        return {"status": "NO_TRADE", "reason": "CANDIDATE_AFTER_EVENT", "real_execution": False}
+    age = event - candidate
+    if age > tolerance:
+        return {"status": "NO_TRADE", "reason": "ASOF_TOLERANCE_EXCEEDED", "age_ms": age, "real_execution": False}
+    return {"status": "PROVEN", "age_ms": age, "real_execution": False}
+
+
 def compare_monotonic_within_connection(
     left: CausalTimestamp,
     right: CausalTimestamp,
@@ -137,7 +268,11 @@ def compare_monotonic_within_connection(
 
 __all__ = [
     "CausalTimestamp",
+    "bounded_asof_match",
+    "causal_clock_skew_ms",
+    "causal_event_admission",
     "causal_timestamp_from_record",
     "compare_monotonic_within_connection",
     "current_record_age_ms",
+    "parse_utc_epoch_ms",
 ]

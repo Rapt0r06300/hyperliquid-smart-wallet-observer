@@ -48,4 +48,19 @@ class HeartbeatVaults:
                 "raison": ("OK" if vivant else "VAULT_SILENCIEUX")}
 
 
-__all__ = ["HeartbeatVaults"]
+def classify_connection_liveness(*, heartbeat_seen: Any, data_messages: int, subscription_ack: Any) -> dict[str, Any]:
+    """Separate a healthy silent market from a subscription that never delivered data."""
+
+    if type(heartbeat_seen) is not bool or type(subscription_ack) is not bool or type(data_messages) is not int or data_messages < 0:
+        return {"status": "UNMEASURABLE", "state": "UNKNOWN", "paper_read_only": True}
+    if not subscription_ack:
+        state = "SUBSCRIPTION_UNCONFIRMED"
+    elif data_messages == 0:
+        state = "CONNECTED_NO_DATA"
+    else:
+        state = "DATA_FLOWING"
+    return {"status": "PROVEN", "state": state, "heartbeat_seen": heartbeat_seen,
+            "data_messages": data_messages, "paper_read_only": True}
+
+
+__all__ = ["HeartbeatVaults", "classify_connection_liveness"]

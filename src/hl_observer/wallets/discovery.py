@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -291,3 +292,13 @@ def _filter_candidates_by_coin(
         for candidate in candidates
         if candidate.coin is None or candidate.coin.upper() in requested
     ]
+
+
+def validate_wallet_address_observation(address: object) -> dict[str, object]:
+    """Accept only an observed full address; truncated display values stay unusable."""
+    value = str(address or "").strip()
+    if re.fullmatch(r"0x[0-9a-fA-F]{40}", value):
+        return {"status": "PROVEN", "address": value.lower(), "paper_read_only": True, "real_execution": False}
+    if value.startswith("0x") and "..." in value:
+        return {"status": "UNMEASURABLE", "reason": "TRUNCATED_ADDRESS", "paper_read_only": True}
+    return {"status": "UNMEASURABLE", "reason": "FULL_ADDRESS_MISSING", "paper_read_only": True}

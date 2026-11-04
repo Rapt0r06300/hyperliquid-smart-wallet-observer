@@ -32,4 +32,13 @@ def efficience(fill_prix: Any, mid_causal: Any, sens: str) -> dict[str, Any]:
             "meilleur_que_mid": amelioration > 0}
 
 
-__all__ = ["efficience", "UNMEASURABLE"]
+def execution_efficiency_receipt(*, fill_price: Any, causal_mid: Any, side: str) -> dict[str, Any]:
+    """Bind execution efficiency to the observed causal mid, never to a later mark."""
+    result = efficience(fill_price, causal_mid, side)
+    if result.get("efficience_bps") == UNMEASURABLE:
+        return {"status": UNMEASURABLE, **result}
+    return {"status": "PROVEN", "efficiency_bps": result["efficience_bps"],
+            "better_than_mid": bool(result["meilleur_que_mid"]), "causal_reference": True}
+
+
+__all__ = ["efficience", "execution_efficiency_receipt", "UNMEASURABLE"]

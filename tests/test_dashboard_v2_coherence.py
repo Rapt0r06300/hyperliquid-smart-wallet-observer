@@ -40,6 +40,24 @@ def _req_root(root):
         ui_state=None, project_root=root)))
 
 
+def test_dashboard_separates_data_lanes_without_return_promises():
+    result = dashboard_v2.separate_dashboard_data_lanes(
+        [
+            {"data_origin": "PAPER", "net_pnl": 1.0},
+            {"data_origin": "SYNTHETIC", "net_pnl": 2.0},
+            {"data_origin": "LIVE", "net_pnl": 3.0},
+        ]
+    )
+    assert result["status"] == "PROVEN"
+    assert set(result["lanes"]) == {"PAPER", "SYNTHETIC", "LIVE"}
+    assert result["economics_certified"] is False
+    assert result["return_promise"] is None
+
+
+def test_dashboard_unknown_origin_fails_closed():
+    assert dashboard_v2.separate_dashboard_data_lanes([{"net_pnl": 1.0}])["status"] == "UNMEASURABLE"
+
+
 def _appel(req, **kw):
     return json.loads(_endpoint("/v2/equity_history")(req, **kw).body.decode("utf-8"))
 

@@ -18,4 +18,16 @@ def respecte_reserve(marge_utilisee: float, capital: float, *, reserve_frac: flo
     return float(marge_utilisee) <= capital_deployable(capital, reserve_frac=reserve_frac) + 1e-9
 
 
+def margin_reserve_receipt(*, used_margin: object, capital: object, reserve_frac: object = RESERVE_FRAC_DEFAUT) -> dict[str, object]:
+    """Expose a fail-closed paper margin-reserve decision."""
+
+    try:
+        used, total, reserve = float(used_margin), float(capital), float(reserve_frac)
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "UNMEASURABLE", "reason": "MARGIN_INPUT_INVALID"}
+    if not all(__import__("math").isfinite(value) for value in (used, total, reserve)) or min(used, total, reserve) < 0.0 or total <= 0.0 or reserve > 1.0:
+        return {"status": "UNMEASURABLE", "reason": "MARGIN_INPUT_INVALID"}
+    return {"status": "PROVEN", "deployable": round(capital_deployable(total, reserve_frac=reserve), 10), "within_reserve": respecte_reserve(used, total, reserve_frac=reserve)}
+
+
 __all__ = ["RESERVE_FRAC_DEFAUT", "capital_deployable", "respecte_reserve"]

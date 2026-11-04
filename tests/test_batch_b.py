@@ -135,3 +135,17 @@ def test_reproducibility():
     assert RP.meme_repro(a, b) is True                      # timestamps ignores
     c = RP.empreinte_repro(code_sha="abc", dataset_hash="d2", config_hash="c1", seed=42)
     assert RP.meme_repro(a, c) is False
+
+
+def test_atomic_freeze_checkpoint_keeps_previous_on_crash(tmp_path):
+    path = tmp_path / "freeze.json"
+    RP.write_atomic_freeze_checkpoint(path, {"champion": "old", "version": 1})
+    before = path.read_bytes()
+    try:
+        RP.write_atomic_freeze_checkpoint(
+            path, {"champion": "new", "version": 2}, simulate_crash_before_replace=True
+        )
+    except RuntimeError:
+        pass
+    assert path.read_bytes() == before
+    assert list(tmp_path.glob(".*.tmp")) == []

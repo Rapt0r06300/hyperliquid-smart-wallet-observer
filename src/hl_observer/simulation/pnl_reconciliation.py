@@ -54,4 +54,13 @@ def reconcile_pnl(
     )
 
 
-__all__ = ["PnlReconciliation", "reconcile_pnl"]
+def realized_mark_receipt(*, realized_pnl_usdc: object, mark_pnl_usdc: object, liquidatable_book: object) -> dict[str, object]:
+    """Keep realized PnL separate from mark PnL and require explicit book state."""
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in (realized_pnl_usdc, mark_pnl_usdc)):
+        return {"status": "UNMEASURABLE", "reason": "PNL_COMPONENT_INVALID"}
+    if not isinstance(liquidatable_book, bool):
+        return {"status": "UNMEASURABLE", "reason": "LIQUIDATABLE_BOOK_FLAG_INVALID"}
+    return {"status": "PROVEN", "realized_pnl_usdc": float(realized_pnl_usdc), "mark_pnl_usdc": float(mark_pnl_usdc), "mark_is_unrealized": True, "liquidatable_book": liquidatable_book, "realized_certifiable": liquidatable_book}
+
+
+__all__ = ["PnlReconciliation", "reconcile_pnl", "realized_mark_receipt"]

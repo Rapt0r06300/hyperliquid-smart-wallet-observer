@@ -120,6 +120,16 @@ def rebuild_positions_from_fills(wallet_address: str, fills: list[dict[str, Any]
     )
 
 
+def position_reconciliation_receipt(*, rebuilt_size: Any, snapshot_size: Any, tolerance: float = 1e-9) -> dict[str, Any]:
+    """Refuse a reconstructed position when it diverges from the observed snapshot."""
+
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (rebuilt_size, snapshot_size, tolerance)) or float(tolerance) < 0:
+        return {"status": "UNMEASURABLE", "reconciled": False, "open_allowed": False, "reason": "POSITION_INPUT_INVALID", "paper_read_only": True}
+    reconciled = abs(float(rebuilt_size) - float(snapshot_size)) <= float(tolerance)
+    return {"status": "PROVEN", "reconciled": reconciled, "open_allowed": reconciled,
+            "reason": "POSITION_MATCH" if reconciled else "POSITION_DIVERGENCE", "paper_read_only": True}
+
+
 def _position_from_state(wallet_address: str, coin: str, state: _CoinState) -> RebuiltPosition:
     side = position_side(state.size)
     confidence = (

@@ -125,7 +125,26 @@ def couverture(positions: Iterable[Any], marks: Mapping[str, float]) -> dict[str
     }
 
 
+def liquidatable_marks_report(
+    positions: Iterable[Any],
+    bbo: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build an executable-bid/ask report with no mid-price fallback."""
+    position_rows = list(positions)
+    marks = marks_depuis_bbo(position_rows, bbo)
+    coverage = couverture(position_rows, marks)
+    coverage.update(
+        {
+            "marks": dict(marks),
+            "equity_basis": "EXECUTABLE_EXIT_BID_ASK_ONLY",
+            "mid_price_fallback": False,
+            "status": "MEASURED" if coverage["n_unmeasurable"] == 0 else "UNMEASURABLE",
+        }
+    )
+    return coverage
+
+
 __all__ = [
     "SCHEMA_VERSION", "mark_liquidatable", "marks_depuis_bbo",
-    "marks_depuis_execution_truths", "couverture",
+    "marks_depuis_execution_truths", "couverture", "liquidatable_marks_report",
 ]
