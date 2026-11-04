@@ -1,22 +1,22 @@
 {
   "analysis_stage": null,
   "attempts": 1,
-  "campaign_id": "collect-resume-probe-e8-run41544869136",
+  "campaign_id": "collect-resume-probe-e8-run41864231350",
   "checkpoint_lineage": [
     {
-      "at": "2026-11-02T23:37:25.804673Z",
-      "digest": "7086662b1ca0f9d055caed5a6ebf0445b5c2460300766a6b0d8c60fdc2acef12",
+      "at": "2026-11-04T16:23:42.768059Z",
+      "digest": "abef5c1b5e8e9c9a28a40a19407cf0d1675a25341956a7e8ae52817a74f197fb",
       "next_probe_unit": 1,
       "result_sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079",
-      "unit_id": "1260aeb1a5085679841d4ea4ddf2dde02bd00093a5de6378486693a1ab1a7656"
+      "unit_id": "c6ffc299e952d51f53aaef8cc12379aa0203cb191d6ce7345ec52d18fa39a89f"
     }
   ],
   "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "e27117e912dc30f943459b278b0bb3d2cba3ebe6",
+  "code_sha": "e8a802bd3f55441af148ee67371a7044ff603b22",
   "collection_cutoff_at_utc": null,
   "completed_units": {
-    "1260aeb1a5085679841d4ea4ddf2dde02bd00093a5de6378486693a1ab1a7656": {
+    "c6ffc299e952d51f53aaef8cc12379aa0203cb191d6ce7345ec52d18fa39a89f": {
       "result": {
         "network_used": false,
         "operation": "durable_checkpoint_write",
@@ -27,64 +27,36 @@
         "unit": 0
       },
       "sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079"
-    },
-    "f16953c74a829dd90f0b6739532635d9c12a4ed7454933fe5288f58c8366b775": {
-      "result": {
-        "network_used": false,
-        "operation": "fresh_runner_resume",
-        "paper_only": true,
-        "read_only": true,
-        "real_execution": false,
-        "resumed_from_checkpoint": true,
-        "status": "COMPLETE",
-        "unit": 1
-      },
-      "sha256": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934"
     }
   },
   "config_sha256": "e3074b6cb84523f035c6055607530f0d3db03c06d883c93b3a6d035c7e303a4f",
   "consecutive_failures": 0,
-  "created_at": "2026-11-02T23:37:25.802744Z",
+  "created_at": "2026-11-04T16:23:42.766257Z",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
     "network_used": false,
-    "next_probe_unit": 2,
+    "next_probe_unit": 1,
     "proof_scope": "control_plane_state_resume",
     "resume_proof": true,
     "segment_a_result_sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079",
-    "segment_a_unit_id": "1260aeb1a5085679841d4ea4ddf2dde02bd00093a5de6378486693a1ab1a7656",
-    "segment_b_result_sha256": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
-    "segment_b_unit_id": "f16953c74a829dd90f0b6739532635d9c12a4ed7454933fe5288f58c8366b775"
+    "segment_a_unit_id": "c6ffc299e952d51f53aaef8cc12379aa0203cb191d6ce7345ec52d18fa39a89f"
   },
   "dataset_generation": "V2_FRESH",
   "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "dataset_selection_id": null,
-  "expires_at": "2026-11-03T01:37:25.802744Z",
+  "expires_at": "2026-11-04T18:23:42.766257Z",
   "history": [
     {
-      "at": "2026-11-02T23:37:25.804603Z",
+      "at": "2026-11-04T16:23:42.768008Z",
       "from": "PENDING",
       "reason": "collect_resume_probe_segment_a",
       "to": "RUNNING"
     },
     {
-      "at": "2026-11-02T23:37:25.804673Z",
+      "at": "2026-11-04T16:23:42.768059Z",
       "from": "RUNNING",
       "reason": "fresh_runner_resume_required",
       "to": "CONTINUATION_REQUIRED"
-    },
-    {
-      "at": "2026-11-02T23:46:09.660153Z",
-      "from": "CONTINUATION_REQUIRED",
-      "reason": "collect_resume_probe_segment_b",
-      "to": "RUNNING"
-    },
-    {
-      "at": "2026-11-02T23:46:09.660236Z",
-      "from": "RUNNING",
-      "reason": "fresh_runner_resume_proven",
-      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
@@ -106,9 +78,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "COMPLETE",
-  "status_reason": "fresh_runner_resume_proven",
-  "terminal_evidence_digest": "86d21d2436fc9aab5a12a6c9da78ef5cf51c222429c68ccb2965b2b2edc1de32",
-  "updated_at": "2026-11-02T23:46:09.660236Z",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "fresh_runner_resume_required",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-11-04T16:23:42.768059Z",
   "work_plan_sha256": "14fd231a242fb2b825354a4923149e86609c63054677dc4ebe6d624048e60ebf"
 }
