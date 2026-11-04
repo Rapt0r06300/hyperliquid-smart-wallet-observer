@@ -1697,6 +1697,107 @@ def test_materialize_safe_shards_persists_alinasync_validation_and_reuses_it(
         ).fetchone() == (next_catalog_sha, 1)
 
 
+def test_safe_shard_registry_preserves_large_windows_file_identity(
+    tmp_path, monkeypatch,
+):
+    """Filesystem identities must survive SQLite without signed-integer overflow."""
+    import sqlite3
+
+    module = _module()
+    destination = tmp_path / "restore"
+    target = destination / "usable" / "shards" / "data-v2-large-identity" / "safe.jsonl.gz"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"safe")
+    row = {
+        "dataset_id": "safe-large-identity",
+        "release_tag": "data-v2-large-identity",
+        "bytes": 4,
+        "sha256": hashlib.sha256(b"safe").hexdigest(),
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "validation_allowed": True,
+        "asset_verified": True,
+    }
+    identity = (4, 2**64 + 17, 2**64 + 19, 2**64 + 23, 2**64 + 29)
+    monkeypatch.setattr(
+        module._SafeShardRegistry,
+        "_stat_identity",
+        staticmethod(lambda _path: identity),
+    )
+    registry = module._SafeShardRegistry(destination)
+    catalog_sha = "d" * 64
+    registry.seal(target, target, row, catalog_sha)
+    registry.commit_cache()
+    registry.close()
+
+    with sqlite3.connect(destination / "SAFE_SHARDS.sqlite3") as connection:
+        stored = connection.execute(
+            "SELECT stat_dev, stat_ino, stat_mtime_ns, stat_ctime_ns "
+            "FROM safe_shards WHERE dataset_id = ?",
+            (row["dataset_id"],),
+        ).fetchone()
+    assert stored == tuple(str(value) for value in identity[1:])
+
+    reopened = module._SafeShardRegistry(destination)
+    try:
+        assert reopened.reusable(target, target, row, catalog_sha) == (True, False)
+    finally:
+        reopened.close()
+
+
+def test_safe_shard_registry_migrates_v2_integer_identity_columns(tmp_path):
+    """Existing v2 registries migrate without losing SAFE rows."""
+    import sqlite3
+
+    module = _module()
+    destination = tmp_path / "restore"
+    destination.mkdir()
+    database = destination / "SAFE_SHARDS.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE safe_shards (
+                dataset_id TEXT NOT NULL,
+                release_tag TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                bytes INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                stat_dev INTEGER NOT NULL,
+                stat_ino INTEGER NOT NULL,
+                stat_mtime_ns INTEGER NOT NULL,
+                stat_ctime_ns INTEGER NOT NULL,
+                catalog_sha256 TEXT NOT NULL,
+                validation_owner TEXT NOT NULL,
+                quality_status TEXT NOT NULL,
+                replayable INTEGER NOT NULL,
+                backtestable INTEGER NOT NULL,
+                catalog_active INTEGER NOT NULL,
+                verified_at_ns INTEGER NOT NULL,
+                PRIMARY KEY (dataset_id, release_tag)
+            );
+            INSERT INTO safe_shards VALUES (
+                'legacy-dataset', 'legacy-release', 'safe.jsonl.gz', 4,
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                11, 13, 17, 19,
+                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                'ALINA_SYNC', 'SAFE', 1, 1, 1, 23
+            );
+            PRAGMA user_version = 2;
+            """
+        )
+
+    registry = module._SafeShardRegistry(destination)
+    try:
+        with sqlite3.connect(database) as connection:
+            row = connection.execute(
+                "SELECT stat_dev, stat_ino, stat_mtime_ns, stat_ctime_ns, "
+                "typeof(stat_dev), COUNT(*) FROM safe_shards"
+            ).fetchone()
+        assert row == ("11", "13", "17", "19", "text", 1)
+    finally:
+        registry.close()
+
+
 def test_alinasync_registry_never_reuses_a_changed_shard(tmp_path, monkeypatch):
     module = _module()
     payload = gzip.compress(b'{"trade_id":"safe"}\n', mtime=0)
