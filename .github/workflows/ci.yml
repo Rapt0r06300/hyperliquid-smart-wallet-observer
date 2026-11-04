@@ -47,6 +47,7 @@ jobs:
             /tests/
             /conftest.py
             /pyproject.toml
+            /.env.example
             /requirements*.txt
       - name: Compare all changed files, fail closed if history is missing
         id: classify
@@ -79,6 +80,7 @@ jobs:
             /tests/
             /conftest.py
             /pyproject.toml
+            /.env.example
             /requirements*.txt
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -157,6 +159,7 @@ jobs:
             /tests/
             /conftest.py
             /pyproject.toml
+            /.env.example
             /requirements*.txt
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -207,6 +210,7 @@ jobs:
             /tests/
             /conftest.py
             /pyproject.toml
+            /.env.example
             /requirements*.txt
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -294,6 +298,7 @@ jobs:
             /tests/
             /conftest.py
             /pyproject.toml
+            /.env.example
             /requirements*.txt
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
