@@ -18,8 +18,8 @@ ou écraser les shards/data.
 - L’inventaire borné actuellement corrigé prend environ 3 secondes sur ce
   checkout.
 - Le contrôle portable du lanceur prend environ 1,5 seconde.
-- La suite dédiée compte maintenant 95 tests ; la dernière exécution complète
-  est verte (`95 passed`).
+- La suite dédiée compte maintenant 100 tests ; la dernière exécution complète
+  est verte (`100 passed`).
 
 ## Objectifs
 
@@ -105,6 +105,16 @@ une nouvelle surface de panne sans bénéfice nécessaire pour ce correctif.
   rétention bornée et sans supprimer de données utilisateur ;
 - vérifier les capacités minimales avant toute mutation ;
 - enrichir les diagnostics sans faire fuiter le contenu des shards.
+- isoler les hooks Git par processus pour que Git LFS ne transforme pas un
+  checkpoint de code en transfert de données ou en attente cachée ;
+- créer le checkpoint avec `write-tree`, `commit-tree` puis `update-ref` gardé
+  par l'ancien SHA, afin d'éviter le rafraîchissement complet de l'index massif
+  exécuté par `git commit` ;
+- refuser explicitement un `index.lock` déjà présent et le signaler dans le
+  receipt, sans le supprimer automatiquement ;
+- autoriser les octets protégés locaux dans un checkpoint code-only/WIP tout en
+  refusant un raccourci silencieux lorsque seuls des octets protégés sont
+  modifiés et que GitHub est déjà aligné.
 
 ### Tests
 
@@ -183,11 +193,18 @@ avec comparaison des SHA et inspection des receipts après chaque run.
 - `--benchmark` et `--plan` ont été exécutés via CMD avec pause désactivée
   pour le test ; le plan a renvoyé `NO_GO` code `2` à cause des modifications
   protégées existantes, avec `mutations=0` et receipt horodaté.
-- Une synchronisation normale a été exécutée. Elle a également renvoyé
-  `NO_GO` code `2` avant toute mutation, car `catalog/...` contient des
-  changements suivis protégés ; aucun contournement de cette barrière n'a été
-  introduit.
+- Une synchronisation normale a créé le checkpoint local par la voie plomberie
+  en environ `3,1 s` pour 218 chemins admissibles, puis a renvoyé `NO_GO` code
+  `2` sans push : `docs/CODEX_GOAL_OBJECTIVE_V31.txt` diverge entre le local et
+  GitHub et n'est pas résolvable automatiquement sans choix de contenu. Les
+  changements `catalog/...` sont restés hors du commit.
+- Le précédent `git commit` a été reproduit jusqu'au timeout de `301,5 s` avec
+  un `index.lock`; après isolation des hooks, le rafraîchissement d'index
+  restait le goulot. `write-tree` a été mesuré à environ `2,8 s`, puis le
+  checkpoint plomberie complet a terminé en quelques secondes sans hook LFS.
+- Le dernier benchmark réel du CMD : 5 runs, p50 `2,672 s`, p95 `3,029 s`,
+  exactement 2 commandes Git par run et `mutations=[]`. Le dernier
+  `--portable-self-check` a renvoyé `0`.
 - Les receipts sont écrits atomiquement dans `LAST_SYNC.json` et
   `history/RUN-<run_id>.json`, avec rétention bornée à 20 fichiers générés.
-- La suite complète finale après la dernière mise à jour d'empreinte CMD est
-  verte : `95 passed in 140.40s`.
+- La suite complète finale est verte : `100 passed in 205.13s`.
