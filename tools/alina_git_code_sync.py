@@ -1041,6 +1041,7 @@ class Synchronizer:
         self._remote_snapshot_ready = False
         self._remote_snapshot_sha: str | None = None
         self._allow_protected_local_checkpoint = False
+        self._deferred_local_paths: set[str] = set()
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
@@ -2184,6 +2185,10 @@ class Synchronizer:
         return created
 
     def checkpoint(self) -> None:
+        # A retry checkpoint intentionally adopts any paths that were
+        # deferred by a previous replay; they are now part of the new local
+        # snapshot rather than silently ignored.
+        self._deferred_local_paths.clear()
         staged, tracked, untracked = self._inventory()
         snapshot = self.report.get("preflight")
         allow_protected_local = (
@@ -2279,11 +2284,16 @@ class Synchronizer:
         self.report["local_syntax_check"] = "PASS_NOT_PROOF_OF_TESTS"
         self.say("[SYNTAXE OK] Tous les fichiers Python admissibles compilent.")
 
-    def _assert_no_new_code_changes(self) -> None:
+    def _assert_no_new_code_changes(self, *, allow_deferred: bool = False) -> None:
         staged, tracked, untracked = self._inventory(refresh=True)
         eligible = self._check_candidates(
             staged, tracked, untracked, allow_protected_local=True,
         )
+        if allow_deferred and self._deferred_local_paths:
+            eligible = [
+                path for path in eligible
+                if path not in self._deferred_local_paths
+            ]
         if eligible:
             self.report["late_local_paths"] = eligible[:100]
             self.report["late_local_count"] = len(eligible)
@@ -3026,26 +3036,52 @@ class Synchronizer:
                     + ", ".join(deleted_code_paths[:8])
                 )
             code_paths = [path for path in changed_paths if not _protected(path)]
-            if code_paths and not self._worktree_matches_tree_paths(
-                local, code_paths,
-            ):
-                raise LocalEditsDetected(
-                    "Le code a change pendant la preparation du replay arbre; "
-                    "contenu conserve sur disque."
+            # Inspect late edits against the operator's real index, not the
+            # temporary merge index.  They are deliberately deferred: the
+            # checkpoint being replayed remains publishable, while the new
+            # bytes stay on disk and are reported for the next run.
+            previous_index = os.environ.pop("GIT_INDEX_FILE", None)
+            try:
+                self._inventory_cache = None
+                late_staged, late_tracked, late_untracked = self._inventory(
+                    refresh=True
                 )
+                late_candidates = self._check_candidates(
+                    late_staged, late_tracked, late_untracked,
+                    allow_protected_local=True,
+                )
+            finally:
+                if previous_index is not None:
+                    os.environ["GIT_INDEX_FILE"] = previous_index
+            deferred = set(late_candidates)
             if code_paths:
+                deferred.update(
+                    self._worktree_mismatched_tree_paths(local, code_paths)
+                )
+            self._deferred_local_paths.update(deferred)
+            if deferred:
+                deferred_list = sorted(deferred)
+                self.report["deferred_local_paths"] = deferred_list[:100]
+                self.report["deferred_local_count"] = len(deferred_list)
+                self.say(
+                    "[REPLAY] Code arrive pendant le rejeu; "
+                    f"{len(deferred_list)} chemin(s) conserve(s) pour le "
+                    "prochain checkpoint, sans ecrasement."
+                )
+            apply_paths = [path for path in code_paths if path not in deferred]
+            if apply_paths:
                 self.command(
                     "checkout-index", "--force", "-z", "--stdin",
                     input_bytes=b"\0".join(
-                        path.encode("utf-8") for path in code_paths
+                        path.encode("utf-8") for path in apply_paths
                     ) + b"\0",
                     timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
                 )
 
             # Verify only the selected blobs while the temporary index is
             # active.  This avoids a full-index `git diff` on every replay.
-            if code_paths and not self._worktree_matches_tree_paths(
-                current, code_paths,
+            if apply_paths and not self._worktree_matches_tree_paths(
+                current, apply_paths,
             ):
                 raise SyncBlocked(
                     "Worktree code different du replay arbre; aucun push."
@@ -3094,8 +3130,14 @@ class Synchronizer:
         self, tree: str, paths: list[str],
     ) -> bool:
         """Compare selected worktree blobs without scanning the giant index."""
+        return not self._worktree_mismatched_tree_paths(tree, paths)
+
+    def _worktree_mismatched_tree_paths(
+        self, tree: str, paths: list[str],
+    ) -> set[str]:
+        """Return selected paths whose worktree bytes differ from a tree."""
         if not paths:
-            return True
+            return set()
         rows = self.command(
             "ls-tree", "-z", tree, "--", *paths,
         ).stdout
@@ -3115,20 +3157,24 @@ class Synchronizer:
             path for path in paths
             if (self.root / path).is_file() or (self.root / path).is_symlink()
         ]
+        mismatched: set[str] = set()
         for path in paths:
             if path not in tree_hashes and path in existing:
-                return False
+                mismatched.add(path)
             if path in tree_hashes and path not in existing:
-                return False
+                mismatched.add(path)
         if not existing:
-            return True
+            return mismatched
         worktree_hashes = self.command(
             "hash-object", "--", *existing,
         ).stdout.decode("ascii", errors="strict").splitlines()
-        return len(worktree_hashes) == len(existing) and all(
-            tree_hashes.get(path) == worktree_hashes[index]
-            for index, path in enumerate(existing)
-        )
+        if len(worktree_hashes) != len(existing):
+            return set(paths)
+        mismatched.update({
+            path for index, path in enumerate(existing)
+            if tree_hashes.get(path) != worktree_hashes[index]
+        })
+        return mismatched
 
     def _run_rebase(
         self, remote: str, *, timeout_seconds: int | None = None,
@@ -3349,7 +3395,7 @@ class Synchronizer:
         while local_retries <= MAX_LOCAL_CHANGE_RETRIES and push_races <= MAX_RACE_RETRIES:
             try:
                 self.reconcile()
-                self._assert_no_new_code_changes()
+                self._assert_no_new_code_changes(allow_deferred=True)
             except LocalEditsDetected as exc:
                 if local_retries >= MAX_LOCAL_CHANGE_RETRIES:
                     raise SyncBlocked(
@@ -3580,7 +3626,7 @@ class Synchronizer:
                 elif not fast_path:
                     self._syntax_gate()
                     self.publish()
-                    self._assert_no_new_code_changes()
+                    self._assert_no_new_code_changes(allow_deferred=True)
                     if self.text("rev-parse", "HEAD") != self.remote_sha():
                         raise SyncBlocked("GitHub a avance; relancer pour finaliser.")
         except (SyncBlocked, subprocess.TimeoutExpired, OSError) as exc:

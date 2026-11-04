@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,9 +324,151 @@ def equity_after_fill_fee_receipt(*, starting_equity_usd: object, realized_pnl_u
     return {"status": "PROVEN", "equity_usd": round(equity, 10), "real_execution": False}
 
 
+def _capital_base(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _capital_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _capital_finite(value: Any) -> bool:
+    return _finite(value)
+
+
+def _capital_number(value: Any) -> float | None:
+    return float(value) if _capital_finite(value) else None
+
+
+def capital_accounting_safety_receipt(snapshot: CapitalAccountingSnapshot) -> dict[str, Any]:
+    valid = isinstance(snapshot, CapitalAccountingSnapshot) and all(_finite(getattr(snapshot, field)) for field in ("starting_equity_usd", "free_cash_usd", "margin_locked_usd", "gross_exposure_usd", "mid_equity_usd"))
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_ACCOUNTING_SAFE" if valid else "CAPITAL_ACCOUNTING_UNSAFE", fail_closed=not valid)
+
+
+def capital_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_FIELD_PRESENT" if valid else "CAPITAL_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def capital_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_FIELD_NON_NULL" if valid else "CAPITAL_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def capital_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_FIELD_TYPE_VALID" if valid else "CAPITAL_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def capital_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _capital_finite(value)
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_VALUE_FINITE" if valid else "CAPITAL_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def capital_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _capital_integer(event_ts_ms) and _capital_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_EVENT_WITHIN_CUTOFF" if valid else "CAPITAL_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def capital_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _capital_integer(event_ts_ms) and _capital_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_EVENT_AGE_VALID" if valid else "CAPITAL_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def capital_duplicate_receipt(*, event_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_EVENTS_UNIQUE" if valid else "CAPITAL_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def capital_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _capital_integer(attempts) and _capital_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_RETRY_BOUNDED" if valid else "CAPITAL_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def capital_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_REPLAY_DETERMINISTIC" if valid else "CAPITAL_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def capital_fill_duplicate_receipt(*, fill_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(fill_ids) and all(str(value).strip() for value in fill_ids) and len(fill_ids) == len(set(fill_ids))
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_FILLS_UNIQUE" if valid else "CAPITAL_FILL_DUPLICATED", fail_closed=not valid)
+
+
+def capital_rejection_no_debit_receipt(*, rejected: bool, debited: bool) -> dict[str, Any]:
+    valid = rejected is True and debited is False
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_REJECTION_NO_DEBIT" if valid else "CAPITAL_REJECTION_DEBITED", fail_closed=not valid)
+
+
+def capital_partial_close_receipt(*, close_quantity: Any, open_quantity: Any, fee_known: bool, fee_amount: Any) -> dict[str, Any]:
+    close, open_size, fee = _capital_number(close_quantity), _capital_number(open_quantity), _capital_number(fee_amount)
+    valid = close is not None and open_size is not None and fee is not None and fee_known is True and 0 < close < open_size and fee >= 0
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_PARTIAL_CLOSE_COSTED" if valid else "CAPITAL_PARTIAL_CLOSE_UNSAFE", fail_closed=not valid)
+
+
+def capital_total_close_release_receipt(*, close_quantity: Any, open_quantity: Any, released_margin: Any) -> dict[str, Any]:
+    close, open_size, release = _capital_number(close_quantity), _capital_number(open_quantity), _capital_number(released_margin)
+    valid = close is not None and open_size is not None and release is not None and open_size > 0 and abs(close - open_size) <= 1e-12 and release >= 0
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_TOTAL_CLOSE_RELEASED" if valid else "CAPITAL_TOTAL_CLOSE_NOT_RELEASED", fail_closed=not valid)
+
+
+def capital_mark_liquidability_receipt(*, mark_price: Any, bid: Any, ask: Any) -> dict[str, Any]:
+    mark, best_bid, best_ask = _capital_number(mark_price), _capital_number(bid), _capital_number(ask)
+    valid = mark is not None and best_bid is not None and best_ask is not None and best_bid > 0 and best_ask >= best_bid and best_bid <= mark <= best_ask
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_MARK_LIQUIDABLE" if valid else "CAPITAL_MARK_NOT_LIQUIDABLE", fail_closed=not valid)
+
+
+def capital_balance_receipt(*, balance: Any) -> dict[str, Any]:
+    value = _capital_number(balance)
+    valid = value is not None and value >= 0
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_BALANCE_NON_NEGATIVE" if valid else "CAPITAL_BALANCE_NEGATIVE", fail_closed=not valid)
+
+
+def capital_funding_sign_receipt(*, amount: Any, direction: str) -> dict[str, Any]:
+    value, normalized = _capital_number(amount), str(direction or "").strip().upper()
+    valid = value is not None and ((normalized == "CREDIT" and value >= 0) or (normalized == "DEBIT" and value <= 0))
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_FUNDING_SIGN_VALID" if valid else "CAPITAL_FUNDING_SIGN_INVALID", fail_closed=not valid)
+
+
+def capital_conversion_receipt(*, fee_amount: Any, fee_token: Any, pnl_currency: Any, token_to_pnl_rate: Any) -> dict[str, Any]:
+    amount, rate = _capital_number(fee_amount), _capital_number(token_to_pnl_rate)
+    valid = amount is not None and amount >= 0 and rate is not None and rate >= 0 and isinstance(fee_token, str) and bool(fee_token.strip()) and isinstance(pnl_currency, str) and bool(pnl_currency.strip())
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_CONVERSION_PROVEN" if valid else "CAPITAL_CONVERSION_MISSING", fail_closed=not valid)
+
+
+def capital_commit_receipt(*, crashed: bool, committed: bool, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = (crashed is True and committed is False and checkpoint_saved is True) or (crashed is False and committed is True)
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_COMMIT_ATOMIC" if valid else "CAPITAL_COMMIT_PARTIAL", fail_closed=not valid)
+
+
+def capital_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(write_ids) and all(str(value).strip() for value in write_ids) and len(write_ids) == len(set(write_ids))
+    return _capital_base("PROVEN" if valid else "REJECTED", verdict="CAPITAL_WRITES_UNIQUE" if valid else "CAPITAL_DOUBLE_WRITE", fail_closed=not valid)
+
+
 __all__ = [
     "CapitalAccountingSnapshot",
     "CapitalAccountingTracker",
     "PositionCapitalInput",
     "equity_after_fill_fee_receipt",
+    "capital_accounting_safety_receipt",
+    "capital_required_field_receipt",
+    "capital_null_field_receipt",
+    "capital_field_type_receipt",
+    "capital_finite_receipt",
+    "capital_cutoff_receipt",
+    "capital_age_receipt",
+    "capital_duplicate_receipt",
+    "capital_retry_receipt",
+    "capital_replay_receipt",
+    "capital_fill_duplicate_receipt",
+    "capital_rejection_no_debit_receipt",
+    "capital_partial_close_receipt",
+    "capital_total_close_release_receipt",
+    "capital_mark_liquidability_receipt",
+    "capital_balance_receipt",
+    "capital_funding_sign_receipt",
+    "capital_conversion_receipt",
+    "capital_commit_receipt",
+    "capital_concurrent_write_receipt",
 ]
