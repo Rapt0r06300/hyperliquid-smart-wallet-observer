@@ -2130,10 +2130,17 @@ class Synchronizer:
         tracked_protected = [
             p for p in tracked if _protected(p) and p not in safe_moves
         ]
-        if tracked_protected and not allow_protected_local:
+        deferable_tracked = {
+            path for path in tracked_protected
+            if _can_defer_staged_protected(path)
+        }
+        blocking_tracked = [
+            path for path in tracked_protected if path not in deferable_tracked
+        ]
+        if blocking_tracked and not allow_protected_local:
             raise SyncBlocked(
                 "Donnees Git suivies mais modifiees localement : "
-                + ", ".join(tracked_protected[:8])
+                + ", ".join(blocking_tracked[:8])
                 + ". Les proteger avant toute fusion."
             )
         if tracked_protected:
