@@ -524,6 +524,132 @@ def _legacy_source(source: str) -> str:
     return str(source)
 
 
+def _l2_base(status: str, **values: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _l2_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _l2_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def l2_safety_receipt(payload: Mapping[str, Any], *, coin: str = "BTC", now_ms: int) -> dict[str, Any]:
+    snapshot = snapshot_from_mapping(coin, payload, source="hyperliquid:ws:l2Book", now_ms=now_ms)
+    valid = snapshot is not None and snapshot.has_full_book and snapshot.data_origin in {"REAL", "RECORDED_REAL"}
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FULL_BOOK_SAFE" if valid else "L2_NOT_SAFE", has_full_book=bool(snapshot and snapshot.has_full_book), fail_closed=not valid)
+
+
+def l2_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FIELD_PRESENT" if valid else "L2_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def l2_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FIELD_NON_NULL" if valid else "L2_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def l2_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FIELD_TYPE_VALID" if valid else "L2_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def l2_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _l2_finite(value)
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_VALUE_FINITE" if valid else "L2_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def l2_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _l2_integer(event_ts_ms) and _l2_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_EVENT_WITHIN_CUTOFF" if valid else "L2_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def l2_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _l2_integer(event_ts_ms) and _l2_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_EVENT_AGE_VALID" if valid else "L2_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def l2_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_EVENTS_UNIQUE" if valid else "L2_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def l2_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _l2_integer(attempts) and _l2_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_RETRY_BOUNDED" if valid else "L2_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def l2_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_REPLAY_DETERMINISTIC" if valid else "L2_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def l2_depth_receipt(*, bids: Sequence[Sequence[Any]], asks: Sequence[Sequence[Any]], is_bbo: bool) -> dict[str, Any]:
+    valid = bool(bids) and bool(asks) and is_bbo is False and all(len(level) >= 2 and _l2_finite(level[0]) and _l2_finite(level[1]) and float(level[1]) > 0 for level in (*bids, *asks))
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FULL_DEPTH" if valid else "L2_BBO_OR_INVALID_DEPTH", fail_closed=not valid)
+
+
+def l2_crossed_book_receipt(*, best_bid: Any, best_ask: Any) -> dict[str, Any]:
+    valid = _l2_finite(best_bid) and _l2_finite(best_ask) and float(best_ask) >= float(best_bid) > 0
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_BOOK_NOT_CROSSED" if valid else "L2_BOOK_CROSSED_OR_INVALID", fail_closed=not valid)
+
+
+def l2_negative_size_receipt(*, sizes: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(sizes) and all(_l2_finite(size) and float(size) > 0 for size in sizes)
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_SIZES_POSITIVE" if valid else "L2_NEGATIVE_OR_ZERO_SIZE", fail_closed=not valid)
+
+
+def l2_tick_receipt(*, prices: Sequence[Any], tick_size: Any) -> dict[str, Any]:
+    try:
+        tick = Decimal(str(tick_size))
+        valid = tick > 0 and bool(prices) and all(Decimal(str(price)) % tick == 0 for price in prices)
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        valid = False
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_TICK_ALIGNED" if valid else "L2_TICK_INVALID", fail_closed=not valid)
+
+
+def l2_delta_receipt(*, has_snapshot: bool, delta_count: Any) -> dict[str, Any]:
+    valid = has_snapshot is True and _l2_integer(delta_count) and delta_count > 0
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_DELTA_HAS_SNAPSHOT" if valid else "L2_DELTA_WITHOUT_SNAPSHOT", fail_closed=not valid)
+
+
+def l2_staleness_receipt(*, now_ms: Any, received_ts_ms: Any, max_age_ms: Any) -> dict[str, Any]:
+    valid = all(_l2_integer(value) for value in (now_ms, received_ts_ms, max_age_ms)) and now_ms >= received_ts_ms and now_ms - received_ts_ms <= max_age_ms
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FRESH" if valid else "L2_STALE", age_ms=(now_ms - received_ts_ms) if valid else None, fail_closed=not valid)
+
+
+def l2_quantity_receipt(*, requested_quantity: Any, visible_depth: Any) -> dict[str, Any]:
+    valid = _l2_finite(requested_quantity) and _l2_finite(visible_depth) and 0 < float(requested_quantity) <= float(visible_depth)
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_QUANTITY_WITHIN_DEPTH" if valid else "L2_QUANTITY_EXCEEDS_DEPTH", fail_closed=not valid)
+
+
+def l2_consumption_receipt(*, consumed_quantity: Any, available_quantity: Any, already_consumed: Any) -> dict[str, Any]:
+    valid = all(_l2_finite(value) for value in (consumed_quantity, available_quantity, already_consumed)) and min(float(consumed_quantity), float(available_quantity), float(already_consumed)) >= 0 and float(consumed_quantity) + float(already_consumed) <= float(available_quantity)
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_CONSUMPTION_ONCE" if valid else "L2_DOUBLE_CONSUMPTION", fail_closed=not valid)
+
+
+def l2_maker_touch_receipt(*, touched: bool, executed: bool) -> dict[str, Any]:
+    valid = touched is False or executed is True
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_MAKER_EXECUTION_CONFIRMED" if valid else "L2_TOUCH_ONLY_NOT_FILL", fail_closed=not valid)
+
+
+def l2_fee_order_receipt(*, maker_fee_bps: Any, taker_fee_bps: Any) -> dict[str, Any]:
+    valid = _l2_finite(maker_fee_bps) and _l2_finite(taker_fee_bps) and float(maker_fee_bps) >= 0 and float(taker_fee_bps) >= float(maker_fee_bps)
+    return _l2_base("PROVEN" if valid else "REJECTED", verdict="L2_FEE_ORDER_VALID" if valid else "L2_FEE_ORDER_INVERTED", fail_closed=not valid)
+
+
 __all__ = [
     "BBO_RELPATH",
     "CARNET_RELPATH",
@@ -533,4 +659,24 @@ __all__ = [
     "LiveL2Snapshot",
     "snapshot_from_mapping",
     "write_dynamic_snapshot",
+    "l2_safety_receipt",
+    "l2_required_field_receipt",
+    "l2_null_field_receipt",
+    "l2_field_type_receipt",
+    "l2_finite_receipt",
+    "l2_cutoff_receipt",
+    "l2_age_receipt",
+    "l2_duplicate_receipt",
+    "l2_retry_receipt",
+    "l2_replay_receipt",
+    "l2_depth_receipt",
+    "l2_crossed_book_receipt",
+    "l2_negative_size_receipt",
+    "l2_tick_receipt",
+    "l2_delta_receipt",
+    "l2_staleness_receipt",
+    "l2_quantity_receipt",
+    "l2_consumption_receipt",
+    "l2_maker_touch_receipt",
+    "l2_fee_order_receipt",
 ]

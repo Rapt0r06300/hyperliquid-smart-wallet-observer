@@ -2911,11 +2911,28 @@ class Synchronizer:
                     )
                 old_parent = parents[1]
                 merged = self.command(
-                    "read-tree", "-m", old_parent, current, old_commit,
+                    # The temporary index must not validate the operator
+                    # worktree: it may still contain the local version of a
+                    # code file while the three-tree merge is being planned.
+                    # `-i` keeps this phase index-only and cannot overwrite
+                    # SAFE bytes.
+                    "read-tree", "-m", "-i", old_parent, current, old_commit,
                     check=False, expected_returncodes=(1,),
                     timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
                 )
                 if merged.returncode not in (0, 1):
+                    self.report["tree_replay_fallback_reason"] = {
+                        "phase": "three_tree_read",
+                        "commit": old_commit,
+                        "parent": old_parent,
+                        "current": current,
+                        "exit_code": merged.returncode,
+                        "stderr": _redact_sensitive_text(
+                            (merged.stderr or b"").decode(
+                                "utf-8", errors="replace"
+                            ).strip()
+                        )[:900],
+                    }
                     return False
                 unmerged_raw = self.command(
                     "ls-files", "-u", "-z",
@@ -2935,6 +2952,11 @@ class Synchronizer:
                 if stage_rows:
                     if any(path not in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
                            for path in stage_rows):
+                        self.report["tree_replay_fallback_reason"] = {
+                            "phase": "unapproved_stage",
+                            "commit": old_commit,
+                            "paths": sorted(stage_rows)[:24],
+                        }
                         return False
                     for path, stages in stage_rows.items():
                         upstream = stages.get(2)
