@@ -95,6 +95,40 @@ def test_replay_materializes_only_v2_safe_workspace(tmp_path):
     assert output == tmp_path
 
 
+def test_output_scope_is_bound_to_campaign_family_and_unit(tmp_path):
+    ctx = context(
+        "market_collection",
+        output_root=str(tmp_path),
+        family="copy_vault",
+    )
+    _cmd, output = build_command(ctx)
+    assert output == tmp_path.resolve() / "c1" / "copy_vault" / "u1"
+
+
+def test_output_scope_rejects_path_components(tmp_path):
+    with pytest.raises(ValueError, match="campaign_id"):
+        build_command(
+            AdapterContext(
+                campaign_id="../escape",
+                kind="market_collection",
+                unit_id="u1",
+                soft_deadline_epoch=time.time() + 60,
+                partition={"output_root": str(tmp_path)},
+            )
+        )
+
+
+def test_workspace_can_be_bound_to_campaign_family_and_unit(tmp_path):
+    _cmd, workspace = build_command(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            workspace_root_scoped=True,
+        )
+    )
+    assert workspace == tmp_path.resolve() / "c1" / "copy_vault" / "u1"
+
+
 def test_backtest_command_targets_economic_runner(tmp_path):
     cmd, output = build_command(
         context("backtest", workspace_root=str(tmp_path))

@@ -153,6 +153,27 @@ def apply_daily_gate(
         and rate is not None
         and rate >= float(target_net_usd_per_day)
     )
+    structural_daily_gate_reached = bool(
+        verified_seconds is not None
+        and verified_seconds >= float(min_forward_observation_seconds)
+        and freeze_ms is not None
+        and start_ms is not None
+        and start_ms > freeze_ms
+        and forward.get("post_freeze") is True
+        and coverage_verified
+        and coverage_ratio is not None
+        and coverage_ratio >= float(min_forward_coverage_ratio)
+        and observation_source
+        and trade_count is not None
+        and trade_count >= MIN_FORWARD_TRADE_COUNT
+        and rate is not None
+    )
+    positive_forward_net = bool(rate is not None and rate > 0.0)
+    quality_certified = bool(
+        result.get("certified") is True
+        and structural_daily_gate_reached
+        and positive_forward_net
+    )
     certified = bool(result.get("certified") is True and daily_target_reached)
     if not certified:
         # A positive pooled OOS+forward total is diagnostic only when the
@@ -179,6 +200,10 @@ def apply_daily_gate(
             "forward_observation_coverage_verified": coverage_verified,
             "forward_observation_source": observation_source or None,
             "forward_net_pnl_usd_per_day": round(rate, 8) if rate is not None else None,
+            "quality_certified": quality_certified,
+            "positive_forward_net": positive_forward_net,
+            "historical_target_reached": daily_target_reached,
+            "structural_daily_gate_reached": structural_daily_gate_reached,
             "daily_target_reached": daily_target_reached,
             "reasons": list(dict.fromkeys(reasons)),
         }

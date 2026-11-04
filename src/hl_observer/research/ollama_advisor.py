@@ -24,6 +24,12 @@ SYSTEM_PROMPT = (
     "Tu ne peux pas ouvrir, fermer, acheter, vendre, signer, connecter un wallet ou appeler une API de trading. "
     "Tu dois expliquer les pertes/refus, proposer des reglages de recherche et signaler les donnees manquantes."
 )
+ADVISOR_SAFETY_CONTRACT = {
+    "paper_only": True,
+    "external_action": False,
+    "decision_authority": False,
+    "promotion_authority": False,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +115,7 @@ def advise_json_from_summary(summary: dict[str, object], *, config: OllamaAdviso
         "recommended_adjustments": [],
         "missing_data": [],
         "safety": "offline_research_only_no_action",
+        **ADVISOR_SAFETY_CONTRACT,
     }
     if not cfg.enabled:
         fallback["warnings"] = ["OLLAMA_DISABLED"]
@@ -133,7 +140,15 @@ def advise_json_from_summary(summary: dict[str, object], *, config: OllamaAdviso
         "tests_to_run": data.get("tests_to_run") or [],
         "risk_notes": data.get("risk_notes") or [],
         "safety": "offline_research_only_no_action",
+        **ADVISOR_SAFETY_CONTRACT,
     }
+
+
+def validate_advisor_payload(payload: object) -> bool:
+    """Validate that an advisor response cannot become a hidden decision path."""
+    if not isinstance(payload, dict):
+        return False
+    return all(payload.get(key) is value for key, value in ADVISOR_SAFETY_CONTRACT.items())
 
 
 def _ollama_generate(prompt: str, *, config: OllamaAdvisorConfig) -> str | None:
@@ -171,4 +186,6 @@ __all__ = [
     "advise_from_summary",
     "build_loss_advisor_prompt",
     "config_from_env",
+    "ADVISOR_SAFETY_CONTRACT",
+    "validate_advisor_payload",
 ]

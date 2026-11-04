@@ -595,6 +595,36 @@ def test_materializer_rejette_les_niveaux_l2_invalides_sans_les_trier(bids, asks
     assert local_lab._book_row(wrapper) is None
 
 
+@pytest.mark.parametrize(
+    "received_ts_ms, exchange_ts_ms",
+    [
+        (True, 2_000),
+        (2_010, False),
+        (2_010.5, 2_000),
+        (2_010, 2_000.5),
+    ],
+)
+def test_materializer_rejette_les_timestamps_l2_ambigus(
+    received_ts_ms, exchange_ts_ms,
+) -> None:
+    wrapper = {
+        "received_ts_ms": received_ts_ms,
+        "_raw": {
+            "channel": "l2Book",
+            "data": {
+                "coin": "BTC",
+                "time": exchange_ts_ms,
+                "levels": [
+                    [{"px": "99", "sz": "1"}],
+                    [{"px": "101", "sz": "1"}],
+                ],
+            },
+        },
+    }
+
+    assert local_lab._book_row(wrapper) is None
+
+
 @pytest.mark.parametrize("coin", ["kPEPE", "xyz:TSLA"])
 def test_safe_parser_preserves_case_sensitive_native_instrument_identity(coin: str) -> None:
     levels = [[{"px": "0.0001", "sz": "1000"}], [{"px": "0.0002", "sz": "1000"}]]
@@ -997,6 +1027,99 @@ def test_campagne_e2e_materialisee_separe_snapshot_historique_du_flux_live(
     )
     assert second["freeze_created"] is False
     assert second["economically_proven"] is False
+
+
+def test_safe_hash_cache_never_accepts_one_byte_mutation(tmp_path: Path) -> None:
+    recovery = tmp_path / "runtime" / "recovery" / "full"
+    tag = "copy-vault-hash-cache-test"
+    asset_name = "safe.jsonl.gz"
+    shard = recovery / "usable" / "shards" / tag / asset_name
+    shard.parent.mkdir(parents=True)
+    with gzip.open(shard, "wb") as handle:
+        handle.write(b"safe-content\n")
+    original = shard.read_bytes()
+    dataset_id = "cv-hash-cache-test"
+    manifest_path = f"datasets/safe/{dataset_id}.manifest.json"
+    sha = hashlib.sha256(original).hexdigest()
+    size = len(original)
+    manifest = {
+        "schema": "alina.shard_manifest.v2",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "asset_verified": True,
+        "validation_allowed": True,
+        "proof_of_pnl_allowed": False,
+        "dataset_id": dataset_id,
+        "family": "copy_vault_snapshot",
+        "release_tag": tag,
+        "release_asset": asset_name,
+        "bytes": size,
+        "sha256": sha,
+        "event_count": 1,
+        "record_count": 1,
+        "integrity": {
+            "gap_count": 0,
+            "regression_count": 0,
+            "desync_count": 0,
+            "duplicate_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+        },
+        "start_ts_ms": 1_000,
+        "end_ts_ms": 1_000,
+        "provenance": {
+            "transports": ["https"],
+            "historical_only": True,
+            "forward_evidence_allowed": False,
+        },
+        "historical_fill_observation_count": 1,
+        "historical_fill_observation_count_exact": True,
+    }
+    manifest_file = tmp_path / manifest_path
+    manifest_file.parent.mkdir(parents=True)
+    manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+    catalog_file = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog_file.parent.mkdir(parents=True)
+    catalog_file.write_text(json.dumps({
+        "schema": "alina.data_index.v2",
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "shards": [{
+            "dataset_id": dataset_id,
+            "family": "copy_vault_snapshot",
+            "quality_status": "SAFE",
+            "replay_compatible": True,
+            "validation_allowed": True,
+            "release_tag": tag,
+            "release_asset": asset_name,
+            "manifest_path": manifest_path,
+            "bytes": size,
+            "sha256": sha,
+        }],
+    }), encoding="utf-8")
+
+    selected, first_audit = local_lab._verified_assets(recovery)
+    assert len(selected) == 1
+    assert first_audit["cached_hashes_reused_after_stat_match"] == 0
+    assert first_audit["hashes_recomputed"] == 1
+
+    unchanged, second_audit = local_lab._verified_assets(recovery)
+    assert len(unchanged) == 1
+    assert second_audit["cached_hashes_reused_after_stat_match"] == 0
+    assert second_audit["hashes_recomputed"] == 1
+
+    mutated = bytearray(original)
+    mutated[len(mutated) // 2] ^= 1
+    shard.write_bytes(mutated)
+    rejected, mutation_audit = local_lab._verified_assets(recovery)
+    assert rejected == []
+    assert mutation_audit["status"] == "SAFE_PARTIAL"
+    assert mutation_audit["cached_hashes_reused_after_stat_match"] == 0
+    assert mutation_audit["hashes_recomputed"] == 1
+    assert mutation_audit["rejected_count"] == 1
+    assert mutation_audit["rejected_sample"] == [{
+        "dataset_id": dataset_id,
+        "reason": "LOCAL_SIZE_OR_SHA256_MISMATCH",
+    }]
 
 
 def test_auxiliary_safe_inventory_distinguishes_local_presence_from_hash_verification(

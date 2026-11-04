@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 
 from hl_observer.backtesting.copy_vault_snapshot_contract import (
     NOT_PROVEN,
     PROVEN,
     verify_snapshot_contract,
 )
+
+
+def _canonical_sha256(value: object) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _snapshot() -> dict[str, object]:
@@ -22,7 +35,7 @@ def _snapshot() -> dict[str, object]:
         for field in ("ledger", "equity", "costs", "metrics", "tests", "report")
     }
     artifacts["restoration_receipt"] = {"status": "RESTORABLE", "sha256": "7" * 64}
-    return {
+    snapshot = {
         "schema_version": "hypersmart.copy_vault_restoration_snapshot.v1",
         "restoration_status": "READY",
         "restoration_missing_requirements": [],
@@ -40,16 +53,20 @@ def _snapshot() -> dict[str, object]:
             "trial_receipt_sha256": "6" * 64,
         },
         "candidate_freeze": {
-            "freeze": {"parameters": {"core_notional_usd": 20.0}, "parameters_sha256": "8" * 64},
+            "freeze": {"parameters": {"core_notional_usd": 20.0}},
         },
         "artifacts": artifacts,
-        "artifacts_sha256": {field: "9" * 64 for field in artifacts},
+        "artifacts_sha256": {field: _canonical_sha256(value) for field, value in artifacts.items()},
         "paper_read_only": True,
         "real_execution": False,
         "restore_started": False,
         "source_untouched": True,
-        "restoration_snapshot_sha256": "a" * 64,
     }
+    snapshot["candidate_freeze"]["freeze"]["parameters_sha256"] = _canonical_sha256(  # type: ignore[index]
+        snapshot["candidate_freeze"]["freeze"]["parameters"]  # type: ignore[index]
+    )
+    snapshot["restoration_snapshot_sha256"] = _canonical_sha256(snapshot)
+    return snapshot
 
 
 def test_complete_canonical_h95_snapshot_is_proven() -> None:

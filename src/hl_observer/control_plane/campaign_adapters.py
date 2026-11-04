@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -28,6 +29,7 @@ ANALYSIS_STAGE_BY_KIND = {
     "module_pnl_proof": "PNL_PROOF",
     "scoreboard": "SCOREBOARD",
 }
+_SAFE_SCOPE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def _analysis_stage(kind: str) -> str | None:
@@ -72,6 +74,40 @@ def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError, OverflowError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _safe_scope_component(value: Any, *, label: str) -> str:
+    """Return one path component suitable for a campaign write scope.
+
+    Campaign identifiers are persisted in receipts and used in filesystem
+    paths.  Treating them as opaque path fragments would allow ``..`` or an
+    absolute path to escape the run boundary.  Rejecting them is fail-closed;
+    no sanitising or silent truncation is allowed.
+    """
+    component = str(value or "").strip()
+    if (
+        not component
+        or component in {".", ".."}
+        or not _SAFE_SCOPE_COMPONENT.fullmatch(component)
+    ):
+        raise ValueError(f"{label} must be one safe path component")
+    return component
+
+
+def _campaign_family(ctx: AdapterContext) -> str:
+    return _safe_scope_component(
+        ctx.partition.get("family")
+        or ctx.partition.get("strategy_family")
+        or "copy_vault",
+        label="campaign family",
+    )
+
+
+def _configured_base(value: Any, default: Path, *, label: str) -> Path:
+    base = Path(str(value)) if value else default
+    if base.exists() and not base.is_dir():
+        raise ValueError(f"{label} must be a directory")
+    return base.resolve()
 
 
 def _exact_nonnegative_int(value: Any) -> int | None:
@@ -682,15 +718,33 @@ def _copy_vault_position_snapshot_receipt(summary: dict[str, Any]) -> dict[str, 
 
 def _output_root(ctx: AdapterContext) -> Path:
     configured = ctx.partition.get("output_root")
-    root = Path(str(configured)) if configured else Path.cwd() / "campaign-output"
-    return root / ctx.campaign_id / ctx.unit_id
+    root = _configured_base(
+        configured,
+        Path.cwd() / "campaign-output",
+        label="output_root",
+    )
+    campaign = _safe_scope_component(ctx.campaign_id, label="campaign_id")
+    family = _campaign_family(ctx)
+    unit = _safe_scope_component(ctx.unit_id, label="unit_id")
+    return root / campaign / family / unit
 
 
 def _workspace(ctx: AdapterContext) -> Path:
     configured = ctx.partition.get("workspace_root")
-    if configured:
-        return Path(str(configured))
-    return Path.cwd() / "campaign-workspaces" / ctx.campaign_id / ctx.unit_id
+    base = _configured_base(
+        configured,
+        Path.cwd() / "campaign-workspaces",
+        label="workspace_root",
+    )
+    if configured and ctx.partition.get("workspace_root_scoped") is not True:
+        # Existing callers may provide an already-scoped workspace.  Keep that
+        # contract explicit, while allowing new orchestrators to pass a base
+        # directory and request the canonical run/family/unit scope below.
+        return base
+    campaign = _safe_scope_component(ctx.campaign_id, label="campaign_id")
+    family = _campaign_family(ctx)
+    unit = _safe_scope_component(ctx.unit_id, label="unit_id")
+    return base / campaign / family / unit
 
 
 def _cutoff_ts_ms(value: Any) -> int | None:
@@ -1205,10 +1259,17 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                         row.get("trade_count"), 0, 0, 2**63 - 1
                     )
 
-    declared_shards = _exact_nonnegative_int(index.get("shard_count"))
-    safe_shards = _exact_nonnegative_int(index.get("safe_count"))
-    partial_shards = _exact_nonnegative_int(index.get("partial_count"))
-    rejected_shards = _exact_nonnegative_int(index.get("reject_count"))
+    checkpoint_missing = not summary_valid and not index_valid
+    if checkpoint_missing:
+        # An absent checkpoint is an empty observation, not a successful
+        # collection.  Keep the counters numerically stable for callers while
+        # `manifest_inventory_complete` remains false and blocks certification.
+        declared_shards = safe_shards = partial_shards = rejected_shards = 0
+    else:
+        declared_shards = _exact_nonnegative_int(index.get("shard_count"))
+        safe_shards = _exact_nonnegative_int(index.get("safe_count"))
+        partial_shards = _exact_nonnegative_int(index.get("partial_count"))
+        rejected_shards = _exact_nonnegative_int(index.get("reject_count"))
     category_counts_complete = all(
         value is not None
         for value in (declared_shards, safe_shards, partial_shards, rejected_shards)
@@ -1306,6 +1367,7 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         "queue_drops": queue_drops,
         "frame_metrics_complete": frame_metrics_complete,
         "manifest_inventory_complete": manifest_inventory_complete,
+        "checkpoint_missing": checkpoint_missing,
         "shard_count": declared_shards,
         "safe_count": safe_shards,
         "partial_count": partial_shards,
@@ -1379,6 +1441,11 @@ def _exact_count_from_sources(
     """Return a count only when an authoritative source gives an exact integer."""
     for source in sources:
         if not isinstance(source, Mapping):
+            continue
+        # An absent checkpoint is represented with zero-valued compatibility
+        # counters by `_collection_checkpoint_metrics`, but those zeros are
+        # not observations and must not become certified unit counts.
+        if source.get("checkpoint_missing") is True:
             continue
         for key in keys:
             if key not in source:

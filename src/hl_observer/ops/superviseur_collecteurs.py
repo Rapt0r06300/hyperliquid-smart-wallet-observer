@@ -604,6 +604,15 @@ def _filtrer_processus_collecteurs(tous: list[dict[str, Any]]) -> list[dict[str,
     return retenus
 
 
+def _cwd_processus(process: Any) -> str | None:
+    """Retourne le cwd d'un processus sans jamais faire échouer l'inventaire."""
+    try:
+        cwd = process.cwd()
+    except Exception:  # noqa: BLE001 — AccessDenied/NoSuchProcess sont attendus ici
+        return None
+    return str(cwd) if cwd else None
+
+
 def _processus_projet_psutil(root: str | Path) -> list[dict[str, Any]]:
     """Inventaire local rapide; ne dépend pas de WMI/CIM et ne lance aucun shell."""
     del root
@@ -619,6 +628,10 @@ def _processus_projet_psutil(root: str | Path) -> list[dict[str, Any]]:
                 "ppid": info.get("ppid"),
                 "name": info.get("name"),
                 "cmd": subprocess.list2cmdline(list(cmdline)),
+                # Le cwd est la seule preuve fiable quand la ligne de commande utilise
+                # les chemins relatifs du lanceur. AccessDenied => None, donc les
+                # opérations sensibles restent fail-closed.
+                "cwd": _cwd_processus(process),
             })
         except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, OSError):
             continue
@@ -661,6 +674,222 @@ def _heartbeat_userfills(root: str | Path) -> int | None:
         return None
 
 
+USERFILLS_SCRIPT = "collecter_userfills_vaults.py"
+USERFILLS_WRAPPER = "boucle_collecteur.cmd"
+MOISSON_SCRIPTS = frozenset({
+    "moissonner_10h.py",
+    "moissonner_github.py",
+    "moissonner_scan.py",
+    "moisson_finale.py",
+    "voir_dashboard.ps1",
+})
+
+
+def _chemin_normalise(value: str | Path) -> str:
+    """Normalise un chemin pour comparer un cwd Windows sans suivre de données."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(value))))
+
+
+def _processus_dans_racine(proc: dict[str, Any], root: str | Path) -> bool:
+    """Preuve d'appartenance au dépôt courant; absence de cwd => refus fermé."""
+    racine = _chemin_normalise(root)
+    cwd = proc.get("cwd")
+    if cwd:
+        # Un cwd connu et différent est une preuve contraire : ne pas le
+        # contredire avec une simple occurrence du chemin dans la commande.
+        return _chemin_normalise(str(cwd)) == racine
+    ligne = str(proc.get("cmd") or "")
+    ligne_norm = ligne.lower().replace("\\", "/")
+    racine_norm = racine.lower().replace("\\", "/").rstrip("/")
+    # Frontière de chemin : `Projet invest2` ne doit jamais être traité comme
+    # l'actuel dépôt `Projet invest`.
+    return f"{racine_norm}/" in ligne_norm
+
+
+def _processus_tous_psutil(root: str | Path) -> list[dict[str, Any]]:
+    """Inventaire borné à la racine pour les opérations legacy explicitement ciblées."""
+    del root
+    import psutil
+
+    tous: list[dict[str, Any]] = []
+    for process in psutil.process_iter(["pid", "ppid", "name", "cmdline"]):
+        try:
+            info = process.info
+            cmdline = info.get("cmdline") or ()
+            tous.append({
+                "pid": info.get("pid"),
+                "ppid": info.get("ppid"),
+                "name": info.get("name"),
+                "cmd": subprocess.list2cmdline(list(cmdline)),
+                "cwd": _cwd_processus(process),
+            })
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, OSError):
+            continue
+    return tous
+
+
+def arreter_moisson_cible(
+    root: str | Path,
+    *,
+    procs: list[dict[str, Any]] | None = None,
+    killer: Callable[[int], bool] | None = None,
+) -> dict[str, Any]:
+    """Arrête uniquement la moisson appartenant à *root*.
+
+    Aucun filtre de fenêtre, nom de titre ou motif global n'est utilisé. Un
+    processus sans preuve de racine est ignoré, et ses enfants ne sont ajoutés
+    qu'après preuve de parenté et d'appartenance au même dépôt.
+    """
+    liste = procs if procs is not None else _processus_tous_psutil(root)
+    candidats: set[int] = set()
+    scripts = {part.lower() for part in MOISSON_SCRIPTS}
+    for proc in liste:
+        pid = proc.get("pid")
+        cmd = str(proc.get("cmd") or "").lower().replace("\\", "/")
+        signe = any(script in cmd for script in scripts)
+        if isinstance(pid, int) and signe and _processus_dans_racine(proc, root):
+            candidats.add(pid)
+
+    par_parent: dict[int, list[int]] = {}
+    for proc in liste:
+        pid, ppid = proc.get("pid"), proc.get("ppid")
+        if isinstance(pid, int) and isinstance(ppid, int):
+            par_parent.setdefault(ppid, []).append(pid)
+    frontiere = list(candidats)
+    index = {p.get("pid"): p for p in liste}
+    while frontiere:
+        parent = frontiere.pop()
+        for child in par_parent.get(parent, []):
+            proc = index.get(child)
+            if child not in candidats and proc is not None and _processus_dans_racine(proc, root):
+                candidats.add(child)
+                frontiere.append(child)
+
+    tuer = killer if killer is not None else (
+        lambda pid: _ps("try { Stop-Process -Id %d -Force -ErrorAction Stop; 'ok' } catch { '' }" % pid).strip() == "ok"
+    )
+    arretes = [pid for pid in sorted(candidats) if tuer(pid)]
+    return {
+        "ok": len(arretes) == len(candidats),
+        "cibles": sorted(candidats),
+        "arretes": arretes,
+        "refuses_sans_preuve": sum(
+            1 for p in liste
+            if any(s in str(p.get("cmd") or "").lower().replace("\\", "/") for s in scripts)
+            and not _processus_dans_racine(p, root)
+        ),
+    }
+
+
+def _processus_userfills(root: str | Path, procs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retourne uniquement les wrappers/workers userfills authentifiés dans cette racine."""
+    retenus: list[dict[str, Any]] = []
+    for proc in procs:
+        if not isinstance(proc.get("pid"), int) or not _processus_dans_racine(proc, root):
+            continue
+        ligne = str(proc.get("cmd") or "").lower()
+        worker = USERFILLS_SCRIPT in ligne
+        wrapper = USERFILLS_WRAPPER in ligne and "userfills-live" in ligne
+        if worker or wrapper:
+            retenus.append(proc)
+    return retenus
+
+
+def _verifier_verrou_userfills(
+    root: str | Path, procs: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Authentifie le PID du verrou avant toute action; aucune suppression implicite."""
+    chemin = Path(root) / LOCK_USERFILLS
+    if not chemin.is_file():
+        return {"ok": True, "reason": "NO_LOCK", "pid": None, "process": None}
+    try:
+        contenu = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ok": False, "reason": "LOCK_INVALID_JSON", "pid": None, "process": None}
+    pid = contenu.get("pid") if isinstance(contenu, dict) else None
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return {"ok": False, "reason": "LOCK_INVALID_PID", "pid": pid, "process": None}
+    run_id = contenu.get("run_id") if isinstance(contenu, dict) else None
+    if not isinstance(run_id, str) or not run_id.startswith("run-") or len(run_id) <= 4:
+        return {"ok": False, "reason": "LOCK_INVALID_RUN_ID", "pid": pid, "process": None}
+    matches = [p for p in _processus_userfills(root, procs) if p.get("pid") == pid]
+    if not matches:
+        return {"ok": False, "reason": "LOCK_PID_NOT_AUTHENTICATED", "pid": pid, "process": None}
+    return {"ok": True, "reason": "AUTHENTICATED", "pid": pid,
+            "run_id": run_id, "process": matches[0]}
+
+
+def arreter_userfills_cible(
+    root: str | Path,
+    *,
+    procs: list[dict[str, Any]] | None = None,
+    killer: Callable[[int], bool] | None = None,
+) -> dict[str, Any]:
+    """Arrête seulement l'arbre userfills authentifié et conserve le verrou sinon.
+
+    Un verrou absent est un état sain pour un redémarrage. Un verrou malformé, étranger,
+    périmé sans preuve de processus ou un échec d'arrêt est refusé sans effacement.
+    """
+    racine = Path(root)
+    liste = list(procs) if procs is not None else _processus_projet(root)
+    userfills = _processus_userfills(root, liste)
+    verrou = _verifier_verrou_userfills(root, liste)
+    base = {
+        "ok": False,
+        "reason": verrou["reason"],
+        "cibles": [],
+        "arretes": [],
+        "lock_removed": False,
+    }
+    if verrou["reason"] == "NO_LOCK":
+        base["ok"] = True
+        return base
+    if not verrou["ok"]:
+        base["pid"] = verrou.get("pid")
+        return base
+
+    par_parent: dict[Any, list[dict[str, Any]]] = {}
+    for proc in userfills:
+        par_parent.setdefault(proc.get("ppid"), []).append(proc)
+    queue = [int(verrou["pid"])]
+    cibles: list[int] = []
+    vus: set[int] = set()
+    while queue:
+        pid = queue.pop(0)
+        if pid in vus:
+            continue
+        vus.add(pid)
+        cibles.append(pid)
+        for enfant in par_parent.get(pid, []):
+            if isinstance(enfant.get("pid"), int):
+                queue.append(int(enfant["pid"]))
+
+    tuer = killer if killer is not None else (
+        lambda pid: _ps(
+            "try { Stop-Process -Id %d -Force -ErrorAction Stop; 'ok' } catch { '' }" % pid
+        ).strip() == "ok"
+    )
+    arretes: list[int] = []
+    for pid in reversed(cibles):
+        try:
+            if tuer(pid):
+                arretes.append(pid)
+        except Exception:  # noqa: BLE001 — une panne d'arrêt reste visible et fail-closed
+            _compter_panne_interne("userfills_arret")
+    base.update({"cibles": sorted(cibles), "arretes": sorted(arretes), "pid": verrou["pid"]})
+    if set(arretes) != set(cibles):
+        base["reason"] = "STOP_INCOMPLETE"
+        return base
+    try:
+        (racine / LOCK_USERFILLS).unlink()
+    except OSError:
+        _compter_panne_interne("userfills_verrou_ineffacable")
+        base["reason"] = "LOCK_REMOVE_FAILED"
+        return base
+    base.update({"ok": True, "reason": "STOPPED_AUTHENTICATED", "lock_removed": True})
+    return base
+
+
 def status_detaille(
     root: str | Path,
     *,
@@ -685,7 +914,12 @@ def status_detaille(
         vivant = (instances > 0) if preuve_processus_disponible else (not e["mort"])
         etat_runner = _lire_etat_collecteur(root, nom)
         dernier_code = etat_runner.get("exit_code")
-        if vivant and etat_runner.get("state") == "ERROR":
+        one_shot = "--une-fois" in tuple(str(arg) for arg in c.get("args", ()))
+        if one_shot and etat_runner.get("state") == "COMPLETED" and dernier_code == 0:
+            etat_reel = "TERMINE"
+        elif one_shot and etat_runner.get("state") == "ERROR" and dernier_code not in (None, 0):
+            etat_reel = "ERREUR"
+        elif vivant and etat_runner.get("state") == "ERROR":
             etat_reel = "ERREUR"
         elif vivant and (etat_runner.get("state") == "RUNNING" or not e["mort"]):
             etat_reel = "VIVANT"
@@ -698,6 +932,7 @@ def status_detaille(
                     "age_log_min": e["age_minutes"], "limite_min": e["limite_minutes"],
                     "log_mort": e["mort"], "etat": etat_reel,
                     "etat_runner": etat_runner.get("state"),
+                    "one_shot": one_shot,
                     "dernier_code_sortie": dernier_code})
     return out
 
@@ -710,7 +945,9 @@ def arreter_cible(root: str | Path, *, procs: list[dict] | None = None,
     `procs`/`killer`/`owner` injectables pour test (défaut = réel Windows)."""
     racine = Path(root)
     cibles: set[int] = set()
-    for pid in (_lire_pids(root).get("pids", {}) or {}).values():        # 1) PID enregistrés du run
+    for nom, pid in (_lire_pids(root).get("pids", {}) or {}).items():   # 1) PID enregistrés du run
+        if str(nom) == "userfills-live":
+            continue  # l'arbre userfills est authentifié séparément ci-dessous
         try:
             cibles.add(int(pid))
         except (TypeError, ValueError):
@@ -720,6 +957,9 @@ def arreter_cible(root: str | Path, *, procs: list[dict] | None = None,
     noms = {c["nom"] for c in REGISTRE}
     for p in liste:                                                     # 2) process SIGNÉS registre
         cl = p.get("cmd") or ""
+        cl_lower = str(cl).lower()
+        if USERFILLS_SCRIPT in cl_lower or (USERFILLS_WRAPPER in cl_lower and "userfills-live" in cl_lower):
+            continue  # jamais de kill par signature globale pour userfills
         if any((" %s " % n) in (" " + cl + " ") for n in noms) or any(s in cl for s in scripts):
             if isinstance(p.get("pid"), int):
                 cibles.add(p["pid"])
@@ -733,21 +973,9 @@ def arreter_cible(root: str | Path, *, procs: list[dict] | None = None,
     owner_pid = pid_du_port(PORT_UI) if owner == -1 else owner          # 3) détenteur validé du port 8794
     if owner_pid:
         cibles.add(owner_pid)
-    try:                                                                # 4) PID du verrou userfills
-        d = json.loads((racine / LOCK_USERFILLS).read_text(encoding="utf-8"))
-        if d.get("pid"):
-            cibles.add(int(d["pid"]))
-    except (OSError, ValueError, TypeError):
-        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     tuer = killer if killer is not None else (
         lambda pid: _ps("try { Stop-Process -Id %d -Force -ErrorAction Stop; 'ok' } catch { '' }" % pid).strip() == "ok")
     arretes = [pid for pid in sorted(cibles) if tuer(pid)]
-    try:
-        (racine / LOCK_USERFILLS).unlink()
-    except OSError:
-        import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
-        _lg.getLogger(__name__).debug("exception ignoree volontairement ici", exc_info=True)
     return {"cibles": sorted(cibles), "arretes": arretes, "port_owner": owner_pid}
 
 
@@ -792,9 +1020,25 @@ def _cli(argv: list[str]) -> int:
         return 0
     if cmd == "arreter":
         r = arreter_cible(root)
+        u = arreter_userfills_cible(root)
         print("[collecteurs] arret CIBLE : %d process arretes (port8794=%s ; jamais de kill global)"
               % (len(r["arretes"]), r["port_owner"]), flush=True)
+        if not u["ok"]:
+            print("[collecteurs] REFUS userfills : %s (verrou conserve)" % u["reason"], flush=True)
+            return 3
         return 0
+    if cmd == "arreter-userfills":
+        u = arreter_userfills_cible(root)
+        print("[collecteurs] userfills-live : %s cibles=%s arretes=%s verrou_supprime=%s" % (
+            u["reason"], u["cibles"] or "aucune", u["arretes"] or "aucune", u["lock_removed"]),
+              flush=True)
+        return 0 if u["ok"] else 3
+    if cmd == "arreter-moisson":
+        m = arreter_moisson_cible(root)
+        print("[moisson] arret cible : cibles=%s arretes=%s refus_sans_preuve=%s" % (
+            m["cibles"] or "aucune", m["arretes"] or "aucune", m["refuses_sans_preuve"]),
+              flush=True)
+        return 0 if m["ok"] else 3
     profil = argv[1] if len(argv) > 1 else "all"
     try:
         collecteurs = collecteurs_pour_profil(profil)

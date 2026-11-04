@@ -313,7 +313,7 @@ def test_lab_uses_at_most_60_percent_of_logical_cpus(monkeypatch) -> None:
         lambda name: object() if name == "xdist" else None,
     )
 
-    assert lab._pytest_parallel_args(20) == ["-n", "9", "--dist", "loadfile"]
+    assert lab._pytest_parallel_args(20) == ["-n", "4", "--dist", "loadfile"]
 
 
 def test_lab_defaults_to_at_most_60_percent_of_logical_cpus(monkeypatch) -> None:
@@ -325,7 +325,20 @@ def test_lab_defaults_to_at_most_60_percent_of_logical_cpus(monkeypatch) -> None
         lambda name: object() if name == "xdist" else None,
     )
 
-    assert lab._pytest_parallel_args(20) == ["-n", "9", "--dist", "loadfile"]
+    assert lab._pytest_parallel_args(20) == ["-n", "4", "--dist", "loadfile"]
+
+
+def test_lab_parallel_pool_cap_remains_bounded_when_configured_too_high(monkeypatch) -> None:
+    monkeypatch.setenv("ALINA_QUANT_CPU_PERCENT", "100")
+    monkeypatch.setenv("ALINA_QUANT_MAX_WORKERS", "99")
+    monkeypatch.setattr(lab.os, "cpu_count", lambda: 64)
+    monkeypatch.setattr(
+        lab.importlib.util,
+        "find_spec",
+        lambda name: object() if name == "xdist" else None,
+    )
+
+    assert lab._pytest_parallel_args(20) == ["-n", "4", "--dist", "loadfile"]
 
 def test_lab_falls_back_to_serial_when_xdist_is_missing(monkeypatch) -> None:
     monkeypatch.setattr(lab.importlib.util, "find_spec", lambda _name: None)
@@ -341,6 +354,7 @@ def test_copy_vault_lab_launcher_checks_complete_test_runtime() -> None:
     assert "tools\\python\\python.exe" in launcher
     assert "import pytest, typer" in launcher
     assert 'set "ALINA_QUANT_CPU_PERCENT=60"' in launcher
+    assert 'set "ALINA_QUANT_MAX_WORKERS=4"' in launcher
     assert '"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c' in launcher
 
 

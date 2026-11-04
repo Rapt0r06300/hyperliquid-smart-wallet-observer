@@ -29,6 +29,7 @@ from hl_observer.backtesting.train_statistics import (
     select_unambiguous_lcb_candidate,
     stable_hash,
 )
+from hl_observer.ops.pnl_improvement_lab import learn_train_only_markout_filter
 
 SCHEMA_VERSION = "hypersmart.copy_vault_v8_entry_efficiency_train.v1"
 MECHANISM = "copy_vault_v8c_causal_entry_efficiency_risk_budget"
@@ -152,8 +153,21 @@ def explore_copy_vault_v8_entry_efficiency_train(
     leader_events: Sequence[Mapping[str, Any]],
     *,
     input_audit: Mapping[str, Any] | None = None,
+    markout_train_rows: Sequence[Mapping[str, Any]] | None = None,
+    markout_candidate_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate the predeclared 4 x 2 admission grid on TRAIN only."""
+    """Evaluate the predeclared 4 x 2 admission grid on TRAIN only.
+
+    The optional markout gate is deliberately explicit: callers must provide a
+    separate TRAIN observation set and candidate set.  This prevents the normal
+    lifecycle replay from silently reusing a candidate's future markout as an
+    entry feature.
+    """
+
+    markout_selected, markout_audit = learn_train_only_markout_filter(
+        markout_train_rows or (),
+        markout_candidate_rows or (),
+    )
 
     continuations, continuation_audit = select_observed_continuations(
         metaorders,
@@ -163,12 +177,12 @@ def explore_copy_vault_v8_entry_efficiency_train(
         continuations,
         purge_ms=COPY_DELAY_MS + PARENT_MAX_HOLD_MS + MAX_TARGET_LAG_MS,
     )
-    train_start_ms = bounds.get("train_start_ms")
-    train_end_ms = bounds.get("train_end_ms")
+    train_start_ms = _strict_positive_int(bounds.get("train_start_ms"))
+    train_end_ms = _strict_positive_int(bounds.get("train_end_ms"))
     valid_bounds = bool(
         train_start_ms is not None
         and train_end_ms is not None
-        and int(train_end_ms) >= int(train_start_ms)
+        and train_end_ms >= train_start_ms
     )
     if valid_bounds:
         parent_trades, parent_audit = replay_lifecycle_train(
@@ -177,8 +191,8 @@ def explore_copy_vault_v8_entry_efficiency_train(
             leader_events,
             required_observed_fills=PARENT_REQUIRED_OBSERVED_FILLS,
             horizon_ms=PARENT_MAX_HOLD_MS,
-            train_start_ms=int(train_start_ms),
-            train_end_ms=int(train_end_ms),
+            train_start_ms=train_start_ms,
+            train_end_ms=train_end_ms,
         )
         placebo_trades, placebo_parent_audit = replay_lifecycle_train(
             metaorders,
@@ -186,8 +200,8 @@ def explore_copy_vault_v8_entry_efficiency_train(
             leader_events,
             required_observed_fills=PARENT_REQUIRED_OBSERVED_FILLS,
             horizon_ms=PARENT_MAX_HOLD_MS,
-            train_start_ms=int(train_start_ms),
-            train_end_ms=int(train_end_ms),
+            train_start_ms=train_start_ms,
+            train_end_ms=train_end_ms,
             direction_multiplier=-1,
         )
     else:
@@ -295,6 +309,10 @@ def explore_copy_vault_v8_entry_efficiency_train(
         "diagnostic_best_train_variant": diagnostic_best,
         "freeze_candidate": freeze_candidate,
         "freeze_candidate_sha256": stable_hash(freeze_candidate) if freeze_candidate else None,
+        "markout_filter": {
+            "selected_candidates": markout_selected,
+            "audit": markout_audit,
+        },
         "variants": variants,
         "paper_read_only": True,
         "real_execution": False,

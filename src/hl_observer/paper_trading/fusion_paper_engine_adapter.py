@@ -6,6 +6,12 @@ import os
 from dataclasses import asdict, dataclass
 
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote, resolve_copy_conflict
+from hl_observer.backtesting.copy_vault_protocol import (
+    RUNTIME_PAPER_LEVERAGE,
+    RUNTIME_PAPER_MAX_OPEN_POSITIONS,
+    RUNTIME_PAPER_MAX_POSITION_USD,
+    RUNTIME_PAPER_MAX_TOTAL_EXPOSURE_USD,
+)
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.paper_trading.execution_truth import ExecutionTruth
 from hl_observer.paper_trading.paper_engine import PaperDecisionResult, PaperEngine, PaperEngineConfig
@@ -61,17 +67,17 @@ def run_copy_votes_through_paper_engine(
     starting_cash_usdt: float = 200.0,
     admission_floor_power: float | None = None,
 ) -> FusionPaperEngineSummary:
-    max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
-    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 100.0)
-    max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
+    max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", RUNTIME_PAPER_MAX_POSITION_USD)
+    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", RUNTIME_PAPER_MAX_TOTAL_EXPOSURE_USD)
+    max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", RUNTIME_PAPER_MAX_OPEN_POSITIONS)
     # BUG CORRIGE (audit 2026-07-11) -- FAIL-OPEN : `if leverage <= 1.0: leverage = 10.0`
     # ECRASAIT SILENCIEUSEMENT toute config a 1. On ne pouvait donc PAS simuler sans levier,
     # et un test qui reglait 1 obtenait 10 sans le savoir. Le defaut reste 10 (demande Flo
     # "pas des centimes"), mais une valeur EXPLICITE est desormais RESPECTEE. Le launcher
     # force deja 10 : le comportement live est inchange.
-    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
+    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", RUNTIME_PAPER_LEVERAGE)
     if leverage <= 0.0:                 # seule une valeur INVALIDE retombe sur le defaut
-        leverage = 10.0
+        leverage = RUNTIME_PAPER_LEVERAGE
     engine = PaperEngine(
         config=PaperEngineConfig(
             starting_cash_usdt=float(starting_cash_usdt),
@@ -372,17 +378,17 @@ def run_distilled_opportunities_through_paper_engine(
     appear in the UI.
     """
 
-    max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
-    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 100.0)
+    max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", RUNTIME_PAPER_MAX_POSITION_USD)
+    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", RUNTIME_PAPER_MAX_TOTAL_EXPOSURE_USD)
     max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
     # BUG CORRIGE (audit 2026-07-11) -- FAIL-OPEN : `if leverage <= 1.0: leverage = 10.0`
     # ECRASAIT SILENCIEUSEMENT toute config a 1. On ne pouvait donc PAS simuler sans levier,
     # et un test qui reglait 1 obtenait 10 sans le savoir. Le defaut reste 10 (demande Flo
     # "pas des centimes"), mais une valeur EXPLICITE est desormais RESPECTEE. Le launcher
     # force deja 10 : le comportement live est inchange.
-    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
+    leverage = _env_float("HYPERSMART_SIMULATION_LEVERAGE", RUNTIME_PAPER_LEVERAGE)
     if leverage <= 0.0:                 # seule une valeur INVALIDE retombe sur le defaut
-        leverage = 10.0
+        leverage = RUNTIME_PAPER_LEVERAGE
     max_entries = max(1, min(_env_int("HYPERSMART_DISTILLED_MAX_PAPER_ENTRIES", 1), 5))
     engine = PaperEngine(
         config=PaperEngineConfig(

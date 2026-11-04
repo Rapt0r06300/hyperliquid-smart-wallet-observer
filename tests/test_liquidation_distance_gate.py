@@ -21,3 +21,8 @@ def test_trop_proche_bloque():
 
 def test_distance_inconnue_bloque():
     assert peut_augmenter(None)["peut_augmenter"] is False
+
+
+def test_distance_infinie_et_seuil_invalide_bloquent():
+    assert peut_augmenter(float("inf"))["peut_augmenter"] is False
+    assert peut_augmenter(10.0, seuil_pct=float("nan"))["peut_augmenter"] is False

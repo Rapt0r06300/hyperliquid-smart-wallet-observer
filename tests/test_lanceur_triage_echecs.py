@@ -117,7 +117,7 @@ def test_le_bloc_de_triage_dit_quand_tout_est_vert():
 
 
 def test_les_options_de_triage_sont_reconnues():
-    for o in ("--derniers-echecs", "--sans-triage"):
+    for o in ("--derniers-echecs", "--sans-triage", "--accelere"):
         assert o in L.OPTIONS_LANCEUR
     # elles restent des options du LANCEUR, jamais transmises au driver
     from tools.tout_tester import OPTIONS

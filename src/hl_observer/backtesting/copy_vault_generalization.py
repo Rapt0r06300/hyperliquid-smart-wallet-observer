@@ -82,6 +82,13 @@ def _positive_int(value: object) -> int | None:
     return value
 
 
+def _strict_direction(value: object) -> int | None:
+    """Accept only the canonical integer direction used by executable proofs."""
+    if type(value) is not int or value not in (-1, 1):
+        return None
+    return value
+
+
 def _strict_candidate(raw: Mapping[str, Any]) -> bool:
     return any(key in raw for key in _STRICT_SENTINELS)
 
@@ -133,11 +140,7 @@ def _strict_issues(raw: Mapping[str, Any], *, net: Decimal, notional: Decimal) -
             issues.append(f"LATENCY_UNMEASURED:{key}")
         elif value < 0:
             issues.append(f"NEGATIVE_LATENCY:{key}")
-    try:
-        direction = int(raw.get("direction"))
-    except (TypeError, ValueError, OverflowError):
-        direction = 0
-    if direction not in (-1, 1):
+    if _strict_direction(raw.get("direction")) is None:
         issues.append("INVALID_DIRECTION")
     if not str(raw.get("coin") or "").strip():
         issues.append("COIN_MISSING")

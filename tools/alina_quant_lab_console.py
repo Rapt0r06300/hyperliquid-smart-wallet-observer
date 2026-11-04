@@ -283,7 +283,15 @@ def _pytest_counts(output: str) -> dict[str, int]:
 
 
 def _pytest_parallel_args(test_file_count: int) -> list[str]:
-    """Use all logical CPU groups while bounding workers to the requested share."""
+    """Choose a bounded xdist pool without oversubscribing the lab.
+
+    The old policy used the full ``ALINA_QUANT_CPU_PERCENT`` share.  On a
+    16-core Windows runner that selected 9 workers for a 45-file Copy-Vault
+    group, which was measurably slower than four workers because each worker
+    paid the import/startup cost and competed for the same disk.  Four is the
+    measured default on the current suite; callers may lower it for a slower
+    disk, but may not raise it accidentally through a percentage setting.
+    """
 
     if importlib.util.find_spec("xdist") is None or test_file_count <= 1:
         return []
@@ -294,6 +302,12 @@ def _pytest_parallel_args(test_file_count: int) -> list[str]:
     percent = min(100, max(1, percent))
     logical_cpus = max(1, int(os.cpu_count() or 1))
     workers = max(1, logical_cpus * percent // 100)
+    try:
+        configured_cap = int(os.environ.get("ALINA_QUANT_MAX_WORKERS", "4"))
+    except ValueError:
+        configured_cap = 4
+    configured_cap = min(4, max(1, configured_cap))
+    workers = min(workers, configured_cap)
     workers = min(workers, max(1, int(test_file_count)))
     return ["-n", str(workers), "--dist", "loadfile"]
 

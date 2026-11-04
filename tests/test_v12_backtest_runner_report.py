@@ -40,6 +40,12 @@ def test_multi_wallet_merge_time_order():
     assert merged[0]["wallet"] == "B" and merged[-1]["wallet"] == "A"
 
 
+@pytest.mark.parametrize("event", [{"ts_ms": 1.5}, {"ts_ms": float("nan")}, {"ts_ms": True}, {}])
+def test_multi_wallet_replay_rejects_unverifiable_event_time(event):
+    with pytest.raises(ValueError, match="exact timestamp"):
+        replay_multi_wallet({"A": [event]})
+
+
 def test_optimize_deterministic_and_picks_best():
     space = {"x": [1, 2, 3, 4, 5]}
     best = optimize(space, lambda p: -abs(p["x"] - 4), n_trials=20, seed=7)

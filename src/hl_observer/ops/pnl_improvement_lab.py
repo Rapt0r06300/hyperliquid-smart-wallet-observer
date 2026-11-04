@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ from hl_observer.simulation.accounting_truth import (
     first_not_none,
     round_trip_net_pnl_usdc,
 )
+from hl_observer.backtesting.regime_label import freeze_regime_allowlist_from_train
 
 CANONICAL_LEDGER_NAME = "simulation_pnl_ledger_latest.jsonl"
 DEFAULT_COMPARISON_NOTIONAL_USDT = 50.0
@@ -35,6 +37,332 @@ LEGACY_UNEVIDENCED_MARKER = "LEGACY_UNEVIDENCED"
 MIN_TOTAL_TRADES = 30
 MIN_COIN_BLACKLIST_TRADES = 30
 MIN_COIN_BLACKLIST_TIME_SLICES = 3
+
+
+def _strict_positive_timestamp(value: object) -> int | None:
+    """Return only an integer millisecond timestamp; never coerce future data."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _markout_leader_key(
+    row: Mapping[str, Any],
+    leader_fields: Sequence[str],
+) -> str | None:
+    for field in leader_fields:
+        value = row.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip().lower()
+    return None
+
+
+def _causal_markout_observation(
+    row: object,
+    *,
+    leader_fields: Sequence[str],
+    entry_ts_field: str,
+    observed_ts_field: str,
+    markout_field: str,
+) -> tuple[str, int, int, float] | None:
+    """Parse one realized markout while preserving the causal timestamp contract."""
+
+    if not isinstance(row, Mapping):
+        return None
+    leader = _markout_leader_key(row, leader_fields)
+    entry_ts = _strict_positive_timestamp(row.get(entry_ts_field))
+    observed_ts = _strict_positive_timestamp(row.get(observed_ts_field))
+    markout = finite_number(row.get(markout_field))
+    if (
+        leader is None
+        or entry_ts is None
+        or observed_ts is None
+        or observed_ts <= entry_ts
+        or markout is None
+    ):
+        return None
+    return leader, entry_ts, observed_ts, float(markout)
+
+
+def learn_train_only_markout_filter(
+    train_rows: Sequence[Mapping[str, Any]],
+    candidate_rows: Sequence[Mapping[str, Any]],
+    *,
+    min_history: int = 5,
+    thresholds_bps: Sequence[float] = (0.0, 1.0, 5.0, 9.0),
+    leader_fields: Sequence[str] = (
+        "leader_id",
+        "leader_wallet",
+        "wallet_address",
+        "wallet",
+    ),
+    entry_ts_field: str = "entry_ts_ms",
+    observed_ts_field: str = "markout_observed_at_ms",
+    markout_field: str = "markout_bps",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Learn a markout gate from TRAIN and apply its frozen value to candidates.
+
+    A row's realized markout is usable as a *historical observation* only after its
+    own entry.  For every TRAIN example, the score is computed from observations
+    whose observation timestamp is strictly before that example's entry timestamp.
+    The chosen threshold is then frozen.  Candidate rows are scored only against
+    TRAIN observations with ``observed_ts < candidate.entry_ts``; candidate
+    markout fields are deliberately never read.  Missing or out-of-order evidence
+    rejects the row instead of creating a zero or a guessed score.
+    """
+
+    minimum_history = int(min_history)
+    if minimum_history < 1:
+        raise ValueError("min_history must be >= 1")
+    thresholds = tuple(sorted({float(value) for value in thresholds_bps}))
+    if not thresholds or any(not math.isfinite(value) for value in thresholds):
+        raise ValueError("thresholds_bps must contain finite values")
+
+    observations: list[tuple[str, int, int, float]] = []
+    invalid_train = 0
+    for raw in train_rows or ():
+        observation = _causal_markout_observation(
+            raw,
+            leader_fields=leader_fields,
+            entry_ts_field=entry_ts_field,
+            observed_ts_field=observed_ts_field,
+            markout_field=markout_field,
+        )
+        if observation is None:
+            invalid_train += 1
+            continue
+        observations.append(observation)
+    observations.sort(key=lambda item: (item[1], item[2], item[0]))
+
+    history: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
+    training_examples: list[tuple[float, float]] = []
+    for leader, entry_ts, observed_ts, markout in observations:
+        prior = [value for prior_ts, value in history[leader] if prior_ts < entry_ts]
+        if len(prior) >= minimum_history:
+            training_examples.append((sum(prior) / len(prior), markout))
+        history[leader].append((observed_ts, markout))
+
+    eligible_thresholds: list[tuple[float, float, int]] = []
+    for threshold in thresholds:
+        selected = [outcome for score, outcome in training_examples if score >= threshold]
+        if len(selected) < minimum_history:
+            continue
+        eligible_thresholds.append((sum(selected) / len(selected), threshold, len(selected)))
+    if not eligible_thresholds:
+        return [], {
+            "status": "INSUFFICIENT_TRAIN_MARKOUT_HISTORY",
+            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            "train_rows": len(train_rows),
+            "valid_train_observations": len(observations),
+            "invalid_train_rows_rejected": invalid_train,
+            "training_examples": len(training_examples),
+            "minimum_history": minimum_history,
+            "threshold_candidates_bps": list(thresholds),
+            "learned_threshold_bps": None,
+            "candidate_rows": len(candidate_rows),
+            "candidate_selected": 0,
+            "candidate_future_markout_ignored": True,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    # Deterministic tie-break: maximize TRAIN mean, then coverage, then prefer
+    # the stricter threshold.  No candidate/OOS outcome participates here.
+    _, learned_threshold, _ = max(
+        eligible_thresholds,
+        key=lambda item: (item[0], item[2], item[1]),
+    )
+    selected_candidates: list[dict[str, Any]] = []
+    rejected_invalid = 0
+    rejected_history = 0
+    for raw in candidate_rows or ():
+        if not isinstance(raw, Mapping):
+            rejected_invalid += 1
+            continue
+        leader = _markout_leader_key(raw, leader_fields)
+        entry_ts = _strict_positive_timestamp(raw.get(entry_ts_field))
+        if leader is None or entry_ts is None:
+            rejected_invalid += 1
+            continue
+        prior = [
+            value
+            for observed_ts, value in history.get(leader, ())
+            if observed_ts < entry_ts
+        ]
+        if len(prior) < minimum_history:
+            rejected_history += 1
+            continue
+        score = sum(prior) / len(prior)
+        if score < learned_threshold:
+            continue
+        selected_candidates.append(
+            {
+                **dict(raw),
+                "markout_filter_score_bps": round(score, 8),
+                "markout_filter_threshold_bps": round(learned_threshold, 8),
+                "markout_filter_history_count": len(prior),
+                "markout_filter_training_only": True,
+                "markout_filter_uses_candidate_future": False,
+            }
+        )
+
+    return selected_candidates, {
+        "status": "TRAIN_FILTER_FROZEN",
+        "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+        "train_rows": len(train_rows),
+        "valid_train_observations": len(observations),
+        "invalid_train_rows_rejected": invalid_train,
+        "training_examples": len(training_examples),
+        "minimum_history": minimum_history,
+        "threshold_candidates_bps": list(thresholds),
+        "learned_threshold_bps": round(learned_threshold, 8),
+        "candidate_rows": len(candidate_rows),
+        "candidate_selected": len(selected_candidates),
+        "candidate_rejected_invalid": rejected_invalid,
+        "candidate_rejected_insufficient_history": rejected_history,
+        "candidate_future_markout_ignored": True,
+        "feature_fields": [entry_ts_field, observed_ts_field, markout_field],
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def compare_regime_ablation(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    regime_field: str = "regime",
+    gross_pnl_field: str = "gross_pnl_bps",
+    cost_field: str = "cost_bps",
+    opened_at_field: str = "opened_at_ms",
+    episode_id_field: str = "episode_id",
+    trial_id_field: str = "trial_id",
+    min_trades_per_regime: int = 3,
+    min_mean_net_bps: float = 0.0,
+) -> dict[str, Any]:
+    """Compare all OOS episodes with a frozen TRAIN regime allow-list.
+
+    The same OOS rows and explicit cost field are used for the baseline and
+    filtered arm.  Missing fields, future TRAIN rows, pre-cutoff OOS rows and
+    duplicate episode identifiers make the result ``UNMEASURABLE``.  This is a
+    diagnostic ablation only; it never changes runtime activation.
+    """
+
+    if isinstance(cutoff_ms, bool) or not isinstance(cutoff_ms, int) or cutoff_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_CUTOFF", "paper_read_only": True}
+
+    def _parse(rows: Sequence[Mapping[str, Any]], *, is_train: bool) -> tuple[list[dict[str, Any]], str | None]:
+        parsed: list[dict[str, Any]] = []
+        seen_episodes: set[str] = set()
+        for row in rows or ():
+            if not isinstance(row, Mapping):
+                return [], "INVALID_ROW"
+            regime = str(row.get(regime_field) or "").strip()
+            episode = str(row.get(episode_id_field) or "").strip()
+            trial = str(row.get(trial_id_field) or "").strip()
+            ts = row.get(opened_at_field)
+            try:
+                gross = float(row.get(gross_pnl_field))
+                cost = float(row.get(cost_field))
+            except (TypeError, ValueError):
+                return [], "INVALID_NUMERIC_EVIDENCE"
+            if (
+                not regime
+                or not episode
+                or not trial
+                or episode in seen_episodes
+                or isinstance(ts, bool)
+                or not isinstance(ts, int)
+                or ts <= 0
+                or not math.isfinite(gross)
+                or not math.isfinite(cost)
+                or cost < 0
+                or (is_train and ts > cutoff_ms)
+                or (not is_train and ts <= cutoff_ms)
+            ):
+                return [], "INVALID_SPLIT_OR_DUPLICATE_EPISODE"
+            seen_episodes.add(episode)
+            parsed.append(
+                {
+                    "regime": regime,
+                    "episode_id": episode,
+                    "trial_id": trial,
+                    "gross_pnl_bps": gross,
+                    "cost_bps": cost,
+                    "net_pnl_bps": gross - cost,
+                }
+            )
+        return parsed, None
+
+    train, train_error = _parse(train_rows, is_train=True)
+    oos, oos_error = _parse(oos_rows, is_train=False)
+    if train_error or oos_error or not train or not oos:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": train_error or oos_error or "EMPTY_SPLIT",
+            "train_rows": len(train_rows or ()),
+            "oos_rows": len(oos_rows or ()),
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    freeze = freeze_regime_allowlist_from_train(
+        train,
+        regime_field="regime",
+        gross_pnl_field="gross_pnl_bps",
+        cost_field="cost_bps",
+        min_trades_per_regime=min_trades_per_regime,
+        min_mean_net_bps=min_mean_net_bps,
+    )
+
+    def _metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        if not rows:
+            return {
+                "rows": 0,
+                "trials": 0,
+                "gross_pnl_bps": None,
+                "cost_bps": None,
+                "net_pnl_bps": None,
+                "mean_net_pnl_bps": None,
+            }
+        net = sum(float(row["net_pnl_bps"]) for row in rows)
+        gross = sum(float(row["gross_pnl_bps"]) for row in rows)
+        cost = sum(float(row["cost_bps"]) for row in rows)
+        return {
+            "rows": len(rows),
+            "trials": len({str(row["trial_id"]) for row in rows}),
+            "gross_pnl_bps": round(gross, 8),
+            "cost_bps": round(cost, 8),
+            "net_pnl_bps": round(net, 8),
+            "mean_net_pnl_bps": round(net / len(rows), 8),
+        }
+
+    allowed = set(freeze["allowed_regimes"])
+    selected = [row for row in oos if row["regime"] in allowed]
+    baseline_metrics = _metrics(oos)
+    selected_metrics = _metrics(selected)
+    comparable = bool(allowed and selected)
+    delta = (
+        round(selected_metrics["mean_net_pnl_bps"] - baseline_metrics["mean_net_pnl_bps"], 8)
+        if comparable
+        else None
+    )
+    return {
+        "status": "COMPARABLE" if comparable else "UNMEASURABLE",
+        "reason": None if comparable else "NO_ELIGIBLE_OOS_REGIME",
+        "cutoff_ms": cutoff_ms,
+        "train_freeze": freeze,
+        "baseline_oos": baseline_metrics,
+        "regime_filtered_oos": selected_metrics,
+        "delta_mean_net_pnl_bps": delta,
+        "cost_model": "net_pnl_bps=gross_pnl_bps-cost_bps",
+        "same_oos_episodes_and_cost_fields": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1717,9 +2045,11 @@ __all__ = [
     "build_candidate_rules",
     "build_lab_report",
     "compute_metrics",
+    "compare_regime_ablation",
     "discover_session_ledgers",
     "evaluate_candidate_rules",
     "extract_historical_trades",
+    "learn_train_only_markout_filter",
     "main",
     "rule_matches",
     "write_lab_outputs",

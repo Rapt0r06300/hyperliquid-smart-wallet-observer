@@ -124,12 +124,12 @@ def explore_copy_vault_v6_balanced_train(
         continuations,
         purge_ms=COPY_DELAY_MS + PARENT_MAX_HOLD_MS + MAX_TARGET_LAG_MS,
     )
-    train_start_ms = bounds.get("train_start_ms")
-    train_end_ms = bounds.get("train_end_ms")
+    train_start_ms = _strict_positive_int(bounds.get("train_start_ms"))
+    train_end_ms = _strict_positive_int(bounds.get("train_end_ms"))
     valid_bounds = bool(
         train_start_ms is not None
         and train_end_ms is not None
-        and int(train_end_ms) >= int(train_start_ms)
+        and train_end_ms >= train_start_ms
     )
     if valid_bounds:
         parent_trades, parent_audit = replay_lifecycle_train(
@@ -138,8 +138,8 @@ def explore_copy_vault_v6_balanced_train(
             leader_events,
             required_observed_fills=PARENT_REQUIRED_OBSERVED_FILLS,
             horizon_ms=PARENT_MAX_HOLD_MS,
-            train_start_ms=int(train_start_ms),
-            train_end_ms=int(train_end_ms),
+            train_start_ms=train_start_ms,
+            train_end_ms=train_end_ms,
         )
         placebo_trades, placebo_parent_audit = replay_lifecycle_train(
             metaorders,
@@ -147,8 +147,8 @@ def explore_copy_vault_v6_balanced_train(
             leader_events,
             required_observed_fills=PARENT_REQUIRED_OBSERVED_FILLS,
             horizon_ms=PARENT_MAX_HOLD_MS,
-            train_start_ms=int(train_start_ms),
-            train_end_ms=int(train_end_ms),
+            train_start_ms=train_start_ms,
+            train_end_ms=train_end_ms,
             direction_multiplier=-1,
         )
     else:

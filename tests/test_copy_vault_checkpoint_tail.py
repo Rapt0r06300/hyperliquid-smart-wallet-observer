@@ -121,6 +121,19 @@ def test_checkpoint_parser_refuse_les_niveaux_l2_invalides(bids, asks) -> None:
     assert checkpoint_module._parse_book(raw, received_at_ms=2_010) is None
 
 
+@pytest.mark.parametrize("invalid_time", [True, 2_000.0, "2000", 0, -1])
+def test_checkpoint_parser_rejette_les_timestamps_l2_ambigus(invalid_time) -> None:
+    raw = {
+        "time": invalid_time,
+        "levels": [
+            [["99", "1"]],
+            [["101", "1"]],
+        ],
+    }
+
+    assert checkpoint_module._parse_book(raw, received_at_ms=2_010) is None
+
+
 def test_first_start_baselines_existing_fills_without_replaying_history(tmp_path: Path) -> None:
     input_path = tmp_path / INPUT_RELPATH
     _append(input_path, _fill(1_000, event="historical"))
@@ -494,6 +507,24 @@ def test_ancienne_identite_de_checkpoint_est_reinitialisee_sans_rejouer_historiq
     assert engine.state["output_start_offset"] == output_path.stat().st_size
 
 
+def test_checkpoint_rejette_un_etat_persistant_corrompu(tmp_path: Path) -> None:
+    now = [8_000_000]
+    engine = CopyVaultCheckpointTail(tmp_path, clock_ms=lambda: now[0])
+    state_path = tmp_path / STATE_RELPATH
+    state = dict(engine.state)
+    state["input_offset"] = True
+    state["pending"] = "not-a-list"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    reloaded = CopyVaultCheckpointTail(tmp_path, clock_ms=lambda: now[0])
+
+    assert reloaded.state["identity_migration_reset"]["reason"] == (
+        "INSTRUMENT_IDENTITY_SCHEMA_CHANGED_OR_UNVERIFIED"
+    )
+    assert reloaded.state["input_offset"] == 0
+    assert reloaded.state["pending"] == []
+
+
 def test_file_replacement_is_recovered_but_invalidates_clean_epoch(tmp_path: Path) -> None:
     now = [6_000_000]
     engine = CopyVaultCheckpointTail(
@@ -510,10 +541,20 @@ def test_file_replacement_is_recovered_but_invalidates_clean_epoch(tmp_path: Pat
     _append(input_path, _fill(now[0], event="replacement-with-a-longer-id"))
     result = engine.poll_once()
 
-    assert result["lines"] == 1
-    assert result["captured"] == 1
+    assert result["lines"] == 0
+    assert result["captured"] == 0
     assert result["counters"]["input_rotations"] == 1
+    assert result["counters"]["reconnect_backfill_blocked"] == 1
     assert result["replay_evidence_complete"] is False
+
+    # The replacement file's pre-existing contents are a reconnect snapshot or
+    # backfill and must not be replayed as causal LIVE_WS evidence. Only a row
+    # appended after the new identity was baselined may be admitted.
+    now[0] += 1_000
+    _append(input_path, _fill(now[0], event="post-reconnect-live"))
+    post_reconnect = engine.poll_once()
+    assert post_reconnect["lines"] == 1
+    assert post_reconnect["captured"] == 1
     _, audit = load_observed_books(tmp_path, coins={"BTC"})
     assert audit["clean_epoch_receipt"]["receipt_valid"] is False
     assert audit["clean_epoch_receipt"]["collector_gap_count"] == 1

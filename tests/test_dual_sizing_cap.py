@@ -22,3 +22,9 @@ def test_une_manquante_non_mesurable():
 
 def test_negatif_borne_a_zero():
     assert taille_finale(-1.0, 0.5)["taille"] == 0.0
+
+
+def test_non_fini_ou_booleen_non_mesurable():
+    for equity, liquidite in ((float("nan"), 0.5), (0.5, float("inf")), (True, 0.5)):
+        r = taille_finale(equity, liquidite)
+        assert r["taille"] == "UNMEASURABLE" and r["refuse"] is True

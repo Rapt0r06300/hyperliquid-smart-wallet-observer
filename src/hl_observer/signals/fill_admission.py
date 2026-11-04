@@ -18,7 +18,9 @@ ni une promesse de PnL. read-only / paper-only. Aucune donnée inventée.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+import math
 
 from hl_observer.markets.universe import is_exotic_market
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
@@ -42,6 +44,7 @@ R_EXOTIC_MARKET = "EXOTIC_MARKET"
 R_ADD_NOT_ENTRY = "ADD_NOT_ENTRY"
 R_UNKNOWN_DELTA = "UNKNOWN_DELTA"
 R_TIMESTAMP_FUTURE = "TIMESTAMP_IN_FUTURE"
+R_INVALID_TIMESTAMP = "INVALID_TIMESTAMP"
 R_PRICE_INVALID = "PRICE_INVALID"
 R_STALE_SIGNAL = "STALE_SIGNAL"
 
@@ -83,15 +86,20 @@ def fill_identity(
     ts_ms: int,
 ) -> str:
     """Identité stable d'un fill (pour la déduplication persistante, T4)."""
+    normalized_price = _finite_positive_float(price)
+    normalized_size = _finite_positive_float(size)
+    normalized_ts = _exact_positive_int(ts_ms)
+    if normalized_price is None or normalized_size is None or normalized_ts is None:
+        raise ValueError("fill identity requires finite positive price, size and exact timestamp")
     raw = "|".join(
         [
             str(wallet_address or "").lower(),
             preserve_native_instrument_symbol(coin),
             str(side or "").upper(),
             str(action_type or "").upper(),
-            f"{float(price or 0):.8f}",
-            f"{float(size or 0):.8f}",
-            str(int(ts_ms or 0)),
+            f"{normalized_price:.8f}",
+            f"{normalized_size:.8f}",
+            str(normalized_ts),
         ]
     )
     return sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -118,7 +126,19 @@ def admit_live_fill(
 
     cfg = config or FillAdmissionConfig()
     action = str(action_type or "").upper()
-    age = int(now_ms) - int(fill_ts_ms)
+    exact_now_ms = _exact_positive_int(now_ms)
+    exact_fill_ts_ms = _exact_positive_int(fill_ts_ms)
+
+    if exact_now_ms is None or exact_fill_ts_ms is None:
+        return FillAdmission(
+            admit=False,
+            kind=KIND_SKIP,
+            reason=R_INVALID_TIMESTAMP,
+            age_ms=0,
+            log_decision=True,
+            is_fresh=False,
+        )
+    age = exact_now_ms - exact_fill_ts_ms
 
     def skip(reason: str, *, log: bool = False) -> FillAdmission:
         return FillAdmission(
@@ -149,8 +169,10 @@ def admit_live_fill(
 
     # ENTRÉE potentielle
     if action in ENTRY_ACTIONS:
-        if leader_price is not None and float(leader_price) <= 0:
-            return skip(R_PRICE_INVALID, log=True)
+        if leader_price is not None:
+            normalized_price = _finite_positive_float(leader_price)
+            if normalized_price is None:
+                return skip(R_PRICE_INVALID, log=True)
         if age > max(0, int(cfg.max_signal_age_ms)):
             return skip(R_STALE_SIGNAL, log=True)
         if action in {"ADD", "INCREASE"} and not cfg.allow_add_as_entry and not has_matching_paper_position:
@@ -199,8 +221,34 @@ __all__ = [
     "R_ADD_NOT_ENTRY",
     "R_UNKNOWN_DELTA",
     "R_STALE_SIGNAL",
+    "R_INVALID_TIMESTAMP",
     "FillAdmissionConfig",
     "FillAdmission",
     "fill_identity",
     "admit_live_fill",
 ]
+
+
+def _finite_positive_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not parsed.is_finite() or parsed <= 0:
+        return None
+    result = float(parsed)
+    return result if math.isfinite(result) and result > 0 else None
+
+
+def _exact_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not parsed.is_finite() or parsed != parsed.to_integral_value() or parsed <= 0:
+        return None
+    return int(parsed)

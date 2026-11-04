@@ -23,3 +23,19 @@ def test_close_accepte_plus_de_cout():
 
 def test_slippage_inconnu_refuse():
     assert acceptable(None, "CLOSE")["acceptable"] is False
+
+
+def test_valeurs_non_finies_ou_booleennes_refusees():
+    assert acceptable(float("nan"), "OPEN")["raison"] == "SLIPPAGE_INCONNU"
+    assert acceptable(float("inf"), "CLOSE")["raison"] == "SLIPPAGE_INCONNU"
+    assert acceptable(True, "OPEN")["raison"] == "SLIPPAGE_INCONNU"
+
+
+def test_budget_negatif_ou_non_fini_refuse_l_action():
+    assert budget_slippage_bps("OPEN", budget_open_bps=-1.0) is None
+    assert budget_slippage_bps("CLOSE", budget_close_bps=float("nan")) is None
+    assert acceptable(0.0, "OPEN", budget_open_bps=-1.0)["raison"] == "BUDGET_INVALIDE"
+
+
+def test_slippage_negative_refusee():
+    assert acceptable(-0.1, "CLOSE")["raison"] == "SLIPPAGE_INCONNU"

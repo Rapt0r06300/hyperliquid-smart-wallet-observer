@@ -337,7 +337,9 @@ def _pytest_parallele() -> list[str]:
     test legacy (dydx) flakait par CONTAMINATION d'état inter-fichiers (il passe en série). « Sans
     régression » prime sur « plus vite » : on ne rend PAS la suite flaky par défaut. Active avec
     `TOUT_TESTER_PYTEST_PARALLELE=1` une fois l'isolation auditée. Le gros gain de vitesse — la
-    recherche des 3 modules en parallèle — reste actif, LUI, sans risque (process séparés)."""
+    recherche des 3 modules en parallèle — reste actif, LUI, sans risque (process séparés).
+    Quand le mode est armé, ``TOUT_TESTER_PYTEST_WORKERS`` peut borner le pool; la valeur est
+    limitée à 4 pour éviter la contention disque/import observée sous Windows."""
     try:
         import importlib.util
         import os as _os
@@ -345,6 +347,13 @@ def _pytest_parallele() -> list[str]:
             return []                                  # défaut = SÉRIE (zéro flake garanti)
         if importlib.util.find_spec("xdist") is None or (_os.cpu_count() or 1) <= 1:
             return []
+        raw_workers = _os.environ.get("TOUT_TESTER_PYTEST_WORKERS", "").strip()
+        if raw_workers:
+            try:
+                workers = min(4, max(1, int(raw_workers)))
+            except ValueError:
+                workers = 4
+            return ["-n", str(workers), "--dist", "loadfile"]
         return ["-n", "auto", "--dist", "loadfile"]
     except Exception:  # noqa: BLE001 — dans le doute, série (jamais un run cassé pour aller vite)
         return []

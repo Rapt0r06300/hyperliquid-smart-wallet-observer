@@ -57,6 +57,17 @@ def test_canonicalizer_detects_tampered_raw_payload() -> None:
     assert "RAW_HASH_MISMATCH" in result.reasons
 
 
+def test_canonicalizer_rejects_ambiguous_exchange_timestamp() -> None:
+    for value in (True, 900.0, "900", 0, -1):
+        record = _tick_record()
+        record["exchange_ts_ms"] = value
+
+        result = canonicalize_tick_record(record)
+
+        assert not result.accepted
+        assert "INVALID_EXCHANGE_TIMESTAMP" in result.reasons
+
+
 def test_canonical_writer_deduplicates_and_replays(tmp_path) -> None:
     event = canonicalize_tick_record(_tick_record()).event
     assert event is not None

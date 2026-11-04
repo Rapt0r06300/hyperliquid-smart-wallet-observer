@@ -9,6 +9,12 @@ from __future__ import annotations
 import os
 from typing import Any
 
+EXECUTION_CAPABILITY_NONE = "NONE"
+SOURCE_STATUS_ACTIVE_OBSERVATION = "ACTIVE_OBSERVATION"
+SOURCE_STATUS_SHADOW_ANALYSIS = "SHADOW_ANALYSIS"
+SOURCE_STATUS_ISOLATED_EXPERIMENT = "ISOLATED_EXPERIMENT"
+SOURCE_STATUS_UNCLASSIFIED = "UNCLASSIFIED"
+
 #: 🔴 SOURCE UNIQUE — doit refléter les lignes `start ... boucle_collecteur.cmd` de
 #: LANCER_HYPERSMART.cmd. Le test `test_le_REGISTRE_correspond_au_LANCEUR` compare les deux :
 #: si quelqu'un ajoute un collecteur au lanceur sans l'ajouter ici, le test rougit — sinon le
@@ -42,7 +48,10 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "backfill-candles-vaults", "script": "tools/backfill_candles_vaults.py",
      "intervalle_s": 14400, "args": ("--une-fois",), "limite_minutes": 480.0},
     {"nom": "pipeline-reel", "script": "tools/pipeline_copie_reel.py",
-     "intervalle_s": 1800, "args": ("--une-fois",), "limite_minutes": 60.0},
+     "intervalle_s": 1800, "args": ("--une-fois",), "limite_minutes": 60.0,
+     "execution_capability": EXECUTION_CAPABILITY_NONE,
+     "source_status": SOURCE_STATUS_SHADOW_ANALYSIS,
+     "paper_read_only": True, "real_execution": False},
     {"nom": "geler-prelim", "script": "tools/geler_prelim_copie.py",
      "intervalle_s": 3600, "args": ("--une-fois",), "limite_minutes": 120.0},
     # PERSISTANTS : écrivent la DATA en continu, pas un log par seconde -> la vie se mesure au HEARTBEAT
@@ -50,7 +59,10 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "userfills-live", "script": "tools/collecter_userfills_vaults.py",
      "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/data/userfills_live.lock",
-     "copy_vault_checkpoint_role": "UNBOUND_SOURCE"},
+     "copy_vault_checkpoint_role": "UNBOUND_SOURCE",
+     "execution_capability": EXECUTION_CAPABILITY_NONE,
+     "source_status": SOURCE_STATUS_ACTIVE_OBSERVATION,
+     "paper_read_only": True, "real_execution": False},
     {"nom": "bbo-collector", "script": "tools/collecter_bbo.py",
      "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/data/bbo_heartbeat.json"},
@@ -59,7 +71,11 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "heartbeat": "runtime/data/native_venues_heartbeat.json"},
     {"nom": "experimental-paper", "script": "tools/experimental_paper_tick.py",
      "intervalle_s": 2, "args": ("--une-fois",), "limite_minutes": 2.0,
-     "heartbeat": "runtime/research_lab/heartbeats/experimental-paper.json"},
+     "heartbeat": "runtime/research_lab/heartbeats/experimental-paper.json",
+     "execution_capability": EXECUTION_CAPABILITY_NONE,
+     "source_status": SOURCE_STATUS_ISOLATED_EXPERIMENT,
+     "paper_read_only": True, "real_execution": False,
+     "isolated_experiment": True},
     {"nom": "copy-whitelist", "script": "tools/ecrire_copy_whitelist.py",
      "intervalle_s": 21600, "args": (), "limite_minutes": 570.0},
     {"nom": "rapport-quotidien", "script": "tools/rapport_quotidien.py",
@@ -138,6 +154,53 @@ def experimental_paper_demande() -> bool:
     return os.environ.get("HYPERSMART_EXPERIMENTAL_PAPER", "0").strip().lower() in {
         "1", "true", "yes", "oui", "on",
     }
+
+
+def contrat_collecteur(nom: str) -> dict[str, Any] | None:
+    """Return the explicit safety contract for one registered collector.
+
+    A name such as ``pipeline-reel`` never grants execution authority.  The
+    contract is metadata on the registry entry, and missing metadata remains
+    unclassified instead of being inferred from a name.
+    """
+    entry = next((c for c in REGISTRE + COLLECTEURS_CAMPAGNE if c["nom"] == nom), None)
+    if entry is None:
+        return None
+    return {
+        "nom": nom,
+        "execution_capability": entry.get("execution_capability", EXECUTION_CAPABILITY_NONE),
+        "source_status": entry.get("source_status", SOURCE_STATUS_UNCLASSIFIED),
+        "paper_read_only": entry.get("paper_read_only") is True,
+        "real_execution": entry.get("real_execution") is False,
+        "isolated_experiment": entry.get("isolated_experiment") is True,
+    }
+
+
+def contrat_collecteur_valide(nom: str) -> bool:
+    """Validate a collector contract without deriving authority from its name."""
+    contract = contrat_collecteur(nom)
+    if contract is None:
+        return False
+    if contract["execution_capability"] != EXECUTION_CAPABILITY_NONE:
+        return False
+    if contract["real_execution"] is not True:
+        return False
+    if contract["source_status"] == SOURCE_STATUS_UNCLASSIFIED:
+        return False
+    return contract["paper_read_only"] is True
+
+
+def experimental_paper_isole() -> bool:
+    """Return whether the opt-in experimental collector is explicitly isolated."""
+    contract = contrat_collecteur("experimental-paper")
+    return bool(
+        experimental_paper_demande()
+        and contract
+        and contract["isolated_experiment"]
+        and contract["paper_read_only"]
+        and contract["real_execution"]
+        and contract["execution_capability"] == EXECUTION_CAPABILITY_NONE
+    )
 
 
 def normaliser_profil(profil: str | None, *, defaut: str = "core") -> str:

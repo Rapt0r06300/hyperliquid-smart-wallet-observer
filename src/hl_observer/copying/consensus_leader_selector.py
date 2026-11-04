@@ -88,12 +88,19 @@ def select_consensus_leaders_from_deltas(
         if not wallet or not coin:
             _count(rejected, "identity_missing")
             continue
+        raw_notional = row.delta_notional_usdc
+        if raw_notional is None:
+            _count(rejected, "missing_notional")
+            continue
         try:
-            notional = float(row.delta_notional_usdc or 0.0)
+            notional = float(raw_notional)
         except (TypeError, ValueError, OverflowError):
             notional = math.nan
         if not math.isfinite(notional):
             _count(rejected, "non_finite_notional")
+            continue
+        if notional <= 0:
+            _count(rejected, "non_positive_notional")
             continue
         action = copy_delta_action(row)
         direction = copy_delta_direction(row, action)
@@ -124,11 +131,15 @@ def select_consensus_leaders_from_deltas(
             total_notionals = []
             for row in cluster_rows:
                 try:
-                    row_notional = float(row.delta_notional_usdc or 0.0)
+                    row_notional = float(row.delta_notional_usdc)
                 except (TypeError, ValueError, OverflowError):
                     row_notional = math.nan
                 if not math.isfinite(row_notional):
                     _count(rejected, "non_finite_notional")
+                    total_notionals = []
+                    break
+                if row_notional <= 0:
+                    _count(rejected, "non_positive_notional")
                     total_notionals = []
                     break
                 total_notionals.append(abs(row_notional))
@@ -256,7 +267,7 @@ def _entity_vote(row: PositionDeltaModel) -> dict:
         "coin": preserve_native_instrument_symbol(row.coin),
         "side": copy_delta_direction(row, copy_delta_action(row)),
         "ts_ms": delta_event_time_ms(row),
-        "size": abs(float(row.delta_notional_usdc or row.delta_size or 0.0)),
+        "size": abs(float(row.delta_notional_usdc)),
         "public_entity_id": raw.get("public_entity_id") or raw.get("onchain_entity_id"),
         "twap_cadence_ms": raw.get("twap_cadence_ms"),
         "funding_profile": raw.get("funding_profile"),

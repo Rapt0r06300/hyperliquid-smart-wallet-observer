@@ -29,6 +29,9 @@ il n'invente pas de label.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from hl_observer.backtesting.regime_detection import garch11_variance_causale
 
@@ -109,6 +112,66 @@ def trades_etiquetes(trades: list[dict], labels: list[str]) -> list[dict]:
     return [dict(t, regime=lab) for t, lab in zip(trades, labels)]
 
 
+def freeze_regime_allowlist_from_train(
+    train_rows: Sequence[Mapping[str, Any]],
+    *,
+    regime_field: str = "regime",
+    gross_pnl_field: str = "gross_pnl_bps",
+    cost_field: str = "cost_bps",
+    min_trades_per_regime: int = 3,
+    min_mean_net_bps: float = 0.0,
+) -> dict[str, Any]:
+    """Freeze regimes selected from TRAIN after explicit costs.
+
+    This is a research gate, not an activation rule.  Every TRAIN row must have
+    a finite gross result, a finite non-negative cost and a non-empty regime.
+    Invalid evidence is rejected instead of being ignored or replaced by zero.
+    The returned allow-list is frozen and can be applied to a later OOS split.
+    """
+
+    minimum = int(min_trades_per_regime)
+    threshold = float(min_mean_net_bps)
+    if minimum < 1 or not math.isfinite(threshold):
+        raise ValueError("invalid TRAIN regime selection bounds")
+    grouped: dict[str, list[float]] = {}
+    invalid = 0
+    for row in train_rows or ():
+        if not isinstance(row, Mapping):
+            invalid += 1
+            continue
+        regime = str(row.get(regime_field) or "").strip()
+        try:
+            gross = float(row.get(gross_pnl_field))
+            cost = float(row.get(cost_field))
+        except (TypeError, ValueError):
+            invalid += 1
+            continue
+        if not regime or not math.isfinite(gross) or not math.isfinite(cost) or cost < 0:
+            invalid += 1
+            continue
+        grouped.setdefault(regime, []).append(gross - cost)
+    eligible = {
+        regime: values
+        for regime, values in grouped.items()
+        if len(values) >= minimum and sum(values) / len(values) > threshold
+    }
+    return {
+        "status": "TRAIN_REGIMES_FROZEN" if eligible else "NO_ELIGIBLE_TRAIN_REGIME",
+        "allowed_regimes": sorted(eligible),
+        "train_regime_counts": {regime: len(values) for regime, values in sorted(grouped.items())},
+        "train_regime_mean_net_bps": {
+            regime: round(sum(values) / len(values), 8)
+            for regime, values in sorted(grouped.items())
+        },
+        "invalid_train_rows_rejected": invalid,
+        "min_trades_per_regime": minimum,
+        "min_mean_net_bps": threshold,
+        "selection_scope": "TRAIN_ONLY_COSTED",
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "HAUTE_VOL",
     "BASSE_VOL",
@@ -118,4 +181,5 @@ __all__ = [
     "seuil_depuis_le_train",
     "etiqueter",
     "trades_etiquetes",
+    "freeze_regime_allowlist_from_train",
 ]

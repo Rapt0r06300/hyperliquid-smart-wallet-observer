@@ -19,7 +19,7 @@ set "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202"
 set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13"
 rem The local engine is intentionally pinned too: a same-build but modified
 rem helper must not be executed silently.
-set "ALINA_LOCAL_ENGINE_SHA256=514a9a39415cc0d63434b27169888bb38b8bec1ca6e5b057e8f9e127a82c32c4"
+set "ALINA_LOCAL_ENGINE_SHA256=5333880033ae3ffe7dcc8d9e1d5676cc77cef429f71a1a09444f0721d6f986a6"
 set "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b"
 set "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297"
 set "HYPERSMART_GIT="
@@ -33,10 +33,12 @@ if /I "%~1"=="-h" goto :help
 
 if /I "%~1"=="--dry-run" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="dry-run" set "SYNC_OPTION=--dry-run"
+if /I "%~1"=="--plan" set "SYNC_OPTION=--dry-run"
 if /I "%~1"=="--wip-only" set "SYNC_OPTION=--wip-only"
 if /I "%~1"=="wip" set "SYNC_OPTION=--wip-only"
 if /I "%~1"=="--promote-current-to-main" set "SYNC_OPTION=--promote-current-to-main"
 if /I "%~1"=="--portable-self-check" set "SYNC_OPTION=--portable-self-check"
+if /I "%~1"=="--benchmark" set "SYNC_OPTION=--benchmark"
 if not "%~1"=="" if not defined SYNC_OPTION goto :bad_option
 if not "%~2"=="" goto :bad_option
 
@@ -137,6 +139,7 @@ if errorlevel 1 goto :invalid_engine
 echo [OK] Version du moteur et syntaxe Python valides
 
 if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check
+if /I "%SYNC_OPTION%"=="--benchmark" goto :benchmark
 
 rem A double click from a Codex/WIP branch promotes it only by a guarded
 rem fast-forward. Dry-run and WIP modes stay branch-local/read-only.
@@ -174,13 +177,20 @@ echo PORTABLE_GITHUB_PUSH_CHECK_OK
 set "RC=0"
 goto :finish
 
+:benchmark
+echo [DIAGNOSTIC] Benchmark lecture seule de l'inventaire Git (5 runs)...
+"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ROOT%tools\benchmark_git_sync.py" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" --runs 5
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" echo [NO_GO] Benchmark non termine; aucune mutation Git.
+goto :finish
+
 :bad_option
 echo [NO_GO] Option inconnue. Utiliser ce fichier en double clic sans argument.
 set "RC=2"
 goto :finish
 
 :help
-echo Usage : POUSSER-GITHUB-FORCE.cmd [--dry-run^|--wip-only^|--promote-current-to-main^|--portable-self-check]
+echo Usage : POUSSER-GITHUB-FORCE.cmd [--dry-run^|--plan^|--wip-only^|--promote-current-to-main^|--portable-self-check^|--benchmark]
 echo Par defaut, une branche non-main est promue vers main uniquement par fast-forward securise.
 echo Aucun force-push, reset, clean, stash, suppression ou telechargement de shard.
 set "RC=0"

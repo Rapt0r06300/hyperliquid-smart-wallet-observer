@@ -16,6 +16,10 @@ from decimal import ROUND_FLOOR, Decimal, localcontext
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
+from hl_observer.backtesting.copy_vault_protocol import (
+    PAPER_EQUITY_USD,
+    PAPER_TARGET_NET_USD_PER_DAY,
+)
 from hl_observer.backtesting.cross_venue_certified import (
     FOUR_FILL_CONTRACT_VERSION,
 )
@@ -32,10 +36,10 @@ from hl_observer.economics.numeric import (
 )
 from hl_observer.strategies.active_scope import strategy_can_materialize
 
-TARGET_NET_USD = 5.0
-TARGET_NET_USD_PER_DAY = 5.0
+TARGET_NET_USD = PAPER_TARGET_NET_USD_PER_DAY
+TARGET_NET_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
 MIN_PROOF_DAYS = 2
-STARTING_CAPITAL_USD = 200.0
+STARTING_CAPITAL_USD = PAPER_EQUITY_USD
 ECONOMIC_CONTRACT_VERSION = "alina.economic_objective.200usd-5usd-day.v1"
 EVIDENCE_LEVEL_THRESHOLDS = (
     ("PROVEN", 30, 150),
@@ -367,6 +371,13 @@ def _number(value: object) -> float | None:
     return result if math.isfinite(result) else None
 
 
+def _exact_non_negative_int(value: object) -> int | None:
+    """Parse a JSON count without accepting coercion or fractional truncation."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _segment_economics(segment: Mapping[str, Any] | None, *, label: str, issues: list[str]) -> dict[str, Any] | None:
     if not isinstance(segment, Mapping):
         return None
@@ -395,9 +406,9 @@ def _segment_economics(segment: Mapping[str, Any] | None, *, label: str, issues:
         elif expected is not None:
             # A tolerated discrepancy is uncertainty, never extra credited PnL.
             metrics["net_pnl_usd"] = min(metrics["net_pnl_usd"], expected)
-    count = _number(segment.get("sample_count"))
-    trade_count = _number(segment.get("trade_ids_count"))
-    duplicates = _number(segment.get("duplicate_trade_ids"))
+    count = _exact_non_negative_int(segment.get("sample_count"))
+    trade_count = _exact_non_negative_int(segment.get("trade_ids_count"))
+    duplicates = _exact_non_negative_int(segment.get("duplicate_trade_ids"))
     trade_hash = str(segment.get("trade_ids_sha256") or "")
     liquidatable = segment.get("liquidatable_net")
     if liquidatable is None:
@@ -421,7 +432,8 @@ def _validate_cross_provenance(evidence: Mapping[str, Any], issues: list[str]) -
     meta = meta if isinstance(meta, Mapping) else {}
     if meta.get("source_mode") != CROSS_CERTIFIED_SOURCE_MODE:
         issues.append("CROSS_VENUE_CERTIFIED_ATOMIC_SOURCE_MISSING")
-    if int(_number(meta.get("certified_snapshots")) or 0) <= 0:
+    certified_snapshots = _exact_non_negative_int(meta.get("certified_snapshots"))
+    if certified_snapshots is None or certified_snapshots <= 0:
         issues.append("CROSS_VENUE_CERTIFIED_SNAPSHOT_PROOF_MISSING")
     if meta.get("mapping_verified") is not True:
         issues.append("CROSS_VENUE_MAPPING_PROOF_MISSING")
@@ -437,12 +449,26 @@ def _validate_copy_checkpoint_integrity(
     integrity = evidence.get("copy_checkpoint_integrity")
     oos = evidence.get("oos")
     forward = evidence.get("forward")
+    oos_count = (
+        _exact_non_negative_int(oos.get("sample_count"))
+        if isinstance(oos, Mapping)
+        else None
+    )
+    forward_count = (
+        _exact_non_negative_int(forward.get("sample_count"))
+        if isinstance(forward, Mapping)
+        else None
+    )
     expected_proof_count = (
-        int(_number(oos.get("sample_count")) or 0)
-        + int(_number(forward.get("sample_count")) or 0)
-        if isinstance(oos, Mapping) and isinstance(forward, Mapping)
+        oos_count + forward_count
+        if oos_count is not None and forward_count is not None
         else 0
     )
+    proof_trade_count = _exact_non_negative_int(integrity.get("proof_trade_count")) if isinstance(integrity, Mapping) else None
+    expected_trade_count = _exact_non_negative_int(integrity.get("expected_proof_trade_count")) if isinstance(integrity, Mapping) else None
+    clean_epoch_ms = _exact_non_negative_int(integrity.get("clean_epoch_ms")) if isinstance(integrity, Mapping) else None
+    duplicate_checkpoint_ids = _exact_non_negative_int(integrity.get("duplicate_checkpoint_ids")) if isinstance(integrity, Mapping) else None
+    quarantined_checkpoint_metaorders = _exact_non_negative_int(integrity.get("quarantined_checkpoint_metaorders")) if isinstance(integrity, Mapping) else None
     clean = bool(
         isinstance(integrity, Mapping)
         and integrity.get("schema_version")
@@ -450,13 +476,13 @@ def _validate_copy_checkpoint_integrity(
         and integrity.get("receipt_valid") is True
         and integrity.get("writer_role") == "BOUND_WRITER"
         and bool(str(integrity.get("writer_run_id") or "").strip())
-        and int(_number(integrity.get("clean_epoch_ms")) or 0) > 0
-        and _number(integrity.get("duplicate_checkpoint_ids")) == 0
-        and _number(integrity.get("quarantined_checkpoint_metaorders")) == 0
+        and clean_epoch_ms is not None
+        and clean_epoch_ms > 0
+        and duplicate_checkpoint_ids == 0
+        and quarantined_checkpoint_metaorders == 0
         and expected_proof_count > 0
-        and _number(integrity.get("proof_trade_count")) == expected_proof_count
-        and _number(integrity.get("expected_proof_trade_count"))
-        == expected_proof_count
+        and proof_trade_count == expected_proof_count
+        and expected_trade_count == expected_proof_count
         and integrity.get("all_proof_trades_exact_checkpoint_bound") is True
         and integrity.get("all_proof_trades_same_writer_run") is True
         and integrity.get("all_proof_trades_post_clean_epoch") is True
@@ -491,7 +517,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
         if not isinstance(generalisation, Mapping):
             issues.append("COPY_HELDOUT_VAULT_PROOF_MISSING")
         else:
-            heldout_n = _number(generalisation.get("sample_count"))
+            heldout_n = _exact_non_negative_int(generalisation.get("sample_count"))
             heldout_net_bps = _number(generalisation.get("net_bps"))
             if heldout_n is None or heldout_n < COPY_HELDOUT_MIN_N:
                 issues.append("COPY_HELDOUT_VAULT_SAMPLE_TOO_SMALL")
@@ -524,8 +550,8 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
         liquidatable = evidence.get("LIQUIDATABLE_NET")
     if liquidatable is not True:
         issues.append("NOT_LIQUIDATABLE_NET")
-    duplicates = _number(evidence.get("duplicate_trade_ids"))
-    trade_count = _number(evidence.get("trade_ids_count"))
+    duplicates = _exact_non_negative_int(evidence.get("duplicate_trade_ids"))
+    trade_count = _exact_non_negative_int(evidence.get("trade_ids_count"))
     trade_hash = str(evidence.get("trade_ids_sha256") or "")
     if duplicates != 0:
         issues.append("DUPLICATE_TRADE_IDENTITIES")
@@ -535,9 +561,9 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     forward = evidence.get("forward")
     placebos = evidence.get("placebos")
     oos_net = decimal_value(oos.get("net_pnl_usd")) if isinstance(oos, Mapping) else None
-    oos_count = _number(oos.get("sample_count")) if isinstance(oos, Mapping) else None
+    oos_count = _exact_non_negative_int(oos.get("sample_count")) if isinstance(oos, Mapping) else None
     forward_net = decimal_value(forward.get("net_pnl_usd")) if isinstance(forward, Mapping) else None
-    forward_count = _number(forward.get("sample_count")) if isinstance(forward, Mapping) else None
+    forward_count = _exact_non_negative_int(forward.get("sample_count")) if isinstance(forward, Mapping) else None
     oos_economics = _segment_economics(oos if isinstance(oos, Mapping) else None, label="OOS", issues=issues)
     forward_economics = _segment_economics(forward if isinstance(forward, Mapping) else None, label="FORWARD", issues=issues)
     if oos_economics is not None and forward_economics is not None and oos_economics["trade_ids_sha256"] == forward_economics["trade_ids_sha256"]:
@@ -663,10 +689,24 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     if target_decimal is None:
         issues.append("INVALID_TARGET_NET_USD")
     proof_net = float_not_above(proof_net_decimal) if proof_net_decimal is not None else None
-    if proof_net_decimal is None or proof_net is None or target_decimal is None or proof_net_decimal < target_decimal:
+    historical_target_reached = bool(
+        proof_net_decimal is not None
+        and proof_net is not None
+        and target_decimal is not None
+        and proof_net_decimal >= target_decimal
+        and not (daily_target_required and isinstance(daily_evidence, Mapping) and daily_evidence.get("all_days_at_or_above_target") is not True)
+    )
+    if not historical_target_reached:
         issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
-    return {"family": family, "target_net_usd": float(target_decimal) if target_decimal is not None else None, "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
+    target_only_reasons = {
+        "TARGET_NET_USD_NOT_REACHED",
+        "DAILY_NET_TARGET_NOT_REACHED",
+    }
+    quality_reasons = [reason for reason in unique_issues if reason not in target_only_reasons]
+    positive_net_proof = bool(proof_net_decimal is not None and proof_net_decimal > 0)
+    quality_gates_passed = not quality_reasons
+    return {"family": family, "target_net_usd": float(target_decimal) if target_decimal is not None else None, "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "positive_net_proof": positive_net_proof, "quality_gates_passed": quality_gates_passed, "historical_target_reached": historical_target_reached, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
 
 
 __all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "ECONOMIC_CONTRACT_VERSION", "EVIDENCE_LEVEL_THRESHOLDS", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

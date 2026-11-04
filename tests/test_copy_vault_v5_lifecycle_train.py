@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.copy_vault_executable import cluster_metaorders
+import hl_observer.backtesting.copy_vault_v5_lifecycle_train as lifecycle
 from hl_observer.backtesting.copy_vault_v5_lifecycle_train import (
     EXIT_POLICY,
     explore_copy_vault_v5_train,
@@ -211,6 +212,22 @@ def test_index_refuse_reception_avant_observation() -> None:
 
     assert indexed == {}
     assert audit["causal_exit_events"] == 0
+
+
+def test_lifecycle_replay_ignores_causal_books_with_timestamp_ambiguous() -> None:
+    books = {
+        "BTC": [
+            {
+                "ts_ms": True,
+                "bid": 99.0,
+                "ask": 101.0,
+                "capacity_usd": 10_000.0,
+                "causal_observation": True,
+            }
+        ]
+    }
+
+    assert lifecycle._continuous_causal_books(books) == {}
 
 
 def test_replay_refuse_des_bornes_train_absentes() -> None:

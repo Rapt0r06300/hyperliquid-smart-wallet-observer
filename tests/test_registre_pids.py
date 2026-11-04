@@ -58,3 +58,16 @@ def test_arreter_ne_tue_que_les_cibles(tmp_path):
     assert 999 not in tues and 999 not in r["cibles"]
     assert set(r["arretes"]) == set(r["cibles"])
     assert 200 in tues and 500 in tues                         # UI + son enfant vérifié
+
+
+def test_enregistrer_avec_root_publie_orphan_audit(tmp_path):
+    root = str(tmp_path)
+    procs = [
+        {"pid": 100, "ppid": 1, "cmd": root + "/LANCER_HYPERSMART.cmd"},
+        {"pid": 200, "ppid": 100, "cmd": root + "/python.exe -m hl_observer ui"},
+        {"pid": 999, "ppid": 1, "cmd": root + "/python.exe -m hl_observer ui --duplicate"},
+    ]
+    reg = RP.construire_registre(procs, cmd_pid=100, root=root)
+    assert reg["audit"]["verdict"] == "ORPHAN"
+    assert reg["audit"]["ready"] is False
+    assert [row["pid"] for row in reg["audit"]["orphelins"]] == [999]

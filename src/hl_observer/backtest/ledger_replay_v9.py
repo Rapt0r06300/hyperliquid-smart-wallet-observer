@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 import math
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass, field
 
+from hl_observer.fees.hyperliquid_fees import frais
 from hl_observer.markets.universe import is_exotic_market
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
@@ -22,10 +24,22 @@ ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
 EXIT_ACTIONS = {"REDUCE", "CLOSE_LONG", "CLOSE_SHORT"}
 
 
+def _exact_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not number.is_finite() or number != number.to_integral_value() or number < 0:
+        return None
+    return int(number)
+
+
 @dataclass(frozen=True, slots=True)
 class ReplayConfig:
     notional_usdt: float = 50.0
-    fee_bps: float = 2.5
+    fee_bps: float = frais(marche="perp").taker_bps
     spread_bps: float = 3.0
     slippage_bps: float = 1.5
     max_signal_age_ms: int = 30_000
@@ -36,7 +50,7 @@ class ReplayConfig:
         values = (self.notional_usdt, self.fee_bps, self.spread_bps, self.slippage_bps)
         if any(isinstance(value, bool) or not math.isfinite(float(value)) or float(value) < 0.0 for value in values):
             raise ValueError("replay economics must be finite and non-negative")
-        if any(isinstance(value, bool) or int(value) < 0 for value in (self.max_signal_age_ms, self.hard_backfill_age_ms)):
+        if any(_exact_non_negative_int(value) is None for value in (self.max_signal_age_ms, self.hard_backfill_age_ms)):
             raise ValueError("replay age limits must be non-negative")
         if self.hard_backfill_age_ms < self.max_signal_age_ms:
             raise ValueError("hard backfill age must cover signal age")
@@ -59,6 +73,7 @@ class ReplayResult:
     skipped_exotic: int = 0
     skipped_stale: int = 0
     skipped_dup: int = 0
+    skipped_invalid: int = 0
     per_coin_net: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -80,27 +95,38 @@ def _signed_move(side: str, entry: float, exit_: float) -> float:
 def replay_ledger_v9(rows: list[dict], *, config: ReplayConfig | None = None) -> ReplayResult:
     cfg = config or ReplayConfig()
     res = ReplayResult()
-    rows = sorted(rows, key=lambda r: int(r.get("timestamp_ms") or 0))
+    valid_rows: list[tuple[int, dict]] = []
+    for row in rows:
+        timestamp = _exact_non_negative_int(row.get("timestamp_ms")) if isinstance(row, dict) else None
+        if timestamp is None or timestamp == 0:
+            res.skipped_invalid += 1
+            continue
+        valid_rows.append((timestamp, row))
+    valid_rows.sort(key=lambda item: item[0])
     book: dict[str, dict] = {}
     seen: set[tuple] = set()
 
-    for r in rows:
+    for timestamp, r in valid_rows:
         coin = str(r.get("coin") or "").upper()
         side = str(r.get("leader_side") or "").upper()
         action = str(r.get("leader_action") or "").upper()
         wallet = str(r.get("wallet_address") or "")
         price = r.get("leader_price")
         age = r.get("signal_age_ms")
-        if not coin or side not in {"LONG", "SHORT"} or price in (None, 0):
+        if not coin or side not in {"LONG", "SHORT"} or isinstance(price, bool) or price in (None, 0):
             continue
-        price = float(price)
+        try:
+            price = float(price)
+        except (TypeError, ValueError, OverflowError):
+            res.skipped_invalid += 1
+            continue
         if not math.isfinite(price) or price <= 0.0:
             continue
 
         if not cfg.allow_exotic and is_exotic_market(coin):
             res.skipped_exotic += 1
             continue
-        ident = (wallet, coin, side, action, round(price, 6), int(r.get("timestamp_ms") or 0))
+        ident = (wallet, coin, side, action, round(price, 6), timestamp)
         if ident in seen:
             res.skipped_dup += 1
             continue
@@ -109,10 +135,11 @@ def replay_ledger_v9(rows: list[dict], *, config: ReplayConfig | None = None) ->
         key = f"{wallet}|{coin}|{side}"
 
         if action in ENTRY_ACTIONS:
-            if isinstance(age, bool) or (isinstance(age, (int, float)) and (not math.isfinite(float(age)) or age < 0)):
+            age_ms = _exact_non_negative_int(age)
+            if age_ms is None:
                 res.skipped_stale += 1
                 continue
-            if isinstance(age, (int, float)) and age > cfg.hard_backfill_age_ms:
+            if age_ms > cfg.hard_backfill_age_ms:
                 res.skipped_stale += 1
                 continue
             if key not in book:  # une seule position par leader/coin/side

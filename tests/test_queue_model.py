@@ -5,6 +5,7 @@ from hl_observer.backtesting.queue_model import (
     avancer,
     cancels_nets,
     fill_borne_par_100,
+    rejouer_evenements_l2,
     rejouer,
 )
 
@@ -37,3 +38,17 @@ def test_invariant_fill_jamais_avant_le_modele_100pct() -> None:
     evts = [(-5.0, 5.0), (-40.0, 10.0), (-100.0, 100.0), (0.0, 50.0)]
     assert fill_borne_par_100(100.0, evts) is True
     assert fill_borne_par_100(0.0, evts) is True   # déjà en tête → rempli, mais jamais "trop tôt"
+
+
+def test_replay_l2_require_timestamp_native_id_and_monotonicity() -> None:
+    result = rejouer_evenements_l2(100.0, [
+        {"ts_ms": 1_000, "event_id": "e1", "chg_carnet": -30.0, "qty_trade": 30.0},
+        {"ts_ms": 1_001, "event_id": "e2", "chg_carnet": -80.0, "qty_trade": 80.0},
+    ])
+    assert result["status"] == "PROVEN"
+    assert result["state"]["rempli"] is True
+    assert result["cancellation_qty"] == 0.0
+
+    missing = rejouer_evenements_l2(100.0, [{"ts_ms": 1_000, "chg_carnet": -30.0, "qty_trade": 30.0}])
+    assert missing["status"] == "UNMEASURABLE"
+    assert "ID_INVALID" in missing["reason"]

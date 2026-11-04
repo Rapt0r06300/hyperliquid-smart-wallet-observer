@@ -137,3 +137,37 @@ def test_v9_keeps_case_distinct_instruments_in_separate_positions():
 
     assert result.entries_opened == 2
     assert {position.coin for position in result.open_positions.values()} == {"kPEPE", "KPEPE"}
+
+
+def test_v9_rejects_missing_or_non_finite_measurements_without_fabricating_trade():
+    result = run_v9_paper_session(
+        [_fill(price="NaN"), _fill(size=None)],
+        now_ms=NOW,
+    )
+
+    assert result.entries_opened == 0
+    assert result.supply_report.skip_reasons["INVALID_FILL_MEASUREMENT"] == 2
+    assert all(decision["reason"] == "INVALID_FILL_MEASUREMENT" for decision in result.decisions)
+
+
+def test_v9_rejects_fractional_timestamp_and_consensus_without_truncation():
+    result = run_v9_paper_session(
+        [_fill(fill_ts_ms="1000000000.5"), _fill(consensus_wallets="2.5")],
+        now_ms=NOW,
+    )
+
+    assert result.entries_opened == 0
+    assert result.supply_report.skip_reasons["INVALID_FILL_MEASUREMENT"] == 2
+
+
+def test_v9_rejects_malformed_reduce_fraction_instead_of_using_default():
+    result = run_v9_paper_session(
+        [
+            _fill(action_type="OPEN_LONG", fill_ts_ms=NOW - 5_000),
+            _fill(action_type="REDUCE", fill_ts_ms=NOW - 1_000, reduce_fraction="NaN"),
+        ],
+        now_ms=NOW,
+    )
+
+    assert result.reduces_applied == 0
+    assert any(decision.get("reason") == "INVALID_REDUCE_FRACTION" for decision in result.decisions)

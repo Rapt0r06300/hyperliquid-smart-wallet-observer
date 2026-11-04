@@ -10,7 +10,7 @@ set "HYPERSMART_INTERACTIVE_LAUNCH=0"
 if "%~1"=="" set "HYPERSMART_INTERACTIVE_LAUNCH=1"
 REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
 REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
-call "%~dp0tools\portable_env.cmd"
+call "%ALINA_PROJECT_ROOT%\tools\portable_env.cmd"
 if errorlevel 1 (
   echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
   set "RC=30"
@@ -125,10 +125,9 @@ REM (on chasse un move deja parti), le prix revient et le SL synthetique coupe -
 REM Le snapshot le dit: "les entrees arrivent trop tard; consensus tres chaud vise 4 s". On resserre
 REM a 15000 ms (fresh): admet la latence WS mediane ~11 s, rejette le chasing. Reversible.
 set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=10000"
-REM 20/07 — CAPITAL DECLARE (repli de la marge dynamique si l'etat UI est illisible).
-REM Sans lui : capital=None -> marge 50 $/position -> 40 %% du capital dort. La distance a la
-REM liquidation depend du LEVIER, pas de la taille : deployer plus a levier constant est sur.
-set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=100"
+REM 20/07 — CAPITAL PAPER CANONIQUE Copy-Vault : 200 USDT, identique au contrat de replay/labo.
+REM Ce montant est une base de simulation, jamais un solde exchange et jamais une autorisation d'ordre.
+set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=200"
 REM Legacy ARBITRAGE DE DISLOCATION paper v1 : QUARANTAINE DEFINITIVE.
 REM Le cross-venue actif est EXPERIMENTAL_PAPER v2 (deux jambes, couts complets, ledger isole).
 REM Re-activer ce flag recreerait un second chemin economique ambigu : contrat runtime = 0.
@@ -387,6 +386,10 @@ REM Fenetre minimisee "HyperSmart Stream" - ferme-la pour stopper le flux temps 
 REM Stream rattache au lanceur principal; pas de fenetre separee.
 set "HYPERSMART_ENABLE_AUX_STREAM=1"
 
+REM Contrat LCH : scope economique unique, autorite dans active_scope.py.
+set "HYPERSMART_ACTIVE_STRATEGY_SCOPE=copy_vault"
+set "HYPERSMART_SCOPE_VERSION=COPY_VAULT_PAPER_V2"
+
 REM === PREFLIGHT BLOQUANT (item 6) — env/deps/disque/dossiers/horloge/endpoints/quotas/schemas/paper.
 REM   NO-GO => le moteur NE demarre PAS. Paper strict, lecture publique HL info uniquement, 0 ordre.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.preflight_lanceur "%~dp0."
@@ -394,8 +397,11 @@ if errorlevel 1 (
   echo.
   echo   [PREFLIGHT] NO-GO : environnement non pret. Le moteur ne demarre pas. Corrige les blocages ci-dessus.
   echo.
-  pause
-  exit /b 2
+  REM LCH-011/LCH-012 : le verrou a deja ete acquis avant ce controle.
+  REM Toujours passer par la sortie commune afin de liberer le verrou, meme sur NO-GO.
+  set "RC=2"
+  call :liberer_verrou_lanceur
+  goto :fin
 )
 
 REM ARCHIVE REPLAY (2026-07-09, demande Flo): au lieu de perdre les donnees du run precedent,
@@ -497,6 +503,16 @@ REM   Ecrit runtime\data\sessions\<run_id>\DATA_CATALOG.json (ACTIVE) + le point
 REM   moniteur et ANALYSER retrouvent. Chaque source est DECLAREE (vivante avec compteurs reels, ou absente
 REM   avec sa raison). Aucune donnee fabriquee.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.session_harvest ouvrir "%~dp0."
+if errorlevel 1 (
+  echo.
+  echo   [SESSION] Echec bloquant de creation du catalogue de session. Le moteur ne demarre pas.
+  echo   Aucun run incomplet ne sera promu ; consulte les logs et corrige les droits/artefacts.
+  echo.
+  set "RC_SESSION=%ERRORLEVEL%"
+  call :stop_impl
+  set "RC=5"
+  goto :fin
+)
 
 REM === ITEM 9 : MONITEUR de sante INTEGRE AU LANCEMENT (plus besoin de "LANCER_HYPERSMART.cmd sante"). ==
 REM   Boucle CACHEE (start /b) : rafraichit le tableau + APPEND runtime\logs\sante_journal.log en continu
@@ -557,6 +573,12 @@ REM Profil HARVEST officiel (items 1/2) : socle CORE (allMids+BBO+userFills) PLU
 REM multi-venue native (Bybit/OKX/Gate/Bitget) et les autres collecteurs HARVEST. Le superviseur evite les
 REM doublons et enregistre lui-meme les PID pour l'arret cible.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous harvest
+exit /b %ERRORLEVEL%
+
+:liberer_verrou_lanceur
+REM Sortie de preflight et arrets anticipes : ne jamais laisser le verrou du lanceur
+REM vivre jusqu'a son TTL lorsque le moteur n'a pas demarre.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.verrou_lanceur liberer "%~dp0."
 exit /b %ERRORLEVEL%
 
 REM ---------------------------------------------------------------------------
@@ -714,7 +736,8 @@ if /I "%SUB%"=="portable-zip"      goto :cmd_portablezip
 if /I "%SUB%"=="portable-proof"    goto :cmd_portableproof
 echo.
 echo   Sous-commande inconnue : "%SUB%"
-goto :cmd_menu
+set "RC=64"
+goto :fin
 
 :cmd_menu
 echo.
@@ -806,6 +829,7 @@ echo   ===  STATUT HYPERSMART  ^(lecture seule^)  ===
 if exist "runtime\data\launcher_pids.json" ( echo   Registre lanceur : & type "runtime\data\launcher_pids.json" & echo. ) else ( echo   Pas de registre lanceur. )
 powershell -NoProfile -Command "try { $ok=(Test-NetConnection -ComputerName 127.0.0.1 -Port 8794 -WarningAction SilentlyContinue -InformationLevel Quiet) } catch { $ok=$false }; Write-Host ('  UI 8794 : ' + $(if($ok){'ACTIVE'}else{'inactive'}))"
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
+set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 
@@ -814,6 +838,7 @@ REM -------- SANTE LIVE (tableau dynamique + journal horodate) --------
 echo   Tableau de sante live des collecteurs (Ctrl-C pour quitter).
 echo   Journal append-only : runtime\logs\sante_journal.log
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 2
+set "RC=%ERRORLEVEL%"
 goto :fin
 
 REM -------- STOP (cible, jamais de kill global) --------
@@ -872,8 +897,15 @@ REM -------- RESTART-USERFILLS (absorbe REDEMARRER / RELANCER / TUER-ORPHELIN) -
 :cmd_ruserfills
 echo.
 echo   Rechargement du collecteur userfills-live avec le code courant...
-powershell -NoProfile -Command "$projet='%~dp0'; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $pp=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue } catch {} }; $py = Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like '*collecter_userfills_vaults.py*' }; foreach ($x in $py) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }; $w = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -like '*boucle_collecteur.cmd userfills-live*' }; foreach ($x in $w) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 800; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host '  ancien userfills arrete + verrou libere.'"
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs arreter-userfills
+set "RC_USERFILLS=%ERRORLEVEL%"
+if not "%RC_USERFILLS%"=="0" (
+  echo   [USERFILLS] Arret refuse : verrou conserve et aucun nouveau processus lance.
+  set "RC=%RC_USERFILLS%"
+  goto :fin
+)
 cmd /c start "" /b tools\boucle_collecteur.cmd userfills-live tools\collecter_userfills_vaults.py 5
+set "RC=%ERRORLEVEL%"
 echo   collecteur userfills-live relance ^(detache, sans fenetre, code courant^).
 timeout /t 9 >nul
 if exist "runtime\data\userfills_live.lock" ( echo   OK : verrou recree : & type "runtime\data\userfills_live.lock" ) else ( echo   Pas encore de verrou ^(demarrage en cours, patiente ~10 s^). )
@@ -885,6 +917,7 @@ REM -------- COLLECTORS (absorbe REANIMER-COLLECTEURS ; reutilise la source uniq
 echo.
 echo   Reanimation du profil CORE ^(idempotent, sans doublon^)...
 call :demarrer_collecteurs
+set "RC=%ERRORLEVEL%"
 echo   Profil CORE actif. Journaux : runtime\logs\. Le moteur n'a pas ete touche.
 echo.
 goto :fin
@@ -902,14 +935,18 @@ goto :fin
 :cmd_collectors_maintenance
 echo.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous maintenance
+set "RC=%ERRORLEVEL%"
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status maintenance
+if "%RC%"=="0" set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 
 :cmd_collectors_research
 echo.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous research
+set "RC=%ERRORLEVEL%"
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status research
+if "%RC%"=="0" set "RC=%ERRORLEVEL%"
 echo.
 goto :fin
 
@@ -926,6 +963,7 @@ REM -------- REPORT (absorbe RAPPORT-DU-JOUR) --------
 :cmd_report
 echo.
 "%HYPERSMART_PYTHON%" tools\rapport_quotidien.py
+set "RC=%ERRORLEVEL%"
 echo.
 pause
 goto :fin
@@ -933,15 +971,17 @@ goto :fin
 REM -------- TEST (absorbe TOUT-TESTER) --------
 :cmd_test
 "%HYPERSMART_PYTHON%" "%~dp0tools\lanceur_tout_tester.py" %2 %3 %4 %5 %6 %7 %8 %9
+set "RC=%ERRORLEVEL%"
 goto :fin
 
 REM -------- AUDIT (absorbe TEST-AUDIT-complet) --------
 :cmd_audit
 echo.
 echo   Lancement de l'audit ^(~180 controles^)...
-"%HYPERSMART_PYTHON%" -m pip install -q pytest-timeout coverage 2>nul
+REM LCH-029 : aucun pip install automatique dans un audit.
 "%HYPERSMART_PYTHON%" tools\audit_report.py %2 %3 %4 %5 %6 %7 %8 %9
 set "AUDIT_CODE=%ERRORLEVEL%"
+set "RC=%AUDIT_CODE%"
 if exist "resultat-audit.md" ( echo   Rapport ecrit : %~dp0resultat-audit.md ) else ( echo   ATTENTION : le rapport n'a pas ete ecrit. )
 echo.
 pause
@@ -951,7 +991,8 @@ REM -------- REPLAY / BACKTESTS (outil separe du runtime principal) --------
 :cmd_replay
 echo.
 call "%~dp0tools\launchers\ANALYSER_BACKTESTS_REPLAYS.cmd" %2 %3 %4 %5 %6 %7 %8 %9
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+goto :fin
 
 REM -------- MOISSON (absorbe LANCER-MOISSON-12H / MOISSONNER-GITHUB / RELIRE / VOIR / FERMER + workers) --------
 :cmd_moisson
@@ -986,8 +1027,13 @@ title Tableau de bord - Moisson
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\voir_dashboard.ps1" -Root "%~dp0"
 goto :fin
 :moisson_stop
-taskkill /FI "WINDOWTITLE eq MOISSON 12h*" /T /F >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Tableau de bord*" /T /F >nul 2>&1
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs arreter-moisson
+set "RC_MOISSON=%ERRORLEVEL%"
+if not "%RC_MOISSON%"=="0" (
+  echo   [MOISSON] Arret refuse ou incomplet : aucune suppression globale executee.
+  set "RC=%RC_MOISSON%"
+  goto :fin
+)
 if exist "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" del "%~dp0runtime\reports\legacy\moisson\moisson-termine.flag" >nul 2>&1
 echo   Moisson fermee. Rien n'est perdu : relancer reprend ou on s'etait arrete.
 goto :fin
@@ -1000,15 +1046,18 @@ if /I "%~2"=="diag"       goto :oos_diag
 if /I "%~2"=="test-notif" goto :oos_testnotif
 if not exist "runtime\rapports\checkpoint_oos_shadow" mkdir "runtime\rapports\checkpoint_oos_shadow" >nul 2>&1
 "%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py >> "runtime\rapports\checkpoint_oos_shadow\verif.log" 2>&1
+set "RC=%ERRORLEVEL%"
 goto :fin
 :oos_install
 schtasks /Create /SC MINUTE /MO 30 /TN "HyperSmart_VerifOOS" /TR "wscript.exe \"%~dp0tools\run_verify_oos_silent.vbs\"" /F
+set "RC=%ERRORLEVEL%"
 schtasks /Query /TN "HyperSmart_VerifOOS" /V /FO LIST 2>nul | findstr /I "TaskName Next Task_To_Run Scheduled"
 echo.
 pause
 goto :fin
 :oos_uninstall
 schtasks /Delete /TN "HyperSmart_VerifOOS" /F
+set "RC=%ERRORLEVEL%"
 echo.
 pause
 goto :fin
@@ -1016,14 +1065,18 @@ goto :fin
 set "DIR=%~dp0runtime\rapports\checkpoint_oos_shadow"
 if not exist "%DIR%" mkdir "%DIR%" >nul 2>&1
 schtasks /Query /TN "HyperSmart_VerifOOS" /V /FO LIST
+set "RC=%ERRORLEVEL%"
 schtasks /Run /TN "HyperSmart_VerifOOS"
+if not "%RC%"=="0" goto :oos_diag_fin
 timeout /t 12 /nobreak >nul
 if exist "%DIR%\status.json" type "%DIR%\status.json"
+:oos_diag_fin
 echo.
 pause
 goto :fin
 :oos_testnotif
 "%HYPERSMART_PYTHON%" tools\verif_checkpoint_oos_shadow.py --test-notification
+set "RC=%ERRORLEVEL%"
 echo   Code de sortie : %ERRORLEVEL%
 echo.
 pause
@@ -1041,6 +1094,7 @@ REM -------- RESET-PAPER (Fix 1) : remise a zero VOLONTAIRE, sauvegarde horodate
 echo.
 echo   RESET PAPER : efface equity/PnL/positions ^(sauvegarde horodatee AVANT^). Exige --confirm.
 "%HYPERSMART_PYTHON%" tools\reset_paper.py %2 %3
+set "RC=%ERRORLEVEL%"
 echo.
 pause
 goto :fin
@@ -1048,6 +1102,7 @@ goto :fin
 REM -------- SELF-TEST (absorbe VERIFIER-TOUT) --------
 :cmd_selftest
 "%HYPERSMART_PYTHON%" tools\verifier_tout.py %2 %3 %4 %5 %6 %7 %8 %9
+set "RC=%ERRORLEVEL%"
 echo.
 pause
 goto :fin
@@ -1065,7 +1120,8 @@ echo.
 pause
 goto :fin
 :cmd_killuserfills
-powershell -NoProfile -Command "$projet='%~dp0'; $lk=Join-Path $projet 'runtime\data\userfills_live.lock'; if (Test-Path $lk) { try { $p=(Get-Content $lk -Raw | ConvertFrom-Json).pid; Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700; Remove-Item $lk -Force -ErrorAction SilentlyContinue; Write-Host ('  PID ' + $p + ' arrete, verrou supprime.') } catch {} } else { Write-Host '  pas de verrou.' }; $py = Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like '*collecter_userfills_vaults.py*' }; foreach ($x in $py) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }"
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs arreter-userfills
+set "RC=%ERRORLEVEL%"
 echo.
 pause
 goto :fin

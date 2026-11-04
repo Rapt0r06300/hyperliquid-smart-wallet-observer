@@ -9,12 +9,14 @@ Bloque des ENTRÉES paper ; ne touche jamais un ordre réel.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from hl_observer.risk.risk_gate import RiskGateConfig, RiskGateState, evaluate_risk_gate
 
 FLAG = "HYPERSMART_RISK_GATE_ENABLED"
 _STATE = RiskGateState()
+_ENTRY_ACTIONS = frozenset({"OPEN", "ADD", "ENTER", "BUY", "SELL"})
+_CLOSE_ACTIONS = frozenset({"REDUCE", "CLOSE", "EXIT"})
 
 
 def set_risk_state(state: RiskGateState) -> None:
@@ -54,6 +56,22 @@ def risk_gate_check(env: dict | None = None) -> tuple[bool, tuple[str, ...]]:
     return v.ok, v.reasons
 
 
+def source_staleness_check(intent: object) -> tuple[bool, tuple[str, ...]]:
+    """Block new exposure on an explicit stale-source defect, close-only otherwise."""
+    values: Mapping[str, object] | None = intent if isinstance(intent, Mapping) else None
+    if values is None:
+        return True, ()
+    stale = values.get("source_stale") is True or values.get("stale_source") is True
+    if not stale:
+        return True, ()
+    action = str(values.get("action") or values.get("side") or "").strip().upper()
+    if action in _CLOSE_ACTIONS:
+        return True, ("SOURCE_STALE_CLOSE_ONLY",)
+    if action in _ENTRY_ACTIONS:
+        return False, ("SOURCE_STALE_ENTRY_BLOCKED",)
+    return False, ("SOURCE_STALE_UNKNOWN_ACTION_BLOCKED",)
+
+
 def compose_risk_fn(
     base_risk_fn: Callable[[object], tuple[bool, object]],
     *,
@@ -64,9 +82,20 @@ def compose_risk_fn(
     def _fn(intent: object) -> tuple[bool, tuple[str, ...]]:
         ok, reasons = base_risk_fn(intent)
         g_ok, g_reasons = risk_gate_check(env)
-        return bool(ok) and bool(g_ok), tuple(reasons or ()) + tuple(g_reasons)
+        source_ok, source_reasons = source_staleness_check(intent)
+        return (
+            bool(ok) and bool(g_ok) and bool(source_ok),
+            tuple(reasons or ()) + tuple(g_reasons) + tuple(source_reasons),
+        )
 
     return _fn
 
 
-__all__ = ["FLAG", "set_risk_state", "risk_gate_enabled", "risk_gate_check", "compose_risk_fn"]
+__all__ = [
+    "FLAG",
+    "set_risk_state",
+    "risk_gate_enabled",
+    "risk_gate_check",
+    "source_staleness_check",
+    "compose_risk_fn",
+]

@@ -5,6 +5,7 @@ notre equity — sinon trois vaults « diversifiés » nous mettent tous long BT
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any
 
 UNMEASURABLE = "UNMEASURABLE"
@@ -14,9 +15,28 @@ def exposition_admissible(expositions_par_vault: Mapping[str, Any], *, equity: A
                           part_max: float = 0.5) -> dict[str, Any]:
     """Agrège |exposition| de tous les vaults sur le coin et la borne à part_max × equity. equity ≤ 0/inconnue →
     UNMEASURABLE. Retourne l'exposition agrégée, le plafond, et le facteur de réduction à appliquer si dépassement."""
-    if not isinstance(equity, (int, float)) or float(equity) <= 0:
+    if (
+        not isinstance(equity, (int, float))
+        or isinstance(equity, bool)
+        or not math.isfinite(float(equity))
+        or float(equity) <= 0
+        or not isinstance(part_max, (int, float))
+        or isinstance(part_max, bool)
+        or not math.isfinite(float(part_max))
+        or not 0.0 <= float(part_max) <= 1.0
+    ):
         return {"agregee": UNMEASURABLE, "refuse": True, "raison": "EQUITY_INVALIDE"}
-    agregee = sum(abs(float(v)) for v in expositions_par_vault.values() if isinstance(v, (int, float)))
+    if not isinstance(expositions_par_vault, Mapping):
+        return {"agregee": UNMEASURABLE, "refuse": True, "raison": "EXPOSITION_INVALIDE"}
+    values = list(expositions_par_vault.values())
+    if any(
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        for value in values
+    ):
+        return {"agregee": UNMEASURABLE, "refuse": True, "raison": "EXPOSITION_INVALIDE"}
+    agregee = sum(abs(float(v)) for v in values)
     plafond = float(part_max) * float(equity)
     depasse = agregee > plafond
     facteur = round(plafond / agregee, 8) if (depasse and agregee > 0) else 1.0

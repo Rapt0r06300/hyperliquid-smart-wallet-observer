@@ -11,6 +11,8 @@ set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 set "ALINA_QUANT_CPU_PERCENT=60"
+rem Plafond mesure: 4 workers max evite la contention disque/import sous Windows.
+set "ALINA_QUANT_MAX_WORKERS=4"
 
 set "ALINA_LAB_MODE=%~1"
 if not defined ALINA_LAB_MODE set "ALINA_LAB_MODE=safe"

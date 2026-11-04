@@ -61,6 +61,14 @@ def _is_exact_int(value: Any, *, minimum: int = 0) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
+def _is_sha256_hex(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value.lower())
+    )
+
+
 def require_campaign_economic_scope(m: CampaignManifest) -> str | None:
     """Require an explicit canonical active family before executing ANALYZE work."""
     if (
@@ -257,6 +265,13 @@ def work_unit_id(m: CampaignManifest, partition: Mapping[str, Any]) -> str:
 
 def complete_work_unit(m: CampaignManifest, unit_id: str, result_sha256: str, result: Mapping[str, Any]) -> bool:
     _require_mutable_manifest(m)
+    validate_manifest(m)
+    if not isinstance(unit_id, str) or not unit_id.strip():
+        raise ValueError("work-unit id must be a non-empty string")
+    if not _is_sha256_hex(result_sha256):
+        raise ValueError("work-unit result_sha256 must be a SHA-256 digest")
+    if not isinstance(result, Mapping):
+        raise ValueError("work-unit result must be a mapping")
     prior = m.completed_units.get(unit_id)
     if prior:
         if prior.get("sha256") != result_sha256:
@@ -401,6 +416,10 @@ def select_due_campaigns(
     current_analysis_stage: str | None = None,
     now: str | None = None,
 ) -> list[CampaignManifest]:
+    # Shell workflows commonly represent an absent optional stage as an empty
+    # string.  Treat it as absent at the domain boundary so COLLECT/ANALYZE
+    # selection remains fail-closed without rejecting an otherwise valid wave.
+    current_analysis_stage = current_analysis_stage or None
     if current_phase not in (None, "COLLECT", "ANALYZE"):
         raise ValueError("invalid current phase")
     if current_epoch is not None and not _is_exact_int(current_epoch, minimum=1):
@@ -410,45 +429,71 @@ def select_due_campaigns(
     current = _parse_ts(now or _now())
     buckets: dict[str, list[CampaignManifest]] = {kind: [] for kind in CAMPAIGN_KIND_ORDER}
     for m in items:
+        def refuse(reason: str) -> None:
+            logging.warning(
+                "campaign_refused id=%s reason=%s manifest_phase=%s manifest_epoch=%s "
+                "source_collection_epoch=%s analysis_stage=%s current_phase=%s "
+                "current_epoch=%s current_analysis_stage=%s",
+                m.campaign_id,
+                reason,
+                m.creation_phase,
+                m.phase_epoch,
+                m.source_collection_epoch,
+                m.analysis_stage,
+                current_phase,
+                current_epoch,
+                current_analysis_stage,
+            )
+
         try:
             validate_manifest(m)
         except (TypeError, ValueError, KeyError) as exc:
-            logging.warning("campaign excluded before scheduling: invalid manifest: %s", exc)
+            refuse(f"INVALID_MANIFEST:{exc}")
             continue
         # V1 remains readable evidence but is never executable after cutover.
         if m.schema_version != SCHEMA_VERSION_V2:
+            refuse("LEGACY_SCHEMA_READ_ONLY")
             continue
         try:
             require_campaign_economic_scope(m)
         except ValueError as exc:
-            logging.warning("campaign excluded before scheduling: %s", exc)
+            refuse(f"DISABLED_BY_SCOPE:{exc}")
             continue
         if m.status not in ACTIVE_STATES:
+            refuse(f"STATUS_NOT_ACTIVE:{m.status}")
             continue
         if _parse_ts(m.expires_at) <= current:
+            refuse("EXPIRED")
             continue
         if m.lease and _parse_ts(m.lease["expires_at"]) > current:
+            refuse("LEASE_ACTIVE")
             continue
         if m.next_due_at and _parse_ts(m.next_due_at) > current:
+            refuse("NOT_DUE")
             continue
 
         # V2 phase/epoch gating
         if m.schema_version == SCHEMA_VERSION_V2:
             if current_phase is not None and m.creation_phase != current_phase:
+                refuse("PHASE_MISMATCH")
                 continue
             if current_epoch is not None and m.phase_epoch != current_epoch:
                 # Prior-epoch campaigns are audit evidence, not live work.
                 # Do not requeue them while another COLLECT epoch runs.
+                refuse("PHASE_EPOCH_MISMATCH")
                 continue
             if current_phase == "COLLECT" and m.kind not in COLLECT_CAMPAIGN_KINDS:
+                refuse("COLLECT_KIND_NOT_ALLOWED")
                 continue
             if current_phase == "ANALYZE" and m.kind not in ANALYZE_CAMPAIGN_KINDS:
+                refuse("ANALYZE_KIND_NOT_ALLOWED")
                 continue
             if (
                 current_phase == "ANALYZE"
                 and current_analysis_stage is not None
                 and ANALYSIS_STAGE_BY_KIND.get(m.kind) != current_analysis_stage
             ):
+                refuse("ANALYSIS_STAGE_MISMATCH")
                 continue
 
         buckets.setdefault(m.kind, []).append(m)

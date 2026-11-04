@@ -12,6 +12,7 @@ ou pas de côté dominant -> None (pas de consensus). Un consensus n'est pas un 
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Iterable
 
 QUORUM_DEFAUT = 3          # au moins 3 wallets indépendants d'accord
@@ -34,19 +35,82 @@ def _representant(adresse: str, groupes: Iterable[frozenset] | None) -> str:
     return adresse
 
 
-def consensus(signaux: Iterable[dict], *, min_wallets: int = QUORUM_DEFAUT,
-              groupes_correles: Iterable[frozenset] | None = None) -> dict[str, Any] | None:
+def consensus(
+    signaux: Iterable[dict],
+    *,
+    min_wallets: int = QUORUM_DEFAUT,
+    groupes_correles: Iterable[frozenset] | None = None,
+    exiger_independance_mesuree: bool = False,
+    as_of_ms: int | None = None,
+) -> dict[str, Any] | None:
     """Renvoie {direction, n_independants, n_oppose} si >= min_wallets wallets INDÉPENDANTS sont
     d'accord ET dominent strictement le côté opposé. Sinon None."""
+    rows = [s for s in signaux or [] if isinstance(s, dict)]
+    if exiger_independance_mesuree:
+        # The legacy API accepts bare address/side pairs.  That form is useful
+        # for compatibility but cannot prove independence; strict mode requires
+        # the existing point-in-time entity resolver and therefore abstains.
+        if isinstance(as_of_ms, bool) or not isinstance(as_of_ms, int) or as_of_ms <= 0:
+            return None
+        # Strict mode is an evidence gate: rows without a point-in-time
+        # observation, a positive size, or an explicit public entity cannot
+        # participate and are rejected rather than silently dropped.
+        for row in rows:
+            ts_ms = row.get("ts_ms")
+            if (
+                not str(row.get("adresse") or "").strip()
+                or not str(row.get("coin") or "").strip()
+                or not str(row.get("public_entity_id") or "").strip()
+                or _norm_side(row.get("side")) is None
+                or isinstance(ts_ms, bool)
+                or not isinstance(ts_ms, int)
+                or ts_ms <= 0
+            ):
+                return None
+            try:
+                size = float(row.get("size"))
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(size) or size <= 0:
+                return None
+        from hl_observer.following.entity_consensus import infer_entity_consensus
+
+        votes = [
+            {
+                "wallet": row.get("adresse"),
+                "coin": row.get("coin"),
+                "side": row.get("side"),
+                "ts_ms": row.get("ts_ms"),
+                "size": row.get("size"),
+                "public_entity_id": row.get("public_entity_id"),
+            }
+            for row in rows
+        ]
+        evidence = infer_entity_consensus(votes, as_of_ms=as_of_ms)
+        if evidence.get("independence_measurable") is not True:
+            return None
+        representatives = {
+            str(wallet).strip(): str(cluster.get("cluster_id"))
+            for cluster in evidence.get("clusters", [])
+            for wallet in cluster.get("wallets", [])
+        }
+        groupes_correles = [
+            frozenset(str(wallet).strip() for wallet in cluster.get("wallets", []))
+            for cluster in evidence.get("clusters", [])
+        ]
+        rows = [row for row in rows if row["ts_ms"] <= as_of_ms]
+    else:
+        representatives = {}
+
     par_side: dict[str, set] = {"LONG": set(), "SHORT": set()}
-    for s in signaux or []:
+    for s in rows:
         if not isinstance(s, dict):
             continue
         side = _norm_side(s.get("side"))
         adr = str(s.get("adresse") or "")
         if side is None or not adr:
             continue
-        par_side[side].add(_representant(adr, groupes_correles))
+        par_side[side].add(representatives.get(adr, _representant(adr, groupes_correles)))
     n_long, n_short = len(par_side["LONG"]), len(par_side["SHORT"])
     if n_long == n_short:
         return None                                   # égalité -> pas de côté net

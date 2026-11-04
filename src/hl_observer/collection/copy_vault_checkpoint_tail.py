@@ -66,6 +66,13 @@ def _strict_int(value: Any, field: str) -> int:
         raise ValueError(f"{field} invalid") from None
 
 
+def _exact_positive_timestamp(value: Any, field: str) -> int:
+    """Require an observed positive integer timestamp with no coercion."""
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return value
+
+
 def _snapshot_marker(fill: Mapping[str, Any]) -> Any:
     markers = [
         fill[name]
@@ -167,6 +174,7 @@ def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str,
             "checkpoints_expired": 0,
             "fetch_retries": 0,
             "input_rotations": 0,
+            "reconnect_backfill_blocked": 0,
             "pending_overflow_rejected": 0,
             "identity_migration_resets": 0,
         },
@@ -187,9 +195,14 @@ def _file_identity(stat: os.stat_result) -> list[int]:
     return [int(stat.st_dev), int(stat.st_ino)]
 
 
+def _valid_state_nonnegative_int(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
 def _parse_book(raw: Mapping[str, Any], *, received_at_ms: int) -> dict[str, Any] | None:
     try:
-        exchange_ts_ms = int(raw["time"])
+        exchange_ts_ms = _exact_positive_timestamp(raw["time"], "time")
+        received_at_ms = _exact_positive_timestamp(received_at_ms, "received_at_ms")
         raw_bids, raw_asks = raw["levels"][0], raw["levels"][1]
         bids = normalize_l2_levels(
             [[row["px"], row["sz"]] for row in raw_bids], side="bid"
@@ -252,6 +265,28 @@ class CopyVaultCheckpointTail:
             loaded = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError, ValueError, TypeError):
             loaded = None
+        preserved_loaded = loaded
+        if (
+            isinstance(loaded, dict)
+            and loaded.get("schema_version") == SCHEMA_VERSION
+            and loaded.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
+            and loaded.get("paper_read_only") is True
+            and loaded.get("real_execution") is False
+            and loaded.get("protocol") == COMPANION_PROTOCOL
+        ):
+            critical_state_fields = ("input_offset", "output_start_offset", "clean_epoch_ms")
+            if (
+                any(
+                    not _valid_state_nonnegative_int(loaded.get(field))
+                    for field in critical_state_fields
+                )
+                or not isinstance(loaded.get("pending"), list)
+                or not isinstance(loaded.get("recent_event_ids"), list)
+                or not isinstance(loaded.get("captured_checkpoint_ids"), list)
+                or not isinstance(loaded.get("metaorder_state"), dict)
+                or not isinstance(loaded.get("writer_run_id"), str)
+            ):
+                loaded = None
         if (
             isinstance(loaded, dict)
             and loaded.get("schema_version") == SCHEMA_VERSION
@@ -286,15 +321,15 @@ class CopyVaultCheckpointTail:
         state = _default_state(
             offset=offset, output_offset=output_offset, now_ms=self.clock_ms()
         )
-        if isinstance(loaded, dict):
+        if isinstance(preserved_loaded, dict):
             archived_state_path = self.state_path.with_name(
                 f"{self.state_path.name}.identity-migration-{time.time_ns()}.json"
             )
-            _atomic_write(archived_state_path, loaded)
+            _atomic_write(archived_state_path, preserved_loaded)
             state["identity_migration_reset"] = {
                 "reason": "INSTRUMENT_IDENTITY_SCHEMA_CHANGED_OR_UNVERIFIED",
-                "previous_schema_version": loaded.get("schema_version"),
-                "previous_instrument_identity_schema": loaded.get(
+                "previous_schema_version": preserved_loaded.get("schema_version"),
+                "previous_instrument_identity_schema": preserved_loaded.get(
                     "instrument_identity_schema"
                 ),
                 "preserved_state_path": str(archived_state_path.relative_to(self.root)),
@@ -318,10 +353,18 @@ class CopyVaultCheckpointTail:
             identity = _file_identity(stat)
             offset = int(self.state.get("input_offset") or 0)
             prior_identity = self.state.get("input_file_identity")
-            if (prior_identity is not None and prior_identity != identity) or size < offset:
+            input_rotated = (prior_identity is not None and prior_identity != identity) or size < offset
+            if input_rotated:
                 offset = 0
-                self.state["input_offset"] = 0
+                # A replacement file may already contain a reconnect snapshot or
+                # REST backfill. Baseline it atomically: only bytes appended after
+                # this observed identity change may enter the causal live tail.
+                self.state["input_offset"] = size
                 self.state["counters"]["input_rotations"] += 1
+                self.state["counters"]["reconnect_backfill_blocked"] += 1
+                self.state["last_reconnect_epoch_ms"] = self.clock_ms()
+                self.state["input_file_identity"] = identity
+                return []
             self.state["input_file_identity"] = identity
             if size == offset:
                 return []
@@ -641,6 +684,7 @@ class CopyVaultCheckpointTail:
             int(counters.get(name) or 0)
             for name in (
                 "input_rotations",
+                "reconnect_backfill_blocked",
                 "checkpoints_expired",
                 "pending_overflow_rejected",
             )

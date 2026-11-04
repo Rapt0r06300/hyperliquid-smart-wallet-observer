@@ -22,6 +22,7 @@ from hl_observer.event_intelligence.worldmonitor import (
     CROSS_SOURCE_PATH,
     NEWS_DIGEST_PATH,
     PREDICTION_PATH,
+    validate_worldmonitor_variant_contracts,
 )
 
 
@@ -124,6 +125,19 @@ def test_hosted_client_requires_key_before_any_network_call() -> None:
 
     assert fake.calls == []
     assert client.real_execution is False
+
+
+def test_world_monitor_exposes_six_unique_read_only_variants() -> None:
+    variants = validate_worldmonitor_variant_contracts()
+
+    assert len(variants) == 6
+    assert len({variant.variant_id for variant in variants}) == 6
+    assert all(variant.read_only for variant in variants)
+    assert {variant.surface for variant in variants if variant.surface.startswith("/")} == {
+        CROSS_SOURCE_PATH,
+        NEWS_DIGEST_PATH,
+        PREDICTION_PATH,
+    }
 
 
 def test_client_uses_only_documented_get_paths_and_auth_header() -> None:

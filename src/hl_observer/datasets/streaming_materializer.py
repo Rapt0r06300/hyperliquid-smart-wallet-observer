@@ -92,8 +92,14 @@ def materialize_records_streaming(
     fetch = downloader or _default_downloader
     by_zip: dict[str, list[DatasetRecord]] = defaultdict(list)
     raw_records: list[DatasetRecord] = []
+    seen_output_paths: set[str] = set()
 
     for record in rows:
+        if not record.relative_path or record.relative_path in seen_output_paths:
+            raise DatasetBridgeError(
+                f"Chemin de sortie absent ou dupliqué: {record.relative_path}"
+            )
+        seen_output_paths.add(record.relative_path)
         if record.storage == "zip_entry":
             if not record.asset:
                 raise DatasetBridgeError(
@@ -185,14 +191,29 @@ def materialize_records_streaming(
             purge(archive_path, asset_name)
 
     for record in raw_records:
-        chunks = sorted(
-            record.chunks,
-            key=lambda item: int(item.get("part") or 0),
-        )
+        chunks = list(record.chunks)
         if not chunks:
             raise DatasetBridgeError(
                 f"Aucun morceau pour {record.relative_path}"
             )
+        parts: list[int] = []
+        for chunk in chunks:
+            part = chunk.get("part")
+            if isinstance(part, bool) or not isinstance(part, int) or part <= 0:
+                raise DatasetBridgeError(
+                    f"Numéro de morceau invalide pour {record.relative_path}"
+                )
+            if not str(chunk.get("asset") or "").strip():
+                raise DatasetBridgeError(
+                    f"Nom de morceau absent pour {record.relative_path}"
+                )
+            parts.append(part)
+        expected_parts = list(range(1, len(parts) + 1))
+        if sorted(parts) != expected_parts:
+            raise DatasetBridgeError(
+                f"Morceaux dupliqués ou non contigus pour {record.relative_path}"
+            )
+        chunks.sort(key=lambda item: item["part"])
 
         destination = _safe_destination(
             output_root,
@@ -206,10 +227,6 @@ def materialize_records_streaming(
             with temporary.open("wb") as target:
                 for chunk in chunks:
                     asset_name = str(chunk.get("asset") or "")
-                    if not asset_name:
-                        raise DatasetBridgeError(
-                            f"Nom de morceau absent pour {record.relative_path}"
-                        )
                     _, chunk_path = obtain(asset_name)
                     try:
                         with chunk_path.open("rb") as source:

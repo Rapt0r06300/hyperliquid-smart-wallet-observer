@@ -4,6 +4,8 @@ from hl_observer.scoring.leader_quality_gate import (
     select_smart_money,
 )
 from hl_observer.backtest.ledger_replay_v9 import replay_ledger_v9, ReplayConfig
+from hl_observer.fees.hyperliquid_fees import frais
+import pytest
 
 
 # ---------- leader quality gate ----------
@@ -64,3 +66,30 @@ def test_replay_pairs_open_close_and_computes_pnl():
     assert r.skipped_exotic == 1
     assert r.gross_pnl_usdt > 0          # deux gagnants bruts
     assert r.wins_gross == 2
+
+
+def test_ledger_replay_defaults_to_canonical_taker_fee():
+    config = ReplayConfig()
+    assert config.fee_bps == frais(marche="perp").taker_bps
+    assert config.round_trip_cost_bps == 2 * config.fee_bps + config.spread_bps + 2 * config.slippage_bps
+
+
+def test_ledger_replay_excludes_invalid_time_and_unknown_age():
+    rows = [
+        _row(1, "0xA", "BTC", "LONG", "OPEN_LONG", 100.0),
+        _row(2, "0xA", "BTC", "LONG", "CLOSE_LONG", 110.0),
+        _row(1.5, "0xB", "BTC", "LONG", "OPEN_LONG", 100.0),
+        _row(3, "0xB", "BTC", "LONG", "OPEN_LONG", 100.0),
+        _row(4, "0xB", "BTC", "LONG", "CLOSE_LONG", 110.0),
+    ]
+    rows[3].pop("signal_age_ms")
+    result = replay_ledger_v9(rows)
+    assert result.matched_round_trips == 1
+    assert result.skipped_invalid == 1
+    assert result.skipped_stale == 1
+
+
+@pytest.mark.parametrize("age_limit", [True, -1, 1.5, float("nan")])
+def test_ledger_replay_config_rejects_nonexact_age_limit(age_limit):
+    with pytest.raises(ValueError, match="age limits"):
+        ReplayConfig(max_signal_age_ms=age_limit)

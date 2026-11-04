@@ -66,26 +66,37 @@ from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 
 
+def _strict_positive_timestamp(value: object) -> int | None:
+    """Require an observed integer timestamp; do not parse or truncate input."""
+    if type(value) is not int or value <= 0:
+        return None
+    return value
+
+
+def _strict_nonnegative_int(value: object) -> int | None:
+    """Require an exact integer for causal lag/age parameters."""
+    if type(value) is not int or value < 0:
+        return None
+    return value
+
+
 def _valid_observed_book_top(row: Mapping[str, Any]) -> bool:
     """Validate the common top-of-book fields before any economic arithmetic."""
 
     try:
         timestamp_raw = row["ts_ms"]
-        if any(
-            isinstance(row[name], bool)
-            for name in ("ts_ms", "bid", "ask", "capacity_usd")
-        ):
+        if any(isinstance(row[name], bool) for name in ("bid", "ask", "capacity_usd")):
             return False
-        timestamp = float(timestamp_raw)
+        timestamp = _strict_positive_timestamp(timestamp_raw)
+        if timestamp is None:
+            return False
         bid = float(row["bid"])
         ask = float(row["ask"])
         capacity = float(row["capacity_usd"])
     except (KeyError, TypeError, ValueError, OverflowError):
         return False
     return bool(
-        math.isfinite(timestamp)
-        and timestamp > 0.0
-        and timestamp.is_integer()
+        timestamp > 0
         and math.isfinite(bid)
         and math.isfinite(ask)
         and math.isfinite(capacity)
@@ -98,23 +109,33 @@ def _valid_observed_book_top(row: Mapping[str, Any]) -> bool:
 def _first_at_or_after(
     rows: list[dict[str, Any]], target_ms: int, max_lag_ms: int
 ) -> tuple[dict[str, Any] | None, int | None]:
-    timestamps = [int(row["ts_ms"]) for row in rows]
-    index = bisect.bisect_left(timestamps, int(target_ms))
+    target = _strict_positive_timestamp(target_ms)
+    max_lag = _strict_nonnegative_int(max_lag_ms)
+    timestamps = [_strict_positive_timestamp(row.get("ts_ms")) for row in rows]
+    if target is None or max_lag is None or any(ts is None for ts in timestamps):
+        return None, None
+    exact_timestamps = [ts for ts in timestamps if ts is not None]
+    index = bisect.bisect_left(exact_timestamps, target)
     if index >= len(rows):
         return None, None
-    lag = int(rows[index]["ts_ms"]) - int(target_ms)
-    return (rows[index], lag) if 0 <= lag <= int(max_lag_ms) else (None, lag)
+    lag = exact_timestamps[index] - target
+    return (rows[index], lag) if 0 <= lag <= max_lag else (None, lag)
 
 
 def _last_at_or_before(
     rows: list[dict[str, Any]], target_ms: int, max_age_ms: int
 ) -> tuple[dict[str, Any] | None, int | None]:
-    timestamps = [int(row["ts_ms"]) for row in rows]
-    index = bisect.bisect_right(timestamps, int(target_ms)) - 1
+    target = _strict_positive_timestamp(target_ms)
+    max_age = _strict_nonnegative_int(max_age_ms)
+    timestamps = [_strict_positive_timestamp(row.get("ts_ms")) for row in rows]
+    if target is None or max_age is None or any(ts is None for ts in timestamps):
+        return None, None
+    exact_timestamps = [ts for ts in timestamps if ts is not None]
+    index = bisect.bisect_right(exact_timestamps, target) - 1
     if index < 0:
         return None, None
-    age = int(target_ms) - int(rows[index]["ts_ms"])
-    return (rows[index], age) if 0 <= age <= int(max_age_ms) else (None, age)
+    age = target - exact_timestamps[index]
+    return (rows[index], age) if 0 <= age <= max_age else (None, age)
 
 
 def _observed_book_epoch_rejection(

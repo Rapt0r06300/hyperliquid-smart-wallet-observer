@@ -13,7 +13,10 @@ UNKNOWN = "UNKNOWN"
 
 def capturer(mode: Any) -> dict[str, Any]:
     """Normalise le mode de marge. Valeur non reconnue/absente → UNKNOWN (le risque n'est pas supposé)."""
-    m = str(mode).upper()
+    # Do not let arbitrary objects or booleans become an apparently valid mode.
+    if not isinstance(mode, str):
+        return {"margin_mode": UNKNOWN, "connu": False, "raison": "MODE_NON_RECONNU"}
+    m = mode.strip().upper()
     if m in ("ISOLATED", "ISO"):
         return {"margin_mode": ISOLATED, "connu": True}
     if m in ("CROSS", "CROSSED"):

@@ -68,6 +68,39 @@ def test_parameter_freeze_is_physical_and_immutable(tmp_path: Path) -> None:
         )
 
 
+def test_parameter_freeze_rejects_unsafe_identifiers_and_non_exact_timestamps(tmp_path: Path) -> None:
+    datasets = {"dataset_fingerprint": "d" * 64, "files": []}
+
+    with pytest.raises(ValueError, match="exact non-negative integer"):
+        freeze_parameters(
+            tmp_path,
+            "copy_vault",
+            {"threshold": 0.1},
+            datasets,
+            frozen_at_ms=1.5,
+        )
+
+    with pytest.raises(ValueError, match="safe filename identifier"):
+        freeze_parameters(
+            tmp_path,
+            "copy_vault",
+            {"threshold": 0.1},
+            datasets,
+            campaign_id="../escape",
+            frozen_at_ms=123,
+        )
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        freeze_parameters(
+            tmp_path,
+            "copy_vault",
+            {"threshold": float("nan")},
+            datasets,
+            campaign_id="nan-parameter",
+            frozen_at_ms=123,
+        )
+
+
 def test_killed_train_candidate_never_creates_a_physical_freeze(tmp_path: Path) -> None:
     freeze = freeze_train_selected_parameters(
         tmp_path,

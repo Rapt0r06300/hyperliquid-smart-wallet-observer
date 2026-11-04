@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from hl_observer.backtesting.copy_vault_generalization import (
     derive_heldout_vault_generalization,
 )
@@ -79,6 +81,18 @@ def test_generalisation_refuse_frontiere_et_timestamps_non_entiers() -> None:
         assert proof is not None
         assert proof["sample_count"] == 0
         assert proof["net_pnl_usd"] is None
+
+
+@pytest.mark.parametrize("invalid_direction", [True, False, 1.0, "1", 0, 2])
+def test_strict_generalisation_rejette_direction_ambigue(invalid_direction) -> None:
+    row = _strict_trade(net=1.0, gross=1.0, suffix="d")
+    row["direction"] = invalid_direction
+
+    proof = derive_heldout_vault_generalization([row], oos_start_ms=200)
+
+    assert proof is not None
+    assert proof["sample_count"] == 0
+    assert proof["economic_claim_eligible"] is False
 
 
 def test_generalisation_ne_confond_pas_les_symboles_native_case_sensitive():

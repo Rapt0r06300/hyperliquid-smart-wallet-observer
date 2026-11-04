@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -12,6 +13,24 @@ from typing import Any
 from .economic_objective import canonical_family
 
 REPORT_DIR = Path("runtime") / "reports" / "economic_campaigns"
+_SAFE_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
+
+def _canonical_json(value: Any) -> str:
+    """Serialize protocol material without accepting non-finite JSON numbers."""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def _exact_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def _sha256(path: Path, *, full_limit_bytes: int = 128 * 1024 * 1024) -> tuple[str, str]:
@@ -57,7 +76,7 @@ def dataset_provenance(root: str | Path, paths: Iterable[str | Path]) -> dict[st
             "fingerprint": digest,
             "fingerprint_method": method,
         })
-    material = json.dumps(files, sort_keys=True, separators=(",", ":"))
+    material = _canonical_json(files)
     return {
         "files": files,
         "dataset_fingerprint": hashlib.sha256(material.encode("utf-8")).hexdigest(),
@@ -76,11 +95,19 @@ def freeze_parameters(
     """Write an immutable parameter selection before final evaluation."""
     project_root = Path(root).resolve()
     normalized = canonical_family(family)
-    timestamp = int(frozen_at_ms if frozen_at_ms is not None else time.time() * 1000)
+    timestamp = (
+        int(time.time() * 1000)
+        if frozen_at_ms is None
+        else _exact_non_negative_int(frozen_at_ms)
+    )
+    if timestamp is None:
+        raise ValueError("frozen_at_ms must be an exact non-negative integer")
     parameter_hash = hashlib.sha256(
-        json.dumps(dict(parameters), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        _canonical_json(dict(parameters)).encode("utf-8")
     ).hexdigest()
     identifier = campaign_id or f"{timestamp}-{parameter_hash[:12]}"
+    if not isinstance(identifier, str) or not _SAFE_IDENTIFIER_RE.fullmatch(identifier):
+        raise ValueError("campaign_id must be a safe filename identifier")
     relative = REPORT_DIR / "freezes" / normalized / f"{identifier}.json"
     target = project_root / relative
     payload: dict[str, Any] = {
@@ -97,7 +124,14 @@ def freeze_parameters(
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
         with target.open("x", encoding="utf-8", newline="\n") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            json.dump(
+                payload,
+                handle,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
             handle.flush()
             os.fsync(handle.fileno())
     except FileExistsError:
@@ -136,7 +170,7 @@ def freeze_or_reuse_parameters(
     project_root = Path(root).resolve()
     normalized = canonical_family(family)
     parameter_hash = hashlib.sha256(
-        json.dumps(dict(parameters), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        _canonical_json(dict(parameters)).encode("utf-8")
     ).hexdigest()
     directory = project_root / REPORT_DIR / "freezes" / normalized
     if directory.is_dir():
@@ -147,6 +181,8 @@ def freeze_or_reuse_parameters(
             except (OSError, ValueError):
                 continue
             if (
+                _exact_non_negative_int(payload.get("frozen_at_ms")) is not None
+                and
                 payload.get("family") == normalized
                 and payload.get("parameters_sha256") == parameter_hash
                 and payload.get("selected_before_final_evaluation") is True
@@ -155,7 +191,7 @@ def freeze_or_reuse_parameters(
         if reusable:
             return min(
                 reusable,
-                key=lambda payload: int(payload.get("frozen_at_ms") or 0),
+                key=lambda payload: _exact_non_negative_int(payload.get("frozen_at_ms")) or 0,
             )
     return freeze_parameters(project_root, normalized, parameters, datasets)
 
@@ -181,7 +217,10 @@ def find_oldest_parameter_freeze(
         parameters = payload.get("parameters")
         if not isinstance(parameters, Mapping):
             continue
+        frozen_at_ms = _exact_non_negative_int(payload.get("frozen_at_ms"))
         if (
+            frozen_at_ms is not None
+            and
             payload.get("family") == normalized
             and payload.get("selected_before_final_evaluation") is True
             and all(
@@ -192,7 +231,10 @@ def find_oldest_parameter_freeze(
             matches.append(payload)
     if not matches:
         return None
-    return min(matches, key=lambda payload: int(payload.get("frozen_at_ms") or 0))
+    return min(
+        matches,
+        key=lambda payload: _exact_non_negative_int(payload.get("frozen_at_ms")) or 0,
+    )
 
 
 def merge_sources_with_frozen_provenance(

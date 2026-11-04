@@ -25,8 +25,40 @@ from hl_observer.backtesting.copy_vault_executable import (
     temporal_bounds,
     temporal_evidence,
 )
-from hl_observer.backtesting.copy_vault_protocol import INSTRUMENT_IDENTITY_SCHEMA
+from hl_observer.backtesting.copy_vault_protocol import (
+    INSTRUMENT_IDENTITY_SCHEMA,
+    canonical_metaorder_id,
+    classify_live_entry_action,
+)
 from hl_observer.economics.assumptions import EconomicConfigError, EconomicRunMode
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("direction", True), ("direction", 1.0), ("signal_ts_ms", True), ("signal_ts_ms", 1_000.5)),
+)
+def test_metaorder_identity_rejects_ambiguous_numeric_coercions(field: str, value: object) -> None:
+    args = {
+        "vault": "0xA",
+        "coin": "BTC",
+        "direction": 1,
+        "signal_ts_ms": 1_000,
+        "first_event_id": "event-1",
+    }
+    args[field] = value
+
+    with pytest.raises(ValueError):
+        canonical_metaorder_id(**args)
+
+
+@pytest.mark.parametrize("selector", ("_first_at_or_after", "_last_at_or_before"))
+def test_book_time_selectors_reject_invalid_timestamp_without_truncation(selector: str) -> None:
+    rows = [{"ts_ms": 1_000.5, "bid": 1.0, "ask": 2.0}]
+    function = getattr(copy_vault_executable, selector)
+
+    result = function(rows, 1_001, 10)
+
+    assert result == (None, None)
 
 
 def _entry(
@@ -49,6 +81,14 @@ def _entry(
         "taille_usd": 100.0,
         "move_frac": 0.01,
     }
+
+
+@pytest.mark.parametrize("start_position", [True, False, float("nan"), float("inf")])
+def test_classification_refuse_position_de_depart_ambigue(start_position) -> None:
+    row = _entry("ambiguous-start", 1_000, action="OPEN")
+    row["startPosition"] = start_position
+
+    assert classify_live_entry_action(row) is None
 
 
 def test_metaorders_refusent_les_sorties_et_les_contradictions_de_sens() -> None:
@@ -175,6 +215,16 @@ def _book(
         row["connection_id"] = "fixture-causal-connection"
         row["l2_gap_epoch"] = 0
     return row
+
+
+@pytest.mark.parametrize("invalid_timestamp", [True, 2_000.0, "2000", 0, -1])
+def test_observed_book_rejette_timestamp_ambigu(
+    invalid_timestamp,
+) -> None:
+    row = _book(2_000, 99.0, 101.0)
+    row["ts_ms"] = invalid_timestamp
+
+    assert copy_vault_executable._valid_observed_book_top(row) is False
 
 
 def test_metaorders_collapse_slices_even_when_other_coin_is_interleaved() -> None:
@@ -412,7 +462,6 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
         and row["raw_frame_sha256"] == "b" * 64
         for row in trade["execution_book_evidence_refs"]
     )
-
     missing_receive_books = [dict(row) for row in books]
     missing_receive_books[0].pop("received_at_ms")
     incomplete_trade, _ = execute_metaorder(selected[0], missing_receive_books, horizon_ms=300_000)
@@ -420,6 +469,34 @@ def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
     assert incomplete_trade["execution_book_safe_evidence_status"] == "INCOMPLETE_OR_UNVERIFIED"
     assert incomplete_trade["execution_book_unverified_count"] > 0
 
+
+def test_causal_protocol_inputs_rejects_ambiguous_timestamps() -> None:
+    metaorders, books, audit = select_causal_protocol_inputs(
+        [
+            {
+                "coin": "BTC",
+                "causal_forward_eligible": True,
+                "signal_source": "LIVE_WS",
+                "signal_ts_ms": 1_000,
+            },
+            {
+                "coin": "ETH",
+                "causal_forward_eligible": True,
+                "signal_source": "LIVE_WS",
+                "signal_ts_ms": 1_000.5,
+            },
+        ],
+        {
+            "BTC": [
+                {"causal_observation": True, "ts_ms": 2_000.5},
+            ]
+        },
+    )
+
+    assert len(metaorders) == 1
+    assert books == {}
+    assert audit["invalid_causal_signal_timestamps_rejected"] == 1
+    assert audit["invalid_causal_book_timestamps_rejected"] == 1
 
 def test_execution_reference_book_ne_peut_pas_etre_postérieur_au_signal() -> None:
     metaorder = cluster_metaorders([_entry("asof", 1_000)])[0][0]
@@ -450,6 +527,35 @@ def test_continuation_refuse_un_prefix_historique_ou_non_monotone() -> None:
         },
     ]
     selected, audit = select_observed_continuations(cluster_metaorders(rows)[0])
+
+    assert selected == []
+    assert audit["noncausal_prefix_rejected"] == 1
+
+
+def test_continuation_rejette_les_timestamps_observes_non_entiers() -> None:
+    metaorder = {
+        "vault": "0xA",
+        "coin": "BTC",
+        "direction": 1,
+        "member_events": [
+            {
+                "event_id": "first",
+                "ts_ms": 1_000,
+                "observed_at_ms": 1_025.5,
+                "causal_forward_eligible": True,
+                "source": "LIVE_WS",
+            },
+            {
+                "event_id": "second",
+                "ts_ms": 2_000,
+                "observed_at_ms": 2_025,
+                "causal_forward_eligible": True,
+                "source": "LIVE_WS",
+            },
+        ],
+    }
+
+    selected, audit = select_observed_continuations([metaorder], required_observed_fills=2)
 
     assert selected == []
     assert audit["noncausal_prefix_rejected"] == 1
@@ -621,6 +727,10 @@ def test_historical_loader_floors_fractional_epoch_seconds_at_utc_midnight(tmp_p
     assert books["BTC"][0]["ts_ms"] == 1_793_145_600_000
     assert books["BTC"][0]["source_timestamp_raw"] == "1793145600.0009"
     assert audit["invalid_rows"] == 0
+    assert audit["replay_grade_ready"] is False
+    assert audit["replay_grade_status"] == "UNMEASURABLE"
+    assert "NON_CAUSAL_BOOK_ROWS" in audit["replay_grade_blockers"]
+    assert audit["marks_or_allmids_substitution"] == "REJECTED_AS_L2_EVIDENCE"
 
 
 @pytest.mark.parametrize(
@@ -1992,3 +2102,15 @@ def test_calibration_ranks_candidates_by_unrounded_decimal_net(monkeypatch) -> N
 
     assert result["selection_eligible"] is True
     assert result["selected_horizon_ms"] == max(HORIZONS_MS)
+
+
+@pytest.mark.parametrize("bad_gap", [True, 1.5, "1.5", -1])
+def test_cluster_metaorders_rejects_non_exact_gap_configuration(bad_gap: object) -> None:
+    with pytest.raises(ValueError, match="gap_ms"):
+        cluster_metaorders([], gap_ms=bad_gap)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("bad_required", [True, 1.5, "2.5", 0, -1])
+def test_observed_continuations_rejects_non_exact_required_fill_count(bad_required: object) -> None:
+    with pytest.raises(ValueError, match="required_observed_fills"):
+        select_observed_continuations([], required_observed_fills=bad_required)  # type: ignore[arg-type]

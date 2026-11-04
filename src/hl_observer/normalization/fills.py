@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+import math
 from typing import Any
 
 from hl_observer.models import Fill, SourceMeta
@@ -196,16 +198,28 @@ def _text(value: Any) -> str | None:
 
 
 def _float(value: Any) -> float | None:
-    try:
-        return None if value in (None, "") else float(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool):
         return None
+    try:
+        parsed = None if value in (None, "") else float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed is not None and math.isfinite(parsed) else None
 
 
 def _int(value: Any) -> int | None:
+    if isinstance(value, bool) or value in (None, ""):
+        return None
     try:
-        return None if value in (None, "") else int(float(value))
-    except (TypeError, ValueError):
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not parsed.is_finite() or parsed != parsed.to_integral_value():
+        return None
+    try:
+        return int(parsed)
+    except (OverflowError, ValueError):
+        return None
         return None
 
 

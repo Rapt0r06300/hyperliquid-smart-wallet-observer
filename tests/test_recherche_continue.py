@@ -154,7 +154,12 @@ def test_14h_18h_intacts_et_isolation_continue(tmp_path):
     # le continu n'écrit que sous continuous/
     txt = (root / "tools" / "recherche_continue.py").read_text(encoding="utf-8")
     assert "continuous" in txt and "overnight_18h" not in txt and "overnight_14h" not in txt
-    assert (root / "LANCER-RECHERCHE-14H.cmd").exists() and (root / "LANCER-RECHERCHE-18H.cmd").exists()
+    # Les deux modes historiques sont conservés sous l'espace officiel des lanceurs;
+    # aucune copie racine ne doit être recréée, car elle constituerait un second point
+    # d'entrée non audité.
+    launchers = root / "tools" / "launchers"
+    assert (launchers / "LANCER-RECHERCHE-14H.cmd").exists()
+    assert (launchers / "LANCER-RECHERCHE-18H.cmd").exists()
 
 
 def test_securite_paper_only_chaine_continue():

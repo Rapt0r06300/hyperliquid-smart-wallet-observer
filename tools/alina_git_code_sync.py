@@ -15,10 +15,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 CANONICAL = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 ALLOWED_ORIGINS = {
@@ -35,6 +37,10 @@ PROTECTED_DIRS = {
     ".git", ".venv", "venv", "node_modules", ".pytest_cache",
     ".mypy_cache", ".ruff_cache", "__pycache__", ".tox",
 }
+# This root contains millions of tracked immutable data paths. A full worktree
+# scan cannot complete within the launcher read budget; remote changes to one
+# of these paths are still checked individually before any merge.
+UNSCANNABLE_PROTECTED_ROOTS = {"datasets"}
 PROTECTED_EXTENSIONS = {
     ".bundle", ".zip", ".7z", ".rar", ".tar", ".gz", ".zst", ".sqlite",
     ".sqlite3", ".db", ".parquet", ".feather", ".pkl", ".pickle",
@@ -86,17 +92,20 @@ REPLAY_WORKTREE_TIMEOUT_SECONDS = 30
 # stalled authentication, SSH host-key prompt, or unreachable remote must
 # fail closed quickly instead of leaving a double-click apparently hung.
 DEFAULT_GIT_TIMEOUT_SECONDS = 300
-# A checkpoint may run Git LFS hooks and re-index a large partial clone.  It
-# must not inherit the short local-read budget, otherwise a completed commit
-# can be reported as failed after its ref was already advanced.
+# A checkpoint is built with the plumbing path below, which avoids Git's
+# full-index refresh and hook/LFS scan on this partial clone.  Keep a generous
+# bound for object creation and the atomic ref update, while still failing
+# closed if either operation stops making progress.
 COMMIT_TIMEOUT_SECONDS = 300
 REMOTE_READ_TIMEOUT_SECONDS = 20
 LOCAL_READ_TIMEOUT_SECONDS = 30
+MIN_GIT_VERSION = (2, 30)
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
 # bound remains fail-closed when the first synchronisation is slow or stuck.
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
+RECEIPT_HISTORY_LIMIT = 20
 GIT_SYNC_ENGINE_BUILD = "2026-11-01-safe-main-promotion-v13"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
@@ -114,6 +123,10 @@ FORBIDDEN_HOSTED_CI_MARKERS = (
     'HYPERSMART_ENABLE_REAL_ORDERS: "1"',
     'ENABLE_REAL_ORDERS: "1"',
 )
+MUTATING_GIT_COMMANDS = {
+    "add", "commit", "commit-tree", "fetch", "merge", "rebase", "read-tree",
+    "write-tree", "switch", "checkout", "update-ref", "push",
+}
 
 
 def _rebase_timeout_budget(replay_count: int) -> int:
@@ -479,6 +492,143 @@ class LocalEditsDetected(SyncBlocked):
     """Source changed while network or Git reconciliation was in flight."""
 
 
+def _redact_sensitive_text(value: str) -> str:
+    """Remove credentials and bearer tokens before text reaches a receipt/UI."""
+    redacted = re.sub(
+        r"(https?://)([^/@\s]+):([^/@\s]+)@",
+        r"\1[REDACTED]@",
+        value,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r"\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b",
+        "[REDACTED]",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r"(authorization\s*:\s*bearer\s+)\S+",
+        r"\1[REDACTED]",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r"([?&](?:access_token|api[_-]?key|password|token|secret)=)[^&\s]+",
+        r"\1[REDACTED]",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    return redacted
+
+
+def _classify_git_failure(
+    detail: str, returncode: int,
+) -> Literal[
+    "retryable_race", "retryable_network", "auth", "protected",
+    "configuration", "unknown",
+]:
+    """Classify a Git transport error without guessing that every failure is a race."""
+    lowered = _redact_sensitive_text(detail).casefold()
+    if any(marker in lowered for marker in (
+        "non-fast-forward", "non fast-forward", "fetch first",
+        "failed to push some refs", "remote rejected",
+    )):
+        return "retryable_race"
+    if any(marker in lowered for marker in (
+        "authentication failed", "terminal prompts disabled",
+        "could not read username", "could not read password",
+        "permission denied (publickey)", "invalid username or password",
+    )):
+        return "auth"
+    if any(marker in lowered for marker in (
+        "protected branch", "hook declined", "gh006",
+        "not allowed to push", "permission denied to update",
+    )):
+        return "protected"
+    if any(marker in lowered for marker in (
+        "no such remote", "does not appear to be a git repository",
+        "invalid remote", "repository not found",
+    )):
+        return "configuration"
+    if any(marker in lowered for marker in (
+        "could not resolve host", "unable to access", "connection reset",
+        "connection refused", "connection timed out", "timed out",
+        "network is unreachable", "temporary failure in name resolution",
+    )):
+        return "retryable_network"
+    if returncode in {128, 129} and not lowered:
+        return "unknown"
+    return "unknown"
+
+
+def _atomic_json_write(destination: Path, payload: object) -> None:
+    """Write a JSON receipt durably, then publish it with one atomic replace."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=destination.parent,
+            prefix=f".{destination.name}.", suffix=".tmp", delete=False,
+        ) as out:
+            temporary = Path(out.name)
+            json.dump(payload, out, indent=2, sort_keys=True, ensure_ascii=False)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _verify_push_porcelain(
+    output: str, expected_sha: str, expected_ref: str,
+) -> None:
+    """Require one successful, non-forced porcelain result for the target ref."""
+    if not re.fullmatch(r"[0-9a-f]{40,64}", expected_sha):
+        raise SyncBlocked("SHA locale invalide; preuve de push refusee.")
+    matches: list[tuple[str, str]] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        fields = line.split(None, 2)
+        if fields and fields[0] in {"*", "=", "+", "!", "-"}:
+            flag = fields[0]
+            mapping = fields[1] if len(fields) > 1 else ""
+        else:
+            # A successful porcelain update may use a leading blank flag.
+            flag = " "
+            mapping = fields[0] if fields else ""
+        if ":" not in mapping:
+            continue
+        _source, target = mapping.split(":", 1)
+        if target == expected_ref:
+            matches.append((flag, raw_line))
+    if len(matches) != 1:
+        raise SyncBlocked(
+            f"Preuve push absente ou ambigue pour {expected_ref}; "
+            "aucun succes distant declare."
+        )
+    flag, line = matches[0]
+    if flag in {"!", "+", "-"}:
+        raise SyncBlocked(
+            f"Preuve push refusee pour {expected_ref}: statut {flag}."
+        )
+    ranges = re.findall(
+        r"\b([0-9a-f]{7,64})\.\.([0-9a-f]{7,64})\b", line.casefold()
+    )
+    if ranges and not any(
+        expected_sha.startswith(target_sha) for _source_sha, target_sha in ranges
+    ):
+        raise SyncBlocked(
+            f"Preuve push incoherente pour {expected_ref}; SHA locale inattendue."
+        )
+
+
 def _paths(data: bytes) -> list[str]:
     if not data:
         return []
@@ -490,14 +640,14 @@ def _paths(data: bytes) -> list[str]:
         raise SyncBlocked("Nom Git non UTF-8, selection automatique refusee.") from exc
 
 
-def _status_paths(data: bytes) -> list[str]:
-    """Decode tracked paths from `git status --porcelain=v1 -z` safely."""
+def _status_records(data: bytes) -> list[tuple[bytes, list[str]]]:
+    """Decode status records from `git status --porcelain=v1 -z` safely."""
     if not data:
         return []
     if not data.endswith(b"\0"):
         raise SyncBlocked("Sortie Git status NUL tronquee; inventaire abandonne.")
     records = data[:-1].split(b"\0")
-    paths: list[str] = []
+    records_out: list[tuple[bytes, list[str]]] = []
     index = 0
     while index < len(records):
         record = records[index]
@@ -506,7 +656,7 @@ def _status_paths(data: bytes) -> list[str]:
             raise SyncBlocked("Enregistrement Git status invalide; inventaire abandonne.")
         status, path = record[:2], record[3:]
         try:
-            paths.append(path.decode("utf-8"))
+            paths = [path.decode("utf-8")]
             if b"R" in status or b"C" in status:
                 if index >= len(records):
                     raise SyncBlocked("Ancien chemin de renommage Git absent.")
@@ -514,7 +664,25 @@ def _status_paths(data: bytes) -> list[str]:
                 index += 1
         except UnicodeDecodeError as exc:
             raise SyncBlocked("Nom Git status non UTF-8; inventaire abandonne.") from exc
-    return paths
+        records_out.append((status, paths))
+    return records_out
+
+
+def _status_entries(data: bytes) -> tuple[list[str], list[str]]:
+    """Split porcelain status paths into staged and worktree changes."""
+    staged: list[str] = []
+    tracked: list[str] = []
+    for status, paths in _status_records(data):
+        if status[:1] != b" ":
+            staged.extend(paths)
+        if status[1:2] != b" ":
+            tracked.extend(paths)
+    return staged, tracked
+
+
+def _status_paths(data: bytes) -> list[str]:
+    """Decode all paths from `git status --porcelain=v1 -z` safely."""
+    return [path for _status, paths in _status_records(data) for path in paths]
 
 
 def _protected(path: str) -> bool:
@@ -584,11 +752,19 @@ def _git_operation_label(args: list[str]) -> str:
     if verb == "hash-object":
         return "Verifier le blob apres normalisation Git"
     if verb == "push":
+        if "-h" in args or "--help" in args:
+            return "Verifier la capacite push porcelain (sans publication)"
         return "Publier vers GitHub main sans force"
     if verb == "add":
         return "Preparer les fichiers de code admissibles"
     if verb == "commit":
         return "Creer le checkpoint local du travail"
+    if verb == "write-tree":
+        return "Construire l'arbre Git depuis l'index courant"
+    if verb == "commit-tree":
+        return "Creer le checkpoint Git sans re-scanner l'index"
+    if verb == "symbolic-ref":
+        return "Verifier la reference de branche"
     if verb == "update-ref":
         return "Enregistrer le checkpoint Git local"
     if verb == "show":
@@ -596,25 +772,101 @@ def _git_operation_label(args: list[str]) -> str:
     return "Commande Git de controle"
 
 
-def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes], root: Path | None = None,
+) -> tuple[bool, list[int]]:
     """Stop a timed-out Git process and descendants without leaking pipes."""
     if process.poll() is not None:
-        return
+        return True, []
     if os.name == "nt":
-        subprocess.run(
+        result = subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
         )
+        killed = result.returncode == 0
     else:
         process.kill()
+        killed = True
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=1)
+        killed = False
+    residual = _remaining_process_ids(root or Path.cwd(), process.pid)
+    return killed and not residual, residual
+
+
+def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
+    """Return surviving descendants after a process-tree termination attempt."""
+    if os.name != "nt":
+        return []
+    del root
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        "Get-CimInstance Win32_Process | "
+        "Select-Object ProcessId,ParentProcessId | "
+        "ConvertTo-Json -Compress"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+             "-Command", command],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return [parent_pid]
+        decoded = json.loads(completed.stdout)
+        rows = decoded if isinstance(decoded, list) else [decoded]
+        parents: dict[int, list[int]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pid = row.get("ProcessId")
+            ppid = row.get("ParentProcessId")
+            if isinstance(pid, int) and isinstance(ppid, int):
+                parents.setdefault(ppid, []).append(pid)
+        pending = [parent_pid]
+        descendants: set[int] = set()
+        while pending:
+            current = pending.pop()
+            for child in parents.get(current, []):
+                if child not in descendants:
+                    descendants.add(child)
+                    pending.append(child)
+        surviving = [parent_pid, *sorted(descendants)]
+        live = set()
+        for pid in surviving:
+            probe = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if str(pid) in probe.stdout:
+                live.add(pid)
+        return sorted(live)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, TypeError):
+        return [parent_pid]
+
+
+def _index_lock_path(root: Path) -> Path | None:
+    """Return the ordinary repository index lock without following a worktree file."""
+    git_path = root / ".git"
+    if git_path.is_dir():
+        return git_path / "index.lock"
+    return None
 
 
 def _run_git(
@@ -644,7 +896,13 @@ def _run_git(
     env["GIT_OPTIONAL_LOCKS"] = (
         "0" if args and args[0] in {"ls-files", "status", "diff"} else "1"
     )
-    command = [git, *args]
+    # This synchronizer admits only code paths and explicitly excludes LFS or
+    # shard transfers.  Repository post-commit/pre-push hooks can otherwise
+    # start Git LFS scans after the checkpoint has already been created, making
+    # a code-only run wait for an unrelated data plane.  The engine performs
+    # its own exact SHA/protected-path proof, so hooks are isolated per process
+    # and the user's repository configuration is never changed.
+    command = [git, "-c", "core.hooksPath=NUL", *args]
     started = time.monotonic()
     process = subprocess.Popen(
         command,
@@ -658,22 +916,38 @@ def _run_git(
         elapsed = time.monotonic() - started
         remaining = timeout - elapsed
         if remaining <= 0:
-            _terminate_process_tree(process)
+            killed_process_tree, residual_process_ids = _terminate_process_tree(
+                process, root,
+            )
             try:
                 stdout, stderr = process.communicate(timeout=2)
             except subprocess.TimeoutExpired as communicate_timeout:
                 for stream in (process.stdout, process.stderr):
                     if stream is not None:
                         stream.close()
-                raise subprocess.TimeoutExpired(
+                timeout_error = subprocess.TimeoutExpired(
                     command,
                     timeout,
                     output=communicate_timeout.output,
                     stderr=communicate_timeout.stderr,
-                ) from communicate_timeout
-            raise subprocess.TimeoutExpired(
+                )
+                timeout_error.killed_process_tree = killed_process_tree
+                timeout_error.residual_process_ids = residual_process_ids
+                timeout_error.git_index_lock_present = bool(
+                    _index_lock_path(root)
+                    and _index_lock_path(root).exists()
+                )
+                raise timeout_error from communicate_timeout
+            timeout_error = subprocess.TimeoutExpired(
                 command, timeout, output=stdout, stderr=stderr,
             )
+            timeout_error.killed_process_tree = killed_process_tree
+            timeout_error.residual_process_ids = residual_process_ids
+            timeout_error.git_index_lock_present = bool(
+                _index_lock_path(root)
+                and _index_lock_path(root).exists()
+            )
+            raise timeout_error
         try:
             stdout, stderr = process.communicate(
                 input=input_bytes, timeout=min(8.0, remaining),
@@ -750,12 +1024,14 @@ class Synchronizer:
         self.promote_current_to_main = promote_current_to_main
         self.changed_python_paths: list[str] = []
         self._inventory_cache: tuple[list[str], list[str], list[str]] | None = None
+        self._pathspec_cache: dict[bool, tuple[str, ...]] = {}
         self._remote_snapshot_ready = False
         self._remote_snapshot_sha: str | None = None
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
             "engine_build": GIT_SYNC_ENGINE_BUILD,
+            "run_id": None,
             "mode": "DRY_RUN" if dry_run else "SYNC",
             "status": "NOT_STARTED",
             "shard_downloads": False,
@@ -767,6 +1043,7 @@ class Synchronizer:
             "history_deepen_steps": [],
             "local_commit_created": False,
             "commit_message": None,
+            "commit_backend": None,
             "proposed_commit_message": None,
             "branch_before": None,
             "branch_after": None,
@@ -776,11 +1053,23 @@ class Synchronizer:
             "merge_commits_created": 0,
             "rebases_performed": 0,
             "push_attempts": 0,
+            "push_failure_classes": [],
             "local_syntax_check": "NOT_RUN",
             "fast_path": None,
             "remote_sha_observed": None,
+            "remote_url_observed": None,
+            "push_url_observed": None,
+            "push_capability": "NOT_CHECKED",
+            "remote_capability": "NOT_CHECKED",
+            "push_ref_result": None,
+            "git_version": None,
+            "python_version": None,
+            "hooks_isolated": True,
+            "git_index_lock_detected": False,
+            "mutations": [],
             "remote_snapshot_reused": False,
             "commit_timeout_recovered": False,
+            "phases": {},
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -804,7 +1093,10 @@ class Synchronizer:
         label = _git_operation_label(git_args)
         self._command_count += 1
         command_number = self._command_count
-        live_stderr = bool(git_args and git_args[0] in {"fetch", "push"})
+        # Capture network stderr so credentials embedded by a credential
+        # helper or remote URL can be redacted before they reach the console
+        # and the receipt.  Git progress is replayed after completion below.
+        live_stderr = False
         self.say(f"[GIT {command_number:03d}] {label} ...")
         started = time.monotonic()
 
@@ -812,20 +1104,42 @@ class Synchronizer:
             self.say(f"[EN COURS] {label} | {elapsed:.0f} s ecoulees")
 
         try:
-            completed = _run_git(
-                self.root,
-                self.git,
-                git_args,
-                input_bytes=input_bytes,
-                timeout=timeout,
-                live_stderr=live_stderr,
-                on_progress=progress,
-            )
-        except subprocess.TimeoutExpired:
+            with self._timed_phase(f"git_{command_number:03d}", timeout):
+                completed = _run_git(
+                    self.root,
+                    self.git,
+                    git_args,
+                    input_bytes=input_bytes,
+                    timeout=timeout,
+                    live_stderr=live_stderr,
+                    on_progress=progress,
+                )
+        except subprocess.TimeoutExpired as timeout_error:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             self._record_git_command(
                 command_number, label, -1, elapsed_ms, timed_out=True,
+                killed_process_tree=bool(
+                    getattr(timeout_error, "killed_process_tree", False)
+                ),
+                residual_process_ids=list(
+                    getattr(timeout_error, "residual_process_ids", [])
+                ),
+                git_index_lock_present=bool(
+                    getattr(timeout_error, "git_index_lock_present", False)
+                ),
             )
+            if git_args and git_args[0] in MUTATING_GIT_COMMANDS and not (
+                git_args[0] == "push"
+                and any(option in git_args for option in ("-h", "--help", "--dry-run"))
+            ):
+                mutations = self.report.setdefault("mutations", [])
+                if isinstance(mutations, list):
+                    mutations.append({
+                        "operation": label,
+                        "exit_code": -1,
+                        "duration_ms": elapsed_ms,
+                        "timed_out": True,
+                    })
             self.say(
                 f"[TIMEOUT] {label} apres {elapsed_ms / 1000:.1f} s; "
                 "le processus Git a ete arrete."
@@ -836,6 +1150,19 @@ class Synchronizer:
         self._record_git_command(
             command_number, label, completed.returncode, elapsed_ms,
         )
+        is_mutation = bool(git_args and git_args[0] in MUTATING_GIT_COMMANDS)
+        if git_args and git_args[0] == "push" and any(
+            option in git_args for option in ("-h", "--help", "--dry-run")
+        ):
+            is_mutation = False
+        if is_mutation:
+            mutations = self.report.setdefault("mutations", [])
+            if isinstance(mutations, list):
+                mutations.append({
+                    "operation": label,
+                    "exit_code": completed.returncode,
+                    "duration_ms": elapsed_ms,
+                })
         outcome = (
             "OK" if completed.returncode == 0
             else "INFO" if completed.returncode in expected_returncodes
@@ -845,16 +1172,19 @@ class Synchronizer:
             f"[{outcome}] {label} | code={completed.returncode} | "
             f"duree={elapsed_ms / 1000:.2f} s"
         )
+        captured_stderr = _redact_sensitive_text(
+            (completed.stderr or b"").decode("utf-8", errors="replace").strip()
+        )
+        if captured_stderr and git_args and git_args[0] in {"fetch", "push"}:
+            self.say("[GIT DETAIL] " + captured_stderr[:1800])
         if check and completed.returncode and completed.returncode not in expected_returncodes:
-            stderr = (completed.stderr or b"").decode(
+            stderr = captured_stderr
+            stdout = _redact_sensitive_text((completed.stdout or b"").decode(
                 "utf-8", errors="replace",
-            ).strip()
-            stdout = (completed.stdout or b"").decode(
-                "utf-8", errors="replace",
-            ).strip()
+            ).strip())
             detail = stderr or stdout
-            if live_stderr and not detail:
-                detail = "detail Git affiche dans le terminal ci-dessus"
+            if not detail:
+                detail = "aucun detail Git recupere"
             raise SyncBlocked(
                 f"git {git_args[0]} a echoue (code {completed.returncode}): "
                 f"{detail[:1400]}"
@@ -863,17 +1193,24 @@ class Synchronizer:
 
     def _record_git_command(
         self, number: int, label: str, exit_code: int, elapsed_ms: int,
-        *, timed_out: bool = False,
+        *, timed_out: bool = False, killed_process_tree: bool | None = None,
+        residual_process_ids: list[int] | None = None,
+        git_index_lock_present: bool = False,
     ) -> None:
         commands = self.report.setdefault("git_commands", [])
         if isinstance(commands, list):
-            commands.append({
+            entry = {
                 "number": number,
                 "operation": label,
                 "exit_code": exit_code,
                 "duration_ms": elapsed_ms,
                 "timed_out": timed_out,
-            })
+            }
+            if timed_out:
+                entry["killed_process_tree"] = bool(killed_process_tree)
+                entry["residual_process_ids"] = list(residual_process_ids or [])
+                entry["git_index_lock_present"] = git_index_lock_present
+            commands.append(entry)
 
     def text(self, *args: str) -> str:
         return self.command(*args).stdout.decode("utf-8", errors="replace").strip()
@@ -883,10 +1220,39 @@ class Synchronizer:
         stamp = datetime.now().astimezone().strftime("%H:%M:%S")
         print(f"[{stamp}] {message}", flush=True)
 
+    def _verify_git_capabilities(self) -> None:
+        """Check local Git/Python features before any repository mutation."""
+        version = self.text("--version")
+        match = re.search(r"git version (\d+)\.(\d+)(?:\.(\d+))?", version)
+        if not match:
+            raise SyncBlocked("Version Git illisible; synchronisation refusee.")
+        git_version = tuple(int(part or 0) for part in match.groups())
+        if git_version[:2] < MIN_GIT_VERSION:
+            raise SyncBlocked(
+                f"Git {version} trop ancien; minimum requis "
+                f"{MIN_GIT_VERSION[0]}.{MIN_GIT_VERSION[1]}."
+            )
+        self.report["git_version"] = _redact_sensitive_text(version)
+        self.report["python_version"] = sys.version.split()[0]
+        help_result = self.command(
+            "push", "-h", check=False, expected_returncodes=(0, 129),
+        )
+        help_text = "\n".join(
+            part.decode("utf-8", errors="replace")
+            for part in (help_result.stdout or b"", help_result.stderr or b"")
+            if part
+        )
+        if "porcelain" not in help_text.casefold():
+            raise SyncBlocked(
+                "Git local ne declare pas --porcelain; preuve de push impossible."
+            )
+        self.report["push_capability"] = "PORCELAIN_SUPPORTED"
+
     def preflight(
         self, *, allow_shallow: bool = False, allow_non_main: bool = False,
     ) -> Path:
         self.say("[MOTEUR 1/5] Controle du depot, de main et du remote autorise.")
+        self._verify_git_capabilities()
         top = Path(self.text("rev-parse", "--show-toplevel")).resolve()
         if top != self.root:
             raise SyncBlocked(f"Lanceur hors racine du depot: {top}")
@@ -912,12 +1278,28 @@ class Synchronizer:
                 "autorise, synchronisation completee apres extension non destructive."
             )
         remote = self.text("remote", "get-url", "origin")
-        if remote not in ALLOWED_ORIGINS and not (
+        push_remote = self.text("remote", "get-url", "--push", "origin")
+        test_remote_allowed = (
             self.allow_test_remote
             and os.environ.get("ALINA_SYNC_TEST_REMOTE_ALLOWED") == "1"
-        ):
+        )
+        if remote not in ALLOWED_ORIGINS and not test_remote_allowed:
             raise SyncBlocked(f"origin non canonique: {remote}. Push interdit.")
+        if push_remote not in ALLOWED_ORIGINS and not test_remote_allowed:
+            raise SyncBlocked(
+                f"pushurl non canonique: {push_remote}. Push interdit."
+            )
+        if not push_remote:
+            raise SyncBlocked("pushurl origin vide; capacite de publication inconnue.")
         gitdir = Path(self.text("rev-parse", "--absolute-git-dir")).resolve()
+        index_lock = _index_lock_path(self.root)
+        if index_lock is not None and index_lock.exists():
+            self.report["git_index_lock_detected"] = True
+            raise SyncBlocked(
+                "Verrou Git index.lock present; aucun add, commit ou push. "
+                "Fermer le processus Git proprietaire et traiter ce verrou "
+                "manuellement avant de relancer."
+            )
         for marker in (
             "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG",
             "rebase-apply", "rebase-merge", "sequencer",
@@ -930,6 +1312,9 @@ class Synchronizer:
             raise SyncBlocked("Conflits Git deja en cours dans l'index.")
         self.report["head_before"] = self.text("rev-parse", "HEAD")
         self.report["remote"] = remote
+        self.report["remote_url_observed"] = _redact_sensitive_text(remote)
+        self.report["push_url_observed"] = _redact_sensitive_text(push_remote)
+        self.report["remote_capability"] = "REMOTE_CONFIGURED"
         self.say(
             f"[PREFLIGHT OK] branche={branch} | HEAD="
             f"{str(self.report['head_before'])[:12]} | remote canonique confirme."
@@ -959,7 +1344,9 @@ class Synchronizer:
                 "Aucune fusion automatique ni force-push."
             )
         dirty = self.command(
-            "status", "--porcelain=v1", "-z", "--untracked-files=no",
+            "status", "--porcelain=v1", "-z", "--no-renames",
+            "--untracked-files=no",
+            "--", *self._pathspecs(include_protected=True),
         ).stdout
         if dirty:
             raise SyncBlocked(
@@ -1137,14 +1524,18 @@ class Synchronizer:
             "[MOTEUR 2/5] Inventaire des changements de code; les dossiers "
             "de donnees restent exclus."
         )
-        staged = _paths(
-            self.command("diff", "--cached", "--name-only", "-z").stdout
-        )
-        # `ls-files --modified` forces an expensive worktree stat across all
-        # 1.8M+ tracked dataset paths in this repository. `git status`
-        # reuses Git's index/stat cache and reports the same changed paths fast.
-        tracked = _status_paths(
-            self.command("status", "--porcelain=v1", "-z", "--untracked-files=no").stdout
+        # This repository tracks millions of protected dataset paths. A full
+        # worktree status exceeds the local read budget even with
+        # --untracked-files=no, so inspect every root except the one massive
+        # protected tree. Protected paths that are scanned are still rejected
+        # as checkpoint candidates; an incoming remote change to the massive
+        # tree is checked individually before any merge.
+        staged, tracked = _status_entries(
+            self.command(
+                "status", "--porcelain=v1", "-z", "--no-renames",
+                "--untracked-files=no",
+                "--", *self._pathspecs(include_protected=True),
+            ).stdout
         )
         # Git prunes excluded directories; never descend into SAFE shards.
         args = ["ls-files", "--others", "--exclude-standard", "-z"]
@@ -1157,6 +1548,48 @@ class Synchronizer:
         )
         self._inventory_cache = (staged, tracked, untracked)
         return self._inventory_cache
+
+    @contextlib.contextmanager
+    def _timed_phase(self, name: str, budget_seconds: float):
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            phases = self.report.setdefault("phases", {})
+            if isinstance(phases, dict):
+                duration = time.monotonic() - started
+                phases[name] = {
+                    "duration_ms": int(duration * 1000),
+                    "budget_seconds": budget_seconds,
+                    "budget_exceeded": duration > budget_seconds,
+                }
+
+    def _pathspecs(self, *, include_protected: bool) -> tuple[str, ...]:
+        """Return bounded top-level worktree pathspecs.
+
+        The repository's root ``datasets`` tree contains millions of tracked
+        files. Passing ``.`` to ``git status`` makes Git stat that entire tree
+        even when untracked files are disabled. A root-file glob preserves
+        deleted tracked files, while explicit directory roots preserve the
+        existing data-integrity checks without traversing ``datasets``.
+        """
+        cached = self._pathspec_cache.get(include_protected)
+        if cached is not None:
+            return cached
+        paths = [":(top,glob)*"]
+        for child in self.root.iterdir():
+            if child.name in UNSCANNABLE_PROTECTED_ROOTS:
+                continue
+            if not include_protected and child.name in PROTECTED_DIRS:
+                continue
+            paths.append(
+                f"{child.name}/**"
+                if child.is_dir() and not child.is_symlink()
+                else child.name
+            )
+        result = tuple(sorted(paths))
+        self._pathspec_cache[include_protected] = result
+        return result
 
     @staticmethod
     def _excluded_untracked_patterns() -> list[str]:
@@ -1206,7 +1639,9 @@ class Synchronizer:
         self.report["remote_snapshot_reused"] = False
         return fetched_remote
 
-    def capture_preflight(self, *, fetch_remote: bool) -> None:
+    def capture_preflight(
+        self, *, fetch_remote: bool, allow_protected_local: bool | None = None,
+    ) -> None:
         """Persist exact local inventory before checkpointing or reconciling."""
         staged, tracked, untracked = self._inventory()
         local_head = str(self.report.get("head_before") or self.text("rev-parse", "HEAD"))
@@ -1239,7 +1674,14 @@ class Synchronizer:
             snapshot["remote_head_observed"] = observed_remote
 
         eligible = self._check_candidates(
-            staged, tracked, untracked, allow_protected_local=fetch_remote,
+            staged,
+            tracked,
+            untracked,
+            allow_protected_local=(
+                fetch_remote
+                if allow_protected_local is None
+                else allow_protected_local
+            ),
         )
         snapshot["publishable_paths"] = eligible
         snapshot["inventory_status"] = "VALIDATED"
@@ -1306,7 +1748,11 @@ class Synchronizer:
         """
         staged, tracked, untracked = self._inventory()
         eligible = self._check_candidates(
-            staged, tracked, untracked, allow_protected_local=False,
+            # Protected local bytes are deliberately excluded from
+            # ``eligible``.  They may coexist with a code-only fast-forward;
+            # _protect_ignored_files below still refuses any remote change
+            # that could overwrite one of them.
+            staged, tracked, untracked, allow_protected_local=True,
         )
         if eligible:
             return False
@@ -1668,10 +2114,55 @@ class Synchronizer:
         if self.command("diff", "--cached", "--check", check=False).returncode:
             self.say("[ATTENTION] Espaces non conformes dans un WIP, code preserve.")
 
+    def _commit_staged_index(self, commit_message: str) -> str:
+        """Create one local checkpoint without Git's full-index commit refresh.
+
+        ``git commit`` refreshes a large index and can then run post-commit
+        hooks.  This repository carries a hundreds-of-megabytes data index,
+        while this synchronizer has already validated the exact staged paths.
+        The plumbing sequence below turns that verified index into a tree,
+        creates one commit, and atomically advances only the current branch.
+        No reset, force update, or worktree rewrite is involved.
+        """
+        branch_ref = self.text("symbolic-ref", "-q", "HEAD")
+        if not re.fullmatch(r"refs/heads/[A-Za-z0-9._/-]+", branch_ref):
+            raise SyncBlocked(
+                "Reference de branche absente ou invalide; checkpoint refuse."
+            )
+        parent = self.text("rev-parse", "HEAD")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", parent):
+            raise SyncBlocked("HEAD local invalide; checkpoint refuse.")
+
+        tree = self.command(
+            "write-tree", timeout=COMMIT_TIMEOUT_SECONDS,
+        ).stdout.decode("utf-8", errors="replace").strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+            raise SyncBlocked("Arbre Git invalide; checkpoint refuse.")
+
+        created = self.command(
+            "commit-tree", tree, "-p", parent, "-m", commit_message,
+            timeout=COMMIT_TIMEOUT_SECONDS,
+        ).stdout.decode("utf-8", errors="replace").strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", created):
+            raise SyncBlocked("Commit Git invalide; checkpoint refuse.")
+
+        # The expected old SHA makes a concurrent local ref update fail closed.
+        self.command(
+            "update-ref", branch_ref, created, parent,
+            timeout=COMMIT_TIMEOUT_SECONDS,
+        )
+        observed = self.text("rev-parse", "HEAD")
+        if observed != created:
+            raise SyncBlocked(
+                "Le checkpoint Git n'est pas le HEAD observe; aucun push."
+            )
+        self.report["commit_backend"] = "COMMIT_TREE_INDEX_FAST_PATH"
+        return created
+
     def checkpoint(self) -> None:
         staged, tracked, untracked = self._inventory()
         snapshot = self.report.get("preflight")
-        allow_protected_local = (
+        allow_protected_local = self.dry_run or (
             isinstance(snapshot, dict)
             and snapshot.get("remote_head_fetched")
             and snapshot.get("local_head") != snapshot.get("remote_head_fetched")
@@ -1727,40 +2218,13 @@ class Synchronizer:
             commit_message = _commit_subject(eligible, staged_diff)
             self.report["commit_message"] = commit_message
             self.say(f"Commit semantique du code admissible: {commit_message}")
-            try:
-                self.command(
-                    "commit", "-m",
-                    commit_message,
-                    timeout=COMMIT_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired as commit_timeout:
-                # Git can advance HEAD and then spend the remaining time in a
-                # post-commit/LFS hook.  Before declaring failure, re-inventory
-                # the exact admissible paths.  If none remain and HEAD moved,
-                # the checkpoint is already complete and it is safe to resume.
-                self._inventory_cache = None
-                post_staged, post_tracked, post_untracked = self._inventory()
-                post_eligible = self._check_candidates(
-                    post_staged, post_tracked, post_untracked,
-                    allow_protected_local=bool(allow_protected_local),
-                )
-                head_after = self.text("rev-parse", "HEAD")
-                head_before = str(self.report.get("head_before") or "")
-                if head_after == head_before or post_eligible:
-                    raise SyncBlocked(
-                        "Commit Git depasse; le checkpoint n'est pas confirme. "
-                        "Les changements restent conserves localement, aucun push."
-                    ) from commit_timeout
-                self.report["commit_timeout_recovered"] = True
-                self.say(
-                    "[CHECKPOINT] Commit Git confirme apres timeout de hook; "
-                    "reprise securisee avec le SHA local avance."
-                )
+            self.report["checkpoint_sha"] = self._commit_staged_index(
+                commit_message
+            )
             self.report["local_commit_created"] = True
-            self.report["checkpoint_sha"] = self.text("rev-parse", "HEAD")
             self.command(
                 "update-ref", "refs/alina-sync/last-local-checkpoint",
-                self.text("rev-parse", "HEAD"),
+                self.report["checkpoint_sha"],
             )
 
     def _syntax_gate(self) -> None:
@@ -1810,7 +2274,17 @@ class Synchronizer:
         remote = self.text("ls-remote", "origin", "refs/heads/main")
         if not remote:
             raise SyncBlocked("GitHub main introuvable ou inaccessible.")
-        sha = remote.split()[0]
+        matches = []
+        for line in remote.splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[1] == "refs/heads/main":
+                matches.append(fields[0])
+        if len(matches) != 1:
+            raise SyncBlocked(
+                "Reponse ls-remote ambigue pour refs/heads/main; SHA distante "
+                "non prouvee."
+            )
+        sha = matches[0]
         if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
             raise SyncBlocked("SHA GitHub invalide.")
         return sha
@@ -1839,9 +2313,12 @@ class Synchronizer:
                 self.command("ls-files", "-z", "--", *batch).stdout
             ))
 
-        local_changed = set(_paths(
-            self.command("diff", "--name-only", "-z", "HEAD").stdout
-        ))
+        local_changed: set[str] = set()
+        for start in range(0, len(protected_changes), PROTECTED_PATH_BATCH_SIZE):
+            batch = protected_changes[start:start + PROTECTED_PATH_BATCH_SIZE]
+            local_changed.update(_paths(
+                self.command("diff", "--name-only", "-z", "HEAD", "--", *batch).stdout
+            ))
         for path in protected_changes:
             local_path = self.root / path
             if not (local_path.exists() or local_path.is_symlink()):
@@ -2291,12 +2768,14 @@ class Synchronizer:
                 "HEAD local ne confirme pas le rejeu Git; aucun push lance."
             )
         clean = self.command(
-            "diff", "--quiet", "HEAD", check=False,
+            "diff", "--quiet", "HEAD", "--",
+            *self._pathspecs(include_protected=False),
+            check=False,
             expected_returncodes=(1,),
         )
         if clean.returncode:
             raise SyncBlocked(
-                "Le rejeu Git a laisse une difference tracked inattendue; "
+                "Le rejeu Git a laisse une difference de code tracked inattendue; "
                 "aucun push lance."
             )
         self.report["replay_engine"] = "GIT_REPLAY_INDEX_PRESERVING"
@@ -2558,10 +3037,23 @@ class Synchronizer:
             )
             self.report["push_attempts"] = int(self.report["push_attempts"]) + 1
             pushed = self.command(
-                "push", "--progress", "origin", "HEAD:refs/heads/main",
+                "push", "--porcelain", "--progress", "origin", "HEAD:refs/heads/main",
                 check=False,
             )
             if pushed.returncode == 0:
+                push_output = "\n".join(
+                    part.decode("utf-8", errors="replace")
+                    for part in (pushed.stdout or b"", pushed.stderr or b"")
+                    if part
+                )
+                _verify_push_porcelain(
+                    push_output, local, "refs/heads/main",
+                )
+                self.report["push_ref_result"] = {
+                    "ref": "refs/heads/main",
+                    "expected_sha": local,
+                    "status": "SUCCESS",
+                }
                 self.report["push_completed"] = True
                 self.report["pushed_head"] = local
                 verified_remote = self.remote_sha()
@@ -2580,6 +3072,19 @@ class Synchronizer:
             # the push against a newer ref.  Refresh the tracking ref before
             # classifying the rejection, otherwise a valid race is reported
             # as a false authentication/protection failure.
+            err = _redact_sensitive_text((pushed.stderr or b"").decode(
+                "utf-8", errors="replace",
+            ).strip())
+            failure_class = _classify_git_failure(err, pushed.returncode)
+            classes = self.report.setdefault("push_failure_classes", [])
+            if isinstance(classes, list):
+                classes.append(failure_class)
+            if failure_class not in {"retryable_race", "retryable_network"}:
+                if not err:
+                    err = "aucun detail Git recupere"
+                raise SyncBlocked(
+                    f"Push refuse ({failure_class}): {err[:1500]}"
+                )
             self.command(
                 "fetch", "--progress", "--no-tags", "origin",
                 "refs/heads/main:refs/remotes/origin/main",
@@ -2591,24 +3096,16 @@ class Synchronizer:
                 self.say("Push non-fast-forward refuse; GitHub avance, reprise...")
                 push_races += 1
                 continue
-            err = (pushed.stderr or b"").decode(
-                "utf-8", errors="replace",
-            ).strip()
-            if any(marker in err.lower() for marker in (
-                "fetch first", "non-fast-forward", "non fast-forward",
-            )):
+            if failure_class == "retryable_race":
                 self.say(
                     "Rejet non-fast-forward persistant sans nouveau SHA observe; "
                     "nouvelle tentative bornee."
                 )
                 push_races += 1
                 continue
-            if not err:
-                err = "detail Git affiche dans le terminal ci-dessus"
-            raise SyncBlocked(
-                "Push refuse (authentification, protection ou reseau): "
-                + err[:1500]
-            )
+            self.say("Echec reseau Git; nouvelle tentative bornee.")
+            push_races += 1
+            continue
         raise SyncBlocked(
             "GitHub avance trop souvent, ou le code local change trop "
             "frequemment: limite de tentatives atteinte. Aucun push force."
@@ -2617,20 +3114,39 @@ class Synchronizer:
 
     def _write_report(self) -> None:
         dest = self.root / "runtime" / "reports" / "git-sync"
+        history = dest / "history"
         if any(p.is_symlink() for p in (
             self.root / "runtime", self.root / "runtime" / "reports", dest,
+            history,
         )):
             return
         try:
-            dest.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=dest,
-                suffix=".tmp", delete=False,
-            ) as out:
-                json.dump(self.report, out, indent=2, sort_keys=True, ensure_ascii=False)
-                out.write("\n")
-                temporary = Path(out.name)
-            os.replace(temporary, dest / "LAST_SYNC.json")
+            if not self.report.get("run_id"):
+                self.report["run_id"] = (
+                    datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+                    + f"-{os.getpid()}"
+                )
+            safe_run_id = re.sub(
+                r"[^0-9A-Za-z_.-]", "_", str(self.report["run_id"])
+            )
+            history.mkdir(parents=True, exist_ok=True)
+            history_name = f"RUN-{safe_run_id}.json"
+            self.report["history_receipt"] = (
+                f"runtime/reports/git-sync/history/{history_name}"
+            )
+            _atomic_json_write(history / history_name, self.report)
+            history_files = sorted(
+                history.glob("RUN-*.json"), key=lambda path: path.name,
+                reverse=True,
+            )
+            for stale in history_files[RECEIPT_HISTORY_LIMIT:]:
+                try:
+                    stale.unlink()
+                except FileNotFoundError:
+                    pass
+            # Publish LAST_SYNC only after its immutable history target exists;
+            # a reporting failure therefore leaves the previous pointer valid.
+            _atomic_json_write(dest / "LAST_SYNC.json", self.report)
             self.say("Journal: runtime/reports/git-sync/LAST_SYNC.json")
         except OSError as exc:
             self.say(f"Journal non ecrit, sans effet sur Git: {exc}")
@@ -2672,6 +3188,7 @@ class Synchronizer:
                         self._ensure_full_history()
                     self.capture_preflight(
                         fetch_remote=not self.dry_run and not wip_only,
+                        allow_protected_local=True,
                     )
                     self.checkpoint()
                     if promotion_needed:
@@ -2713,8 +3230,9 @@ class Synchronizer:
                         raise SyncBlocked("GitHub a avance; relancer pour finaliser.")
         except (SyncBlocked, subprocess.TimeoutExpired, OSError) as exc:
             self.report["status"] = "NO_GO"
-            self.report["error"] = str(exc)
-            self.say("[NO_GO] " + str(exc))
+            safe_error = _redact_sensitive_text(str(exc))
+            self.report["error"] = safe_error
+            self.say("[NO_GO] " + safe_error)
             self.say(
                 "Aucun shard telecharge; aucun push force, reset ou clean."
             )
@@ -2727,10 +3245,11 @@ class Synchronizer:
             # finally block only records the fail-closed outcome.
             self.report["status"] = "NO_GO"
             self.report["error_type"] = type(exc).__name__
-            self.report["error"] = str(exc) or type(exc).__name__
+            safe_error = _redact_sensitive_text(str(exc)) or type(exc).__name__
+            self.report["error"] = safe_error
             self.say(
                 "[NO_GO] Unexpected internal sync error: "
-                + (str(exc) or type(exc).__name__)
+                + safe_error
             )
             self.say(
                 "Aucun shard telecharge; aucun push force, reset ou clean."

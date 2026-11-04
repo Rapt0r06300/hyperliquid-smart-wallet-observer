@@ -105,6 +105,23 @@ def test_overlap_ws_scans_joined_before_copy_run(tmp_path):
     )
 
 
+def test_multiplex_userfills_is_the_only_subscription_owner(tmp_path):
+    runner, journal, cfg = _mk(tmp_path, max_runs=1, overlap=False)
+    cfg.fills_multiplex = True
+    runner.run_poll(1)
+    assert "invoke:live-user-fills-scan" not in journal
+    assert runner.metrics["userfills_subscription_owner"] == "fills-multiplex"
+
+
+def test_multiplex_userfills_prevents_overlap_ws_subscription(tmp_path):
+    runner, journal, cfg = _mk(tmp_path, max_runs=1, overlap=True)
+    cfg.fills_multiplex = True
+    runner.run_poll(1)
+    assert "spawn:live-user-fills-scan" not in journal
+    assert "spawn:live-public-scan" in journal
+    assert runner.metrics["userfills_subscription_owner"] == "fills-multiplex"
+
+
 def test_stop_file_honored_between_polls(tmp_path):
     stop_after = {"done": False}
     def on_step(label):

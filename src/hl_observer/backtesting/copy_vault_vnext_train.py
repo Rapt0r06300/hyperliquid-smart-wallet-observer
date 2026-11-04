@@ -254,41 +254,61 @@ def admit_consensus_train_rows(
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Apply prior-only entity-normalized consensus; PnL is never read here."""
 
+    valid_window_ms = _strict_positive_int(window_ms)
+    valid_minimum_wallets = _strict_positive_int(minimum_distinct_wallets)
+    if valid_window_ms is None or valid_minimum_wallets is None:
+        return [], {"INVALID_CONSENSUS_PARAMETERS": len(rows)}
+    reasons = Counter()
+    normalized_rows: list[dict[str, Any]] = []
+    for raw in rows:
+        timestamp = _strict_positive_int(raw.get("signal_ts_ms"))
+        direction = raw.get("direction")
+        if timestamp is None or type(direction) is not int or direction not in (-1, 1):
+            reasons["INVALID_SIGNAL_TIMESTAMP_OR_DIRECTION"] += 1
+            continue
+        normalized_rows.append(dict(raw))
     ordered = sorted(
-        [dict(row) for row in rows],
-        key=lambda row: (int(row.get("signal_ts_ms") or 0), str(row.get("trade_id") or "")),
+        normalized_rows,
+        key=lambda row: (
+            _strict_positive_int(row["signal_ts_ms"]) or 0,
+            str(row.get("trade_id") or ""),
+        ),
     )
     admitted: list[dict[str, Any]] = []
-    reasons = Counter()
     for index, row in enumerate(ordered):
-        timestamp = int(row.get("signal_ts_ms") or 0)
+        timestamp = _strict_positive_int(row["signal_ts_ms"])
+        if timestamp is None:
+            reasons["INVALID_SIGNAL_TIMESTAMP_OR_DIRECTION"] += 1
+            continue
         coin = preserve_native_instrument_symbol(row.get("coin"))
-        direction = int(row.get("direction") or 0)
+        direction = row["direction"]
         current_vault = str(row.get("vault") or "").lower()
         supporting_rows: list[dict[str, Any]] = []
         prior_vaults: set[str] = set()
         for previous in reversed(ordered[:index]):
-            previous_ts = int(previous.get("signal_ts_ms") or 0)
+            previous_ts = _strict_positive_int(previous["signal_ts_ms"])
+            if previous_ts is None:
+                continue
             age = timestamp - previous_ts
-            if age > int(window_ms):
+            if age > valid_window_ms:
                 break
             if age <= 0:
                 continue
             if (
                 preserve_native_instrument_symbol(previous.get("coin")) == coin
-                and int(previous.get("direction") or 0) == direction
+                and previous["direction"] == direction
             ):
                 vault = str(previous.get("vault") or "").lower()
                 if vault and vault != current_vault:
                     prior_vaults.add(vault)
                     supporting_rows.append(previous)
         distinct_addresses = len(prior_vaults | {current_vault}) if current_vault else len(prior_vaults)
-        if distinct_addresses < int(minimum_distinct_wallets):
+        if distinct_addresses < valid_minimum_wallets:
             reasons["INSUFFICIENT_PRIOR_DISTINCT_WALLET_CONSENSUS"] += 1
             continue
         identity = entity_consensus_gate(
             [_identity_vote(item) for item in [*reversed(supporting_rows), row]],
-            min_independent_votes=float(minimum_distinct_wallets),
+            min_independent_votes=float(valid_minimum_wallets),
             strict=True,
             as_of_ms=timestamp,
         )
@@ -302,8 +322,8 @@ def admit_consensus_train_rows(
         admitted.append(
             {
                 **row,
-                "consensus_window_ms": int(window_ms),
-                "minimum_distinct_wallets": int(minimum_distinct_wallets),
+                "consensus_window_ms": valid_window_ms,
+                "minimum_distinct_wallets": valid_minimum_wallets,
                 "prior_supporting_wallet_addresses": sorted(prior_vaults),
                 "distinct_wallet_addresses_at_signal": distinct_addresses,
                 "entity_cluster_count_at_signal": int(identity["entity_cluster_count"]),

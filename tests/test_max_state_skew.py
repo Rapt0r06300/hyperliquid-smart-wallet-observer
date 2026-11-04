@@ -21,3 +21,8 @@ def test_skew_trop_grand():
 
 def test_horodatage_inconnu():
     assert fiable(None, 1500.0)["fiable"] is False
+
+
+def test_horodatage_non_fini_ou_bool_est_refuse():
+    assert fiable(float("nan"), 1500.0)["fiable"] is False
+    assert fiable(True, 1500.0)["fiable"] is False

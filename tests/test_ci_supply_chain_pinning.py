@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -14,12 +14,15 @@ HISTORICAL_CHECKOUT_SHA = "11bd71901bbe5b1630ceea73d27597364c9af683"
 LEGACY_SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
 LEGACY_UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
 ATTEST_BUILD_PROVENANCE_SHA = "e8998f949152b193b063cb0ec769d69d929409be"
+CACHE_SHA = "5a3ec84eff668545956fd18022155c47e93e2684"
 
 PINNED = {
     "actions/checkout": frozenset({HISTORICAL_CHECKOUT_SHA, LEGACY_CHECKOUT_SHA, CHECKOUT_SHA}),
     "actions/setup-python": frozenset({LEGACY_SETUP_PYTHON_SHA, SETUP_PYTHON_SHA}),
     "actions/upload-artifact": frozenset({LEGACY_UPLOAD_ARTIFACT_SHA, UPLOAD_ARTIFACT_SHA}),
     "actions/attest-build-provenance": frozenset({ATTEST_BUILD_PROVENANCE_SHA}),
+    "actions/cache/restore": frozenset({CACHE_SHA}),
+    "actions/cache/save": frozenset({CACHE_SHA}),
 }
 
 # These workflows intentionally mutate the canonical repository/control plane.

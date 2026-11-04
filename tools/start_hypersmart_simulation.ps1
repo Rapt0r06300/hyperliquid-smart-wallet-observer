@@ -1,12 +1,15 @@
 param(
+    [ValidateRange(1, 65535)]
     [int]$Port = 8794,
+    [ValidateRange(1, 3600)]
     [int]$IntervalSeconds = 5,
+    [ValidateRange(1, 10000)]
     [int]$MaxLeaders = 50,
     [bool]$RestartExisting = $true,
     [switch]$Interactive
 )
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 # PORTABILITE: runtime Python explicite, local au checkout.
 $PythonExe = [string]$env:HYPERSMART_PYTHON
@@ -19,11 +22,29 @@ try {
 } catch {
     throw "HYPERSMART_PYTHON invalide: $($_.Exception.Message)"
 }
+$rootPrefixForPython = $rootFullForPython + [IO.Path]::DirectorySeparatorChar
+$expectedPythonExe = [IO.Path]::GetFullPath((Join-Path $Root "tools\python\python.exe"))
+$pythonManifestPath = Join-Path $Root "tools\python\portable_runtime_manifest.json"
 if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
     throw "Runtime Python HyperSmart introuvable: $PythonExe"
 }
-if (-not $PythonExe.StartsWith($rootFullForPython, [StringComparison]::OrdinalIgnoreCase)) {
+if (-not $PythonExe.StartsWith($rootPrefixForPython, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Runtime Python refuse hors du checkout courant: $PythonExe"
+}
+if (-not [StringComparer]::OrdinalIgnoreCase.Equals($PythonExe, $expectedPythonExe)) {
+    throw "Runtime Python refuse: seul tools\python\python.exe est autorise par le runtime portable: $PythonExe"
+}
+if (-not (Test-Path -LiteralPath $pythonManifestPath -PathType Leaf)) {
+    throw "Manifest runtime portable manquant: $pythonManifestPath"
+}
+try {
+    $pythonManifest = Get-Content -LiteralPath $pythonManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $manifestRuntimePath = ([string]$pythonManifest.runtime_path).Replace('/', '\')
+    if ($manifestRuntimePath -ne "tools\python\python.exe") {
+        throw "runtime_path inattendu: $manifestRuntimePath"
+    }
+} catch {
+    throw "Manifest runtime portable invalide: $($_.Exception.Message)"
 }
 $env:HYPERSMART_PYTHON = $PythonExe
 $Url = "http://127.0.0.1:$Port/v2"   # 2026-07-08: nouvelle UI hacker v2 (metagraphe reel) au lieu de l ancienne
@@ -111,6 +132,10 @@ $env:HL_ENABLE_TESTNET_EXECUTION = "0"
 $env:HYPERSMART_V12_SQLITE_PATH = $v12SqlitePath
 $env:HYPERSMART_MODE = "SIMULATION_ONLY_UNTIL_MANUAL_REVIEW"
 $env:HYPERSMART_RUNTIME_STOP_FILE = $runtimeStopFile
+$env:HYPERSMART_ACTIVE_STRATEGY_SCOPE = "copy_vault"
+$env:HYPERSMART_SCOPE_VERSION = "COPY_VAULT_PAPER_V2"
+$env:HYPERSMART_CONFIG_AUTHORITY = "tools/start_hypersmart_simulation.ps1"
+Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "200"
 $startupProfile = [string]$env:HYPERSMART_STARTUP_PROFILE
 if ([string]::IsNullOrWhiteSpace($startupProfile)) {
     $startupProfile = "core"
@@ -457,6 +482,28 @@ function Test-CommandCenter {
     }
 }
 
+function Test-HyperSmartUiReady {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 2
+        return $response.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
+
+function Test-HyperSmartEngineReady {
+    try {
+        $status = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+        if ($null -eq $status) { return $false }
+        # READY is a safety contract, not merely a reachable HTTP page.
+        return [bool]($status.read_only -eq $true -and
+            $status.simulation_only -eq $true -and
+            $status.external_action -eq $false)
+    } catch {
+        return $false
+    }
+}
+
 function Test-ProcessAlive {
     param([Nullable[int]]$ProcessId)
     if ($null -eq $ProcessId) {
@@ -467,6 +514,16 @@ function Test-ProcessAlive {
     } catch {
         return $false
     }
+}
+
+function Get-HyperSmartStartedProcessFailures {
+    $failed = @()
+    foreach ($startedPid in @($script:startedProcesses)) {
+        if (-not (Test-ProcessAlive -ProcessId ([int]$startedPid))) {
+            $failed += [int]$startedPid
+        }
+    }
+    return $failed
 }
 
 function Write-LauncherLine {
@@ -546,12 +603,16 @@ function Test-HyperSmartProcessBelongsToRoot {
     if ($null -eq $Process) { return $false }
     try {
         $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd([char]92, [char]47)
+        $rootPrefix = $rootFull + [IO.Path]::DirectorySeparatorChar
         $command = [string]$Process.CommandLine
+        $commandNormalise = $command.Replace([char]47, [char]92)
         $executable = [string]$Process.ExecutablePath
-        if ($command -and $command.IndexOf($rootFull, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        # A plain StartsWith/substring accepts a sibling checkout such as
+        # C:\Projet invest-copy. The separator is part of the ownership proof.
+        if ($commandNormalise -and $commandNormalise.IndexOf($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
             return $true
         }
-        if ($executable -and $executable.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+        if ($executable -and $executable.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
         return $false
@@ -631,12 +692,40 @@ function Stop-HyperSmartLauncherTree {
 
 function Stop-HyperSmartProcessTree {
     param([int]$ProcId)
-    if (-not $ProcId -or $ProcId -eq $PID) { return }
-    # /T tue TOUT l'arbre (enfants: workers multiprocessing du poller, connexions firehose,
-    # interface.py de l'IA lancee par ia_train_loop.ps1). Sans /T, Stop-Process ne tuait que
-    # le parent -> les enfants survivaient en orphelins (bug "Q ne ferme pas tout", Flo 2026-07-10).
-    try { & taskkill.exe /PID $ProcId /T /F *> $null }
-    catch { try { Stop-Process -Id $ProcId -Force -ErrorAction SilentlyContinue } catch {} }
+    if (-not $ProcId -or $ProcId -eq $PID) { return $false }
+    # D'abord une demande d'arrêt coopérative; /T /F n'est qu'un filet de sécurité
+    # borné au PID exact et n'est jamais interprété comme un succès implicite.
+    try {
+        Stop-Process -Id $ProcId -ErrorAction Stop
+    } catch {
+        Write-LauncherLog "graceful stop failed pid=$ProcId : $($_.Exception.Message)"
+    }
+    Start-Sleep -Milliseconds 350
+    try {
+        Get-Process -Id $ProcId -ErrorAction Stop | Out-Null
+    } catch {
+        return $true
+    }
+    try {
+        $taskkill = Start-Process -FilePath "taskkill.exe" `
+            -ArgumentList @("/PID", [string]$ProcId, "/T", "/F") `
+            -Wait -PassThru -NoNewWindow -ErrorAction Stop
+        if ([int]$taskkill.ExitCode -ne 0) {
+            Write-LauncherLog "taskkill failed pid=$ProcId exit=$($taskkill.ExitCode)"
+            return $false
+        }
+    } catch {
+        Write-LauncherLog "taskkill invocation failed pid=$ProcId : $($_.Exception.Message)"
+        return $false
+    }
+    Start-Sleep -Milliseconds 350
+    try {
+        Get-Process -Id $ProcId -ErrorAction Stop | Out-Null
+        Write-LauncherLog "process still alive after taskkill pid=$ProcId"
+        return $false
+    } catch {
+        return $true
+    }
 }
 
 function Test-HyperSmartUiProcess {
@@ -648,9 +737,11 @@ function Test-HyperSmartUiProcess {
         $command = [string]$candidate.CommandLine
         $executable = [string]$candidate.ExecutablePath
         $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+        $rootPrefix = $rootFull + [IO.Path]::DirectorySeparatorChar
         $hasUiSignature = $command -match '(?i)(?:-m\s+hl_observer\s+ui|hl_observer\s+ui)'
-        $belongsToRoot = ($command.IndexOf($rootFull, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
-            ($executable -and $executable.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase))
+        $commandNormalise = $command.Replace([char]47, [char]92)
+        $belongsToRoot = ($commandNormalise.IndexOf($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+            ($executable -and $executable.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase))
         return [bool]($hasUiSignature -and $belongsToRoot)
     } catch {
         Write-LauncherLog "UI port owner inspection failed pid=$ProcId : $($_.Exception.Message)"
@@ -698,11 +789,11 @@ function Stop-HyperSmartRuntime {
     # serveur (ancien code, positions a 40) et le neuf ne peut pas se lancer (demande Flo:
     # "c'est a toi de gerer que Q ferme tout").
     try {
-        $portPids = @(Get-NetTCPConnection -LocalPort 8794 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+        $portPids = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
         foreach ($pp in $portPids) {
             if ($pp -and $pp -ne $PID) {
                 if (Test-HyperSmartUiProcess -ProcId $pp) {
-                    Write-LauncherLog "Freeing verified HyperSmart UI port 8794 pid=$pp"
+                    Write-LauncherLog "Freeing verified HyperSmart UI port $Port pid=$pp"
                     Stop-HyperSmartProcessTree -ProcId $pp
                 } else {
                     Write-LauncherLog "Refusing to stop foreign port owner pid=$pp port=8794"
@@ -814,31 +905,43 @@ if (Test-Path -LiteralPath $resourceScript) {
 try {
     Push-Location $Root
     $initOutput = & $PythonExe -m hl_observer init-db 2>&1
+    $initExitCode = [int]$LASTEXITCODE
     foreach ($line in $initOutput) { Write-LauncherLog $line }
+    if ($initExitCode -ne 0) { throw "init-db failed with exit code $initExitCode" }
     if ($env:HYPERSMART_RESET_ON_LAUNCH -eq "1") {
         # RESET seulement si DEMANDE EXPLICITEMENT (=1). Defaut (unset/0) = CONSERVER. AUTOPILOT et
         # restart passent =0 -> jamais de reset. Le vrai reset volontaire passe par reset-paper --confirm.
-        $resetOutput = & $PythonExe -m hl_observer reset-simulation-state --starting-equity 1000 2>&1
+        $paperStartingEquity = [string]$env:HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT
+        if ([string]::IsNullOrWhiteSpace($paperStartingEquity)) { $paperStartingEquity = "200" }
+        $resetOutput = & $PythonExe -m hl_observer reset-simulation-state --starting-equity $paperStartingEquity 2>&1
+        $resetExitCode = [int]$LASTEXITCODE
         foreach ($line in $resetOutput) { Write-LauncherLog $line }
-        Write-LauncherLine "Capital virtuel REMIS a 1000 USDT (HYPERSMART_RESET_ON_LAUNCH=1 explicite)."
+        if ($resetExitCode -ne 0) { throw "reset-simulation-state failed with exit code $resetExitCode" }
+        Write-LauncherLine "Capital virtuel REMIS a $paperStartingEquity USDT (HYPERSMART_RESET_ON_LAUNCH=1 explicite)."
     } else {
         Write-LauncherLine "Capital virtuel CONSERVE entre lancements (defaut garanti): equity/PnL/ledgers/positions/historique intacts. Reset uniquement via reset-paper --confirm."
     }
     Write-LauncherLine "Nouvelle session simulation: moteur Hyperliquid read-only + paper local actif."
     $prepareLogsOutput = & $PythonExe -m hl_observer prepare-simulation-logs 2>&1
+    $prepareExitCode = [int]$LASTEXITCODE
     foreach ($line in $prepareLogsOutput) { Write-LauncherLog $line }
     Write-LauncherLine "Logs a envoyer prepares: session fraiche, anciens fichiers deplaces dans _archives."
     Write-LauncherLine "Nouvelle session de logs preparee (capital CONSERVE par defaut; reset uniquement via reset-paper --confirm ou HYPERSMART_RESET_ON_LAUNCH=1)."
+    if ($prepareExitCode -ne 0) { throw "prepare-simulation-logs failed with exit code $prepareExitCode" }
     if ($startupProfile -eq "core") {
         Write-LauncherLine "Profil CORE: warmup lourd delegue au poller persistant; aucun scan initial duplique."
     } else {
         Write-LauncherLine "Profil $startupProfile : warmup read-only explicite."
         Write-LauncherLine "Decouverte read-only des marches Hyperliquid pour scanner davantage de coins."
         $marketsOutput = & $PythonExe -m hl_observer discover-markets --store --max-coins 80 2>&1
+        $marketsExitCode = [int]$LASTEXITCODE
         foreach ($line in $marketsOutput) { Write-LauncherLog $line }
+        if ($marketsExitCode -ne 0) { throw "discover-markets failed with exit code $marketsExitCode" }
         Write-LauncherLine "Scan L2/candles read-only des marches Hyperliquid pour les gates de liquidite."
         $marketScanOutput = & $PythonExe -m hl_observer scan-markets --all --store --max-coins 80 --l2book --candles 2>&1
+        $marketScanExitCode = [int]$LASTEXITCODE
         foreach ($line in $marketScanOutput) { Write-LauncherLog $line }
+        if ($marketScanExitCode -ne 0) { throw "scan-markets failed with exit code $marketScanExitCode" }
         Write-LauncherLine "Elargissement read-only de la shortlist de leaders."
         try {
             $walletsOutput = & $PythonExe -m hl_observer.collection.run_collect_all --max-coins 200 --target 6000 2>&1
@@ -850,28 +953,43 @@ try {
         Write-LauncherEngineStatus "startup_public_trade_scan" "Warm scan public read-only."
         try {
             $warmPublicScanOutput = & $PythonExe -m hl_observer live-public-scan --network-read --store --duration-seconds 6 --coins AUTO --max-coins 60 --max-wallets 20000 --promote-top $MaxLeaders --no-report 2>&1
+            $warmPublicScanExitCode = [int]$LASTEXITCODE
             foreach ($line in $warmPublicScanOutput) { Write-LauncherLog $line }
+            Write-LauncherLog "warm live-public-scan exit_code=$warmPublicScanExitCode (non-bloquant, aucun resultat absent ne devient une preuve)."
         } catch {
             Write-LauncherLog "warm live-public-scan non bloquant: $($_.Exception.Message)"
         }
     }
     Pop-Location
 } catch {
-    Write-LauncherLog "init-db failed: $($_.Exception.Message)"
+    Write-LauncherLog "startup initialization failed: $($_.Exception.Message)"
     try { Pop-Location } catch {}
+    Stop-HyperSmartRuntime -Reason "startup_initialization_failed"
+    exit 12
 }
 
 if (-not (Test-CommandCenter)) {
     Write-LauncherLine "Demarrage du serveur UI local sur $Url"
-    $uiProcess = Start-Process -NoNewWindow -PassThru -FilePath $PythonExe -ArgumentList @(
-        "-m", "hl_observer", "ui",
-        "--host", "127.0.0.1",
-        "--port", "$Port"
-    ) -WorkingDirectory $Root -RedirectStandardOutput $uiStdoutLog -RedirectStandardError $uiStderrLog
+    try {
+        $uiProcess = Start-Process -NoNewWindow -PassThru -FilePath $PythonExe -ArgumentList @(
+            "-m", "hl_observer", "ui",
+            "--host", "127.0.0.1",
+            "--port", "$Port"
+        ) -WorkingDirectory $Root -RedirectStandardOutput $uiStdoutLog -RedirectStandardError $uiStderrLog -ErrorAction Stop
+    } catch {
+        Write-LauncherLog "UI startup failed before process creation: $($_.Exception.Message)"
+        Stop-HyperSmartRuntime -Reason "ui_start_failed"
+        exit 13
+    }
     if ($uiProcess -and $uiProcess.Id) {
         $uiProcessId = [int]$uiProcess.Id
         $startedProcesses.Add([int]$uiProcess.Id) | Out-Null
         Set-HyperSmartBelowNormal -ProcessId $uiProcessId
+        Write-LauncherEngineStatus "ui_starting" "Serveur UI lance; attente du endpoint de sante avant le poller."
+    } else {
+        Write-LauncherLog "UI startup failed: Start-Process did not return a PID."
+        Stop-HyperSmartRuntime -Reason "ui_start_no_pid"
+        exit 13
     }
 }
 
@@ -891,6 +1009,7 @@ try {
 
 if (-not $pollerAlreadyRunning) {
     Write-LauncherLine "Demarrage du poller simulation read-only. Rotation leaders en lots bornes."
+    Write-LauncherEngineStatus "poller_starting" "UI creee; poller read-only en demarrage ordonne."
     $pollScript = Join-Path $PSScriptRoot "hypersmart_simulation_poll_loop.ps1"
     $pollArguments = @(
         "-NoProfile",
@@ -911,11 +1030,21 @@ if (-not $pollerAlreadyRunning) {
         "-UserFillsMaxLiveAgeMs", "20000",
         "-MaxRuns", "5760"
     ) -join " "
-    $pollProcess = Start-Process -NoNewWindow -PassThru -FilePath "powershell" -ArgumentList $pollArguments -WorkingDirectory $Root -RedirectStandardOutput $pollerStdoutLog -RedirectStandardError $pollerStderrLog
+    try {
+        $pollProcess = Start-Process -NoNewWindow -PassThru -FilePath "powershell" -ArgumentList $pollArguments -WorkingDirectory $Root -RedirectStandardOutput $pollerStdoutLog -RedirectStandardError $pollerStderrLog -ErrorAction Stop
+    } catch {
+        Write-LauncherLog "poller startup failed before process creation: $($_.Exception.Message)"
+        Stop-HyperSmartRuntime -Reason "poller_start_failed"
+        exit 14
+    }
     if ($pollProcess -and $pollProcess.Id) {
         $pollProcessId = [int]$pollProcess.Id
         $startedProcesses.Add([int]$pollProcess.Id) | Out-Null
         Set-HyperSmartBelowNormal -ProcessId $pollProcessId
+    } else {
+        Write-LauncherLog "poller startup failed: Start-Process did not return a PID."
+        Stop-HyperSmartRuntime -Reason "poller_start_no_pid"
+        exit 14
     }
 } else {
     Write-LauncherLine "Un poller simulation tourne deja; pas de doublon."
@@ -975,8 +1104,14 @@ if ($env:HYPERSMART_ENABLE_AUX_STREAM -ne "0") {
     }
 }
 
+ $uiReady = $false
+ $healthReady = $false
+ $engineReady = $false
 for ($i = 0; $i -lt 120; $i++) {
-    if (Test-CommandCenter) {
+    $uiReady = Test-HyperSmartUiReady
+    $healthReady = Test-CommandCenter
+    $engineReady = Test-HyperSmartEngineReady
+    if ($uiReady -and $healthReady -and $engineReady) {
         break
     }
     if ($null -ne $uiProcessId -and -not (Test-ProcessAlive -ProcessId $uiProcessId)) {
@@ -985,19 +1120,44 @@ for ($i = 0; $i -lt 120; $i++) {
     Start-Sleep -Milliseconds 500
 }
 
-if (-not (Test-CommandCenter)) {
-    Write-LauncherLine "ALERTE: serveur UI local ne repond pas encore sur $HealthUrl. Regarde $uiStderrLog."
+if (-not $uiReady) {
+    Write-LauncherLine "ALERTE: page UI locale indisponible sur $Url. Regarde $uiStderrLog."
+    Write-LauncherLog "UI page readiness failed after bounded wait."
+    Stop-HyperSmartRuntime -Reason "ui_readiness_failed"
+    exit 15
+}
+
+if (-not $healthReady) {
+    Write-LauncherLine "ALERTE: endpoint de sante indisponible sur $HealthUrl. Regarde $uiStderrLog."
+    Write-LauncherLog "UI health readiness failed after bounded wait."
+    Stop-HyperSmartRuntime -Reason "ui_health_failed"
+    exit 18
+}
+
+if (-not $engineReady) {
+    Write-LauncherLine "ALERTE: moteur paper non conforme au contrat read-only. Regarde $uiStderrLog."
+    Write-LauncherLog "Engine safety readiness failed after bounded wait."
+    Stop-HyperSmartRuntime -Reason "engine_safety_failed"
+    exit 19
 }
 
 if ($null -ne $uiProcessId -and -not (Test-ProcessAlive -ProcessId $uiProcessId)) {
     Write-LauncherLine "ALERTE: le serveur UI s'est arrete juste apres le lancement. Regarde $uiStderrLog."
+    Write-LauncherLog "UI process died after startup."
+    Stop-HyperSmartRuntime -Reason "ui_process_died"
+    exit 16
 }
 
 if ($null -ne $pollProcessId -and -not (Test-ProcessAlive -ProcessId $pollProcessId)) {
     Write-LauncherLine "ALERTE: le poller simulation s'est arrete juste apres le lancement. Regarde $pollerStderrLog et $pollerStdoutLog."
+    Write-LauncherLog "Poller process died after startup."
+    Stop-HyperSmartRuntime -Reason "poller_process_died"
+    exit 17
 }
 
-if (Test-CommandCenter) {
+Write-LauncherEngineStatus "ready" "UI saine et poller read-only vivant; lanceur pret."
+
+if ($uiReady -and $healthReady -and $engineReady) {
     Write-LauncherLine "Ouverture du dashboard $Url"
     Start-Process $Url
 } else {
@@ -1008,9 +1168,27 @@ if (Test-CommandCenter) {
 # registre_pids scanne la table des process PAR SIGNATURE ; l'arret devient cible, zero orphelin.
 try {
     & $PythonExe -m hl_observer.ops.registre_pids enregistrer "$Root" 2>&1 | Out-Null
+    $registryExitCode = [int]$LASTEXITCODE
+    if ($registryExitCode -ne 0) {
+        Write-LauncherEngineStatus "orphan" "Registre PID incoherent; processus hors registre detecte."
+        Write-LauncherLog "PID registry audit returned ORPHAN exit_code=$registryExitCode."
+        Stop-HyperSmartRuntime -Reason "pid_registry_orphan"
+        exit 20
+    }
+    $registryPath = Join-Path $Root "runtime\data\lanceur_pids.json"
+    $registryPayload = Get-Content -LiteralPath $registryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($registryPayload.audit.verdict -eq "ORPHAN") {
+        Write-LauncherEngineStatus "orphan" "Registre PID incoherent; processus hors registre detecte."
+        Write-LauncherLog "PID registry audit verdict=ORPHAN; READY refused."
+        Stop-HyperSmartRuntime -Reason "pid_registry_orphan"
+        exit 20
+    }
     Write-LauncherLine "Registre PID reel ecrit (lanceur_pids.json)."
 } catch {
-    Write-LauncherLine "Registre PID: capture non effectuee."
+    Write-LauncherLog "PID registry capture/audit failed: $($_.Exception.Message)"
+    Write-LauncherEngineStatus "orphan" "Registre PID indisponible; READY refuse."
+    Stop-HyperSmartRuntime -Reason "pid_registry_failed"
+    exit 21
 }
 
 if ($Interactive) {
@@ -1022,8 +1200,42 @@ if ($Interactive) {
     Write-Host "- Evite de fermer par la croix si tu veux arreter les processus proprement."
     Write-Host ""
     try {
+        $interactiveStopRequested = $false
         while ($true) {
-            $choice = Read-Host "Commande [R=status, Q=stop]"
+            $failedChildren = @(Get-HyperSmartStartedProcessFailures)
+            if ($failedChildren.Count -gt 0) {
+                Write-LauncherLine "ALERTE: processus enfant termine pendant l'attente interactive: $($failedChildren -join ',')."
+                Write-LauncherLog "interactive child exit detected pids=$($failedChildren -join ','); requesting bounded stop/recovery."
+                Write-LauncherEngineStatus "child_exit" "Processus enfant termine; session arretee en fail-closed."
+                $interactiveStopRequested = $true
+                break
+            }
+            if ([Console]::IsInputRedirected) {
+                try {
+                    $choice = Read-Host "Commande [R=status, Q=stop]"
+                } catch {
+                    Write-LauncherLog "interactive stdin closed or unavailable: $($_.Exception.Message)"
+                    $choice = $null
+                }
+                if ($null -eq $choice) {
+                    Write-LauncherLog "interactive stdin EOF; exiting without prompt loop."
+                    break
+                }
+            } else {
+                while (-not [Console]::KeyAvailable) {
+                    $failedChildren = @(Get-HyperSmartStartedProcessFailures)
+                    if ($failedChildren.Count -gt 0) {
+                        Write-LauncherLine "ALERTE: processus enfant termine pendant l'attente interactive: $($failedChildren -join ',')."
+                        Write-LauncherLog "interactive child exit detected pids=$($failedChildren -join ','); requesting bounded stop/recovery."
+                        Write-LauncherEngineStatus "child_exit" "Processus enfant termine; session arretee en fail-closed."
+                        $interactiveStopRequested = $true
+                        break
+                    }
+                    Start-Sleep -Milliseconds 250
+                }
+                if ($interactiveStopRequested) { break }
+                $choice = [Console]::ReadLine()
+            }
             if ($choice -match "^[Qq]") {
                 break
             }
@@ -1042,6 +1254,9 @@ if ($Interactive) {
                     Write-Host "Status indisponible: $($_.Exception.Message)"
                 }
             }
+        }
+        if ($interactiveStopRequested) {
+            Stop-HyperSmartRuntime -Reason "interactive_child_exit"
         }
     } finally {
         Stop-HyperSmartRuntime -Reason "launcher_exit"

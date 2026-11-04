@@ -50,11 +50,15 @@ def test_safety_and_transition():
 def test_idempotent_unit_and_collision():
     campaign = manifest()
     unit_id = work_unit_id(campaign, {"x": 1})
-    assert complete_work_unit(campaign, unit_id, "a", {}) is True
-    assert complete_work_unit(campaign, unit_id, "a", {}) is False
+    result_sha = "a" * 64
+    assert complete_work_unit(campaign, unit_id, result_sha, {}) is True
+    assert complete_work_unit(campaign, unit_id, result_sha, {}) is False
 
     with pytest.raises(ValueError):
-        complete_work_unit(campaign, unit_id, "b", {})
+        complete_work_unit(campaign, unit_id, "b" * 64, {})
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        complete_work_unit(campaign, "unit-2", "short", {})
 
 
 def test_lease_is_hashed_and_stale_rejected():
@@ -180,7 +184,97 @@ def test_v2_foreign_code_or_dataset_repository_is_rejected():
     with pytest.raises(ValueError, match="canonical Alina repository"):
         validate_manifest(campaign)
 
+
+def test_empty_analysis_stage_is_treated_as_absent_at_selection_boundary():
+    now = datetime.now(timezone.utc)
+    campaign = CampaignManifest(
+        "replay-empty-stage",
+        "replay",
+        "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "a" * 40,
+        "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "g1",
+        "b" * 64,
+        "c" * 64,
+        (now + timedelta(days=1)).isoformat(),
+        schema_version=SCHEMA_VERSION_V2,
+        created_at=now.isoformat(),
+        creation_phase="ANALYZE",
+        phase_epoch=1,
+        source_collection_epoch=1,
+        collection_cutoff_at_utc=now.isoformat(),
+        dataset_selection_id="selection-1",
+        cursor={"strategy_family": "copy_vault"},
+    )
+
+    selected = select_due_campaigns(
+        [campaign],
+        current_phase="ANALYZE",
+        current_epoch=1,
+        current_analysis_stage="",
+        now=now.isoformat(),
+    )
+
+    assert selected == [campaign]
+
+
+def test_empty_analysis_stage_is_safe_for_collect_epoch_eight():
+    campaign = manifest()
+    campaign.phase_epoch = 8
+
+    selected = select_due_campaigns(
+        [campaign],
+        current_phase="COLLECT",
+        current_epoch=8,
+        current_analysis_stage="",
+        now=datetime.now(timezone.utc).isoformat(),
+    )
+
+    assert selected == [campaign]
+
+
+def test_invalid_nonempty_analysis_stage_still_fails_closed():
+    with pytest.raises(ValueError, match="invalid current analysis stage"):
+        select_due_campaigns(
+            [manifest()],
+            current_phase="COLLECT",
+            current_epoch=8,
+            current_analysis_stage="NOT_A_STAGE",
+        )
+
     campaign = manifest()
     campaign.code_repo = "someone/other"
     with pytest.raises(ValueError, match="canonical Alina repository"):
         validate_manifest(campaign)
+
+
+def test_due_selection_logs_reason_and_epochs_for_refused_campaigns(caplog):
+    now = datetime.now(timezone.utc)
+    stale = manifest()
+    stale.campaign_id = "stale-epoch"
+    stale.kind = "replay"
+    stale.creation_phase = "ANALYZE"
+    stale.phase_epoch = 2
+    stale.source_collection_epoch = 1
+    stale.collection_cutoff_at_utc = now.isoformat()
+    stale.dataset_selection_id = "selection-1"
+    stale.cursor = {"strategy_family": "copy_vault"}
+    wrong_phase = manifest()
+    wrong_phase.campaign_id = "wrong-phase"
+
+    with caplog.at_level("WARNING"):
+        selected = select_due_campaigns(
+            [stale, wrong_phase],
+            current_phase="ANALYZE",
+            current_epoch=1,
+            now=now.isoformat(),
+        )
+
+    assert selected == []
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "id=stale-epoch" in messages
+    assert "reason=PHASE_EPOCH_MISMATCH" in messages
+    assert "manifest_epoch=2" in messages
+    assert "current_epoch=1" in messages
+    assert "id=wrong-phase" in messages
+    assert "reason=PHASE_MISMATCH" in messages

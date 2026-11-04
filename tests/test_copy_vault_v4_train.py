@@ -137,6 +137,26 @@ def test_replay_train_refuse_des_bornes_absentes() -> None:
     assert audit["replay"]["INVALID_OR_MISSING_TRAIN_BOUNDS"] == 1
 
 
+def test_replay_train_refuse_parametres_ambigus() -> None:
+    entries = [
+        _live_fill("first", 1_000, action="OPEN"),
+        _live_fill("second", 2_000, action="ADD"),
+    ]
+    metaorders, _ = cluster_metaorders(entries)
+
+    trades, audit = replay_continuation_train(
+        metaorders,
+        {},
+        required_observed_fills=True,
+        horizon_ms=300_000,
+        train_start_ms=1_000,
+        train_end_ms=10_000,
+    )
+
+    assert trades == []
+    assert audit["selection"]["INVALID_REPLAY_PARAMETERS"] == 1
+
+
 def test_assessment_bloque_un_gain_concentre_sur_un_seul_vault() -> None:
     trades = [_economic_trade(index, 1.0) for index in range(8)]
     placebo = [_economic_trade(index, -0.5, vault="placebo") for index in range(8)]

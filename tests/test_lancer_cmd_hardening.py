@@ -23,7 +23,7 @@ def test_aucun_appel_python_nu():
 
 def test_portable_env_echec_est_non_nul():
     # item 10 : un echec de portable_env reste non nul jusqu'a la sortie.
-    i = CMD.index('call "%~dp0tools\\portable_env.cmd"')
+    i = CMD.index('call "%ALINA_PROJECT_ROOT%\\tools\\portable_env.cmd"')
     bloc = CMD[i:i + 400]
     assert 'set "RC=30"' in bloc and "if errorlevel 1" in bloc
 

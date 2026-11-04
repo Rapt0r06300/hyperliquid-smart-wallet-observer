@@ -19,7 +19,11 @@ from typing import Any
 
 from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
-from hl_observer.backtesting.copy_vault_protocol import canonical_copy_vault_coin
+from hl_observer.backtesting.copy_vault_protocol import (
+    PAPER_EQUITY_USD,
+    PAPER_TARGET_NET_USD_PER_DAY,
+    canonical_copy_vault_coin,
+)
 from hl_observer.backtesting.copy_vault_v21_frozen import (
     evaluate_frozen_v21,
     evaluate_frozen_v21_segment,
@@ -41,8 +45,8 @@ from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.copy_vault_continuity import load_release_history_audits
 
-OBJECTIVE_USD_PER_DAY = 5.0
-PAPER_CAPITAL_USD = 200.0
+OBJECTIVE_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
+PAPER_CAPITAL_USD = PAPER_EQUITY_USD
 _SAFE_AUDIT_CACHE_SCHEMA = "hypersmart.copy_vault_local_safe_hash_cache.v1"
 _SAFE_FAMILIES = {
     "copy_vault_fills", "copy_vault_l2", "copy_vault_snapshot",
@@ -147,6 +151,13 @@ def _number(value: object) -> float:
     if not math.isfinite(number):
         raise ValueError("non-finite number")
     return number
+
+
+def _positive_int_timestamp(value: object) -> int | None:
+    """Accept only an observed integer timestamp; never coerce ambiguous input."""
+    if type(value) is not int or value <= 0:
+        return None
+    return value
 
 
 def _copy_vault_catalog_audit(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
@@ -369,6 +380,7 @@ def _verified_assets(
     ).hexdigest()
     cache_path = root / "runtime" / "research_lab" / "copy_vault_safe_hash_cache.json"
     cached: dict[str, Any] = {}
+    cache_load_error: str | None = None
     try:
         if cache_path.is_symlink():
             raise OSError("SAFE hash cache is symlinked")
@@ -377,12 +389,13 @@ def _verified_assets(
             prior.get("schema") == _SAFE_AUDIT_CACHE_SCHEMA
             and isinstance(prior.get("verified"), dict)
         ):
-            # Reuse a previous hash only when the current catalog+manifest
-            # still name the same SHA and the local file identity is unchanged.
-            # New SAFE shards therefore do not force rehashing every old shard.
+            # Keep the previous rows for diagnostics only.  A filesystem
+            # identity (size/inode/timestamps) is not a cryptographic proof:
+            # an octet can change while those values are preserved.  SAFE
+            # admission therefore rehashes the content below on every audit.
             cached = prior["verified"]
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        pass
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        cache_load_error = type(exc).__name__
 
     selected: list[tuple[Path, dict[str, Any]]] = []
     missing: list[str] = []
@@ -504,16 +517,10 @@ def _verified_assets(
                 raise ValueError("LOCAL_SAFE_SHARD_PATH_ESCAPES_RECOVERY_ROOT")
             stat = io_path.stat()
             identity = [stat.st_size, stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns]
-            prior_row = cached.get(dataset_id)
-            reused = bool(
-                isinstance(prior_row, dict)
-                and prior_row.get("sha256") == sha
-                and prior_row.get("identity") == identity
-                and stat.st_size == size
-            )
-            if reused:
-                stat_reused += 1
-            elif stat.st_size != size or _sha256(
+            # Never use metadata-only cache reuse for SAFE admission.  The
+            # authoritative check is the complete content digest, so even a
+            # one-byte mutation that preserves size and timestamps is caught.
+            if stat.st_size != size or _sha256(
                 io_path,
                 progress=(
                     lambda done, total, item=dataset_id, current=row_number: progress(
@@ -574,6 +581,7 @@ def _verified_assets(
         "rejected_sample": rejected[:50],
         "cached_hashes_reused_after_stat_match": stat_reused,
         "hashes_recomputed": hashes_recomputed,
+        "hash_cache_load_error": cache_load_error,
         "catalog_validation_allowed_manifest_fallbacks": catalog_validation_permission_fallbacks,
         "heartbeat_evidence_missing_dataset_ids": sorted(heartbeat_evidence_missing),
         "no_downloads": True,
@@ -877,9 +885,24 @@ def _book_row(
             sum(price * size for price, size in bids),
             sum(price * size for price, size in asks),
         )
-        received = int(wrapper.get("received_ts_ms") or wrapper.get("recv_wall_ts_ms") or 0)
-        exchange = int(data.get("time") or wrapper.get("exchange_ts_ms") or 0)
-        if received < exchange or exchange <= 0 or received - exchange > 30_000:
+        received_raw = (
+            wrapper["received_ts_ms"]
+            if "received_ts_ms" in wrapper
+            else wrapper.get("recv_wall_ts_ms")
+        )
+        exchange_raw = (
+            data["time"]
+            if "time" in data
+            else wrapper.get("exchange_ts_ms")
+        )
+        received = _positive_int_timestamp(received_raw)
+        exchange = _positive_int_timestamp(exchange_raw)
+        if (
+            received is None
+            or exchange is None
+            or received < exchange
+            or received - exchange > 30_000
+        ):
             return None
         row = {
             "schema_version": "hypersmart.copy_vault_l2.v1",

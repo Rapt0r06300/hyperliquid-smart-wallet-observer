@@ -38,17 +38,42 @@ COPY_BOOK_REJECTION_REASONS = (
     "STALE_OR_MISSING_EXIT_BOOK",
     "NON_CAUSAL_FORWARD_BOOK",
 )
+COLLECTION_SURFACE_LOCAL_PAPER = "LOCAL_PAPER_READ_ONLY"
+COLLECTION_SURFACE_GITHUB_HOSTED_EPOCH = "GITHUB_HOSTED_EPOCH"
+COLLECTION_SURFACE_UNMEASURABLE = "UNMEASURABLE"
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _collection_surface(collector_state: Mapping[str, Any] | None) -> str:
+    """Classify the execution surface only from explicit, safe declarations.
+
+    Missing or contradictory fields must stay UNMEASURABLE; a local process is
+    never upgraded to hosted evidence by inference from a generic status field.
+    """
+    state = _mapping(collector_state)
+    surface = state.get("runner_surface")
+    paper_read_only = state.get("paper_read_only")
+    real_execution = state.get("real_execution")
+    if paper_read_only is not True or real_execution is not False:
+        return COLLECTION_SURFACE_UNMEASURABLE
+    if surface == "LOCAL":
+        return COLLECTION_SURFACE_LOCAL_PAPER
+    if surface == "GITHUB_HOSTED":
+        phase = state.get("phase")
+        epoch = state.get("phase_epoch")
+        if phase == "COLLECT" and type(epoch) is int and epoch >= 1:
+            return COLLECTION_SURFACE_GITHUB_HOSTED_EPOCH
+    return COLLECTION_SURFACE_UNMEASURABLE
+
+
 def _integer(value: object) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError, OverflowError):
+    """Read a non-negative JSON counter without coercion or truncation."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return 0
+    return value
 
 
 def _number(value: object) -> float | None:
@@ -674,11 +699,15 @@ def build_collection_plan(
     )
     goal_complete = all(row["objective_status"] == "ATTEINT" for row in families)
     unmet = [row for row in families if row["objective_status"] != "ATTEINT"]
+    collection_surface = _collection_surface(collector_state)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_ms": int(now_ms if now_ms is not None else time.time() * 1000),
         "paper_read_only": True,
         "real_execution": False,
+        "collection_surface": collection_surface,
+        "paper_observer_active": True,
+        "cloud_revenue_simulation": False,
         "starting_capital_usd_per_family": STARTING_CAPITAL_USD,
         "target_net_usd_per_family": TARGET_NET_USD_PER_DAY,
         "goal_complete": goal_complete,
@@ -711,6 +740,9 @@ def render_collection_plan(plan: Mapping[str, Any]) -> str:
         "- Seules des donnees futures manquent : "
         f"**{plan.get('safe_to_claim_future_data_required_only')}**",
         "- Mode : PAPER / READ-ONLY ; execution reelle : false",
+        f"- Surface de collecte : **{plan.get('collection_surface')}**",
+        f"- Observateur paper actif : **{plan.get('paper_observer_active')}**",
+        f"- Simulation de revenus cloud : **{plan.get('cloud_revenue_simulation')}**",
         "",
     ]
     for row in plan.get("families") or []:

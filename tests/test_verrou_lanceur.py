@@ -53,3 +53,13 @@ def test_le_cmd_pose_le_verrou_avant_les_collecteurs_et_le_libere():
     i_collecteurs = CMD.index("demarrer-tous harvest", i_verrou)
     assert i_verrou < i_collecteurs                      # verrou AVANT tout writer (couvre le warmup)
     assert "verrou_lanceur liberer" in CMD              # libere a l'arret
+
+
+def test_preflight_no_go_libere_le_verrou_sans_exit_anticipe():
+    debut = CMD.index('ops.preflight_lanceur')
+    fin = CMD.index('REM ARCHIVE REPLAY', debut)
+    bloc = CMD[debut:fin]
+    assert 'set "RC=2"' in bloc
+    assert 'call :liberer_verrou_lanceur' in bloc
+    assert 'goto :fin' in bloc
+    assert 'exit /b 2' not in bloc

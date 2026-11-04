@@ -666,3 +666,73 @@ def test_summarize_to_objective_replay_is_stable_and_keeps_exact_net_gate() -> N
     assert json.dumps(first, sort_keys=True, allow_nan=False) == json.dumps(
         second, sort_keys=True, allow_nan=False
     )
+
+
+def test_small_positive_net_is_separate_from_historical_target_gate() -> None:
+    def closed_trade(trade_id: str, net: str, exit_ts_ms: int) -> dict:
+        return {
+            "trade_id": trade_id,
+            "exit_ts_ms": exit_ts_ms,
+            "gross_pnl_usd": str(Decimal(net) + Decimal("0.4")),
+            "fees_usd": "0.1",
+            "spread_cost_usd": "0.1",
+            "slippage_cost_usd": "0.1",
+            "latency_cost_usd": "0.1",
+            "net_pnl_usd": net,
+            "liquidatable_net": True,
+            "financeable_under_paper_policy": True,
+        }
+
+    oos = summarize([closed_trade("oos-1", "0.6", 1), closed_trade("oos-2", "0.6", 2)])
+    forward = summarize([closed_trade("forward-1", "0.6", 3), closed_trade("forward-2", "0.6", 4)])
+    result = evaluate_objective(_proof(
+        gross_pnl_usd=4.0,
+        fees_usd=0.4,
+        spread_cost_usd=0.4,
+        slippage_cost_usd=0.4,
+        latency_cost_usd=0.4,
+        net_pnl_usd=2.4,
+        oos={**oos, "sample_count": 2, "trade_ids_count": 2, "no_lookahead": True},
+        forward={**forward, "sample_count": 2, "trade_ids_count": 2, "post_freeze": True},
+    ))
+
+    assert result["positive_net_proof"] is True
+    assert result["quality_gates_passed"] is True
+    assert result["historical_target_reached"] is False
+    assert result["objective_status"] == "NON_ATTEINT"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("sample_count", 1.5),
+    ("sample_count", "2"),
+    ("trade_ids_count", 1.5),
+    ("duplicate_trade_ids", True),
+])
+def test_segment_counts_reject_coercion_and_fractional_truncation(field: str, value: object) -> None:
+    segment = _segment(
+        gross=2.7,
+        net=2.3,
+        count=2,
+        trade_hash="d",
+        no_lookahead=True,
+    )
+    segment[field] = value
+
+    result = evaluate_objective(_proof(oos=segment))
+
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert any(reason.startswith("OOS_") for reason in result["objective_reasons"])
+
+
+def test_checkpoint_integrity_rejects_fractional_counts_without_truncation() -> None:
+    evidence = _proof()
+    evidence["copy_checkpoint_integrity"] = {
+        **evidence["copy_checkpoint_integrity"],
+        "proof_trade_count": 3.5,
+        "expected_proof_trade_count": 4,
+    }
+
+    result = evaluate_objective(evidence)
+
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert "COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN" in result["objective_reasons"]

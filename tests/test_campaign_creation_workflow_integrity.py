@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hl_observer.ops.runtime_contract import RESUMABLE_COLLECTION_CONTRACT
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "create-resumable-campaigns.yml"
 
@@ -100,3 +102,20 @@ def test_archive_backfill_is_not_starved_by_unbounded_live_market_backlog():
     assert '"archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"' in creator
     assert '"archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"' in creator
     assert "--preserve-running" in creator
+
+
+def test_hosted_collection_dispatch_binds_both_lanes_to_durable_worker() -> None:
+    controller = (ROOT / RESUMABLE_COLLECTION_CONTRACT["controller_workflow"]).read_text(encoding="utf-8")
+    worker = (ROOT / RESUMABLE_COLLECTION_CONTRACT["worker_workflow"]).read_text(encoding="utf-8")
+
+    for job in RESUMABLE_COLLECTION_CONTRACT["collection_jobs"]:
+        assert f"\n  {job}:" in controller
+        assert "uses: ./.github/workflows/resumable-campaign-worker.yml" in controller
+    for output in RESUMABLE_COLLECTION_CONTRACT["controller_outputs"]:
+        assert f"{output}: ${{{{ steps.due.outputs.{output} }}}}" in controller
+    for guard in RESUMABLE_COLLECTION_CONTRACT["worker_phase_guards"]:
+        assert guard in worker
+    for marker in RESUMABLE_COLLECTION_CONTRACT["durable_worker_markers"]:
+        assert marker in worker
+    assert "persist-credentials: false" in worker
+    assert "runs-on: ubuntu-latest" in worker

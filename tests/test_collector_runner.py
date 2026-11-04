@@ -84,4 +84,5 @@ def test_main_borne_execute_la_vraie_boucle_et_publie_son_succes(
             encoding="utf-8"
         )
     )
-    assert etat["state"] == "WAITING" and etat["exit_code"] == 0
+    assert etat["state"] == "COMPLETED" and etat["exit_code"] == 0
+    assert etat["completed_at"] >= etat["updated_at"] - 1

@@ -20,6 +20,7 @@ from hl_observer.ops.autonomous_research_guard import (
     _terminate_process_tree,
 )
 from hl_observer.ops.autonomous_research_status import status_path, write_status
+from hl_observer.ops.runtime_contract import build_safe_child_environment
 
 SCHEMA = "alina.autonomous_research_job.v1"
 CANONICAL_RELEASE_ID = 371149058
@@ -157,19 +158,7 @@ def _assert_execution_disabled() -> None:
 
 
 def _safe_environment() -> dict[str, str]:
-    env = dict(os.environ)
-    env.update(
-        {
-            "HL_ENABLE_MAINNET_EXECUTION": "0",
-            "HL_ENABLE_TESTNET_EXECUTION": "0",
-            "REAL_MAINNET_TRADING": "false",
-            "TESTNET_ONLY": "true",
-            "HYPERSMART_ANALYSIS_LOCAL_ONLY": "1",
-            "PYTHONUTF8": "1",
-            "PYTHONIOENCODING": "utf-8",
-        }
-    )
-    return env
+    return build_safe_child_environment(os.environ)
 
 
 def _run_logged(

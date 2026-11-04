@@ -521,6 +521,15 @@ def build() -> dict[str, Any]:
                     if unique_identity_current
                     else None
                 )
+                candidate_overlap = unique_patch.get("cross_shard_overlap_count")
+                global_values_consistent = (
+                    type(candidate_global_unique) is int
+                    and 0 <= candidate_global_unique <= totals["TOTAL_UNIQUE_TRADES_WITHIN_SHARDS"]
+                    and isinstance(candidate_global_unique_digest, str)
+                    and re.fullmatch(r"[0-9a-f]{64}", candidate_global_unique_digest) is not None
+                    and type(candidate_overlap) is int
+                    and candidate_overlap == totals["TOTAL_UNIQUE_TRADES_WITHIN_SHARDS"] - candidate_global_unique
+                )
                 explicit_scope = unique_patch.get("trade_shards_in_scope")
                 if explicit_scope is not None:
                     unique_scope_complete = (
@@ -542,14 +551,13 @@ def build() -> dict[str, Any]:
                     and unique_identity_current
                     and unique_scope_complete
                     and global_unique_asset_receipts_bound
+                    and global_values_consistent
                 )
                 totals["GLOBAL_UNIQUE_FAILURE_REASON_COUNT"] = len(unique_patch.get("failure_reasons") or {})
                 if global_unique_complete:
                     global_unique = candidate_global_unique
                     global_unique_digest = candidate_global_unique_digest
-                    totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = _int(
-                        unique_patch.get("cross_shard_overlap_count")
-                    )
+                    totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = candidate_overlap
                 else:
                     # Fail closed: a partial/global-scope-mismatched receipt may
                     # remain useful diagnostically, but it must not publish a

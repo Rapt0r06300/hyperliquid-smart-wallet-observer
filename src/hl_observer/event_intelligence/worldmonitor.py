@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
@@ -28,6 +29,74 @@ NEWS_DIGEST_PATH = "/api/news/v1/list-feed-digest"
 PREDICTION_PATH = "/api/prediction/v1/list-prediction-markets"
 _ALLOWED_PATHS = frozenset({CROSS_SOURCE_PATH, NEWS_DIGEST_PATH, PREDICTION_PATH})
 SCHEMA_VERSION = "alina.worldmonitor_event.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class WorldMonitorVariantContract:
+    """One locally auditable World Monitor variant, not an economic result."""
+
+    variant_id: str
+    surface: str
+    client_method: str
+    normalizer: str
+    read_only: bool = True
+
+
+WORLD_MONITOR_VARIANTS = (
+    WorldMonitorVariantContract(
+        "cross_source_signals",
+        CROSS_SOURCE_PATH,
+        "list_cross_source_signals",
+        "normalize_cross_source_signals",
+    ),
+    WorldMonitorVariantContract(
+        "news_digest",
+        NEWS_DIGEST_PATH,
+        "list_feed_digest",
+        "normalize_news_digest",
+    ),
+    WorldMonitorVariantContract(
+        "prediction_markets",
+        PREDICTION_PATH,
+        "list_prediction_markets",
+        "PredictionShiftTracker.observe",
+    ),
+    WorldMonitorVariantContract(
+        "news_flow_features",
+        "derived:news_digest",
+        "compute_news_flow_features",
+        "compute_news_flow_features",
+    ),
+    WorldMonitorVariantContract(
+        "news_velocity_zscore",
+        "derived:news_digest",
+        "compute_news_velocity_zscore",
+        "compute_news_velocity_zscore",
+    ),
+    WorldMonitorVariantContract(
+        "prediction_shift_features",
+        "derived:prediction_markets",
+        "PredictionShiftTracker.observe",
+        "PredictionShiftTracker.observe",
+    ),
+)
+
+
+def validate_worldmonitor_variant_contracts() -> tuple[WorldMonitorVariantContract, ...]:
+    """Return the six bounded variants or fail closed on catalog drift."""
+
+    variants = tuple(WORLD_MONITOR_VARIANTS)
+    ids = [variant.variant_id for variant in variants]
+    if len(variants) != 6 or len(set(ids)) != len(ids):
+        raise ValueError("World Monitor variant catalog must contain six unique variants")
+    if any(not variant.read_only for variant in variants):
+        raise ValueError("World Monitor variants must remain read-only")
+    if any(
+        variant.surface.startswith("/") and variant.surface not in _ALLOWED_PATHS
+        for variant in variants
+    ):
+        raise ValueError("World Monitor variant surface is outside the GET allowlist")
+    return variants
 
 
 class WorldMonitorError(RuntimeError):

@@ -18,7 +18,8 @@ Module PUR (aucun réseau, aucun état global).
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,6 +70,60 @@ def rejouer(
             break
         etat = avancer(etat.qty_devant, chg_carnet=chg, qty_trade=tr)
     return etat
+
+
+def rejouer_evenements_l2(
+    qty_devant_initial: float,
+    evenements: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Replay observed aggregate L2 queue events without inventing fills.
+
+    This evidence boundary requires a positive timestamp, a native event id,
+    and finite observed volumes.  Missing or out-of-order observations remain
+    ``UNMEASURABLE`` and never advance the queue.
+    """
+
+    normalized: list[tuple[float, float]] = []
+    cancellation_total = 0.0
+    previous_ts = 0
+    for index, row in enumerate(evenements or ()):
+        if not isinstance(row, Mapping):
+            return {"status": "UNMEASURABLE", "reason": "L2_ROW_NOT_MAPPING", "index": index}
+        try:
+            ts_ms = int(row.get("ts_ms"))
+        except (TypeError, ValueError, OverflowError):
+            ts_ms = 0
+        event_id = str(row.get("event_id") or row.get("native_event_id") or "").strip()
+        if ts_ms <= 0 or not event_id or (previous_ts and ts_ms < previous_ts):
+            return {
+                "status": "UNMEASURABLE",
+                "reason": "L2_TIMESTAMP_OR_ID_INVALID",
+                "index": index,
+            }
+        previous_ts = ts_ms
+        raw_change = row.get("chg_carnet", row.get("book_change_qty"))
+        raw_trade = row.get("qty_trade", row.get("trade_qty", row.get("executed_qty")))
+        try:
+            change = float(raw_change)
+            trade = float(raw_trade)
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "UNMEASURABLE", "reason": "L2_VOLUME_MISSING", "index": index}
+        if not math.isfinite(change) or not math.isfinite(trade) or trade < 0.0:
+            return {"status": "UNMEASURABLE", "reason": "L2_VOLUME_INVALID", "index": index}
+        normalized.append((change, trade))
+        cancellation_total += cancels_nets(change, trade)
+
+    if not normalized:
+        return {"status": "UNMEASURABLE", "reason": "L2_EVENTS_EMPTY"}
+    state = rejouer(qty_devant_initial, normalized)
+    return {
+        "status": "PROVEN",
+        "state": state.as_dict(),
+        "observed_event_count": len(normalized),
+        "cancellation_qty": round(cancellation_total, 12),
+        "paper_only": True,
+        "real_execution": False,
+    }
 
 
 def fill_borne_par_100(

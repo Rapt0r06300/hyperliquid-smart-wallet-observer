@@ -14,15 +14,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+import math
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.signals.fill_admission import (
+    FillAdmission,
     FillAdmissionConfig,
     admit_live_fill,
     fill_identity,
     KIND_ENTRY,
     KIND_EXIT,
+    KIND_SKIP,
 )
 from hl_observer.signals.entry_supply_diagnostics import CycleEvent, build_entry_supply_report, EntrySupplyReport
 
@@ -32,6 +36,28 @@ ENTRY_ACTIONS = {"OPEN_LONG", "OPEN_SHORT", "ADD", "INCREASE"}
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
+
+
+def _finite_float(value: object, *, minimum: float | None = None) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not parsed.is_finite():
+        return None
+    result = float(parsed)
+    if not math.isfinite(result) or (minimum is not None and result < minimum):
+        return None
+    return result
+
+
+def _exact_positive_int(value: object) -> int | None:
+    parsed = _finite_float(value)
+    if parsed is None or parsed <= 0 or not parsed.is_integer():
+        return None
+    return int(parsed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,10 +138,8 @@ def _exit_fraction(action: str, fill: dict, cfg: V9PipelineConfig) -> float:
         return 1.0
     for key in ("reduce_fraction", "close_fraction", "leader_reduce_fraction"):
         if fill.get(key) is not None:
-            try:
-                return _clamp(float(fill[key]), 0.0, 1.0)
-            except (TypeError, ValueError):
-                break
+            value = _finite_float(fill[key])
+            return _clamp(value, 0.0, 1.0) if value is not None else -1.0
     return _clamp(cfg.default_reduce_fraction, 0.0, 1.0)
 
 
@@ -170,14 +194,45 @@ def run_v9_paper_session(
         side = str(f.get("side") or "").upper()
         action = str(f.get("action_type") or "").upper()
         wallet = str(f.get("wallet") or "")
+        price = _finite_float(f.get("price"), minimum=0.0)
+        size = _finite_float(f.get("size"), minimum=0.0)
+        fill_ts_ms = _exact_positive_int(f.get("fill_ts_ms"))
+        leader_edge_bps = _finite_float(f.get("leader_edge_bps"))
+        liquidity_score = _finite_float(f.get("liquidity_score"), minimum=0.0)
+        consensus_wallets = _exact_positive_int(f.get("consensus_wallets"))
+        if (
+            price is None or price <= 0 or size is None or size <= 0 or fill_ts_ms is None
+            or leader_edge_bps is None or liquidity_score is None or consensus_wallets is None
+        ):
+            invalid_admission = FillAdmission(
+                admit=False,
+                kind=KIND_SKIP,
+                reason="INVALID_FILL_MEASUREMENT",
+                age_ms=0,
+                log_decision=True,
+                is_fresh=False,
+            )
+            events.append(CycleEvent(admission=invalid_admission))
+            decisions.append(_decision(
+                coin=coin,
+                side=side,
+                action_type=action,
+                wallet=wallet,
+                status="REFUSED",
+                reason="INVALID_FILL_MEASUREMENT",
+                raw_event_hash=_paper_ref(
+                    "invalid_fill",
+                    json.dumps(f, sort_keys=True, default=str),
+                ),
+            ))
+            continue
         fid = fill_identity(
             wallet_address=wallet, coin=coin, side=side, action_type=action,
-            price=float(f.get("price") or 0.0), size=float(f.get("size") or 0.0),
-            ts_ms=int(f.get("fill_ts_ms") or 0),
+            price=price, size=size, ts_ms=fill_ts_ms,
         )
         key = _position_key(wallet, coin, side)
         adm = admit_live_fill(
-            action_type=action, coin=coin, fill_ts_ms=int(f.get("fill_ts_ms") or 0), now_ms=now_ms,
+            action_type=action, coin=coin, fill_ts_ms=fill_ts_ms, now_ms=now_ms,
             already_seen=fid in seen, has_matching_paper_position=key in book,
             leader_price=f.get("price"), config=adm_cfg,
         )
@@ -199,6 +254,7 @@ def run_v9_paper_session(
 
         if adm.kind == KIND_ENTRY:
             mark = f.get("mark_price") if f.get("mark_price") is not None else marks.get(coin)
+            mark = _finite_float(mark, minimum=0.0)
             if mark is None or mark <= 0:
                 events.append(CycleEvent(admission=adm, accepted=False, refusal_reason="PRICE_MISSING"))
                 decisions.append(_decision(
@@ -212,11 +268,11 @@ def run_v9_paper_session(
                 ))
                 continue
             edge = _net_edge_bps(
-                leader_edge_bps=float(f.get("leader_edge_bps") or 0.0),
-                age_ms=adm.age_ms, consensus_wallets=int(f.get("consensus_wallets") or 1), cfg=cfg,
+                leader_edge_bps=leader_edge_bps,
+                age_ms=adm.age_ms, consensus_wallets=consensus_wallets, cfg=cfg,
             )
-            liquidity = float(f.get("liquidity_score") or 0.0)
-            consensus = int(f.get("consensus_wallets") or 1)
+            liquidity = liquidity_score
+            consensus = consensus_wallets
             min_edge = cfg.single_wallet_min_edge_bps if consensus < 2 else cfg.min_edge_bps
             reason = None
             if liquidity < cfg.min_liquidity_score:
@@ -264,8 +320,8 @@ def run_v9_paper_session(
                 status = "PAPER_INCREASE"
             else:
                 book[key] = PaperPosition(
-                    coin=coin, side=side, notional_usdt=notional, entry_price=float(mark),
-                    wallet=wallet, opened_ts_ms=int(f.get("fill_ts_ms") or now_ms),
+                    coin=coin, side=side, notional_usdt=notional, entry_price=mark,
+                    wallet=wallet, opened_ts_ms=fill_ts_ms,
                 )
                 status = "PAPER_ENTRY"
             realized -= notional * (cfg.fee_bps / 10_000.0)  # frais d'entrée
@@ -289,7 +345,8 @@ def run_v9_paper_session(
         elif adm.kind == KIND_EXIT:
             pos = book.get(key)
             mark = f.get("mark_price") if f.get("mark_price") is not None else marks.get(coin)
-            if not mark or mark <= 0:
+            mark = _finite_float(mark, minimum=0.0)
+            if mark is None or mark <= 0:
                 events.append(CycleEvent(admission=adm, accepted=False, refusal_reason="PRICE_MISSING_EXIT"))
                 decisions.append(_decision(
                     coin=coin,
@@ -357,9 +414,9 @@ def run_v9_paper_session(
     # latent (mark-to-market sur prix réels)
     unrealized = 0.0
     for p in book.values():
-        mark = marks.get(p.coin)
-        if mark and mark > 0:
-            unrealized += _signed_pnl_usdt(p.side, p.notional_usdt, p.entry_price, float(mark))
+        mark = _finite_float(marks.get(p.coin), minimum=0.0)
+        if mark is not None and mark > 0:
+            unrealized += _signed_pnl_usdt(p.side, p.notional_usdt, p.entry_price, mark)
 
     equity = cfg.starting_equity_usdt + realized + unrealized
     return V9SessionResult(

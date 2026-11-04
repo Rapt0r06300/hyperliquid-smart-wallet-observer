@@ -23,6 +23,10 @@ def _official_content(extra: str = "") -> str:
             'call "%~dp0tools\\portable_env.cmd"',
             'set "HL_ENABLE_MAINNET_EXECUTION=0"',
             'set "HL_ENABLE_TESTNET_EXECUTION=0"',
+            'set "HYPERSMART_ACTIVE_STRATEGY_SCOPE=copy_vault"',
+            'set "HYPERSMART_SCOPE_VERSION=COPY_VAULT_PAPER_V2"',
+            'tools\\start_hypersmart_simulation.ps1',
+            'superviseur_collecteurs demarrer-tous harvest',
             '"%HYPERSMART_PYTHON%" -V',
             extra,
         ]
@@ -38,6 +42,9 @@ def _seed_registered_launchers(root: Path) -> None:
         root / OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_RESEARCH],
         _official_content("tools\\recherche_continue.py"),
     )
+    _write(root / "tools" / "start_hypersmart_simulation.ps1", "-m hl_observer ui persistent_poll_runner")
+    _write(root / "src" / "hl_observer" / "strategies" / "active_scope.py", "copy_vault")
+    _write(root / ".github" / "workflows" / "resumable-campaign-controller.yml", "hosted")
     _write(root / "tools" / "launchers" / "CREER_ARCHIVE_PORTABLE.cmd", _official_content("portable archive"))
 
 

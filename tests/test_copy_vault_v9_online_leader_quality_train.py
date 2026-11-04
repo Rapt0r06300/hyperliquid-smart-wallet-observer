@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from unittest.mock import patch
 
 from hl_observer.backtesting.copy_vault_v9_online_leader_quality_train import (
     apply_causal_online_leader_quality,
@@ -242,3 +243,15 @@ def test_v9_empty_input_remains_train_only_and_counts_eight_trials() -> None:
     assert all(row["candidate_decision_count"] == 0 for row in trace["traces"])
     assert result["paper_read_only"] is True
     assert result["real_execution"] is False
+
+
+def test_v9_rejects_non_integer_train_bounds_without_truncation() -> None:
+    with patch(
+        "hl_observer.backtesting.copy_vault_v9_online_leader_quality_train.temporal_bounds",
+        return_value={"train_start_ms": 1_000.5, "train_end_ms": 2_000},
+    ):
+        result = explore_copy_vault_v9_online_leader_quality_train([], {}, [])
+
+    assert result["status"] == "NO_ROBUST_TRAIN_CANDIDATE"
+    assert result["selection_eligible"] is False
+    assert result["physical_freeze_allowed"] is False

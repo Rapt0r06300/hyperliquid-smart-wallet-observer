@@ -6,8 +6,11 @@ preuves de latence et de replay causal.
 """
 from __future__ import annotations
 
+import asyncio
 import pytest
 
+import hl_observer.wallets.user_fills_live as live
+from hl_observer.config.loader import load_settings
 from hl_observer.collection import userfills_live as UL
 
 
@@ -317,3 +320,91 @@ def test_fill_websocket_invalide_ne_mutate_pas_une_position_existante():
     assert fills == []
     assert audit["rejected_by_reason"] == {"FILL_EXECUTION_VALUE_INVALID": 1}
     assert positions == before
+
+
+def test_store_failure_retries_same_batch_before_abandoning():
+    calls = []
+    sleeps = []
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return None
+
+        def commit(self):
+            return None
+
+    def session_factory():
+        return Session()
+
+    original = live.store_user_fills_live_result
+
+    def flaky_store(_session, result, **_kwargs):
+        calls.append(result)
+        if len(calls) == 1:
+            raise OSError("temporary database failure")
+        result.fills_stored = 1
+        result.deltas_stored = 1
+        return result
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    live.store_user_fills_live_result = flaky_store
+    try:
+        stats = live.StreamStats()
+        ok = asyncio.run(live._store_fresh_fills(
+            session_factory, "0x" + "a" * 40, [{"tid": 1}],
+            max_live_fill_age_ms=20_000, stats=stats, sleep=fake_sleep,
+        ))
+    finally:
+        live.store_user_fills_live_result = original
+
+    assert ok is True
+    assert len(calls) == 2
+    assert sleeps == [pytest.approx(0.25)]
+    assert stats.storage_failures == 0
+    assert stats.fresh_fills_stored == 1
+
+
+def test_brief_connections_keep_increasing_jittered_backoff():
+    class BriefWs:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return None
+
+        async def send(self, _payload):
+            return None
+
+        async def recv(self):
+            raise ConnectionError("closed immediately")
+
+    sleeps = []
+
+    def websocket_connect(_url):
+        return BriefWs()
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    stats = asyncio.run(live.stream_user_fills_ws(
+        load_settings(),
+        wallets=["0x" + "a" * 40],
+        session_factory=lambda: None,
+        network_read=True,
+        websocket_connect=websocket_connect,
+        max_reconnects=2,
+        backoff_schedule_s=(1, 2, 4),
+        sleep=fake_sleep,
+    ))
+
+    assert stats.stopped_reason == "max_reconnects"
+    assert stats.reconnects == 3
+    assert len(sleeps) == 2
+    assert 0.8 <= sleeps[0] <= 1.2
+    assert 1.6 <= sleeps[1] <= 2.4
+    assert sleeps[1] > sleeps[0]

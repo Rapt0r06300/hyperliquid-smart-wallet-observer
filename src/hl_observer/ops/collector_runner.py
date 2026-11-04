@@ -200,6 +200,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         passes_session += 1
         if max_passes and passes_session >= max_passes:
+            # Publier l'état terminal avant de quitter : un collecteur borné
+            # n'est pas « WAITING » (qui signifie qu'une nouvelle passe est
+            # prévue), mais COMPLETED/ERROR. Cela évite de ressusciter un
+            # one-shot terminé à partir de son ancien heartbeat.
+            etat_final = {
+                **etat,
+                "state": "COMPLETED" if code == 0 else "ERROR",
+                "completed_at": time.time(),
+                "updated_at": time.time(),
+            }
+            _ecrire_json_atomique(status_path, etat_final)
             return code
         delai = delai_apres_passe(
             intervalle_s=intervalle,

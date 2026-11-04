@@ -22,3 +22,9 @@ def test_sous_plafond():
 
 def test_equity_invalide():
     assert exposition_admissible({"vA": 1000.0}, equity=0.0)["refuse"] is True
+
+
+def test_exposition_inconnue_et_equity_non_finie_sont_refusees():
+    assert exposition_admissible({"vA": "unknown"}, equity=10_000.0)["refuse"] is True
+    assert exposition_admissible({"vA": 1.0}, equity=float("nan"))["refuse"] is True
+    assert exposition_admissible({"vA": 1.0}, equity=10_000.0, part_max=float("inf"))["refuse"] is True

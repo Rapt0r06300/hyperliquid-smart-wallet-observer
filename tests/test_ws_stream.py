@@ -18,6 +18,16 @@ def _msg(is_snapshot, fills):
     return json.dumps({"channel": "userFills", "data": {"user": W, "isSnapshot": is_snapshot, "fills": fills}})
 
 
+def _ack():
+    return json.dumps({
+        "channel": "subscriptionResponse",
+        "data": {
+            "method": "subscribe",
+            "subscription": {"type": "userFills", "user": W},
+        },
+    })
+
+
 class _FakeWS:
     def __init__(self, messages):
         self._msgs = list(messages)
@@ -44,7 +54,7 @@ def test_snapshot_ignored_and_reconnect_bounded(monkeypatch):
     monkeypatch.setattr(ufl, "_store_fresh_fills", lambda *a, **k: calls.append(("store", a, k)))
     # every connection yields one SNAPSHOT message (must be ignored), then closes -> reconnect
     def fake_connect(url):
-        return _FakeWS([_msg(True, [{"coin": "ETH", "time": 1, "px": "1"}])])
+        return _FakeWS([_ack(), _msg(True, [{"coin": "ETH", "time": 1, "px": "1"}])])
     res = asyncio.run(stream_user_fills_ws(
         Settings(), wallets=[W], session_factory=lambda: None, network_read=True,
         websocket_connect=fake_connect, max_reconnects=2, sleep=lambda s: asyncio.sleep(0),
@@ -108,14 +118,15 @@ def test_idle_recv_timeout_keeps_socket_alive_py310(monkeypatch):
 
 def test_fresh_fill_is_stored(monkeypatch):
     stored = []
-    def fake_store(session_factory, wallet, fills, *, max_live_fill_age_ms, stats):
+    def fake_store(session_factory, wallet, fills, *, max_live_fill_age_ms, stats, **_kwargs):
         stored.append((wallet, [f.get("coin") for f in fills])); stats.fresh_fills_stored += len(fills)
     monkeypatch.setattr(ufl, "_store_fresh_fills", fake_store)
     def fake_connect(url):
-        return _FakeWS([_msg(False, [{"coin": "BTC", "time": 123, "px": "60000"}])])
+        return _FakeWS([_ack(), _msg(False, [{"coin": "BTC", "time": 123, "px": "60000"}])])
     res = asyncio.run(stream_user_fills_ws(
         Settings(), wallets=[W], session_factory=lambda: None, network_read=True,
         websocket_connect=fake_connect, max_reconnects=0, sleep=lambda s: asyncio.sleep(0),
     ))
     assert stored and stored[0][0] == W and "BTC" in stored[0][1]
     assert res.fresh_fills_stored >= 1
+    assert res.subscription_acks_seen == 1

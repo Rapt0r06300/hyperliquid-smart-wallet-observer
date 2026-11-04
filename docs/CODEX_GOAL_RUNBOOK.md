@@ -21,6 +21,7 @@ Pas de scan de l'historique Git complet, pas de scan des 775 optimisations scell
 - Préférer les sorties machine compactes ; ne charger les détails que sur anomalie ciblée.
 - Toute boucle qui peut continuer sans nouvelle décision s'exécute localement jusqu'à un checkpoint scientifique matériel.
 - Si la seule variable manquante est le temps ou de nouvelles données, arrêter les tours modèle et laisser les collecteurs locaux travailler.
+- Le contrat quotidien machine reste explicite : `codex_quant_batch.py` doit atteindre au moins `0.99` de couverture de validation sur **2 jours UTC complets** avant toute conclusion de stabilité ; ce seuil de santé opérationnelle ne remplace jamais les gates économiques ni la preuve exact-SHA.
 
 ## 2. Mission et preuve machine
 
@@ -28,7 +29,7 @@ Famille économique active unique : `copy_vault`. Les anciens résultats
 Lead-Lag/Cross-Venue restent consultables pour provenance, mais ne reçoivent
 aucun budget de recherche, replay économique, sélection ou promotion.
 
-**Nouvel objectif sans seuil de profit fixe :** rechercher et conserver chaque amélioration NETTE de Copy-Vault, même faible. Geler tout résultat favorable avec sa provenance, ses fenêtres, sa seed, son code SHA, sa configuration et ses coûts. Séparer `FREEZE_EXPLORATORY` (amélioration mesurée mais non certifiée) et `CHAMPION_VERIFIED` (preuve OOS/forward post-freeze indépendante et toutes les gates applicables passées). Après chaque gel, continuer Discovery. Les contrôles du HEAD réel — dont la causalité, les coûts, les périodes UTC complètes, la couverture, le forward post-freeze et les refus fail-closed — restent stricts; ne jamais transformer la cible historique +5 USD en condition terminale.
+**Nouvel objectif sans seuil de profit fixe :** rechercher et conserver chaque amélioration NETTE de Copy-Vault, même faible. La cible historique de recherche reste `+5.00 USD net/jour`, mais elle ne constitue ni une gate terminale ni une preuve en soi. Geler tout résultat favorable avec sa provenance, ses fenêtres, sa seed, son code SHA, sa configuration et ses coûts. Séparer `FREEZE_EXPLORATORY` (amélioration mesurée mais non certifiée) et `CHAMPION_VERIFIED` (preuve OOS/forward post-freeze indépendante et toutes les gates applicables passées). Après chaque gel, continuer Discovery. Les contrôles du HEAD réel — dont la causalité, les coûts, les périodes UTC complètes, la couverture, le forward post-freeze et les refus fail-closed — restent stricts; ne jamais transformer la cible historique +5 USD en condition terminale.
 
 ## 3. Mémoire V3.2
 

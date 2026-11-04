@@ -161,3 +161,13 @@ def test_local_l2_cancels_only_obsolete_same_ref_runs():
     txt = _texte("local-l2-certification-tests.yml")
     assert "group: local-l2-certification-tests-${{ github.ref }}" in txt
     assert "cancel-in-progress: true" in txt
+
+
+def test_global_unique_backfill_persists_and_restores_its_durable_checkpoint():
+    txt = _texte("backfill-global-unique-trade-counts.yml")
+    assert "actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684" in txt
+    assert "actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684" in txt
+    assert "path: runtime/reports/global-unique-trades" in txt
+    assert "key: global-unique-trades-v4-${{ github.run_id }}" in txt
+    assert "restore-keys:" in txt
+    assert "global-unique-trades-v4-" in txt

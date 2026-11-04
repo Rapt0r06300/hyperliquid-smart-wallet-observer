@@ -81,6 +81,9 @@ Au gel de certification du 12/08/2026, sous un ancien périmètre multi-familles
 Ces verdicts ne décrivent pas l'état économique actuel. L'objectif économique actif est **l'amélioration continue de Copy-Vault, sans seuil quotidien fixe**. Chaque gain NET mesuré est gelé comme expérience reproductible; seuls les champions validés par OOS et forward post-freeze disjoints, coûts complets, causalité et gates de risque sont promouvables. La recherche reprend après chaque gel.
 Un résultat exploratoire, TRAIN, synthétique ou simplement observé n'est pas
 une preuve de PnL ; le statut actuel doit venir du dernier rapport valide.
+La cible historique de référence était **+5 USD net/jour** sur 200 USD paper après
+corrections techniques et preuves OOS/forward ; elle est inactive et ne constitue
+ni une gate actuelle ni une condition de clôture.
 
 Un verdict économique `KILL`, `MORE_DATA` ou négatif n'empêche pas le logiciel d'être techniquement parfait : au contraire, refuser honnêtement une stratégie non prouvée fait partie de la qualité attendue.
 

@@ -28,6 +28,14 @@ def _read_json(path: Path) -> Any:
         raise ValueError(f"cannot read JSON {path}: {exc}") from exc
 
 
+def _exact_positive_int(value: Any, *, label: str) -> int:
+    """Accept only a JSON integer; never truncate or coerce a contract value."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{label} must be a positive JSON integer")
+    return value
+
+
 def _criteria(value: Any) -> list[ClosureCriterion]:
     if not isinstance(value, list):
         raise ValueError("criteria JSON must be a list")
@@ -48,7 +56,9 @@ def _criteria(value: Any) -> list[ClosureCriterion]:
                 required_claims=claims,
                 require_hosted=row.get("require_hosted") is True,
                 require_full_dataset=row.get("require_full_dataset") is True,
-                min_distinct_runs=int(row.get("min_distinct_runs", 1)),
+                min_distinct_runs=_exact_positive_int(
+                    row.get("min_distinct_runs", 1), label="min_distinct_runs"
+                ),
                 unavailable_is_unmeasurable=(
                     row.get("unavailable_is_unmeasurable") is True
                 ),

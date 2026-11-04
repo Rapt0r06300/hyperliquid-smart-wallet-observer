@@ -5,7 +5,6 @@ All adapters are read-only. No order endpoint or real-execution path exists here
 
 from .archive import ArchiveAppendResult, EventArchiveCorruptError, EventIntelligenceArchive
 from .candidates import EventLeadLagCandidate, EventLeadLagConfig, evaluate_event_lead_lag_candidate
-from .idea_coverage import IDEA_COVERAGE, IdeaCoverage, coverage_summary
 from .direct_sources import (
     DIRECT_SOURCES,
     DirectSourceError,
@@ -20,6 +19,7 @@ from .direct_sources import (
     normalize_usgs,
 )
 from .economic_pipeline import build_economic_research_evidence
+from .event_price_discovery import EventMarketReaction, measure_event_price_discovery
 from .external_event import (
     ExternalEvent,
     ExternalEventDecision,
@@ -43,23 +43,22 @@ from .health import (
     evaluate_direct_source_health,
     evaluate_worldmonitor_health,
 )
+from .idea_coverage import IDEA_COVERAGE, IdeaCoverage, coverage_summary
 from .macro import MacroEventClock, MacroWindow, ScheduledMacroEvent
 from .market_context import AuxMarketMetrics, EventMarketContextDelta, compare_event_market_context
 from .market_features import EventMarketFeatureDelta, MarketStateObservation, measure_event_market_features
 from .module_bridges import (
     CopyVaultLeaderEventStats,
     CrossVenueEventContext,
-    LeadLagEventContext,
     LeaderAction,
+    LeadLagEventContext,
     build_cross_venue_event_context,
     build_lead_lag_event_context,
     measure_copy_vault_event_reactions,
 )
 from .outcomes import EventCandidateMarkout, evaluate_candidate_markout
-from .event_price_discovery import EventMarketReaction, measure_event_price_discovery
 from .protocol import EventResearchFreeze, assert_forward_after_freeze, freeze_event_research
 from .provenance import EventCluster, ProvenanceScore, cluster_external_events, score_provenance
-from .runtime_pipeline import build_market_response_evidence, build_research_protocol_evidence, build_runtime_evidence
 from .regimes import (
     AssetRelevance,
     EventRegime,
@@ -67,6 +66,11 @@ from .regimes import (
     SurpriseContext,
     classify_event_regime,
     map_event_to_assets,
+)
+from .runtime_pipeline import (
+    build_market_response_evidence,
+    build_research_protocol_evidence,
+    build_runtime_evidence,
 )
 from .scoreboard import (
     EventScoreboardBundle,
@@ -89,6 +93,13 @@ from .source_catalog import (
     build_source_catalog,
     source_pair_role,
 )
+from .stock_data import (
+    PROVEN,
+    UNMEASURABLE,
+    StockDataStudyReport,
+    StockPointInTimeObservation,
+    study_stock_data,
+)
 from .validation import (
     ChronologicalSplit,
     EventStudyObservation,
@@ -97,8 +108,8 @@ from .validation import (
     bootstrap_mean_ci,
     chronological_split,
     compare_source_latency,
-    independent_event_count,
     incremental_effect,
+    independent_event_count,
     market_session_utc,
     permute_event_labels,
     placebo_timestamps,
@@ -165,6 +176,7 @@ __all__ = [
     "PropagationPattern",
     "PropagationStage",
     "ProvenanceScore",
+    "PROVEN",
     "ScheduledMacroEvent",
     "ScoredEventOutcome",
     "SourceCatalogSnapshot",
@@ -172,7 +184,10 @@ __all__ = [
     "SourceLatencyComparison",
     "SourceTier",
     "StageObservation",
+    "StockDataStudyReport",
+    "StockPointInTimeObservation",
     "SurpriseContext",
+    "UNMEASURABLE",
     "WorldMonitorAuthRequired",
     "WorldMonitorEvent",
     "WorldMonitorHTTPError",
@@ -227,6 +242,7 @@ __all__ = [
     "score_provenance",
     "select_no_event_controls",
     "source_pair_role",
+    "study_stock_data",
     "stratify",
     "stratify_numeric",
     "summarize_patterns",

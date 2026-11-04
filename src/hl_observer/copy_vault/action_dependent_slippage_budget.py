@@ -4,30 +4,53 @@
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 _AUGMENTE = ("OPEN", "ADD")
 _REDUIT = ("REDUCE", "CLOSE")
 
 
-def budget_slippage_bps(action: Any, *, budget_open_bps: float = 8.0, budget_close_bps: float = 25.0) -> Any:
+def _budget_bps(value: Any) -> float | None:
+    """Return a finite non-negative budget, never a coercion of bad input."""
+
+    if isinstance(value, bool):
+        return None
+    try:
+        budget = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(budget) or budget < 0.0:
+        return None
+    return budget
+
+
+def budget_slippage_bps(
+    action: Any, *, budget_open_bps: float = 8.0, budget_close_bps: float = 25.0
+) -> float | None:
     """Budget de slippage selon l'action : strict pour OPEN/ADD, plus large pour CLOSE/REDUCE. Action inconnue →
     budget le plus strict (prudence)."""
     a = str(action).upper()
     if a in _REDUIT:
-        return float(budget_close_bps)
-    if a in _AUGMENTE:
-        return float(budget_open_bps)
-    return float(budget_open_bps)                        # inconnu = strict
+        return _budget_bps(budget_close_bps)
+    return _budget_bps(budget_open_bps)  # OPEN/ADD/inconnu = strict
 
 
 def acceptable(slippage_bps: Any, action: Any, *, budget_open_bps: float = 8.0,
                budget_close_bps: float = 25.0) -> dict[str, Any]:
     """Le slippage observé tient-il dans le budget de l'action ? Slippage inconnu → refus."""
-    if not isinstance(slippage_bps, (int, float)):
+    if isinstance(slippage_bps, bool):
+        return {"acceptable": False, "raison": "SLIPPAGE_INCONNU"}
+    try:
+        observed = float(slippage_bps)
+    except (TypeError, ValueError, OverflowError):
+        return {"acceptable": False, "raison": "SLIPPAGE_INCONNU"}
+    if not math.isfinite(observed) or observed < 0.0:
         return {"acceptable": False, "raison": "SLIPPAGE_INCONNU"}
     b = budget_slippage_bps(action, budget_open_bps=budget_open_bps, budget_close_bps=budget_close_bps)
-    ok = float(slippage_bps) <= b
+    if b is None:
+        return {"acceptable": False, "raison": "BUDGET_INVALIDE"}
+    ok = observed <= b
     return {"acceptable": bool(ok), "budget_bps": b, "raison": ("OK" if ok else "SLIPPAGE_HORS_BUDGET")}
 
 

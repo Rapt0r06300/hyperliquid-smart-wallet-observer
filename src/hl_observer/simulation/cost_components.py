@@ -25,6 +25,7 @@ from typing import Any, Sequence
 from hl_observer.simulation.scoreboard_metrics import costs_bps as _sommer_couts
 
 SCHEMA_VERSION = "hypersmart.cost_components.v1"
+DEFAULT_MAX_OBSERVATION_AGE_MS = 90_000
 _BPS = 10_000.0
 
 
@@ -121,8 +122,17 @@ def decompose_execution(
     avg_fill_price: float | None,
     mid_at_fill: float | None = None,
     fee_bps: float | None = None,
+    observation_age_ms: float | None = None,
+    max_observation_age_ms: float = DEFAULT_MAX_OBSERVATION_AGE_MS,
 ) -> CostComponents:
     """Décompose un franchissement en 4 composantes bps. Chaque entrée absente ⇒ composante UNMEASURABLE."""
+    try:
+        age = None if observation_age_ms is None else float(observation_age_ms)
+        max_age = float(max_observation_age_ms)
+    except (TypeError, ValueError, OverflowError):
+        age, max_age = math.nan, math.nan
+    if age is not None and (not math.isfinite(age) or age < 0.0 or not math.isfinite(max_age) or max_age < 0.0 or age > max_age):
+        return _finalise(None, None, None, None)
     spread = spread_bps(mid_decision, best_touch, side) if (mid_decision is not None and best_touch is not None) else None
     slip = (slippage_bps(best_touch, avg_fill_price, side, mid=mid_decision)
             if (best_touch is not None and avg_fill_price is not None) else None)
@@ -183,7 +193,7 @@ def depuis_carnet_causal(
 
 
 __all__ = [
-    "SCHEMA_VERSION", "CostComponents",
+    "SCHEMA_VERSION", "DEFAULT_MAX_OBSERVATION_AGE_MS", "CostComponents",
     "spread_bps", "slippage_bps", "latency_bps",
     "decompose_execution", "depuis_carnet_causal",
 ]

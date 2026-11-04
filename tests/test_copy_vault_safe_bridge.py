@@ -287,6 +287,25 @@ def test_bridge_preserves_available_shallow_l2_depth(tmp_path: Path) -> None:
     assert len(book["bids5"]) == len(book["asks5"]) == 4
 
 
+def test_book_loader_rejects_boolean_checkpoint_counters(tmp_path: Path) -> None:
+    _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
+    report = build_safe_copy_workspace(tmp_path)
+    workspace = Path(report["workspace"])
+    state_path = workspace / "runtime/data/copy_vault_checkpoint_tail_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"counters": {"input_rotations": True}}),
+        encoding="utf-8",
+    )
+
+    from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
+
+    _, audit = load_observed_books(workspace, coins={"BTC"})
+
+    assert audit["clean_epoch_receipt"]["collector_gap_count"] == 1
+    assert audit["clean_epoch_receipt"]["receipt_valid"] is False
+
+
 def test_bridge_rejects_stale_safe_registry(tmp_path: Path) -> None:
     recovery = _corpus(tmp_path, [_envelope("copy_vault_fills"), _envelope("copy_vault_l2")])
     db = sqlite3.connect(recovery / "SAFE_SHARDS.sqlite3")

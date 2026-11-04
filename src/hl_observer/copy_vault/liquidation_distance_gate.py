@@ -5,13 +5,22 @@ pas les réductions). Distance inconnue → bloqué (prudence). Pur, 0 réseau, 
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
 def peut_augmenter(distance_liquidation_pct: Any, *, seuil_pct: float = 5.0) -> dict[str, Any]:
     """Autorise une augmentation d'exposition seulement si la distance à la liquidation ≥ seuil. Proche ou
     inconnu → bloqué (réduction toujours permise)."""
-    if not isinstance(distance_liquidation_pct, (int, float)):
+    if (
+        not isinstance(distance_liquidation_pct, (int, float))
+        or isinstance(distance_liquidation_pct, bool)
+        or not math.isfinite(float(distance_liquidation_pct))
+        or not isinstance(seuil_pct, (int, float))
+        or isinstance(seuil_pct, bool)
+        or not math.isfinite(float(seuil_pct))
+        or float(seuil_pct) < 0
+    ):
         return {"peut_augmenter": False, "peut_reduire": True, "raison": "DISTANCE_LIQ_INCONNUE"}
     ok = float(distance_liquidation_pct) >= float(seuil_pct)
     return {"peut_augmenter": bool(ok), "peut_reduire": True,

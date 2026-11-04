@@ -88,6 +88,24 @@ def test_w3_marks_absents_leve_meme_avec_candidats(tmp_path):
         exiger_suffisant(rapport)
 
 
+def test_invalid_input_is_classified_as_technical_failure_not_honest_no_trade():
+    rapport = diagnostiquer(
+        [{"coin": "BTC", "recorded_at": float("nan")}],
+        [{"coin": "BTC", "ts": float("inf"), "mid": 100.0}],
+        min_candidats=1,
+        min_marks=1,
+        min_coins=1,
+    )
+
+    assert rapport.suffisant is False
+    assert rapport.invalid_candidates == 1
+    assert rapport.invalid_marks == 1
+    assert rapport.as_dict()["classification"] == "TECHNICAL_INPUT_FAILURE"
+    assert any("INVALIDES" in reason for reason in rapport.raisons)
+    with pytest.raises(DonneesReplayInsuffisantes):
+        exiger_suffisant(rapport)
+
+
 # ============================ W11 — E2E : données chargées -> VRAIS trades ============================
 
 def test_w11_e2e_donnees_chargees_produisent_de_vrais_trades(tmp_path):

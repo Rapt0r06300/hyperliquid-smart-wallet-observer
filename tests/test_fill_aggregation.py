@@ -23,3 +23,22 @@ def test_fill_aggregation_does_not_merge_native_symbols_by_case():
 
     assert len(rows) == 2
     assert {row.coin for row in rows} == {"kPEPE", "KPEPE"}
+
+
+def test_fill_aggregation_rejects_missing_or_non_finite_measurements():
+    rows = aggregate_fills_by_oid(
+        [
+            {"wallet": "w", "coin": "HYPE", "oid": "1", "sz": "1", "px": "10", "time": 1},
+            {"wallet": "w", "coin": "HYPE", "oid": "1", "sz": "NaN", "px": "11", "time": 2},
+        ]
+    )
+
+    assert rows == ()
+
+
+def test_fill_aggregation_rejects_fractional_timestamps_without_truncation():
+    rows = aggregate_fills_by_oid(
+        [{"wallet": "w", "coin": "HYPE", "oid": "1", "sz": "1", "px": "10", "time": "1.5"}]
+    )
+
+    assert rows == ()

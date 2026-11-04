@@ -59,7 +59,8 @@ def test_start_script_initializes_everything_without_execution():
     assert "& $PythonExe -m hl_observer init-db" in text
     assert '$HealthUrl = "http://127.0.0.1:$Port/api/simulation/status"' in text
     assert "Invoke-WebRequest -UseBasicParsing -Uri $HealthUrl" in text
-    assert "& $PythonExe -m hl_observer reset-simulation-state --starting-equity 1000" in text
+    assert "reset-simulation-state --starting-equity $paperStartingEquity" in text
+    assert 'HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "200"' in text
     assert 'HYPERSMART_RESET_ON_LAUNCH -eq "1"' in text  # 25/07 Fix1 : reset SEULEMENT si =1 explicite
     assert "CONSERVE par defaut" in text                  # defaut garanti = conserver equity/PnL/ledgers
     assert "& $PythonExe -m hl_observer discover-markets --store --max-coins 80" in text
@@ -155,7 +156,9 @@ def test_start_script_initializes_everything_without_execution():
     assert "tools\\stream_loop.ps1" in text
     assert "live-user-fills-stream" in text
     assert "Start-Process -WindowStyle Hidden" in text
-    assert "ALERTE: serveur UI local ne repond pas encore" in text
+    assert "ALERTE: page UI locale indisponible" in text
+    assert "ALERTE: endpoint de sante indisponible" in text
+    assert "ALERTE: moteur paper non conforme" in text
     assert "ALERTE: le serveur UI s'est arrete juste apres le lancement" in text
     assert "ALERTE: le poller simulation s'est arrete juste apres le lancement" in text
     assert "Test-ProcessAlive" in text

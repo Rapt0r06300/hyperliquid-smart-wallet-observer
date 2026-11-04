@@ -50,6 +50,8 @@ MOTIF_CONCENTRATION = "TROP_CONCENTRE_SUR_UN_COIN"
 MOTIF_OK = "ACCEPTE"
 
 MOTIF_BASELINE_CHANGEE = "LA_BASELINE_A_CHANGE_TOUTE_COMPARAISON_EST_INVALIDE"
+MOTIF_SIGNAL_PARITY = "SIGNAL_PAPER_REPLAY_PARITY"
+MOTIF_SIGNAL_PARITY_MISMATCH = "SIGNAL_PAPER_REPLAY_MISMATCH"
 
 
 @dataclass(slots=True)
@@ -221,10 +223,83 @@ def comparer(baseline: Baseline, donnees: Any, config: Mapping[str, Any],
     return {"valide": True, "deltas": deltas, "empreinte": e, "real_execution": False}
 
 
+def comparer_signaux_paper_replay(
+    paper_signals: Iterable[Mapping[str, Any]],
+    replay_signals: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Compare strictement les décisions PAPER et replay par signal.
+
+    La fonction ne fabrique ni remplissage ni PnL et ne promeut aucune décision.
+    Toute identité manquante, dupliquée ou décision incomplète rend le résultat
+    ``UNMEASURABLE`` au lieu de transformer une absence en parité.
+    """
+    def index(
+        rows: Iterable[Mapping[str, Any]], label: str,
+    ) -> tuple[dict[str, dict[str, Any]] | None, str | None]:
+        indexed: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                return None, f"{label}_ROW_NOT_MAPPING"
+            signal_id = row.get("signal_id")
+            decision = row.get("decision")
+            reason = row.get("reason")
+            if (
+                not isinstance(signal_id, str) or not signal_id.strip()
+                or not isinstance(decision, str) or not decision.strip()
+                or (reason is not None and not isinstance(reason, str))
+            ):
+                return None, f"{label}_SIGNAL_CONTRACT_INVALID"
+            normalized_id = signal_id.strip()
+            if normalized_id in indexed:
+                return None, f"{label}_DUPLICATE_SIGNAL_ID"
+            indexed[normalized_id] = {
+                "decision": decision.strip(),
+                "reason": reason.strip() if isinstance(reason, str) else None,
+            }
+        return indexed, None
+
+    paper, paper_error = index(paper_signals, "PAPER")
+    replay, replay_error = index(replay_signals, "REPLAY")
+    if paper_error or replay_error or paper is None or replay is None:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": paper_error or replay_error or "SIGNAL_PARITY_INPUT_INVALID",
+            "compared": 0,
+            "mismatches": [],
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    missing_in_paper = sorted(set(replay) - set(paper))
+    missing_in_replay = sorted(set(paper) - set(replay))
+    mismatches = []
+    for signal_id in sorted(set(paper) & set(replay)):
+        if paper[signal_id] != replay[signal_id]:
+            mismatches.append({
+                "signal_id": signal_id,
+                "paper": paper[signal_id],
+                "replay": replay[signal_id],
+            })
+    parity = not missing_in_paper and not missing_in_replay and not mismatches
+    return {
+        "status": "PARITY" if parity else "MISMATCH",
+        "reason": MOTIF_SIGNAL_PARITY if parity else MOTIF_SIGNAL_PARITY_MISMATCH,
+        "parity": parity,
+        "compared": len(set(paper) & set(replay)),
+        "missing_in_paper": missing_in_paper,
+        "missing_in_replay": missing_in_replay,
+        "mismatches": mismatches,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "MAX_EXPOSITION_NETTE", "MAX_PART_PAR_COIN", "MAX_POSITIONS_PAR_COIN", "MAX_POSITIONS_TOTAL",
     "MOTIF_BASELINE_CHANGEE", "MOTIF_CONCENTRATION", "MOTIF_DEJA_UNE_POSITION",
     "MOTIF_EXPOSITION", "MOTIF_OK", "MOTIF_TROP_DE_POSITIONS",
+    "MOTIF_SIGNAL_PARITY", "MOTIF_SIGNAL_PARITY_MISMATCH",
     "Baseline", "CompteurRefus", "Position",
-    "comparer", "empreinte", "le_live_accepterait", "rejouer_sans_empilement", "sceller",
+    "comparer", "comparer_signaux_paper_replay", "empreinte", "le_live_accepterait",
+    "rejouer_sans_empilement", "sceller",
 ]

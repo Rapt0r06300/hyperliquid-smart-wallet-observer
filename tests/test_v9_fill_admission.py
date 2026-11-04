@@ -14,6 +14,7 @@ from hl_observer.signals.fill_admission import (
     R_ADD_NOT_ENTRY,
     R_UNKNOWN_DELTA,
     R_STALE_SIGNAL,
+    R_INVALID_TIMESTAMP,
 )
 
 NOW = 1_000_000_000
@@ -89,12 +90,32 @@ def test_unknown_delta_is_silent_skip():
     assert d.admit is False and d.reason == R_UNKNOWN_DELTA
 
 
+def test_invalid_timestamp_is_logged_and_never_truncated():
+    d = _admit(fill_ts_ms="999999999.5")
+
+    assert d.admit is False and d.kind == KIND_SKIP
+    assert d.reason == R_INVALID_TIMESTAMP and d.log_decision is True
+
+
+def test_non_finite_leader_price_is_refused():
+    d = _admit(leader_price="NaN")
+
+    assert d.admit is False and d.reason == "PRICE_INVALID" and d.log_decision is True
+
+
 def test_fill_identity_is_stable_and_distinct():
     a = fill_identity(wallet_address="0xABC", coin="BTC", side="LONG", action_type="ADD", price=100.0, size=1.0, ts_ms=NOW)
     b = fill_identity(wallet_address="0xabc", coin="btc", side="long", action_type="add", price=100.0, size=1.0, ts_ms=NOW)
     c = fill_identity(wallet_address="0xABC", coin="BTC", side="LONG", action_type="ADD", price=100.0, size=2.0, ts_ms=NOW)
     assert a != b  # le symbole natif est sensible à la casse
     assert a != c  # taille différente -> identité différente
+
+
+def test_fill_identity_rejects_non_exact_measurements():
+    import pytest
+
+    with pytest.raises(ValueError):
+        fill_identity(wallet_address="w", coin="BTC", side="LONG", action_type="ADD", price="10.5", size=1, ts_ms="1000.5")
 
 
 def test_fill_identity_ne_fusionne_pas_les_symboles_native_case_distincts():

@@ -7,6 +7,9 @@ from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
 from hl_observer.backtesting.copy_vault_protocol import UNBOUND_L2_SOURCE_PROTOCOL
 from hl_observer.collection.copy_vault_checkpoint_tail import COMPANION_PROTOCOL
 from hl_observer.simulation.economic_collection_plan import (
+    COLLECTION_SURFACE_GITHUB_HOSTED_EPOCH,
+    COLLECTION_SURFACE_LOCAL_PAPER,
+    COLLECTION_SURFACE_UNMEASURABLE,
     build_collection_plan,
     write_collection_plan,
 )
@@ -99,6 +102,54 @@ def test_plan_distinguishes_future_data_from_killed_hypothesis() -> None:
     assert plan["safe_to_claim_future_data_required_only"] is True
     assert plan["goal_complete"] is False
     assert plan["real_execution"] is False
+    assert plan["collection_surface"] == COLLECTION_SURFACE_UNMEASURABLE
+    assert plan["paper_observer_active"] is True
+    assert plan["cloud_revenue_simulation"] is False
+
+
+def test_collection_surface_requires_explicit_local_or_hosted_epoch_contract() -> None:
+    campaigns = [_campaign("copy_vault"), _campaign("lead_lag"), _campaign("cross_venue_dislocation_v2")]
+    raw = _raw_reports()
+
+    local = build_collection_plan(
+        campaigns,
+        raw,
+        collector_state={
+            "runner_surface": "LOCAL",
+            "paper_read_only": True,
+            "real_execution": False,
+        },
+        now_ms=123,
+    )
+    assert local["collection_surface"] == COLLECTION_SURFACE_LOCAL_PAPER
+
+    hosted = build_collection_plan(
+        campaigns,
+        raw,
+        collector_state={
+            "runner_surface": "GITHUB_HOSTED",
+            "phase": "COLLECT",
+            "phase_epoch": 8,
+            "paper_read_only": True,
+            "real_execution": False,
+        },
+        now_ms=123,
+    )
+    assert hosted["collection_surface"] == COLLECTION_SURFACE_GITHUB_HOSTED_EPOCH
+
+    ambiguous = build_collection_plan(
+        campaigns,
+        raw,
+        collector_state={
+            "runner_surface": "GITHUB_HOSTED",
+            "phase": "COLLECT",
+            "phase_epoch": 8,
+            "paper_read_only": True,
+            "real_execution": True,
+        },
+        now_ms=123,
+    )
+    assert ambiguous["collection_surface"] == COLLECTION_SURFACE_UNMEASURABLE
 
 
 def test_plan_recognizes_prefreeze_maker_queue_pipeline_as_data_only() -> None:
@@ -527,6 +578,39 @@ def test_copy_plan_counts_entry_exit_and_missing_coin_book_rejections() -> None:
         "NON_CAUSAL_FORWARD_BOOK": 0,
     }
     assert copy["progress"]["parameters_frozen"] is False
+
+
+def test_temporal_progress_rejects_fractional_and_text_counts() -> None:
+    raw = _raw_reports()
+    raw["copy_vault"]["temporal_evidence"] = {
+        "oos": {
+            "sample_count": 2.9,
+            "net_pnl_usd": 1.0,
+            "no_lookahead": True,
+            "liquidatable_net": True,
+        },
+        "forward": {
+            "sample_count": "3",
+            "net_pnl_usd": 1.0,
+            "no_lookahead": True,
+            "post_freeze": True,
+            "liquidatable_net": True,
+        },
+    }
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    copy = next(row for row in plan["families"] if row["family"] == "copy_vault")
+
+    assert copy["progress"]["oos_sample_count"] == 0
+    assert copy["progress"]["forward_sample_count"] == 0
+    assert copy["progress"]["oos_valid"] is False
+    assert copy["progress"]["forward_valid"] is False
+    assert copy["evidence_state"] != "PROVEN"
 
 
 def test_write_plan_is_strict_json_and_human_readable(tmp_path: Path) -> None:

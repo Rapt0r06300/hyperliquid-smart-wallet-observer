@@ -192,6 +192,17 @@ def test_pytest_parallele_S_ACTIVE_explicitement(monkeypatch):
     assert T._pytest_parallele() == []
 
 
+def test_pytest_parallele_workers_are_bounded_when_explicit(monkeypatch):
+    import importlib.util as _iu
+    import os as _os
+    monkeypatch.setenv("TOUT_TESTER_PYTEST_PARALLELE", "1")
+    monkeypatch.setenv("TOUT_TESTER_PYTEST_WORKERS", "64")
+    monkeypatch.setattr(_iu, "find_spec", lambda *_a, **_k: object())
+    monkeypatch.setattr(_os, "cpu_count", lambda: 64)
+
+    assert T._pytest_parallele() == ["-n", "4", "--dist", "loadfile"]
+
+
 def test_entete_progres_montre_l_etape_et_le_reste(capsys):
     T._planifier(["securite", "tests", "recherche"])
     T._entete_progres("securite")

@@ -17,6 +17,7 @@ jamais `/exchange`. Toutes les sondes réseau sont INJECTABLES → les tests et 
 from __future__ import annotations
 
 import os
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,7 @@ from hl_observer.hyperliquid.rate_weights import (
 )
 from hl_observer.ops.clock_integrity import skew_excessif
 from hl_observer.ops.runtime_contract import PREFLIGHT_RUNTIME_FLAGS, verify_runtime_env
+from hl_observer.strategies.active_scope import verify_official_runtime_scope
 from hl_observer.research.venue_capabilities import registre_par_defaut
 from hl_observer.runtime.capability_reconciliation import CapabilityReconciliationError
 from hl_observer.runtime.protections import manifeste_execution
@@ -59,6 +61,18 @@ ENV_EXECUTION_INTERDITES: tuple[str, ...] = ("HL_ENABLE_MAINNET_EXECUTION", "HL_
 _VRAI = {"1", "true", "yes", "on", "vrai", "oui"}
 MIN_DISQUE_MO_DEFAUT = 500.0
 MAX_SKEW_MS_DEFAUT = 5_000.0
+# Contrat conservateur : chaque phase a son seuil explicite. Le lanceur démarre
+# en phase collect; les outils de replay/backtest peuvent réutiliser la même
+# sonde avec leur phase propre au lieu de masquer un besoin disque différent.
+MIN_DISQUE_MO_PAR_PHASE: dict[str, float] = {
+    "collect": 500.0,
+    "analyze": 200.0,
+    "replay": 1_000.0,
+    "backtest": 1_000.0,
+    "oos": 2_000.0,
+    "forward_paper": 2_000.0,
+}
+JOURNAL_ECHECS_REL = "runtime/logs/preflight_failures.jsonl"
 
 
 @dataclass(frozen=True)
@@ -125,16 +139,28 @@ def verifier_deps(*, dures: Sequence[str] = DEPS_DURES, recommandees: Sequence[s
     return out
 
 
-def verifier_disque(racine: Path, *, min_mo: float = MIN_DISQUE_MO_DEFAUT,
+def seuil_disque_phase(phase: str) -> float:
+    """Retourne le seuil disque contractuel d'une phase, fail-closed sur phase inconnue."""
+    cle = str(phase).strip().lower()
+    if cle not in MIN_DISQUE_MO_PAR_PHASE:
+        raise ValueError("phase disque inconnue: %s" % phase)
+    return MIN_DISQUE_MO_PAR_PHASE[cle]
+
+
+def verifier_disque(racine: Path, *, min_mo: float | None = None,
+                    phase: str = "collect",
                     usage: Callable[[str], Any] | None = None) -> Verification:
     lecture = usage if usage is not None else shutil.disk_usage
+    seuil = seuil_disque_phase(phase) if min_mo is None else float(min_mo)
     try:
         u = lecture(str(racine))
         libre_mo = float(getattr(u, "free", u[2])) / (1024.0 * 1024.0)
-        ok = libre_mo >= min_mo
-        return Verification("disque", "disque", True, ok, "libre=%.0f Mo (min %.0f)" % (libre_mo, min_mo))
+        ok = libre_mo >= seuil
+        return Verification("disque", "disque", True, ok,
+                            "phase=%s libre=%.0f Mo (min %.0f)" % (phase, libre_mo, seuil))
     except (OSError, ValueError, IndexError) as exc:
-        return Verification("disque", "disque", True, False, "illisible: %s" % exc)
+        return Verification("disque", "disque", True, False,
+                            "phase=%s illisible: %s" % (phase, exc))
 
 
 def verifier_dossiers(racine: Path, *, dossiers: Sequence[str] = DOSSIERS_DEFAUT) -> Verification:
@@ -232,7 +258,13 @@ def verifier_contrat_runtime(*, env: Mapping[str, str] | None = None) -> Verific
     """
     e = env if env is not None else os.environ
     result = verify_runtime_env(e, expected=PREFLIGHT_RUNTIME_FLAGS)
-    return Verification("contrat-runtime", "paper", True, result.ok, result.detail)
+    scope_ok, scope_mismatches = verify_official_runtime_scope(dict(e))
+    details = [result.detail]
+    if not scope_ok:
+        details.append("scope: " + "; ".join(scope_mismatches))
+    return Verification(
+        "contrat-runtime", "paper", True, result.ok and scope_ok, "; ".join(details)
+    )
 
 
 def verifier_capacites_chargees(
@@ -280,7 +312,8 @@ def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | N
                        ws_connexions: int = HYPERSMART_WS_MAX_CONNECTIONS,
                        ws_utilisateurs: int = HYPERSMART_WS_MAX_UNIQUE_USERS,
                        ws_souscriptions: int = 200,
-                       min_disque_mo: float = MIN_DISQUE_MO_DEFAUT,
+                       min_disque_mo: float | None = None,
+                       phase: str = "collect",
                        enforce_runtime_contract: bool = False) -> ResultatPreflight:
     """Exécute TOUS les contrôles et rend un ResultatPreflight. `prober` (sonde réseau) et `local_ts_ms`
     sont injectés → 0 réseau en test. Sans prober, les endpoints sont marqués injoignables (fail-closed
@@ -292,7 +325,7 @@ def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | N
     r = Path(racine)
     vers: list[Verification] = [verifier_python()]
     vers.extend(verifier_deps(present=deps_present))
-    vers.append(verifier_disque(r, min_mo=min_disque_mo, usage=disque_usage))
+    vers.append(verifier_disque(r, min_mo=min_disque_mo, phase=phase, usage=disque_usage))
     vers.append(verifier_dossiers(r, dossiers=dossiers))
     if prober is not None:
         ep, serveur_ts = verifier_endpoints(prober, endpoints=endpoints)
@@ -311,6 +344,47 @@ def executer_preflight(racine: str | Path, *, prober: Callable[[str], Sonde] | N
         vers.append(verifier_contrat_runtime(env=env))
         vers.append(verifier_capacites_chargees(r))
     return ResultatPreflight(tuple(vers))
+
+
+def journaliser_echec_preflight(
+    racine: str | Path,
+    resultat: ResultatPreflight,
+    *,
+    phase: str = "collect",
+    run_id: str = "launcher-preflight",
+    now_ms: float | None = None,
+) -> bool:
+    """Ajoute un reçu JSONL append-only pour un NO-GO.
+
+    Le journal ne remplace jamais les preuves ni les données de session; il rend
+    seulement le refus machine-readable. Une erreur d'écriture est renvoyée au
+    CLI, qui reste alors NO-GO avec un code distinct au lieu de masquer le défaut.
+    """
+    import time
+
+    record = {
+        "schema": "preflight-failure/v1",
+        "run_id": str(run_id),
+        "phase": str(phase),
+        "ts_ms": int(now_ms if now_ms is not None else time.time() * 1000.0),
+        "status": "NO_GO",
+        "blocking_checks": [
+            {"name": v.nom, "category": v.categorie, "detail": v.detail}
+            for v in resultat.blocages()
+        ],
+        "warnings": [
+            {"name": v.nom, "category": v.categorie, "detail": v.detail}
+            for v in resultat.avertissements()
+        ],
+    }
+    try:
+        journal = Path(racine) / JOURNAL_ECHECS_REL
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        with journal.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def format_preflight(res: ResultatPreflight) -> str:
@@ -373,13 +447,25 @@ def main(argv: list[str] | None = None) -> int:
         enforce_runtime_contract=True,
     )
     print(format_preflight(res), flush=True)
-    return 0 if res.go() else 2
+    if res.go():
+        return 0
+    journal_ok = journaliser_echec_preflight(
+        racine,
+        res,
+        phase=os.environ.get("HYPERSMART_PREFLIGHT_PHASE", "collect"),
+        run_id=os.environ.get("HYPERSMART_RUN_ID", "launcher-preflight"),
+    )
+    if not journal_ok:
+        print("[PREFLIGHT] NO-GO : journalisation JSONL impossible (fail-closed).", flush=True)
+        return 3
+    return 2
 
 
 __all__ = ["Sonde", "Verification", "ResultatPreflight", "executer_preflight", "format_preflight",
-           "verifier_python", "verifier_deps", "verifier_disque", "verifier_dossiers", "verifier_horloge",
+           "verifier_python", "verifier_deps", "seuil_disque_phase", "verifier_disque", "verifier_dossiers", "verifier_horloge",
            "verifier_endpoints", "verifier_quotas_ws", "verifier_schemas", "verifier_orphelins",
-           "verifier_paper", "verifier_contrat_runtime", "verifier_capacites_chargees", "main"]
+           "verifier_paper", "verifier_contrat_runtime", "verifier_capacites_chargees",
+           "journaliser_echec_preflight", "main"]
 
 
 if __name__ == "__main__":

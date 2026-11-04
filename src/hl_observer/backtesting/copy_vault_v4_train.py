@@ -51,6 +51,12 @@ MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if type(value) is not int or value <= 0:
+        return None
+    return value
+
+
 def _share_exceeds(count: int, total: int, threshold: object) -> bool:
     """Compare a count ratio to the decimal policy limit without float rounding."""
     if type(count) is not int or type(total) is not int or count < 0 or total <= 0:
@@ -74,14 +80,37 @@ def replay_continuation_train(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Rejoue une variante sur la seule fenêtre TRAIN fournie."""
 
+    valid_required = _strict_positive_int(required_observed_fills)
+    valid_horizon = _strict_positive_int(horizon_ms)
+    valid_direction = (
+        direction_multiplier
+        if type(direction_multiplier) is int and direction_multiplier in (-1, 1)
+        else None
+    )
+    valid_start = None if train_start_ms is None else _strict_positive_int(train_start_ms)
+    valid_end = None if train_end_ms is None else _strict_positive_int(train_end_ms)
+    if (
+        valid_required is None
+        or valid_horizon is None
+        or valid_direction is None
+        or (train_start_ms is not None and valid_start is None)
+        or (train_end_ms is not None and valid_end is None)
+    ):
+        return [], {
+            "selection": {"INVALID_REPLAY_PARAMETERS": 1},
+            "replay": {"metaorders_considered": 0, "completed_positions": 0},
+            "train_start_ms": train_start_ms,
+            "train_end_ms": train_end_ms,
+            "direction_multiplier": None,
+        }
     continuations, selection_audit = select_observed_continuations(
         metaorders,
-        required_observed_fills=int(required_observed_fills),
+        required_observed_fills=valid_required,
     )
     if (
-        train_start_ms is None
-        or train_end_ms is None
-        or int(train_end_ms) < int(train_start_ms)
+        valid_start is None
+        or valid_end is None
+        or valid_end < valid_start
     ):
         return [], {
             "selection": selection_audit,
@@ -92,15 +121,15 @@ def replay_continuation_train(
             },
             "train_start_ms": train_start_ms,
             "train_end_ms": train_end_ms,
-            "direction_multiplier": 1 if int(direction_multiplier) >= 0 else -1,
+            "direction_multiplier": valid_direction,
         }
     trades, replay_audit = replay_metaorders(
         continuations,
         books_by_coin,
-        horizon_ms=int(horizon_ms),
-        start_ms=train_start_ms,
-        end_ms=train_end_ms,
-        direction_multiplier=int(direction_multiplier),
+        horizon_ms=valid_horizon,
+        start_ms=valid_start,
+        end_ms=valid_end,
+        direction_multiplier=valid_direction,
         require_causal_observation=True,
     )
     annotated = [
@@ -108,8 +137,8 @@ def replay_continuation_train(
             **trade,
             "mechanism": MECHANISM,
             "walk_forward_segment": "train",
-            "required_observed_fills": int(required_observed_fills),
-            "continuation_horizon_ms": int(horizon_ms),
+            "required_observed_fills": valid_required,
+            "continuation_horizon_ms": valid_horizon,
             "sizing_policy": "FIXED_PAPER_NOTIONAL_USD",
             "paper_read_only": True,
             "real_execution": False,
@@ -121,7 +150,7 @@ def replay_continuation_train(
         "replay": replay_audit,
         "train_start_ms": train_start_ms,
         "train_end_ms": train_end_ms,
-        "direction_multiplier": 1 if int(direction_multiplier) >= 0 else -1,
+        "direction_multiplier": valid_direction,
     }
 
 
@@ -225,18 +254,18 @@ def explore_copy_vault_v4_train(
         continuations, selection_audit = continuation_cache[required]
         purge_ms = COPY_DELAY_MS + int(horizon) + MAX_TARGET_LAG_MS
         bounds = temporal_bounds(continuations, purge_ms=purge_ms)
-        train_start_ms = bounds.get("train_start_ms")
-        train_end_ms = bounds.get("train_end_ms")
+        train_start_ms = _strict_positive_int(bounds.get("train_start_ms"))
+        train_end_ms = _strict_positive_int(bounds.get("train_end_ms"))
         valid_train_bounds = bool(
             train_start_ms is not None
             and train_end_ms is not None
-            and int(train_end_ms) >= int(train_start_ms)
+            and train_end_ms >= train_start_ms
         )
         if valid_train_bounds:
             trades, replay_audit = replay_metaorders(
                 continuations,
                 books_by_coin,
-                horizon_ms=int(horizon),
+                horizon_ms=horizon,
                 start_ms=train_start_ms,
                 end_ms=train_end_ms,
                 require_causal_observation=True,
@@ -244,7 +273,7 @@ def explore_copy_vault_v4_train(
             placebo_trades, placebo_audit = replay_metaorders(
                 continuations,
                 books_by_coin,
-                horizon_ms=int(horizon),
+                horizon_ms=horizon,
                 start_ms=train_start_ms,
                 end_ms=train_end_ms,
                 direction_multiplier=-1,

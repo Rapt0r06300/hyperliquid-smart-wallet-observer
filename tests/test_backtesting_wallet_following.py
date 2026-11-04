@@ -10,6 +10,29 @@ def test_same_strategy_delay_changes_event_times():
     assert zero[0]["effective_ts_ms"] != delayed[0]["effective_ts_ms"]
 
 
+def test_replay_same_timestamp_is_input_order_invariant():
+    events = [
+        {"event_id": "event-b", "ts_ms": 1000},
+        {"event_id": "event-a", "ts_ms": 1000},
+    ]
+
+    first = replay_events_with_delay(events, delay_seconds=0)
+    permuted = replay_events_with_delay(list(reversed(events)), delay_seconds=0)
+
+    assert first == permuted
+    assert [row["event_id"] for row in first] == ["event-a", "event-b"]
+
+
+def test_replay_rejects_duplicate_native_event_identity():
+    events = [
+        {"event_id": "event-a", "ts_ms": 1000},
+        {"event_id": " event-a ", "ts_ms": 1001},
+    ]
+
+    with pytest.raises(ValueError, match="event_id must be unique"):
+        replay_events_with_delay(events, delay_seconds=0)
+
+
 @pytest.mark.parametrize(
     "event",
     [

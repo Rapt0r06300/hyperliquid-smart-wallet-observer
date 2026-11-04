@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,72 @@ from hl_observer.utils.time import now_ms
 from hl_observer.wallets.position_delta_engine import build_position_delta_from_fill
 
 
+def _decode_ws_message(message: str | bytes | dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(message, bytes):
+        message = message.decode("utf-8", errors="replace")
+    if isinstance(message, str):
+        try:
+            message = json.loads(message)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+    return message if isinstance(message, dict) else None
+
+
+def user_fills_subscription_ack(message: str | bytes | dict[str, Any]) -> str | None:
+    """Return the wallet acknowledged by a real userFills subscribe response."""
+    payload = _decode_ws_message(message)
+    if not payload or payload.get("channel") != "subscriptionResponse":
+        return None
+    data = payload.get("data")
+    subscription = data.get("subscription") if isinstance(data, dict) else None
+    if (
+        not isinstance(data, dict)
+        or data.get("method") != "subscribe"
+        or not isinstance(subscription, dict)
+        or subscription.get("type") != "userFills"
+    ):
+        return None
+    wallet = subscription.get("user")
+    return str(wallet).lower() if wallet and WALLET_RE.fullmatch(str(wallet)) else None
+
+
+def _native_fill_identity(fill: dict[str, Any]) -> dict[str, Any]:
+    """Copy only venue-provided identity fields; never synthesize an event id."""
+    return {
+        key: fill[key]
+        for key in ("hash", "tid", "oid")
+        if fill.get(key) is not None and str(fill[key]).strip()
+    }
+
+
+def _live_fill_provenance(fill: dict[str, Any]) -> dict[str, Any] | None:
+    source = str(fill.get("_hypersmart_source") or "")
+    received_at = _safe_positive_int(fill.get("_hypersmart_ws_received_at_ms"))
+    ack_at = _safe_positive_int(fill.get("_hypersmart_ws_ack_received_at_ms"))
+    connection_id = str(fill.get("_hypersmart_ws_connection_id") or "").strip()
+    if (
+        source not in {"hyperliquid_ws:userFills", "hyperliquid_ws:userFills:stream"}
+        or received_at is None
+        or ack_at is None
+        or not connection_id
+        or fill.get("_hypersmart_ws_is_snapshot") is not False
+    ):
+        return None
+    provenance: dict[str, Any] = {
+        "channel": "userFills",
+        "source": source,
+        "received_at_ms": received_at,
+        "ack_received_at_ms": ack_at,
+        "connection_id": connection_id,
+        "is_snapshot": False,
+        "native_identity": _native_fill_identity(fill),
+    }
+    sequence = fill.get("_hypersmart_ws_frame_sequence")
+    if type(sequence) is int and sequence >= 0:
+        provenance["frame_sequence"] = sequence
+    return provenance
+
+
 @dataclass(slots=True)
 class UserFillsLiveResult:
     wallets: list[str]
@@ -25,9 +92,12 @@ class UserFillsLiveResult:
     fills_seen: int = 0
     snapshots_ignored: int = 0
     unclassified_fills_ignored: int = 0
+    unacked_fills_ignored: int = 0
+    subscription_acks_seen: int = 0
     stale_fills_ignored: int = 0
     fills_stored: int = 0
     deltas_stored: int = 0
+    fills_quarantined: int = 0
     stopped_reason: str = "not_started"
     warnings: list[str] = field(default_factory=list)
     wallet_fills: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -52,9 +122,7 @@ def normalize_user_fill_wallets(wallets: Iterable[str], *, max_users: int = 10) 
 
 
 def user_fills_from_message(message: str | bytes | dict[str, Any]) -> tuple[str | None, bool | None, list[dict[str, Any]]]:
-    if isinstance(message, bytes):
-        message = message.decode("utf-8", errors="replace")
-    payload: Any = json.loads(message) if isinstance(message, str) else message
+    payload: Any = _decode_ws_message(message)
     if not isinstance(payload, dict) or payload.get("channel") != "userFills":
         return None, False, []
     data = payload.get("data")
@@ -122,6 +190,9 @@ async def scan_user_fills_ws(
         websocket_connect = websockets.connect
 
     deadline = asyncio.get_running_loop().time() + duration_seconds
+    acknowledged_wallets: set[str] = set()
+    ack_received_at_ms: dict[str, int] = {}
+    connection_id = f"scan-{id(result):x}"
     try:
         async with websocket_connect(settings.hyperliquid.ws_base_url) as ws:
             for wallet in selected_wallets:
@@ -139,6 +210,13 @@ async def scan_user_fills_ws(
                 )
             async for message in _bounded_ws_messages(ws, deadline):
                 result.messages_seen += 1
+                ack_wallet = user_fills_subscription_ack(message)
+                if ack_wallet is not None:
+                    if ack_wallet in selected_wallets:
+                        acknowledged_wallets.add(ack_wallet)
+                        ack_received_at_ms[ack_wallet] = now_ms()
+                        result.subscription_acks_seen += 1
+                    continue
                 wallet, is_snapshot, fills = user_fills_from_message(message)
                 if is_snapshot is None:
                     # Missing or malformed classification is not proof of a live
@@ -152,6 +230,12 @@ async def scan_user_fills_ws(
                     continue
                 if not fills:
                     continue
+                if wallet not in acknowledged_wallets:
+                    result.unacked_fills_ignored += len(fills)
+                    result.warnings.append(
+                        f"fill quarantined for {wallet}: subscription ACK not observed"
+                    )
+                    continue
                 received_at_ms = now_ms()
                 enriched_fills: list[dict[str, Any]] = []
                 for fill in fills:
@@ -159,6 +243,8 @@ async def scan_user_fills_ws(
                     enriched["_hypersmart_source"] = "hyperliquid_ws:userFills"
                     enriched["_hypersmart_ws_received_at_ms"] = received_at_ms
                     enriched["_hypersmart_ws_is_snapshot"] = False
+                    enriched["_hypersmart_ws_ack_received_at_ms"] = ack_received_at_ms[wallet]
+                    enriched["_hypersmart_ws_connection_id"] = connection_id
                     enriched_fills.append(enriched)
                 result.fills_seen += len(enriched_fills)
                 result.wallet_fills.setdefault(wallet, []).extend(enriched_fills)
@@ -167,6 +253,11 @@ async def scan_user_fills_ws(
     except Exception as exc:  # noqa: BLE001 - the CLI reports the source failure instead of crashing.
         result.stopped_reason = "SOURCE_UNAVAILABLE"
         result.warnings.append(f"userFills WebSocket unavailable: {exc}")
+    missing_ack_wallets = sorted(set(selected_wallets) - acknowledged_wallets)
+    if missing_ack_wallets:
+        result.warnings.append(
+            "subscription ACK incomplete; wallets quarantined: " + ", ".join(missing_ack_wallets)
+        )
     return result
 
 
@@ -193,6 +284,7 @@ def store_user_fills_live_result(
     result.stale_fills_ignored = 0
     result.fills_stored = 0
     result.deltas_stored = 0
+    result.fills_quarantined = 0
     repo = CollectionRepository(session)
     latest_event_ms = 0
     for wallet, fills in result.wallet_fills.items():
@@ -219,22 +311,51 @@ def store_user_fills_live_result(
                 continue
             fresh_fills.append(fill)
 
-        public_fills = [_strip_internal_fill_metadata(fill) for fill in fresh_fills]
-        stored = repo.store_fills(wallet, public_fills)
-        result.fills_stored += len(stored)
-        deltas = []
+        valid_pairs: list[tuple[dict[str, Any], Any]] = []
         for fill in fresh_fills:
             try:
-                deltas.append(build_position_delta_from_fill(wallet, fill))
+                delta = build_position_delta_from_fill(wallet, fill)
                 latest_event_ms = max(latest_event_ms, int(fill.get("time") or fill.get("timestamp") or 0))
             except Exception as exc:  # noqa: BLE001 - malformed fills are recorded as warnings.
+                result.fills_quarantined += 1
                 result.warnings.append(f"fill skipped for {wallet}: {exc}")
-        result.deltas_stored += len(repo.store_position_deltas(deltas))
+                continue
+            valid_pairs.append((fill, delta))
+
+        if valid_pairs:
+            try:
+                # The nested transaction keeps a fill and its derived delta atomic
+                # when a storage failure occurs after validation.
+                with session.begin_nested():
+                    public_fills: list[dict[str, Any]] = []
+                    for fill, _ in valid_pairs:
+                        public_fill = _strip_internal_fill_metadata(fill)
+                        provenance = _live_fill_provenance(fill)
+                        if provenance is not None:
+                            public_fill["observer_provenance"] = provenance
+                        public_fills.append(public_fill)
+                    stored = repo.store_fills(wallet, public_fills)
+                    stored_deltas = repo.store_position_deltas([delta for _, delta in valid_pairs])
+                result.fills_stored += len(stored)
+                result.deltas_stored += len(stored_deltas)
+            except Exception as exc:  # noqa: BLE001 - quarantine the complete batch on storage failure.
+                result.fills_quarantined += len(valid_pairs)
+                result.warnings.append(f"fill batch quarantined for {wallet}: storage failed: {exc}")
+
+    invalid_observations = (
+        result.unclassified_fills_ignored
+        + result.stale_fills_ignored
+        + result.unacked_fills_ignored
+        + result.fills_quarantined
+    )
+    data_consistent = invalid_observations == 0
+    source_success = result.stopped_reason != "SOURCE_UNAVAILABLE" and data_consistent
     repo.update_source_health(
         "hyperliquid_ws:userFills",
-        is_success=result.stopped_reason != "SOURCE_UNAVAILABLE",
+        is_success=source_success,
+        is_consistent=data_consistent,
         is_heartbeat=True,
-        event_timestamp_ms=latest_event_ms or now_ms(),
+        event_timestamp_ms=latest_event_ms or (now_ms() if source_success else None),
         error_message="; ".join(result.warnings) if result.warnings else None,
     )
     return result
@@ -251,7 +372,10 @@ def format_user_fills_live_report(result: UserFillsLiveResult) -> str:
         f"fills_seen: {result.fills_seen}",
         f"snapshots_ignored: {result.snapshots_ignored}",
         f"unclassified_fills_ignored: {result.unclassified_fills_ignored}",
+        f"unacked_fills_ignored: {result.unacked_fills_ignored}",
+        f"subscription_acks_seen: {result.subscription_acks_seen}",
         f"stale_fills_ignored: {result.stale_fills_ignored}",
+        f"fills_quarantined: {result.fills_quarantined}",
         f"fills_stored: {result.fills_stored}",
         f"deltas_stored: {result.deltas_stored}",
         f"stopped_reason: {result.stopped_reason}",
@@ -280,23 +404,38 @@ class StreamStats:
     deltas_stored: int = 0
     snapshots_ignored: int = 0
     unclassified_fills_ignored: int = 0
+    unacked_fills_ignored: int = 0
+    subscription_acks_seen: int = 0
+    connections_without_complete_ack: int = 0
+    storage_failures: int = 0
     last_fill_age_ms: int | None = None
     stopped_reason: str = "not_started"
     warnings: list[str] = field(default_factory=list)
 
 
-def _store_fresh_fills(session_factory: Any, wallet: str, fills: list[dict[str, Any]],
-                       *, max_live_fill_age_ms: int, stats: StreamStats) -> None:
+async def _store_fresh_fills(session_factory: Any, wallet: str, fills: list[dict[str, Any]],
+                             *, max_live_fill_age_ms: int, stats: StreamStats,
+                             sleep: Any, max_store_retries: int = 2) -> bool:
     """Store one fresh batch immediately (short session) so copy-run sees it now."""
     res = UserFillsLiveResult(wallets=[wallet], duration_seconds=1, network_read=True,
                               stopped_reason="stream_batch")
     res.wallet_fills[wallet] = fills
-    with session_factory() as session:
-        store_user_fills_live_result(session, res, max_live_fill_age_ms=max_live_fill_age_ms)
-        session.commit()
-    stats.fresh_fills_stored += res.fills_stored
-    stats.deltas_stored += res.deltas_stored
-    stats.snapshots_ignored += res.snapshots_ignored
+    for attempt in range(max(0, int(max_store_retries)) + 1):
+        try:
+            with session_factory() as session:
+                store_user_fills_live_result(session, res, max_live_fill_age_ms=max_live_fill_age_ms)
+                session.commit()
+            stats.fresh_fills_stored += res.fills_stored
+            stats.deltas_stored += res.deltas_stored
+            stats.snapshots_ignored += res.snapshots_ignored
+            return True
+        except Exception as exc:  # noqa: BLE001 - retain the batch until bounded retries are exhausted.
+            if attempt >= max_store_retries:
+                stats.storage_failures += 1
+                stats.warnings.append(f"store failed after {attempt + 1} attempts: {exc}")
+                return False
+            await sleep(min(1.0, 0.25 * (2 ** attempt)))
+    return False
 
 
 async def stream_user_fills_ws(
@@ -339,6 +478,7 @@ async def stream_user_fills_ws(
 
     attempt = 0
     while not _stopped():
+        connected_at = asyncio.get_running_loop().time()
         try:
             # Timeout DUR sur l'ouverture: un DNS/TCP qui pend ne doit JAMAIS geler le stream
             # (le stop_event est inconsultable pendant un connect bloquant). Vu en session
@@ -347,7 +487,9 @@ async def stream_user_fills_ws(
             ws = await asyncio.wait_for(cm.__aenter__(), timeout=max(1.0, float(connect_timeout_s)))
             try:
                 stats.connects += 1
-                attempt = 0  # reset backoff on a clean connect
+                connection_id = f"stream-{stats.connects}"
+                acknowledged_wallets: set[str] = set()
+                ack_received_at_ms: dict[str, int] = {}
                 for wallet in selected:
                     await ws.send(json.dumps({
                         "method": "subscribe",
@@ -362,6 +504,13 @@ async def stream_user_fills_ws(
                         # période calme de 30s forçait une reconnexion complète.
                         continue
                     stats.messages_seen += 1
+                    ack_wallet = user_fills_subscription_ack(message)
+                    if ack_wallet is not None:
+                        if ack_wallet in selected:
+                            acknowledged_wallets.add(ack_wallet)
+                            ack_received_at_ms[ack_wallet] = now_ms()
+                            stats.subscription_acks_seen += 1
+                        continue
                     wallet, is_snapshot, fills = user_fills_from_message(message)
                     if is_snapshot is None:
                         stats.unclassified_fills_ignored += len(fills)
@@ -371,6 +520,12 @@ async def stream_user_fills_ws(
                         continue
                     if not wallet or wallet not in selected or not fills:
                         continue
+                    if wallet not in acknowledged_wallets:
+                        stats.unacked_fills_ignored += len(fills)
+                        stats.warnings.append(
+                            f"fill quarantined for {wallet}: subscription ACK not observed"
+                        )
+                        continue
                     received = now_ms()
                     enriched = []
                     for fill in fills:
@@ -378,16 +533,28 @@ async def stream_user_fills_ws(
                         e["_hypersmart_source"] = "hyperliquid_ws:userFills:stream"
                         e["_hypersmart_ws_received_at_ms"] = received
                         e["_hypersmart_ws_is_snapshot"] = False
+                        e["_hypersmart_ws_ack_received_at_ms"] = ack_received_at_ms[wallet]
+                        e["_hypersmart_ws_connection_id"] = connection_id
+                        payload = _decode_ws_message(message)
+                        sequence = payload.get("sequence") if payload else None
+                        if type(sequence) is int and sequence >= 0:
+                            e["_hypersmart_ws_frame_sequence"] = sequence
                         enriched.append(e)
                         ft = _safe_positive_int(fill.get("time") or fill.get("timestamp"))
                         if ft is not None:
                             stats.last_fill_age_ms = max(0, received - ft)
                     try:
-                        _store_fresh_fills(session_factory, wallet, enriched,
-                                           max_live_fill_age_ms=max_live_fill_age_ms, stats=stats)
+                        await _store_fresh_fills(
+                            session_factory, wallet, enriched,
+                            max_live_fill_age_ms=max_live_fill_age_ms,
+                            stats=stats,
+                            sleep=sleep,
+                        )
                     except Exception as exc:  # noqa: BLE001
                         stats.warnings.append(f"store failed: {exc}")
             finally:
+                if acknowledged_wallets != set(selected):
+                    stats.connections_without_complete_ack += 1
                 try:
                     # Une fermeture qui pend ne doit pas geler non plus.
                     await asyncio.wait_for(cm.__aexit__(None, None, None), timeout=5.0)
@@ -402,14 +569,19 @@ async def stream_user_fills_ws(
         if max_reconnects is not None and stats.reconnects > max_reconnects:
             stats.stopped_reason = "max_reconnects"
             break
+        if asyncio.get_running_loop().time() - connected_at >= 5.0:
+            attempt = 0  # only stable connections reset the consecutive-failure backoff
         idx = min(attempt, len(backoff_schedule_s) - 1)
         attempt += 1
-        await sleep(backoff_schedule_s[idx])
+        base_delay = max(0.01, float(backoff_schedule_s[idx]))
+        jittered_delay = random.uniform(base_delay * 0.8, base_delay * 1.2)
+        await sleep(max(0.01, jittered_delay))
     return stats
 
 
 __all__ = [
     "UserFillsLiveResult", "normalize_user_fill_wallets", "user_fills_from_message",
+    "user_fills_subscription_ack",
     "scan_user_fills_ws", "store_user_fills_live_result", "format_user_fills_live_report",
     "StreamStats", "stream_user_fills_ws",
 ]

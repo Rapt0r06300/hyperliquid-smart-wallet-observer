@@ -64,6 +64,18 @@ threshold. The current default research threshold is 5 percentage points.
 
 No Polymarket trading/CLOB/private-key capability is introduced.
 
+### Stock-data study
+
+Stock-market data is audited through the existing source catalog and the
+`event_intelligence.stock_data` contract.  A source is not considered available
+unless it is explicitly registered as `stock_market_data`, read-only, linked to
+a point-in-time observation and associated with a named research consumer.
+Observations whose observed timestamp is later than their received timestamp are
+rejected as look-ahead.  The current catalog registers no such SAFE source, so
+the honest current result is `UNMEASURABLE` and the stock study is never exposed
+as a signal or execution path.  No synthetic quote, OHLC row or corporate-action
+observation is accepted as a substitute.
+
 ## First quantitative features
 
 The first derived layer now measures:

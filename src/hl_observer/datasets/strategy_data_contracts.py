@@ -161,6 +161,49 @@ def missing_required_families(
     }
 
 
+def evaluate_copy_vault_replay_readiness(
+    manifests: Iterable[Mapping[str, Any]],
+    *,
+    observed_book_audit: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a separate replay-grade gate; never reuse live ``READY``.
+
+    A live observer heartbeat proves only that a process is receiving data.  A
+    replay requires every Copy-Vault family, one collection run, and an
+    observed SAFE/L2 audit.  Missing evidence is reported as a blocker rather
+    than filled with marks, zeros, or synthetic rows.
+    """
+
+    rows = [dict(row) for row in manifests if isinstance(row, Mapping)]
+    missing = missing_required_families(
+        rows, strategy="copy_vault", venues=["hyperliquid"]
+    )
+    blockers: list[str] = []
+    if missing:
+        blockers.append("MISSING_REQUIRED_FAMILIES")
+    run_ids = {
+        str(row.get("collection_run_id") or row.get("run_id") or "").strip()
+        for row in rows
+    }
+    run_ids.discard("")
+    if len(run_ids) != 1:
+        blockers.append("COLLECTION_RUN_NOT_UNIQUE")
+    if not isinstance(observed_book_audit, Mapping):
+        blockers.append("OBSERVED_BOOK_AUDIT_MISSING")
+    elif observed_book_audit.get("replay_grade_ready") is not True:
+        blockers.append("OBSERVED_BOOK_REPLAY_GRADE_NOT_READY")
+    return {
+        "ready": not blockers,
+        "status": "READY_REPLAY" if not blockers else "DATA_NOT_READY",
+        "live_observer_ready_is_not_replay_ready": True,
+        "missing_required_families": missing,
+        "collection_run_ids": sorted(run_ids),
+        "blockers": blockers,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "CONTRACTS",
     "COPY_VAULT_REQUIRED_FAMILIES",
@@ -170,4 +213,5 @@ __all__ = [
     "StrategyDataContract",
     "get_strategy_data_contract",
     "missing_required_families",
+    "evaluate_copy_vault_replay_readiness",
 ]

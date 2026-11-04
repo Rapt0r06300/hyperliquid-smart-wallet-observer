@@ -41,6 +41,12 @@ def _strict_positive_int(value: object) -> int | None:
     return value
 
 
+def _strict_nonnegative_int(value: object) -> int | None:
+    if type(value) is not int or value < 0:
+        return None
+    return value
+
+
 def _causal_exit(row: Mapping[str, Any]) -> dict[str, Any] | None:
     event_ms = _strict_positive_int(row.get("ts_ms"))
     observed_ms = _strict_positive_int(row.get("observed_at_ms"))
@@ -166,11 +172,31 @@ def replay_exit_flow_train(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Replay one fixed exit-flow variant on supplied TRAIN bounds."""
 
+    valid_delay = _strict_nonnegative_int(copy_delay_ms)
+    valid_horizon = _strict_positive_int(horizon_ms)
+    valid_direction = (
+        direction_multiplier
+        if type(direction_multiplier) is int and direction_multiplier in (-1, 1)
+        else None
+    )
+    valid_start = None if train_start_ms is None else _strict_nonnegative_int(train_start_ms)
+    valid_end = None if train_end_ms is None else _strict_nonnegative_int(train_end_ms)
+    if (
+        valid_delay is None
+        or valid_horizon is None
+        or valid_direction is None
+        or (train_start_ms is not None and valid_start is None)
+        or (train_end_ms is not None and valid_end is None)
+    ):
+        return [], {
+            "signals": {"INVALID_REPLAY_PARAMETERS": 1},
+            "replay": {"completed_positions": 0},
+        }
     signals, signal_audit = cluster_causal_exit_flow(events)
     if (
-        train_start_ms is None
-        or train_end_ms is None
-        or int(train_end_ms) < int(train_start_ms)
+        valid_start is None
+        or valid_end is None
+        or valid_end < valid_start
     ):
         return [], {
             "signals": signal_audit,
@@ -184,9 +210,13 @@ def replay_exit_flow_train(
             [
                 dict(row)
                 for row in rows
-                if row.get("causal_observation") is True and not row.get("checkpoint_id")
+                if (
+                    row.get("causal_observation") is True
+                    and not row.get("checkpoint_id")
+                    and _strict_positive_int(row.get("ts_ms")) is not None
+                )
             ],
-            key=lambda row: int(row.get("ts_ms") or 0),
+            key=lambda row: _strict_positive_int(row["ts_ms"]) or 0,
         )
         for coin, rows in books_by_coin.items()
     }
@@ -202,9 +232,9 @@ def replay_exit_flow_train(
         trade, reason = execute_metaorder(
             signal,
             continuous.get(preserve_native_instrument_symbol(signal["coin"]), []),
-            horizon_ms=int(horizon_ms),
-            direction_multiplier=int(direction_multiplier),
-            copy_delay_ms=int(copy_delay_ms),
+        horizon_ms=valid_horizon,
+        direction_multiplier=valid_direction,
+        copy_delay_ms=valid_delay,
             require_causal_books=True,
         )
         if trade is None:
@@ -230,8 +260,8 @@ def replay_exit_flow_train(
                 "leader_position_direction": signal["leader_position_direction"],
                 "leader_exit_action": signal["exit_action"],
                 "leader_exit_event_ids": list(signal["member_event_ids"]),
-                "copy_delay_ms": int(copy_delay_ms),
-                "markout_horizon_ms": int(horizon_ms),
+                "copy_delay_ms": valid_delay,
+                "markout_horizon_ms": valid_horizon,
                 "paper_read_only": True,
                 "real_execution": False,
             }

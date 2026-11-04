@@ -85,6 +85,29 @@ def test_preflight_sans_sonde_les_endpoints_durs_echouent(tmp_path):
     assert "endpoint:hyperliquid" in {v.nom for v in res.blocages()}
 
 
+def test_disque_utilise_un_seuil_explicitement_borne_par_phase():
+    assert PF.seuil_disque_phase("collect") == 500.0
+    assert PF.seuil_disque_phase("replay") == 1000.0
+    assert PF.seuil_disque_phase("forward_paper") == 2000.0
+    try:
+        PF.seuil_disque_phase("unknown")
+    except ValueError as exc:
+        assert "phase disque inconnue" in str(exc)
+    else:
+        raise AssertionError("une phase inconnue doit rester fail-closed")
+
+
+def test_journal_no_go_est_append_only_et_machine_readable(tmp_path):
+    res = _preflight(tmp_path, prober=None)
+    assert res.go() is False
+    assert PF.journaliser_echec_preflight(tmp_path, res, phase="collect", run_id="run-a", now_ms=123)
+    assert PF.journaliser_echec_preflight(tmp_path, res, phase="collect", run_id="run-b", now_ms=456)
+    lignes = (tmp_path / PF.JOURNAL_ECHECS_REL).read_text(encoding="utf-8").splitlines()
+    assert len(lignes) == 2
+    assert [json.loads(l)["run_id"] for l in lignes] == ["run-a", "run-b"]
+    assert all(json.loads(l)["status"] == "NO_GO" for l in lignes)
+
+
 def test_preflight_schemas_reels_presents_dans_le_repo():
     v = PF.verifier_schemas(RACINE_REPO)                       # garde de régression sur docs/schemas
     assert v.ok, v.detail

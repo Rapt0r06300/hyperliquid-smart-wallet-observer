@@ -22,3 +22,27 @@ def test_penalise_par_defauts():
 def test_borne_a_zero():
     r = score(gaps=5, rest_ws_accord=False, age_etat_ms=999999.0, position_reconstruite_ok=False)
     assert r["sync_confidence"] == 0.0
+
+
+def test_observations_absentes_refusent_l_ouverture():
+    r = score()
+    assert r["state"] == "UNMEASURABLE"
+    assert r["refuse"] is True
+    assert r["sync_confidence"] is None
+
+
+def test_nan_et_age_negatif_sont_refuses():
+    complete = dict(gaps=0, rest_ws_accord=True, position_reconstruite_ok=True)
+    assert score(**complete, age_etat_ms=float("nan"))["refuse"] is True
+    assert score(**complete, age_etat_ms=-1.0)["refuse"] is True
+
+
+def test_bool_et_gaps_invalides_sont_refuses():
+    assert score(gaps=True, rest_ws_accord=True, age_etat_ms=0.0,
+                 position_reconstruite_ok=True)["refuse"] is True
+    assert score(gaps=float("nan"), rest_ws_accord=True, age_etat_ms=0.0,
+                 position_reconstruite_ok=True)["refuse"] is True
+    assert score(gaps=float("inf"), rest_ws_accord=True, age_etat_ms=0.0,
+                 position_reconstruite_ok=True)["refuse"] is True
+    assert score(gaps=0, rest_ws_accord=1, age_etat_ms=0.0,
+                 position_reconstruite_ok=True)["refuse"] is True

@@ -7,12 +7,67 @@ from pathlib import Path
 from hl_observer.ops.pnl_improvement_lab import (
     HistoricalTrade,
     build_lab_report,
+    compare_regime_ablation,
     compute_metrics,
     evaluate_candidate_rules,
     extract_historical_trades,
     write_lab_outputs,
 )
 from hl_observer.simulation.accounting_truth import ACCOUNTING_SCHEMA_VERSION
+
+
+def _regime_row(regime: str, ts: int, episode: str, trial: str, gross: float, cost: float) -> dict:
+    return {
+        "regime": regime,
+        "opened_at_ms": ts,
+        "episode_id": episode,
+        "trial_id": trial,
+        "gross_pnl_bps": gross,
+        "cost_bps": cost,
+    }
+
+
+def test_regime_ablation_freeze_train_and_costs_identically_in_oos() -> None:
+    train = [
+        _regime_row("HIGH", 100, "tr-h-1", "trial-a", 8.0, 2.0),
+        _regime_row("HIGH", 110, "tr-h-2", "trial-a", 7.0, 2.0),
+        _regime_row("HIGH", 120, "tr-h-3", "trial-b", 6.0, 2.0),
+        _regime_row("LOW", 130, "tr-l-1", "trial-a", 1.0, 2.0),
+        _regime_row("LOW", 140, "tr-l-2", "trial-b", 1.0, 2.0),
+        _regime_row("LOW", 150, "tr-l-3", "trial-b", 1.0, 2.0),
+    ]
+    oos = [
+        _regime_row("HIGH", 2_000, "oos-h-1", "trial-c", 8.0, 2.0),
+        _regime_row("HIGH", 2_010, "oos-h-2", "trial-c", 7.0, 2.0),
+        _regime_row("LOW", 2_020, "oos-l-1", "trial-d", 0.0, 2.0),
+    ]
+
+    result = compare_regime_ablation(train, oos, cutoff_ms=1_000)
+
+    assert result["status"] == "COMPARABLE"
+    assert result["train_freeze"]["allowed_regimes"] == ["HIGH"]
+    assert result["baseline_oos"]["cost_bps"] == 6.0
+    assert result["regime_filtered_oos"]["cost_bps"] == 4.0
+    assert result["regime_filtered_oos"]["mean_net_pnl_bps"] == 5.5
+    assert result["same_oos_episodes_and_cost_fields"] is True
+    assert result["promotion"] == "DISABLED_UNTIL_REVIEW"
+
+
+def test_regime_ablation_refuse_future_train_and_duplicate_episode() -> None:
+    row = _regime_row("HIGH", 2_000, "episode-1", "trial-a", 5.0, 1.0)
+    assert compare_regime_ablation(
+        [row],
+        [_regime_row("HIGH", 3_000, "episode-2", "trial-b", 5.0, 1.0)],
+        cutoff_ms=1_000,
+    )["status"] == "UNMEASURABLE"
+
+    duplicate = _regime_row("HIGH", 100, "episode-1", "trial-a", 5.0, 1.0)
+    duplicate_2 = _regime_row("HIGH", 110, "episode-1", "trial-b", 5.0, 1.0)
+    assert compare_regime_ablation(
+        [duplicate, duplicate_2],
+        [_regime_row("HIGH", 3_000, "episode-2", "trial-b", 5.0, 1.0)],
+        cutoff_ms=1_000,
+    )["status"] == "UNMEASURABLE"
 
 
 def _trade(

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from unittest.mock import patch
 
 from hl_observer.backtesting.copy_vault_v8_entry_efficiency_train import (
     entry_efficiency_score,
     explore_copy_vault_v8_entry_efficiency_train,
     select_entry_efficiency,
 )
+from hl_observer.ops.pnl_improvement_lab import learn_train_only_markout_filter
 
 
 def _trade(index: int) -> dict:
@@ -69,3 +71,62 @@ def test_v8_entry_score_refuse_coercions_numeriques_et_horaires() -> None:
         row = dict(base)
         row[field] = value
         assert entry_efficiency_score(row) is None
+
+
+def test_v8_rejects_non_integer_train_bounds_without_truncation() -> None:
+    with patch(
+        "hl_observer.backtesting.copy_vault_v8_entry_efficiency_train.temporal_bounds",
+        return_value={"train_start_ms": 1_000.5, "train_end_ms": 2_000},
+    ):
+        result = explore_copy_vault_v8_entry_efficiency_train([], {}, [])
+
+    assert result["status"] == "NO_ROBUST_TRAIN_CANDIDATE"
+    assert result["selection_eligible"] is False
+    assert result["physical_freeze_allowed"] is False
+
+
+def _markout_row(index: int, *, markout: float, observed_delta: int = 10) -> dict:
+    entry = 1_900_000_000_000 + index * 1_000
+    return {
+        "leader_id": "leader-a",
+        "entry_ts_ms": entry,
+        "markout_observed_at_ms": entry + observed_delta,
+        "markout_bps": markout,
+    }
+
+
+def test_markout_filter_apprend_train_only_et_ignore_le_future_du_candidat() -> None:
+    train = [_markout_row(index, markout=10.0 + index) for index in range(8)]
+    candidate = {
+        "leader_id": "leader-a",
+        "entry_ts_ms": 1_900_000_010_000,
+        # This is deliberately contradictory future data.  The selector must
+        # not inspect it while applying the frozen TRAIN threshold.
+        "markout_observed_at_ms": 1_900_000_010_010,
+        "markout_bps": -10_000.0,
+    }
+
+    selected, audit = learn_train_only_markout_filter(
+        train,
+        [candidate],
+        min_history=2,
+    )
+
+    assert [row["leader_id"] for row in selected] == ["leader-a"]
+    assert selected[0]["markout_filter_training_only"] is True
+    assert selected[0]["markout_filter_uses_candidate_future"] is False
+    assert audit["status"] == "TRAIN_FILTER_FROZEN"
+    assert audit["candidate_future_markout_ignored"] is True
+
+
+def test_markout_filter_refuse_observation_non_causale_et_historique_insuffisant() -> None:
+    train = [_markout_row(0, markout=10.0, observed_delta=0)]
+    selected, audit = learn_train_only_markout_filter(
+        train,
+        [_markout_row(2, markout=50.0)],
+        min_history=1,
+    )
+
+    assert selected == []
+    assert audit["status"] == "INSUFFICIENT_TRAIN_MARKOUT_HISTORY"
+    assert audit["invalid_train_rows_rejected"] == 1

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -62,18 +63,58 @@ def _claim_matches(actual: object, expected: object) -> bool:
             return False
         if "min" in expected:
             try:
-                if isinstance(actual, bool) or actual < expected["min"]:
+                if (
+                    isinstance(actual, bool)
+                    or not isinstance(actual, (int, float))
+                    or not math.isfinite(float(actual))
+                    or actual < expected["min"]
+                ):
                     return False
             except (TypeError, ValueError):
                 return False
         if "max" in expected:
             try:
-                if isinstance(actual, bool) or actual > expected["max"]:
+                if (
+                    isinstance(actual, bool)
+                    or not isinstance(actual, (int, float))
+                    or not math.isfinite(float(actual))
+                    or actual > expected["max"]
+                ):
                     return False
             except (TypeError, ValueError):
                 return False
         return True
     return _equal(actual, expected)
+
+
+def _validate_claim_expectation(value: object, *, path: str) -> None:
+    """Reject non-finite or contradictory JSON contract bounds early."""
+
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{path} must be finite")
+    if not isinstance(value, Mapping):
+        return
+    for flag in ("present",):
+        if flag in value and not isinstance(value[flag], bool):
+            raise ValueError(f"{path}.{flag} must be boolean")
+    bounds: dict[str, float] = {}
+    for bound in ("min", "max"):
+        if bound not in value:
+            continue
+        candidate = value[bound]
+        if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+            raise ValueError(f"{path}.{bound} must be a finite number")
+        number = float(candidate)
+        if not math.isfinite(number):
+            raise ValueError(f"{path}.{bound} must be a finite number")
+        bounds[bound] = number
+    if "min" in bounds and "max" in bounds and bounds["min"] > bounds["max"]:
+        raise ValueError(f"{path} has min greater than max")
+    for key, nested in value.items():
+        if key not in {"equals", "present", "min", "max"}:
+            _validate_claim_expectation(nested, path=f"{path}.{key}")
+        elif key == "equals":
+            _validate_claim_expectation(nested, path=f"{path}.equals")
 
 
 def _canonical_receipt_sha256(receipt: Mapping[str, Any]) -> str:
@@ -192,11 +233,11 @@ def _criterion_errors(
     if record.real_execution is not False:
         errors.append("REAL_EXECUTION_MUST_BE_FALSE")
     if criterion.require_hosted:
-        if record.run_id is None:
+        if not record.run_id:
             errors.append("HOSTED_RUN_ID_MISSING")
-        if record.artifact_id is None:
+        if not record.artifact_id:
             errors.append("HOSTED_ARTIFACT_ID_MISSING")
-        if record.artifact_sha256 is None:
+        if not record.artifact_sha256:
             errors.append("HOSTED_ARTIFACT_DIGEST_MISSING")
         if record.run_status not in _SAFE_RUN_STATUSES:
             errors.append("HOSTED_RUN_NOT_COMPLETED")
@@ -204,7 +245,7 @@ def _criterion_errors(
             errors.append("HOSTED_RUN_NOT_SUCCESSFUL")
     if criterion.require_full_dataset and record.full_dataset_certified is not True:
         errors.append("FULL_DATASET_CERTIFICATION_MISSING")
-    if record.artifact_sha256 is not None and not _is_full_sha(record.artifact_sha256):
+    if record.artifact_sha256 is not None and not _SHA256_RE.fullmatch(record.artifact_sha256):
         errors.append("ARTIFACT_SHA_INVALID")
     for path, expected in criterion.required_claims.items():
         present, actual = _claim_at_path(record.claims, path)
@@ -220,7 +261,15 @@ def _validate_criterion(criterion: ClosureCriterion) -> None:
         raise ValueError("criterion_id must be non-empty")
     if not criterion.required_kinds or any(not kind.strip() for kind in criterion.required_kinds):
         raise ValueError(f"{criterion.criterion_id}: required_kinds must be non-empty")
-    if criterion.min_distinct_runs < 1:
+    if not isinstance(criterion.required_claims, Mapping):
+        raise ValueError(f"{criterion.criterion_id}: required_claims must be an object")
+    for path, expected in criterion.required_claims.items():
+        _validate_claim_expectation(expected, path=str(path))
+    if (
+        isinstance(criterion.min_distinct_runs, bool)
+        or not isinstance(criterion.min_distinct_runs, int)
+        or criterion.min_distinct_runs < 1
+    ):
         raise ValueError(f"{criterion.criterion_id}: min_distinct_runs must be positive")
     if criterion.require_hosted and criterion.min_distinct_runs > 1:
         # This is valid, but making it explicit prevents a caller from thinking

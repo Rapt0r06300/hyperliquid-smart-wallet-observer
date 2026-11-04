@@ -154,6 +154,24 @@ def test_consensus_rejects_non_finite_notional_fail_closed():
     assert report.rejected_reasons["non_finite_notional"] == 1
 
 
+def test_consensus_rejects_missing_notional_instead_of_treating_it_as_zero():
+    wallet_a = "0x" + "a" * 40
+    wallet_b = "0x" + "b" * 40
+    report = select_consensus_leaders_from_deltas(
+        [
+            _delta(wallet_a, ms=10_000, notional=None),
+            _delta(wallet_b, ms=10_100, notional=25_000.0),
+        ],
+        [_leader(wallet_a, 98), _leader(wallet_b, 92)],
+        now_timestamp_ms=11_000,
+        max_leaders=2,
+        min_wallets=2,
+    )
+
+    assert report.groups_seen == 0
+    assert report.rejected_reasons["missing_notional"] == 1
+
+
 def test_consensus_ignores_non_finite_leader_score_without_inventing_score():
     wallet_a = "0x" + "a" * 40
     wallet_b = "0x" + "b" * 40

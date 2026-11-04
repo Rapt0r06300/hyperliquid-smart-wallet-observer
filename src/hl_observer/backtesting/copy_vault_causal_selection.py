@@ -15,6 +15,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
 )
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_MAX_CONFIRMED_L2_LAG_MS = 30_000
 
 
 def _finite_number(value: object) -> float | None:
@@ -36,13 +37,28 @@ def _snapshot_flag(row: Mapping[str, Any]) -> object:
 def _strict_positive_int(value: object) -> int | None:
     if type(value) is bool or value is None:
         return None
-    if isinstance(value, float) and not value.is_integer():
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.strip().isdecimal():
+        try:
+            parsed = int(value.strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _strict_non_negative_int(value: object) -> int | None:
+    if type(value) is bool or value is None:
         return None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return parsed if parsed > 0 else None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdecimal():
+        try:
+            return int(value.strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return None
 
 
 def _local_receipt_timestamp_ms(row: Mapping[str, Any]) -> int | None:
@@ -71,6 +87,32 @@ def causal_live_observation(row: Mapping[str, Any]) -> bool:
         and event_ts_ms is not None
         and received_at_ms is not None
         and received_at_ms >= event_ts_ms
+    )
+
+
+def confirmed_causal_l2_observation(row: Mapping[str, Any]) -> bool:
+    """Require real, complete, SAFE L2 evidence before certification use."""
+
+    exchange_ts_ms = _strict_positive_int(row.get("exchange_ts_ms"))
+    received_at_ms = _strict_positive_int(row.get("received_at_ms"))
+    return bool(
+        row.get("causal_observation") is True
+        and row.get("source") in {
+            "HYPERLIQUID_L2_WS",
+            "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+        }
+        and row.get("data_origin") == "REAL_OBSERVED"
+        and exchange_ts_ms is not None
+        and received_at_ms is not None
+        and received_at_ms >= exchange_ts_ms
+        and received_at_ms - exchange_ts_ms <= _MAX_CONFIRMED_L2_LAG_MS
+        and isinstance(row.get("bids5"), list)
+        and bool(row.get("bids5"))
+        and isinstance(row.get("asks5"), list)
+        and bool(row.get("asks5"))
+        and row.get("source_quality_status") == "SAFE"
+        and row.get("source_manifest_verified") is True
+        and row.get("source_replay_compatible") is True
     )
 
 
@@ -146,6 +188,9 @@ def cluster_metaorders(
     entries: Iterable[Mapping[str, Any]], *, gap_ms: int = METAORDER_GAP_MS
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Collapse sliced fills without using later slices as independent trades."""
+    gap = _strict_non_negative_int(gap_ms)
+    if gap is None:
+        raise ValueError("gap_ms must be an exact non-negative integer")
     canonical: list[dict[str, Any]] = []
     seen: set[str] = set()
     duplicate_events = 0
@@ -229,7 +274,7 @@ def cluster_metaorders(
         if (
             cluster is None
             or row["action"] == "OPEN"
-            or row["ts_ms"] - cluster["last_fill_ts_ms"] > int(gap_ms)
+            or row["ts_ms"] - cluster["last_fill_ts_ms"] > gap
         ):
             if cluster is not None:
                 completed.append(cluster)
@@ -357,7 +402,10 @@ def select_observed_continuations(
     The candidate depends exclusively on the prefix available at signal time. Later
     slices remain audit material and cannot alter its identity or sizing evidence.
     """
-    required = max(2, int(required_observed_fills))
+    required_value = _strict_positive_int(required_observed_fills)
+    if required_value is None:
+        raise ValueError("required_observed_fills must be an exact positive integer")
+    required = max(2, required_value)
     rows = [dict(row) for row in metaorders]
     selected: list[dict[str, Any]] = []
     rejected_noncausal = 0
@@ -369,20 +417,34 @@ def select_observed_continuations(
             rejected_short += 1
             continue
         prefix = members[:required]
-        if not all(
-            row.get("causal_forward_eligible") is True
-            and str(row.get("source") or "") == "LIVE_WS"
-            and int(row.get("observed_at_ms") or 0) >= int(row.get("ts_ms") or 0) > 0
-            for row in prefix
-        ):
+        prefix_timestamps: list[int] = []
+        prefix_valid = True
+        for row in prefix:
+            event_ts_ms = _strict_positive_int(row.get("ts_ms"))
+            observed_at_ms = _strict_positive_int(row.get("observed_at_ms"))
+            if (
+                row.get("causal_forward_eligible") is not True
+                or str(row.get("source") or "") != "LIVE_WS"
+                or event_ts_ms is None
+                or observed_at_ms is None
+                or observed_at_ms < event_ts_ms
+            ):
+                prefix_valid = False
+                break
+            prefix_timestamps.append(observed_at_ms)
+        if not prefix_valid:
             rejected_noncausal += 1
             continue
-        observed_times = [int(row["observed_at_ms"]) for row in prefix]
+        observed_times = prefix_timestamps
         if observed_times != sorted(observed_times):
             rejected_nonmonotonic += 1
             continue
         confirmation = prefix[-1]
-        signal_ts_ms = int(confirmation["observed_at_ms"])
+        signal_ts_ms = observed_times[-1]
+        direction = raw.get("direction")
+        if type(direction) is not int or direction not in (-1, 1):
+            rejected_noncausal += 1
+            continue
         candidate = {
             **dict(raw),
             "signal_ts_ms": signal_ts_ms,
@@ -400,7 +462,7 @@ def select_observed_continuations(
         candidate["metaorder_id"] = canonical_metaorder_id(
             vault=str(candidate["vault"]),
             coin=str(candidate["coin"]),
-            direction=int(candidate["direction"]),
+            direction=direction,
             signal_ts_ms=signal_ts_ms,
             first_event_id=str(confirmation["event_id"]),
         )
@@ -426,15 +488,40 @@ def select_observed_continuations(
 def select_causal_protocol_inputs(
     metaorders: Iterable[Mapping[str, Any]],
     books_by_coin: Mapping[str, Iterable[Mapping[str, Any]]],
+    *,
+    cutoff_ms: int | None = None,
+    require_confirmed_l2: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Separate certifiable live evidence from historical audit material."""
+    """Separate certifiable live evidence from historical audit material.
+
+    When ``cutoff_ms`` is supplied, it is a frozen availability boundary: signal
+    and book rows after it are rejected rather than silently becoming part of a
+    replay.  This keeps repeated replays deterministic when a later capture is
+    appended to the same source.
+    """
+    if cutoff_ms is not None:
+        cutoff_value = _strict_positive_int(cutoff_ms)
+        if cutoff_value is None:
+            raise ValueError("cutoff_ms must be an exact positive integer")
+    else:
+        cutoff_value = None
     all_metaorders = [dict(row) for row in metaorders]
-    causal_metaorders = [
-        row
-        for row in all_metaorders
-        if row.get("causal_forward_eligible") is True
-        and str(row.get("signal_source") or "") == "LIVE_WS"
-    ]
+    causal_metaorders: list[dict[str, Any]] = []
+    invalid_causal_signal_timestamps = 0
+    post_cutoff_metaorders_rejected = 0
+    for row in all_metaorders:
+        if (
+            row.get("causal_forward_eligible") is not True
+            or str(row.get("signal_source") or "") != "LIVE_WS"
+        ):
+            continue
+        if _strict_positive_int(row.get("signal_ts_ms")) is None:
+            invalid_causal_signal_timestamps += 1
+            continue
+        if cutoff_value is not None and int(row["signal_ts_ms"]) > cutoff_value:
+            post_cutoff_metaorders_rejected += 1
+            continue
+        causal_metaorders.append(row)
     causal_metaorders.sort(
         key=lambda row: (int(row.get("signal_ts_ms") or 0), str(row.get("metaorder_id") or ""))
     )
@@ -443,6 +530,9 @@ def select_causal_protocol_inputs(
     }
     total_book_rows = 0
     causal_book_rows = 0
+    total_invalid_book_timestamps = 0
+    post_cutoff_book_rows_rejected = 0
+    unconfirmed_causal_book_rows_rejected = 0
     causal_books: dict[str, list[dict[str, Any]]] = {}
     for raw_coin, raw_rows in books_by_coin.items():
         coin = canonical_copy_vault_coin(raw_coin)
@@ -450,20 +540,63 @@ def select_causal_protocol_inputs(
         total_book_rows += len(rows)
         if coin not in wanted_coins:
             continue
-        selected = [row for row in rows if row.get("causal_observation") is True]
-        selected.sort(key=lambda row: int(row.get("ts_ms") or 0))
+        selected = [
+            row
+            for row in rows
+            if row.get("causal_observation") is True
+            and _strict_positive_int(row.get("ts_ms")) is not None
+            and (
+                not require_confirmed_l2
+                or confirmed_causal_l2_observation(row)
+            )
+            and (
+                cutoff_value is None
+                or int(row["ts_ms"]) <= cutoff_value
+            )
+        ]
+        if cutoff_value is not None:
+            post_cutoff_book_rows_rejected += sum(
+                row.get("causal_observation") is True
+                and _strict_positive_int(row.get("ts_ms")) is not None
+                and int(row["ts_ms"]) > cutoff_value
+                for row in rows
+            )
+        invalid_book_timestamps = sum(
+            row.get("causal_observation") is True
+            and _strict_positive_int(row.get("ts_ms")) is None
+            for row in rows
+        )
+        selected.sort(key=lambda row: _strict_positive_int(row.get("ts_ms")) or 0)
         if selected:
             causal_books[coin] = selected
             causal_book_rows += len(selected)
+        total_invalid_book_timestamps += invalid_book_timestamps
+        if require_confirmed_l2:
+            unconfirmed_causal_book_rows_rejected += sum(
+                row.get("causal_observation") is True
+                and _strict_positive_int(row.get("ts_ms")) is not None
+                and not confirmed_causal_l2_observation(row)
+                for row in rows
+            )
     return causal_metaorders, causal_books, {
         "protocol_scope": "LIVE_WS_SIGNALS_AND_CAUSAL_HYPERLIQUID_L2_ONLY",
         "all_metaorders": len(all_metaorders),
         "causal_protocol_metaorders": len(causal_metaorders),
+        "invalid_causal_signal_timestamps_rejected": invalid_causal_signal_timestamps,
+        "cutoff_ms": cutoff_value,
+        "post_cutoff_metaorders_rejected": post_cutoff_metaorders_rejected,
         "historical_or_noncausal_metaorders_excluded": (
             len(all_metaorders) - len(causal_metaorders)
         ),
         "all_loaded_book_rows": total_book_rows,
         "causal_protocol_book_rows": causal_book_rows,
+        "invalid_causal_book_timestamps_rejected": total_invalid_book_timestamps,
+        "post_cutoff_book_rows_rejected": post_cutoff_book_rows_rejected,
+        "require_confirmed_l2": bool(require_confirmed_l2),
+        "unconfirmed_causal_book_rows_rejected": unconfirmed_causal_book_rows_rejected,
         "historical_or_noncausal_book_rows_excluded": total_book_rows - causal_book_rows,
         "causal_protocol_coins": len(causal_books),
     }
+
+
+__all__ = ["causal_live_observation", "confirmed_causal_l2_observation", "select_causal_protocol_inputs"]

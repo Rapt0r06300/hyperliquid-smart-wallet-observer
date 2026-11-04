@@ -29,3 +29,8 @@ def test_vente_prix_exceptionnel_non_replicable():
     assert r["avantage_execution_bps"] == 100.0
     assert r["replicable"] is False
     assert r["verdict"] == "EDGE_EXECUTION_NON_REPLICABLE"
+
+
+def test_prix_non_fini_et_sens_inconnu_sont_non_mesurables():
+    assert attribuer(float("nan"), 100.0, "ACHAT")["replicable"] is False
+    assert attribuer(100.0, 100.0, "UNKNOWN")["avantage_execution_bps"] == "UNMEASURABLE"

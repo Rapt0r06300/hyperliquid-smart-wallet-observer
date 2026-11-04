@@ -21,6 +21,15 @@ from hl_observer.core.causal_time import causal_timestamp_from_record
 CANONICAL_SCHEMA_VERSION = "hypersmart.market_event.v1"
 
 
+def _optional_exact_exchange_timestamp(value: object) -> int | None:
+    """Keep an optional exchange timestamp only when it is an observed integer."""
+    if value is None:
+        return None
+    if type(value) is not int or value <= 0:
+        return None
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class CanonicalMarketEvent:
     event_id: str
@@ -111,6 +120,9 @@ def canonicalize_tick_record(record: Mapping[str, Any]) -> CanonicalizationResul
     )
     if not control_event and not gate_ready:
         reasons.append("DATA_QUALITY_GATE_NOT_READY")
+    exchange_ts_ms = _optional_exact_exchange_timestamp(record.get("exchange_ts_ms"))
+    if record.get("exchange_ts_ms") is not None and exchange_ts_ms is None:
+        reasons.append("INVALID_EXCHANGE_TIMESTAMP")
     if reasons:
         return CanonicalizationResult(None, tuple(dict.fromkeys(reasons)))
 
@@ -140,11 +152,7 @@ def canonicalize_tick_record(record: Mapping[str, Any]) -> CanonicalizationResul
         connection_id=clock.connection_id,
         sequence=clock.sequence,
         recv_mono_ns=clock.recv_mono_ns,
-        exchange_ts_ms=(
-            None
-            if record.get("exchange_ts_ms") is None
-            else int(record["exchange_ts_ms"])
-        ),
+        exchange_ts_ms=exchange_ts_ms,
         received_ts_ms=received_ts_ms,
         written_ts_ms=written_ts_ms,
         observable_at_ms=max(received_ts_ms, written_ts_ms),

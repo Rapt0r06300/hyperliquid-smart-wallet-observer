@@ -277,3 +277,86 @@ def test_two_hosted_runs_cannot_reuse_one_artifact() -> None:
         "two_exact_sha_retries:DISTINCT_ARTIFACTS_INSUFFICIENT:1<2"
         in reused_artifact["missing_evidence"]
     )
+
+
+def test_hosted_evidence_rejects_blank_run_and_artifact_ids() -> None:
+    record = EvidenceRecord(
+        **{
+            **_hosted(semantic_equivalence=True).__dict__,
+            "run_id": "",
+            "artifact_id": "",
+        },
+    )
+    report = build_closure_matrix(
+        "H-T102",
+        [ClosureCriterion("exact_sha_hosted_run", ("github_hosted",), require_hosted=True)],
+        [record],
+        expected_head_sha=HEAD,
+    )
+
+    assert report["status"] == NOT_PROVEN
+    reasons = report["missing_evidence"]
+    assert "exact_sha_hosted_run:github_hosted:HOSTED_RUN_ID_MISSING" in reasons
+    assert "exact_sha_hosted_run:github_hosted:HOSTED_ARTIFACT_ID_MISSING" in reasons
+
+
+def test_numeric_claim_bounds_reject_nan_and_non_numeric_values() -> None:
+    criterion = ClosureCriterion(
+        "causal_rows",
+        ("safe_replay",),
+        required_claims={"rows": {"min": 1}},
+    )
+    base = EvidenceRecord(
+        kind="safe_replay",
+        source="local://safe-replay.json",
+        head_sha=HEAD,
+        evidence_status="VERIFIED",
+        paper_read_only=True,
+        real_execution=False,
+    )
+    nan_report = build_closure_matrix(
+        "H-T170",
+        [criterion],
+        [EvidenceRecord(**{**base.__dict__, "claims": {"rows": float("nan")}})],
+        expected_head_sha=HEAD,
+    )
+    string_report = build_closure_matrix(
+        "H-T170",
+        [criterion],
+        [EvidenceRecord(**{**base.__dict__, "claims": {"rows": "1"}})],
+        expected_head_sha=HEAD,
+    )
+
+    assert nan_report["status"] == NOT_PROVEN
+    assert string_report["status"] == NOT_PROVEN
+
+
+def test_criterion_rejects_boolean_run_count() -> None:
+    try:
+        build_closure_matrix(
+            "H-T195",
+            [ClosureCriterion("two_runs", ("github_hosted",), min_distinct_runs=True)],
+            [_hosted()],
+            expected_head_sha=HEAD,
+        )
+    except ValueError as exc:
+        assert "min_distinct_runs" in str(exc)
+    else:
+        raise AssertionError("boolean min_distinct_runs must fail closed")
+
+
+def test_criterion_rejects_non_finite_or_inverted_claim_bounds() -> None:
+    base = {"kind": "safe_replay", "source": "local://receipt", "head_sha": HEAD,
+            "evidence_status": "VERIFIED", "paper_read_only": True, "real_execution": False}
+    for claims in ({"rows": {"min": float("nan")}}, {"rows": {"min": 3, "max": 2}}):
+        try:
+            build_closure_matrix(
+                "H-T170",
+                [ClosureCriterion("rows", ("safe_replay",), required_claims=claims)],
+                [EvidenceRecord(**base, claims={"rows": 3})],
+                expected_head_sha=HEAD,
+            )
+        except ValueError as exc:
+            assert "rows" in str(exc)
+        else:
+            raise AssertionError("invalid claim bounds must fail closed")

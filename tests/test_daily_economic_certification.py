@@ -63,6 +63,9 @@ def test_daily_gate_refuses_below_five_dollars_per_day() -> None:
     assert result["certified"] is False
     assert result["eligible_net_pnl_usd"] is None
     assert "TARGET_NET_USD_PER_DAY_NOT_REACHED" in result["reasons"]
+    assert result["quality_certified"] is True
+    assert result["positive_forward_net"] is True
+    assert result["historical_target_reached"] is False
 
 
 def test_daily_gate_fails_closed_when_forward_duration_is_missing() -> None:

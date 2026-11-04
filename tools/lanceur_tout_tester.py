@@ -52,6 +52,20 @@ def _chemin_recap(racine: Path = RACINE) -> Path:
     return racine / "runtime" / "reports" / "legacy" / RECAP.name
 
 
+def _chemin_recap_triage(racine: Path = RACINE) -> Path:
+    """Retourne le récap canonique, avec compatibilité pour un récap de test à la racine.
+
+    Le runtime écrit toujours sous ``runtime/reports/legacy``.  Le fallback racine est limité
+    au mode de lecture du triage et permet aux copies minimales ou aux sondes temporaires de
+    fournir un récap sans devoir recréer toute l'arborescence d'exécution.
+    """
+    canonique = _chemin_recap(racine)
+    if canonique.is_file():
+        return canonique
+    racine_directe = racine / RECAP.name
+    return racine_directe if racine_directe.is_file() else canonique
+
+
 def _chemin_logs(racine: Path = RACINE) -> Path:
     return racine / "runtime" / "reports" / "legacy" / "tout-tester"
 
@@ -87,6 +101,7 @@ SECRETS = ("PRIVATE_KEY", "HL_PRIVATE_KEY", "MNEMONIC", "SEED_PHRASE", "WALLET_S
 OPTIONS_LANCEUR = {"--sans-pause": "ne pas attendre une touche a la fin",
                    "--ouvrir": "ouvrir le RECAP a la fin",
                    "--forcer": "ignorer un verrou existant",
+                   "--accelere": "garder toutes les etapes avec 4 workers pytest bornes",
                    "--derniers-echecs": "afficher les echecs du DERNIER run, sans relancer",
                    "--sans-triage": "ne pas afficher le triage des echecs a la fin"}
 
@@ -189,6 +204,16 @@ def environnement_fils(racine: Path = RACINE) -> dict[str, str]:
     e["HYPERSMART_READ_ONLY"] = "1"
     e["HYPERSMART_PAPER_ONLY"] = "1"
     return e
+
+
+def environnement_execution(racine: Path = RACINE, *, accelere: bool = False) -> dict[str, str]:
+    """Build the child environment while keeping acceleration explicitly opt-in."""
+
+    environnement = environnement_fils(racine)
+    if accelere:
+        environnement["TOUT_TESTER_PYTEST_PARALLELE"] = "1"
+        environnement["TOUT_TESTER_PYTEST_WORKERS"] = "4"
+    return environnement
 
 
 def _cflags() -> int:
@@ -394,12 +419,13 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
     pause = "--sans-pause" not in brut
     ouvrir = "--ouvrir" in brut
     forcer = "--forcer" in brut
+    accelere = "--accelere" in brut
     triage = "--sans-triage" not in brut
     args = [a for a in brut if a not in OPTIONS_LANCEUR]
 
     # --derniers-echecs : triage INSTANTANE du dernier RECAP, sans rien relancer (~0 s).
     if "--derniers-echecs" in brut:
-        resume = resumer_echecs_du_recap(_chemin_recap(racine))
+        resume = resumer_echecs_du_recap(_chemin_recap_triage(racine))
         if not resume["present"]:
             print("  aucun RECAP-COMPLET.md — lance d'abord TOUT-TESTER.cmd.", flush=True)
         else:
@@ -452,6 +478,8 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
         dire("")
         dire("  --- lancement : tools/tout_tester.py %s ---" % " ".join(args))
         dire("")
+        if accelere:
+            dire("  [ACCELERATION] toutes les etapes conservees; pytest xdist borne a 4 workers.")
         # ISOLATION DU GROUPE (invariant test_outils_isoles_du_ctrl_c) : tout sous-processus
         # qui touche a pytest recoit son PROPRE groupe. Sans `creationflags`, un Ctrl-C console
         # tuerait tout_tester.py AVANT qu'il n'ecrive le RECAP — le bug du 11/07 (audit_report)
@@ -473,9 +501,10 @@ def lancer(argv: list[str] | None = None, racine: Path = RACINE) -> int:
         # 22/07 — Popen (pas subprocess.run) pour pouvoir TUER L'ARBRE au timeout : run() ne tuerait
         # que tout_tester.py et laisserait la recherche + workers orphelins (le bug vécu par Flo).
         # start_new_session : groupe POSIX pour killpg ; _cflags() : groupe Windows pour taskkill /T.
+        environnement = environnement_execution(racine, accelere=accelere)
         proc = subprocess.Popen(
             [sys.executable, str(racine / "tools" / "tout_tester.py"), *args],
-            cwd=racine, env=environnement_fils(racine),
+            cwd=racine, env=environnement,
             creationflags=_cflags(), start_new_session=True)
         try:
             code = proc.wait(timeout=BUDGET_TOTAL_S)                          # 41 filet anti-blocage

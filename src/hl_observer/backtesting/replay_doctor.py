@@ -21,6 +21,7 @@ n'émet aucun ordre. Les métriques sont descriptives — jamais une promesse de
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Iterable
 
 from hl_observer.runtime.replay_recorder import read_replay_lines
@@ -46,6 +47,8 @@ class RapportSante:
     couverture_marks: float
     suffisant: bool
     raisons: tuple[str, ...] = ()
+    invalid_candidates: int = 0
+    invalid_marks: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,11 +56,26 @@ class RapportSante:
             "n_coins_candidats": self.n_coins_candidats, "n_coins_marks": self.n_coins_marks,
             "couverture_marks": self.couverture_marks, "suffisant": self.suffisant,
             "raisons": list(self.raisons),
+            "invalid_candidates": self.invalid_candidates,
+            "invalid_marks": self.invalid_marks,
+            "classification": (
+                "MEASURABLE_INPUT"
+                if self.suffisant
+                else "TECHNICAL_INPUT_FAILURE"
+            ),
         }
 
 
 def _coin(row: dict) -> str:
     return str(row.get("coin") or "").upper()
+
+
+def _finite_number(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+    )
 
 
 def _index_marks_par_coin(marks: Iterable[dict]) -> dict[str, list[float]]:
@@ -68,7 +86,7 @@ def _index_marks_par_coin(marks: Iterable[dict]) -> dict[str, list[float]]:
             continue
         c = _coin(m)
         ts = m.get("ts")
-        if c and isinstance(ts, (int, float)):
+        if c and _finite_number(ts):
             par_coin.setdefault(c, []).append(float(ts))
     for serie in par_coin.values():
         serie.sort()
@@ -87,7 +105,7 @@ def _a_un_mark_posterieur(candidat: dict, marks: Iterable[dict] | dict[str, list
     if not serie:
         return False
     t = candidat.get("recorded_at")
-    if not isinstance(t, (int, float)):
+    if not _finite_number(t):
         return False
     import bisect
     return bisect.bisect_right(serie, float(t)) < len(serie)
@@ -105,8 +123,18 @@ def diagnostiquer(candidates: Iterable[dict], marks: Iterable[dict], *,
                   min_candidats: int = MIN_CANDIDATS, min_marks: int = MIN_MARKS,
                   min_coins: int = MIN_COINS, min_couverture: float = MIN_COUVERTURE_MARKS) -> RapportSante:
     """W6 — santé des données. Un candidat n'est exploitable que si son coin a des marks."""
-    cands = [c for c in candidates if isinstance(c, dict)]
-    mks = [m for m in marks if isinstance(m, dict)]
+    raw_cands = list(candidates)
+    raw_marks = list(marks)
+    cands = [
+        c for c in raw_cands
+        if isinstance(c, dict) and _coin(c) and _finite_number(c.get("recorded_at"))
+    ]
+    mks = [
+        m for m in raw_marks
+        if isinstance(m, dict) and _coin(m) and _finite_number(m.get("ts"))
+    ]
+    invalid_candidates = len(raw_cands) - len(cands)
+    invalid_marks = len(raw_marks) - len(mks)
     coins_c = {_coin(c) for c in cands if _coin(c)}
     coins_m = {_coin(m) for m in mks if _coin(m)}
     couverture = 0.0
@@ -128,8 +156,12 @@ def diagnostiquer(candidates: Iterable[dict], marks: Iterable[dict], *,
         raisons.append(f"COINS_INSUFFISANTS<{min_coins}")
     if couverture < float(min_couverture):
         raisons.append(f"COUVERTURE_MARKS<{int(min_couverture*100)}%")
+    if invalid_candidates:
+        raisons.append(f"CANDIDATS_INVALIDES>{invalid_candidates}")
+    if invalid_marks:
+        raisons.append(f"MARKS_INVALIDES>{invalid_marks}")
     return RapportSante(len(cands), len(mks), len(coins_c), len(coins_m), couverture,
-                        not raisons, tuple(raisons))
+                        not raisons, tuple(raisons), invalid_candidates, invalid_marks)
 
 
 def exiger_suffisant(rapport: RapportSante) -> None:

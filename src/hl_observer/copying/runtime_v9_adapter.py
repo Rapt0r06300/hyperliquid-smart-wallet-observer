@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
+import math
 from time import time
 from typing import Any
 
@@ -78,7 +80,17 @@ def attach_v9_runtime_diagnostics(
             l2_book=l2_book,
             candles=candles,
         )
-        notional = _float_or_none(event.get("copied_notional_usdt")) or 0.0
+        notional = _float_or_none(event.get("copied_notional_usdt"))
+        if notional is None or notional <= 0:
+            event.update(
+                {
+                    "v9_decision": "NO_TRADE",
+                    "v9_accepted": False,
+                    "v9_reasons": ["NOTIONAL_MISSING_OR_INVALID"],
+                    "v9_error": "paper notional is required and must be finite and positive",
+                }
+            )
+            return event
         decision = run_paper_simulation_decision(
             signal=signal,
             market=market,
@@ -137,7 +149,9 @@ def build_signal_candidate_from_event(
     coin = preserve_native_instrument_symbol(event.get("coin"))
     side = _side_from_event(event)
     signal_type = _signal_type_from_event(event)
-    observed_at = _int_or_none(event.get("observed_at_ms")) or now_ms
+    observed_at = _int_or_none(event.get("observed_at_ms"))
+    if observed_at is None or observed_at <= 0:
+        raise ValueError("observed timestamp missing or invalid")
     observed_price = (
         _float_or_none(event.get("leader_price"))
         or _float_or_none(event.get("entry_price"))
@@ -253,19 +267,22 @@ def _source_refs(market: Any, l2_book: dict[str, Any] | None, candles: list[Any]
 
 
 def _float_or_none(value: Any) -> float | None:
-    try:
-        if value is None or value == "":
-            return None
-        result = float(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool) or value is None or value == "":
         return None
-    return result
+    try:
+        result = float(Decimal(str(value).strip()))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
 
 
 def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None or value == "":
+        return None
     try:
-        if value is None or value == "":
+        parsed = Decimal(str(value).strip())
+        if not parsed.is_finite() or parsed != parsed.to_integral_value():
             return None
-        return int(float(value))
-    except (TypeError, ValueError):
+        return int(parsed)
+    except (InvalidOperation, TypeError, ValueError):
         return None

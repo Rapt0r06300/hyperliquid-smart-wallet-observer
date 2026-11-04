@@ -536,11 +536,15 @@ class PersistentPollRunner:
                     "--max-wallets", str(cfg.public_trade_max_wallets),
                     "--promote-top", str(cfg.max_leaders), "--no-report",
                 ])
-            fills_handle = self._spawn_ws_scan("live-user-fills-scan", [
-                "live-user-fills-scan", "--network-read", "--store", "--duration-seconds", "10",
-                "--max-users", str(safe_leaders), "--leader-offset", str(leader_offset),
-                "--max-live-fill-age-ms", str(cfg.user_fills_max_live_age_ms),
-            ])
+            if cfg.fills_multiplex:
+                self.metrics["userfills_subscription_owner"] = "fills-multiplex"
+                self.log("userFills scan saute: le firehose multiplexe detient deja les abonnements.")
+            else:
+                fills_handle = self._spawn_ws_scan("live-user-fills-scan", [
+                    "live-user-fills-scan", "--network-read", "--store", "--duration-seconds", "10",
+                    "--max-users", str(safe_leaders), "--leader-offset", str(leader_offset),
+                    "--max-live-fill-age-ms", str(cfg.user_fills_max_live_age_ms),
+                ])
 
         # --- Plans (1 poll sur N, gap-recovery conservé)
         if i == 1 or (i % max(1, cfg.plans_every_polls)) == 0:
@@ -602,11 +606,15 @@ class PersistentPollRunner:
                                   "--coins", cfg.public_trade_coins, "--max-coins", str(cfg.public_trade_max_coins),
                                   "--max-wallets", str(cfg.public_trade_max_wallets),
                                   "--promote-top", str(cfg.max_leaders), "--no-report"])
-            self.run_step(phase="live_user_fills_scan", message="Lecture WebSocket userFills read-only sur shortlist bornee.",
-                          label="live-user-fills-scan", argv=[
-                              "live-user-fills-scan", "--network-read", "--store", "--duration-seconds", "10",
-                              "--max-users", str(safe_leaders), "--leader-offset", str(leader_offset),
-                              "--max-live-fill-age-ms", str(cfg.user_fills_max_live_age_ms)])
+            if cfg.fills_multiplex:
+                self.metrics["userfills_subscription_owner"] = "fills-multiplex"
+                self.log("userFills scan sequentiel saute: le firehose multiplexe detient deja les abonnements.")
+            else:
+                self.run_step(phase="live_user_fills_scan", message="Lecture WebSocket userFills read-only sur shortlist bornee.",
+                              label="live-user-fills-scan", argv=[
+                                  "live-user-fills-scan", "--network-read", "--store", "--duration-seconds", "10",
+                                  "--max-users", str(safe_leaders), "--leader-offset", str(leader_offset),
+                                  "--max-live-fill-age-ms", str(cfg.user_fills_max_live_age_ms)])
         else:
             # Joindre les écoutes AVANT copy-run (qui consomme leurs fills).
             self.write_engine_status("ws_scans_join", "Attente des ecoutes WebSocket paralleles (fills frais).")

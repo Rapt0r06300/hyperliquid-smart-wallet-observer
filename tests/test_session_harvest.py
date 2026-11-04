@@ -156,6 +156,28 @@ def test_le_cmd_ouvre_session_auto_moniteur_et_cloture():
     assert 'cloturer "%~dp0." --writers-arretes' not in txt
 
 
+def test_le_cmd_bloque_si_ouverture_session_echoue():
+    txt = CMD.read_text(encoding="utf-8", errors="ignore")
+    debut = txt.index('session_harvest ouvrir')
+    fin = txt.index('REM === ITEM 9', debut)
+    bloc = txt[debut:fin]
+    assert 'if errorlevel 1' in bloc
+    assert 'call :stop_impl' in bloc
+    assert 'set "RC=5"' in bloc
+    assert 'goto :fin' in bloc
+
+
+def test_verifier_dossiers_bloque_sur_un_chemin_non_repertoire(tmp_path):
+    cible = tmp_path / "runtime" / "data"
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    cible.write_text("fichier a la place du dossier", encoding="utf-8")
+    from hl_observer.ops import preflight_lanceur as PF
+
+    verification = PF.verifier_dossiers(tmp_path, dossiers=("runtime/data",))
+    assert verification.dur is True and verification.ok is False
+    assert "runtime/data" in verification.detail
+
+
 def _ecrire_registre(root, collecteurs):
     from hl_observer.ops.registre_pids import REGISTRE_RELPATH
     import json as _j

@@ -9,6 +9,7 @@ from hl_observer.strategies.active_scope import (
     StrategyScopeStatus,
     active_strategy_families,
     authoritative_strategy_scope,
+    build_official_scope_environment,
     require_active_strategy,
     strategy_can_materialize,
     strategy_scope_payload,
@@ -125,3 +126,14 @@ def test_official_launchers_do_not_reenable_funding_economics() -> None:
     assert 'HYPERSMART_FUNDING_ARB_PAPER=1' not in cmd
     assert '"HYPERSMART_FUNDING_ARB_PAPER", "0"' in ps1
     assert '"HYPERSMART_FUNDING_ARB_PAPER", "1"' not in ps1
+
+
+def test_official_scope_environment_removes_strategy_override() -> None:
+    env = build_official_scope_environment({
+        "HYPERSMART_ACTIVE_STRATEGIES": "lead_lag,funding_carry",
+        "SAFE_DIAGNOSTIC": "1",
+    })
+    assert "HYPERSMART_ACTIVE_STRATEGIES" not in env
+    assert env["HYPERSMART_ACTIVE_STRATEGY_SCOPE"] == "copy_vault"
+    assert env["HYPERSMART_SCOPE_OVERRIDE_ALLOWED"] == "0"
+    assert env["SAFE_DIAGNOSTIC"] == "1"

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from hl_observer.economics.families import build_copy_vault_contract
@@ -37,6 +39,16 @@ MAX_OPEN_POSITIONS = 6
 PAPER_EQUITY_USD = 200.0
 PAPER_LEVERAGE = 1.0
 MAX_GROSS_EXPOSURE_USD = PAPER_EQUITY_USD * PAPER_LEVERAGE
+PAPER_TARGET_NET_USD_PER_DAY = 5.0
+PAPER_EXECUTION_STYLE = "maker"
+PAPER_FEE_POLICY = "EXPLICIT_VENUE_SNAPSHOT_REQUIRED"
+PAPER_L2_FRESHNESS_MS = 90_000
+# Runtime paper sizing is intentionally distinct from the replay contract's
+# unlevered diagnostic profile.  It is still bounded and never enables real execution.
+RUNTIME_PAPER_LEVERAGE = 10.0
+RUNTIME_PAPER_MAX_POSITION_USD = 50.0
+RUNTIME_PAPER_MAX_TOTAL_EXPOSURE_USD = 100.0
+RUNTIME_PAPER_MAX_OPEN_POSITIONS = 20
 DIAGNOSTIC_NOTIONAL_USD = 150.0
 NOTIONAL_USD = min(DIAGNOSTIC_NOTIONAL_USD, MAX_GROSS_EXPOSURE_USD)
 MIN_TRAIN_TRADES = 8
@@ -47,6 +59,45 @@ _OPEN_DIRECTION_BY_LABEL = {
     "open long": 1,
     "open short": -1,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class CopyVaultPaperProfile:
+    """Single explicit paper contract shared by replay, lab and reporting.
+
+    The profile is descriptive only.  It never authorizes an order or creates a
+    missing observation; an absent fee, book or timestamp remains unmeasurable.
+    """
+
+    capital_usd: float = PAPER_EQUITY_USD
+    leverage: float = PAPER_LEVERAGE
+    target_net_usd_per_day: float = PAPER_TARGET_NET_USD_PER_DAY
+    execution_style: str = PAPER_EXECUTION_STYLE
+    fee_policy: str = PAPER_FEE_POLICY
+    l2_freshness_ms: int = PAPER_L2_FRESHNESS_MS
+
+    @property
+    def max_gross_exposure_usd(self) -> float:
+        return self.capital_usd * self.leverage
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "capital_usd": self.capital_usd,
+            "leverage": self.leverage,
+            "target_net_usd_per_day": self.target_net_usd_per_day,
+            "execution_style": self.execution_style,
+            "fee_policy": self.fee_policy,
+            "l2_freshness_ms": self.l2_freshness_ms,
+            "max_gross_exposure_usd": self.max_gross_exposure_usd,
+            "paper_only": True,
+            "real_execution": False,
+        }
+
+
+def paper_profile() -> CopyVaultPaperProfile:
+    """Return the immutable Copy-Vault paper profile used by all local paths."""
+
+    return CopyVaultPaperProfile()
 
 
 def canonical_copy_vault_coin(value: Any) -> str:
@@ -67,11 +118,16 @@ def canonical_metaorder_id(
 ) -> str:
     """Construit l'identité immuable depuis les faits du premier slice observé."""
 
+    if type(direction) is not int or direction not in (-1, 1):
+        raise ValueError("direction must be the exact integer -1 or 1")
+    if type(signal_ts_ms) is not int or signal_ts_ms <= 0:
+        raise ValueError("signal_ts_ms must be an exact positive integer")
+
     material = {
         "vault": str(vault or "").lower(),
         "coin": canonical_copy_vault_coin(coin),
-        "direction": int(direction),
-        "signal_ts_ms": int(signal_ts_ms),
+        "direction": direction,
+        "signal_ts_ms": signal_ts_ms,
         "first_event_id": str(first_event_id or ""),
     }
     return hashlib.sha256(
@@ -86,9 +142,13 @@ def classify_live_entry_action(row: Mapping[str, Any]) -> str | None:
     if direction is None:
         return None
     raw_start = row.get("start_position", row.get("startPosition"))
+    if isinstance(raw_start, bool):
+        return None
     try:
         start = float(raw_start)
     except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(start):
         return None
     if abs(start) <= 1e-12:
         return "OPEN"
@@ -127,6 +187,15 @@ def protocol_signature() -> dict[str, Any]:
         "paper_equity_usd": PAPER_EQUITY_USD,
         "paper_leverage": PAPER_LEVERAGE,
         "max_gross_exposure_usd": MAX_GROSS_EXPOSURE_USD,
+        "paper_profile": paper_profile().as_dict(),
+        "runtime_paper_profile": {
+            "leverage": RUNTIME_PAPER_LEVERAGE,
+            "max_position_usd": RUNTIME_PAPER_MAX_POSITION_USD,
+            "max_total_exposure_usd": RUNTIME_PAPER_MAX_TOTAL_EXPOSURE_USD,
+            "max_open_positions": RUNTIME_PAPER_MAX_OPEN_POSITIONS,
+            "paper_only": True,
+            "real_execution": False,
+        },
         "capital_margin_policy": "gross_notional_leq_paper_equity_times_leverage_v1",
         "fee_source": "hl_observer.economics.families:build_copy_vault_contract",
         "economic_contract": economic.receipt(),
@@ -162,6 +231,10 @@ __all__ = [
     "MIN_COMPLETE_PROOF_DAYS",
     "MIN_TRAIN_TRADES",
     "NOTIONAL_USD", "PAPER_EQUITY_USD", "PAPER_LEVERAGE", "MAX_GROSS_EXPOSURE_USD",
+    "PAPER_TARGET_NET_USD_PER_DAY", "PAPER_EXECUTION_STYLE", "PAPER_FEE_POLICY",
+    "PAPER_L2_FRESHNESS_MS", "CopyVaultPaperProfile", "paper_profile",
+    "RUNTIME_PAPER_LEVERAGE", "RUNTIME_PAPER_MAX_POSITION_USD",
+    "RUNTIME_PAPER_MAX_TOTAL_EXPOSURE_USD", "RUNTIME_PAPER_MAX_OPEN_POSITIONS",
     "PROTOCOL_NAME",
     "POST_FREEZE_PROOF_POLICY",
     "TRAIN_ECONOMIC_GATE_VERSION",

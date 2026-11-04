@@ -4,17 +4,37 @@ jamais une ouverture : une action mal comprise qui augmente le risque est le pir
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 _CLAIR_AUGMENTE = ("OPEN", "ADD")
 _CLAIR_REDUIT = ("REDUCE", "CLOSE")
 
 
+def _confidence_is_valid(value: Any, threshold: Any) -> bool:
+    """Accept only a finite probability and a finite threshold in [0, 1]."""
+
+    if isinstance(value, bool) or isinstance(threshold, bool):
+        return False
+    try:
+        confidence = float(value)
+        minimum = float(threshold)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (
+        math.isfinite(confidence)
+        and math.isfinite(minimum)
+        and 0.0 <= confidence <= 1.0
+        and 0.0 <= minimum <= 1.0
+        and confidence >= minimum
+    )
+
+
 def decision(action_determinee: Any, *, confiance: Any = None, seuil_confiance: float = 0.7) -> dict[str, Any]:
     """Autorise une nouvelle exposition SEULEMENT si l'action est clairement OPEN/ADD ET la confiance ≥ seuil.
     Ambigu, inconnu ou peu confiant → pas de nouvelle exposition (réduction éventuellement tolérée)."""
     a = str(action_determinee).upper()
-    conf_ok = isinstance(confiance, (int, float)) and float(confiance) >= float(seuil_confiance)
+    conf_ok = _confidence_is_valid(confiance, seuil_confiance)
     if a in _CLAIR_REDUIT:
         return {"nouvelle_exposition": False, "autorise_reduction": True, "raison": "REDUCTION"}
     if a in _CLAIR_AUGMENTE and conf_ok:

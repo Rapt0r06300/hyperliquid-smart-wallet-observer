@@ -6,6 +6,7 @@ que MESURER la règle gelée (jamais de re-sélection sur l'OOS). Pur, 0 réseau
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -14,14 +15,39 @@ EXITS = ("HORIZON_FIXE", "STOP_LOSS", "TAKE_PROFIT", "TIME_STOP", "SIGNAL_OPPOSE
          "CONVERGENCE", "DETERIORATION_MICRO")
 
 
-def _sortie(m: float, dd: float, t: int, cause: str) -> dict[str, Any]:
-    return {"net_bps": round(m, 4), "dd_bps": round(dd, 4), "sortie_pas": t, "cause": cause}
+def _sortie(
+    m: float,
+    dd: float,
+    t: int,
+    cause: str,
+    *,
+    cost_bps: float = 0.0,
+    risk_penalty_bps: float = 0.0,
+) -> dict[str, Any]:
+    return {
+        "net_bps": round(m - cost_bps - risk_penalty_bps, 4),
+        "gross_markout_bps": round(m, 4),
+        "dd_bps": round(dd, 4),
+        "sortie_pas": t,
+        "cause": cause,
+    }
+
+
+def _nonnegative_finite(value: object, *, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be finite and non-negative") from exc
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative")
+    return parsed
 
 
 def simuler_exit(chemin_bps: Sequence[float], *, regle: str, sl_bps: float = 30.0, tp_bps: float = 40.0,
                  horizon: int = 5, time_stop: int = 20, signal_oppose_a: int | None = None,
                  conv_frac: float = 0.5, sante_micro: Sequence[float] | None = None,
-                 micro_seuil: float = 0.0) -> dict[str, Any]:
+                 micro_seuil: float = 0.0, cost_bps: float = 0.0,
+                 risk_penalty_bps: float = 0.0) -> dict[str, Any]:
     """Applique une règle d'exit sur un chemin de markout SIGNÉ (bps depuis l'entrée). Retourne net + DD.
 
     CONVERGENCE : sort quand le markout, après un pic favorable, revient à `conv_frac` du pic (retour au fair).
@@ -29,6 +55,8 @@ def simuler_exit(chemin_bps: Sequence[float], *, regle: str, sl_bps: float = 30.
     la micro-détérioration est UNMEASURABLE (net=None, cause MICRO_NA) — jamais un 0 fabriqué."""
     if not chemin_bps:
         return {"net_bps": None, "dd_bps": None, "sortie_pas": None}
+    cost_bps = _nonnegative_finite(cost_bps, name="cost_bps")
+    risk_penalty_bps = _nonnegative_finite(risk_penalty_bps, name="risk_penalty_bps")
     if regle == "DETERIORATION_MICRO" and sante_micro is None:
         return {"net_bps": None, "dd_bps": None, "sortie_pas": None, "cause": "MICRO_NA"}
     dd = 0.0
@@ -37,22 +65,28 @@ def simuler_exit(chemin_bps: Sequence[float], *, regle: str, sl_bps: float = 30.
         dd = min(dd, m)
         peak = max(peak, m)
         if regle == "STOP_LOSS" and m <= -sl_bps:
-            return _sortie(m, dd, t, "SL")
+            return _sortie(m, dd, t, "SL", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
         if regle == "TAKE_PROFIT" and m >= tp_bps:
-            return _sortie(m, dd, t, "TP")
+            return _sortie(m, dd, t, "TP", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
         if regle == "HORIZON_FIXE" and t >= horizon:
-            return _sortie(m, dd, t, "H")
+            return _sortie(m, dd, t, "H", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
         if regle == "TIME_STOP" and t >= time_stop:
-            return _sortie(m, dd, t, "TIME")
+            return _sortie(m, dd, t, "TIME", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
         if regle == "SIGNAL_OPPOSE" and signal_oppose_a is not None and t >= signal_oppose_a:
-            return _sortie(m, dd, t, "OPP")
+            return _sortie(m, dd, t, "OPP", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
         if regle == "CONVERGENCE" and peak > 0 and m <= conv_frac * peak:
-            return _sortie(m, dd, t, "CONV")
+            return _sortie(m, dd, t, "CONV", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
         if regle == "DETERIORATION_MICRO" and sante_micro is not None \
                 and t < len(sante_micro) and sante_micro[t] <= micro_seuil:
-            return _sortie(m, dd, t, "MICRO")
+            return _sortie(m, dd, t, "MICRO", cost_bps=cost_bps, risk_penalty_bps=risk_penalty_bps)
     m = chemin_bps[-1]
-    return {"net_bps": round(m, 4), "dd_bps": round(min(dd, m), 4), "sortie_pas": len(chemin_bps) - 1, "cause": "FIN"}
+    return {
+        "net_bps": round(m - cost_bps - risk_penalty_bps, 4),
+        "gross_markout_bps": round(m, 4),
+        "dd_bps": round(min(dd, m), 4),
+        "sortie_pas": len(chemin_bps) - 1,
+        "cause": "FIN",
+    }
 
 
 def comparer_exits(chemins: Sequence[Sequence[float]], *, regles: Sequence[str] = EXITS,
@@ -101,5 +135,69 @@ def factory_exit(chemins_decouverte: Sequence[Sequence[float]], chemins_oos: Seq
     return {"regle_gelee": choix["regle"], "decouverte": choix["table"], "oos": oos}
 
 
+def comparer_sortie_autonome_et_suivi_aveugle(
+    chemins: Sequence[Sequence[float]],
+    *,
+    regle_autonome: str | None,
+    regle_aveugle: str = "HORIZON_FIXE",
+    cost_bps: float = 0.0,
+    risk_penalty_bps: float = 0.0,
+    **params: Any,
+) -> dict[str, Any]:
+    """Compare two exits on identical paths with identical cost/risk parameters.
+
+    ``regle_autonome`` must already be frozen from discovery.  The blind-follow
+    baseline is deliberately evaluated on the same observations and is never
+    allowed to re-select an exit from them.  The result is a PAPER diagnostic;
+    it does not promote a rule or enable execution.
+    """
+
+    if regle_autonome is None:
+        return {
+            "status": "NO_FROZEN_AUTONOMOUS_RULE",
+            "autonomous": None,
+            "blind_follow": None,
+            "same_paths": True,
+            "same_costs": True,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    if regle_autonome not in EXITS or regle_aveugle not in EXITS:
+        return {
+            "status": "INVALID_EXIT_RULE",
+            "autonomous": None,
+            "blind_follow": None,
+            "same_paths": True,
+            "same_costs": True,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    shared = {
+        **params,
+        "cost_bps": cost_bps,
+        "risk_penalty_bps": risk_penalty_bps,
+    }
+    autonomous = comparer_exits(chemins, regles=(regle_autonome,), **shared)[regle_autonome]
+    blind = comparer_exits(chemins, regles=(regle_aveugle,), **shared)[regle_aveugle]
+    delta = None
+    if autonomous["net_moyen_bps"] is not None and blind["net_moyen_bps"] is not None:
+        delta = round(autonomous["net_moyen_bps"] - blind["net_moyen_bps"], 4)
+    return {
+        "status": "COMPARABLE" if delta is not None else "UNMEASURABLE",
+        "autonomous_rule": regle_autonome,
+        "blind_follow_rule": regle_aveugle,
+        "autonomous": autonomous,
+        "blind_follow": blind,
+        "delta_net_moyen_bps": delta,
+        "same_paths": True,
+        "same_costs": True,
+        "cost_bps": float(cost_bps),
+        "risk_penalty_bps": float(risk_penalty_bps),
+        "selection_scope": "FROZEN_AUTONOMOUS_RULE_VS_PREDECLARED_BLIND_BASELINE",
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = ["EXITS", "simuler_exit", "comparer_exits", "choisir_regle_gelee", "mesurer_regle_gelee",
-           "factory_exit"]
+           "factory_exit", "comparer_sortie_autonome_et_suivi_aveugle"]

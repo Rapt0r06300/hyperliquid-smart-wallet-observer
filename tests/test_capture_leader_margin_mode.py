@@ -21,3 +21,12 @@ def test_inconnu():
 
 def test_alias():
     assert capturer("iso")["margin_mode"] == ISOLATED
+
+
+def test_espaces_sont_normalises_sans_elargir_le_contrat():
+    assert capturer("  cross ")["margin_mode"] == CROSS
+
+
+def test_objet_ou_booleen_ne_devient_pas_un_mode_valide():
+    assert capturer(True)["margin_mode"] == UNKNOWN
+    assert capturer({"mode": "CROSS"})["connu"] is False

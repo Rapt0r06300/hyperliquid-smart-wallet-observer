@@ -98,7 +98,7 @@ def construire_registre(
             pid = _pid_par_signature(procs, sigs, root=root)
         if isinstance(pid, int):
             composants[cle] = {"pid": pid, "role": role, "signature": sigs[0]}
-    return {
+    registre: dict[str, Any] = {
         "run_id": run_id,
         "commit": commit,
         "root": _normalise_path_text(root) if root is not None else "",
@@ -106,6 +106,14 @@ def construire_registre(
         "composants": composants,
         "collecteurs": {k: int(v) for k, v in dict(collecteurs or {}).items() if isinstance(v, int)},
     }
+    if root is not None:
+        orphelins = detecter_orphelins(procs, pids_enregistres(registre), root=root)
+        registre["audit"] = {
+            "ready": not orphelins,
+            "verdict": "ORPHAN" if orphelins else "READY",
+            "orphelins": orphelins,
+        }
+    return registre
 
 
 def _ecrire_atomique(chemin: Path, texte: str) -> bool:
@@ -291,7 +299,8 @@ def main(argv: list[str] | None = None) -> int:
         rid = args[2] if len(args) > 2 else ""
         reg = enregistrer_depuis_disque(racine, run_id=rid)
         print(format_registre(reg), flush=True)
-        return 0
+        audit = reg.get("audit") if isinstance(reg, dict) else None
+        return 0 if not isinstance(audit, dict) or audit.get("ready") is True else 20
     if cmd == "arreter":
         r = arreter(racine, procs=processus_reels(), killer=_tuer_reel)
         print(

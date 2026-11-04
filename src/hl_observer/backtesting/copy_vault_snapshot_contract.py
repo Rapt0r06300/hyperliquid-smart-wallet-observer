@@ -9,6 +9,8 @@ evidence separately.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -37,6 +39,20 @@ def _nonnegative_int(value: object) -> bool:
 
 def _positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _canonical_json_sha256(value: object) -> str | None:
+    try:
+        payload = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(payload).hexdigest()
 
 
 def verify_snapshot_contract(snapshot: Mapping[str, Any] | object) -> dict[str, Any]:
@@ -148,6 +164,8 @@ def verify_snapshot_contract(snapshot: Mapping[str, Any] | object) -> dict[str, 
                 missing.append("candidate_freeze.freeze.parameters_sha256")
             elif not _sha256(parameter_sha):
                 invalid.append("candidate_freeze.freeze.parameters_sha256")
+            elif _canonical_json_sha256(parameters) != str(parameter_sha).lower():
+                invalid.append("candidate_freeze.freeze.parameters_sha256")
 
     artifacts = require("artifacts", lambda value: isinstance(value, Mapping))
     artifact_hashes = require("artifacts_sha256", lambda value: isinstance(value, Mapping))
@@ -161,6 +179,8 @@ def verify_snapshot_contract(snapshot: Mapping[str, Any] | object) -> dict[str, 
                 missing.append(hash_path)
             elif not _sha256(artifact_hashes[field]):
                 invalid.append(hash_path)
+            elif field in artifacts and _canonical_json_sha256(artifacts[field]) != str(artifact_hashes[field]).lower():
+                invalid.append(hash_path)
         receipt = artifacts.get("restoration_receipt")
         if isinstance(receipt, Mapping):
             status = str(receipt.get("status") or "").upper()
@@ -168,6 +188,13 @@ def verify_snapshot_contract(snapshot: Mapping[str, Any] | object) -> dict[str, 
                 invalid.append("artifacts.restoration_receipt.status")
 
     missing = list(dict.fromkeys(missing))
+    invalid = list(dict.fromkeys(invalid))
+    snapshot_digest = snapshot.get("restoration_snapshot_sha256")
+    if _sha256(snapshot_digest):
+        unsigned_snapshot = dict(snapshot)
+        unsigned_snapshot.pop("restoration_snapshot_sha256", None)
+        if _canonical_json_sha256(unsigned_snapshot) != str(snapshot_digest).lower():
+            invalid.append("restoration_snapshot_sha256")
     invalid = list(dict.fromkeys(invalid))
     return {
         "schema": schema,

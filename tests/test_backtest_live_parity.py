@@ -19,6 +19,7 @@ from hl_observer.backtesting.backtest_live_parity import (
     MOTIF_TROP_DE_POSITIONS,
     Position,
     comparer,
+    comparer_signaux_paper_replay,
     le_live_accepterait,
     rejouer_sans_empilement,
     sceller,
@@ -103,6 +104,70 @@ def test_un_signal_normal_passe() -> None:
     ok, m = le_live_accepterait("BTC", 500.0, long=True,
                                 positions_ouvertes=[], capital=5000.0)
     assert ok and m == MOTIF_OK
+
+
+def test_paper_et_replay_comparent_les_memes_decisions_et_raisons() -> None:
+    paper = [
+        {"signal_id": "s-2", "decision": "NO_TRADE", "reason": "STALE_BOOK"},
+        {"signal_id": "s-1", "decision": "PAPER_ENTRY", "reason": None},
+    ]
+    replay = list(reversed(paper))
+
+    result = comparer_signaux_paper_replay(paper, replay)
+
+    assert result["status"] == "PARITY"
+    assert result["parity"] is True
+    assert result["compared"] == 2
+    assert result["missing_in_paper"] == []
+    assert result["missing_in_replay"] == []
+    assert result["mismatches"] == []
+    assert result["paper_read_only"] is True
+    assert result["real_execution"] is False
+
+
+def test_paper_replay_mismatch_is_explicit_and_not_silently_accepted() -> None:
+    result = comparer_signaux_paper_replay(
+        [{"signal_id": "s-1", "decision": "PAPER_ENTRY", "reason": None}],
+        [{"signal_id": "s-1", "decision": "NO_TRADE", "reason": "STALE_BOOK"}],
+    )
+
+    assert result["status"] == "MISMATCH"
+    assert result["parity"] is False
+    assert result["mismatches"] == [{
+        "signal_id": "s-1",
+        "paper": {"decision": "PAPER_ENTRY", "reason": None},
+        "replay": {"decision": "NO_TRADE", "reason": "STALE_BOOK"},
+    }]
+
+
+@pytest.mark.parametrize(
+    "paper,replay,reason",
+    [
+        ([{"signal_id": "s-1", "decision": "PAPER_ENTRY"},
+          {"signal_id": "s-1", "decision": "NO_TRADE"}], [], "PAPER_DUPLICATE_SIGNAL_ID"),
+        ([{"signal_id": "s-1", "decision": "PAPER_ENTRY"}],
+         [{"signal_id": "", "decision": "PAPER_ENTRY"}], "REPLAY_SIGNAL_CONTRACT_INVALID"),
+    ],
+)
+def test_paper_replay_invalid_or_missing_input_is_unmeasurable(paper, replay, reason) -> None:
+    result = comparer_signaux_paper_replay(paper, replay)
+
+    assert result["status"] == "UNMEASURABLE"
+    assert reason in result["reason"]
+    assert result["compared"] == 0
+    assert result["paper_read_only"] is True
+    assert result["real_execution"] is False
+
+
+def test_missing_signal_is_an_explicit_parity_mismatch() -> None:
+    result = comparer_signaux_paper_replay(
+        [{"signal_id": "s-1", "decision": "PAPER_ENTRY"}],
+        [],
+    )
+
+    assert result["status"] == "MISMATCH"
+    assert result["parity"] is False
+    assert result["missing_in_replay"] == ["s-1"]
 
 
 # ════════════════════════════════════════════════════════════════════════════════════════════

@@ -61,6 +61,12 @@ def _required_epoch_ms(value: object, name: str) -> int:
     return value
 
 
+def _exact_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _optional_epoch_ms(value: object) -> int:
     if type(value) is int and 0 <= value <= MAX_SUPPORTED_EPOCH_MS:
         return value
@@ -84,10 +90,19 @@ def load_observed_books(
     root: str | Path,
     *,
     coins: Iterable[str] | None = None,
+    as_of_ms: int | None = None,
     relative_path: str = "runtime/data/carnet_venues.jsonl",
     causal_relative_path: str = "runtime/data/copy_vault_l2_tape.jsonl",
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    """Load historical books plus causally received Hyperliquid L2 samples."""
+    """Load books visible no later than ``as_of_ms``.
+
+    ``as_of_ms`` is an optional causal cutoff applied before rows enter the
+    returned collection.  It is deliberately enforced at the source boundary
+    so callers cannot accidentally use a future book when they forget a later
+    filter.  For causal L2 rows the cutoff is the reception timestamp.
+    """
+    if as_of_ms is not None:
+        as_of_ms = _required_epoch_ms(as_of_ms, "as_of_ms")
 
     resolved_root = Path(root).resolve()
     path = resolved_root / relative_path
@@ -114,17 +129,18 @@ def load_observed_books(
     )
     if not isinstance(checkpoint_counters, dict):
         checkpoint_counters = {}
-    try:
-        collector_gap_count = sum(
-            int(checkpoint_counters.get(name) or 0)
-            for name in (
-                "input_rotations",
-                "checkpoints_expired",
-                "pending_overflow_rejected",
-            )
+    checkpoint_counter_values = [
+        _exact_non_negative_int(checkpoint_counters.get(name))
+        for name in (
+            "input_rotations",
+            "checkpoints_expired",
+            "pending_overflow_rejected",
         )
-    except (TypeError, ValueError, OverflowError):
+    ]
+    if any(value is None for value in checkpoint_counter_values):
         collector_gap_count = 1
+    else:
+        collector_gap_count = sum(checkpoint_counter_values)
     clean_epoch_receipt_valid = bool(
         isinstance(checkpoint_state, dict)
         and checkpoint_state.get("schema_version") == CHECKPOINT_WRITER_STATE_SCHEMA
@@ -140,6 +156,7 @@ def load_observed_books(
     wanted = {canonical_copy_vault_coin(coin) for coin in coins} if coins is not None else None
     by_coin: dict[str, list[dict[str, Any]]] = {}
     invalid = 0
+    future_rows_rejected = 0
     rows_read = 0
     duplicate_rows = 0
     checkpoint_protocol_mismatches = 0
@@ -147,6 +164,7 @@ def load_observed_books(
     duplicate_checkpoint_rows = 0
     l2_rejection_reasons: Counter[str] = Counter()
     quarantined_checkpoint_rows = 0
+    incomplete_causal_l2_rows = 0
     quarantined_checkpoint_metaorders: set[str] = set()
     clean_checkpoint_counts: Counter[str] = Counter()
     clean_duplicated_ids: set[str] = set()
@@ -184,7 +202,7 @@ def load_observed_books(
         source_manifest_verified: bool | None = None,
         source_replay_compatible: bool | None = None,
     ) -> None:
-        nonlocal invalid, duplicate_rows
+        nonlocal invalid, duplicate_rows, future_rows_rejected
         if (
             not coin
             or ts_ms <= 0
@@ -194,6 +212,9 @@ def load_observed_books(
             or capacity_usd <= 0
         ):
             invalid += 1
+            return
+        if as_of_ms is not None and ts_ms > as_of_ms:
+            future_rows_rejected += 1
             return
         identity = (
             ("checkpoint", checkpoint_id)
@@ -347,9 +368,7 @@ def load_observed_books(
                             "bid", "ask", "capacity_usd",
                         )
                     )
-                    _, l2_rejection = _validated_recorded_levels(
-                        raw, bid=bid, ask=ask
-                    )
+                    _, l2_rejection = _validated_recorded_levels(raw, bid=bid, ask=ask)
                     if not (
                         collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
                         and raw.get("instrument_identity_schema") == INSTRUMENT_IDENTITY_SCHEMA
@@ -507,6 +526,8 @@ def load_observed_books(
                             l2_rejection_reasons[l2_rejection] += 1
                         continue
                     bids5, asks5 = validated_levels
+                    if bids5 is None and asks5 is None:
+                        incomplete_causal_l2_rows += 1
                     add_row(
                         coin=coin,
                         ts_ms=received,
@@ -560,10 +581,35 @@ def load_observed_books(
     for rows in by_coin.values():
         rows.sort(key=lambda row: row["ts_ms"])
     valid = sum(len(rows) for rows in by_coin.values())
+    all_rows = [row for rows in by_coin.values() for row in rows]
+    non_causal_rows = sum(row.get("causal_observation") is not True for row in all_rows)
+    safe_causal_rows = sum(
+        row.get("causal_observation") is True
+        and row.get("source_quality_status") == "SAFE"
+        and row.get("source_manifest_verified") is True
+        and row.get("source_replay_compatible") is True
+        and "bids5" in row
+        and "asks5" in row
+        for row in all_rows
+    )
+    replay_grade_blockers: list[str] = []
+    if not all_rows:
+        replay_grade_blockers.append("NO_OBSERVED_BOOK_ROWS")
+    if invalid or sum(l2_rejection_reasons.values()):
+        replay_grade_blockers.append("INVALID_OR_REJECTED_ROWS")
+    if non_causal_rows:
+        replay_grade_blockers.append("NON_CAUSAL_BOOK_ROWS")
+    if safe_causal_rows != valid:
+        replay_grade_blockers.append("SAFE_MANIFEST_L2_EVIDENCE_INCOMPLETE")
+    if incomplete_causal_l2_rows:
+        replay_grade_blockers.append("CAUSAL_L2_LEVELS_INCOMPLETE")
+    replay_grade_ready = not replay_grade_blockers
     return by_coin, {
         "sources": [relative_path, causal_relative_path],
         "exists": path.is_file() or causal_path.is_file(),
         "rows_read": rows_read,
+        "as_of_ms": as_of_ms,
+        "future_rows_rejected": future_rows_rejected,
         "valid_rows": valid,
         "invalid_rows": invalid,
         "invalid_l2_structure_rows": sum(l2_rejection_reasons.values()),
@@ -574,6 +620,7 @@ def load_observed_books(
         "source_evidence_rows": dict(sorted(source_evidence_counts.items())),
         "quarantined_checkpoint_metaorders": len(quarantined_checkpoint_metaorders),
         "quarantined_checkpoint_rows": quarantined_checkpoint_rows,
+        "incomplete_causal_l2_rows": incomplete_causal_l2_rows,
         "clean_epoch_receipt": {
             "schema_version": CHECKPOINT_INTEGRITY_SCHEMA,
             "receipt_valid": clean_epoch_receipt_valid,
@@ -592,6 +639,12 @@ def load_observed_books(
         "causal_forward_rows": (
             source_counts["causal_ws"] + source_counts["causal_info_checkpoint"]
         ),
+        "non_causal_rows": non_causal_rows,
+        "safe_causal_rows": safe_causal_rows,
+        "replay_grade_ready": replay_grade_ready,
+        "replay_grade_status": "READY" if replay_grade_ready else "UNMEASURABLE",
+        "replay_grade_blockers": replay_grade_blockers,
+        "marks_or_allmids_substitution": "REJECTED_AS_L2_EVIDENCE",
         "capacity_semantics": (
             "legacy_minimum_side_capacity;certification_uses_side_specific_observed_l2_vwap"
         ),

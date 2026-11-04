@@ -23,3 +23,14 @@ def test_ambigu_pas_de_nouvelle_exposition():
 def test_confiance_insuffisante_refuse_ouverture():
     r = decision("OPEN", confiance=0.4)
     assert r["nouvelle_exposition"] is False and r["raison"] == "CONFIANCE_INSUFFISANTE"
+
+
+def test_confiance_non_finie_ou_booleenne_refuse_ouverture():
+    assert decision("OPEN", confiance=float("inf"))["nouvelle_exposition"] is False
+    assert decision("OPEN", confiance=float("nan"))["nouvelle_exposition"] is False
+    assert decision("OPEN", confiance=True)["nouvelle_exposition"] is False
+
+
+def test_seuil_invalide_reste_fail_closed():
+    assert decision("OPEN", confiance=0.99, seuil_confiance=-1.0)["nouvelle_exposition"] is False
+    assert decision("OPEN", confiance=0.99, seuil_confiance=float("inf"))["nouvelle_exposition"] is False

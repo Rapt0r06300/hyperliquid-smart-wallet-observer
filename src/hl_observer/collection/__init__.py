@@ -1,11 +1,6 @@
 """Read-only Hyperliquid collection pipeline."""
 
 from hl_observer.collection.backoff import BackoffDecision, BackoffPolicy, compute_backoff_delay
-from hl_observer.collection.bybit_market_data import (
-    BybitMarketState,
-    BybitPublicClient,
-    parse_bybit_linear_instruments,
-)
 from hl_observer.collection.circuit_breaker import (
     CircuitBreakerConfig,
     CircuitBreakerState,
@@ -15,22 +10,6 @@ from hl_observer.collection.circuit_breaker import (
     record_success,
 )
 from hl_observer.collection.html_scraper import HtmlScrapeResult, HtmlWalletCandidate, parse_wallets_from_html
-from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
-from hl_observer.collection.native_venue_market import (
-    DESYNC,
-    EXPLOITABLE,
-    STALE,
-    UNMEASURABLE,
-    MarketLevel,
-    MultiVenueMarketStore,
-    NativeMarketSnapshot,
-    canonical_coin,
-)
-from hl_observer.collection.okx_market_data import (
-    OkxMarketState,
-    OkxPublicClient,
-    parse_okx_swap_instruments,
-)
 from hl_observer.collection.proxy_pool import (
     ProxyEndpoint,
     ProxyPoolPlan,
@@ -71,6 +50,65 @@ def __getattr__(name: str):
             "CollectionPlan": CollectionPlan,
             "CollectionResult": CollectionResult,
             "run_collection_once": run_collection_once,
+        }[name]
+    if name in {"BybitMarketState", "BybitPublicClient", "parse_bybit_linear_instruments"}:
+        from hl_observer.collection.bybit_market_data import (
+            BybitMarketState,
+            BybitPublicClient,
+            parse_bybit_linear_instruments,
+        )
+
+        return {
+            "BybitMarketState": BybitMarketState,
+            "BybitPublicClient": BybitPublicClient,
+            "parse_bybit_linear_instruments": parse_bybit_linear_instruments,
+        }[name]
+    if name in {"OkxMarketState", "OkxPublicClient", "parse_okx_swap_instruments"}:
+        from hl_observer.collection.okx_market_data import (
+            OkxMarketState,
+            OkxPublicClient,
+            parse_okx_swap_instruments,
+        )
+
+        return {
+            "OkxMarketState": OkxMarketState,
+            "OkxPublicClient": OkxPublicClient,
+            "parse_okx_swap_instruments": parse_okx_swap_instruments,
+        }[name]
+    if name == "NativeVenueCoordinator":
+        from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
+
+        return NativeVenueCoordinator
+    if name in {
+        "DESYNC",
+        "EXPLOITABLE",
+        "STALE",
+        "UNMEASURABLE",
+        "MarketLevel",
+        "MultiVenueMarketStore",
+        "NativeMarketSnapshot",
+        "canonical_coin",
+    }:
+        from hl_observer.collection.native_venue_market import (
+            DESYNC,
+            EXPLOITABLE,
+            STALE,
+            UNMEASURABLE,
+            MarketLevel,
+            MultiVenueMarketStore,
+            NativeMarketSnapshot,
+            canonical_coin,
+        )
+
+        return {
+            "DESYNC": DESYNC,
+            "EXPLOITABLE": EXPLOITABLE,
+            "STALE": STALE,
+            "UNMEASURABLE": UNMEASURABLE,
+            "MarketLevel": MarketLevel,
+            "MultiVenueMarketStore": MultiVenueMarketStore,
+            "NativeMarketSnapshot": NativeMarketSnapshot,
+            "canonical_coin": canonical_coin,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

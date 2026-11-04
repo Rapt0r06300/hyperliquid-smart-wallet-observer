@@ -22,3 +22,9 @@ def test_jamais_au_dela_de_zero_ni_flip():
 def test_short_reduit_vers_zero():
     r = appliquer_reduction(-2.0, 1.0)
     assert r["position"] == -1.0 and abs(r["position"]) <= 2.0
+
+
+def test_non_fini_et_bool_sont_non_mesurables():
+    assert appliquer_reduction(float("nan"), 1.0)["position"] == "UNMEASURABLE"
+    assert appliquer_reduction(float("inf"), 1.0)["position"] == "UNMEASURABLE"
+    assert appliquer_reduction(True, 1.0)["position"] == "UNMEASURABLE"

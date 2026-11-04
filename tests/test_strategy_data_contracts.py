@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hl_observer.datasets.strategy_data_contracts import (
+    evaluate_copy_vault_replay_readiness,
     get_strategy_data_contract,
     missing_required_families,
 )
@@ -68,3 +69,27 @@ def test_missing_required_families_never_silently_pass() -> None:
 def test_unknown_strategy_is_rejected() -> None:
     with pytest.raises(ValueError):
         get_strategy_data_contract("unknown")
+
+
+def test_copy_vault_replay_ready_is_distinct_from_live_observer_ready() -> None:
+    manifests = [
+        {"venue": "hyperliquid", "family": family, "run_id": "safe-run-1"}
+        for family in ("userFills", "bbo", "l2Book", "trades", "activeAssetCtx", "instrument_metadata")
+    ]
+    not_ready = evaluate_copy_vault_replay_readiness(
+        manifests,
+        observed_book_audit={"replay_grade_ready": False},
+    )
+    assert not_ready["ready"] is False
+    assert not_ready["status"] == "DATA_NOT_READY"
+    assert not_ready["live_observer_ready_is_not_replay_ready"] is True
+    assert "OBSERVED_BOOK_REPLAY_GRADE_NOT_READY" in not_ready["blockers"]
+
+    ready = evaluate_copy_vault_replay_readiness(
+        manifests,
+        observed_book_audit={"replay_grade_ready": True},
+    )
+    assert ready["ready"] is True
+    assert ready["status"] == "READY_REPLAY"
+    assert ready["paper_read_only"] is True
+    assert ready["real_execution"] is False

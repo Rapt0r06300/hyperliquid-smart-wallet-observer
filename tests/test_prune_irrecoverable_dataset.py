@@ -111,7 +111,15 @@ def test_terminal_receipt_rejects_path_traversal_or_symlink(tmp_path):
     outside.write_text("secret", encoding="utf-8")
     link = tmp_path / "datasets" / "rejected" / "link.manifest.json"
     link.parent.mkdir(parents=True)
-    link.symlink_to(outside)
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        # Windows refuse les liens symboliques sans le privilège développeur ou
+        # le mode développeur; la propriété de sécurité reste couverte sur les
+        # environnements qui savent créer le fixture requis.
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("privilège Windows de création de symlink indisponible")
+        raise
     with pytest.raises(gc.Refuse):
         gc._remove_terminal_receipt(tmp_path, "datasets/rejected/link.manifest.json")
     assert outside.read_text(encoding="utf-8") == "secret"

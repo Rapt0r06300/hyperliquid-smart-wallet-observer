@@ -16,12 +16,32 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from roadmap_136_registry import ROADMAP_ID, ROADMAP_SOURCE_SHA256, ROADMAP_TASKS, STATUSES, validate_registry
-
+from roadmap_136_registry import (
+    ROADMAP_ID,
+    ROADMAP_SOURCE_SHA256,
+    ROADMAP_TASKS,
+    STATUSES,
+    validate_registry,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE = ROOT / "runtime" / "reports" / "roadmap_136" / "evidence"
 DEFAULT_OUTPUT = ROOT / "runtime" / "reports" / "roadmap_136" / "ROADMAP_136_STATUS_CURRENT.json"
+SCIENTIFIC_LEDGER = ROOT / "runtime" / "reports" / "roadmap_136" / "scientific_ledger.jsonl"
+_CODE_PATHSPEC = (
+    "src", "tools", "tests", "docs", ".github", "*.cmd", "*.ps1", "*.sh",
+    "pyproject.toml", "requirements*.txt", "setup.cfg", "tox.ini", "Makefile",
+    "AGENTS.md", "CLAUDE.md", "SECURITY.md",
+)
+_CODE_DIGEST_CACHE: str | None = None
+
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+from hl_observer.ops.roadmap_closure_audit import (  # noqa: E402
+    append_scientific_record,
+    certify_technical_closure,
+    load_scientific_ledger,
+)
 
 SECURITY_PREFLIGHT_TESTS = (
     "tests/test_no_mainnet_execution.py",
@@ -43,9 +63,50 @@ COMMAND_PREFLIGHT_TESTS = (
     "tests/test_portable_official_cmds.py",
     "tests/test_push_github_launcher.py",
     "tests/test_ci_workflows.py",
+    "tests/test_platform_responsibility_check.py",
     "tests/test_workflow_bounds.py",
     "tests/test_restore_safe_workflow_contract.py",
     "tests/test_sync_complete_clone.py",
+)
+
+CLOSURE_PREFLIGHT_TESTS = (
+    "tests/test_roadmap_closure_audit.py",
+)
+
+TRADE_COUNT_PREFLIGHT_TESTS = (
+    "tests/test_global_unique_trade_backfill.py",
+    "tests/test_backfill_trade_partition_guards.py",
+    "tests/test_roadmap_closure_audit.py",
+)
+
+RECONCILIATION_PREFLIGHT_TESTS = (
+    "tests/test_roadmap_authority_reconciliation.py",
+    "tests/test_global_closure_run_summary.py",
+    "tests/test_global_closure_resume_contract.py",
+    "tests/test_global_closure_phase_guard.py",
+    "tests/test_closure_report_current_epoch.py",
+    "tests/test_build_closure_current_scoreboard.py",
+    "tests/test_current_scoreboard_closure.py",
+    "tests/test_persist_analysis_scoreboard.py",
+    "tests/test_scoreboard_metrics.py",
+    "tests/test_scoreboard_feeder.py",
+    "tests/test_scoreboard_producer.py",
+    "tests/test_scoreboard_promotion.py",
+    "tests/test_campaign_watchdog_drain.py",
+    "tests/test_campaign_resilience_receipt.py",
+    "tests/test_campaign_manifest_json.py",
+    "tests/test_campaign_execution_scope.py",
+    "tests/test_quarantine_audit.py",
+    "tests/test_verify_safe_corpus_partition.py",
+    "tests/test_publication_failure_boundaries.py",
+    "tests/test_event_intelligence_foundation.py",
+    "tests/test_event_intelligence_runtime_pipeline.py",
+    "tests/test_event_intelligence_outcomes.py",
+    "tests/test_event_intelligence_complete120.py",
+    "tests/test_continuous_reconcile_backlog.py",
+    "tests/test_recovery_source_audit.py",
+    "tests/test_resumable_campaign.py",
+    "tests/test_resumable_campaign_v2.py",
 )
 
 CI_CONTRACT_PREFLIGHT_TESTS = (
@@ -307,6 +368,7 @@ WORLD_MONITOR_PREFLIGHT_TESTS = (
     "tests/test_event_intelligence_worldmonitor.py",
     "tests/test_event_intelligence_foundation.py",
     "tests/test_event_intelligence_complete120.py",
+    "tests/test_event_intelligence_stock_data.py",
 )
 
 
@@ -316,61 +378,61 @@ def _git(*args: str) -> str:
 
 
 def _tree_digest() -> str:
-    status = _git("status", "--porcelain=v1", "--untracked-files=all")
+    # The roadmap status digest is about implementation surfaces.  Restricting
+    # the pathspec prevents Git from walking the multi-million-file SAFE corpus
+    # for a report field that is not used as economic evidence.
+    status = _git(
+        "status", "--porcelain=v1", "--untracked-files=normal", "--",
+        *_CODE_PATHSPEC,
+    )
     return sha256(status.encode("utf-8")).hexdigest()
 
 
 def _working_tree_code_digest() -> str:
-    """Hash tracked code/document deltas, excluding generated SAFE/runtime data."""
-    result = subprocess.run(
-        [
-            "git", "diff", "--binary", "HEAD", "--", ".",
-            ":(exclude)runtime", ":(exclude)data", ":(exclude)datasets",
-            ":(exclude)logs", ":(exclude)reports",
-            ":(exclude)tools/verify_roadmap_136.py",
-        ],
-        cwd=ROOT, check=True, capture_output=True,
-    )
-    digest = sha256(result.stdout)
+    """Hash changed implementation files without serializing the full corpus."""
+    global _CODE_DIGEST_CACHE
+    if _CODE_DIGEST_CACHE is not None:
+        return _CODE_DIGEST_CACHE
     status = subprocess.run(
         [
             "git", "status", "--porcelain=v1", "--untracked-files=normal", "--",
-            "src", "tools", "tests", "docs", "*.cmd", "*.ps1", "*.sh",
+            *_CODE_PATHSPEC,
         ],
         cwd=ROOT, check=True, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=120,
     ).stdout.splitlines()
-    untracked: list[str] = []
     generated_dirs = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".tox"}
-    for line in status:
-        if not line.startswith("?? "):
+    digest = sha256()
+    for line in sorted(status):
+        relative_text = line[3:].replace("\\", "/") if len(line) >= 4 else ""
+        if " -> " in relative_text:
+            relative_text = relative_text.rsplit(" -> ", 1)[1]
+        relative_text = relative_text.rstrip("/")
+        if relative_text == "tools/verify_roadmap_136.py":
             continue
-        candidate = ROOT / line[3:].rstrip("/").replace("/", os.sep)
+        digest.update(line.encode("utf-8"))
+        digest.update(b"\0")
+        candidate = ROOT / relative_text.replace("/", os.sep)
         if candidate.is_dir():
-            untracked.extend(
-                str(path.relative_to(ROOT))
+            paths = (
+                path
                 for path in candidate.rglob("*")
                 if path.is_file()
                 and not path.is_symlink()
                 and not any(part in generated_dirs for part in path.relative_to(ROOT).parts)
                 and path.suffix not in {".pyc", ".pyo"}
             )
-        elif candidate.is_file():
-            relative = candidate.relative_to(ROOT)
-            if (
-                not any(part in generated_dirs for part in relative.parts)
-                and candidate.suffix not in {".pyc", ".pyo"}
-            ):
-                untracked.append(str(relative))
-    for relative in sorted(path for path in untracked if path.strip()):
-        if relative.replace(os.sep, "/") == "tools/verify_roadmap_136.py":
-            continue
-        path = ROOT / relative
-        if not path.is_file():
-            continue
-        digest.update(relative.replace(os.sep, "/").encode("utf-8"))
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
+        elif candidate.is_file() and not candidate.is_symlink():
+            paths = (candidate,)
+        else:
+            paths = ()
+        for path in sorted(paths):
+            relative = path.relative_to(ROOT)
+            digest.update(str(relative).replace(os.sep, "/").encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(sha256(path.read_bytes()).digest())
+    _CODE_DIGEST_CACHE = digest.hexdigest()
+    return _CODE_DIGEST_CACHE
 
 
 def _read_receipts(directory: Path) -> dict[str, list[dict[str, Any]]]:
@@ -411,9 +473,11 @@ def _valid_receipt(
         return False
     if not all(isinstance(receipt[key], list) and receipt[key] for key in ("commands", "tests", "proofs", "files")):
         return False
-    if any(not isinstance(value, str) or not value.strip() for key in ("commands", "tests", "proofs", "files") for value in receipt[key]):
-        return False
-    return True
+    return not any(
+        not isinstance(value, str) or not value.strip()
+        for key in ("commands", "tests", "proofs", "files")
+        for value in receipt[key]
+    )
 
 
 def _run_readonly(
@@ -476,10 +540,23 @@ def record_authority_preflight(evidence_dir: Path) -> dict[str, Any]:
     head_sha = _git("rev-parse", "HEAD")
     working_tree_code_sha256 = _working_tree_code_digest()
     git_checks = [
-        _run_readonly(["git", "status", "--porcelain=v1", "--untracked-files=all"]),
+        # ``all`` recursively enumerates every ignored-data-adjacent file on
+        # this checkout and can exceed the evidence timeout.  ``normal`` still
+        # records untracked WIP at directory granularity while keeping the
+        # exact-head receipt bounded and reproducible.
+        _run_readonly([
+            "git", "status", "--porcelain=v1", "--untracked-files=normal", "--",
+            *_CODE_PATHSPEC,
+        ]),
         _run_readonly(["git", "rev-parse", "HEAD"]),
-        _run_readonly(["git", "diff", "--name-only", "HEAD"]),
-        _run_readonly(["git", "diff", "--cached", "--name-only"]),
+        _run_readonly([
+            "git", "diff", "--name-only", "HEAD", "--",
+            *_CODE_PATHSPEC,
+        ]),
+        _run_readonly([
+            "git", "diff", "--cached", "--name-only", "--",
+            *_CODE_PATHSPEC,
+        ]),
         _run_readonly(["git", "rev-parse", "--verify", "refs/remotes/origin/main"]),
         _run_readonly(["git", "ls-remote", "origin", "refs/heads/main"]),
     ]
@@ -570,7 +647,15 @@ def record_security_preflight(evidence_dir: Path) -> dict[str, Any]:
     evidence_dir.mkdir(parents=True, exist_ok=True)
     head_sha = _git("rev-parse", "HEAD")
     working_tree_code_sha256 = _working_tree_code_digest()
-    test = _run_readonly([sys.executable, "-m", "pytest", "-q", *SECURITY_PREFLIGHT_TESTS])
+    # The security/orchestration bundle includes temporary-repository and
+    # filesystem-isolation tests.  A fixed 60-second ceiling classified a
+    # healthy hosted-equivalent run as a failure on slower Windows disks.
+    # Keep the timeout bounded, but allow the complete evidence command to
+    # finish instead of writing no receipt after an observation timeout.
+    test = _run_readonly(
+        [sys.executable, "-m", "pytest", "-q", *SECURITY_PREFLIGHT_TESTS],
+        timeout_s=300,
+    )
     if test["returncode"] != 0:
         raise RuntimeError("security/orchestration preflight failed; no receipts written")
 
@@ -668,7 +753,10 @@ def record_command_preflight(evidence_dir: Path) -> dict[str, Any]:
     evidence_dir.mkdir(parents=True, exist_ok=True)
     head_sha = _git("rev-parse", "HEAD")
     working_tree_code_sha256 = _working_tree_code_digest()
-    test = _run_readonly_files(COMMAND_PREFLIGHT_TESTS, timeout_s=90)
+    # The portable launcher contract intentionally exercises the real local
+    # reports tree; on this checkout its bounded scan takes about 145 seconds.
+    # Keep the per-file isolation, but do not reject a valid result at 90s.
+    test = _run_readonly_files(COMMAND_PREFLIGHT_TESTS, timeout_s=300)
     if test["returncode"] != 0:
         raise RuntimeError("command/workflow preflight failed; no receipts written")
 
@@ -708,6 +796,10 @@ def record_command_preflight(evidence_dir: Path) -> dict[str, Any]:
             "launcher, restore and workflow failure paths remain fail-closed locally",
             ["POUSSER-GITHUB-FORCE.cmd", "tests/test_push_github_launcher.py", "tests/test_sync_complete_clone.py", "tests/test_workflow_bounds.py"],
         ),
+        "T120": (
+            "Linux and Windows hosted jobs execute one explicit platform-responsibility contract while remaining PAPER and fail-closed",
+            ["tools/platform_responsibility_check.py", ".github/workflows/ci.yml", "tests/test_platform_responsibility_check.py"],
+        ),
     }
     written: list[str] = []
     for task_id, (proof, files) in task_specs.items():
@@ -719,6 +811,367 @@ def record_command_preflight(evidence_dir: Path) -> dict[str, Any]:
             "proofs": [proof, "local contract tests passed; no hosted run is claimed by this receipt"],
         }
         path = evidence_dir / f"{task_id}-command-preflight-{head_sha[:12]}-{working_tree_code_sha256[:12]}.json"
+        path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written.append(str(path.relative_to(ROOT)).replace(os.sep, "/"))
+    return {"head_sha": head_sha, "written": written, "tested": test}
+
+
+def record_closure_preflight(evidence_dir: Path) -> dict[str, Any]:
+    """Record the anti-omission audit without claiming global closure."""
+
+    validate_registry()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    head_sha = _git("rev-parse", "HEAD")
+    working_tree_code_sha256 = _working_tree_code_digest()
+    test = _run_readonly_files(CLOSURE_PREFLIGHT_TESTS, timeout_s=90)
+    if test["returncode"] != 0:
+        raise RuntimeError("roadmap closure audit preflight failed; no receipts written")
+    receipt = {
+        "source_sha256": ROADMAP_SOURCE_SHA256,
+        "head_sha": head_sha,
+        "working_tree_code_sha256": working_tree_code_sha256,
+        "task_id": "T134",
+        "status": "VERIFIED_DONE",
+        "commands": [test["command"]],
+        "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
+        "proofs": [
+            "anti-omission audit checks exact T001..T136 coverage, duplicate IDs and unknown IDs",
+            "receipt audit rejects stale SHA, partial proof lists and unsafe technical closure",
+            "this receipt certifies the audit execution only; it does not claim all roadmap tasks are complete",
+        ],
+        "files": ["src/hl_observer/ops/roadmap_closure_audit.py", "tests/test_roadmap_closure_audit.py"],
+    }
+    path = evidence_dir / f"T134-closure-audit-preflight-{head_sha[:12]}-{working_tree_code_sha256[:12]}.json"
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "head_sha": head_sha,
+        "written": [str(path.relative_to(ROOT)).replace(os.sep, "/")],
+        "tested": test,
+    }
+
+
+def record_trade_count_preflight(evidence_dir: Path) -> dict[str, Any]:
+    """Record the exact global unique-trade backfill only when complete.
+
+    This is intentionally separate from the broad reconciliation preflight:
+    the durable scan is a real corpus operation, while the receipt must reject
+    any partial, failed, or digest-less result instead of treating local unit
+    tests as proof of corpus coverage.
+    """
+    validate_registry()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    head_sha = _git("rev-parse", "HEAD")
+    working_tree_code_sha256 = _working_tree_code_digest()
+    patch_path = ROOT / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
+    try:
+        patch = json.loads(patch_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("global unique-trade patch is unreadable") from exc
+    if not isinstance(patch, dict):
+        raise RuntimeError("global unique-trade patch root is invalid")
+    required_exact = (
+        patch.get("schema") == "alina.global_unique_trade_patch.v4"
+        and patch.get("coverage_complete") is True
+        and patch.get("identity_store_persisted") is True
+        and patch.get("candidate_trade_shards") == patch.get("successful")
+        and patch.get("successful") == patch.get("trade_shards_in_scope")
+        and patch.get("remaining_candidate_shards") == 0
+        and patch.get("unscanned_candidate_shards") == 0
+        and patch.get("unproven_trade_count_shards") == 0
+        and not patch.get("failed")
+        and not patch.get("failure_reasons")
+        and isinstance(patch.get("global_unique_trade_count"), int)
+        and patch["global_unique_trade_count"] > 0
+        and isinstance(patch.get("global_identity_digest"), str)
+        and len(patch["global_identity_digest"]) == 64
+    )
+    if not required_exact:
+        raise RuntimeError("global unique-trade coverage is incomplete or unproven")
+    test = _run_readonly(
+        [sys.executable, "-m", "pytest", "-q", *TRADE_COUNT_PREFLIGHT_TESTS],
+        timeout_s=180,
+    )
+    if test["returncode"] != 0:
+        raise RuntimeError("global unique-trade preflight tests failed; no receipt written")
+    receipt = {
+        "source_sha256": ROADMAP_SOURCE_SHA256,
+        "head_sha": head_sha,
+        "working_tree_code_sha256": working_tree_code_sha256,
+        "task_id": "T018",
+        "status": "VERIFIED_DONE",
+        "commands": [
+            "python tools/backfill_global_unique_trade_counts.py --limit 10 --workers 6",
+            test["command"],
+        ],
+        "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
+        "proofs": [
+            "exact current SAFE release coverage is complete for every candidate trade shard",
+            "durable SHA-bound SQLite identity checkpoint is persisted and the published identity digest is present",
+            "no failed, unscanned, or unproven shard remains; no synthetic row or zero fill was substituted",
+        ],
+        "files": [
+            "tools/backfill_exact_trade_counts.py",
+            "tools/backfill_global_unique_trade_counts.py",
+            "tests/test_global_unique_trade_backfill.py",
+            "tests/test_backfill_trade_partition_guards.py",
+            "catalog/DATA_INDEX.json",
+            "catalog/TRADE_UNIQUE_COUNT_PATCH.json",
+            "runtime/reports/global-unique-trades/identities.sqlite",
+        ],
+        "observations": {
+            key: patch.get(key)
+            for key in (
+                "trade_shards_in_scope", "candidate_trade_shards", "successful",
+                "remaining_candidate_shards", "unscanned_candidate_shards",
+                "unproven_trade_count_shards", "global_unique_trade_count",
+                "global_identity_digest", "identity_store_persisted",
+            )
+        },
+        "patch_sha256": sha256(patch_path.read_bytes()).hexdigest(),
+    }
+    path = evidence_dir / f"T018-trade-count-preflight-{head_sha[:12]}-{working_tree_code_sha256[:12]}.json"
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "head_sha": head_sha,
+        "written": [str(path.relative_to(ROOT)).replace(os.sep, "/")],
+        "tested": test,
+        "observations": receipt["observations"],
+    }
+
+
+def record_scientific_preflight(evidence_dir: Path) -> dict[str, Any]:
+    """Append one honest scientific continuation record for T136."""
+    validate_registry()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    head_sha = _git("rev-parse", "HEAD")
+    working_tree_code_sha256 = _working_tree_code_digest()
+    patch_path = ROOT / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
+    try:
+        patch = json.loads(patch_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("scientific preflight corpus patch is unreadable") from exc
+    if not isinstance(patch, dict) or patch.get("coverage_complete") is not True:
+        raise RuntimeError("scientific preflight requires complete exact corpus coverage")
+    test = _run_readonly(
+        [sys.executable, "-m", "pytest", "-q", *TRADE_COUNT_PREFLIGHT_TESTS],
+        timeout_s=180,
+    )
+    if test["returncode"] != 0:
+        raise RuntimeError("scientific continuation tests failed; no receipt written")
+    corpus_sha = sha256(patch_path.read_bytes()).hexdigest()
+    config_payload = {
+        "protocol": "roadmap-136-scientific-continuation-v1",
+        "status": "MORE_DATA",
+        "test_command": test["command"],
+        "identity_version": patch.get("identity_version"),
+    }
+    config_sha = sha256(
+        (json.dumps(config_payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    ).hexdigest()
+    # Keep one immutable ledger entry per exact implementation snapshot.  A
+    # single HEAD can legitimately receive several safe, uncommitted fixes;
+    # reusing the HEAD-only id would make a later honest preflight fail as a
+    # duplicate instead of appending the new exact-code observation.
+    experiment_id = (
+        f"roadmap-136-scientific-continuation-{head_sha[:12]}-"
+        f"{working_tree_code_sha256[:12]}"
+    )
+    entries = load_scientific_ledger(SCIENTIFIC_LEDGER)
+    entry = next((item for item in entries if item.record.experiment_id == experiment_id), None)
+    if entry is None:
+        entry = append_scientific_record(
+            SCIENTIFIC_LEDGER,
+            {
+                "experiment_id": experiment_id,
+                "status": "MORE_DATA",
+                "code_sha": working_tree_code_sha256,
+                "corpus_sha": corpus_sha,
+                "config_sha": config_sha,
+                "observations": int(patch["successful"]),
+                "fabricated_values": False,
+            },
+        )
+    elif (
+        entry.record.code_sha != working_tree_code_sha256
+        or entry.record.corpus_sha != corpus_sha
+        or entry.record.config_sha != config_sha
+    ):
+        raise RuntimeError("scientific ledger entry is stale for this exact HEAD")
+    receipt = {
+        "source_sha256": ROADMAP_SOURCE_SHA256,
+        "head_sha": head_sha,
+        "working_tree_code_sha256": working_tree_code_sha256,
+        "task_id": "T136",
+        "status": "VERIFIED_DONE",
+        "commands": [test["command"]],
+        "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
+        "proofs": [
+            "append-only hash-chained scientific ledger entry is valid for the exact current code and corpus digests",
+            "the record is explicitly MORE_DATA and does not claim an economic edge or hosted execution",
+            "observations equal the exact number of successfully scanned corpus shards; no missing value was replaced by zero",
+        ],
+        "files": [
+            "src/hl_observer/ops/roadmap_closure_audit.py",
+            "tools/verify_roadmap_136.py",
+            "catalog/TRADE_UNIQUE_COUNT_PATCH.json",
+            "runtime/reports/roadmap_136/scientific_ledger.jsonl",
+            "tests/test_roadmap_closure_audit.py",
+        ],
+        "observations": {
+            "experiment_id": entry.record.experiment_id,
+            "ledger_entry_sha256": entry.entry_sha256,
+            "status": entry.record.status,
+            "observations": entry.record.observations,
+            "corpus_sha": entry.record.corpus_sha,
+            "config_sha": entry.record.config_sha,
+        },
+    }
+    path = evidence_dir / f"T136-scientific-preflight-{head_sha[:12]}-{working_tree_code_sha256[:12]}.json"
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "head_sha": head_sha,
+        "written": [str(path.relative_to(ROOT)).replace(os.sep, "/")],
+        "tested": test,
+        "observations": receipt["observations"],
+    }
+
+
+def record_technical_closure_preflight(evidence_dir: Path) -> dict[str, Any]:
+    """Emit T135 only after a certificate validates every current receipt."""
+    validate_registry()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    head_sha = _git("rev-parse", "HEAD")
+    working_tree_code_sha256 = _working_tree_code_digest()
+    test = _run_readonly_files(CLOSURE_PREFLIGHT_TESTS, timeout_s=90)
+    if test["returncode"] != 0:
+        raise RuntimeError("technical closure tests failed; no receipt written")
+    receipts_by_task = _read_receipts(evidence_dir)
+    provisional = {
+        "source_sha256": ROADMAP_SOURCE_SHA256,
+        "head_sha": head_sha,
+        "working_tree_code_sha256": working_tree_code_sha256,
+        "task_id": "T135",
+        "status": "VERIFIED_DONE",
+        "commands": [test["command"]],
+        "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
+        "proofs": [
+            "technical closure certificate validates the complete exact-HEAD receipt set",
+            "closure remains PAPER, READ-ONLY and FAIL-CLOSED with no real execution path",
+        ],
+        "files": [
+            "src/hl_observer/ops/roadmap_closure_audit.py",
+            "tools/verify_roadmap_136.py",
+            "runtime/reports/roadmap_136/evidence",
+            "tests/test_roadmap_closure_audit.py",
+        ],
+    }
+    receipt_map: dict[str, dict[str, Any]] = {}
+    for task in ROADMAP_TASKS:
+        candidates = [
+            item
+            for item in receipts_by_task[task.task_id]
+            if _valid_receipt(item, task.task_id, head_sha, working_tree_code_sha256)
+        ]
+        if candidates:
+            receipt_map[task.task_id] = candidates[-1]
+    receipt_map["T135"] = provisional
+    certificate = certify_technical_closure(
+        receipt_map,
+        head_sha=head_sha,
+        code_sha256=working_tree_code_sha256,
+        paper_read_only_fail_closed=True,
+        real_execution=False,
+    )
+    final = {
+        **provisional,
+        "proofs": [
+            *provisional["proofs"],
+            "certificate_sha256 is bound to all T001..T136 exact-head receipts, including the current T136 scientific record",
+        ],
+        "certificate": certificate,
+    }
+    path = evidence_dir / f"T135-technical-closure-{head_sha[:12]}-{working_tree_code_sha256[:12]}.json"
+    path.write_text(json.dumps(final, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "head_sha": head_sha,
+        "written": [str(path.relative_to(ROOT)).replace(os.sep, "/")],
+        "tested": test,
+        "certificate_sha256": certificate["certificate_sha256"],
+    }
+
+
+def record_reconciliation_preflight(evidence_dir: Path) -> dict[str, Any]:
+    """Record authority and runtime reconciliation contracts while excluding T018."""
+
+    validate_registry()
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    head_sha = _git("rev-parse", "HEAD")
+    working_tree_code_sha256 = _working_tree_code_digest()
+    test = _run_readonly_files(RECONCILIATION_PREFLIGHT_TESTS, timeout_s=180)
+    if test["returncode"] != 0:
+        raise RuntimeError("reconciliation preflight failed; no receipts written")
+    common = {
+        "source_sha256": ROADMAP_SOURCE_SHA256,
+        "head_sha": head_sha,
+        "working_tree_code_sha256": working_tree_code_sha256,
+        "commands": [test["command"]],
+        "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
+    }
+    task_specs = {
+        "T004": (
+            "the sealed 1..775 registry is reconciled without inventing unrecoverable literal history",
+            [
+                "src/hl_observer/ops/roadmap_authority_reconciliation.py",
+                "docs/PRE_RUN_775_CANONICAL_STATUS.json",
+                "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md",
+                "tests/test_roadmap_authority_reconciliation.py",
+            ],
+        ),
+        "T005": (
+            "current V5/776+ authority is distinguished from the sealed pre-run 1..775 registry",
+            [
+                "src/hl_observer/ops/roadmap_authority_reconciliation.py",
+                "docs/CURRENT_STATE.md",
+                "docs/HYPERSMART_CONSTITUTION.md",
+                "docs/audit/ROADMAP_V5_LOT05_COPY_VAULT_MAPPING.md",
+                "tests/test_roadmap_authority_reconciliation.py",
+            ],
+        ),
+        "T006": (
+            "the numbered complementary-ideas reservoir is inventoried 1..100 and not promoted as implementation",
+            [
+                "src/hl_observer/ops/roadmap_authority_reconciliation.py",
+                "docs/IDEAS_BANK.md",
+                "tests/test_roadmap_authority_reconciliation.py",
+            ],
+        ),
+        "T008": (
+            "current and historical documentation surfaces are classified and SHA-256 inventoried",
+            [
+                "src/hl_observer/ops/roadmap_authority_reconciliation.py",
+                "docs/CURRENT_STATE.md",
+                "docs/TASKLIST_EVIDENCE_MATRIX.md",
+                "tests/test_roadmap_authority_reconciliation.py",
+            ],
+        ),
+        "T017": ("closure-report and current-epoch reconciliation contracts pass locally", ["tools/build_closure_report.py", "tests/test_closure_report_current_epoch.py", "tests/test_global_closure_run_summary.py"]),
+        "T019": ("global closure proof and resume guards pass locally", ["tools/build_global_implementation_closure.py", "tests/test_global_closure_run_summary.py", "tests/test_global_closure_resume_contract.py", "tests/test_global_closure_phase_guard.py"]),
+        "T020": ("scoreboard evidence and persistence contracts pass locally", ["tests/test_build_closure_current_scoreboard.py", "tests/test_current_scoreboard_closure.py", "tests/test_persist_analysis_scoreboard.py", "tests/test_scoreboard_metrics.py", "tests/test_scoreboard_feeder.py", "tests/test_scoreboard_producer.py", "tests/test_scoreboard_promotion.py"]),
+        "T021": ("non-terminal analysis campaign and watchdog contracts pass locally", ["tools/campaign_watchdog.py", "tests/test_campaign_watchdog_drain.py", "tests/test_campaign_resilience_receipt.py", "tests/test_campaign_manifest_json.py", "tests/test_campaign_execution_scope.py"]),
+        "T022": ("PARTIAL market campaign quarantine and publication failure contracts pass locally", ["tools/build_quarantine_audit.py", "tests/test_quarantine_audit.py", "tests/test_verify_safe_corpus_partition.py", "tests/test_publication_failure_boundaries.py"]),
+        "T023": ("Event Intelligence failure and normalization contracts pass locally", ["src/hl_observer/event_intelligence", "tests/test_event_intelligence_foundation.py", "tests/test_event_intelligence_runtime_pipeline.py", "tests/test_event_intelligence_outcomes.py", "tests/test_event_intelligence_complete120.py"]),
+        "T024": ("recovery, resumable campaign and publication contracts pass locally", ["tools/continuous_reconcile_backlog.py", "tests/test_continuous_reconcile_backlog.py", "tests/test_recovery_source_audit.py", "tests/test_resumable_campaign.py", "tests/test_resumable_campaign_v2.py"]),
+    }
+    written: list[str] = []
+    for task_id, (proof, files) in task_specs.items():
+        receipt = {
+            **common,
+            "task_id": task_id,
+            "status": "VERIFIED_DONE",
+            "files": files,
+            "proofs": [proof, "local reconciliation tests passed; no hosted, live-data or economic completion claim is made"],
+        }
+        path = evidence_dir / f"{task_id}-reconciliation-preflight-{head_sha[:12]}-{working_tree_code_sha256[:12]}.json"
         path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         written.append(str(path.relative_to(ROOT)).replace(os.sep, "/"))
     return {"head_sha": head_sha, "written": written, "tested": test}
@@ -1204,6 +1657,10 @@ def record_world_monitor_preflight(evidence_dir: Path) -> dict[str, Any]:
         "tests": [f"{test['command']} -> returncode={test['returncode']}; {test['stdout']}"],
     }
     task_specs = {
+        "T073": (
+            "six World Monitor variants are explicitly catalogued and remain read-only",
+            ["src/hl_observer/event_intelligence/worldmonitor.py", "tests/test_event_intelligence_worldmonitor.py"],
+        ),
         "T074": (
             "World Monitor read-only GET paths, authentication and HTTP fail-closed contracts pass locally",
             ["src/hl_observer/event_intelligence/worldmonitor.py", "tests/test_event_intelligence_worldmonitor.py"],
@@ -1211,6 +1668,14 @@ def record_world_monitor_preflight(evidence_dir: Path) -> dict[str, Any]:
         "T075": (
             "World Monitor news digest and prediction-market normalization contracts pass locally",
             ["src/hl_observer/event_intelligence/worldmonitor.py", "tests/test_event_intelligence_worldmonitor.py"],
+        ),
+        "T076": (
+            "stock-data study contract is causal, provenance-bound and remains non-deployed when no SAFE stock source is registered",
+            [
+                "src/hl_observer/event_intelligence/stock_data.py",
+                "src/hl_observer/event_intelligence/source_catalog.py",
+                "tests/test_event_intelligence_stock_data.py",
+            ],
         ),
         "T077": (
             "World Monitor macro/news classification and causal timestamp contracts pass locally",
@@ -1344,6 +1809,30 @@ def record_domain_contract_preflight(evidence_dir: Path) -> dict[str, Any]:
         "T105": (
             "closure gates require explicit evidence and refuse incomplete Copy-Vault proof",
             ["src/hl_observer/backtesting/copy_vault_closure_gate.py", "tests/test_copy_vault_closure_gate.py"],
+        ),
+        "T106": (
+            "candidate-freeze contracts bind the candidate identity to immutable snapshot and provenance evidence",
+            ["tests/test_copy_vault_snapshot_contract.py", "tests/test_kronos_closure_contract.py"],
+        ),
+        "T107": (
+            "OOS contracts require causal, no-lookahead and complete evidence before acceptance",
+            ["tests/test_copy_vault_causal_evidence_contract.py", "tests/test_copy_vault_closure_gate.py"],
+        ),
+        "T108": (
+            "forward-paper contracts require a distinct post-freeze segment and refuse missing forward evidence",
+            ["tests/test_copy_vault_causal_evidence_contract.py", "tests/test_kronos_closure_contract.py"],
+        ),
+        "T109": (
+            "all-in cost contracts keep fee, spread, slippage and latency evidence explicit and fail closed when absent",
+            ["tests/test_copy_vault_performance_contract.py", "tests/test_copy_vault_closure_gate.py"],
+        ),
+        "T110": (
+            "capacity contracts require observed executable-size evidence and never infer capacity from missing values",
+            ["tests/test_copy_vault_performance_contract.py", "tests/test_copy_vault_closure_gate.py"],
+        ),
+        "T111": (
+            "verdict contracts derive PROVEN, MORE_DATA, UNMEASURABLE or REJECTED from complete evidence only",
+            ["tests/test_kronos_closure_contract.py", "tests/test_copy_vault_closure_gate.py"],
         ),
         "T112": (
             "missing or causal-invalid evidence remains an honest refusal rather than a fabricated result",
@@ -1646,6 +2135,11 @@ def main() -> int:
     parser.add_argument("--record-authority-preflight", action="store_true")
     parser.add_argument("--record-security-preflight", action="store_true")
     parser.add_argument("--record-command-preflight", action="store_true")
+    parser.add_argument("--record-closure-preflight", action="store_true")
+    parser.add_argument("--record-trade-count-preflight", action="store_true")
+    parser.add_argument("--record-scientific-preflight", action="store_true")
+    parser.add_argument("--record-technical-closure-preflight", action="store_true")
+    parser.add_argument("--record-reconciliation-preflight", action="store_true")
     parser.add_argument("--record-ci-contract-preflight", action="store_true")
     parser.add_argument("--record-domain-contract-preflight", action="store_true")
     parser.add_argument("--record-storage-performance-preflight", action="store_true")
@@ -1670,6 +2164,16 @@ def main() -> int:
             preflight = record_security_preflight(args.evidence_dir)
         if args.record_command_preflight:
             preflight = record_command_preflight(args.evidence_dir)
+        if args.record_closure_preflight:
+            preflight = record_closure_preflight(args.evidence_dir)
+        if args.record_trade_count_preflight:
+            preflight = record_trade_count_preflight(args.evidence_dir)
+        if args.record_scientific_preflight:
+            preflight = record_scientific_preflight(args.evidence_dir)
+        if args.record_technical_closure_preflight:
+            preflight = record_technical_closure_preflight(args.evidence_dir)
+        if args.record_reconciliation_preflight:
+            preflight = record_reconciliation_preflight(args.evidence_dir)
         if args.record_ci_contract_preflight:
             preflight = record_ci_contract_preflight(args.evidence_dir)
         if args.record_domain_contract_preflight:

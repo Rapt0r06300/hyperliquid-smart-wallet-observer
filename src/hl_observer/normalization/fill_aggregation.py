@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+import math
 from typing import Iterable
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
@@ -21,6 +23,31 @@ class AggregatedFill:
     fill_refs: tuple[str, ...]
 
 
+def _finite_positive_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not parsed.is_finite() or parsed <= 0:
+        return None
+    result = float(parsed)
+    return result if math.isfinite(result) and result > 0 else None
+
+
+def _exact_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not parsed.is_finite() or parsed != parsed.to_integral_value() or parsed <= 0:
+        return None
+    return int(parsed)
+
+
 def aggregate_fills_by_oid(fills: Iterable[dict[str, object]]) -> tuple[AggregatedFill, ...]:
     groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
     for fill in fills:
@@ -33,12 +60,20 @@ def aggregate_fills_by_oid(fills: Iterable[dict[str, object]]) -> tuple[Aggregat
         groups.setdefault((wallet, coin, direction, oid), []).append(fill)
     rows: list[AggregatedFill] = []
     for (wallet, coin, direction, oid), items in groups.items():
-        total_size = sum(abs(float(item.get("sz") or item.get("size") or 0.0)) for item in items)
-        notional = sum(
-            abs(float(item.get("sz") or item.get("size") or 0.0)) * abs(float(item.get("px") or item.get("price") or 0.0))
-            for item in items
-        )
-        times = [int(item.get("time") or item.get("time_ms") or 0) for item in items]
+        parsed_items: list[tuple[float, float, int]] = []
+        for item in items:
+            size = _finite_positive_float(item.get("sz") if item.get("sz") is not None else item.get("size"))
+            price = _finite_positive_float(item.get("px") if item.get("px") is not None else item.get("price"))
+            timestamp = _exact_positive_int(item.get("time") if item.get("time") is not None else item.get("time_ms"))
+            if size is None or price is None or timestamp is None:
+                parsed_items = []
+                break
+            parsed_items.append((size, price, timestamp))
+        if not parsed_items:
+            continue
+        total_size = sum(size for size, _, _ in parsed_items)
+        notional = sum(size * price for size, price, _ in parsed_items)
+        times = [timestamp for _, _, timestamp in parsed_items]
         refs = tuple(str(item.get("hash") or item.get("tid") or item.get("oid") or "") for item in items)
         rows.append(
             AggregatedFill(

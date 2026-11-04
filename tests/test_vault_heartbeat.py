@@ -23,3 +23,10 @@ def test_silencieux_mort():
 
 def test_jamais_vu_mort():
     assert HeartbeatVaults().vivant("vaultB", now_ms=1000.0)["vivant"] is False   # indépendant par vault
+
+
+def test_heartbeat_futur_et_non_fini_sont_refuses():
+    h = HeartbeatVaults()
+    h.battement("vaultA", now_ms=2_000.0)
+    assert h.vivant("vaultA", now_ms=1_000.0)["vivant"] is False
+    assert h.vivant("vaultA", now_ms=float("nan"))["vivant"] is False

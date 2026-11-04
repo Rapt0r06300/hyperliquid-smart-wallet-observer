@@ -73,6 +73,15 @@ def test_runbook_treats_recent_head_mechanisms_as_existing_baselines() -> None:
     assert "delta git" in text
 
 
+def test_continuous_search_keeps_data_gates_separate_from_historical_target() -> None:
+    text = _text("docs/CODEX_GOAL_RUNBOOK.md")
+    assert "nouvel objectif sans seuil de profit fixe" in text
+    assert "cible historique" in text
+    assert "ni une gate terminale" in text
+    assert "oos/forward" in text
+    assert "gates applicables" in text
+
+
 def test_agents_routes_through_canonical_manual_phase_spec() -> None:
     text = _text("AGENTS.md")
     assert len(text) < 6500

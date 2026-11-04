@@ -19,8 +19,13 @@ from tools.alina_git_code_sync import (
     SyncBlocked,
     Synchronizer,
     _commit_subject,
+    _classify_git_failure,
+    _git_operation_label,
     _mutex,
+    _redact_sensitive_text,
+    _status_entries,
     _status_paths,
+    _verify_push_porcelain,
 )
 
 
@@ -50,6 +55,7 @@ def test_terminate_process_tree_kills_descendant_process(tmp_path: Path) -> None
             text=True,
             check=False,
         ).stdout.find(str(child_pid)) == -1
+        assert sync_module._remaining_process_ids(tmp_path, parent.pid) == []
     finally:
         subprocess.run(
             ["taskkill", "/PID", str(parent.pid), "/T", "/F"],
@@ -66,6 +72,49 @@ def test_status_paths_parse_spaces_and_rename_records():
     assert _status_paths(raw) == [
         "src/file with space.py", "docs/new name.md", "docs/old name.md",
     ]
+
+
+def test_status_entries_split_staged_and_worktree_changes():
+    raw = (
+        b"M  staged.py\0"
+        b" M unstaged.py\0"
+        b"MM both.py\0"
+    )
+
+    staged, tracked = _status_entries(raw)
+
+    assert staged == ["staged.py", "both.py"]
+    assert tracked == ["unstaged.py", "both.py"]
+
+
+def test_redact_sensitive_git_details_before_reporting() -> None:
+    raw = (
+        "remote https://user:token@example.com/repo.git "
+        "ghp_1234567890 github_pat_abcdefgh Authorization: Bearer secret"
+    )
+
+    redacted = _redact_sensitive_text(raw)
+
+    assert "token" not in redacted
+    assert "ghp_1234567890" not in redacted
+    assert "github_pat_abcdefgh" not in redacted
+    assert "Bearer secret" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+@pytest.mark.parametrize(
+    ("detail", "expected"),
+    [
+        ("rejected non-fast-forward", "retryable_race"),
+        ("Could not resolve host github.com", "retryable_network"),
+        ("Authentication failed for remote", "auth"),
+        ("protected branch hook declined", "protected"),
+        ("No such remote origin", "configuration"),
+        ("unexpected Git transport failure", "unknown"),
+    ],
+)
+def test_classify_git_failure_for_bounded_retry_policy(detail: str, expected: str) -> None:
+    assert _classify_git_failure(detail, 1) == expected
 
 
 def test_commit_subject_keeps_words_intact_when_many_paths_are_changed() -> None:
@@ -286,8 +335,10 @@ def test_commit_subject_does_not_overclaim_a_mixed_batch() -> None:
     assert subject == "chore(repository): update repository tooling and safeguards (4 paths)"
 
 
-def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> None:
+def test_inventory_scopes_status_away_from_massive_protected_roots(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "datasets").mkdir()
     commands: list[tuple[str, ...]] = []
 
     def fake_command(*args: str, **_kwargs):
@@ -304,8 +355,68 @@ def test_inventory_uses_cached_status_for_tracked_changes(tmp_path: Path) -> Non
     assert staged == []
     assert tracked == ["src/changed.py"]
     assert untracked == []
-    assert any(args[:2] == ("status", "--porcelain=v1") for args in commands)
+    status = next(args for args in commands if args[0] == "status")
+    assert ":(top,glob)*" in status
+    assert "src/**" in status
+    assert "datasets/**" not in status
+    assert "--no-renames" in status
+    assert not any(args[0] == "diff" for args in commands)
     assert not any("--modified" in args or "--deleted" in args for args in commands)
+
+
+def test_benchmark_is_read_only_and_reports_p50_p95(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    from tools import benchmark_git_sync as benchmark
+
+    class FakeSynchronizer:
+        def __init__(self, root: Path, **_kwargs) -> None:
+            self.root = root
+            self.report = {"git_commands": []}
+
+        def _inventory(self, *, refresh: bool = False):
+            return [], [], []
+
+    monkeypatch.setattr(benchmark, "Synchronizer", FakeSynchronizer)
+
+    assert benchmark.main(["--root", str(tmp_path), "--runs", "5"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["runs"] == 5
+    assert payload["mutations"] == []
+    assert payload["inventory_p50_seconds"] >= 0
+    assert payload["inventory_p95_seconds"] >= payload["inventory_p50_seconds"]
+
+
+def test_pathspecs_are_cached_per_run(tmp_path: Path, monkeypatch) -> None:
+    task = Synchronizer(tmp_path)
+    (tmp_path / "src").mkdir()
+    calls = 0
+    original_iterdir = Path.iterdir
+
+    def counted_iterdir(path: Path):
+        nonlocal calls
+        calls += 1
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", counted_iterdir)
+    first = task._pathspecs(include_protected=True)
+    second = task._pathspecs(include_protected=True)
+
+    assert isinstance(first, tuple)
+    assert first == second
+    assert calls == 1
+
+
+def test_phase_metrics_record_duration_and_budget(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+
+    with task._timed_phase("unit", budget_seconds=1.0):
+        pass
+
+    phase = task.report["phases"]["unit"]
+    assert phase["duration_ms"] >= 0
+    assert phase["budget_seconds"] == 1.0
+    assert phase["budget_exceeded"] is False
 
 
 def test_sync_receipt_records_exact_preflight_inventory_and_remote_divergence(repos):
@@ -376,6 +487,8 @@ def test_timed_out_inventory_is_explicitly_logged_and_keeps_wip(
     )
     assert timeout["timed_out"] is True
     assert timeout["exit_code"] == -1
+    assert timeout["killed_process_tree"] is True
+    assert timeout["residual_process_ids"] == []
     assert task.report["push_attempts"] == 0
     assert task.report["local_commit_created"] is False
     assert git(local, "rev-parse", "HEAD") == local_head
@@ -427,6 +540,135 @@ def test_expected_git_return_code_is_logged_as_info_not_failure(
     assert "[ECHEC] Comparer les fichiers suivis par Git" not in output
 
 
+def test_command_redacts_credentials_from_network_details(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    def fake_run_git(root, git, args, **kwargs):
+        return subprocess.CompletedProcess(
+            [git, *args], 1, b"",
+            b"remote https://user:secret@example.com/repo.git ghp_1234567890",
+        )
+
+    monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
+    task = Synchronizer(tmp_path)
+
+    with pytest.raises(SyncBlocked) as failure:
+        task.command("push", "origin", "HEAD:refs/heads/main")
+
+    output = capsys.readouterr().out + str(failure.value)
+    assert "secret" not in output
+    assert "ghp_1234567890" not in output
+    assert "[REDACTED]" in output
+
+
+def test_remote_sha_rejects_ambiguous_ls_remote_output(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 0,
+            b"a" * 40 + b"\trefs/heads/main\n"
+            + b"b" * 40 + b"\trefs/heads/main\n",
+            b"",
+        )
+
+    task.command = fake_command  # type: ignore[method-assign]
+    with pytest.raises(SyncBlocked, match="ambigue"):
+        task.remote_sha()
+
+
+@pytest.mark.parametrize(
+    ("porcelain", "expected_ref", "should_pass"),
+    [
+        ("* HEAD:refs/heads/main [new branch]", "refs/heads/main", True),
+        ("= HEAD:refs/heads/other [up to date]", "refs/heads/main", False),
+        ("! HEAD:refs/heads/main [rejected]", "refs/heads/main", False),
+        ("", "refs/heads/main", False),
+    ],
+)
+def test_push_porcelain_proof_requires_exact_successful_ref(
+    porcelain: str, expected_ref: str, should_pass: bool,
+) -> None:
+    if should_pass:
+        _verify_push_porcelain(porcelain, "a" * 40, expected_ref)
+    else:
+        with pytest.raises(SyncBlocked):
+            _verify_push_porcelain(porcelain, "a" * 40, expected_ref)
+
+
+def test_git_capability_check_records_versions_and_push_porcelain(
+    tmp_path: Path,
+) -> None:
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **_kwargs):
+        if args == ("--version",):
+            return subprocess.CompletedProcess(args, 0, b"git version 2.45.1.windows.1\n", b"")
+        if args == ("push", "-h"):
+            return subprocess.CompletedProcess(args, 0, b"usage: git push [--porcelain]\n", b"")
+        raise AssertionError(args)
+
+    task.command = fake_command  # type: ignore[method-assign]
+    task._verify_git_capabilities()
+
+    assert task.report["git_version"] == "git version 2.45.1.windows.1"
+    assert task.report["push_capability"] == "PORCELAIN_SUPPORTED"
+    assert task.report["python_version"]
+
+
+def test_git_capability_check_fails_without_push_porcelain(tmp_path: Path) -> None:
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **_kwargs):
+        if args == ("--version",):
+            return subprocess.CompletedProcess(args, 0, b"git version 2.45.1\n", b"")
+        if args == ("push", "-h"):
+            return subprocess.CompletedProcess(args, 0, b"usage: git push\n", b"")
+        raise AssertionError(args)
+
+    task.command = fake_command  # type: ignore[method-assign]
+    with pytest.raises(SyncBlocked, match="porcelain"):
+        task._verify_git_capabilities()
+
+
+def test_push_help_is_not_reported_as_a_real_publication() -> None:
+    assert "sans publication" in _git_operation_label(["push", "-h"])
+    assert "Publier" in _git_operation_label(["push", "origin", "HEAD"])
+
+
+def test_write_report_keeps_last_receipt_and_bounded_history(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(sync_module, "RECEIPT_HISTORY_LIMIT", 3)
+    task = Synchronizer(tmp_path)
+
+    for index in range(5):
+        task.report["run_id"] = f"20261104T00000{index}Z-{index}"
+        task.report["status"] = "SYNCHRONIZED"
+        task._write_report()
+
+    receipt_dir = tmp_path / "runtime" / "reports" / "git-sync"
+    last = json.loads((receipt_dir / "LAST_SYNC.json").read_text(encoding="utf-8"))
+    history = sorted((receipt_dir / "history").glob("RUN-*.json"))
+    assert last["run_id"] == "20261104T000004Z-4"
+    assert len(history) == 3
+    assert all(json.loads(path.read_text(encoding="utf-8"))["status"] == "SYNCHRONIZED" for path in history)
+
+
+def test_launcher_contract_pins_engine_and_exposes_safe_diagnostics() -> None:
+    launcher = Path("POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
+    engine_sha = hashlib.sha256(
+        Path("tools/alina_git_code_sync.py").read_bytes()
+    ).hexdigest()
+
+    assert f"ALINA_LOCAL_ENGINE_SHA256={engine_sha}" in launcher
+    assert "--portable-self-check" in launcher
+    assert "--benchmark" in launcher
+    assert "--plan" in launcher
+    assert "set \"RC=%ERRORLEVEL%\"" in launcher
+    assert "exit /b %RC%" in launcher
+
+
 @pytest.mark.parametrize("verb", ["fetch", "push"])
 def test_network_git_commands_stream_progress_to_terminal(
     tmp_path: Path, monkeypatch, capsys, verb: str,
@@ -444,7 +686,9 @@ def test_network_git_commands_stream_progress_to_terminal(
     output = capsys.readouterr().out
     assert "GitHub" in output
     assert "code=0" in output
-    assert calls[0][1]["live_stderr"] is True
+    # Network stderr is captured and replayed only after redaction, so a
+    # credential helper can never leak a secret directly to the console.
+    assert calls[0][1]["live_stderr"] is False
 
 
 def test_commit_command_uses_long_checkpoint_timeout(tmp_path: Path, monkeypatch):
@@ -804,6 +1048,7 @@ def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch)
             return self.returncode
 
     def fake_popen(command, **kwargs):
+        captured["command"] = command
         captured.update(kwargs)
         return FakeProcess()
 
@@ -817,6 +1062,22 @@ def test_git_subprocess_disables_interactive_auth_prompts(tmp_path, monkeypatch)
     assert env["GIT_SSH_COMMAND"] == (
         "ssh -o BatchMode=yes -o ConnectTimeout=8"
     )
+    assert captured["command"][0:3] == [
+        "git", "-c", "core.hooksPath=NUL",
+    ]
+
+
+def test_preflight_refuses_an_existing_git_index_lock(repos):
+    local, _, _ = repos
+    lock = local / ".git" / "index.lock"
+    lock.write_bytes(b"")
+    try:
+        task = Synchronizer(local, allow_test_remote=True)
+        with pytest.raises(SyncBlocked, match="index.lock"):
+            task.preflight(allow_shallow=True)
+        assert task.report["git_index_lock_detected"] is True
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def test_clean_sync_never_commits_empty(repos):
@@ -826,6 +1087,12 @@ def test_clean_sync_never_commits_empty(repos):
     assert rc == 0
     assert receipt["local_commit_created"] is False
     assert receipt["push_attempts"] == 0
+    assert receipt["push_capability"] == "PORCELAIN_SUPPORTED"
+    assert receipt["remote_capability"] == "REMOTE_CONFIGURED"
+    assert receipt["remote_url_observed"]
+    assert receipt["push_url_observed"]
+    assert receipt["run_id"]
+    assert receipt["mutations"] == []
     assert git(local, "rev-parse", "HEAD") == before
 
 
@@ -958,6 +1225,7 @@ def test_dry_run_does_not_mutate_git(repos):
     assert rc == 0 and receipt["status"] == "DRY_RUN_ONLY"
     assert receipt["engine_build"] == sync_module.GIT_SYNC_ENGINE_BUILD
     assert receipt["proposed_commit_message"] == "chore(runtime): update local"
+    assert receipt["mutations"] == []
     assert git(local, "rev-parse", "HEAD") == local_head
     assert git(origin, "rev-parse", "main") == remote_head
     assert git(local, "diff", "--cached", "--name-only") == ""
@@ -988,6 +1256,48 @@ def test_ignored_data_collision_refused(repos):
     assert git(origin, "show", "main:runtime/session.json") == "remote state"
 
 
+def test_tracked_protected_local_change_does_not_block_code_only_fast_forward(repos):
+    local, cloud, origin = repos
+    cloud_commit(cloud, "catalog/state.json", "initial\n")
+    git(local, "fetch", "origin", "main")
+    git(local, "merge", "--ff-only", "origin/main")
+    protected = local / "catalog" / "state.json"
+    protected.write_text("local protected value\n", encoding="utf-8")
+    cloud_commit(cloud, "docs/remote.md", "remote code\n")
+
+    dry_rc, dry_receipt = run_sync(local, dry=True)
+    assert dry_rc == 0 and dry_receipt["status"] == "DRY_RUN_ONLY"
+    assert dry_receipt["mutations"] == []
+    assert protected.read_text(encoding="utf-8") == "local protected value\n"
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert receipt["fast_path"] == "CLEAN_REMOTE_FAST_FORWARD"
+    assert receipt["push_attempts"] == 0
+    assert protected.read_text(encoding="utf-8") == "local protected value\n"
+    assert (local / "docs/remote.md").read_text(encoding="utf-8") == "remote code\n"
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+
+
+def test_tracked_protected_collision_still_fails_closed(repos):
+    local, cloud, origin = repos
+    cloud_commit(cloud, "catalog/state.json", "initial\n")
+    git(local, "fetch", "origin", "main")
+    git(local, "merge", "--ff-only", "origin/main")
+    protected = local / "catalog" / "state.json"
+    protected.write_text("local protected value\n", encoding="utf-8")
+    cloud_commit(cloud, "catalog/state.json", "remote protected value\n")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 2 and receipt["status"] == "NO_GO"
+    assert "protege" in receipt["error"]
+    assert protected.read_text(encoding="utf-8") == "local protected value\n"
+    assert git(origin, "show", "main:catalog/state.json") == "remote protected value"
+    assert receipt["push_attempts"] == 0
+
+
 def test_concurrent_cloud_push_retries_without_force(repos):
     local, cloud, origin = repos
     (local / "src" / "local.py").write_text("local = 1\n")
@@ -996,7 +1306,7 @@ def test_concurrent_cloud_push_retries_without_force(repos):
         raced = False
 
         def command(self, *args, **kwargs):
-            if args and args[0] == "push" and not self.raced:
+            if args and args[0] == "push" and "origin" in args and not self.raced:
                 self.raced = True
                 cloud_commit(cloud, "docs/race.md", "race\n")
             return super().command(*args, **kwargs)
@@ -1004,6 +1314,7 @@ def test_concurrent_cloud_push_retries_without_force(repos):
     task = RacingSync(local, allow_test_remote=True)
     assert task.run() == 0
     assert task.report["push_attempts"] == 2
+    assert task.report["push_failure_classes"] == ["retryable_race"]
     assert git(origin, "show", "main:docs/race.md") == "race"
     assert git(origin, "show", "main:src/local.py") == "local = 1"
 
@@ -1191,7 +1502,10 @@ def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
     assert 'call :download_source "tools/install_portable_git.ps1"' in source
     assert 'call :download_source "tools/alina_git_code_sync.py"' in source
     assert "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202" in source
-    assert "ALINA_LOCAL_ENGINE_SHA256=514a9a39415cc0d63434b27169888bb38b8bec1ca6e5b057e8f9e127a82c32c4" in source
+    engine_sha = hashlib.sha256(
+        (launcher.parent / "tools" / "alina_git_code_sync.py").read_bytes()
+    ).hexdigest()
+    assert f"ALINA_LOCAL_ENGINE_SHA256={engine_sha}" in source
     assert "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b" in source
     assert "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297" in source
     assert "Get-FileHash" not in source

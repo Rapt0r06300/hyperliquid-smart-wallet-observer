@@ -149,3 +149,55 @@ def test_streaming_materializer_rejects_path_escape(tmp_path: Path) -> None:
             purge_assets_after_use=True,
             downloader=fake_download,
         )
+
+
+def test_streaming_materializer_rejects_non_contiguous_chunks(tmp_path: Path) -> None:
+    import pytest
+
+    record = DatasetRecord(
+        relative_path="runtime/data/large.bin",
+        size=1,
+        sha256=hashlib.sha256(b"x").hexdigest(),
+        storage="raw_chunks",
+        chunks=(
+            {"asset": "part1.bin", "part": 1},
+            {"asset": "part3.bin", "part": 3},
+        ),
+    )
+
+    with pytest.raises(Exception, match="non contigus"):
+        materialize_records_streaming(
+            [record],
+            {},
+            tmp_path / "output",
+            tmp_path / "cache",
+            repository="Rapt0r06300/hypersmart-datasets",
+        )
+
+
+def test_streaming_materializer_rejects_duplicate_output_path(tmp_path: Path) -> None:
+    import pytest
+
+    first = DatasetRecord(
+        relative_path="runtime/data/a.bin",
+        size=1,
+        sha256=hashlib.sha256(b"x").hexdigest(),
+        storage="raw_chunks",
+        chunks=({"asset": "part1.bin", "part": 1},),
+    )
+    second = DatasetRecord(
+        relative_path="runtime/data/a.bin",
+        size=1,
+        sha256=hashlib.sha256(b"x").hexdigest(),
+        storage="raw_chunks",
+        chunks=({"asset": "part2.bin", "part": 1},),
+    )
+
+    with pytest.raises(Exception, match="dupliqué"):
+        materialize_records_streaming(
+            [first, second],
+            {},
+            tmp_path / "output",
+            tmp_path / "cache",
+            repository="Rapt0r06300/hypersmart-datasets",
+        )

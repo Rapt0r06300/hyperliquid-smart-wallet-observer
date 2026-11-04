@@ -43,3 +43,56 @@ def test_doublon_d_adresse_compte_une_fois():
 
 def test_ignore_un_signal_non_mapping_fail_closed():
     assert consensus([None, _s("a", "BUY")], min_wallets=2) is None
+
+
+def _strict_s(adr, side, ts_ms, *, entity):
+    return {
+        "adresse": adr,
+        "side": side,
+        "coin": "BTC",
+        "ts_ms": ts_ms,
+        "size": 10.0,
+        "public_entity_id": entity,
+    }
+
+
+def test_strict_consensus_refuse_les_votes_sans_preuve_point_in_time() -> None:
+    assert consensus(
+        [_s("a", "BUY"), _s("b", "BUY"), _s("c", "BUY")],
+        min_wallets=3,
+        exiger_independance_mesuree=True,
+        as_of_ms=2_000,
+    ) is None
+
+
+def test_strict_consensus_replie_les_wallets_de_la_meme_entite() -> None:
+    signals = [
+        _strict_s("a", "BUY", 1_000, entity="desk-one"),
+        _strict_s("b", "BUY", 1_100, entity="desk-one"),
+        _strict_s("c", "BUY", 1_200, entity="desk-two"),
+    ]
+
+    assert consensus(
+        signals,
+        min_wallets=3,
+        exiger_independance_mesuree=True,
+        as_of_ms=2_000,
+    ) is None
+
+
+def test_strict_consensus_compte_les_entites_distinctes_et_ignore_le_futur() -> None:
+    signals = [
+        _strict_s("a", "BUY", 1_000, entity="desk-one"),
+        _strict_s("b", "BUY", 1_100, entity="desk-two"),
+        _strict_s("c", "BUY", 1_200, entity="desk-three"),
+        _strict_s("d", "SELL", 9_000, entity="future-shared"),
+    ]
+
+    result = consensus(
+        signals,
+        min_wallets=3,
+        exiger_independance_mesuree=True,
+        as_of_ms=2_000,
+    )
+
+    assert result == {"direction": "LONG", "n_independants": 3, "n_oppose": 0}

@@ -1,6 +1,7 @@
 """Authoritative strategy scope for the official paper runtime."""
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from enum import Enum
 
@@ -50,6 +51,10 @@ _SCOPE: tuple[StrategyScopeEntry, ...] = (
 _FAMILY_ALIASES = {"cross_venue_dislocation_v2": "cross_venue_dislocation"}
 _BY_FAMILY = {entry.family: entry for entry in _SCOPE}
 
+# Launch-time contract: the official runtime has exactly one paper family.
+OFFICIAL_SCOPE_VERSION = "COPY_VAULT_PAPER_V2"
+OFFICIAL_SCOPE_FAMILY = "copy_vault"
+
 
 def canonical_strategy_family(family: str) -> str:
     normalized = str(family).strip().lower()
@@ -98,6 +103,8 @@ def strategy_scope_refusal(family: str) -> str:
 def strategy_scope_payload() -> dict[str, object]:
     return {
         "scope_version": "V2-20260729",
+        "official_scope_version": OFFICIAL_SCOPE_VERSION,
+        "official_scope_family": OFFICIAL_SCOPE_FAMILY,
         "active_families": sorted(active_strategy_families()),
         "family_aliases": dict(sorted(_FAMILY_ALIASES.items())),
         "entries": [
@@ -106,3 +113,41 @@ def strategy_scope_payload() -> dict[str, object]:
         ],
         "environment_override_allowed": False,
     }
+
+
+def verify_official_runtime_scope(env: dict[str, str] | None = None) -> tuple[bool, tuple[str, ...]]:
+    """Reject inherited scope widening at the official process boundary."""
+    values = env or {}
+    mismatches: list[str] = []
+    if active_strategy_families() != frozenset({OFFICIAL_SCOPE_FAMILY}):
+        mismatches.append("canonical active family is not exactly copy_vault")
+    declared = str(values.get("HYPERSMART_ACTIVE_STRATEGY_SCOPE", "")).strip().lower()
+    if declared and declared != OFFICIAL_SCOPE_FAMILY:
+        mismatches.append(
+            f"HYPERSMART_ACTIVE_STRATEGY_SCOPE={declared!r} (expected {OFFICIAL_SCOPE_FAMILY!r})"
+        )
+    inherited = str(values.get("HYPERSMART_ACTIVE_STRATEGIES", "")).strip()
+    if inherited:
+        mismatches.append("HYPERSMART_ACTIVE_STRATEGIES override is forbidden")
+    return not mismatches, tuple(mismatches)
+
+
+def build_official_scope_environment(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Build a launch environment that cannot widen the official strategy scope."""
+    values = dict(os.environ if env is None else env)
+    values.pop("HYPERSMART_ACTIVE_STRATEGIES", None)
+    values["HYPERSMART_ACTIVE_STRATEGY_SCOPE"] = OFFICIAL_SCOPE_FAMILY
+    values["HYPERSMART_SCOPE_OVERRIDE_ALLOWED"] = "0"
+    valid, reasons = verify_official_runtime_scope(values)
+    if not valid:
+        raise ValueError("OFFICIAL_SCOPE_INVALID:" + ",".join(reasons))
+    return values
+
+
+__all__ = [
+    "StrategyScopeStatus", "StrategyScopeEntry", "OFFICIAL_SCOPE_VERSION",
+    "OFFICIAL_SCOPE_FAMILY", "canonical_strategy_family", "authoritative_strategy_scope",
+    "active_strategy_families", "strategy_can_materialize", "require_active_strategy",
+    "strategy_scope_status", "strategy_scope_refusal", "strategy_scope_payload",
+    "verify_official_runtime_scope", "build_official_scope_environment",
+]

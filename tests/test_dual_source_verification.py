@@ -21,3 +21,13 @@ def test_fill_manque_en_live():
 def test_fill_en_trop():
     r = verifier(["f1", "f2", "f3"], ["f1", "f2"])
     assert r["coherent"] is False and r["en_trop"] == ["f3"]
+
+
+def test_doublon_officiel_non_vu_est_signale():
+    r = verifier(["f1"], ["f1", "f1"])
+    assert r["coherent"] is False and r["manquants"] == ["f1"]
+
+
+def test_doublon_live_est_signale():
+    r = verifier(["f1", "f1"], ["f1"])
+    assert r["coherent"] is False and r["en_trop"] == ["f1"]

@@ -5,6 +5,7 @@ contre un inconnu). Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 UNMEASURABLE = "UNMEASURABLE"
@@ -12,7 +13,11 @@ UNMEASURABLE = "UNMEASURABLE"
 
 def taille_finale(taille_equity: Any, taille_liquidite: Any) -> dict[str, Any]:
     """min des deux tailles. Si l'une manque → UNMEASURABLE (jamais retomber sur l'autre en douce)."""
-    if not all(isinstance(x, (int, float)) for x in (taille_equity, taille_liquidite)):
+    if (
+        not all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                for x in (taille_equity, taille_liquidite))
+        or not all(math.isfinite(float(x)) for x in (taille_equity, taille_liquidite))
+    ):
         return {"taille": UNMEASURABLE, "refuse": True, "raison": "TAILLE_MANQUANTE"}
     te, tl = float(taille_equity), float(taille_liquidite)
     taille = min(te, tl)

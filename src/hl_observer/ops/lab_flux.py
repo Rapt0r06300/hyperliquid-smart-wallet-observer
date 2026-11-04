@@ -19,9 +19,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
-from hl_observer.ops.lab_inventaire import lire_lignes, _row_to_bundle, LabFormatBloque
-
 # item 9 — ordre CAUSAL global : exchange_ts -> recv_ts -> sequence -> source. Un timestamp absent trie
 # APRÈS les présents (jamais devant), de façon déterministe. Sans cet ordre, Lead-Lag et Cross-Venue sont
 # FAUX : on ne peut pas mesurer que Binance bouge avant Hyperliquid si les événements sont concaténés
@@ -58,6 +55,12 @@ def flux_evenements_stream(fichiers: Iterable[str | Path], *, max_events: int = 
     """Générateur BORNÉ : pour chaque fichier, lit ligne par ligne, convertit CHAQUE bundle en événements
     et les yield un par un. Ne matérialise JAMAIS un dataset entier. `max_events<=0` = illimité (le
     streaming garde la mémoire bornée). Un fichier au format bloqué est sauté (compté par l'appelant)."""
+    # Import différé : l'API d'import du module doit rester utilisable dans une copie minimale
+    # avant installation des dépendances lourdes (pydantic, yaml, httpx). Le chemin d'exécution
+    # du labo charge ses dépendances ici, au moment où une lecture réelle est demandée.
+    from hl_observer.mega_cablage.feed_adapter import evenements_depuis_bundles
+    from hl_observer.ops.lab_inventaire import lire_lignes, _row_to_bundle, LabFormatBloque
+
     n = 0
     for f in fichiers:
         try:

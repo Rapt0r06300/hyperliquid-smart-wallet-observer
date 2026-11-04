@@ -180,6 +180,17 @@ def test_l_environnement_du_fils_impose_la_lecture_seule():
     assert "src" in e["PYTHONPATH"]
 
 
+def test_acceleration_is_explicit_and_keeps_the_paper_environment():
+    serial = L.environnement_execution(accelere=False)
+    fast = L.environnement_execution(accelere=True)
+
+    assert "TOUT_TESTER_PYTEST_PARALLELE" not in serial
+    assert fast["TOUT_TESTER_PYTEST_PARALLELE"] == "1"
+    assert fast["TOUT_TESTER_PYTEST_WORKERS"] == "4"
+    assert fast["HYPERSMART_READ_ONLY"] == "1"
+    assert fast["HYPERSMART_PAPER_ONLY"] == "1"
+
+
 # ═══════════════ TRAÇABILITÉ (16-25) ═══════════════
 
 def test_un_recap_perime_est_DETECTE(tmp_path):

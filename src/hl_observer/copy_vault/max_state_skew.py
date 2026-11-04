@@ -5,13 +5,22 @@ Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
 def fiable(fill_ts_ms: Any, snapshot_ts_ms: Any, *, skew_max_ms: float = 2000.0) -> dict[str, Any]:
     """Fiable seulement si |fill_ts − snapshot_ts| ≤ skew_max. Au-delà → NON FIABLE. Horodatage invalide →
     non fiable (on ne dimensionne pas sur un décalage inconnu)."""
-    if not all(isinstance(x, (int, float)) for x in (fill_ts_ms, snapshot_ts_ms)):
+    if (
+        not all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                for x in (fill_ts_ms, snapshot_ts_ms))
+        or not all(math.isfinite(float(x)) for x in (fill_ts_ms, snapshot_ts_ms))
+        or not isinstance(skew_max_ms, (int, float))
+        or isinstance(skew_max_ms, bool)
+        or not math.isfinite(float(skew_max_ms))
+        or float(skew_max_ms) < 0
+    ):
         return {"fiable": False, "raison": "HORODATAGE_INCONNU"}
     skew = abs(float(fill_ts_ms) - float(snapshot_ts_ms))
     ok = skew <= float(skew_max_ms)

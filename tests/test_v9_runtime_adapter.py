@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from hl_observer.copying.runtime_v9_adapter import (
     attach_v9_runtime_diagnostics,
     build_signal_candidate_from_event,
@@ -87,4 +89,31 @@ def test_runtime_adapter_can_pass_with_real_l2book_features() -> None:
     assert event["v9_decision"] == "PAPER_TRADE"
     assert event["v9_pipeline"]["paper_notional_usdc"] == 25.0
     assert event["v9_pipeline"]["feature_hash"].startswith("feat:")
+
+
+@pytest.mark.parametrize("observed_at_ms", ["1700000000000.5", float("nan"), True])
+def test_runtime_adapter_rejects_non_exact_observed_timestamp(observed_at_ms: object) -> None:
+    with pytest.raises(ValueError, match="observed timestamp"):
+        build_signal_candidate_from_event(_event(observed_at_ms=observed_at_ms), current_ms=1_700_000_000_500)
+
+
+def test_runtime_adapter_does_not_fallback_to_now_for_missing_observed_timestamp() -> None:
+    event = _event()
+    del event["observed_at_ms"]
+
+    with pytest.raises(ValueError, match="observed timestamp"):
+        build_signal_candidate_from_event(event, current_ms=1_700_000_000_500)
+
+
+def test_runtime_adapter_does_not_fabricate_zero_notional() -> None:
+    event = attach_v9_runtime_diagnostics(
+        _event(copied_notional_usdt=None),
+        current_ms=1_700_000_000_500,
+        all_mids={"ETH": 2_000.0},
+        run_id="missing-notional",
+    )
+
+    assert event["v9_decision"] == "NO_TRADE"
+    assert event["v9_accepted"] is False
+    assert event["v9_reasons"] == ["NOTIONAL_MISSING_OR_INVALID"]
 

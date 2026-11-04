@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from hl_observer.backtesting.copy_vault_v6_balanced_train import (
     apply_causal_daily_risk_budget,
     explore_copy_vault_v6_balanced_train,
@@ -94,3 +96,15 @@ def test_v6_empty_input_is_train_only_and_counts_parent_selection() -> None:
     assert result["physical_freeze_allowed"] is False
     assert result["paper_read_only"] is True
     assert result["real_execution"] is False
+
+
+def test_v6_rejects_non_integer_train_bounds_without_truncation() -> None:
+    with patch(
+        "hl_observer.backtesting.copy_vault_v6_balanced_train.temporal_bounds",
+        return_value={"train_start_ms": 1_000.5, "train_end_ms": 2_000},
+    ):
+        result = explore_copy_vault_v6_balanced_train([], {}, [])
+
+    assert result["status"] == "NO_ROBUST_TRAIN_CANDIDATE"
+    assert result["selection_eligible"] is False
+    assert result["physical_freeze_allowed"] is False

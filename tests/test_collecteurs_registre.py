@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hl_observer.ops import collecteur_registry as CR
 from hl_observer.ops import superviseur_collecteurs as SC
 
 
@@ -23,6 +24,25 @@ def test_registre_canonique_coherent():
     root = Path(__file__).resolve().parents[1]
     for c in SC.REGISTRE:
         assert (root / c["script"]).exists(), c["script"]
+
+
+def test_execution_capability_ne_depends_jamais_du_nom():
+    assert CR.contrat_collecteur("pipeline-reel")["execution_capability"] == CR.EXECUTION_CAPABILITY_NONE
+    assert CR.contrat_collecteur_valide("pipeline-reel") is True
+    assert CR.contrat_collecteur("pipeline-reel")["real_execution"] is True
+
+
+def test_sources_active_et_shadow_sont_declarees_explicitement():
+    assert CR.contrat_collecteur("userfills-live")["source_status"] == CR.SOURCE_STATUS_ACTIVE_OBSERVATION
+    assert CR.contrat_collecteur("pipeline-reel")["source_status"] == CR.SOURCE_STATUS_SHADOW_ANALYSIS
+    assert CR.contrat_collecteur_valide("userfills-live") is True
+
+
+def test_experimental_paper_reste_opt_in_et_isole(monkeypatch):
+    monkeypatch.setenv("HYPERSMART_EXPERIMENTAL_PAPER", "1")
+    assert CR.experimental_paper_isole() is True
+    monkeypatch.setenv("HYPERSMART_EXPERIMENTAL_PAPER", "0")
+    assert CR.experimental_paper_isole() is False
 
 
 def _root(tmp_path):
@@ -210,7 +230,7 @@ def test_arret_cible_ne_tue_JAMAIS_un_process_etranger(tmp_path):
     port 8794 + verrou userfills sont ciblés."""
     root = _root(tmp_path)
     (root / SC.PIDS_RELPATH).write_text(json.dumps({"run_id": "r", "pids": {"bbo-collector": 100}}), encoding="utf-8")
-    (root / SC.LOCK_USERFILLS).write_text(json.dumps({"pid": 200}), encoding="utf-8")
+    (root / SC.LOCK_USERFILLS).write_text(json.dumps({"pid": 200, "run_id": "run-foreign"}), encoding="utf-8")
     procs = [
         {"pid": 100, "ppid": 1, "name": "cmd.exe", "cmd": "cmd /c tools\\boucle_collecteur.cmd bbo-collector tools\\collecter_bbo.py 5"},
         {"pid": 101, "ppid": 100, "name": "python.exe", "cmd": "python tools\\collecter_bbo.py"},         # enfant vérifié
@@ -219,8 +239,12 @@ def test_arret_cible_ne_tue_JAMAIS_un_process_etranger(tmp_path):
     tues: list[int] = []
     r = SC.arreter_cible(root, procs=procs, killer=lambda pid: tues.append(pid) or True, owner=555)
     assert 100 in r["cibles"] and 101 in r["cibles"]       # collecteur signé + son enfant
-    assert 200 in r["cibles"]                              # verrou userfills
+    assert 200 not in r["cibles"]                           # userfills est authentifie separement
     assert 555 in r["cibles"]                              # détenteur du port 8794
     assert 999 not in r["cibles"], "un process ETRANGER (hl_observer dans la cmdline) ne doit JAMAIS etre cible"
     assert 999 not in tues
     assert set(r["arretes"]) == set(r["cibles"])           # le killer n'est appelé QUE sur les cibles
+    userfills = SC.arreter_userfills_cible(root, procs=procs, killer=lambda pid: tues.append(pid) or True)
+    assert userfills["ok"] is False
+    assert userfills["reason"] == "LOCK_PID_NOT_AUTHENTICATED"
+    assert (root / SC.LOCK_USERFILLS).is_file()

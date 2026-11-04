@@ -72,6 +72,25 @@ def test_vnext_train_rows_refuse_timestamp_direction_and_numeric_bool_coercion()
         assert _train_rows({"trades": [row]}) == []
 
 
+def test_vnext_consensus_rejette_parametres_et_lignes_ambigus() -> None:
+    base = _row(ts=1_000, vault="0xa")
+    admitted, audit = admit_consensus_train_rows(
+        [dict(base, signal_ts_ms=True)],
+        window_ms=30_000,
+        minimum_distinct_wallets=2,
+    )
+    assert admitted == []
+    assert audit["INVALID_SIGNAL_TIMESTAMP_OR_DIRECTION"] == 1
+
+    admitted, audit = admit_consensus_train_rows(
+        [base],
+        window_ms=30_000.0,
+        minimum_distinct_wallets=2,
+    )
+    assert admitted == []
+    assert audit["INVALID_CONSENSUS_PARAMETERS"] == 1
+
+
 def test_vnext_candidate_rank_uses_exact_net_when_lcb_and_float_tie(monkeypatch) -> None:
     import hl_observer.backtesting.copy_vault_vnext_train as module
 

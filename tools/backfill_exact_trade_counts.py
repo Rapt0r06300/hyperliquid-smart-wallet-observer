@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 import tempfile
 import zipfile
 from typing import Any, Mapping
@@ -49,6 +50,13 @@ TRADE_FAMILIES = {
     "copy_vault_fills",
 }
 IDENTITY_VERSION = "full_native_or_deterministic_composite_string_v3"
+
+# GitHub Release downloads are logically independent, but the Windows curl
+# process and endpoint can transiently report a successful request before the
+# output file is visible to the caller when several large assets are started
+# together.  Keep parsing concurrent while serializing only the immutable
+# release transfer and its immediate verification/publish boundary.
+_RELEASE_DOWNLOAD_LOCK = threading.Lock()
 
 
 class BackfillError(RuntimeError):
@@ -467,6 +475,7 @@ def _download(row: Mapping[str, Any], destination: Path) -> Path:
         raise BackfillError("release coordinates missing")
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / asset
+    partial = destination / (asset + ".partial")
     # Release assets have stable immutable download URLs. Fetching them directly
     # avoids spending one GitHub API request per shard and therefore keeps large
     # closure backfills within GitHub-hosted rate limits.
@@ -478,22 +487,26 @@ def _download(row: Mapping[str, Any], destination: Path) -> Path:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         headers = ["-H", f"Authorization: Bearer {token}"]
-    result = subprocess.run(
-        ["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
-         *headers, "--output", os.fspath(path), direct_url],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise BackfillError((result.stderr or result.stdout or "direct release download failed").strip())
-    if not path.is_file():
-        raise BackfillError("downloaded asset missing")
-    if row.get("release_container_asset"):
-        result = _extract_packed_verified_shard(row, path, destination)
-        path.unlink(missing_ok=True)
-        return result
-    return path
+    with _RELEASE_DOWNLOAD_LOCK:
+        partial.unlink(missing_ok=True)
+        result = subprocess.run(
+            ["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
+             *headers, "--output", os.fspath(partial), direct_url],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            partial.unlink(missing_ok=True)
+            raise BackfillError((result.stderr or result.stdout or "direct release download failed").strip())
+        if not partial.is_file():
+            raise BackfillError("downloaded asset missing")
+        partial.replace(path)
+        if row.get("release_container_asset"):
+            result = _extract_packed_verified_shard(row, path, destination)
+            path.unlink(missing_ok=True)
+            return result
+        return path
 
 
 def _persist_manifest_counts(row: Mapping[str, Any], result: Mapping[str, Any]) -> None:

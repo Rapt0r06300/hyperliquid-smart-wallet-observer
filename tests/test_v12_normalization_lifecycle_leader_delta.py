@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from hl_observer.models import DataQuality, SourceMeta
 from hl_observer.normalization.fills import fill_dedupe_key, normalize_hyperliquid_fill
 from hl_observer.normalization.positions import normalize_hyperliquid_position
@@ -89,6 +93,41 @@ def test_v12_normalization_refuses_missing_real_fill_fields():
     assert "FILL_SIZE_INVALID" in result.warnings
     assert "FILL_PRICE_INVALID" in result.warnings
     assert "FILL_TIME_MISSING" in result.warnings
+
+
+@pytest.mark.parametrize("bad_time", [1.5, "1.5", True, math.nan, math.inf])
+def test_v12_normalization_rejects_non_exact_fill_timestamps(bad_time):
+    result = normalize_hyperliquid_fill(
+        {
+            "coin": "BTC",
+            "dir": "Open Long",
+            "sz": "1",
+            "px": "100",
+            "time": bad_time,
+        },
+        wallet=WALLET,
+        meta=_meta(),
+    )
+
+    assert result.fill is None
+    assert "FILL_TIME_MISSING" in result.warnings
+
+
+@pytest.mark.parametrize("field", ["sz", "px"])
+def test_v12_normalization_rejects_non_finite_prices_and_sizes(field):
+    payload = {
+        "coin": "BTC",
+        "dir": "Open Long",
+        "sz": "1",
+        "px": "100",
+        "time": 1_700_000_000_000,
+        field: "NaN",
+    }
+
+    result = normalize_hyperliquid_fill(payload, wallet=WALLET, meta=_meta())
+
+    assert result.fill is None
+    assert "FILL_SIZE_INVALID" in result.warnings or "FILL_PRICE_INVALID" in result.warnings
 
 
 def test_v12_normalizes_clearinghouse_position_shape():

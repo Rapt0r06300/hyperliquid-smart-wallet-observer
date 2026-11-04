@@ -132,6 +132,33 @@ def test_replay_long_reduction_opens_short_after_causal_delay() -> None:
     assert audit["replay"]["completed_positions"] == 1
 
 
+def test_replay_rejette_parametres_ambigus_et_carnets_ambigus() -> None:
+    invalid_books = {
+        "BTC": [{**_book(1_000, 100.0, 100.1, 1), "ts_ms": True}]
+    }
+    trades, audit = replay_exit_flow_train(
+        [_exit("a", 1_000)],
+        invalid_books,
+        copy_delay_ms=250,
+        horizon_ms=30_000,
+        train_start_ms=0,
+        train_end_ms=10_000,
+    )
+    assert trades == []
+    assert audit["replay"]["completed_positions"] == 0
+
+    trades, audit = replay_exit_flow_train(
+        [_exit("a", 1_000)],
+        {},
+        copy_delay_ms=True,
+        horizon_ms=30_000,
+        train_start_ms=0,
+        train_end_ms=10_000,
+    )
+    assert trades == []
+    assert audit["signals"]["INVALID_REPLAY_PARAMETERS"] == 1
+
+
 def test_v7_empty_input_is_train_only_and_accounts_all_trials() -> None:
     result = explore_copy_vault_v7_exit_flow_train([], {})
 

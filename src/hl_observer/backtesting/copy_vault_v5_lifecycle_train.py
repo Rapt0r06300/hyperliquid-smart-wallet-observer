@@ -136,8 +136,9 @@ def _continuous_causal_books(
             for row in raw_rows
             if row.get("causal_observation") is True
             and not row.get("checkpoint_id")
+            and _strict_positive_int(row.get("ts_ms")) is not None
         ]
-        rows.sort(key=lambda row: int(row.get("ts_ms") or 0))
+        rows.sort(key=lambda row: _strict_positive_int(row["ts_ms"]) or 0)
         if rows:
             selected[preserve_native_instrument_symbol(raw_coin)] = rows
     return selected
@@ -146,8 +147,10 @@ def _continuous_causal_books(
 def _first_book_at_or_after(
     rows: Sequence[Mapping[str, Any]], target_ms: int
 ) -> Mapping[str, Any] | None:
-    timestamps = [int(row.get("ts_ms") or 0) for row in rows]
-    index = bisect.bisect_left(timestamps, int(target_ms))
+    timestamps = [_strict_positive_int(row.get("ts_ms")) for row in rows]
+    if any(timestamp is None for timestamp in timestamps):
+        return None
+    index = bisect.bisect_left(timestamps, target_ms)
     if index >= len(rows):
         return None
     lag_ms = timestamps[index] - int(target_ms)
@@ -157,8 +160,10 @@ def _first_book_at_or_after(
 def _first_exit_after(
     rows: Sequence[Mapping[str, Any]], entry_ts_ms: int
 ) -> Mapping[str, Any] | None:
-    observed = [int(row.get("observed_at_ms") or 0) for row in rows]
-    index = bisect.bisect_right(observed, int(entry_ts_ms))
+    observed = [_strict_positive_int(row.get("observed_at_ms")) for row in rows]
+    if any(timestamp is None for timestamp in observed):
+        return None
+    index = bisect.bisect_right(observed, entry_ts_ms)
     return rows[index] if index < len(rows) else None
 
 
@@ -291,15 +296,24 @@ def replay_lifecycle_train(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Rejoue une variante fermée sur les seules bornes TRAIN fournies."""
 
+    required = _strict_positive_int(required_observed_fills)
+    horizon = _strict_positive_int(horizon_ms)
+    start = None if train_start_ms is None else _strict_positive_int(train_start_ms)
+    end = None if train_end_ms is None else _strict_positive_int(train_end_ms)
+    direction = direction_multiplier if type(direction_multiplier) is int else None
+
     continuations, selection_audit = select_observed_continuations(
         metaorders,
-        required_observed_fills=int(required_observed_fills),
+        required_observed_fills=required or 0,
     )
     exit_index, exit_audit = index_causal_leader_exits(leader_events)
     if (
-        train_start_ms is None
-        or train_end_ms is None
-        or int(train_end_ms) < int(train_start_ms)
+        required is None
+        or horizon is None
+        or start is None
+        or end is None
+        or end < start
+        or direction not in (-1, 1)
     ):
         return [], {
             "selection": selection_audit,
@@ -314,19 +328,19 @@ def replay_lifecycle_train(
         continuations,
         books_by_coin,
         exit_index,
-        required_observed_fills=int(required_observed_fills),
-        horizon_ms=int(horizon_ms),
-        train_start_ms=int(train_start_ms),
-        train_end_ms=int(train_end_ms),
-        direction_multiplier=int(direction_multiplier),
+        required_observed_fills=required,
+        horizon_ms=horizon,
+        train_start_ms=start,
+        train_end_ms=end,
+        direction_multiplier=direction,
     )
     return trades, {
         "selection": selection_audit,
         "leader_exits": exit_audit,
         "replay": replay_audit,
-        "train_start_ms": int(train_start_ms),
-        "train_end_ms": int(train_end_ms),
-        "direction_multiplier": 1 if int(direction_multiplier) >= 0 else -1,
+        "train_start_ms": start,
+        "train_end_ms": end,
+        "direction_multiplier": direction,
     }
 
 
@@ -363,12 +377,12 @@ def explore_copy_vault_v5_train(
             continuations,
             purge_ms=COPY_DELAY_MS + int(horizon) + MAX_TARGET_LAG_MS,
         )
-        train_start_ms = bounds.get("train_start_ms")
-        train_end_ms = bounds.get("train_end_ms")
+        train_start_ms = _strict_positive_int(bounds.get("train_start_ms"))
+        train_end_ms = _strict_positive_int(bounds.get("train_end_ms"))
         if (
             train_start_ms is not None
             and train_end_ms is not None
-            and int(train_end_ms) >= int(train_start_ms)
+            and train_end_ms >= train_start_ms
         ):
             trades, replay_audit = _replay_selected(
                 continuations,
@@ -376,8 +390,8 @@ def explore_copy_vault_v5_train(
                 exit_index,
                 required_observed_fills=required,
                 horizon_ms=horizon,
-                train_start_ms=int(train_start_ms),
-                train_end_ms=int(train_end_ms),
+                train_start_ms=train_start_ms,
+                train_end_ms=train_end_ms,
                 direction_multiplier=1,
             )
             placebo_trades, placebo_audit = _replay_selected(
@@ -386,8 +400,8 @@ def explore_copy_vault_v5_train(
                 exit_index,
                 required_observed_fills=required,
                 horizon_ms=horizon,
-                train_start_ms=int(train_start_ms),
-                train_end_ms=int(train_end_ms),
+                train_start_ms=train_start_ms,
+                train_end_ms=train_end_ms,
                 direction_multiplier=-1,
             )
         else:

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from hl_observer.ops.runtime_contract import OFFICIAL_LAUNCH_CONTRACT, RUNTIME_PARAMETER_CONSUMERS
+
 
 class EntrypointRole(StrEnum):
     OFFICIAL_RUNTIME = "OFFICIAL_RUNTIME"
@@ -163,6 +165,53 @@ def audit_entrypoint_topology(repo_root: str | Path) -> list[EntrypointTopologyI
         _require(content, runtime_path.name, "port_owner", "RUNTIME_SINGLE_INSTANCE_MISSING", issues)
         if "recherche_continue.py" in content:
             issues.append(EntrypointTopologyIssue("RUNTIME_RESEARCH_DUPLICATION", runtime_path.name, "runtime must not start research worker"))
+
+    # LCH-001..LCH-010: validate the actual launch graph, not just file names.
+    graph_files = (
+        OFFICIAL_LAUNCH_CONTRACT["runtime_entrypoint"],
+        OFFICIAL_LAUNCH_CONTRACT["runtime_handoff"],
+        OFFICIAL_LAUNCH_CONTRACT["scope_module"],
+        OFFICIAL_LAUNCH_CONTRACT["hosted_controller"],
+    )
+    for graph_path in graph_files:
+        if not (root / Path(graph_path)).is_file():
+            issues.append(EntrypointTopologyIssue("LAUNCH_GRAPH_FILE_MISSING", graph_path, "official launch graph node is missing"))
+
+    if runtime_path.is_file():
+        for token in (
+            "start_hypersmart_simulation.ps1",
+            "superviseur_collecteurs demarrer-tous harvest",
+            "HYPERSMART_ACTIVE_STRATEGY_SCOPE=copy_vault",
+            "HYPERSMART_SCOPE_VERSION=COPY_VAULT_PAPER_V2",
+        ):
+            _require(content, runtime_path.name, token, "LAUNCH_GRAPH_CONTRACT_DRIFT", issues)
+        # Legacy references may remain after the subroutine's first ``exit /b``;
+        # only the reachable launch block is authoritative.
+        reachable = content
+        marker = "\n:demarrer_collecteurs"
+        if marker in content:
+            reachable = content.split(marker, 1)[1].split(r"exit \b", 1)[0]
+        if "lancer_research_parallel.py" in reachable or "collecter_lab_microstructure.py" in reachable:
+            issues.append(EntrypointTopologyIssue("AUTO_LAB_LAUNCH", runtime_path.name, "official runtime must not start research laboratories"))
+
+    handoff_path = root / OFFICIAL_LAUNCH_CONTRACT["runtime_handoff"]
+    if handoff_path.is_file():
+        handoff = _normalized(handoff_path)
+        for token in ("hl_observer", "ui", "persistent_poll_runner"):
+            _require(handoff, str(handoff_path.relative_to(root)), token, "RUNTIME_HANDOFF_CONTRACT_DRIFT", issues)
+        _require(handoff, str(handoff_path.relative_to(root)), "hypersmart_config_authority", "CONFIG_AUTHORITY_MISSING", issues)
+
+    # LCH-004..LCH-009: configuration consumers are explicit and the local
+    # launcher cannot impersonate the hosted controller or revive old workers.
+    for group, paths in RUNTIME_PARAMETER_CONSUMERS.items():
+        for consumer in paths:
+            if not (root / Path(consumer)).is_file():
+                issues.append(EntrypointTopologyIssue("PARAMETER_CONSUMER_MISSING", consumer, f"missing {group} consumer"))
+    if runtime_candidate.is_file():
+        if "gh workflow run" in content or ".github\\workflows" in content:
+            issues.append(EntrypointTopologyIssue("LOCAL_HOSTED_CONTROL_MIX", runtime_candidate.name, "local runtime must not dispatch hosted workflows"))
+        if "tools\\boucle_collecteur.cmd research-lab" in reachable or "tools\\boucle_collecteur.cmd lab-microstructure" in reachable:
+            issues.append(EntrypointTopologyIssue("LEGACY_LAB_AUTHORITY", runtime_candidate.name, "legacy laboratory workers are not runtime authority"))
 
     research_path = root / OFFICIAL_ENTRYPOINTS[EntrypointRole.OFFICIAL_RESEARCH]
     if research_path.is_file():

@@ -452,6 +452,21 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
     assert totals["TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is True
 
     patch_path = catalog / "TRADE_UNIQUE_COUNT_PATCH.json"
+    complete_patch = json.loads(patch_path.read_text(encoding="utf-8"))
+    for field, invalid in (
+        ("global_unique_trade_count", True),
+        ("global_unique_trade_count", 190001),
+        ("global_identity_digest", "not-a-sha256"),
+        ("cross_shard_overlap_count", -1),
+        ("cross_shard_overlap_count", 1),
+    ):
+        tampered = dict(complete_patch)
+        tampered[field] = invalid
+        patch_path.write_text(json.dumps(tampered), encoding="utf-8")
+        rejected = metrics.build()["totals"]
+        assert rejected["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
+        assert rejected["TOTAL_UNIQUE_TRADES_GLOBAL"] is None
+    patch_path.write_text(json.dumps(complete_patch), encoding="utf-8")
     stale = json.loads(patch_path.read_text(encoding="utf-8"))
     stale["counts"]["bybit-archive"]["asset_sha256"] = "f" * 64
     patch_path.write_text(json.dumps(stale), encoding="utf-8")

@@ -311,6 +311,76 @@ def test_inventaire_psutil_retrouve_un_vrai_processus_collecteur(tmp_path):
         process.wait(timeout=10)
 
 
+def _userfills_lock(root: Path, pid: int) -> Path:
+    path = root / SC.LOCK_USERFILLS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"pid": pid, "run_id": "run-test", "heartbeat_ms": 10}), encoding="utf-8")
+    return path
+
+
+def test_userfills_refuse_un_processus_d_un_autre_checkout_et_conserve_le_verrou(tmp_path):
+    lock = _userfills_lock(tmp_path, 42)
+    procs = [{
+        "pid": 42,
+        "ppid": 1,
+        "cwd": str(tmp_path / "autre-checkout"),
+        "cmd": "python tools\\collecter_userfills_vaults.py",
+    }]
+
+    resultat = SC.arreter_userfills_cible(tmp_path, procs=procs, killer=lambda _pid: True)
+
+    assert resultat["ok"] is False
+    assert resultat["reason"] == "LOCK_PID_NOT_AUTHENTICATED"
+    assert lock.is_file()
+
+
+def test_userfills_arrete_uniquement_son_arbre_et_supprime_le_verrou_apres_succes(tmp_path):
+    lock = _userfills_lock(tmp_path, 42)
+    procs = [
+        {
+            "pid": 42,
+            "ppid": 1,
+            "cwd": str(tmp_path),
+            "cmd": "cmd /c tools\\boucle_collecteur.cmd userfills-live tools\\collecter_userfills_vaults.py 5",
+        },
+        {
+            "pid": 43,
+            "ppid": 42,
+            "cwd": str(tmp_path),
+            "cmd": "python tools\\collecter_userfills_vaults.py",
+        },
+        {
+            "pid": 99,
+            "ppid": 1,
+            "cwd": str(tmp_path / "autre-checkout"),
+            "cmd": "python tools\\collecter_userfills_vaults.py",
+        },
+    ]
+    killed: list[int] = []
+
+    resultat = SC.arreter_userfills_cible(
+        tmp_path, procs=procs, killer=lambda pid: killed.append(pid) or True,
+    )
+
+    assert resultat["ok"] is True
+    assert resultat["cibles"] == [42, 43]
+    assert set(killed) == {42, 43}
+    assert resultat["lock_removed"] is True
+    assert not lock.exists()
+
+
+def test_userfills_verrou_malforme_est_refuse_sans_effacement(tmp_path):
+    lock = tmp_path / SC.LOCK_USERFILLS
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("{broken", encoding="utf-8")
+
+    resultat = SC.arreter_userfills_cible(tmp_path, procs=[])
+
+    assert resultat["ok"] is False
+    assert resultat["reason"] == "LOCK_INVALID_JSON"
+    assert lock.is_file()
+
+
 def test_sous_windows_un_log_frais_ne_ressuscite_pas_un_processus_absent(
     tmp_path, monkeypatch
 ):
@@ -343,3 +413,47 @@ def test_une_premiere_passe_longue_est_vivante_si_runner_RUNNING(tmp_path):
     )
 
     assert marks["etat"] == "VIVANT"
+
+
+def test_one_shot_termine_est_affiche_termine_meme_sans_processus(tmp_path):
+    """Un one-shot achevé ne doit pas être confondu avec un processus vivant."""
+    _tous_vivants(tmp_path)
+    etat = tmp_path / "runtime" / "data" / "collecteurs" / "marks-collector.json"
+    etat.parent.mkdir(parents=True, exist_ok=True)
+    etat.write_text(json.dumps({"state": "COMPLETED", "exit_code": 0}), encoding="utf-8")
+
+    marks = next(
+        item for item in SC.status_detaille(tmp_path, profil="all", procs=[])
+        if item["nom"] == "marks-collector"
+    )
+
+    assert marks["one_shot"] is True
+    assert marks["etat"] == "TERMINE"
+
+
+def test_arret_moisson_ne_tue_que_la_racine_et_ses_enfants(tmp_path):
+    procs = [
+        {"pid": 10, "ppid": 1, "cwd": str(tmp_path),
+         "cmd": f"python {tmp_path / 'tools' / 'moissonner_10h.py'}"},
+        {"pid": 11, "ppid": 10, "cwd": str(tmp_path), "cmd": "python worker.py"},
+        {"pid": 12, "ppid": 1, "cwd": str(tmp_path), "cmd": "python unrelated.py"},
+        {"pid": 13, "ppid": 1, "cwd": str(tmp_path) + "2",
+         "cmd": f"python {tmp_path / 'tools' / 'moissonner_10h.py'}"},
+    ]
+    killed = []
+
+    resultat = SC.arreter_moisson_cible(
+        tmp_path, procs=procs, killer=lambda pid: killed.append(pid) or True
+    )
+
+    assert killed == [10, 11]
+    assert resultat["cibles"] == [10, 11]
+    assert resultat["refuses_sans_preuve"] == 1
+
+
+def test_arret_moisson_echoue_ferme_si_un_pid_ne_sarrete_pas(tmp_path):
+    procs = [{"pid": 10, "ppid": 1, "cwd": str(tmp_path),
+              "cmd": f"python {tmp_path / 'tools' / 'moissonner_10h.py'}"}]
+    resultat = SC.arreter_moisson_cible(tmp_path, procs=procs, killer=lambda pid: False)
+    assert resultat["ok"] is False
+    assert resultat["arretes"] == []
