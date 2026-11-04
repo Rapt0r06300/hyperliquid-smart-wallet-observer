@@ -1,5 +1,11 @@
 from hl_observer.research.validation_stats import (
-    stationary_bootstrap, model_confidence_set, alpha_spending, intervalle_conforme)
+    alpha_spending,
+    calculer_pbo_toutes_les_tentatives,
+    intervalle_conforme,
+    model_confidence_set,
+    pbo_all_attempts,
+    stationary_bootstrap,
+)
 
 
 def test_stationary_bootstrap_taille_et_determinisme():
@@ -27,3 +33,27 @@ def test_conforme_couvre_la_cible():
     r = intervalle_conforme(residus, alpha=0.1)
     couverts = sum(1 for e in residus if abs(e) <= r["demi_largeur"])
     assert couverts / len(residus) >= 0.9 - 1e-9
+
+
+def test_pbo_compte_toutes_les_tentatives_et_reste_deterministe():
+    attempts = [
+        {"attempt_id": "a", "performance_by_block": [2, 2, 2, 2]},
+        {"attempt_id": "b", "performance_by_block": [1, 1, 1, 1]},
+    ]
+    result = pbo_all_attempts(attempts)
+    assert result["status"] == "PROVEN"
+    assert result["n_attempts_total"] == result["n_attempts_used"] == 2
+    assert result["pbo"] == 0.0
+    assert calculer_pbo_toutes_les_tentatives(attempts) == result
+
+
+def test_pbo_refuse_une_tentative_incomplete_sans_zero_implicit():
+    result = pbo_all_attempts([
+        {"attempt_id": "ok", "performance_by_block": [1, 1, 1, 1]},
+        {"attempt_id": "missing", "performance_by_block": None},
+    ])
+    assert result["status"] == "UNMEASURABLE"
+    assert result["pbo"] is None
+    assert result["n_attempts_total"] == 2
+    assert result["n_attempts_used"] == 1
+    assert result["invalid_attempt_ids"] == ["missing"]

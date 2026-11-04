@@ -433,9 +433,108 @@ def derive_heldout_vault_generalization(trades: Iterable[Mapping[str, Any]], *, 
     }
 
 
+def compare_long_short_net_edge(
+    train_rows: Iterable[Mapping[str, Any]],
+    oos_rows: Iterable[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    min_oos_trades_per_side: int = 3,
+) -> dict[str, Any]:
+    """Compare LONG and SHORT after identical, fully measured costs.
+
+    Funding is signed: a positive value is a cost and a negative value is a
+    measured credit.  Every component remains explicit.  This helper is a
+    diagnostic research result and cannot activate a runtime strategy.
+    """
+
+    if isinstance(cutoff_ms, bool) or not isinstance(cutoff_ms, int) or cutoff_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_CUTOFF", "paper_read_only": True}
+    minimum = int(min_oos_trades_per_side)
+    if minimum < 1:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_MINIMUM", "paper_read_only": True}
+    cost_fields = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps", "funding_bps")
+
+    def _parse(rows: Iterable[Mapping[str, Any]], *, train: bool) -> tuple[list[dict[str, Any]], str | None]:
+        parsed: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows or ():
+            if not isinstance(row, Mapping):
+                return [], "INVALID_ROW"
+            direction = str(row.get("direction") or "").strip().upper()
+            episode = str(row.get("episode_id") or "").strip()
+            ts = row.get("signal_ts_ms")
+            try:
+                gross = float(row.get("gross_edge_bps"))
+                costs = {field: float(row.get(field)) for field in cost_fields}
+            except (TypeError, ValueError):
+                return [], "MISSING_COST_OR_EDGE"
+            if (
+                direction not in {"LONG", "SHORT"}
+                or not episode
+                or episode in seen
+                or isinstance(ts, bool)
+                or not isinstance(ts, int)
+                or ts <= 0
+                or (train and ts > cutoff_ms)
+                or (not train and ts <= cutoff_ms)
+                or not math.isfinite(gross)
+                or any(not math.isfinite(value) for value in costs.values())
+                or costs["fees_bps"] < 0
+                or costs["spread_bps"] < 0
+                or costs["slippage_bps"] < 0
+                or costs["latency_bps"] < 0
+            ):
+                return [], "INVALID_DIRECTION_SPLIT_OR_COST"
+            seen.add(episode)
+            net = gross - sum(costs[field] for field in cost_fields)
+            parsed.append({"direction": direction, "episode_id": episode, "gross_edge_bps": gross, **costs, "net_edge_bps": net})
+        return parsed, None
+
+    train, train_error = _parse(train_rows, train=True)
+    oos, oos_error = _parse(oos_rows, train=False)
+    if train_error or oos_error or not train or not oos:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": train_error or oos_error or "EMPTY_SPLIT",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    by_direction: dict[str, list[dict[str, Any]]] = {"LONG": [], "SHORT": []}
+    for row in oos:
+        by_direction[row["direction"]].append(row)
+    metrics: dict[str, dict[str, Any]] = {}
+    for direction, rows in by_direction.items():
+        if not rows:
+            metrics[direction] = {"trades": 0, "net_edge_bps": None, "mean_net_edge_bps": None}
+            continue
+        total = sum(float(row["net_edge_bps"]) for row in rows)
+        metrics[direction] = {
+            "trades": len(rows),
+            "net_edge_bps": round(total, 8),
+            "mean_net_edge_bps": round(total / len(rows), 8),
+            "cost_components_measured": list(cost_fields),
+        }
+    comparable = all(metrics[direction]["trades"] >= minimum for direction in ("LONG", "SHORT"))
+    return {
+        "status": "COMPARABLE" if comparable else "UNMEASURABLE",
+        "reason": None if comparable else "INSUFFICIENT_OOS_SIDE_SAMPLE",
+        "cutoff_ms": cutoff_ms,
+        "train_rows": len(train),
+        "oos_by_direction": metrics,
+        "same_cost_model": "gross_edge_bps - fees_bps - spread_bps - slippage_bps - latency_bps - funding_bps",
+        "funding_signed_and_measured": True,
+        "min_oos_trades_per_side": minimum,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+    }
+
+
 __all__ = [
     "ONE_BIG_WIN_SHARE",
     "ONE_BIG_WIN_SHARE_DECIMAL",
     "VAULT_CONFLICT_WINDOW_MS",
+    "compare_long_short_net_edge",
     "derive_heldout_vault_generalization",
 ]

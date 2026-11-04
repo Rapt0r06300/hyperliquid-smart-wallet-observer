@@ -168,7 +168,95 @@ def fuite_potentielle(
     }
 
 
+def purge_overlapping_periods(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    embargo_ms: int = 0,
+    start_field: str = "start_ms",
+    end_field: str = "end_ms",
+    episode_id_field: str = "episode_id",
+) -> dict[str, Any]:
+    """Remove interval overlap from both TRAIN and OOS, fail-closed.
+
+    A row is removed from its split when its measured interval overlaps any
+    row in the other split, expanded by the declared embargo.  Missing or
+    invalid boundaries and duplicate episode identifiers are not silently
+    discarded: the result is ``UNMEASURABLE``.
+    """
+
+    if isinstance(embargo_ms, bool) or not isinstance(embargo_ms, int) or embargo_ms < 0:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_EMBARGO", "paper_read_only": True}
+
+    def _parse(rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
+        parsed: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows or ():
+            if not isinstance(row, Mapping):
+                return [], "INVALID_ROW"
+            episode = str(row.get(episode_id_field) or "").strip()
+            start = row.get(start_field)
+            end = row.get(end_field)
+            if (
+                not episode
+                or episode in seen
+                or isinstance(start, bool)
+                or not isinstance(start, int)
+                or isinstance(end, bool)
+                or not isinstance(end, int)
+                or start <= 0
+                or end < start
+            ):
+                return [], "INVALID_INTERVAL_OR_DUPLICATE_EPISODE"
+            seen.add(episode)
+            parsed.append({**dict(row), "_start_ms": start, "_end_ms": end, "_episode_id": episode})
+        return parsed, None
+
+    train, train_error = _parse(train_rows)
+    oos, oos_error = _parse(oos_rows)
+    if train_error or oos_error or not train or not oos:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": train_error or oos_error or "EMPTY_SPLIT",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    train_overlap: set[str] = set()
+    oos_overlap: set[str] = set()
+    overlap_pairs: list[tuple[str, str]] = []
+    for left in train:
+        for right in oos:
+            overlaps = (
+                left["_start_ms"] <= right["_end_ms"] + embargo_ms
+                and right["_start_ms"] <= left["_end_ms"] + embargo_ms
+            )
+            if overlaps:
+                train_overlap.add(left["_episode_id"])
+                oos_overlap.add(right["_episode_id"])
+                overlap_pairs.append((left["_episode_id"], right["_episode_id"]))
+
+    kept_train = [row for row in train if row["_episode_id"] not in train_overlap]
+    kept_oos = [row for row in oos if row["_episode_id"] not in oos_overlap]
+    for row in (*kept_train, *kept_oos):
+        row.pop("_start_ms", None)
+        row.pop("_end_ms", None)
+        row.pop("_episode_id", None)
+    return {
+        "status": "COMPARABLE" if kept_train and kept_oos else "UNMEASURABLE",
+        "reason": None if kept_train and kept_oos else "PURGE_REMOVED_A_SPLIT",
+        "train": kept_train,
+        "oos": kept_oos,
+        "purged_train": len(train_overlap),
+        "purged_oos": len(oos_overlap),
+        "overlap_pairs": [list(pair) for pair in sorted(overlap_pairs)],
+        "embargo_ms": embargo_ms,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "EMBARGO_FRACTION_DE_L_HORIZON", "MOTIF_TRAIN_VIDE",
-    "Coupe", "fuite_potentielle", "purged_temporal_split",
+    "Coupe", "fuite_potentielle", "purge_overlapping_periods", "purged_temporal_split",
 ]

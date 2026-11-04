@@ -27,11 +27,44 @@ import pytest
 from hl_observer.backtesting.purged_split import (
     EMBARGO_FRACTION_DE_L_HORIZON,
     fuite_potentielle,
+    purge_overlapping_periods,
     purged_temporal_split,
 )
 
 RACINE = Path(__file__).resolve().parents[1]
 SEARCH = RACINE / "src" / "hl_observer" / "backtesting" / "scenario_search.py"
+
+
+def test_strict_period_purge_removes_overlap_from_both_sides() -> None:
+    train = [
+        {"episode_id": "tr-overlap", "start_ms": 100, "end_ms": 300},
+        {"episode_id": "tr-safe", "start_ms": 400, "end_ms": 450},
+    ]
+    oos = [
+        {"episode_id": "oos-overlap", "start_ms": 250, "end_ms": 350},
+        {"episode_id": "oos-safe", "start_ms": 600, "end_ms": 650},
+    ]
+
+    result = purge_overlapping_periods(train, oos, embargo_ms=0)
+
+    assert result["status"] == "COMPARABLE"
+    assert result["purged_train"] == 1
+    assert result["purged_oos"] == 1
+    assert result["train"] == [train[1]]
+    assert result["oos"] == [oos[1]]
+    assert result["overlap_pairs"] == [["tr-overlap", "oos-overlap"]]
+
+
+def test_strict_period_purge_refuses_invalid_intervals_or_embargo() -> None:
+    invalid = purge_overlapping_periods(
+        [{"episode_id": "tr", "start_ms": 100, "end_ms": 90}],
+        [{"episode_id": "oos", "start_ms": 200, "end_ms": 250}],
+    )
+    assert invalid["status"] == "UNMEASURABLE"
+    assert invalid["reason"] == "INVALID_INTERVAL_OR_DUPLICATE_EPISODE"
+    bad_embargo = purge_overlapping_periods([], [], embargo_ms=-1)
+    assert bad_embargo["status"] == "UNMEASURABLE"
+    assert bad_embargo["reason"] == "INVALID_EMBARGO"
 
 
 def _cands(n: int, *, pas_s: float = 60.0):

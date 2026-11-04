@@ -1146,6 +1146,23 @@ def test_wip_can_be_saved_locally_without_upload(repos):
     assert git(local, "rev-parse", "HEAD") != before
 
 
+def test_wip_code_checkpoint_ignores_protected_local_bytes(repos):
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+    protected = local / "catalog" / "state.json"
+    protected.parent.mkdir()
+    protected.write_text("local SAFE bytes\n", encoding="utf-8")
+    (local / "src" / "wip.py").write_text("wip = True\n", encoding="utf-8")
+
+    rc, receipt = run_sync(local, wip=True)
+
+    assert rc == 0 and receipt["status"] == "LOCAL_CHECKPOINT_ONLY"
+    assert receipt["local_commit_created"] is True
+    assert protected.read_text(encoding="utf-8") == "local SAFE bytes\n"
+    assert git(origin, "rev-parse", "main") == before
+    assert git(local, "show", "HEAD:src/wip.py") == "wip = True"
+
+
 def test_default_fails_closed_on_incomplete_python_but_keeps_wip(repos):
     local, _, origin = repos
     before = git(origin, "rev-parse", "main")
@@ -1549,7 +1566,7 @@ def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "commit" and not self.wrote:
+            if args and args[0] in {"commit", "commit-tree"} and not self.wrote:
                 self.wrote = True
                 (local / "src" / "added_during_fetch.py").write_text(
                     "late = True\n", encoding="utf-8"
@@ -1587,7 +1604,7 @@ def test_late_invalid_python_saved_locally_never_pushed(repos):
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "commit" and not self.wrote:
+            if args and args[0] in {"commit", "commit-tree"} and not self.wrote:
                 self.wrote = True
                 (local / "src" / "incomplete.py").write_text(
                     "def broken(:\n", encoding="utf-8"
@@ -1626,7 +1643,7 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
 
         def command(self, *args, **kwargs):
             result = super().command(*args, **kwargs)
-            if args and args[0] == "commit":
+            if args and args[0] in {"commit", "commit-tree"}:
                 self.n += 1
                 (local / "src" / f"concurrent_{self.n}.py").write_text(
                     f"value = {self.n}\n", encoding="utf-8"

@@ -6,7 +6,110 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
+
+
+def pbo_all_attempts(
+    attempts: Sequence[Mapping[str, Any]],
+    *,
+    max_partitions: int = 2000,
+    seed: int = 7,
+) -> dict[str, Any]:
+    """Calculate CSCV PBO while preserving the exact count of all attempts.
+
+    Every attempt must provide a unique identifier and a complete sequence of
+    net performance values under ``performance_by_block``. Invalid or failed
+    attempts remain counted in ``n_attempts_total`` but make PBO unmeasurable;
+    they are never silently dropped or replaced with zeros. This is a
+    PAPER/read-only analysis of already observed values and cannot promote a
+    model.
+    """
+    rows = list(attempts or [])
+    base: dict[str, Any] = {
+        "pbo": None,
+        "n_attempts_total": len(rows),
+        "n_attempts_used": 0,
+        "n_blocks": 0,
+        "n_partitions": 0,
+        "attempt_ids": [],
+        "invalid_attempt_ids": [],
+        "status": "UNMEASURABLE",
+        "verdict": "INSUFFISANT",
+        "reason": None,
+        "selection_source": "all_attempts",
+        "real_execution": False,
+    }
+    if not rows:
+        base["reason"] = "aucune_tentative"
+        return base
+    try:
+        from hl_observer.backtesting.robustesse_selection import pbo_cscv
+    except ImportError as exc:  # pragma: no cover - fail closed if wiring is broken
+        base["reason"] = f"dependance_pbo_indisponible:{exc}"
+        return base
+
+    matrices: list[list[float]] = []
+    seen_ids: set[str] = set()
+    invalid: list[str] = []
+    expected_blocks: int | None = None
+    for position, row in enumerate(rows):
+        attempt_id = row.get("attempt_id")
+        attempt_key = str(attempt_id) if attempt_id is not None else f"<row:{position}>"
+        base["attempt_ids"].append(attempt_key)
+        values = row.get("performance_by_block")
+        valid = True
+        if not isinstance(attempt_id, str) or not attempt_id.strip() or attempt_id in seen_ids:
+            valid = False
+        else:
+            seen_ids.add(attempt_id)
+        if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+            valid = False
+        else:
+            try:
+                numeric = [float(value) for value in values]
+            except (TypeError, ValueError):
+                valid = False
+            else:
+                if not numeric or not all(math.isfinite(value) for value in numeric):
+                    valid = False
+                elif expected_blocks is None:
+                    expected_blocks = len(numeric)
+                elif len(numeric) != expected_blocks:
+                    valid = False
+                if valid:
+                    matrices.append(numeric)
+        if not valid:
+            invalid.append(attempt_key)
+
+    base["invalid_attempt_ids"] = invalid
+    base["n_attempts_used"] = len(matrices)
+    base["n_blocks"] = expected_blocks or 0
+    if invalid:
+        base["reason"] = "tentatives_incompletes_ou_invalides"
+        return base
+    if len(matrices) < 2 or (expected_blocks or 0) < 4 or (expected_blocks or 0) % 2:
+        base["reason"] = "matrice_insuffisante_pour_cscv"
+        return base
+    result = pbo_cscv(matrices, max_partitions=max_partitions, graine=seed)
+    base.update(
+        pbo=result.get("pbo"),
+        n_blocks=int(result.get("n_blocs") or 0),
+        n_partitions=int(result.get("n_partitions") or 0),
+        status="PROVEN" if result.get("pbo") is not None else "UNMEASURABLE",
+        verdict=result.get("verdict", "INSUFFISANT"),
+        reason=None if result.get("pbo") is not None else result.get("verdict"),
+    )
+    return base
+
+
+def calculer_pbo_toutes_les_tentatives(
+    attempts: Sequence[Mapping[str, Any]],
+    *,
+    max_partitions: int = 2000,
+    seed: int = 7,
+) -> dict[str, Any]:
+    """French alias for the strict ``pbo_all_attempts`` API."""
+    return pbo_all_attempts(attempts, max_partitions=max_partitions, seed=seed)
 
 
 def stationary_bootstrap(x: Sequence[float], *, p: float = 0.1, n: int = 1000, seed: int = 7) -> list[list[float]]:

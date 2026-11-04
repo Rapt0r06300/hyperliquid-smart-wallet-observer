@@ -6,6 +6,9 @@ capacité, decay) score bas. Pur, 0 réseau, 0 ordre réel.
 """
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping, Sequence
+from statistics import median
 from typing import Any
 
 UNMEASURABLE = "UNMEASURABLE"
@@ -47,4 +50,107 @@ def classer(wallets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(wallets, key=cle)
 
 
-__all__ = ["info_ratio", "classer", "UNMEASURABLE"]
+def compare_markout_to_pnl_score(
+    train_rows: Sequence[Mapping[str, Any]],
+    oos_rows: Sequence[Mapping[str, Any]],
+    *,
+    cutoff_ms: int,
+    min_rows_per_bucket: int = 3,
+    markout_field: str = "leader_markout_score_bps",
+    pnl_score_field: str = "pnl_score_bps",
+    outcome_field: str = "realized_net_pnl_bps",
+    signal_ts_field: str = "signal_ts_ms",
+    episode_id_field: str = "episode_id",
+) -> dict[str, Any]:
+    """Compare two frozen predictors against the same OOS realized outcome.
+
+    Medians are learned from TRAIN only.  OOS outcomes are never used to choose
+    a threshold, and missing or future-split evidence fails closed.  The PnL
+    score is treated as a baseline predictor, not as proof that prior
+    profitability is causal.
+    """
+
+    if isinstance(cutoff_ms, bool) or not isinstance(cutoff_ms, int) or cutoff_ms <= 0:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_CUTOFF", "paper_read_only": True}
+    minimum = int(min_rows_per_bucket)
+    if minimum < 1:
+        return {"status": "UNMEASURABLE", "reason": "INVALID_MINIMUM", "paper_read_only": True}
+
+    def _parse(rows: Sequence[Mapping[str, Any]], *, train: bool) -> tuple[list[dict[str, float]], str | None]:
+        parsed: list[dict[str, float]] = []
+        seen: set[str] = set()
+        for row in rows or ():
+            if not isinstance(row, Mapping):
+                return [], "INVALID_ROW"
+            episode = str(row.get(episode_id_field) or "").strip()
+            ts = row.get(signal_ts_field)
+            try:
+                markout = float(row.get(markout_field))
+                pnl_score = float(row.get(pnl_score_field))
+                outcome = float(row.get(outcome_field))
+            except (TypeError, ValueError):
+                return [], "MISSING_SCORE_OR_OUTCOME"
+            if (
+                not episode
+                or episode in seen
+                or isinstance(ts, bool)
+                or not isinstance(ts, int)
+                or ts <= 0
+                or (train and ts > cutoff_ms)
+                or (not train and ts <= cutoff_ms)
+                or any(not math.isfinite(value) for value in (markout, pnl_score, outcome))
+            ):
+                return [], "INVALID_SPLIT_OR_DUPLICATE_EPISODE"
+            seen.add(episode)
+            parsed.append({"markout": markout, "pnl_score": pnl_score, "outcome": outcome})
+        return parsed, None
+
+    train, train_error = _parse(train_rows, train=True)
+    oos, oos_error = _parse(oos_rows, train=False)
+    if train_error or oos_error or not train or not oos:
+        return {
+            "status": "UNMEASURABLE",
+            "reason": train_error or oos_error or "EMPTY_SPLIT",
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+
+    markout_threshold = float(median(row["markout"] for row in train))
+    pnl_threshold = float(median(row["pnl_score"] for row in train))
+
+    def _buckets(field: str, threshold: float) -> dict[str, Any]:
+        high = [row["outcome"] for row in oos if row[field] >= threshold]
+        low = [row["outcome"] for row in oos if row[field] < threshold]
+
+        def _metric(values: list[float]) -> dict[str, Any]:
+            if not values:
+                return {"rows": 0, "mean_outcome_bps": None}
+            return {"rows": len(values), "mean_outcome_bps": round(sum(values) / len(values), 8)}
+
+        return {"threshold_train": threshold, "high": _metric(high), "low": _metric(low)}
+
+    markout = _buckets("markout", markout_threshold)
+    pnl_score = _buckets("pnl_score", pnl_threshold)
+    comparable = all(
+        bucket[side]["rows"] >= minimum
+        for bucket in (markout, pnl_score)
+        for side in ("high", "low")
+    )
+    return {
+        "status": "COMPARABLE" if comparable else "UNMEASURABLE",
+        "reason": None if comparable else "INSUFFICIENT_OOS_BUCKET_SAMPLE",
+        "cutoff_ms": cutoff_ms,
+        "train_rows": len(train),
+        "oos_rows": len(oos),
+        "markout_predictor": markout,
+        "pnl_score_predictor": pnl_score,
+        "threshold_scope": "TRAIN_ONLY",
+        "same_oos_outcome": True,
+        "prior_profitability_not_causal_claim": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+    }
+
+
+__all__ = ["info_ratio", "classer", "compare_markout_to_pnl_score", "UNMEASURABLE"]

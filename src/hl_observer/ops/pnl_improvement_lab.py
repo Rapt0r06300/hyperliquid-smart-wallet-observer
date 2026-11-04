@@ -30,6 +30,7 @@ from hl_observer.simulation.accounting_truth import (
     round_trip_net_pnl_usdc,
 )
 from hl_observer.backtesting.regime_label import freeze_regime_allowlist_from_train
+from hl_observer.research.market_quality import compare_copy_vault_liquidity_veto
 
 CANONICAL_LEDGER_NAME = "simulation_pnl_ledger_latest.jsonl"
 DEFAULT_COMPARISON_NOTIONAL_USDT = 50.0
@@ -2046,6 +2047,7 @@ __all__ = [
     "build_lab_report",
     "compute_metrics",
     "compare_regime_ablation",
+    "compare_copy_vault_liquidity_veto",
     "discover_session_ledgers",
     "evaluate_candidate_rules",
     "extract_historical_trades",

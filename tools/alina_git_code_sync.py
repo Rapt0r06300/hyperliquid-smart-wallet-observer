@@ -902,7 +902,15 @@ def _run_git(
     # a code-only run wait for an unrelated data plane.  The engine performs
     # its own exact SHA/protected-path proof, so hooks are isolated per process
     # and the user's repository configuration is never changed.
-    command = [git, "-c", "core.hooksPath=NUL", *args]
+    # The production caller passes Git.  Keeping non-Git test doubles intact
+    # makes timeout/process-tree tests exercise the requested executable
+    # rather than accidentally feeding Git-only options to Python.
+    is_git_executable = Path(git).stem.casefold() == "git"
+    command = (
+        [git, "-c", "core.hooksPath=NUL", *args]
+        if is_git_executable
+        else [git, *args]
+    )
     started = time.monotonic()
     process = subprocess.Popen(
         command,
@@ -1027,6 +1035,7 @@ class Synchronizer:
         self._pathspec_cache: dict[bool, tuple[str, ...]] = {}
         self._remote_snapshot_ready = False
         self._remote_snapshot_sha: str | None = None
+        self._allow_protected_local_checkpoint = False
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
@@ -1759,6 +1768,16 @@ class Synchronizer:
 
         local = str(self.report.get("head_before") or self.text("rev-parse", "HEAD"))
         observed_remote = self.remote_sha()
+        protected_local = sorted({
+            path for path in staged + tracked + untracked if _protected(path)
+        })
+        if observed_remote == local and protected_local:
+            self.report["protected_local_changes"] = protected_local
+            raise SyncBlocked(
+                "Donnees locales protegees modifiees alors que GitHub est deja "
+                "aligne; aucun raccourci silencieux. Relancer apres traitement "
+                "manuel des donnees SAFE."
+            )
         if observed_remote != local:
             fetched_remote = self._fetch_remote_snapshot(observed_remote)
             if fetched_remote == local:
@@ -2162,10 +2181,14 @@ class Synchronizer:
     def checkpoint(self) -> None:
         staged, tracked, untracked = self._inventory()
         snapshot = self.report.get("preflight")
-        allow_protected_local = self.dry_run or (
+        allow_protected_local = (
+            self.dry_run
+            or self._allow_protected_local_checkpoint
+            or (
             isinstance(snapshot, dict)
             and snapshot.get("remote_head_fetched")
             and snapshot.get("local_head") != snapshot.get("remote_head_fetched")
+            )
         )
         eligible = self._check_candidates(
             staged, tracked, untracked,
@@ -3154,6 +3177,7 @@ class Synchronizer:
     def run(self, *, wip_only: bool = False) -> int:
         run_started = time.monotonic()
         self.report["started_at_utc"] = datetime.now(UTC).isoformat()
+        self._allow_protected_local_checkpoint = wip_only
         self.say(
             "[DEBUT] Mode="
             + ("DRY-RUN (lecture seule)" if self.dry_run else

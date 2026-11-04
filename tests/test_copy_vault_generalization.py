@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from hl_observer.backtesting.copy_vault_generalization import (
+    compare_long_short_net_edge,
     derive_heldout_vault_generalization,
 )
 
@@ -36,6 +37,64 @@ def test_generalisation_exclut_tout_vault_deja_vu_avant_oos() -> None:
     assert proof["vaults_held_out"] == ["B"]
     assert proof["net_pnl_usd"] == 2.0
     assert proof["net_bps"] == 200.0
+
+
+def _direction_row(direction: str, ts: int, episode: str, gross: float) -> dict:
+    return {
+        "direction": direction,
+        "signal_ts_ms": ts,
+        "episode_id": episode,
+        "gross_edge_bps": gross,
+        "fees_bps": 2.0,
+        "spread_bps": 1.0,
+        "slippage_bps": 1.0,
+        "latency_bps": 0.5,
+        "funding_bps": 0.5 if direction == "LONG" else -0.5,
+    }
+
+
+def test_long_short_edge_uses_same_measured_cost_model() -> None:
+    train = [
+        _direction_row("LONG", 100, "tr-l", 8.0),
+        _direction_row("SHORT", 110, "tr-s", 7.0),
+    ]
+    oos = [
+        _direction_row("LONG", 2_000, "oos-l-1", 8.0),
+        _direction_row("LONG", 2_010, "oos-l-2", 7.0),
+        _direction_row("LONG", 2_020, "oos-l-3", 9.0),
+        _direction_row("SHORT", 2_030, "oos-s-1", 7.0),
+        _direction_row("SHORT", 2_040, "oos-s-2", 6.0),
+        _direction_row("SHORT", 2_050, "oos-s-3", 8.0),
+    ]
+
+    result = compare_long_short_net_edge(train, oos, cutoff_ms=1_000)
+
+    assert result["status"] == "COMPARABLE"
+    assert result["oos_by_direction"]["LONG"]["mean_net_edge_bps"] == 3.0
+    assert result["oos_by_direction"]["SHORT"]["mean_net_edge_bps"] == 3.0
+    assert result["funding_signed_and_measured"] is True
+    assert result["promotion"] == "DISABLED_UNTIL_REVIEW"
+
+
+def test_long_short_edge_rejects_missing_side_or_future_split() -> None:
+    invalid = _direction_row("LONG", 2_000, "tr-future", 8.0)
+    assert compare_long_short_net_edge(
+        [invalid],
+        [_direction_row("LONG", 3_000, "oos-l", 8.0)],
+        cutoff_ms=1_000,
+    )["status"] == "UNMEASURABLE"
+
+    insufficient = compare_long_short_net_edge(
+        [_direction_row("LONG", 100, "tr-l", 8.0)],
+        [
+            _direction_row("LONG", 2_000, "oos-l-1", 8.0),
+            _direction_row("LONG", 2_010, "oos-l-2", 8.0),
+            _direction_row("LONG", 2_020, "oos-l-3", 8.0),
+        ],
+        cutoff_ms=1_000,
+    )
+    assert insufficient["status"] == "UNMEASURABLE"
+    assert insufficient["reason"] == "INSUFFICIENT_OOS_SIDE_SAMPLE"
 
 
 def test_generalisation_ne_fabrique_pas_de_preuve_sans_vault_inedit() -> None:
