@@ -2407,6 +2407,13 @@ class Synchronizer:
         with self._temporary_checkpoint_index(
             self._deferred_staged_protected_paths,
         ):
+            # In a same-size edit made within Windows' coarse filesystem
+            # timestamp window, a copied index can still carry a valid stat
+            # cache and ``git add`` may incorrectly believe the worktree is
+            # unchanged. Reset only publishable paths to their HEAD entries
+            # in the temporary index; the following add must then read their
+            # current bytes. The operator index remains untouched.
+            self._restore_protected_paths_from_head(set(eligible))
             self.command(
                 "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
                 input_bytes=pathspec,
