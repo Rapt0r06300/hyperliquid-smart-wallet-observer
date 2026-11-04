@@ -1012,6 +1012,39 @@ def test_git_replay_falls_back_on_unsupported_git(tmp_path: Path) -> None:
     assert task.report["replay_fallback"] == "GIT_REPLAY_UNAVAILABLE"
 
 
+def test_tree_plumbing_replay_keeps_github_governance_version(repos):
+    local, cloud, origin = repos
+    path = "docs/CODEX_GOAL_OBJECTIVE_V31.txt"
+    local_file = local / path
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    local_file.write_text("local governance\n", encoding="utf-8")
+    git(local, "add", path)
+    git(local, "commit", "-m", "local governance")
+    local_tip = git(local, "rev-parse", "HEAD")
+
+    cloud_file = cloud / path
+    cloud_file.parent.mkdir(parents=True, exist_ok=True)
+    cloud_file.write_text("github governance\n", encoding="utf-8")
+    git(cloud, "add", path)
+    git(cloud, "commit", "-m", "github governance")
+    git(cloud, "push", "origin", "main")
+    git(local, "fetch", "origin", "main")
+    remote = git(local, "rev-parse", "origin/main")
+    base = git(local, "merge-base", local_tip, remote)
+
+    task = Synchronizer(local, allow_test_remote=True)
+    assert task._try_tree_plumbing_replay(
+        remote, local_tip, base, [path]
+    ) is True
+    rebased_head = git(local, "rev-parse", "HEAD")
+    assert rebased_head != local_tip
+    if rebased_head != remote:
+        assert git(local, "rev-parse", "HEAD^") == remote
+    assert git(local, "show", f"HEAD:{path}") == "github governance"
+    assert task.report["replay_engine"] == "TREE_PLUMBING_REPLAY_GOVERNANCE"
+    assert task.report["tree_replay_conflict_resolutions"][0]["path"] == path
+
+
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120

@@ -116,6 +116,11 @@ AUTO_RESOLVABLE_CI_CONFLICTS = {
     ".github/workflows/alina-restore-safe-regression.yml",
     ".github/workflows/copy-vault-collector-soak.yml",
 }
+AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS = {
+    "docs/CODEX_GOAL_OBJECTIVE_V31.txt",
+    "tests/test_roadmap_722_progress.py",
+    "tools/roadmap_722_progress.py",
+}
 FORBIDDEN_HOSTED_CI_MARKERS = (
     "runs-on: self-hosted",
     'HL_ENABLE_MAINNET_EXECUTION: "1"',
@@ -1516,7 +1521,7 @@ class Synchronizer:
     @staticmethod
     def _preflight_auto_resolvable_conflict(path: str) -> bool:
         """Return whether the existing post-rebase resolver may inspect it."""
-        if path in AUTO_RESOLVABLE_CI_CONFLICTS:
+        if path in AUTO_RESOLVABLE_CI_CONFLICTS | AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS:
             return True
         return (
             path.startswith(("src/", "tools/", "tests/"))
@@ -2809,6 +2814,165 @@ class Synchronizer:
         )
         return True
 
+    @contextlib.contextmanager
+    def _temporary_index(self):
+        """Give tree-only replay an isolated index, never the operator index."""
+        git_dir = self.root / ".git"
+        if not git_dir.is_dir():
+            raise SyncBlocked("Git directory absent; replay arbre impossible.")
+        fd, raw_path = tempfile.mkstemp(
+            prefix=".alina-tree-replay-", suffix=".index", dir=git_dir,
+        )
+        os.close(fd)
+        index = Path(raw_path)
+        index.unlink(missing_ok=True)
+        previous = os.environ.get("GIT_INDEX_FILE")
+        os.environ["GIT_INDEX_FILE"] = str(index)
+        try:
+            yield index
+        finally:
+            if previous is None:
+                os.environ.pop("GIT_INDEX_FILE", None)
+            else:
+                os.environ["GIT_INDEX_FILE"] = previous
+            index.unlink(missing_ok=True)
+
+    def _try_tree_plumbing_replay(
+        self, remote: str, local: str, base: str,
+        predicted: list[str],
+    ) -> bool:
+        """Replay linear commits through trees for approved governance conflicts.
+
+        Classic rebase refreshes the full 346MB index for every local commit.
+        For the small, reviewed governance conflict set, Git's three-tree
+        index merge is enough: keep the current GitHub stage for those paths,
+        fail closed for every other conflict, create equivalent linear commit
+        objects, then update the real worktree once and advance main atomically.
+        The operator's real index is never used during planning.
+        """
+        if not predicted or any(
+            path not in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
+            for path in predicted
+        ):
+            return False
+        commits = self.text(
+            "rev-list", "--reverse", "--topo-order", f"{base}..{local}"
+        ).split()
+        if not commits:
+            return False
+        current = remote
+        resolved: list[dict[str, str]] = []
+        skipped_empty = 0
+        with self._temporary_index():
+            for old_commit in commits:
+                parents = self.text(
+                    "rev-list", "--parents", "-n", "1", old_commit
+                ).split()
+                if len(parents) != 2:
+                    raise SyncBlocked(
+                        "Commit local de fusion ou parent ambigu; replay arbre refuse."
+                    )
+                old_parent = parents[1]
+                merged = self.command(
+                    "read-tree", "-m", old_parent, current, old_commit,
+                    check=False, expected_returncodes=(1,),
+                    timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+                )
+                if merged.returncode not in (0, 1):
+                    return False
+                unmerged_raw = self.command(
+                    "ls-files", "-u", "-z",
+                ).stdout
+                stage_rows: dict[str, dict[int, tuple[str, str]]] = {}
+                for raw_row in unmerged_raw.split(b"\0"):
+                    if not raw_row:
+                        continue
+                    fields = raw_row.decode("utf-8", errors="strict").split("\t", 1)
+                    if len(fields) != 2:
+                        raise SyncBlocked("Index de replay arbre illisible.")
+                    mode_oid_stage = fields[0].split()
+                    if len(mode_oid_stage) != 3:
+                        raise SyncBlocked("Stage Git de replay arbre invalide.")
+                    mode, oid, stage_text = mode_oid_stage
+                    stage_rows.setdefault(fields[1], {})[int(stage_text)] = (mode, oid)
+                if stage_rows:
+                    if any(path not in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
+                           for path in stage_rows):
+                        return False
+                    for path, stages in stage_rows.items():
+                        upstream = stages.get(2)
+                        if upstream is None:
+                            self.command("update-index", "--remove", "--", path)
+                        else:
+                            mode, oid = upstream
+                            self.command(
+                                "update-index", "--add", "--cacheinfo",
+                                f"{mode},{oid},{path}",
+                            )
+                        resolved.append({
+                            "path": path,
+                            "resolution": "UPSTREAM_GITHUB_HEAD",
+                            "commit": old_commit,
+                        })
+                    if self.command("ls-files", "-u", "-z").stdout:
+                        raise SyncBlocked(
+                            "Conflit residuel apres resolution gouvernance; aucun push."
+                        )
+                tree = self.command(
+                    "write-tree", timeout=COMMIT_TIMEOUT_SECONDS,
+                ).stdout.decode("ascii", errors="strict").strip()
+                if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+                    raise SyncBlocked("Arbre de replay invalide; aucun push.")
+                current_tree = self.text("rev-parse", f"{current}^{{tree}}")
+                if tree == current_tree:
+                    skipped_empty += 1
+                    continue
+                author = self.text("show", "-s", "--format=%an <%ae>", old_commit)
+                message = self.command(
+                    "show", "-s", "--format=%B", old_commit,
+                ).stdout
+                created = self.command(
+                    "commit-tree", f"--author={author}", tree, "-p", current,
+                    input_bytes=message, timeout=COMMIT_TIMEOUT_SECONDS,
+                ).stdout.decode("ascii", errors="strict").strip()
+                if not re.fullmatch(r"[0-9a-f]{40,64}", created):
+                    raise SyncBlocked("Commit de replay invalide; aucun push.")
+                current = created
+
+        self._assert_no_new_code_changes()
+        try:
+            self.command(
+                "read-tree", "-u", "-m", current,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            raise
+        updated = self.command(
+            "update-ref", "refs/heads/main", current, local, check=False,
+        )
+        if updated.returncode:
+            restored = self.command(
+                "read-tree", "-u", "-m", local, check=False,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
+            if restored.returncode:
+                raise SyncBlocked(
+                    "Ref Git refusee et restauration du code impossible; "
+                    "intervention manuelle requise."
+                )
+            raise SyncBlocked("Ref Git avancee par une autre operation; code restaure.")
+        if self.text("rev-parse", "HEAD") != current:
+            raise SyncBlocked("HEAD apres replay arbre non prouve; aucun push.")
+        self.report["replay_engine"] = "TREE_PLUMBING_REPLAY_GOVERNANCE"
+        self.report["tree_replay_conflict_resolutions"] = resolved
+        self.report["empty_replay_commits_skipped"] = skipped_empty
+        self.report["local_rebased_onto"] = remote
+        self.say(
+            "[INTEGRATION RAPIDE] Replay arbre termine sans rebase classique; "
+            f"{len(resolved)} conflit(s) gouvernance conserve(nt) GitHub."
+        )
+        return True
+
     def _run_rebase(
         self, remote: str, *, timeout_seconds: int | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
@@ -2946,6 +3110,16 @@ class Synchronizer:
             )
         rebase_resolved = False
         with self._preserve_local_protected_index():
+            if predicted and all(
+                path in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
+                for path in predicted
+            ) and self._try_tree_plumbing_replay(
+                remote, local, base, predicted,
+            ):
+                self.report["rebases_performed"] = (
+                    int(self.report["rebases_performed"]) + 1
+                )
+                return
             if not predicted and self._try_git_replay(remote, local, base):
                 self.report["rebases_performed"] = (
                     int(self.report["rebases_performed"]) + 1
