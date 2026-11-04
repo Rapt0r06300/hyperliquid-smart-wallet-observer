@@ -120,7 +120,147 @@ def verite_latence(
     return base
 
 
+def _latency_base(status: str, **values: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _latency_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _latency_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def latency_truth_safety_receipt(result: Mapping[str, Any]) -> dict[str, Any]:
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("schema_version") == SCHEMA_VERSION
+        and result.get("statut") in {MEASURED, ASSUMED, NO_FILL, STALE_BOOK, UNMEASURABLE}
+        and result.get("real_execution") is False
+    )
+    return _latency_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="LATENCY_TRUTH_SAFE" if valid else "LATENCY_TRUTH_UNSAFE",
+        fail_closed=not valid,
+    )
+
+
+def latency_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_FIELD_PRESENT" if valid else "LATENCY_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def latency_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_FIELD_NON_NULL" if valid else "LATENCY_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def latency_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_FIELD_TYPE_VALID" if valid else "LATENCY_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def latency_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _latency_finite(value)
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_VALUE_FINITE" if valid else "LATENCY_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def latency_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _latency_integer(event_ts_ms) and _latency_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_EVENT_WITHIN_CUTOFF" if valid else "LATENCY_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def latency_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _latency_integer(event_ts_ms) and _latency_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_EVENT_AGE_VALID" if valid else "LATENCY_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def latency_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_EVENTS_UNIQUE" if valid else "LATENCY_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def latency_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _latency_integer(attempts) and _latency_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_RETRY_BOUNDED" if valid else "LATENCY_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def latency_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_REPLAY_DETERMINISTIC" if valid else "LATENCY_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def latency_depth_receipt(*, bids: Sequence[Sequence[Any]], asks: Sequence[Sequence[Any]], is_bbo: bool) -> dict[str, Any]:
+    valid = bool(bids) and bool(asks) and is_bbo is False and all(len(level) >= 2 and _latency_finite(level[0]) and _latency_finite(level[1]) and float(level[1]) > 0 for level in (*bids, *asks))
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_FULL_DEPTH" if valid else "LATENCY_BBO_OR_INVALID_DEPTH", fail_closed=not valid)
+
+
+def latency_crossed_book_receipt(*, best_bid: Any, best_ask: Any) -> dict[str, Any]:
+    valid = _latency_finite(best_bid) and _latency_finite(best_ask) and float(best_ask) >= float(best_bid) > 0
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_BOOK_NOT_CROSSED" if valid else "LATENCY_BOOK_CROSSED_OR_INVALID", fail_closed=not valid)
+
+
+def latency_negative_size_receipt(*, sizes: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(sizes) and all(_latency_finite(size) and float(size) > 0 for size in sizes)
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_SIZES_POSITIVE" if valid else "LATENCY_NEGATIVE_OR_ZERO_SIZE", fail_closed=not valid)
+
+
+def latency_tick_receipt(*, prices: Sequence[Any], tick_size: Any) -> dict[str, Any]:
+    try:
+        tick = float(tick_size)
+        valid = math.isfinite(tick) and tick > 0 and bool(prices) and all(abs((float(price) / tick) - round(float(price) / tick)) <= 1e-9 for price in prices)
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_TICK_ALIGNED" if valid else "LATENCY_TICK_INVALID", fail_closed=not valid)
+
+
+def latency_delta_receipt(*, has_snapshot: bool, delta_count: Any) -> dict[str, Any]:
+    valid = has_snapshot is True and _latency_integer(delta_count) and delta_count > 0
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_DELTA_HAS_SNAPSHOT" if valid else "LATENCY_DELTA_WITHOUT_SNAPSHOT", fail_closed=not valid)
+
+
+def latency_staleness_receipt(*, now_ms: Any, received_ts_ms: Any, max_age_ms: Any) -> dict[str, Any]:
+    valid = all(_latency_integer(value) for value in (now_ms, received_ts_ms, max_age_ms)) and now_ms >= received_ts_ms and now_ms - received_ts_ms <= max_age_ms
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_FRESH" if valid else "LATENCY_STALE", fail_closed=not valid)
+
+
+def latency_quantity_receipt(*, requested_quantity: Any, visible_depth: Any) -> dict[str, Any]:
+    valid = _latency_finite(requested_quantity) and _latency_finite(visible_depth) and 0 < float(requested_quantity) <= float(visible_depth)
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_QUANTITY_WITHIN_DEPTH" if valid else "LATENCY_QUANTITY_EXCEEDS_DEPTH", fail_closed=not valid)
+
+
+def latency_consumption_receipt(*, consumed_quantity: Any, available_quantity: Any, already_consumed: Any) -> dict[str, Any]:
+    valid = all(_latency_finite(value) for value in (consumed_quantity, available_quantity, already_consumed)) and min(float(consumed_quantity), float(available_quantity), float(already_consumed)) >= 0 and float(consumed_quantity) + float(already_consumed) <= float(available_quantity)
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_CONSUMPTION_ONCE" if valid else "LATENCY_DOUBLE_CONSUMPTION", fail_closed=not valid)
+
+
+def latency_maker_touch_receipt(*, touched: bool, executed: bool) -> dict[str, Any]:
+    valid = touched is False or executed is True
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_MAKER_EXECUTION_CONFIRMED" if valid else "LATENCY_TOUCH_ONLY_NOT_FILL", fail_closed=not valid)
+
+
+def latency_fee_order_receipt(*, maker_fee_bps: Any, taker_fee_bps: Any) -> dict[str, Any]:
+    valid = _latency_finite(maker_fee_bps) and _latency_finite(taker_fee_bps) and float(maker_fee_bps) >= 0 and float(taker_fee_bps) >= float(maker_fee_bps)
+    return _latency_base("PROVEN" if valid else "REJECTED", verdict="LATENCY_FEE_ORDER_VALID" if valid else "LATENCY_FEE_ORDER_INVERTED", fail_closed=not valid)
+
+
 __all__ = [
     "SCHEMA_VERSION", "MEASURED", "ASSUMED", "NO_FILL", "STALE_BOOK", "UNMEASURABLE", "STRESS_ONLY",
     "selectionner_carnet_causal", "latence_scalaire_stress_bps", "verite_latence",
+    "latency_truth_safety_receipt", "latency_required_field_receipt", "latency_null_field_receipt",
+    "latency_field_type_receipt", "latency_finite_receipt", "latency_cutoff_receipt", "latency_age_receipt",
+    "latency_duplicate_receipt", "latency_retry_receipt", "latency_replay_receipt", "latency_depth_receipt",
+    "latency_crossed_book_receipt", "latency_negative_size_receipt", "latency_tick_receipt", "latency_delta_receipt",
+    "latency_staleness_receipt", "latency_quantity_receipt", "latency_consumption_receipt",
+    "latency_maker_touch_receipt", "latency_fee_order_receipt",
 ]
