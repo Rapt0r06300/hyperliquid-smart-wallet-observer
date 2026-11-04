@@ -76,6 +76,21 @@ def test_user_fills_parser_extracts_wallet_and_ignores_snapshot_flag():
     assert fills[0]["dir"] == "Open Long"
 
 
+@pytest.mark.parametrize("snapshot_value", [None, "false", 0, 1])
+def test_user_fills_parser_does_not_coerce_unknown_snapshot_markers(snapshot_value):
+    payload = json.loads(_user_fill_message(snapshot=False))
+    if snapshot_value is None:
+        payload["data"].pop("isSnapshot")
+    else:
+        payload["data"]["isSnapshot"] = snapshot_value
+
+    wallet, is_snapshot, fills = user_fills_from_message(payload)
+
+    assert wallet == WALLET
+    assert is_snapshot is (snapshot_value if type(snapshot_value) is bool else None)
+    assert len(fills) == 1
+
+
 def test_user_fills_live_scan_stores_fresh_fill_and_delta(tmp_path):
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'userfills.sqlite3'}"
@@ -147,6 +162,63 @@ def test_user_fills_live_scan_ignores_stale_updates_even_when_snapshot_flag_miss
         assert result.stale_fills_ignored == 1
         assert session.query(Fill).count() == 0
         assert session.query(PositionDeltaModel).count() == 0
+
+
+def test_user_fills_live_scan_quarantines_unknown_snapshot_classification():
+    settings = load_settings()
+    fake_payload = json.loads(_user_fill_message(snapshot=False))
+    fake_payload["data"]["isSnapshot"] = "false"
+
+    class OneMessageWs(FakeWs):
+        pass
+
+    def websocket_connect(_url):
+        return OneMessageWs([json.dumps(fake_payload)])
+
+    result = asyncio.run(
+        scan_user_fills_ws(
+            settings,
+            wallets=[WALLET],
+            duration_seconds=1,
+            network_read=True,
+            websocket_connect=websocket_connect,
+        )
+    )
+
+    assert result.fills_seen == 0
+    assert result.unclassified_fills_ignored == 1
+    assert result.wallet_fills == {}
+
+
+@pytest.mark.parametrize("value", [True, 1.5, "1000.5", 0, -1])
+def test_store_user_fills_rejects_non_exact_causal_timestamps(tmp_path, value):
+    settings = load_settings()
+    settings.database_url = f"sqlite:///{tmp_path / 'invalid_timestamp.sqlite3'}"
+    init_db(settings.database_url)
+    session_factory = create_session_factory(create_sqlite_engine(settings.database_url))
+    fill = {
+        "coin": "BTC",
+        "px": "100",
+        "sz": "1",
+        "time": 1000,
+        "hash": "0xinvalid-ts",
+        "tid": 99,
+        "_hypersmart_ws_received_at_ms": value,
+    }
+    result = UserFillsLiveResult(
+        wallets=[WALLET],
+        duration_seconds=1,
+        network_read=True,
+        fills_seen=1,
+        stopped_reason="duration_elapsed",
+        wallet_fills={WALLET: [fill]},
+    )
+
+    with session_factory() as session:
+        store_user_fills_live_result(session, result)
+        session.commit()
+        assert result.fills_stored == 0
+        assert session.query(Fill).count() == 0
 
 
 @pytest.mark.parametrize("receive_offset_ms", [None, -1_000])

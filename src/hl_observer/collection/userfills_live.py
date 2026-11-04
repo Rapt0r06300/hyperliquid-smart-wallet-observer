@@ -22,6 +22,22 @@ _AUDIT_FILL_FIELDS = (
 )
 
 
+def _exact_non_negative_int(value: Any) -> int | None:
+    """Return only an exact non-negative sequence, never a truncated value."""
+
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdecimal():
+        try:
+            parsed = int(value.strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
 def _audit_value(value: Any, *, depth: int = 0) -> Any:
     """Bound and JSON-sanitize an untrusted fill value for rejection diagnostics."""
     if value is None or type(value) is bool:
@@ -291,10 +307,7 @@ def parser_message_userfills(
     sequence_raw = msg.get("sequence", msg.get("seq")) if isinstance(msg, dict) else None
     if sequence_raw is None and isinstance(data, dict):
         sequence_raw = data.get("sequence", data.get("seq"))
-    try:
-        frame_sequence = int(sequence_raw) if sequence_raw is not None else None
-    except (TypeError, ValueError, OverflowError):
-        frame_sequence = None
+    frame_sequence = _exact_non_negative_int(sequence_raw)
     frame_received_at_ms: int | None = None
     if isinstance(received_at_ms, int) and not isinstance(received_at_ms, bool):
         frame_received_at_ms = received_at_ms if received_at_ms > 0 else None

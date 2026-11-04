@@ -24,6 +24,7 @@ class UserFillsLiveResult:
     messages_seen: int = 0
     fills_seen: int = 0
     snapshots_ignored: int = 0
+    unclassified_fills_ignored: int = 0
     stale_fills_ignored: int = 0
     fills_stored: int = 0
     deltas_stored: int = 0
@@ -50,7 +51,7 @@ def normalize_user_fill_wallets(wallets: Iterable[str], *, max_users: int = 10) 
     return normalized
 
 
-def user_fills_from_message(message: str | bytes | dict[str, Any]) -> tuple[str | None, bool, list[dict[str, Any]]]:
+def user_fills_from_message(message: str | bytes | dict[str, Any]) -> tuple[str | None, bool | None, list[dict[str, Any]]]:
     if isinstance(message, bytes):
         message = message.decode("utf-8", errors="replace")
     payload: Any = json.loads(message) if isinstance(message, str) else message
@@ -61,18 +62,28 @@ def user_fills_from_message(message: str | bytes | dict[str, Any]) -> tuple[str 
         return None, False, []
     wallet = data.get("user") or data.get("userAddress") or data.get("wallet") or payload.get("user")
     wallet = str(wallet).lower() if wallet and WALLET_RE.fullmatch(str(wallet)) else None
-    is_snapshot = bool(data.get("isSnapshot") or payload.get("isSnapshot"))
+    raw_snapshot = data["isSnapshot"] if "isSnapshot" in data else payload.get("isSnapshot")
+    is_snapshot = raw_snapshot if type(raw_snapshot) is bool else None
     fills = data.get("fills")
     if not isinstance(fills, list):
         return wallet, is_snapshot, []
     return wallet, is_snapshot, [fill for fill in fills if isinstance(fill, dict)]
 
 
-def _safe_int(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+def _safe_positive_int(value: Any) -> int | None:
+    """Parse an exact positive millisecond value without truncation or coercion."""
+
+    if isinstance(value, bool) or value is None:
         return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.strip().isdecimal():
+        try:
+            parsed = int(value.strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed if parsed > 0 else None
+    return None
 
 
 def _strip_internal_fill_metadata(fill: dict[str, Any]) -> dict[str, Any]:
@@ -129,7 +140,12 @@ async def scan_user_fills_ws(
             async for message in _bounded_ws_messages(ws, deadline):
                 result.messages_seen += 1
                 wallet, is_snapshot, fills = user_fills_from_message(message)
-                if is_snapshot and ignore_snapshots:
+                if is_snapshot is None:
+                    # Missing or malformed classification is not proof of a live
+                    # event, even when a caller explicitly asks to retain snapshots.
+                    result.unclassified_fills_ignored += len(fills)
+                    continue
+                if is_snapshot is True and ignore_snapshots:
                     result.snapshots_ignored += len(fills)
                     continue
                 if not wallet or wallet not in selected_wallets:
@@ -182,8 +198,8 @@ def store_user_fills_live_result(
     for wallet, fills in result.wallet_fills.items():
         fresh_fills: list[dict[str, Any]] = []
         for fill in fills:
-            fill_time_ms = _safe_int(fill.get("time") or fill.get("timestamp"))
-            received_at_ms = _safe_int(fill.get("_hypersmart_ws_received_at_ms"))
+            fill_time_ms = _safe_positive_int(fill.get("time") or fill.get("timestamp"))
+            received_at_ms = _safe_positive_int(fill.get("_hypersmart_ws_received_at_ms"))
             if received_at_ms is None or received_at_ms <= 0:
                 result.warnings.append(
                     f"fill quarantined for {wallet}: missing or invalid WebSocket receive timestamp"
@@ -234,6 +250,7 @@ def format_user_fills_live_report(result: UserFillsLiveResult) -> str:
         f"messages_seen: {result.messages_seen}",
         f"fills_seen: {result.fills_seen}",
         f"snapshots_ignored: {result.snapshots_ignored}",
+        f"unclassified_fills_ignored: {result.unclassified_fills_ignored}",
         f"stale_fills_ignored: {result.stale_fills_ignored}",
         f"fills_stored: {result.fills_stored}",
         f"deltas_stored: {result.deltas_stored}",
@@ -262,6 +279,7 @@ class StreamStats:
     fresh_fills_stored: int = 0
     deltas_stored: int = 0
     snapshots_ignored: int = 0
+    unclassified_fills_ignored: int = 0
     last_fill_age_ms: int | None = None
     stopped_reason: str = "not_started"
     warnings: list[str] = field(default_factory=list)
@@ -345,8 +363,11 @@ async def stream_user_fills_ws(
                         continue
                     stats.messages_seen += 1
                     wallet, is_snapshot, fills = user_fills_from_message(message)
-                    if is_snapshot:
-                        stats.snapshots_ignored += len(fills)   # historical -> ignore (we want FRESH)
+                    if is_snapshot is None:
+                        stats.unclassified_fills_ignored += len(fills)
+                        continue
+                    if is_snapshot is True:
+                        stats.snapshots_ignored += len(fills)
                         continue
                     if not wallet or wallet not in selected or not fills:
                         continue
@@ -358,7 +379,7 @@ async def stream_user_fills_ws(
                         e["_hypersmart_ws_received_at_ms"] = received
                         e["_hypersmart_ws_is_snapshot"] = False
                         enriched.append(e)
-                        ft = _safe_int(fill.get("time") or fill.get("timestamp"))
+                        ft = _safe_positive_int(fill.get("time") or fill.get("timestamp"))
                         if ft is not None:
                             stats.last_fill_age_ms = max(0, received - ft)
                     try:

@@ -118,6 +118,18 @@ def test_parser_message_userfills_separe_exchange_et_reception_ws():
     assert fill["is_snapshot"] is None
 
 
+@pytest.mark.parametrize("sequence", [True, 1.5, -1, "1.5", "-1"])
+def test_parser_ne_tronque_pas_une_sequence_non_entier(sequence):
+    msg = {"channel": "userFills", "sequence": sequence, "data": {"fills": [
+        {"coin": "SOL", "px": "150", "sz": "1", "side": "B", "time": 1000,
+         "tid": 7, "hash": "0xabc"}
+    ]}}
+
+    [fill] = UL.parser_message_userfills(msg, vault="0xA", received_at_ms=1500)
+
+    assert fill["frame_sequence"] is None
+
+
 def test_parser_userfills_preserve_la_casse_native_de_l_instrument():
     msg = {"channel": "userFills", "data": {"fills": [
         {"coin": "kPEPE", "px": "0.01", "sz": "1", "side": "B", "time": 1000, "tid": 5}
