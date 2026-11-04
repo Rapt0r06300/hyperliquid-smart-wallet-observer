@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -112,6 +113,133 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
     if head != remote_sha:
         raise SyncError("main is not identical to the fetched origin/main")
     return head
+
+
+def _sync_base(status: str, **values: object) -> dict[str, object]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _sync_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _sync_finite(value: object) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def sync_clone_safety_receipt(state: dict[str, object]) -> dict[str, object]:
+    valid = (
+        isinstance(state, dict)
+        and state.get("branch") == "main"
+        and state.get("tracked_clean") is True
+        and state.get("origin_trusted") is True
+        and state.get("force_push") is False
+        and state.get("reset") is False
+        and state.get("clean") is False
+    )
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_SAFE" if valid else "SYNC_CLONE_UNSAFE", fail_closed=not valid)
+
+
+def sync_clone_required_field_receipt(row: dict[str, object], *, field: str) -> dict[str, object]:
+    valid = isinstance(row, dict) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_FIELD_PRESENT" if valid else "SYNC_CLONE_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def sync_clone_null_field_receipt(row: dict[str, object], *, field: str) -> dict[str, object]:
+    valid = isinstance(row, dict) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_FIELD_NON_NULL" if valid else "SYNC_CLONE_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def sync_clone_field_type_receipt(row: dict[str, object], *, field: str, expected_type: type) -> dict[str, object]:
+    valid = isinstance(row, dict) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_FIELD_TYPE_VALID" if valid else "SYNC_CLONE_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def sync_clone_finite_receipt(value: object) -> dict[str, object]:
+    valid = _sync_finite(value)
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_VALUE_FINITE" if valid else "SYNC_CLONE_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def sync_clone_cutoff_receipt(*, event_ts_ms: object, cutoff_ts_ms: object) -> dict[str, object]:
+    valid = _sync_integer(event_ts_ms) and _sync_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_EVENT_WITHIN_CUTOFF" if valid else "SYNC_CLONE_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def sync_clone_age_receipt(*, event_ts_ms: object, oldest_allowed_ts_ms: object) -> dict[str, object]:
+    valid = _sync_integer(event_ts_ms) and _sync_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_EVENT_AGE_VALID" if valid else "SYNC_CLONE_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def sync_clone_duplicate_receipt(*, event_ids: list[object]) -> dict[str, object]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_EVENTS_UNIQUE" if valid else "SYNC_CLONE_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def sync_clone_retry_receipt(*, attempts: object, max_attempts: object, checkpoint_saved: bool) -> dict[str, object]:
+    valid = _sync_integer(attempts) and _sync_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_RETRY_BOUNDED" if valid else "SYNC_CLONE_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def sync_clone_replay_receipt(*, outputs: list[object]) -> dict[str, object]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_REPLAY_DETERMINISTIC" if valid else "SYNC_CLONE_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def sync_clone_http_error_receipt(*, status_code: object, retry_after_seconds: object = None) -> dict[str, object]:
+    valid_status = _sync_integer(status_code) and status_code in {404, 408, 429, 500, 502, 503, 504}
+    retryable = status_code in {408, 429, 500, 502, 503, 504} and _sync_finite(retry_after_seconds) and float(retry_after_seconds) > 0
+    valid = status_code == 404 or retryable
+    return _sync_base("PROVEN" if valid and valid_status else "REJECTED", verdict="SYNC_CLONE_REMOTE_ERROR_QUARANTINED" if valid and valid_status else "SYNC_CLONE_REMOTE_ERROR_UNSAFE", status_code=status_code, retryable=retryable, fail_closed=not (valid and valid_status))
+
+
+def sync_clone_range_receipt(*, requested_start: object, observed_start: object, range_honored: bool) -> dict[str, object]:
+    valid = _sync_integer(requested_start) and _sync_integer(observed_start) and requested_start == observed_start and range_honored is True
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_RANGE_HONORED" if valid else "SYNC_CLONE_RANGE_IGNORED", fail_closed=not valid)
+
+
+def sync_clone_content_range_receipt(*, expected_start: object, observed_start: object, expected_end: object, observed_end: object) -> dict[str, object]:
+    valid = all(_sync_integer(value) for value in (expected_start, observed_start, expected_end, observed_end)) and expected_start == observed_start and expected_end == observed_end and observed_end >= observed_start
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_CONTENT_RANGE_MATCH" if valid else "SYNC_CLONE_CONTENT_RANGE_MISMATCH", fail_closed=not valid)
+
+
+def sync_clone_etag_receipt(*, previous_etag: object, current_etag: object) -> dict[str, object]:
+    previous = str(previous_etag or "").strip(); current = str(current_etag or "").strip()
+    changed = bool(previous and current and previous != current)
+    return _sync_base("PROVEN" if changed else "REJECTED", verdict="SYNC_CLONE_ETAG_CHANGE_INVALIDATES_CACHE" if changed else "SYNC_CLONE_ETAG_CHANGE_UNPROVEN", cache_invalidated=changed, fail_closed=not changed)
+
+
+def sync_clone_disk_space_receipt(*, required_bytes: object, available_bytes: object) -> dict[str, object]:
+    valid = _sync_integer(required_bytes) and _sync_integer(available_bytes) and required_bytes >= 0 and available_bytes >= 0 and available_bytes >= required_bytes
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_DISK_SPACE_SUFFICIENT" if valid else "SYNC_CLONE_DISK_SPACE_INSUFFICIENT", fail_closed=not valid)
+
+
+def sync_clone_zip_slip_receipt(member: object) -> dict[str, object]:
+    text = str(member or "").replace("\\", "/")
+    unsafe = text.startswith("/") or ":" in text.split("/")[0] or ".." in text.split("/")
+    return _sync_base("PROVEN" if unsafe else "REJECTED", verdict="SYNC_CLONE_ZIP_SLIP_REFUSED" if unsafe else "SYNC_CLONE_ZIP_SLIP_NOT_REFUSED", fail_closed=not unsafe)
+
+
+def sync_clone_expansion_receipt(*, observed_bytes: object, max_bytes: object, complete: bool) -> dict[str, object]:
+    valid = _sync_integer(observed_bytes) and _sync_integer(max_bytes) and observed_bytes >= 0 and max_bytes >= 0 and observed_bytes <= max_bytes and complete is True
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_EXPANSION_BOUNDED" if valid else "SYNC_CLONE_EXPANSION_UNSAFE", fail_closed=not valid)
+
+
+def sync_clone_lease_receipt(*, active_leases: object, lease_token_present: bool) -> dict[str, object]:
+    valid = _sync_integer(active_leases) and active_leases == 1 and lease_token_present is True
+    return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_SINGLE_LEASE" if valid else "SYNC_CLONE_SPLIT_BRAIN_RISK", fail_closed=not valid)
+
+
+def sync_clone_preflight_receipt(state: dict[str, object]) -> dict[str, object]:
+    return sync_clone_safety_receipt(state)
 
 
 def restore_published(root: Path, *, preflight: bool = False,

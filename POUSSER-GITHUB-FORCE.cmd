@@ -19,7 +19,7 @@ set "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202"
 set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13"
 rem The local engine is intentionally pinned too: a same-build but modified
 rem helper must not be executed silently.
-set "ALINA_LOCAL_ENGINE_SHA256=e26f918dbcf56689f6abcb36b7b102c2b5ede83df05b24b8d287e2861e3fedf9"
+set "ALINA_LOCAL_ENGINE_SHA256=b9307bbf52ed56f9d90fb72c426296643aa8b68a9bae1df5f6c380a30e86d44d"
 set "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b"
 set "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297"
 set "HYPERSMART_GIT="

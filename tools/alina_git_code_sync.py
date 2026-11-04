@@ -2899,6 +2899,7 @@ class Synchronizer:
         current = remote
         resolved: list[dict[str, str]] = []
         skipped_empty = 0
+        replay_index_info = b""
         with self._temporary_index():
             for old_commit in commits:
                 parents = self.text(
@@ -3029,10 +3030,20 @@ class Synchronizer:
                 raise SyncBlocked(
                     "Worktree code different du replay arbre; aucun push."
                 )
+            if code_paths:
+                replay_index_info = self.command(
+                    "ls-files", "-s", "-z", "--", *code_paths,
+                ).stdout
 
-        # Align the operator index without updating any protected worktree
-        # file.  The outer guard clears its temporary skip-worktree flags.
-        self.command("read-tree", current)
+        # Align only the code entries in the operator index.  A full
+        # `read-tree` would revalidate/replace the protected SAFE entries and
+        # can fail on their intentionally dirty worktree bytes.  The outer
+        # guard leaves those entries and their bytes untouched.
+        if replay_index_info:
+            self.command(
+                "update-index", "-z", "--index-info",
+                input_bytes=replay_index_info,
+            )
         updated = self.command(
             "update-ref", "refs/heads/main", current, local, check=False,
         )
