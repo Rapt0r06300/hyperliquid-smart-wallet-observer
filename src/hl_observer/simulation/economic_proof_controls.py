@@ -5,7 +5,7 @@ import hashlib
 import math
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -621,3 +621,151 @@ def _independent_economic_audit(
         "ready": all(control["ready"] for control in ordered.values()),
         "controls": ordered,
     }
+
+
+def _proof_base(status: str, **values: Any) -> dict[str, Any]:
+    """Return a non-promoting receipt for economic-proof boundary checks."""
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _proof_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _proof_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def economic_proof_safety_receipt(result: Any) -> dict[str, Any]:
+    """Validate the minimum boundary contract without certifying economics."""
+    required = (
+        "schema_version",
+        "family",
+        "data_sha256",
+        "code_sha256",
+        "freeze_sha256",
+        "cutoff_ts_ms",
+    )
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("schema_version") == INDEPENDENT_AUDIT_SCHEMA
+        and all(isinstance(result.get(key), str) and bool(result.get(key).strip()) for key in required[:-1])
+        and isinstance(result.get("cutoff_ts_ms"), int)
+        and not isinstance(result.get("cutoff_ts_ms"), bool)
+        and result.get("cutoff_ts_ms") > 0
+        and result.get("paper_only") is True
+        and result.get("real_execution") is False
+        and result.get("economic_proof_status") in {"PROVEN", "UNMEASURABLE", "REJECTED"}
+    )
+    return _proof_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="ECONOMIC_PROOF_BOUNDARY_SAFE" if valid else "ECONOMIC_PROOF_BOUNDARY_UNSAFE",
+        fail_closed=not valid,
+    )
+
+
+def proof_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_FIELD_PRESENT" if valid else "PROOF_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def proof_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_FIELD_NON_NULL" if valid else "PROOF_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def proof_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_FIELD_TYPE_VALID" if valid else "PROOF_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def proof_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _proof_finite(value)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_VALUE_FINITE" if valid else "PROOF_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def proof_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _proof_integer(event_ts_ms) and _proof_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_EVENT_WITHIN_CUTOFF" if valid else "PROOF_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def proof_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _proof_integer(event_ts_ms) and _proof_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_EVENT_AGE_VALID" if valid else "PROOF_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def proof_duplicate_receipt(*, event_ids: Iterable[Any]) -> dict[str, Any]:
+    values = list(event_ids)
+    valid = bool(values) and all(str(value).strip() for value in values) and len(values) == len(set(values))
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_EVENTS_UNIQUE" if valid else "PROOF_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def proof_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _proof_integer(attempts) and _proof_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_RETRY_BOUNDED" if valid else "PROOF_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def proof_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_REPLAY_DETERMINISTIC" if valid else "PROOF_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def proof_fill_duplicate_receipt(*, fill_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(fill_ids) and all(str(value).strip() for value in fill_ids) and len(fill_ids) == len(set(fill_ids))
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_FILLS_UNIQUE" if valid else "PROOF_FILL_DUPLICATED", fail_closed=not valid)
+
+
+def proof_rejection_no_debit_receipt(*, balance_before: Any, balance_after: Any, rejected: bool) -> dict[str, Any]:
+    valid = rejected is True and _proof_finite(balance_before) and _proof_finite(balance_after) and float(balance_before) == float(balance_after)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_REJECTION_NO_DEBIT" if valid else "PROOF_REJECTION_DEBITED", fail_closed=not valid)
+
+
+def proof_partial_close_receipt(*, position_before: Any, close_quantity: Any, position_after: Any) -> dict[str, Any]:
+    valid = all(_proof_finite(value) for value in (position_before, close_quantity, position_after)) and 0 < float(close_quantity) < float(position_before) and math.isclose(float(position_after), float(position_before) - float(close_quantity), abs_tol=1e-9)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_PARTIAL_CLOSE_CONSISTENT" if valid else "PROOF_PARTIAL_CLOSE_INVALID", fail_closed=not valid)
+
+
+def proof_total_close_release_receipt(*, position_before: Any, released_quantity: Any, position_after: Any) -> dict[str, Any]:
+    valid = all(_proof_finite(value) for value in (position_before, released_quantity, position_after)) and float(position_before) > 0 and math.isclose(float(released_quantity), float(position_before), abs_tol=1e-9) and math.isclose(float(position_after), 0.0, abs_tol=1e-9)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_TOTAL_CLOSE_RELEASED" if valid else "PROOF_TOTAL_CLOSE_INVALID", fail_closed=not valid)
+
+
+def proof_mark_liquidability_receipt(*, mark: Any, liquidatable: bool, finite: bool = True) -> dict[str, Any]:
+    valid = finite is True and _proof_finite(mark) and isinstance(liquidatable, bool)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_MARK_LIQUIDABILITY_VALID" if valid else "PROOF_MARK_LIQUIDABILITY_INVALID", fail_closed=not valid)
+
+
+def proof_balance_receipt(*, balance: Any, equity: Any, reserved: Any = 0.0) -> dict[str, Any]:
+    valid = all(_proof_finite(value) for value in (balance, equity, reserved)) and float(balance) >= 0 and float(equity) >= float(balance) - float(reserved)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_BALANCE_VALID" if valid else "PROOF_BALANCE_INVALID", fail_closed=not valid)
+
+
+def proof_funding_sign_receipt(*, funding_pnl: Any, funding_rate: Any, position_size: Any) -> dict[str, Any]:
+    valid = all(_proof_finite(value) for value in (funding_pnl, funding_rate, position_size)) and math.isclose(float(funding_pnl), -float(funding_rate) * float(position_size), abs_tol=1e-9)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_FUNDING_SIGN_VALID" if valid else "PROOF_FUNDING_SIGN_INVALID", fail_closed=not valid)
+
+
+def proof_conversion_receipt(*, source_value: Any, converted_value: Any, conversion_rate: Any) -> dict[str, Any]:
+    valid = all(_proof_finite(value) for value in (source_value, converted_value, conversion_rate)) and float(conversion_rate) >= 0 and math.isclose(float(converted_value), float(source_value) * float(conversion_rate), abs_tol=1e-9)
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_CONVERSION_VALID" if valid else "PROOF_CONVERSION_INVALID", fail_closed=not valid)
+
+
+def proof_commit_receipt(*, prepared: bool, committed: bool, receipt_id: Any) -> dict[str, Any]:
+    valid = prepared is True and committed is True and isinstance(receipt_id, str) and bool(receipt_id.strip())
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_COMMIT_ATOMIC" if valid else "PROOF_COMMIT_INVALID", fail_closed=not valid)
+
+
+def proof_concurrent_write_receipt(*, writers: Any, accepted_versions: Sequence[Any], unique_commit_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = _proof_integer(writers) and writers > 0 and bool(accepted_versions) and len(accepted_versions) == len(set(accepted_versions)) and bool(unique_commit_ids) and len(unique_commit_ids) == len(set(unique_commit_ids))
+    return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_CONCURRENT_WRITE_SERIALIZED" if valid else "PROOF_CONCURRENT_WRITE_UNSAFE", fail_closed=not valid)
+
+
