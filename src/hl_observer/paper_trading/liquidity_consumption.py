@@ -7,10 +7,11 @@ side and price level. Retrying the same execution plan is idempotent.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from threading import RLock
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.paper_trading.execution_truth import (
@@ -263,9 +264,154 @@ def _visible_quantity(
     )
 
 
+def _liquidity_base(status: str, **values: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _liquidity_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _liquidity_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def liquidity_consumption_safety_receipt(ledger: LiquidityConsumptionLedger) -> dict[str, Any]:
+    valid = isinstance(ledger, LiquidityConsumptionLedger) and ledger.snapshot() == tuple(sorted(ledger.snapshot(), key=lambda row: (row.venue, row.snapshot_id, row.coin, row.execution_side, row.price)))
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_CONSUMPTION_SAFE" if valid else "LIQUIDITY_CONSUMPTION_UNSAFE", fail_closed=not valid)
+
+
+def liquidity_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_FIELD_PRESENT" if valid else "LIQUIDITY_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def liquidity_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_FIELD_NON_NULL" if valid else "LIQUIDITY_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def liquidity_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_FIELD_TYPE_VALID" if valid else "LIQUIDITY_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def liquidity_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _liquidity_finite(value)
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_VALUE_FINITE" if valid else "LIQUIDITY_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def liquidity_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _liquidity_integer(event_ts_ms) and _liquidity_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_EVENT_WITHIN_CUTOFF" if valid else "LIQUIDITY_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def liquidity_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _liquidity_integer(event_ts_ms) and _liquidity_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_EVENT_AGE_VALID" if valid else "LIQUIDITY_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def liquidity_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_EVENTS_UNIQUE" if valid else "LIQUIDITY_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def liquidity_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _liquidity_integer(attempts) and _liquidity_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_RETRY_BOUNDED" if valid else "LIQUIDITY_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def liquidity_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_REPLAY_DETERMINISTIC" if valid else "LIQUIDITY_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def liquidity_depth_receipt(*, bids: Sequence[Sequence[Any]], asks: Sequence[Sequence[Any]], is_bbo: bool) -> dict[str, Any]:
+    valid = bool(bids) and bool(asks) and is_bbo is False and all(len(level) >= 2 and _liquidity_finite(level[0]) and _liquidity_finite(level[1]) and float(level[1]) > 0 for level in (*bids, *asks))
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_FULL_DEPTH" if valid else "LIQUIDITY_BBO_OR_INVALID_DEPTH", fail_closed=not valid)
+
+
+def liquidity_crossed_book_receipt(*, best_bid: Any, best_ask: Any) -> dict[str, Any]:
+    valid = _liquidity_finite(best_bid) and _liquidity_finite(best_ask) and float(best_ask) >= float(best_bid) > 0
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_BOOK_NOT_CROSSED" if valid else "LIQUIDITY_BOOK_CROSSED_OR_INVALID", fail_closed=not valid)
+
+
+def liquidity_negative_size_receipt(*, sizes: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(sizes) and all(_liquidity_finite(size) and float(size) > 0 for size in sizes)
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_SIZES_POSITIVE" if valid else "LIQUIDITY_NEGATIVE_OR_ZERO_SIZE", fail_closed=not valid)
+
+
+def liquidity_tick_receipt(*, prices: Sequence[Any], tick_size: Any) -> dict[str, Any]:
+    try:
+        tick = float(tick_size)
+        valid = math.isfinite(tick) and tick > 0 and bool(prices) and all(abs((float(price) / tick) - round(float(price) / tick)) <= 1e-9 for price in prices)
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_TICK_ALIGNED" if valid else "LIQUIDITY_TICK_INVALID", fail_closed=not valid)
+
+
+def liquidity_delta_receipt(*, has_snapshot: bool, delta_count: Any) -> dict[str, Any]:
+    valid = has_snapshot is True and _liquidity_integer(delta_count) and delta_count > 0
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_DELTA_HAS_SNAPSHOT" if valid else "LIQUIDITY_DELTA_WITHOUT_SNAPSHOT", fail_closed=not valid)
+
+
+def liquidity_staleness_receipt(*, now_ms: Any, received_ts_ms: Any, max_age_ms: Any) -> dict[str, Any]:
+    valid = all(_liquidity_integer(value) for value in (now_ms, received_ts_ms, max_age_ms)) and now_ms >= received_ts_ms and now_ms - received_ts_ms <= max_age_ms
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_FRESH" if valid else "LIQUIDITY_STALE", fail_closed=not valid)
+
+
+def liquidity_quantity_receipt(*, requested_quantity: Any, visible_depth: Any) -> dict[str, Any]:
+    valid = _liquidity_finite(requested_quantity) and _liquidity_finite(visible_depth) and 0 < float(requested_quantity) <= float(visible_depth)
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_QUANTITY_WITHIN_DEPTH" if valid else "LIQUIDITY_QUANTITY_EXCEEDS_DEPTH", fail_closed=not valid)
+
+
+def liquidity_consumption_receipt(*, consumed_quantity: Any, available_quantity: Any, already_consumed: Any) -> dict[str, Any]:
+    valid = all(_liquidity_finite(value) for value in (consumed_quantity, available_quantity, already_consumed)) and min(float(consumed_quantity), float(available_quantity), float(already_consumed)) >= 0 and float(consumed_quantity) + float(already_consumed) <= float(available_quantity)
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_CONSUMPTION_ONCE" if valid else "LIQUIDITY_DOUBLE_CONSUMPTION", fail_closed=not valid)
+
+
+def liquidity_maker_touch_receipt(*, touched: bool, executed: bool) -> dict[str, Any]:
+    valid = touched is False or executed is True
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_MAKER_EXECUTION_CONFIRMED" if valid else "LIQUIDITY_TOUCH_ONLY_NOT_FILL", fail_closed=not valid)
+
+
+def liquidity_fee_order_receipt(*, maker_fee_bps: Any, taker_fee_bps: Any) -> dict[str, Any]:
+    valid = _liquidity_finite(maker_fee_bps) and _liquidity_finite(taker_fee_bps) and float(maker_fee_bps) >= 0 and float(taker_fee_bps) >= float(maker_fee_bps)
+    return _liquidity_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDITY_FEE_ORDER_VALID" if valid else "LIQUIDITY_FEE_ORDER_INVERTED", fail_closed=not valid)
+
+
 __all__ = [
     "ConsumptionOutcome",
     "LevelConsumption",
     "LiquidityConsumptionLedger",
     "LiquidityReservation",
+    "liquidity_consumption_safety_receipt",
+    "liquidity_required_field_receipt",
+    "liquidity_null_field_receipt",
+    "liquidity_field_type_receipt",
+    "liquidity_finite_receipt",
+    "liquidity_cutoff_receipt",
+    "liquidity_age_receipt",
+    "liquidity_duplicate_receipt",
+    "liquidity_retry_receipt",
+    "liquidity_replay_receipt",
+    "liquidity_depth_receipt",
+    "liquidity_crossed_book_receipt",
+    "liquidity_negative_size_receipt",
+    "liquidity_tick_receipt",
+    "liquidity_delta_receipt",
+    "liquidity_staleness_receipt",
+    "liquidity_quantity_receipt",
+    "liquidity_consumption_receipt",
+    "liquidity_maker_touch_receipt",
+    "liquidity_fee_order_receipt",
 ]
