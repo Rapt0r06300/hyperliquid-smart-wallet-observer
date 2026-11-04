@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import math
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -384,6 +385,133 @@ def partial_recovery_receipt(manifest: Mapping[str, Any]) -> dict[str, object]:
     return {"status": "PROVEN" if recoverable else "REJECTED", "recoverable": recoverable, "reasons": sorted(reasons), "forbidden_reasons": sorted(forbidden), "no_payload_rewrite": True}
 
 
+def _pipeline_base(status: str, **values: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _pipeline_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _pipeline_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def pipeline_safety_receipt(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose the V2 manifest classifier as a fail-closed materialization receipt."""
+    if not isinstance(manifest, Mapping):
+        return _pipeline_base("UNMEASURABLE", reason="MANIFEST_NOT_MAPPING", fail_closed=True)
+    quality, reasons = assess_manifest(manifest)
+    status = "PROVEN" if quality == "SAFE" else "REJECTED" if quality == "REJECT" else "UNMEASURABLE"
+    return _pipeline_base(status, quality_status=quality, reasons=reasons, fail_closed=status != "PROVEN")
+
+
+def pipeline_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_FIELD_PRESENT" if valid else "PIPELINE_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def pipeline_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_FIELD_NON_NULL" if valid else "PIPELINE_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def pipeline_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_FIELD_TYPE_VALID" if valid else "PIPELINE_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def pipeline_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _pipeline_finite(value)
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_VALUE_FINITE" if valid else "PIPELINE_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def pipeline_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _pipeline_integer(event_ts_ms) and _pipeline_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_EVENT_WITHIN_CUTOFF" if valid else "PIPELINE_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def pipeline_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _pipeline_integer(event_ts_ms) and _pipeline_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_EVENT_AGE_VALID" if valid else "PIPELINE_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def pipeline_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_EVENTS_UNIQUE" if valid else "PIPELINE_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def pipeline_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _pipeline_integer(attempts) and _pipeline_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_RETRY_BOUNDED" if valid else "PIPELINE_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def pipeline_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_REPLAY_DETERMINISTIC" if valid else "PIPELINE_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def pipeline_sha256_receipt(*, actual_sha256: Any, expected_sha256: Any) -> dict[str, Any]:
+    actual = str(actual_sha256 or ""); expected = str(expected_sha256 or "")
+    valid = len(actual) == 64 and len(expected) == 64 and all(char in "0123456789abcdefABCDEF" for char in actual + expected) and actual.casefold() == expected.casefold()
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_SHA256_MATCH" if valid else "PIPELINE_SHA256_MISMATCH", fail_closed=not valid)
+
+
+def pipeline_size_receipt(*, actual_size: Any, expected_size: Any) -> dict[str, Any]:
+    valid = _pipeline_integer(actual_size) and _pipeline_integer(expected_size) and actual_size >= 0 and actual_size == expected_size
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_SIZE_MATCH" if valid else "PIPELINE_SIZE_MISMATCH", fail_closed=not valid)
+
+
+def pipeline_compression_receipt(*, expected_size: Any, observed_size: Any, complete: bool) -> dict[str, Any]:
+    valid = _pipeline_integer(expected_size) and _pipeline_integer(observed_size) and expected_size >= 0 and observed_size == expected_size and complete is True
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_COMPRESSION_COMPLETE" if valid else "PIPELINE_COMPRESSION_TRUNCATED", fail_closed=not valid)
+
+
+def pipeline_zip_slip_receipt(member: Any) -> dict[str, Any]:
+    text = str(member or "").replace("\\", "/")
+    unsafe = text.startswith("/") or ":" in text.split("/")[0] or ".." in text.split("/")
+    return _pipeline_base("PROVEN" if unsafe else "REJECTED", verdict="PIPELINE_ZIP_SLIP_REFUSED" if unsafe else "PIPELINE_ZIP_SLIP_NOT_REFUSED", fail_closed=not unsafe)
+
+
+def pipeline_symlink_receipt(*, is_symlink: bool, within_root: bool) -> dict[str, Any]:
+    valid = is_symlink is False and within_root is True
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_SYMLINK_SAFE" if valid else "PIPELINE_SYMLINK_REFUSED", fail_closed=not valid)
+
+
+def pipeline_partial_replay_receipt(*, status: Any, replayable: bool) -> dict[str, Any]:
+    valid = str(status or "").upper() != "PARTIAL" or replayable is False
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_PARTIAL_NOT_REPLAYABLE" if valid else "PIPELINE_PARTIAL_PROMOTED", fail_closed=not valid)
+
+
+def pipeline_reject_validation_receipt(*, status: Any, validated: bool) -> dict[str, Any]:
+    valid = str(status or "").upper() != "REJECT" or validated is False
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_REJECT_NOT_VALIDATED" if valid else "PIPELINE_REJECT_PROMOTED", fail_closed=not valid)
+
+
+def pipeline_unique_counts_receipt(*, total_count: Any, unique_count: Any, unique_ids: list[Any]) -> dict[str, Any]:
+    valid = _pipeline_integer(total_count) and _pipeline_integer(unique_count) and total_count > 0 and total_count == unique_count == len(unique_ids) and len(set(unique_ids)) == unique_count
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_UNIQUE_COUNTS_MATCH" if valid else "PIPELINE_UNIQUE_COUNTS_FALSE", fail_closed=not valid)
+
+
+def pipeline_manifest_compatibility_receipt(*, manifest_version: Any, required_version: Any, compatible: bool) -> dict[str, Any]:
+    valid = bool(str(manifest_version or "").strip()) and bool(str(required_version or "").strip()) and compatible is True
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_MANIFEST_COMPATIBLE" if valid else "PIPELINE_MANIFEST_INCOMPATIBLE", fail_closed=not valid)
+
+
+def pipeline_publication_receipt(*, status: Any, manifest_committed: bool, receipt_written: bool) -> dict[str, Any]:
+    valid = str(status or "").upper() in {"COMPLETE", "PUBLISHED"} and manifest_committed is True and receipt_written is True
+    return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_PUBLICATION_COMPLETE" if valid else "PIPELINE_PUBLICATION_INTERRUPTED", fail_closed=not valid)
+
+
 def summarize_admission_rejections(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     counts: Counter[str] = Counter()
     for row in rows:
@@ -717,6 +845,26 @@ __all__ = [
     "locally_replay_admissible",
     "admission_rejection",
     "partial_recovery_receipt",
+    "pipeline_safety_receipt",
+    "pipeline_required_field_receipt",
+    "pipeline_null_field_receipt",
+    "pipeline_field_type_receipt",
+    "pipeline_finite_receipt",
+    "pipeline_cutoff_receipt",
+    "pipeline_age_receipt",
+    "pipeline_duplicate_receipt",
+    "pipeline_retry_receipt",
+    "pipeline_replay_receipt",
+    "pipeline_sha256_receipt",
+    "pipeline_size_receipt",
+    "pipeline_compression_receipt",
+    "pipeline_zip_slip_receipt",
+    "pipeline_symlink_receipt",
+    "pipeline_partial_replay_receipt",
+    "pipeline_reject_validation_receipt",
+    "pipeline_unique_counts_receipt",
+    "pipeline_manifest_compatibility_receipt",
+    "pipeline_publication_receipt",
     "summarize_admission_rejections",
     "verify_remote_asset",
 ]

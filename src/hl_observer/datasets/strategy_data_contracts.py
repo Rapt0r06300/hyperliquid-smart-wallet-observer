@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+import math
 from typing import Any
 
 CORE_VENUES = ("hyperliquid", "binance", "bybit", "okx")
@@ -204,6 +205,118 @@ def evaluate_copy_vault_replay_readiness(
     }
 
 
+def _base(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _fini(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _entier(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def strategy_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_FIELD_PRESENT" if valid else "STRATEGY_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def strategy_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_FIELD_NON_NULL" if valid else "STRATEGY_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def strategy_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_FIELD_TYPE_VALID" if valid else "STRATEGY_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def strategy_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _fini(value)
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_VALUE_FINITE" if valid else "STRATEGY_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def strategy_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _entier(event_ts_ms) and _entier(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_EVENT_WITHIN_CUTOFF" if valid else "STRATEGY_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def strategy_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _entier(event_ts_ms) and _entier(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_EVENT_AGE_VALID" if valid else "STRATEGY_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def strategy_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_EVENTS_UNIQUE" if valid else "STRATEGY_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def strategy_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _entier(attempts) and _entier(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_RETRY_BOUNDED" if valid else "STRATEGY_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def strategy_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_REPLAY_DETERMINISTIC" if valid else "STRATEGY_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def strategy_sha256_receipt(*, actual_sha256: Any, expected_sha256: Any) -> dict[str, Any]:
+    actual = str(actual_sha256 or ""); expected = str(expected_sha256 or "")
+    valid = len(actual) == 64 and len(expected) == 64 and all(char in "0123456789abcdefABCDEF" for char in actual + expected) and actual.casefold() == expected.casefold()
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_SHA256_MATCH" if valid else "STRATEGY_SHA256_MISMATCH", fail_closed=not valid)
+
+
+def strategy_size_receipt(*, actual_size: Any, expected_size: Any) -> dict[str, Any]:
+    valid = _entier(actual_size) and _entier(expected_size) and actual_size >= 0 and actual_size == expected_size
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_SIZE_MATCH" if valid else "STRATEGY_SIZE_MISMATCH", fail_closed=not valid)
+
+
+def strategy_compression_receipt(*, expected_size: Any, observed_size: Any, complete: bool) -> dict[str, Any]:
+    valid = _entier(expected_size) and _entier(observed_size) and expected_size >= 0 and observed_size == expected_size and complete is True
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_COMPRESSION_COMPLETE" if valid else "STRATEGY_COMPRESSION_TRUNCATED", fail_closed=not valid)
+
+
+def strategy_zip_slip_receipt(member: Any) -> dict[str, Any]:
+    text = str(member or "").replace("\\", "/")
+    unsafe = text.startswith("/") or ":" in text.split("/")[0] or ".." in text.split("/")
+    return _base("PROVEN" if unsafe else "REJECTED", verdict="STRATEGY_ZIP_SLIP_REFUSED" if unsafe else "STRATEGY_ZIP_SLIP_NOT_REFUSED", fail_closed=not unsafe)
+
+
+def strategy_symlink_receipt(*, is_symlink: bool, within_root: bool) -> dict[str, Any]:
+    valid = is_symlink is False and within_root is True
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_SYMLINK_SAFE" if valid else "STRATEGY_SYMLINK_REFUSED", fail_closed=not valid)
+
+
+def strategy_partial_replay_receipt(*, status: Any, replayable: bool) -> dict[str, Any]:
+    valid = str(status or "").upper() != "PARTIAL" or replayable is False
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_PARTIAL_NOT_REPLAYABLE" if valid else "STRATEGY_PARTIAL_PROMOTED", fail_closed=not valid)
+
+
+def strategy_reject_validation_receipt(*, status: Any, validated: bool) -> dict[str, Any]:
+    valid = str(status or "").upper() != "REJECT" or validated is False
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_REJECT_NOT_VALIDATED" if valid else "STRATEGY_REJECT_PROMOTED", fail_closed=not valid)
+
+
+def strategy_unique_counts_receipt(*, total_count: Any, unique_count: Any, unique_ids: list[Any]) -> dict[str, Any]:
+    valid = _entier(total_count) and _entier(unique_count) and total_count > 0 and total_count == unique_count == len(unique_ids) and len(set(unique_ids)) == unique_count
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_UNIQUE_COUNTS_MATCH" if valid else "STRATEGY_UNIQUE_COUNTS_FALSE", fail_closed=not valid)
+
+
+def strategy_manifest_compatibility_receipt(*, manifest_version: Any, required_version: Any, compatible: bool) -> dict[str, Any]:
+    valid = bool(str(manifest_version or "").strip()) and bool(str(required_version or "").strip()) and compatible is True
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_MANIFEST_COMPATIBLE" if valid else "STRATEGY_MANIFEST_INCOMPATIBLE", fail_closed=not valid)
+
+
+def strategy_publication_receipt(*, status: Any, manifest_committed: bool, receipt_written: bool) -> dict[str, Any]:
+    valid = str(status or "").upper() in {"COMPLETE", "PUBLISHED"} and manifest_committed is True and receipt_written is True
+    return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_PUBLICATION_COMPLETE" if valid else "STRATEGY_PUBLICATION_INTERRUPTED", fail_closed=not valid)
+
+
 __all__ = [
     "CONTRACTS",
     "COPY_VAULT_REQUIRED_FAMILIES",
@@ -214,4 +327,10 @@ __all__ = [
     "get_strategy_data_contract",
     "missing_required_families",
     "evaluate_copy_vault_replay_readiness",
+    "strategy_required_field_receipt", "strategy_null_field_receipt", "strategy_field_type_receipt",
+    "strategy_finite_receipt", "strategy_cutoff_receipt", "strategy_age_receipt", "strategy_duplicate_receipt",
+    "strategy_retry_receipt", "strategy_replay_receipt", "strategy_sha256_receipt", "strategy_size_receipt",
+    "strategy_compression_receipt", "strategy_zip_slip_receipt", "strategy_symlink_receipt",
+    "strategy_partial_replay_receipt", "strategy_reject_validation_receipt", "strategy_unique_counts_receipt",
+    "strategy_manifest_compatibility_receipt", "strategy_publication_receipt",
 ]

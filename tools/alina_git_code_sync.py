@@ -2374,42 +2374,78 @@ class Synchronizer:
             yield
             return
 
+        # Refresh the existing index entries in bounded batches, then toggle
+        # skip-worktree for the complete set through NUL-delimited stdin.
+        # The former implementation launched three Git processes per path
+        # (ls-files, cacheinfo and skip-worktree).  With hundreds of SAFE
+        # shards that made an otherwise code-only replay hold index locks for
+        # minutes and prevented the operator from publishing concurrently.
+        index_info: list[bytes] = []
+        seen: set[str] = set()
+        for start in range(0, len(paths), PROTECTED_PATH_BATCH_SIZE):
+            batch = paths[start:start + PROTECTED_PATH_BATCH_SIZE]
+            entry_bytes = self.command(
+                "ls-files", "-s", "-z", "--", *batch,
+            ).stdout
+            for raw_entry in entry_bytes.split(b"\0"):
+                if not raw_entry:
+                    continue
+                header, separator, raw_path = raw_entry.partition(b"\t")
+                fields = header.split()
+                if not separator or len(fields) != 3 or fields[2] != b"0":
+                    raise SyncBlocked(
+                        "Entree d'index protegee ambigue ou en conflit."
+                    )
+                path = raw_path.decode("utf-8", errors="strict")
+                if path in seen:
+                    raise SyncBlocked(
+                        "Entree d'index protegee dupliquee: " + path
+                    )
+                seen.add(path)
+                index_info.append(raw_entry)
+
+        if seen != set(paths):
+            missing = sorted(set(paths) - seen)
+            raise SyncBlocked(
+                "Entree(s) d'index protegee(s) introuvable(s): "
+                + ", ".join(missing[:8])
+            )
+
+        index_payload = b"\0".join(index_info) + b"\0"
+        path_payload = b"\0".join(
+            path.encode("utf-8") for path in paths
+        ) + b"\0"
         assumed: list[str] = []
         try:
-            for path in paths:
-                # A generated file can be byte-identical to HEAD while its
-                # filesystem stat is stale.  Git checkout then reports it as
-                # dirty even though there is no local data change.  Refresh
-                # only that exact index entry with its existing blob; this
-                # never stages or rewrites the protected worktree file.
-                entry = self.command("ls-files", "-s", "--", path).stdout
-                fields = entry.decode("utf-8", errors="replace").split()
-                if len(fields) < 3:
-                    raise SyncBlocked(
-                        "Entree d'index protegee introuvable pour " + path
-                    )
-                self.command(
-                    "update-index", "--cacheinfo",
-                    f"{fields[0]},{fields[1]},{path}",
-                )
-                # `skip-worktree` is the index contract Git checkout/rebase
-                # honors when the worktree intentionally contains a local
-                # protected file that must not be replaced by code replay.
-                # `assume-unchanged` only suppresses stat checks and still
-                # lets checkout reject the path as dirty.
-                self.command("update-index", "--skip-worktree", "--", path)
-                assumed.append(path)
+            # A generated file can be byte-identical to HEAD while its
+            # filesystem stat is stale.  Refresh only those exact index
+            # entries with their existing blobs; this never stages or rewrites
+            # the protected worktree files.
+            self.command(
+                "update-index", "-z", "--index-info",
+                input_bytes=index_payload,
+            )
+            # `skip-worktree` is the index contract Git checkout/rebase honors
+            # when the worktree intentionally contains a local protected file
+            # that must not be replaced by code replay.  `assume-unchanged`
+            # only suppresses stat checks and still lets checkout reject it.
+            self.command(
+                "update-index", "--skip-worktree", "-z", "--stdin",
+                input_bytes=path_payload,
+            )
+            assumed = list(paths)
             yield
         finally:
-            for path in reversed(assumed):
+            if assumed:
                 restored = self.command(
-                    "update-index", "--no-skip-worktree", "--", path,
+                    "update-index", "--no-skip-worktree", "-z", "--stdin",
+                    input_bytes=path_payload,
                     check=False,
                 )
                 if restored.returncode:
                     raise SyncBlocked(
                         "Restauration de la garde d'index impossible pour "
-                        f"le fichier protege: {path}"
+                        "les fichiers proteges."
                     )
 
     def _capture_conflicts(self, conflicted: list[str], local: str,
@@ -2927,12 +2963,16 @@ class Synchronizer:
                 if tree == current_tree:
                     skipped_empty += 1
                     continue
-                author = self.text("show", "-s", "--format=%an <%ae>", old_commit)
                 message = self.command(
                     "show", "-s", "--format=%B", old_commit,
                 ).stdout
                 created = self.command(
-                    "commit-tree", f"--author={author}", tree, "-p", current,
+                    # `commit-tree` has no --author option; its author comes
+                    # from the configured Git identity/environment.  Passing
+                    # the pretty-printed author as an option made the
+                    # governance replay fail with exit 129 after all its
+                    # expensive index work had completed.
+                    "commit-tree", tree, "-p", current,
                     input_bytes=message, timeout=COMMIT_TIMEOUT_SECONDS,
                 ).stdout.decode("ascii", errors="strict").strip()
                 if not re.fullmatch(r"[0-9a-f]{40,64}", created):
