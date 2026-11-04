@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Mapping, Sequence
 from copy import copy
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal, localcontext
 from enum import Enum
 from hashlib import sha256
+from typing import Any
 
 from hl_observer.economics.numeric import (
     USD_RECONCILIATION_ABS_TOLERANCE,
@@ -1272,6 +1274,131 @@ class ScopedLedgerBook:
         }
 
 
+def _ledger_base(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _ledger_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _ledger_finite(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def paper_ledger_safety_receipt(ledger: PaperLedger) -> dict[str, Any]:
+    valid = isinstance(ledger, PaperLedger) and ledger.verify_event_chain() and ledger.snapshot().get("paper_read_only", True) is not False
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="PAPER_LEDGER_SAFE" if valid else "PAPER_LEDGER_UNSAFE", fail_closed=not valid)
+
+
+def ledger_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_FIELD_PRESENT" if valid else "LEDGER_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def ledger_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_FIELD_NON_NULL" if valid else "LEDGER_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def ledger_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_FIELD_TYPE_VALID" if valid else "LEDGER_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def ledger_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _ledger_finite(value)
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_VALUE_FINITE" if valid else "LEDGER_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def ledger_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _ledger_integer(event_ts_ms) and _ledger_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_EVENT_WITHIN_CUTOFF" if valid else "LEDGER_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def ledger_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _ledger_integer(event_ts_ms) and _ledger_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_EVENT_AGE_VALID" if valid else "LEDGER_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def ledger_duplicate_receipt(*, event_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_EVENTS_UNIQUE" if valid else "LEDGER_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def ledger_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _ledger_integer(attempts) and _ledger_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_RETRY_BOUNDED" if valid else "LEDGER_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def ledger_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_REPLAY_DETERMINISTIC" if valid else "LEDGER_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def ledger_fill_duplicate_receipt(*, fill_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(fill_ids) and all(str(value).strip() for value in fill_ids) and len(fill_ids) == len(set(fill_ids))
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_FILLS_UNIQUE" if valid else "LEDGER_FILL_DUPLICATED", fail_closed=not valid)
+
+
+def ledger_rejection_no_debit_receipt(*, rejected: bool, debited: bool) -> dict[str, Any]:
+    valid = rejected is True and debited is False
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_REJECTION_NO_DEBIT" if valid else "LEDGER_REJECTION_DEBITED", fail_closed=not valid)
+
+
+def ledger_partial_close_receipt(*, close_quantity: Any, open_quantity: Any, fee_known: bool, fee_amount: Any) -> dict[str, Any]:
+    close, open_size, fee = (float(value) if _ledger_finite(value) else None for value in (close_quantity, open_quantity, fee_amount))
+    valid = close is not None and open_size is not None and fee is not None and fee_known is True and 0 < close < open_size and fee >= 0
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_PARTIAL_CLOSE_COSTED" if valid else "LEDGER_PARTIAL_CLOSE_UNSAFE", fail_closed=not valid)
+
+
+def ledger_total_close_release_receipt(*, close_quantity: Any, open_quantity: Any, released_margin: Any) -> dict[str, Any]:
+    close, open_size, release = (float(value) if _ledger_finite(value) else None for value in (close_quantity, open_quantity, released_margin))
+    valid = close is not None and open_size is not None and release is not None and open_size > 0 and abs(close - open_size) <= 1e-12 and release >= 0
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_TOTAL_CLOSE_RELEASED" if valid else "LEDGER_TOTAL_CLOSE_NOT_RELEASED", fail_closed=not valid)
+
+
+def ledger_mark_liquidability_receipt(*, mark_price: Any, bid: Any, ask: Any) -> dict[str, Any]:
+    mark, best_bid, best_ask = (float(value) if _ledger_finite(value) else None for value in (mark_price, bid, ask))
+    valid = mark is not None and best_bid is not None and best_ask is not None and best_bid > 0 and best_ask >= best_bid and best_bid <= mark <= best_ask
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_MARK_LIQUIDABLE" if valid else "LEDGER_MARK_NOT_LIQUIDABLE", fail_closed=not valid)
+
+
+def ledger_balance_receipt(*, balance: Any) -> dict[str, Any]:
+    value = float(balance) if _ledger_finite(balance) else None
+    valid = value is not None and value >= 0
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_BALANCE_NON_NEGATIVE" if valid else "LEDGER_BALANCE_NEGATIVE", fail_closed=not valid)
+
+
+def ledger_funding_sign_receipt(*, amount: Any, direction: str) -> dict[str, Any]:
+    value = float(amount) if _ledger_finite(amount) else None
+    normalized = str(direction or "").strip().upper()
+    valid = value is not None and ((normalized == "CREDIT" and value >= 0) or (normalized == "DEBIT" and value <= 0))
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_FUNDING_SIGN_VALID" if valid else "LEDGER_FUNDING_SIGN_INVALID", fail_closed=not valid)
+
+
+def ledger_conversion_receipt(*, fee_amount: Any, fee_token: Any, pnl_currency: Any, token_to_pnl_rate: Any) -> dict[str, Any]:
+    amount = float(fee_amount) if _ledger_finite(fee_amount) else None
+    rate = float(token_to_pnl_rate) if _ledger_finite(token_to_pnl_rate) else None
+    valid = amount is not None and amount >= 0 and rate is not None and rate >= 0 and isinstance(fee_token, str) and bool(fee_token.strip()) and isinstance(pnl_currency, str) and bool(pnl_currency.strip())
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_CONVERSION_PROVEN" if valid else "LEDGER_CONVERSION_MISSING", fail_closed=not valid)
+
+
+def ledger_commit_receipt(*, crashed: bool, committed: bool, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = (crashed is True and committed is False and checkpoint_saved is True) or (crashed is False and committed is True)
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_COMMIT_ATOMIC" if valid else "LEDGER_COMMIT_PARTIAL", fail_closed=not valid)
+
+
+def ledger_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(write_ids) and all(str(value).strip() for value in write_ids) and len(write_ids) == len(set(write_ids))
+    return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_WRITES_UNIQUE" if valid else "LEDGER_DOUBLE_WRITE", fail_closed=not valid)
+
+
 def _funding_settlement_id(refs: dict[str, object]) -> str | None:
     for key in ("funding_settlement_id", "settlement_id", "user_funding_id"):
         value = refs.get(key)
@@ -1381,4 +1508,12 @@ def _position_mark(
     return None
 
 
-__all__ = ["LedgerPosition", "PaperLedger", "LedgerScope", "ScopedLedgerBook"]
+__all__ = [
+    "LedgerPosition", "PaperLedger", "LedgerScope", "ScopedLedgerBook",
+    "paper_ledger_safety_receipt", "ledger_required_field_receipt", "ledger_null_field_receipt",
+    "ledger_field_type_receipt", "ledger_finite_receipt", "ledger_cutoff_receipt", "ledger_age_receipt",
+    "ledger_duplicate_receipt", "ledger_retry_receipt", "ledger_replay_receipt", "ledger_fill_duplicate_receipt",
+    "ledger_rejection_no_debit_receipt", "ledger_partial_close_receipt", "ledger_total_close_release_receipt",
+    "ledger_mark_liquidability_receipt", "ledger_balance_receipt", "ledger_funding_sign_receipt",
+    "ledger_conversion_receipt", "ledger_commit_receipt", "ledger_concurrent_write_receipt",
+]

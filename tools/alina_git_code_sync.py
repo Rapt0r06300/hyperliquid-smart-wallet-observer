@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,14 @@ MAX_BLOB_BYTES = 95 * 1024 * 1024
 MAX_RACE_RETRIES = 5
 MAX_LOCAL_CHANGE_RETRIES = 3
 PROTECTED_PATH_BATCH_SIZE = 128
+# Data collectors may leave generated SAFE files staged while the operator is
+# editing code. They stay outside code-only checkpoints, but their presence
+# must not prevent an unrelated code publication. Secret-like files still
+# fail closed through ``_can_defer_staged_protected`` below.
+DEFERRED_STAGED_PROTECTED_ROOTS = {
+    "archive", "archives", "build", "catalog", "data", "datasets", "dist",
+    "logs", "runtime", "wheelhouse",
+}
 # A shallow checkout only needs enough history to prove a common ancestor
 # with the canonical main.  Fetching the entire repository can transfer
 # millions of objects even when the two tips diverged by a handful of
@@ -719,6 +728,32 @@ def _protected(path: str) -> bool:
     return name in ("thumbs.db", "desktop.ini")
 
 
+def _can_defer_staged_protected(path: str) -> bool:
+    """Return whether a staged protected path is collector-owned SAFE data.
+
+    This is intentionally narrower than ``_protected``. A staged ``.env`` or
+    key-looking file must still stop the run; only known data/runtime roots
+    may remain staged while an isolated code checkpoint is built.
+    """
+    normalized = path.replace("\\", "/")
+    parts = PurePosixPath(normalized).parts
+    if not parts or parts[0].casefold() not in DEFERRED_STAGED_PROTECTED_ROOTS:
+        return False
+    lowered = tuple(part.casefold() for part in parts)
+    if any(part in SENSITIVE_PARTS for part in lowered):
+        return False
+    name = lowered[-1]
+    if name.startswith(".env") or name.endswith(".env"):
+        return False
+    if any(secret in name for secret in (
+        "id_rsa", "id_ed25519", "private_key", "private-key",
+    )):
+        return False
+    return Path(name).suffix not in {
+        ".pem", ".key", ".p12", ".pfx", ".keystore",
+    }
+
+
 def _git_operation_label(args: list[str]) -> str:
     """Return a safe, user-facing description without echoing raw arguments."""
     verb = args[0] if args else ""
@@ -1042,6 +1077,7 @@ class Synchronizer:
         self._remote_snapshot_sha: str | None = None
         self._allow_protected_local_checkpoint = False
         self._deferred_local_paths: set[str] = set()
+        self._deferred_staged_protected_paths: set[str] = set()
         self._command_count = 0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
@@ -2068,11 +2104,29 @@ class Synchronizer:
         *, allow_protected_local: bool = False,
     ) -> list[str]:
         staged_protected = [p for p in staged if _protected(p)]
-        if staged_protected:
-            raise SyncBlocked(
-                "Fichiers sensibles deja stages : " + ", ".join(staged_protected[:8])
-            )
         safe_moves = self._verified_unstaged_historical_moves(tracked, untracked)
+        deferable_staged = {
+            path for path in staged_protected
+            if path not in safe_moves and _can_defer_staged_protected(path)
+        }
+        blocking_staged = [
+            path for path in staged_protected
+            if path not in deferable_staged and path not in safe_moves
+        ]
+        if blocking_staged:
+            raise SyncBlocked(
+                "Fichiers sensibles deja stages : " + ", ".join(blocking_staged[:8])
+            )
+        if deferable_staged:
+            self._deferred_staged_protected_paths.update(deferable_staged)
+            deferred_list = sorted(self._deferred_staged_protected_paths)
+            self.report["deferred_staged_protected_paths"] = deferred_list[:100]
+            self.report["deferred_staged_protected_count"] = len(deferred_list)
+            self.say(
+                "[GARDE DONNEES] "
+                f"{len(deferable_staged)} fichier(s) SAFE deja stages "
+                "seront exclus du commit de code et preserves dans l'index operateur."
+            )
         tracked_protected = [
             p for p in tracked if _protected(p) and p not in safe_moves
         ]
@@ -2132,12 +2186,121 @@ class Synchronizer:
             ).stdout
         )
         safe_moves = self._verified_staged_historical_moves(staged)
-        if any(_protected(path) and path not in safe_moves for path in staged):
-            raise SyncBlocked("L'index contient une archive, des donnees ou un secret.")
+        deferred = self._deferred_staged_protected_paths
+        unexpected_protected = [
+            path for path in staged
+            if _protected(path) and path not in safe_moves and path not in deferred
+        ]
+        if unexpected_protected:
+            raise SyncBlocked(
+                "L'index contient une archive, des donnees ou un secret: "
+                + ", ".join(unexpected_protected[:8])
+            )
         for path in staged:
             self._check_file_payload(path, self.root / path)
         if self.command("diff", "--cached", "--check", check=False).returncode:
             self.say("[ATTENTION] Espaces non conformes dans un WIP, code preserve.")
+
+    @contextlib.contextmanager
+    def _temporary_checkpoint_index(self, protected_paths: set[str]):
+        """Stage code in an isolated index while preserving operator staging.
+
+        A collector can legitimately stage SAFE catalog receipts while this
+        launcher is publishing code. Copying the operator index and removing
+        protected deltas only in the copy means the real index is never
+        unstaged, reset, or rewritten as a side effect of publishing.
+        """
+        git_dir = Path(self.text("rev-parse", "--absolute-git-dir"))
+        source_index = git_dir / "index"
+        lock_path = git_dir / "index.lock"
+        fd, raw_path = tempfile.mkstemp(
+            prefix=".alina-checkpoint-", suffix=".index", dir=git_dir,
+        )
+        os.close(fd)
+        index = Path(raw_path)
+        index.unlink(missing_ok=True)
+        previous = os.environ.get("GIT_INDEX_FILE")
+        copied = False
+        try:
+            # Never copy an index while another Git process is replacing it.
+            # A HEAD-only temporary index is still sufficient: the checkpoint
+            # stages admissible worktree paths below and excludes SAFE data.
+            if source_index.is_file() and not lock_path.exists():
+                shutil.copyfile(source_index, index)
+                copied = True
+            os.environ["GIT_INDEX_FILE"] = str(index)
+            if not copied:
+                self.command("read-tree", "HEAD")
+            self._restore_protected_paths_from_head(protected_paths)
+            yield index
+        finally:
+            if previous is None:
+                os.environ.pop("GIT_INDEX_FILE", None)
+            else:
+                os.environ["GIT_INDEX_FILE"] = previous
+            index.unlink(missing_ok=True)
+
+    def _restore_protected_paths_from_head(self, paths: set[str]) -> None:
+        """Remove protected staged deltas from the currently selected index."""
+        if not paths:
+            return
+        head_entries: dict[str, bytes] = {}
+        ordered = sorted(paths)
+        for start in range(0, len(ordered), PROTECTED_PATH_BATCH_SIZE):
+            batch = ordered[start:start + PROTECTED_PATH_BATCH_SIZE]
+            output = self.command(
+                "ls-tree", "-r", "-z", "HEAD", "--", *batch,
+            ).stdout
+            for raw in output.split(b"\0"):
+                if not raw:
+                    continue
+                metadata, separator, raw_path = raw.partition(b"\t")
+                fields = metadata.split()
+                if not separator or len(fields) != 3 or fields[1] != b"blob":
+                    raise SyncBlocked("Arbre HEAD protege illisible.")
+                path = raw_path.decode("utf-8", errors="strict")
+                head_entries[path] = (
+                    fields[0] + b" " + fields[2] + b" 0\t" + raw_path
+                )
+        updates = [head_entries[path] for path in ordered if path in head_entries]
+        removals = [path for path in ordered if path not in head_entries]
+        if updates:
+            self.command(
+                "update-index", "-z", "--index-info",
+                input_bytes=b"\0".join(updates) + b"\0",
+            )
+        if removals:
+            self.command(
+                "update-index", "--force-remove", "-z", "--stdin",
+                input_bytes=b"\0".join(
+                    path.encode("utf-8") for path in removals
+                ) + b"\0",
+            )
+
+    def _align_operator_index(self, paths: list[str], index_info: bytes) -> None:
+        """Align only published paths; never disturb protected operator stages."""
+        if not paths:
+            return
+        entries: set[str] = set()
+        if index_info:
+            for raw in index_info.split(b"\0"):
+                if not raw:
+                    continue
+                _metadata, separator, raw_path = raw.partition(b"\t")
+                if not separator:
+                    raise SyncBlocked("Index du checkpoint publie illisible.")
+                entries.add(raw_path.decode("utf-8", errors="strict"))
+            self.command(
+                "update-index", "-z", "--index-info", input_bytes=index_info,
+            )
+        removals = [path for path in paths if path not in entries]
+        if removals:
+            self.command(
+                "update-index", "--force-remove", "-z", "--stdin",
+                input_bytes=b"\0".join(
+                    path.encode("utf-8") for path in removals
+                ) + b"\0",
+            )
 
     def _commit_staged_index(self, commit_message: str) -> str:
         """Create one local checkpoint without Git's full-index commit refresh.
@@ -2233,28 +2396,37 @@ class Synchronizer:
                 self.say("[CHECKPOINT] Rien a sauvegarder; aucun commit vide.")
             return
         pathspec = b"\0".join(path.encode("utf-8") for path in eligible) + b"\0"
-        self.command(
-            "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
-            input_bytes=pathspec,
-        )
-        self._verify_stage()
-        diff = self.command(
-            "diff", "--cached", "--quiet", check=False,
-            expected_returncodes=(1,),
-        )
-        if diff.returncode not in (0, 1):
-            raise SyncBlocked("Verification de l'index Git impossible.")
-        if diff.returncode == 1:
-            staged_diff = self.command(
-                "diff", "--cached", "--no-ext-diff", "--unified=0",
-            ).stdout.decode("utf-8", errors="replace")
-            commit_message = _commit_subject(eligible, staged_diff)
-            self.report["commit_message"] = commit_message
-            self.say(f"Commit semantique du code admissible: {commit_message}")
-            self.report["checkpoint_sha"] = self._commit_staged_index(
-                commit_message
+        published_index_info = b""
+        with self._temporary_checkpoint_index(
+            self._deferred_staged_protected_paths,
+        ):
+            self.command(
+                "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
+                input_bytes=pathspec,
             )
-            self.report["local_commit_created"] = True
+            self._verify_stage()
+            diff = self.command(
+                "diff", "--cached", "--quiet", check=False,
+                expected_returncodes=(1,),
+            )
+            if diff.returncode not in (0, 1):
+                raise SyncBlocked("Verification de l'index Git impossible.")
+            if diff.returncode == 1:
+                staged_diff = self.command(
+                    "diff", "--cached", "--no-ext-diff", "--unified=0",
+                ).stdout.decode("utf-8", errors="replace")
+                commit_message = _commit_subject(eligible, staged_diff)
+                self.report["commit_message"] = commit_message
+                self.say(f"Commit semantique du code admissible: {commit_message}")
+                self.report["checkpoint_sha"] = self._commit_staged_index(
+                    commit_message
+                )
+                published_index_info = self.command(
+                    "ls-files", "-s", "-z", "--", *eligible,
+                ).stdout
+                self.report["local_commit_created"] = True
+        if self.report.get("local_commit_created"):
+            self._align_operator_index(eligible, published_index_info)
             self.command(
                 "update-ref", "refs/alina-sync/last-local-checkpoint",
                 self.report["checkpoint_sha"],
@@ -2351,12 +2523,15 @@ class Synchronizer:
                 self.command("ls-files", "-z", "--", *batch).stdout
             ))
 
-        local_changed: set[str] = set()
-        for start in range(0, len(protected_changes), PROTECTED_PATH_BATCH_SIZE):
-            batch = protected_changes[start:start + PROTECTED_PATH_BATCH_SIZE]
-            local_changed.update(_paths(
-                self.command("diff", "--name-only", "-z", "HEAD", "--", *batch).stdout
-            ))
+        # `capture_preflight` and the immediately preceding late-edit gate
+        # already inventory the operator's protected paths against the real
+        # index.  Re-running `git diff HEAD -- <thousands of catalog paths>`
+        # here rescans the large index and was the remaining multi-minute
+        # bottleneck.  Reuse that exact validated set instead.
+        observed_protected = self.report.get("protected_local_changes", [])
+        local_changed = {
+            path for path in observed_protected if isinstance(path, str)
+        }
         for path in protected_changes:
             local_path = self.root / path
             if not (local_path.exists() or local_path.is_symlink()):

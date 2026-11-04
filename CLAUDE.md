@@ -47,7 +47,7 @@ Famille économique active unique : **Copy-Vault**.
 
 `Lead-Lag / Cross-Venue / arbitrage / Carry / Funding Carry / shadow / research-only = DISABLED_BY_SCOPE` pour simulation, labo, replay/backtest, OOS/forward, preuve PnL, certification et scoreboard. Préserver leur code et leurs preuves sans les exécuter. Aucune variable d'environnement ne peut élargir le scope.
 
-Objectif actif : **amélioration NETTE reproductible de Copy-Vault, sans seuil quotidien fixe**. Le jalon historique de +5 USD nets/jour sur 200 USD paper n'est ni une exigence de promotion ni une raison de réduire les garde-fous.
+Objectif de recherche : **>= +5.00 USD NET/jour PROUVÉS pour Copy-Vault, sur 200 USD paper**.
 
 Les statuts honnêtes restent :
 

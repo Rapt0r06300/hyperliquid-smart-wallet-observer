@@ -16,7 +16,7 @@ sortie reflète `PaperLedger._position_mark` (`position_id`, sinon `COIN:SIDE`).
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
@@ -144,7 +144,139 @@ def liquidatable_marks_report(
     return coverage
 
 
+def _marks_base(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _marks_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _marks_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def liquidatable_marks_safety_receipt(result: Mapping[str, Any]) -> dict[str, Any]:
+    valid = isinstance(result, Mapping) and result.get("schema_version") == SCHEMA_VERSION and result.get("real_execution") is False and result.get("mid_price_fallback") is False
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="LIQUIDATABLE_MARKS_SAFE" if valid else "LIQUIDATABLE_MARKS_UNSAFE", fail_closed=not valid)
+
+
+def marks_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_FIELD_PRESENT" if valid else "MARKS_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def marks_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_FIELD_NON_NULL" if valid else "MARKS_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def marks_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_FIELD_TYPE_VALID" if valid else "MARKS_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def marks_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _marks_finite(value)
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_VALUE_FINITE" if valid else "MARKS_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def marks_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _marks_integer(event_ts_ms) and _marks_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_EVENT_WITHIN_CUTOFF" if valid else "MARKS_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def marks_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _marks_integer(event_ts_ms) and _marks_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_EVENT_AGE_VALID" if valid else "MARKS_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def marks_duplicate_receipt(*, event_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_EVENTS_UNIQUE" if valid else "MARKS_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def marks_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _marks_integer(attempts) and _marks_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_RETRY_BOUNDED" if valid else "MARKS_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def marks_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_REPLAY_DETERMINISTIC" if valid else "MARKS_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def marks_fill_duplicate_receipt(*, fill_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(fill_ids) and all(str(value).strip() for value in fill_ids) and len(fill_ids) == len(set(fill_ids))
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_FILLS_UNIQUE" if valid else "MARKS_FILL_DUPLICATED", fail_closed=not valid)
+
+
+def marks_rejection_no_debit_receipt(*, rejected: bool, debited: bool) -> dict[str, Any]:
+    valid = rejected is True and debited is False
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_REJECTION_NO_DEBIT" if valid else "MARKS_REJECTION_DEBITED", fail_closed=not valid)
+
+
+def marks_partial_close_receipt(*, close_quantity: Any, open_quantity: Any, fee_known: bool, fee_amount: Any) -> dict[str, Any]:
+    values = tuple(float(value) if _marks_finite(value) else None for value in (close_quantity, open_quantity, fee_amount))
+    close, open_size, fee = values
+    valid = close is not None and open_size is not None and fee is not None and fee_known is True and 0 < close < open_size and fee >= 0
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_PARTIAL_CLOSE_COSTED" if valid else "MARKS_PARTIAL_CLOSE_UNSAFE", fail_closed=not valid)
+
+
+def marks_total_close_release_receipt(*, close_quantity: Any, open_quantity: Any, released_margin: Any) -> dict[str, Any]:
+    values = tuple(float(value) if _marks_finite(value) else None for value in (close_quantity, open_quantity, released_margin))
+    close, open_size, release = values
+    valid = close is not None and open_size is not None and release is not None and open_size > 0 and abs(close - open_size) <= 1e-12 and release >= 0
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_TOTAL_CLOSE_RELEASED" if valid else "MARKS_TOTAL_CLOSE_NOT_RELEASED", fail_closed=not valid)
+
+
+def marks_mark_liquidability_receipt(*, mark_price: Any, bid: Any, ask: Any) -> dict[str, Any]:
+    values = tuple(float(value) if _marks_finite(value) else None for value in (mark_price, bid, ask))
+    mark, best_bid, best_ask = values
+    valid = mark is not None and best_bid is not None and best_ask is not None and best_bid > 0 and best_ask >= best_bid and best_bid <= mark <= best_ask
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_MARK_LIQUIDABLE" if valid else "MARKS_MARK_NOT_LIQUIDABLE", fail_closed=not valid)
+
+
+def marks_balance_receipt(*, balance: Any) -> dict[str, Any]:
+    value = float(balance) if _marks_finite(balance) else None
+    valid = value is not None and value >= 0
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_BALANCE_NON_NEGATIVE" if valid else "MARKS_BALANCE_NEGATIVE", fail_closed=not valid)
+
+
+def marks_funding_sign_receipt(*, amount: Any, direction: str) -> dict[str, Any]:
+    value = float(amount) if _marks_finite(amount) else None
+    normalized = str(direction or "").strip().upper()
+    valid = value is not None and ((normalized == "CREDIT" and value >= 0) or (normalized == "DEBIT" and value <= 0))
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_FUNDING_SIGN_VALID" if valid else "MARKS_FUNDING_SIGN_INVALID", fail_closed=not valid)
+
+
+def marks_conversion_receipt(*, fee_amount: Any, fee_token: Any, pnl_currency: Any, token_to_pnl_rate: Any) -> dict[str, Any]:
+    amount = float(fee_amount) if _marks_finite(fee_amount) else None
+    rate = float(token_to_pnl_rate) if _marks_finite(token_to_pnl_rate) else None
+    valid = amount is not None and amount >= 0 and rate is not None and rate >= 0 and isinstance(fee_token, str) and bool(fee_token.strip()) and isinstance(pnl_currency, str) and bool(pnl_currency.strip())
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_CONVERSION_PROVEN" if valid else "MARKS_CONVERSION_MISSING", fail_closed=not valid)
+
+
+def marks_commit_receipt(*, crashed: bool, committed: bool, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = (crashed is True and committed is False and checkpoint_saved is True) or (crashed is False and committed is True)
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_COMMIT_ATOMIC" if valid else "MARKS_COMMIT_PARTIAL", fail_closed=not valid)
+
+
+def marks_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(write_ids) and all(str(value).strip() for value in write_ids) and len(write_ids) == len(set(write_ids))
+    return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_WRITES_UNIQUE" if valid else "MARKS_DOUBLE_WRITE", fail_closed=not valid)
+
+
 __all__ = [
     "SCHEMA_VERSION", "mark_liquidatable", "marks_depuis_bbo",
     "marks_depuis_execution_truths", "couverture", "liquidatable_marks_report",
+    "liquidatable_marks_safety_receipt", "marks_required_field_receipt", "marks_null_field_receipt",
+    "marks_field_type_receipt", "marks_finite_receipt", "marks_cutoff_receipt", "marks_age_receipt",
+    "marks_duplicate_receipt", "marks_retry_receipt", "marks_replay_receipt", "marks_fill_duplicate_receipt",
+    "marks_rejection_no_debit_receipt", "marks_partial_close_receipt", "marks_total_close_release_receipt",
+    "marks_mark_liquidability_receipt", "marks_balance_receipt", "marks_funding_sign_receipt",
+    "marks_conversion_receipt", "marks_commit_receipt", "marks_concurrent_write_receipt",
 ]

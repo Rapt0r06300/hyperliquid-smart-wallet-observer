@@ -1196,6 +1196,35 @@ def test_wip_code_checkpoint_ignores_protected_local_bytes(repos):
     assert git(local, "show", "HEAD:src/wip.py") == "wip = True"
 
 
+def test_staged_catalog_data_does_not_block_code_publication(repos):
+    local, _, origin = repos
+    before = git(origin, "rev-parse", "main")
+    protected = local / "catalog" / "collector-state.json"
+    protected.parent.mkdir()
+    protected.write_text("SAFE collector receipt\n", encoding="utf-8")
+    git(local, "add", "-f", "catalog/collector-state.json")
+    (local / "src" / "while_collector_runs.py").write_text(
+        "published = True\n", encoding="utf-8"
+    )
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert receipt["push_completed"] is True
+    assert receipt["deferred_staged_protected_count"] == 1
+    assert git(origin, "rev-parse", "main") != before
+    assert git(origin, "show", "main:src/while_collector_runs.py") == (
+        "published = True"
+    )
+    assert "catalog/collector-state.json" not in git(
+        origin, "ls-tree", "-r", "--name-only", "main"
+    )
+    assert "catalog/collector-state.json" in git(
+        local, "diff", "--cached", "--name-only"
+    )
+    assert protected.read_text(encoding="utf-8") == "SAFE collector receipt\n"
+
+
 def test_default_fails_closed_on_incomplete_python_but_keeps_wip(repos):
     local, _, origin = repos
     before = git(origin, "rev-parse", "main")
