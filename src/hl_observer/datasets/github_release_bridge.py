@@ -3,12 +3,13 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 DEFAULT_RELEASE_ID: int | None = None
@@ -441,3 +442,123 @@ def release_publication_receipt(
     if missing or invalid or not str(release.get("tag_name") or "").strip() or release.get("draft") is True:
         return {"status": "REJECTED", "missing_assets": missing, "invalid_assets": invalid, "safe_published": False}
     return {"status": "PROVEN", "asset_count": len(assets), "required_assets": list(required), "safe_published": True, "repository": DEFAULT_REPOSITORY, "tag_name": str(release.get("tag_name"))}
+
+
+def _release_base(status: str, **values: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _release_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _release_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def release_bridge_safety_receipt(release: Mapping[str, object], required_assets: Sequence[str]) -> dict[str, Any]:
+    result = release_publication_receipt(release, required_assets) if isinstance(release, Mapping) else {"status": "REJECTED"}
+    valid = result.get("status") == "PROVEN"
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_SAFE" if valid else "RELEASE_BRIDGE_UNSAFE", release_status=result, fail_closed=not valid)
+
+
+def release_bridge_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_FIELD_PRESENT" if valid else "RELEASE_BRIDGE_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def release_bridge_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_FIELD_NON_NULL" if valid else "RELEASE_BRIDGE_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def release_bridge_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_FIELD_TYPE_VALID" if valid else "REJECTED", field=field, fail_closed=not valid)
+
+
+def release_bridge_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _release_finite(value)
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_VALUE_FINITE" if valid else "RELEASE_BRIDGE_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def release_bridge_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _release_integer(event_ts_ms) and _release_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_EVENT_WITHIN_CUTOFF" if valid else "RELEASE_BRIDGE_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def release_bridge_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _release_integer(event_ts_ms) and _release_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_EVENT_AGE_VALID" if valid else "RELEASE_BRIDGE_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def release_bridge_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_EVENTS_UNIQUE" if valid else "RELEASE_BRIDGE_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def release_bridge_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _release_integer(attempts) and _release_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_RETRY_BOUNDED" if valid else "RELEASE_BRIDGE_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def release_bridge_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_REPLAY_DETERMINISTIC" if valid else "RELEASE_BRIDGE_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def release_bridge_http_error_receipt(*, status_code: Any, retry_after_seconds: Any = None) -> dict[str, Any]:
+    valid_status = _release_integer(status_code) and status_code in {404, 408, 429, 500, 502, 503, 504}
+    retryable = status_code in {408, 429, 500, 502, 503, 504} and _release_finite(retry_after_seconds) and float(retry_after_seconds) > 0
+    valid = status_code == 404 or retryable
+    return _release_base("PROVEN" if valid and valid_status else "REJECTED", verdict="RELEASE_BRIDGE_REMOTE_ERROR_QUARANTINED" if valid and valid_status else "RELEASE_BRIDGE_REMOTE_ERROR_UNSAFE", status_code=status_code, retryable=retryable, fail_closed=not (valid and valid_status))
+
+
+def release_bridge_range_receipt(*, requested_start: Any, observed_start: Any, range_honored: bool) -> dict[str, Any]:
+    valid = _release_integer(requested_start) and _release_integer(observed_start) and requested_start == observed_start and range_honored is True
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_RANGE_HONORED" if valid else "RELEASE_BRIDGE_RANGE_IGNORED", fail_closed=not valid)
+
+
+def release_bridge_content_range_receipt(*, expected_start: Any, observed_start: Any, expected_end: Any, observed_end: Any) -> dict[str, Any]:
+    valid = all(_release_integer(value) for value in (expected_start, observed_start, expected_end, observed_end)) and expected_start == observed_start and expected_end == observed_end and observed_end >= observed_start
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_CONTENT_RANGE_MATCH" if valid else "RELEASE_BRIDGE_CONTENT_RANGE_MISMATCH", fail_closed=not valid)
+
+
+def release_bridge_etag_receipt(*, previous_etag: Any, current_etag: Any) -> dict[str, Any]:
+    previous = str(previous_etag or "").strip(); current = str(current_etag or "").strip()
+    changed = bool(previous and current and previous != current)
+    return _release_base("PROVEN" if changed else "REJECTED", verdict="RELEASE_BRIDGE_ETAG_CHANGE_INVALIDATES_CACHE" if changed else "RELEASE_BRIDGE_ETAG_CHANGE_UNPROVEN", cache_invalidated=changed, fail_closed=not changed)
+
+
+def release_bridge_disk_space_receipt(*, required_bytes: Any, available_bytes: Any) -> dict[str, Any]:
+    valid = _release_integer(required_bytes) and _release_integer(available_bytes) and required_bytes >= 0 and available_bytes >= 0 and available_bytes >= required_bytes
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_DISK_SPACE_SUFFICIENT" if valid else "RELEASE_BRIDGE_DISK_SPACE_INSUFFICIENT", fail_closed=not valid)
+
+
+def release_bridge_zip_slip_receipt(member: Any) -> dict[str, Any]:
+    text = str(member or "").replace("\\", "/")
+    unsafe = text.startswith("/") or ":" in text.split("/")[0] or ".." in text.split("/")
+    return _release_base("PROVEN" if unsafe else "REJECTED", verdict="RELEASE_BRIDGE_ZIP_SLIP_REFUSED" if unsafe else "RELEASE_BRIDGE_ZIP_SLIP_NOT_REFUSED", fail_closed=not unsafe)
+
+
+def release_bridge_expansion_receipt(*, observed_bytes: Any, max_bytes: Any, complete: bool) -> dict[str, Any]:
+    valid = _release_integer(observed_bytes) and _release_integer(max_bytes) and observed_bytes >= 0 and max_bytes >= 0 and observed_bytes <= max_bytes and complete is True
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_EXPANSION_BOUNDED" if valid else "RELEASE_BRIDGE_EXPANSION_UNSAFE", fail_closed=not valid)
+
+
+def release_bridge_lease_receipt(*, active_leases: Any, lease_token_present: bool) -> dict[str, Any]:
+    valid = _release_integer(active_leases) and active_leases == 1 and lease_token_present is True
+    return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_SINGLE_LEASE" if valid else "RELEASE_BRIDGE_SPLIT_BRAIN_RISK", fail_closed=not valid)
+
+
+def release_bridge_preflight_receipt(release: Mapping[str, object], required_assets: Sequence[str]) -> dict[str, Any]:
+    return release_bridge_safety_receipt(release, required_assets)

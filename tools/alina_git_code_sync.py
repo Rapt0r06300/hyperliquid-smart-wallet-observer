@@ -2979,28 +2979,74 @@ class Synchronizer:
                     raise SyncBlocked("Commit de replay invalide; aucun push.")
                 current = created
 
-        self._assert_no_new_code_changes()
-        try:
-            self.command(
-                "read-tree", "-u", "-m", current,
-                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            # The temporary index contains the final replay tree.  Applying
+            # it with `read-tree -u` against the operator index is unsafe
+            # here: the operator index intentionally contains local SAFE-byte
+            # changes and Git can reject the whole checkout (or touch a
+            # protected path).  Copy only changed, non-protected files from
+            # the isolated index.  This keeps shard bytes untouched and makes
+            # the concurrent-push window short.
+            changed_paths = _paths(
+                self.command("diff", "--name-only", "-z", local, current).stdout
             )
-        except Exception:
-            raise
+            deleted_code_paths = [
+                path for path in _paths(self.command(
+                    "diff", "--name-only", "--diff-filter=D", "-z",
+                    local, current,
+                ).stdout)
+                if not _protected(path)
+            ]
+            if deleted_code_paths:
+                raise SyncBlocked(
+                    "Replay arbre avec suppression de code refuse sans "
+                    "nettoyage implicite: "
+                    + ", ".join(deleted_code_paths[:8])
+                )
+            code_paths = [path for path in changed_paths if not _protected(path)]
+            if code_paths and self.command(
+                "diff", "--quiet", local, "--", *code_paths,
+                check=False, expected_returncodes=(1,),
+            ).returncode:
+                raise LocalEditsDetected(
+                    "Le code a change pendant la preparation du replay arbre; "
+                    "contenu conserve sur disque."
+                )
+            if code_paths:
+                self.command(
+                    "checkout-index", "--force", "-z", "--stdin",
+                    input_bytes=b"\0".join(
+                        path.encode("utf-8") for path in code_paths
+                    ) + b"\0",
+                    timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+                )
+
+            # Verify the worktree against the target tree while the temporary
+            # index is still active, before advancing the branch ref.
+            if code_paths and self.command(
+                "diff", "--quiet", current, "--", *code_paths,
+                check=False, expected_returncodes=(1,),
+            ).returncode:
+                raise SyncBlocked(
+                    "Worktree code different du replay arbre; aucun push."
+                )
+
+        # Align the operator index without updating any protected worktree
+        # file.  The outer guard clears its temporary skip-worktree flags.
+        self.command("read-tree", current)
         updated = self.command(
             "update-ref", "refs/heads/main", current, local, check=False,
         )
         if updated.returncode:
-            restored = self.command(
-                "read-tree", "-u", "-m", local, check=False,
-                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-            )
+            restored = self.command("read-tree", local, check=False)
             if restored.returncode:
                 raise SyncBlocked(
-                    "Ref Git refusee et restauration du code impossible; "
+                    "Ref Git refusee et restauration de l'index impossible; "
                     "intervention manuelle requise."
                 )
-            raise SyncBlocked("Ref Git avancee par une autre operation; code restaure.")
+            raise SyncBlocked(
+                "Ref Git avancee par une autre operation; index restaure, "
+                "aucun push."
+            )
         if self.text("rev-parse", "HEAD") != current:
             raise SyncBlocked("HEAD apres replay arbre non prouve; aucun push.")
         self.report["replay_engine"] = "TREE_PLUMBING_REPLAY_GOVERNANCE"

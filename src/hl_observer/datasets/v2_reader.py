@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import gzip
 import json
+import math
 import shutil
 import zipfile
 from collections.abc import Iterable, Mapping
@@ -324,6 +325,136 @@ def recount_shard_lines_receipt(path: str | Path, *, expected_event_count: objec
     return {"status": "PROVEN" if actual == expected_event_count else "REJECTED", "actual_event_count": actual, "expected_event_count": expected_event_count, "exact": actual == expected_event_count}
 
 
+def _reader_base(status: str, **values: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": "DISABLED_UNTIL_REVIEW",
+        **values,
+    }
+
+
+def _reader_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _reader_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def reader_safety_receipt(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    release = manifest.get("release") if isinstance(manifest, Mapping) else None
+    valid = (
+        isinstance(manifest, Mapping)
+        and manifest.get("quality_status") == "SAFE"
+        and manifest.get("replay_compatible") is True
+        and manifest.get("validation_allowed") is True
+        and manifest.get("asset_verified") is True
+        and isinstance(release, Mapping)
+        and str(release.get("repository") or "") == V2_REPOSITORY
+        and int(release.get("asset_id") or 0) > 0
+        and bool(str(release.get("asset_name") or "").strip())
+    )
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_SAFE_MANIFEST" if valid else "READER_UNSAFE_MANIFEST", fail_closed=not valid)
+
+
+def reader_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_FIELD_PRESENT" if valid else "READER_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def reader_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_FIELD_NON_NULL" if valid else "READER_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def reader_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_FIELD_TYPE_VALID" if valid else "READER_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def reader_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _reader_finite(value)
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_VALUE_FINITE" if valid else "READER_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def reader_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _reader_integer(event_ts_ms) and _reader_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_EVENT_WITHIN_CUTOFF" if valid else "READER_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def reader_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _reader_integer(event_ts_ms) and _reader_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_EVENT_AGE_VALID" if valid else "READER_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def reader_duplicate_receipt(*, event_ids: list[Any]) -> dict[str, Any]:
+    valid = bool(event_ids) and all(str(value).strip() for value in event_ids) and len(event_ids) == len(set(event_ids))
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_EVENTS_UNIQUE" if valid else "READER_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def reader_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _reader_integer(attempts) and _reader_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_RETRY_BOUNDED" if valid else "READER_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def reader_replay_receipt(*, outputs: list[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_REPLAY_DETERMINISTIC" if valid else "READER_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def reader_http_error_receipt(*, status_code: Any, retry_after_seconds: Any = None) -> dict[str, Any]:
+    valid_status = _reader_integer(status_code) and status_code in {404, 408, 429, 500, 502, 503, 504}
+    retryable = status_code in {408, 429, 500, 502, 503, 504} and _reader_finite(retry_after_seconds) and float(retry_after_seconds) > 0
+    valid = status_code == 404 or retryable
+    return _reader_base("PROVEN" if valid and valid_status else "REJECTED", verdict="READER_REMOTE_ERROR_QUARANTINED" if valid and valid_status else "READER_REMOTE_ERROR_UNSAFE", status_code=status_code, retryable=retryable, fail_closed=not (valid and valid_status))
+
+
+def reader_range_receipt(*, requested_start: Any, observed_start: Any, range_honored: bool) -> dict[str, Any]:
+    valid = _reader_integer(requested_start) and _reader_integer(observed_start) and requested_start == observed_start and range_honored is True
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_RANGE_HONORED" if valid else "READER_RANGE_IGNORED", fail_closed=not valid)
+
+
+def reader_content_range_receipt(*, expected_start: Any, observed_start: Any, expected_end: Any, observed_end: Any) -> dict[str, Any]:
+    valid = all(_reader_integer(value) for value in (expected_start, observed_start, expected_end, observed_end)) and expected_start == observed_start and expected_end == observed_end and observed_end >= observed_start
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_CONTENT_RANGE_MATCH" if valid else "READER_CONTENT_RANGE_MISMATCH", fail_closed=not valid)
+
+
+def reader_etag_receipt(*, previous_etag: Any, current_etag: Any) -> dict[str, Any]:
+    previous = str(previous_etag or "").strip(); current = str(current_etag or "").strip()
+    changed = bool(previous and current and previous != current)
+    return _reader_base("PROVEN" if changed else "REJECTED", verdict="READER_ETAG_CHANGE_INVALIDATES_CACHE" if changed else "READER_ETAG_CHANGE_UNPROVEN", cache_invalidated=changed, fail_closed=not changed)
+
+
+def reader_disk_space_receipt(*, required_bytes: Any, available_bytes: Any) -> dict[str, Any]:
+    valid = _reader_integer(required_bytes) and _reader_integer(available_bytes) and required_bytes >= 0 and available_bytes >= 0 and available_bytes >= required_bytes
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_DISK_SPACE_SUFFICIENT" if valid else "READER_DISK_SPACE_INSUFFICIENT", fail_closed=not valid)
+
+
+def reader_zip_slip_receipt(member: Any) -> dict[str, Any]:
+    text = str(member or "").replace("\\", "/")
+    unsafe = text.startswith("/") or ":" in text.split("/")[0] or ".." in text.split("/")
+    return _reader_base("PROVEN" if unsafe else "REJECTED", verdict="READER_ZIP_SLIP_REFUSED" if unsafe else "READER_ZIP_SLIP_NOT_REFUSED", fail_closed=not unsafe)
+
+
+def reader_expansion_receipt(*, observed_bytes: Any, max_bytes: Any, complete: bool) -> dict[str, Any]:
+    valid = _reader_integer(observed_bytes) and _reader_integer(max_bytes) and observed_bytes >= 0 and max_bytes >= 0 and observed_bytes <= max_bytes and complete is True
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_EXPANSION_BOUNDED" if valid else "READER_EXPANSION_UNSAFE", fail_closed=not valid)
+
+
+def reader_lease_receipt(*, active_leases: Any, lease_token_present: bool) -> dict[str, Any]:
+    valid = _reader_integer(active_leases) and active_leases == 1 and lease_token_present is True
+    return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_SINGLE_LEASE" if valid else "READER_SPLIT_BRAIN_RISK", fail_closed=not valid)
+
+
+def reader_preflight_receipt(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    return reader_safety_receipt(manifest)
+
+
 def _int(value: Any) -> int | None:
     try:
         return int(value) if value is not None and not isinstance(value, bool) else None
@@ -349,4 +480,23 @@ __all__ = [
     "load_run_manifest",
     "materialize_safe_shards",
     "recount_shard_lines_receipt",
+    "reader_safety_receipt",
+    "reader_required_field_receipt",
+    "reader_null_field_receipt",
+    "reader_field_type_receipt",
+    "reader_finite_receipt",
+    "reader_cutoff_receipt",
+    "reader_age_receipt",
+    "reader_duplicate_receipt",
+    "reader_retry_receipt",
+    "reader_replay_receipt",
+    "reader_http_error_receipt",
+    "reader_range_receipt",
+    "reader_content_range_receipt",
+    "reader_etag_receipt",
+    "reader_disk_space_receipt",
+    "reader_zip_slip_receipt",
+    "reader_expansion_receipt",
+    "reader_lease_receipt",
+    "reader_preflight_receipt",
 ]
