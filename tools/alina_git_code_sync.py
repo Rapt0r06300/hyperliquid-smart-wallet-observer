@@ -3043,15 +3043,38 @@ class Synchronizer:
                     timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
                 )
 
-            # Verify the worktree against the target tree while the temporary
-            # index is still active, before advancing the branch ref.
-            if code_paths and self.command(
-                "diff", "--quiet", current, "--", *code_paths,
-                check=False, expected_returncodes=(1,),
-            ).returncode:
-                raise SyncBlocked(
-                    "Worktree code different du replay arbre; aucun push."
-                )
+            # Verify only the selected blobs while the temporary index is
+            # active.  `git diff --quiet <tree> -- <paths>` still scans the
+            # repository's huge index and can hit the read budget; these two
+            # tree/blob lookups are bounded by the actual replay path count.
+            if code_paths:
+                tree_rows = self.command(
+                    "ls-tree", "-z", current, "--", *code_paths,
+                ).stdout
+                tree_hashes: dict[str, str] = {}
+                for raw_row in tree_rows.split(b"\0"):
+                    if not raw_row:
+                        continue
+                    header, separator, raw_path = raw_row.partition(b"\t")
+                    fields = header.split()
+                    if not separator or len(fields) != 3:
+                        raise SyncBlocked("Arbre de replay illisible; aucun push.")
+                    tree_hashes[raw_path.decode("utf-8", errors="strict")] = (
+                        fields[2].decode("ascii", errors="strict")
+                    )
+                worktree_hashes = self.command(
+                    "hash-object", "--", *code_paths,
+                ).stdout.decode("ascii", errors="strict").splitlines()
+                if (
+                    len(worktree_hashes) != len(code_paths)
+                    or any(
+                        tree_hashes.get(path) != worktree_hashes[index]
+                        for index, path in enumerate(code_paths)
+                    )
+                ):
+                    raise SyncBlocked(
+                        "Worktree code different du replay arbre; aucun push."
+                    )
             if code_paths:
                 replay_index_info = self.command(
                     "ls-files", "-s", "-z", "--", *code_paths,
