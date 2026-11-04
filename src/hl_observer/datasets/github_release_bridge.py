@@ -560,5 +560,25 @@ def release_bridge_lease_receipt(*, active_leases: Any, lease_token_present: boo
     return _release_base("PROVEN" if valid else "REJECTED", verdict="RELEASE_BRIDGE_SINGLE_LEASE" if valid else "RELEASE_BRIDGE_SPLIT_BRAIN_RISK", fail_closed=not valid)
 
 
+def release_bridge_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close release-bridge review only when every local gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _release_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="RELEASE_BRIDGE_DONE_COVERED" if valid else "RELEASE_BRIDGE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def release_bridge_preflight_receipt(release: Mapping[str, object], required_assets: Sequence[str]) -> dict[str, Any]:
     return release_bridge_safety_receipt(release, required_assets)

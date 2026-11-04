@@ -423,6 +423,26 @@ def materialization_publication_receipt(*, status: Any, manifest_committed: bool
     return _base("PROVEN" if valid else "REJECTED", verdict="MATERIALIZATION_PUBLICATION_COMPLETE" if valid else "MATERIALIZATION_PUBLICATION_INTERRUPTED", fail_closed=not valid)
 
 
+def materialization_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close materialization review only when every local gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="MATERIALIZATION_DONE_COVERED" if valid else "MATERIALIZATION_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "materialize_records_streaming", "materialization_safety_receipt", "streaming_codec_receipt",
     "materialization_required_field_receipt", "materialization_null_field_receipt",
@@ -432,5 +452,5 @@ __all__ = [
     "materialization_compression_receipt", "materialization_zip_slip_receipt", "materialization_symlink_receipt",
     "materialization_partial_replay_receipt", "materialization_reject_validation_receipt",
     "materialization_unique_counts_receipt", "materialization_manifest_compatibility_receipt",
-    "materialization_publication_receipt",
+    "materialization_publication_receipt", "materialization_done_receipt",
 ]

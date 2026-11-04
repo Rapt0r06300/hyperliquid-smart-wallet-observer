@@ -138,4 +138,26 @@ def quarantine_heartbeat_receipt(*, previous_ts_ms: Any, current_ts_ms: Any, max
     return {"status": "PROVEN" if valid else "REJECTED", "verdict": "HEARTBEAT_CONTINUOUS" if valid else "HEARTBEAT_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
 
 
-__all__ = ["Quarantaine", "reconciliation_receipt", "quarantine_event_contract_receipt", "quarantine_required_field_receipt", "quarantine_finite_receipt", "quarantine_cutoff_receipt", "quarantine_age_receipt", "quarantine_duplicate_receipt", "quarantine_retry_receipt", "quarantine_replay_receipt", "rest_ws_fill_receipt", "same_timestamp_quarantine_receipt", "quarantine_tid_receipt", "quarantine_hash_receipt", "quarantine_close_open_receipt", "quarantine_wallet_receipt", "quarantine_side_receipt", "quarantine_backfill_receipt", "quarantine_position_receipt", "quarantine_heartbeat_receipt"]
+def quarantine_done_receipt(*, checks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Close the local quarantine contract only when every supplied check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, dict)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "QUARANTINE_DONE_COVERED" if valid else "QUARANTINE_DONE_INCOMPLETE",
+        "check_count": len(checks) if isinstance(checks, list) else 0,
+        "paper_read_only": True,
+        "real_execution": False,
+        "fail_closed": not valid,
+    }
+
+
+__all__ = ["Quarantaine", "reconciliation_receipt", "quarantine_event_contract_receipt", "quarantine_required_field_receipt", "quarantine_finite_receipt", "quarantine_cutoff_receipt", "quarantine_age_receipt", "quarantine_duplicate_receipt", "quarantine_retry_receipt", "quarantine_replay_receipt", "rest_ws_fill_receipt", "same_timestamp_quarantine_receipt", "quarantine_tid_receipt", "quarantine_hash_receipt", "quarantine_close_open_receipt", "quarantine_wallet_receipt", "quarantine_side_receipt", "quarantine_backfill_receipt", "quarantine_position_receipt", "quarantine_heartbeat_receipt", "quarantine_done_receipt"]

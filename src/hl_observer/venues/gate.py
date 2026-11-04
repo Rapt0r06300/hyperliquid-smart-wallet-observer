@@ -139,5 +139,25 @@ def gate_fee_order_receipt(*, maker_fee_bps: Any, taker_fee_bps: Any) -> dict[st
     return _gate_base("PROVEN" if valid else "REJECTED", verdict="GATE_FEE_ORDER_VALID" if valid else "GATE_FEE_ORDER_INVERTED", fail_closed=not valid)
 
 
+def gate_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close the venue gate review only when every supplied proof is safe."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _gate_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="GATE_DONE_COVERED" if valid else "GATE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def capacites() -> dict:
     return {"venue": VENUE, "flux": ("book", "trades", "ticker", "funding", "oi", "mark", "index"), "adaptateur": "OFFLINE_READY", "pull_live": "REQUIRES_NETWORK"}

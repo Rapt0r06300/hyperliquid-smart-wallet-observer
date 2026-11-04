@@ -8,6 +8,7 @@ from hl_observer.paper_trading.execution_truth import (
     truth_delta_receipt,
     truth_depth_receipt,
     truth_duplicate_receipt,
+    truth_done_receipt,
     truth_fee_order_receipt,
     truth_finite_receipt,
     truth_field_type_receipt,
@@ -133,3 +134,13 @@ def test_hvr_0559_touch_only_is_not_maker_fill():
 def test_hvr_0560_maker_fee_must_not_exceed_taker_fee():
     assert truth_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0)["status"] == "PROVEN"
     assert truth_fee_order_receipt(maker_fee_bps=3.0, taker_fee_bps=2.0)["status"] == "REJECTED"
+
+
+def test_hvr_0561_truth_done_requires_all_proven_gates():
+    checks = [
+        truth_required_field_receipt({"coin": "BTC"}, field="coin"),
+        truth_replay_receipt(outputs=[{"mark": 100}, {"mark": 100}]),
+        truth_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0),
+    ]
+    assert truth_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert truth_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

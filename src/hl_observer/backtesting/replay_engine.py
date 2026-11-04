@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Iterable
 
 from .execution_delay_model import apply_execution_delay
@@ -70,4 +71,34 @@ def replay_determinism_receipt(
     }
 
 
-__all__ = ["replay_events_with_delay", "replay_determinism_receipt"]
+def replay_boundary_safety_receipt(result: object) -> dict[str, object]:
+    """Validate replay provenance and execution isolation only."""
+    event_ids = result.get("event_ids") if isinstance(result, Mapping) else None
+    compared = result.get("compared") if isinstance(result, Mapping) else None
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("status") in {"PROVEN", "UNMEASURABLE"}
+        and result.get("paper_read_only") is True
+        and result.get("real_execution") is False
+        and isinstance(compared, int)
+        and not isinstance(compared, bool)
+        and compared >= 0
+        and isinstance(event_ids, (list, tuple))
+        and compared == len(event_ids)
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "REPLAY_PAPER_ONLY" if valid else "REPLAY_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "economic_verdict": "UNMEASURABLE",
+        "promotion": False,
+        "fail_closed": not valid,
+    }
+
+
+__all__ = [
+    "replay_events_with_delay",
+    "replay_determinism_receipt",
+    "replay_boundary_safety_receipt",
+]

@@ -3,6 +3,7 @@ from hl_observer.datasets.v2_reader import (
     reader_age_receipt,
     reader_content_range_receipt,
     reader_cutoff_receipt,
+    reader_done_receipt,
     reader_disk_space_receipt,
     reader_duplicate_receipt,
     reader_etag_receipt,
@@ -131,3 +132,13 @@ def test_hvr_0459_only_one_sync_lease_is_allowed():
 
 def test_hvr_0460_invalid_manifest_is_fail_closed():
     assert reader_preflight_receipt({"quality_status": "PARTIAL"})["status"] == "REJECTED"
+
+
+def test_hvr_0461_reader_done_requires_all_proven_gates():
+    checks = [
+        reader_required_field_receipt({"dataset_id": "d1"}, field="dataset_id"),
+        reader_replay_receipt(outputs=[{"rows": 1}, {"rows": 1}]),
+        reader_lease_receipt(active_leases=1, lease_token_present=True),
+    ]
+    assert reader_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert reader_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

@@ -8,6 +8,7 @@ from hl_observer.paper_trading.liquidity_consumption import (
     liquidity_delta_receipt,
     liquidity_depth_receipt,
     liquidity_duplicate_receipt,
+    liquidity_done_receipt,
     liquidity_fee_order_receipt,
     liquidity_finite_receipt,
     liquidity_field_type_receipt,
@@ -121,3 +122,13 @@ def test_hvr_0599_touch_only_is_not_maker_fill():
 def test_hvr_0600_maker_fee_must_not_exceed_taker_fee():
     assert liquidity_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0)["status"] == "PROVEN"
     assert liquidity_fee_order_receipt(maker_fee_bps=3.0, taker_fee_bps=2.0)["status"] == "REJECTED"
+
+
+def test_hvr_0601_liquidity_done_requires_all_proven_gates():
+    checks = [
+        liquidity_required_field_receipt({"coin": "BTC"}, field="coin"),
+        liquidity_replay_receipt(outputs=[{"depth": 1}, {"depth": 1}]),
+        liquidity_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0),
+    ]
+    assert liquidity_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert liquidity_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

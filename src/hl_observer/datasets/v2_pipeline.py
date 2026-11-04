@@ -5,7 +5,7 @@ import os
 import shutil
 import math
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -512,6 +512,26 @@ def pipeline_publication_receipt(*, status: Any, manifest_committed: bool, recei
     return _pipeline_base("PROVEN" if valid else "REJECTED", verdict="PIPELINE_PUBLICATION_COMPLETE" if valid else "PIPELINE_PUBLICATION_INTERRUPTED", fail_closed=not valid)
 
 
+def pipeline_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close v2 pipeline review only when every local gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _pipeline_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="PIPELINE_DONE_COVERED" if valid else "PIPELINE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def summarize_admission_rejections(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     counts: Counter[str] = Counter()
     for row in rows:
@@ -865,6 +885,7 @@ __all__ = [
     "pipeline_unique_counts_receipt",
     "pipeline_manifest_compatibility_receipt",
     "pipeline_publication_receipt",
+    "pipeline_done_receipt",
     "summarize_admission_rejections",
     "verify_remote_asset",
 ]

@@ -4,7 +4,7 @@ import threading
 import time
 import math
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from hl_observer.datasets.github_api_transport import (
     GitHubTransportError,
@@ -246,6 +246,26 @@ def downloader_lease_receipt(*, active_leases: Any, lease_token_present: bool) -
     return _downloader_base("PROVEN" if valid else "REJECTED", verdict="DOWNLOADER_SINGLE_LEASE" if valid else "DOWNLOADER_SPLIT_BRAIN_RISK", fail_closed=not valid)
 
 
+def downloader_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close downloader review only when every local gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _downloader_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="DOWNLOADER_DONE_COVERED" if valid else "DOWNLOADER_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def _progress_heartbeat(
     *,
     temporary: Path,
@@ -456,6 +476,7 @@ __all__ = [
     "downloader_zip_slip_receipt",
     "downloader_expansion_receipt",
     "downloader_lease_receipt",
+    "downloader_done_receipt",
     "download_needed_assets_with_progress",
     "human_bytes",
     "human_eta",

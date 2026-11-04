@@ -385,6 +385,26 @@ def truth_fee_order_receipt(*, maker_fee_bps: Any, taker_fee_bps: Any) -> dict[s
     return _truth_base("PROVEN" if valid else "REJECTED", verdict="EXECUTION_TRUTH_FEE_ORDER_VALID" if valid else "EXECUTION_TRUTH_FEE_ORDER_INVERTED", fail_closed=not valid)
 
 
+def truth_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close execution-truth review only when every supplied gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _truth_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="EXECUTION_TRUTH_DONE_COVERED" if valid else "EXECUTION_TRUTH_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "ExecutionTruth",
     "Levels",
@@ -410,4 +430,5 @@ __all__ = [
     "truth_consumption_receipt",
     "truth_maker_touch_receipt",
     "truth_fee_order_receipt",
+    "truth_done_receipt",
 ]

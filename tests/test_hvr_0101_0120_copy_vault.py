@@ -7,11 +7,17 @@ from hl_observer.copy_vault.exactly_once_source_fill import (
     source_fill_duplicate_receipt, source_fill_finite_receipt,
     source_fill_replay_receipt, source_fill_required_field_receipt,
     source_fill_retry_receipt, wallet_source_receipt,
+    source_fill_done_receipt,
+)
+from hl_observer.copy_vault.target_exposure_reconciliation import (
+    exposure_contract_receipt,
+    exposure_done_receipt,
 )
 
 
 def test_hvr_0101_source_contract():
     assert source_fill_contract_receipt({"wallet": "w", "tid": "t", "oid": "o", "hash": "abcdefgh", "source_ts_ms": 1, "receive_ts_ms": 2})["status"] == "PROVEN"
+    assert exposure_contract_receipt({"wallet": "w", "target_exposure": 1.0, "paper_exposure": 1.0, "event_ts_ms": 1, "receive_ts_ms": 2})["status"] == "PROVEN"
 
 
 def test_hvr_0102_missing_field():
@@ -89,3 +95,5 @@ def test_hvr_0119_position_matches_fills():
 
 def test_hvr_0120_heartbeat_continuous():
     assert heartbeat_continuity_receipt(previous_ts_ms=10, current_ts_ms=20, max_gap_ms=20)["status"] == "PROVEN"
+    assert source_fill_done_receipt(status="PROVEN", coverage_status="PROVEN", proof_ids=["p1"], replay_verified=True)["status"] == "PROVEN"
+    assert exposure_done_receipt(status="PROVEN", coverage_status="PROVEN", proof_ids=[], replay_verified=True)["status"] == "REJECTED"

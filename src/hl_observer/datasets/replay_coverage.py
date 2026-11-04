@@ -226,6 +226,26 @@ def coverage_publication_receipt(*, status: Any, manifest_committed: bool, recei
     return _base("PROVEN" if valid else "REJECTED", verdict="COVERAGE_PUBLICATION_COMPLETE" if valid else "COVERAGE_PUBLICATION_INTERRUPTED", fail_closed=not valid)
 
 
+def coverage_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close SAFE replay-coverage review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="COVERAGE_DONE_COVERED" if valid else "COVERAGE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def _merge_intervals(intervals: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
     rows = sorted(
         (int(start), int(end))
@@ -258,5 +278,5 @@ __all__ = [
     "coverage_retry_receipt", "coverage_replay_receipt", "coverage_sha256_receipt", "coverage_size_receipt",
     "coverage_compression_receipt", "coverage_zip_slip_receipt", "coverage_symlink_receipt",
     "coverage_partial_replay_receipt", "coverage_reject_validation_receipt", "coverage_unique_counts_receipt",
-    "coverage_manifest_compatibility_receipt", "coverage_publication_receipt",
+    "coverage_manifest_compatibility_receipt", "coverage_publication_receipt", "coverage_done_receipt",
 ]

@@ -154,11 +154,31 @@ def ratio_concurrent_add_close_receipt(*, actions: Sequence[Any], ordered: bool)
     return _base("PROVEN" if valid else "REJECTED", verdict="RATIO_ADD_CLOSE_ORDERED" if valid else "RATIO_ADD_CLOSE_CONCURRENT_UNSAFE", fail_closed=not valid)
 
 
+def ratio_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close partial-close review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="RATIO_DONE_COVERED" if valid else "RATIO_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "ratio_fermeture", "UNMEASURABLE", "ratio_contract_receipt", "ratio_required_field_receipt",
     "ratio_field_type_receipt", "ratio_finite_receipt", "ratio_cutoff_receipt", "ratio_age_receipt",
     "ratio_duplicate_receipt", "ratio_retry_receipt", "ratio_replay_receipt", "ratio_open_long_receipt",
     "ratio_open_short_receipt", "ratio_add_without_position_receipt", "ratio_reduce_without_position_receipt",
     "ratio_close_without_position_receipt", "ratio_flip_receipt", "ratio_reduce_only_receipt",
-    "ratio_close_remaining_receipt", "ratio_leverage_receipt", "ratio_concurrent_add_close_receipt",
+    "ratio_close_remaining_receipt", "ratio_leverage_receipt", "ratio_concurrent_add_close_receipt", "ratio_done_receipt",
 ]

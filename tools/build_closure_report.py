@@ -44,6 +44,30 @@ def terminal_campaign_receipt(*, campaign_id: str, status: str, phase: str, epoc
     return {"status": "PROVEN" if valid else "REJECTED", "verdict": "CAMPAIGN_TERMINAL" if valid else "CAMPAIGN_NON_TERMINAL", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
 
 
+def closure_boundary_safety_receipt(report: object) -> dict[str, object]:
+    """Validate a closure report without changing campaign or task state."""
+    if not isinstance(report, dict):
+        valid = False
+    else:
+        digest_value = str(report.get("evidence_digest") or "").lower()
+        valid = (
+            report.get("paper_read_only") is True
+            and report.get("real_execution") is False
+            and report.get("status") in {"PROVEN", "COMPLETE", "SAFE"}
+            and bool(re.fullmatch(r"[0-9a-f]{64}", digest_value))
+            and report.get("task_status_mutation") is False
+        )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "CLOSURE_BOUNDARY_SAFE" if valid else "CLOSURE_BOUNDARY_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "task_status_mutation": False,
+        "closure_allowed": False,
+        "fail_closed": not valid,
+    }
+
+
 def digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()

@@ -175,6 +175,26 @@ def leader_causality_receipt(*, event_ts_ms: Any, state_ts_ms: Any, observed_bef
     return _base("PROVEN" if valid else "REJECTED", verdict="LEADER_CAUSAL_OBSERVATION" if valid else "LEADER_LOOKAHEAD_OR_UNOBSERVED", fail_closed=not valid)
 
 
+def leader_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close leader-state review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="LEADER_DONE_COVERED" if valid else "LEADER_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "VersionneurEtat", "leader_contract_receipt", "leader_required_field_receipt",
     "leader_field_type_receipt", "leader_finite_receipt", "leader_cutoff_receipt",
@@ -182,5 +202,5 @@ __all__ = [
     "leader_replay_receipt", "leader_rest_ws_receipt", "leader_timestamp_identity_receipt",
     "leader_tid_receipt", "leader_hash_receipt", "leader_close_open_receipt",
     "leader_wallet_receipt", "leader_side_receipt", "leader_overlap_receipt",
-    "leader_position_receipt", "leader_heartbeat_receipt", "leader_causality_receipt",
+    "leader_position_receipt", "leader_heartbeat_receipt", "leader_causality_receipt", "leader_done_receipt",
 ]

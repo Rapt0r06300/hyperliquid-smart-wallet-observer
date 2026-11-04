@@ -7,6 +7,7 @@ from src.hl_observer.venues.gate import (
     gate_delta_receipt,
     gate_depth_receipt,
     gate_duplicate_receipt,
+    gate_done_receipt,
     gate_fee_order_receipt,
     gate_finite_receipt,
     gate_field_type_receipt,
@@ -120,3 +121,13 @@ def test_hvr_0539_touch_only_is_not_maker_fill():
 def test_hvr_0540_maker_fee_must_not_exceed_taker_fee():
     assert gate_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0)["status"] == "PROVEN"
     assert gate_fee_order_receipt(maker_fee_bps=3.0, taker_fee_bps=2.0)["status"] == "REJECTED"
+
+
+def test_hvr_0541_gate_done_requires_all_proven_gates():
+    checks = [
+        gate_required_field_receipt({"venue": "gate"}, field="venue"),
+        gate_replay_receipt(outputs=[{"book": 1}, {"book": 1}]),
+        gate_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0),
+    ]
+    assert gate_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert gate_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

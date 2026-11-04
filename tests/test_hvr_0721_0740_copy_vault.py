@@ -7,6 +7,7 @@ from hl_observer.backtest.no_lookahead_guard import (
     lookahead_concurrent_write_receipt,
     lookahead_conversion_receipt,
     lookahead_cutoff_receipt,
+    lookahead_done_receipt,
     lookahead_duplicate_receipt,
     lookahead_field_type_receipt,
     lookahead_fill_duplicate_receipt,
@@ -132,3 +133,13 @@ def test_hvr_0740_runtime_replay_commit_is_fail_closed():
     assert lookahead_total_close_release_receipt(close_quantity=2.0, open_quantity=2.0, released_margin=10.0)["status"] == "PROVEN"
     assert lookahead_funding_sign_receipt(amount=1.0, direction="CREDIT")["status"] == "PROVEN"
     assert lookahead_conversion_receipt(fee_amount=1.0, fee_token="USDC", pnl_currency="USD", token_to_pnl_rate=1.0)["status"] == "PROVEN"
+
+
+def test_hvr_0741_lookahead_done_requires_all_proven_gates():
+    checks = [
+        lookahead_required_field_receipt({"coin": "BTC"}, field="coin"),
+        lookahead_replay_receipt(outputs=[{"ts_ms": 100}, {"ts_ms": 100}]),
+        lookahead_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert lookahead_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert lookahead_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

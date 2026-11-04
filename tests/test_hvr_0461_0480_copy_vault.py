@@ -2,6 +2,7 @@ from hl_observer.datasets.replay_workspace import (
     replay_workspace_age_receipt,
     replay_workspace_content_range_receipt,
     replay_workspace_cutoff_receipt,
+    replay_workspace_done_receipt,
     replay_workspace_disk_space_receipt,
     replay_workspace_duplicate_receipt,
     replay_workspace_etag_receipt,
@@ -127,3 +128,13 @@ def test_hvr_0479_only_one_sync_lease_is_allowed():
 
 def test_hvr_0480_invalid_workspace_report_is_fail_closed():
     assert replay_workspace_preflight_receipt({"status": "READY"})["status"] == "REJECTED"
+
+
+def test_hvr_0481_replay_workspace_done_requires_all_proven_gates():
+    checks = [
+        replay_workspace_required_field_receipt({"workspace": "x"}, field="workspace"),
+        replay_workspace_replay_receipt(outputs=[{"rows": 1}, {"rows": 1}]),
+        replay_workspace_lease_receipt(active_leases=1, lease_token_present=True),
+    ]
+    assert replay_workspace_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert replay_workspace_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

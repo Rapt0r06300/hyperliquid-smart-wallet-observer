@@ -236,6 +236,26 @@ def dataset_publication_receipt(*, status: object, manifest_committed: bool, rec
     return _base("PROVEN" if valid else "REJECTED", verdict="DATASET_PUBLICATION_COMPLETE" if valid else "DATASET_PUBLICATION_INTERRUPTED", fail_closed=not valid)
 
 
+def dataset_done_receipt(*, checks: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Close an untrusted-dataset review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only", check.get("paper_only")) is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed", False) is False
+        and (bool(str(check.get("verdict") or "").strip()) or check.get("ok") is True)
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="DATASET_DONE_COVERED" if valid else "DATASET_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "DatasetUntrustedError",
     "FORBIDDEN_EXTENSIONS",
@@ -248,5 +268,5 @@ __all__ = [
     "dataset_duplicate_receipt", "dataset_retry_receipt", "dataset_replay_receipt", "dataset_sha256_receipt",
     "dataset_size_receipt", "dataset_compression_receipt", "dataset_zip_slip_receipt", "dataset_symlink_receipt",
     "dataset_partial_replay_receipt", "dataset_reject_validation_receipt", "dataset_unique_counts_receipt",
-    "dataset_manifest_compatibility_receipt", "dataset_publication_receipt",
+    "dataset_manifest_compatibility_receipt", "dataset_publication_receipt", "dataset_done_receipt",
 ]

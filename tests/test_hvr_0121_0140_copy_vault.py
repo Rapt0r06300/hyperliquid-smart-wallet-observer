@@ -6,7 +6,7 @@ from hl_observer.copy_vault.ws_rest_disagreement_quarantine import (
     quarantine_heartbeat_receipt, quarantine_position_receipt,
     quarantine_replay_receipt, quarantine_required_field_receipt,
     quarantine_retry_receipt, quarantine_side_receipt,
-    quarantine_tid_receipt, quarantine_wallet_receipt,
+    quarantine_tid_receipt, quarantine_wallet_receipt, quarantine_done_receipt,
     rest_ws_fill_receipt, same_timestamp_quarantine_receipt,
 )
 
@@ -89,3 +89,13 @@ def test_hvr_0139_position():
 
 def test_hvr_0140_heartbeat():
     assert quarantine_heartbeat_receipt(previous_ts_ms=10, current_ts_ms=20, max_gap_ms=20)["status"] == "PROVEN"
+
+
+def test_hvr_0140_done_gate_requires_all_checks():
+    checks = [
+        quarantine_event_contract_receipt({"vault": "v", "source": "ws", "event_id": "e", "source_ts_ms": 1, "receive_ts_ms": 2}),
+        quarantine_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        quarantine_heartbeat_receipt(previous_ts_ms=10, current_ts_ms=20, max_gap_ms=20),
+    ]
+    assert quarantine_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert quarantine_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

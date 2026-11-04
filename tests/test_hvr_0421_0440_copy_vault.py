@@ -2,6 +2,7 @@ from hl_observer.datasets.github_release_bridge import (
     release_bridge_age_receipt,
     release_bridge_content_range_receipt,
     release_bridge_cutoff_receipt,
+    release_bridge_done_receipt,
     release_bridge_disk_space_receipt,
     release_bridge_duplicate_receipt,
     release_bridge_etag_receipt,
@@ -127,3 +128,13 @@ def test_hvr_0439_only_one_sync_lease_is_allowed():
 
 def test_hvr_0440_incomplete_release_is_fail_closed():
     assert release_bridge_preflight_receipt({"tag_name": "safe-v1", "draft": False, "assets": []}, ["manifest.json"])["status"] == "REJECTED"
+
+
+def test_hvr_0441_release_bridge_done_requires_all_proven_gates():
+    checks = [
+        release_bridge_required_field_receipt({"tag": "v1"}, field="tag"),
+        release_bridge_replay_receipt(outputs=[{"assets": 1}, {"assets": 1}]),
+        release_bridge_lease_receipt(active_leases=1, lease_token_present=True),
+    ]
+    assert release_bridge_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert release_bridge_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

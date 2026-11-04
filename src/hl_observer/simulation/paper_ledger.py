@@ -1399,6 +1399,24 @@ def ledger_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, An
     return _ledger_base("PROVEN" if valid else "REJECTED", verdict="LEDGER_WRITES_UNIQUE" if valid else "LEDGER_DOUBLE_WRITE", fail_closed=not valid)
 
 
+def ledger_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _ledger_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="LEDGER_DONE_COVERED" if valid else "LEDGER_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def _funding_settlement_id(refs: dict[str, object]) -> str | None:
     for key in ("funding_settlement_id", "settlement_id", "user_funding_id"):
         value = refs.get(key)
@@ -1516,4 +1534,5 @@ __all__ = [
     "ledger_rejection_no_debit_receipt", "ledger_partial_close_receipt", "ledger_total_close_release_receipt",
     "ledger_mark_liquidability_receipt", "ledger_balance_receipt", "ledger_funding_sign_receipt",
     "ledger_conversion_receipt", "ledger_commit_receipt", "ledger_concurrent_write_receipt",
+    "ledger_done_receipt",
 ]

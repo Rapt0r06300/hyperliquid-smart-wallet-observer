@@ -215,4 +215,9 @@ def heartbeat_continuity_receipt(*, previous_ts_ms: Any, current_ts_ms: Any, max
     return {"status": "PROVEN" if valid else "REJECTED", "verdict": "HEARTBEAT_CONTINUOUS" if valid else "HEARTBEAT_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
 
 
-__all__ = ["identite", "RegistreFills", "identity_stability_receipt", "source_fill_contract_receipt", "source_fill_required_field_receipt", "source_fill_finite_receipt", "source_fill_cutoff_receipt", "source_fill_age_receipt", "source_fill_duplicate_receipt", "source_fill_retry_receipt", "source_fill_replay_receipt", "same_timestamp_fill_receipt", "fill_tid_receipt", "fill_hash_receipt", "close_open_receipt", "wallet_source_receipt", "side_consistency_receipt", "backfill_overlap_receipt", "position_fill_consistency_receipt", "heartbeat_continuity_receipt"]
+def source_fill_done_receipt(*, status: Any, coverage_status: Any, proof_ids: list[Any], replay_verified: bool) -> dict[str, Any]:
+    valid = status == "PROVEN" and coverage_status == "PROVEN" and bool(proof_ids) and replay_verified is True
+    return {"status": "PROVEN" if valid else "REJECTED", "verdict": "SOURCE_FILL_DONE_COVERED" if valid else "SOURCE_FILL_DONE_UNPROVEN", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
+
+
+__all__ = ["identite", "RegistreFills", "identity_stability_receipt", "source_fill_contract_receipt", "source_fill_required_field_receipt", "source_fill_finite_receipt", "source_fill_cutoff_receipt", "source_fill_age_receipt", "source_fill_duplicate_receipt", "source_fill_retry_receipt", "source_fill_replay_receipt", "same_timestamp_fill_receipt", "fill_tid_receipt", "fill_hash_receipt", "close_open_receipt", "wallet_source_receipt", "side_consistency_receipt", "backfill_overlap_receipt", "position_fill_consistency_receipt", "heartbeat_continuity_receipt", "source_fill_done_receipt"]

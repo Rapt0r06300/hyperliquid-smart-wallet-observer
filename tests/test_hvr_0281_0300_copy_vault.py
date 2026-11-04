@@ -20,6 +20,7 @@ from hl_observer.copy_vault.per_coin_serialization import (
     serialization_required_field_receipt,
     serialization_retry_receipt,
     serialization_receipt,
+    serialization_done_receipt,
 )
 
 
@@ -105,3 +106,13 @@ def test_hvr_0299_close_remaining():
 def test_hvr_0300_leverage_and_concurrent():
     assert serialization_leverage_receipt(leverage=2.0)["status"] == "PROVEN"
     assert serialization_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True)["status"] == "PROVEN"
+
+
+def test_hvr_0300_done_gate_requires_all_checks():
+    checks = [
+        serialization_contract_receipt({"vault": "v", "coin": "BTC", "fill_id": "f", "event_ts_ms": 10, "receive_ts_ms": 11}),
+        serialization_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        serialization_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True),
+    ]
+    assert serialization_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert serialization_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

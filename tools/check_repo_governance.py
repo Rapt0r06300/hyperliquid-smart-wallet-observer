@@ -118,6 +118,20 @@ def local_failures() -> list[str]:
     return failures
 
 
+def governance_safety_receipt(failures: object) -> dict[str, object]:
+    """Turn the local governance result into an auditable fail-closed receipt."""
+    valid = isinstance(failures, list) and not failures
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "REPOSITORY_GOVERNANCE_GREEN" if valid else "REPOSITORY_GOVERNANCE_RED",
+        "paper_read_only": True,
+        "real_execution": False,
+        "mutation": False,
+        "failure_count": len(failures) if isinstance(failures, list) else None,
+        "fail_closed": not valid,
+    }
+
+
 def main() -> int:
     failures = local_failures()
     if failures:

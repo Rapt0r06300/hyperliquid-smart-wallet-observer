@@ -193,6 +193,24 @@ def pnl_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any]:
     return _pnl_base("PROVEN" if valid else "REJECTED", verdict="PNL_WRITES_UNIQUE" if valid else "PNL_DOUBLE_WRITE", fail_closed=not valid)
 
 
+def pnl_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _pnl_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="PNL_DONE_COVERED" if valid else "PNL_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "PnlReconciliation", "reconcile_pnl", "realized_mark_receipt",
     "pnl_reconciliation_safety_receipt", "pnl_required_field_receipt", "pnl_null_field_receipt",
@@ -201,4 +219,5 @@ __all__ = [
     "pnl_rejection_no_debit_receipt", "pnl_partial_close_receipt", "pnl_total_close_release_receipt",
     "pnl_mark_liquidability_receipt", "pnl_balance_receipt", "pnl_funding_sign_receipt",
     "pnl_conversion_receipt", "pnl_commit_receipt", "pnl_concurrent_write_receipt",
+    "pnl_done_receipt",
 ]

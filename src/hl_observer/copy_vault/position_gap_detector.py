@@ -255,11 +255,31 @@ def gap_delta_receipt(*, before: Any, after: Any, fills: Sequence[Any], toleranc
     )
 
 
+def gap_done_receipt(*, checks: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Close a position-gap review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, dict)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="GAP_DONE_COVERED" if valid else "GAP_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "detecter", "gap_contract_receipt", "gap_required_field_receipt", "gap_finite_receipt",
     "gap_cutoff_receipt", "gap_age_receipt", "gap_duplicate_receipt", "gap_retry_receipt",
     "gap_replay_receipt", "gap_rest_ws_receipt", "gap_timestamp_identity_receipt",
     "gap_tid_receipt", "gap_hash_receipt", "gap_close_open_receipt", "gap_wallet_receipt",
     "gap_side_receipt", "gap_overlap_receipt", "gap_position_receipt", "gap_heartbeat_receipt",
-    "gap_causality_receipt", "gap_delta_receipt",
+    "gap_causality_receipt", "gap_delta_receipt", "gap_done_receipt",
 ]

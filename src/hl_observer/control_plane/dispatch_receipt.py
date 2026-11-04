@@ -1,12 +1,13 @@
 """Deterministic cross-repository dispatch receipts for Alina SmartFlow."""
 from __future__ import annotations
 
+import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from hl_observer.control_plane.phase_state import parse_iso_utc, sha256_json
+from hl_observer.control_plane.phase_state import canonical_json, parse_iso_utc, sha256_json
 
 DISPATCH_STATUSES = frozenset({"DISPATCHED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
 TERMINAL_DISPATCH_STATUSES = frozenset({"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
@@ -109,3 +110,201 @@ def validate_dispatch_receipt(receipt: DispatchReceipt) -> None:
         raise ValueError("complete dispatch receipt requires an exact terminal evidence digest")
     if receipt.status != "COMPLETE" and receipt.terminal_evidence_digest is not None:
         raise ValueError("terminal evidence digest is only valid for COMPLETE dispatches")
+
+
+def _dispatch_base(status: str, **values: Any) -> dict[str, Any]:
+    """Return paper/read-only dispatch evidence without dispatching anything."""
+    return {"status": status, "paper_read_only": True, "real_execution": False, "dispatch_mutation": False, "closure_allowed": False, **values}
+
+
+def _dispatch_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _dispatch_finite(value: Any) -> bool:
+    try:
+        return not isinstance(value, bool) and math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _dispatch_sha(value: Any, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(ch in "0123456789abcdef" for ch in value)
+
+
+def dispatch_state_safety_receipt(receipt: Any) -> dict[str, Any]:
+    try:
+        candidate = receipt if isinstance(receipt, DispatchReceipt) else DispatchReceipt.from_dict(receipt)
+        validate_dispatch_receipt(candidate)
+    except (TypeError, ValueError):
+        return _dispatch_base("REJECTED", verdict="DISPATCH_RECEIPT_INVALID", fail_closed=True)
+    return _dispatch_base("PROVEN", verdict="DISPATCH_RECEIPT_VALID", phase=candidate.creation_phase, epoch=candidate.phase_epoch, fail_closed=False)
+
+
+def dispatch_to_campaign_boundary_receipt(dispatch_result: Any, campaign_manifest: Any) -> dict[str, Any]:
+    """Admit a dispatch receipt to a campaign without dispatching or mutating it."""
+    from hl_observer.control_plane.resumable_campaign import campaign_state_safety_receipt
+
+    dispatch = dispatch_state_safety_receipt(dispatch_result)
+    campaign = campaign_state_safety_receipt(campaign_manifest)
+    valid = (
+        dispatch.get("status") == "PROVEN"
+        and dispatch.get("paper_read_only") is True
+        and dispatch.get("real_execution") is False
+        and dispatch.get("dispatch_mutation") is False
+        and dispatch.get("fail_closed") is False
+        and campaign.get("status") == "PROVEN"
+        and campaign.get("paper_read_only") is True
+        and campaign.get("real_execution") is False
+        and campaign.get("manifest_mutation") is False
+        and campaign.get("fail_closed") is False
+    )
+    return _dispatch_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="DISPATCH_CAMPAIGN_BOUNDARY_SAFE" if valid else "DISPATCH_CAMPAIGN_BOUNDARY_REJECTED",
+        dispatch_status=dispatch.get("status"),
+        campaign_status=campaign.get("status"),
+        dispatch_mutation=False,
+        manifest_mutation=False,
+        phase_mutation=False,
+        promotion="DISABLED_UNTIL_REVIEW",
+        fail_closed=not valid,
+    )
+
+
+def native_venue_to_dispatch_boundary_receipt(
+    venue_result: Any,
+    dispatch_result: Any,
+) -> dict[str, Any]:
+    """Admit OKX public capabilities to dispatch evidence without dispatching."""
+    from hl_observer.venues.okx import venue_capability_safety_receipt
+
+    venue = venue_capability_safety_receipt(venue_result)
+    dispatch = dispatch_state_safety_receipt(dispatch_result)
+    valid = (
+        venue.get("status") == "PROVEN"
+        and venue.get("paper_read_only") is True
+        and venue.get("real_execution") is False
+        and venue.get("network_execution") is False
+        and dispatch.get("status") == "PROVEN"
+        and dispatch.get("paper_read_only") is True
+        and dispatch.get("real_execution") is False
+        and dispatch.get("dispatch_mutation") is False
+        and dispatch.get("fail_closed") is False
+    )
+    return _dispatch_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="NATIVE_VENUE_DISPATCH_BOUNDARY_SAFE" if valid else "NATIVE_VENUE_DISPATCH_BOUNDARY_REJECTED",
+        venue_status=venue.get("status"),
+        dispatch_status=dispatch.get("status"),
+        network_execution=False,
+        dispatch_mutation=False,
+        promotion="DISABLED_UNTIL_REVIEW",
+        fail_closed=not valid,
+    )
+
+
+def dispatch_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and field in row and row[field] not in (None, "")
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_FIELD_PRESENT" if valid else "DISPATCH_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def dispatch_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and field in row and row[field] is not None
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_FIELD_NON_NULL" if valid else "DISPATCH_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def dispatch_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    value = row.get(field) if isinstance(row, Mapping) else None
+    bool_is_int = expected_type is int and isinstance(value, bool)
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and isinstance(expected_type, type) and isinstance(value, expected_type) and not bool_is_int
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_FIELD_TYPE_VALID" if valid else "DISPATCH_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def dispatch_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _dispatch_finite(value)
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_VALUE_FINITE" if valid else "DISPATCH_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def dispatch_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _dispatch_integer(event_ts_ms) and _dispatch_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_EVENT_WITHIN_CUTOFF" if valid else "DISPATCH_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def dispatch_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _dispatch_integer(event_ts_ms) and _dispatch_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_EVENT_AGE_VALID" if valid else "DISPATCH_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def dispatch_duplicate_receipt(*, event_ids: Iterable[Any]) -> dict[str, Any]:
+    values = list(event_ids)
+    valid = bool(values) and all(isinstance(value, str) and value.strip() for value in values) and len(values) == len(set(values))
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_EVENTS_UNIQUE" if valid else "DISPATCH_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def dispatch_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _dispatch_integer(attempts) and _dispatch_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_RETRY_BOUNDED" if valid else "DISPATCH_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def dispatch_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    values = list(outputs)
+    valid = bool(values) and len({canonical_json(value) for value in values}) == 1
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_REPLAY_DETERMINISTIC" if valid else "DISPATCH_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def dispatch_stage_order_receipt(*, creation_phase: Any, status: Any, phase_barrier: bool) -> dict[str, Any]:
+    valid = creation_phase in {"COLLECT", "ANALYZE"} and status in DISPATCH_STATUSES and phase_barrier is True
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_PHASE_BARRIER" if valid else "DISPATCH_PHASE_BARRIER_MISSING", fail_closed=not valid)
+
+
+def dispatch_collect_authorization_receipt(*, creation_phase: Any, automatic: bool, authorized: bool) -> dict[str, Any]:
+    valid = creation_phase == "COLLECT" and isinstance(automatic, bool) and ((automatic is False and authorized is False) or (automatic is True and authorized is True))
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_COLLECT_AUTHORIZED" if valid else "DISPATCH_COLLECT_UNAUTHORIZED", fail_closed=not valid)
+
+
+def dispatch_request_replay_receipt(*, request_ids: Sequence[Any], accepted_request_ids: Sequence[Any]) -> dict[str, Any]:
+    requests = list(request_ids)
+    accepted = list(accepted_request_ids)
+    valid = bool(requests) and len(requests) == len(set(requests)) and len(accepted) == len(set(accepted)) and set(accepted).issubset(requests)
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_REQUESTS_IDEMPOTENT" if valid else "DISPATCH_REQUEST_REPLAYED", fail_closed=not valid)
+
+
+def dispatch_epoch_receipt(*, observed_epoch: Any, current_epoch: Any) -> dict[str, Any]:
+    valid = _dispatch_integer(observed_epoch) and _dispatch_integer(current_epoch) and observed_epoch == current_epoch
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_EPOCH_CURRENT" if valid else "DISPATCH_EPOCH_STALE", fail_closed=not valid)
+
+
+def dispatch_hash_receipt(*, expected_sha: Any, actual_sha: Any, length: int = 40) -> dict[str, Any]:
+    valid = _dispatch_sha(expected_sha, length) and _dispatch_sha(actual_sha, length) and expected_sha == actual_sha
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_SHA_MATCH" if valid else "DISPATCH_SHA_MISMATCH", fail_closed=not valid)
+
+
+def dispatch_lease_receipt(*, worker_id: Any, lease_owner: Any, lease_expires_at_ms: Any, now_ms: Any) -> dict[str, Any]:
+    valid = isinstance(worker_id, str) and bool(worker_id.strip()) and worker_id == lease_owner and _dispatch_integer(lease_expires_at_ms) and _dispatch_integer(now_ms) and now_ms < lease_expires_at_ms
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_LEASE_ACTIVE" if valid else "DISPATCH_LEASE_EXPIRED_OR_MISMATCHED", fail_closed=not valid)
+
+
+def dispatch_single_owner_receipt(*, owner_ids: Sequence[Any]) -> dict[str, Any]:
+    owners = list(owner_ids)
+    valid = len(owners) == 1 and isinstance(owners[0], str) and bool(owners[0].strip())
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_SINGLE_OWNER" if valid else "DISPATCH_SPLIT_BRAIN", fail_closed=not valid)
+
+
+def dispatch_checkpoint_receipt(*, checkpoint: Mapping[str, Any], required_fields: Sequence[str]) -> dict[str, Any]:
+    required = list(required_fields)
+    valid = isinstance(checkpoint, Mapping) and bool(required) and all(isinstance(field, str) and checkpoint.get(field) not in (None, "") for field in required) and checkpoint.get("saved") is True
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_CHECKPOINT_COMPLETE" if valid else "DISPATCH_CHECKPOINT_PARTIAL", fail_closed=not valid)
+
+
+def dispatch_runner_receipt(*, runner_label: Any) -> dict[str, Any]:
+    normalized = runner_label.strip().lower() if isinstance(runner_label, str) else ""
+    valid = bool(normalized) and "self-hosted" not in normalized and "self_hosted" not in normalized and "localhost" not in normalized and normalized in {"ubuntu-latest", "windows-latest", "macos-latest", "github-hosted"}
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_GITHUB_HOSTED" if valid else "DISPATCH_RUNNER_FORBIDDEN", fail_closed=not valid)
+
+
+def dispatch_done_coverage_receipt(*, status: Any, coverage_status: Any, required_proofs: Sequence[Any], completed_proofs: Sequence[Any]) -> dict[str, Any]:
+    required = set(required_proofs)
+    completed = set(completed_proofs)
+    valid = status == "COMPLETE" and coverage_status == "PROVEN" and bool(required) and required.issubset(completed)
+    return _dispatch_base("PROVEN" if valid else "REJECTED", verdict="DISPATCH_DONE_COVERAGE_COMPLETE" if valid else "DISPATCH_DONE_WITHOUT_COVERAGE", fail_closed=not valid)

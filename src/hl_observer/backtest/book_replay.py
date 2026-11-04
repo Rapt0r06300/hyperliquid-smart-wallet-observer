@@ -127,6 +127,7 @@ __all__ = [
     "replay_mark_liquidability_receipt", "replay_balance_receipt",
     "replay_funding_sign_receipt", "replay_conversion_receipt",
     "replay_commit_receipt", "replay_concurrent_write_receipt",
+    "replay_done_receipt",
 ]
 
 
@@ -297,3 +298,21 @@ def replay_commit_receipt(*, crashed: bool, committed: bool, checkpoint_saved: b
 def replay_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any]:
     valid = bool(write_ids) and all(str(value).strip() for value in write_ids) and len(write_ids) == len(set(write_ids))
     return _replay_base("PROVEN" if valid else "REJECTED", verdict="REPLAY_WRITES_UNIQUE" if valid else "REPLAY_DOUBLE_WRITE", fail_closed=not valid)
+
+
+def replay_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _replay_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="REPLAY_DONE_COVERED" if valid else "REPLAY_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )

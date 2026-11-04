@@ -5,6 +5,7 @@ from hl_observer.simulation.pnl_reconciliation import (
     pnl_concurrent_write_receipt,
     pnl_conversion_receipt,
     pnl_cutoff_receipt,
+    pnl_done_receipt,
     pnl_duplicate_receipt,
     pnl_field_type_receipt,
     pnl_fill_duplicate_receipt,
@@ -132,3 +133,13 @@ def test_hvr_0679_crash_before_commit_is_recoverable():
 def test_hvr_0680_concurrent_writes_are_unique():
     assert pnl_concurrent_write_receipt(write_ids=["w1", "w2"])["status"] == "PROVEN"
     assert pnl_concurrent_write_receipt(write_ids=["w1", "w1"])["status"] == "REJECTED"
+
+
+def test_hvr_0681_pnl_done_requires_all_proven_gates():
+    checks = [
+        pnl_required_field_receipt({"coin": "BTC"}, field="coin"),
+        pnl_replay_receipt(outputs=[{"pnl": 1.0}, {"pnl": 1.0}]),
+        pnl_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert pnl_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert pnl_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

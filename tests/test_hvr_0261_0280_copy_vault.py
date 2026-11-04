@@ -19,6 +19,7 @@ from hl_observer.copy_vault.post_fill_source_confirmation import (
     post_fill_replay_receipt,
     post_fill_required_field_receipt,
     post_fill_retry_receipt,
+    post_fill_done_receipt,
 )
 
 
@@ -104,3 +105,13 @@ def test_hvr_0279_close_remaining():
 def test_hvr_0280_leverage_and_concurrent():
     assert post_fill_leverage_receipt(leverage=2.0)["status"] == "PROVEN"
     assert post_fill_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True)["status"] == "PROVEN"
+
+
+def test_hvr_0280_done_gate_requires_all_checks():
+    checks = [
+        post_fill_contract_receipt({"wallet": "w", "position_before": 2.0, "delta": 1.5, "snapshot_after": 3.5, "event_ts_ms": 10, "receive_ts_ms": 11}),
+        post_fill_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        post_fill_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True),
+    ]
+    assert post_fill_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert post_fill_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

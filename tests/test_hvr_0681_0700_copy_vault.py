@@ -7,6 +7,7 @@ from hl_observer.simulation.liquidatable_marks import (
     marks_concurrent_write_receipt,
     marks_conversion_receipt,
     marks_cutoff_receipt,
+    marks_done_receipt,
     marks_duplicate_receipt,
     marks_field_type_receipt,
     marks_fill_duplicate_receipt,
@@ -128,3 +129,13 @@ def test_hvr_0699_crash_before_commit_is_recoverable():
 def test_hvr_0700_concurrent_writes_are_unique():
     assert marks_concurrent_write_receipt(write_ids=["w1", "w2"])["status"] == "PROVEN"
     assert marks_concurrent_write_receipt(write_ids=["w1", "w1"])["status"] == "REJECTED"
+
+
+def test_hvr_0701_marks_done_requires_all_proven_gates():
+    checks = [
+        marks_required_field_receipt({"coin": "BTC"}, field="coin"),
+        marks_replay_receipt(outputs=[{"equity": 1000.0}, {"equity": 1000.0}]),
+        marks_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert marks_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert marks_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

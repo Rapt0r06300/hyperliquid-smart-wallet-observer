@@ -99,6 +99,45 @@ def validate_worldmonitor_variant_contracts() -> tuple[WorldMonitorVariantContra
     return variants
 
 
+def worldmonitor_safety_receipt(result: object) -> dict[str, object]:
+    """Validate the bounded World Monitor read-only surface.
+
+    This receipt covers adapter safety only.  It does not assert that an
+    external event is true, causal, or economically useful for Copy-Vault.
+    """
+    variants = None
+    if isinstance(result, Mapping):
+        variants = result.get("variants")
+        valid = (
+            result.get("read_only") is True
+            and result.get("real_execution") is False
+            and result.get("mutation") is False
+            and isinstance(variants, (list, tuple))
+            and len(variants) == 6
+            and all(
+                isinstance(item, Mapping)
+                and item.get("read_only") is True
+                and (
+                    str(item.get("surface") or "") in _ALLOWED_PATHS
+                    or str(item.get("surface") or "")
+                    in {"derived:news_digest", "derived:prediction_markets"}
+                )
+                for item in variants
+            )
+        )
+    else:
+        valid = False
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "WORLDMONITOR_READ_ONLY" if valid else "WORLDMONITOR_UNSAFE",
+        "read_only": True,
+        "real_execution": False,
+        "mutation": False,
+        "economic_verdict": "UNMEASURABLE",
+        "fail_closed": not valid,
+    }
+
+
 class WorldMonitorError(RuntimeError):
     """Base adapter error."""
 
@@ -702,6 +741,7 @@ __all__ = [
     "WorldMonitorEvent",
     "WorldMonitorHTTPError",
     "WorldMonitorReadOnlyClient",
+    "worldmonitor_safety_receipt",
     "normalize_cross_source_signals",
     "normalize_news_digest",
 ]

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 try:
     from enum import StrEnum
@@ -335,3 +336,25 @@ class AdvancedRiskManager:
         for sid in old_ids:
             del self.signal_first_seen[sid]
         return len(old_ids)
+
+
+def risk_engine_safety_receipt(result: object) -> dict[str, object]:
+    """Validate that a risk result stayed in the paper-only boundary.
+
+    This receipt deliberately proves only the execution boundary.  It does not
+    certify an economic outcome, a fill, or a risk decision as profitable.
+    Missing or contradictory fields fail closed instead of being inferred.
+    """
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("simulation_only") is True
+        and result.get("real_orders_created") == 0
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "RISK_ENGINE_PAPER_ONLY" if valid else "RISK_ENGINE_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "risk_mutation": False,
+        "fail_closed": not valid,
+    }

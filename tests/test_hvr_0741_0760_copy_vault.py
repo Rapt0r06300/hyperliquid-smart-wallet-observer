@@ -5,6 +5,7 @@ from hl_observer.backtest.replay_engine import (
     engine_concurrent_write_receipt,
     engine_conversion_receipt,
     engine_cutoff_receipt,
+    engine_done_receipt,
     engine_duplicate_receipt,
     engine_field_type_receipt,
     engine_fill_duplicate_receipt,
@@ -131,3 +132,13 @@ def test_hvr_0760_runtime_replay_is_atomic_and_fail_closed():
     assert engine_balance_receipt(balance=0.0)["status"] == "PROVEN"
     assert engine_funding_sign_receipt(amount=1.0, direction="CREDIT")["status"] == "PROVEN"
     assert engine_conversion_receipt(fee_amount=1.0, fee_token="USDC", pnl_currency="USD", token_to_pnl_rate=1.0)["status"] == "PROVEN"
+
+
+def test_hvr_0761_engine_done_requires_all_proven_gates():
+    checks = [
+        engine_required_field_receipt({"coin": "BTC"}, field="coin"),
+        engine_replay_receipt(outputs=[{"ts_ms": 100}, {"ts_ms": 100}]),
+        engine_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert engine_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert engine_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

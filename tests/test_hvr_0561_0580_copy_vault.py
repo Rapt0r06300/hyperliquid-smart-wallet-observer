@@ -20,6 +20,7 @@ from hl_observer.paper_trading.latency_truth import (
     latency_staleness_receipt,
     latency_tick_receipt,
     latency_truth_safety_receipt,
+    latency_truth_done_receipt,
     verite_latence,
 )
 
@@ -133,3 +134,12 @@ def test_hvr_0579_touch_only_is_not_maker_fill():
 def test_hvr_0580_maker_fee_must_not_exceed_taker_fee():
     assert latency_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0)["status"] == "PROVEN"
     assert latency_fee_order_receipt(maker_fee_bps=3.0, taker_fee_bps=2.0)["status"] == "REJECTED"
+
+
+def test_hvr_0581_latency_truth_done_requires_all_proven_gates():
+    assert latency_truth_done_receipt(
+        status="PROVEN", coverage_status="PROVEN", proof_ids=["latency-proof"], replay_verified=True
+    )["status"] == "PROVEN"
+    assert latency_truth_done_receipt(
+        status="PROVEN", coverage_status="PROVEN", proof_ids=[], replay_verified=True
+    )["status"] == "REJECTED"

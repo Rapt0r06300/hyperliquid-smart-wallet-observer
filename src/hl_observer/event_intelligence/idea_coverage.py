@@ -164,4 +164,28 @@ def coverage_summary() -> dict[str, object]:
     }
 
 
-__all__ = ["IDEA_COVERAGE", "IdeaCoverage", "coverage_summary"]
+def idea_coverage_safety_receipt(summary: object) -> dict[str, object]:
+    """Validate coverage bookkeeping without treating it as economic proof."""
+    valid = (
+        isinstance(summary, dict)
+        and summary.get("count") == 120
+        and summary.get("min_id") == 1
+        and summary.get("max_id") == 120
+        and summary.get("unique_ids") == 120
+        and summary.get("complete_1_to_120") is True
+        and summary.get("coverage_valid") is True
+        and summary.get("statuses") == {"IMPLEMENTED": 120}
+        and summary.get("real_execution", False) is False
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "IDEA_COVERAGE_COMPLETE" if valid else "IDEA_COVERAGE_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "economic_verdict": "UNMEASURABLE",
+        "promotion": False,
+        "fail_closed": not valid,
+    }
+
+
+__all__ = ["IDEA_COVERAGE", "IdeaCoverage", "coverage_summary", "idea_coverage_safety_receipt"]

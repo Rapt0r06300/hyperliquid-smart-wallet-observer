@@ -20,6 +20,7 @@ from hl_observer.copy_vault.position_gap_detector import (
     gap_tid_receipt,
     gap_timestamp_identity_receipt,
     gap_wallet_receipt,
+    gap_done_receipt,
 )
 
 
@@ -122,3 +123,13 @@ def test_hvr_0179_heartbeat():
 def test_hvr_0180_causality():
     assert gap_causality_receipt(event_ts_ms=10, position_ts_ms=20, observed_before_position=True)["status"] == "PROVEN"
     assert gap_causality_receipt(event_ts_ms=21, position_ts_ms=20, observed_before_position=True)["status"] == "REJECTED"
+
+
+def test_hvr_0180_done_gate_requires_all_checks():
+    checks = [
+        gap_contract_receipt({"wallet": "0xabc", "position_before": 1.0, "position_after": 2.0, "fills_signed": [1.0], "event_ts_ms": 10, "receive_ts_ms": 11}),
+        gap_delta_receipt(before=1.0, fills=[1.0], after=2.0),
+        gap_causality_receipt(event_ts_ms=10, position_ts_ms=20, observed_before_position=True),
+    ]
+    assert gap_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert gap_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

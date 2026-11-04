@@ -320,6 +320,24 @@ def accounting_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str
     return _accounting_base("PROVEN" if valid else "REJECTED", verdict="ACCOUNTING_WRITES_UNIQUE" if valid else "ACCOUNTING_DOUBLE_WRITE", fail_closed=not valid)
 
 
+def accounting_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _accounting_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="ACCOUNTING_DONE_COVERED" if valid else "ACCOUNTING_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "ACCOUNTING_SCHEMA_VERSION",
     "NamedRoiMetrics",
@@ -351,4 +369,5 @@ __all__ = [
     "accounting_conversion_receipt",
     "accounting_commit_receipt",
     "accounting_concurrent_write_receipt",
+    "accounting_done_receipt",
 ]

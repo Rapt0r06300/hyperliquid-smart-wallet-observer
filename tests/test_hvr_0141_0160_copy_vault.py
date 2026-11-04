@@ -8,6 +8,7 @@ from hl_observer.copy_vault.reconnect_overlap_backfill import (
     reconnect_rest_ws_receipt, reconnect_retry_receipt,
     reconnect_side_receipt, reconnect_tid_receipt,
     reconnect_timestamp_identity_receipt, reconnect_wallet_receipt,
+    reconnect_done_receipt,
 )
 
 
@@ -89,3 +90,13 @@ def test_hvr_0159_position():
 
 def test_hvr_0160_heartbeat():
     assert reconnect_heartbeat_receipt(previous_ts_ms=10, current_ts_ms=20, max_gap_ms=20)["status"] == "PROVEN"
+
+
+def test_hvr_0160_done_gate_requires_all_checks():
+    checks = [
+        reconnect_contract_receipt({"connection_id": "c", "checkpoint_id": "p", "event_id": "e", "receive_ts_ms": 1}),
+        reconnect_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        reconnect_heartbeat_receipt(previous_ts_ms=10, current_ts_ms=20, max_gap_ms=20),
+    ]
+    assert reconnect_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert reconnect_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

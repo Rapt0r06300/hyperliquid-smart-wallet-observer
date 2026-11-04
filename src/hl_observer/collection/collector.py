@@ -106,6 +106,26 @@ class CollectionResult(BaseModel):
     dry_run: bool = False
 
 
+def collection_scope_safety_receipt(plan: object) -> dict[str, object]:
+    """Validate a public collection plan without enabling execution surfaces."""
+    valid = (
+        isinstance(plan, CollectionPlan)
+        and isinstance(plan.fetch, bool)
+        and isinstance(plan.dry_run, bool)
+        and isinstance(plan.store_raw, bool)
+        and not bool(getattr(plan, "execution_requested", False))
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "COLLECTION_SCOPE_SAFE" if valid else "COLLECTION_SCOPE_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "network_execution": False,
+        "collection_mutation": False,
+        "fail_closed": not valid,
+    }
+
+
 def build_default_collection_plan(
     *,
     settings: Settings,

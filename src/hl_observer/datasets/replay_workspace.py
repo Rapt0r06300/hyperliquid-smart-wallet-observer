@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -225,6 +225,26 @@ def replay_workspace_expansion_receipt(*, observed_bytes: Any, max_bytes: Any, c
 def replay_workspace_lease_receipt(*, active_leases: Any, lease_token_present: bool) -> dict[str, Any]:
     valid = _workspace_integer(active_leases) and active_leases == 1 and lease_token_present is True
     return _workspace_base("PROVEN" if valid else "REJECTED", verdict="REPLAY_WORKSPACE_SINGLE_LEASE" if valid else "REPLAY_WORKSPACE_SPLIT_BRAIN_RISK", fail_closed=not valid)
+
+
+def replay_workspace_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close replay workspace review only when every local gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _workspace_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="REPLAY_WORKSPACE_DONE_COVERED" if valid else "REPLAY_WORKSPACE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
 
 
 def replay_workspace_preflight_receipt(report: Mapping[str, Any]) -> dict[str, Any]:

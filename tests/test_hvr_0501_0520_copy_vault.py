@@ -6,6 +6,7 @@ from hl_observer.market_data.live_l2_service import (
     l2_delta_receipt,
     l2_depth_receipt,
     l2_duplicate_receipt,
+    l2_done_receipt,
     l2_fee_order_receipt,
     l2_finite_receipt,
     l2_field_type_receipt,
@@ -130,3 +131,13 @@ def test_hvr_0519_touch_only_is_not_maker_fill():
 def test_hvr_0520_maker_fee_must_not_exceed_taker_fee():
     assert l2_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0)["status"] == "PROVEN"
     assert l2_fee_order_receipt(maker_fee_bps=3.0, taker_fee_bps=2.0)["status"] == "REJECTED"
+
+
+def test_hvr_0521_l2_done_requires_all_proven_gates():
+    checks = [
+        l2_required_field_receipt({"coin": "BTC"}, field="coin"),
+        l2_replay_receipt(outputs=[{"bid": 100}, {"bid": 100}]),
+        l2_fee_order_receipt(maker_fee_bps=1.0, taker_fee_bps=2.0),
+    ]
+    assert l2_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert l2_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

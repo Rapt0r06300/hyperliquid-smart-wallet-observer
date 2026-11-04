@@ -34,6 +34,34 @@ def _integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+class TraceurEpoch:
+    """Track flat-to-open paper position epochs without network or execution."""
+
+    def __init__(self) -> None:
+        self._position = 0.0
+        self._current_epoch: int | None = None
+        self._next_epoch = 1
+
+    def observer(self, position: Any) -> dict[str, Any]:
+        if not _finite(position):
+            return {"transition": "REFUSEE", "status": "UNMEASURABLE", "epoch_id": None, "paper_read_only": True, "real_execution": False, "fail_closed": True}
+        observed = float(position)
+        if self._position == 0.0 and observed != 0.0:
+            self._current_epoch = self._next_epoch
+            self._next_epoch += 1
+            transition = "OUVERTURE"
+        elif self._position != 0.0 and observed == 0.0:
+            transition = "FERMETURE"
+            self._current_epoch = None
+        else:
+            transition = "AUCUNE"
+        self._position = observed
+        return {"transition": transition, "status": "PROVEN", "epoch_id": self._current_epoch, "paper_read_only": True, "real_execution": False, "fail_closed": False}
+
+    def epoch_courant(self) -> int | None:
+        return self._current_epoch
+
+
 def creer_epoch_id(*, wallet: Any, instrument: Any, sequence: Any, snapshot_ts_ms: Any) -> dict[str, Any]:
     """Create a deterministic identity, without treating it as trading proof."""
     valid = bool(str(wallet or "").strip()) and bool(str(instrument or "").strip()) and _integer(sequence) and sequence >= 0 and _integer(snapshot_ts_ms) and snapshot_ts_ms >= 0
@@ -154,11 +182,31 @@ def epoch_concurrent_add_close_receipt(*, actions: Sequence[Any], ordered: bool)
     return _base("PROVEN" if valid else "REJECTED", verdict="EPOCH_ADD_CLOSE_ORDERED" if valid else "EPOCH_ADD_CLOSE_CONCURRENT_UNSAFE", fail_closed=not valid)
 
 
+def epoch_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close an epoch review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="EPOCH_DONE_COVERED" if valid else "EPOCH_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
-    "creer_epoch_id", "epoch_contract_receipt", "epoch_required_field_receipt", "epoch_field_type_receipt",
+    "TraceurEpoch", "creer_epoch_id", "epoch_contract_receipt", "epoch_required_field_receipt", "epoch_field_type_receipt",
     "epoch_finite_receipt", "epoch_cutoff_receipt", "epoch_age_receipt", "epoch_duplicate_receipt",
     "epoch_retry_receipt", "epoch_replay_receipt", "epoch_open_long_receipt", "epoch_open_short_receipt",
     "epoch_add_without_position_receipt", "epoch_reduce_without_position_receipt", "epoch_close_without_position_receipt",
     "epoch_flip_receipt", "epoch_reduce_only_receipt", "epoch_close_remaining_receipt", "epoch_leverage_receipt",
-    "epoch_concurrent_add_close_receipt",
+    "epoch_concurrent_add_close_receipt", "epoch_done_receipt",
 ]

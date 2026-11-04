@@ -324,6 +324,33 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     return "SAFE", []
 
 
+def manifest_safety_receipt(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose SAFE admissibility without rewriting or promoting a manifest."""
+    try:
+        status, reasons = classify_manifest(manifest)
+    except (TypeError, ValueError):
+        status, reasons = "REJECT", ["MANIFEST_INVALID"]
+    provenance = manifest.get("provenance") if isinstance(manifest, Mapping) else None
+    valid = (
+        status == "SAFE"
+        and manifest.get("quality_status") == "SAFE"
+        and isinstance(provenance, Mapping)
+        and provenance.get("real_execution") is False
+        and manifest.get("replay_compatible") is True
+        and manifest.get("asset_verified") is True
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "MANIFEST_SAFE" if valid else "MANIFEST_NOT_SAFE",
+        "manifest_status": status,
+        "reasons": list(reasons),
+        "paper_read_only": True,
+        "real_execution": False,
+        "manifest_mutation": False,
+        "fail_closed": not valid,
+    }
+
+
 def verify_asset(manifest: Mapping[str, Any], asset_path: str | Path) -> tuple[bool, str]:
     path = Path(asset_path)
     if not path.is_file():

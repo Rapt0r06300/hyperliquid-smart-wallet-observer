@@ -19,6 +19,7 @@ from hl_observer.copy_vault.position_epoch_id import (
     epoch_replay_receipt,
     epoch_required_field_receipt,
     epoch_retry_receipt,
+    epoch_done_receipt,
 )
 
 
@@ -107,3 +108,13 @@ def test_hvr_0239_close_remaining():
 def test_hvr_0240_leverage_and_concurrent():
     assert epoch_leverage_receipt(leverage=2.0)["status"] == "PROVEN"
     assert epoch_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True)["status"] == "PROVEN"
+
+
+def test_hvr_0240_done_gate_requires_all_checks():
+    checks = [
+        epoch_contract_receipt({"epoch_id": "e", "wallet": "w", "instrument": "BTC", "sequence": 1, "snapshot_ts_ms": 10, "receive_ts_ms": 11}),
+        epoch_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        epoch_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True),
+    ]
+    assert epoch_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert epoch_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

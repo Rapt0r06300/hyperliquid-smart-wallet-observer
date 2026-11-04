@@ -339,6 +339,30 @@ def certify_daily_workspace(workspace: str | Path) -> dict[str, Any]:
     }
 
 
+def daily_certification_safety_receipt(result: object) -> dict[str, object]:
+    """Validate certification output without manufacturing a positive verdict."""
+    families = result.get("families") if isinstance(result, Mapping) else None
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("status") in {"ALL_FAMILIES_CERTIFIED_DAILY", "NO_GO"}
+        and isinstance(result.get("all_families_certified"), bool)
+        and result.get("daily_rate_basis") == "VERIFIED_STRICT_POST_FREEZE_FORWARD_WALL_CLOCK"
+        and isinstance(families, Mapping)
+        and result.get("paper_read_only", True) is True
+        and result.get("real_execution", False) is False
+        and result.get("automatic_activation", False) is False
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "DAILY_CERTIFICATION_SAFE" if valid else "DAILY_CERTIFICATION_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "economic_verdict": "UNMEASURABLE" if not (isinstance(result, Mapping) and result.get("all_families_certified") is True) else "PROVEN_EXTERNAL_RESULT_REQUIRED",
+        "automatic_activation": False,
+        "fail_closed": not valid,
+    }
+
+
 __all__ = [
     "MIN_FORWARD_COVERAGE_RATIO",
     "MIN_FORWARD_OBSERVATION_SECONDS",
@@ -350,4 +374,5 @@ __all__ = [
     "apply_daily_gate",
     "certify_daily_campaign",
     "certify_daily_workspace",
+    "daily_certification_safety_receipt",
 ]

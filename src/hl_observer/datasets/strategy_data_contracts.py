@@ -6,7 +6,7 @@ PARTIAL instead of being silently substituted.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import math
 from typing import Any
@@ -317,6 +317,26 @@ def strategy_publication_receipt(*, status: Any, manifest_committed: bool, recei
     return _base("PROVEN" if valid else "REJECTED", verdict="STRATEGY_PUBLICATION_COMPLETE" if valid else "STRATEGY_PUBLICATION_INTERRUPTED", fail_closed=not valid)
 
 
+def strategy_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close strategy replay-readiness review only when every local check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="STRATEGY_DONE_COVERED" if valid else "STRATEGY_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "CONTRACTS",
     "COPY_VAULT_REQUIRED_FAMILIES",
@@ -332,5 +352,5 @@ __all__ = [
     "strategy_retry_receipt", "strategy_replay_receipt", "strategy_sha256_receipt", "strategy_size_receipt",
     "strategy_compression_receipt", "strategy_zip_slip_receipt", "strategy_symlink_receipt",
     "strategy_partial_replay_receipt", "strategy_reject_validation_receipt", "strategy_unique_counts_receipt",
-    "strategy_manifest_compatibility_receipt", "strategy_publication_receipt",
+    "strategy_manifest_compatibility_receipt", "strategy_publication_receipt", "strategy_done_receipt",
 ]

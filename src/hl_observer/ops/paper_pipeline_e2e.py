@@ -24,6 +24,55 @@ _REQUIS = ("seq", "ts_ms", "coin", "mid")
 _E2E_STAGES = ("SAFE", "WALLET", "SIGNAL", "RISK", "PAPER", "LEDGER", "OOS")
 
 
+def paper_pipeline_safety_receipt(result: object) -> dict[str, object]:
+    """Validate an E2E technical result without certifying economics or execution."""
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("paper_only") is True
+        and result.get("real_execution") is False
+        and result.get("economic_verdict") in {"UNMEASURABLE", "PROVEN_TECHNICAL"}
+        and result.get("closure_allowed") is False
+        and bool(result.get("stages"))
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "PAPER_PIPELINE_SAFE" if valid else "PAPER_PIPELINE_UNSAFE",
+        "paper_only": True,
+        "real_execution": False,
+        "economic_promotion": False,
+        "mutation": False,
+        "fail_closed": not valid,
+    }
+
+
+def e2e_technical_closure_receipt(result: object) -> dict[str, object]:
+    """Validate the complete technical stage chain without economic closure."""
+    stages = result.get("stages") if isinstance(result, Mapping) else None
+    errors = result.get("errors") if isinstance(result, Mapping) else None
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("paper_only") is True
+        and result.get("real_execution") is False
+        and result.get("economic_verdict") == "UNMEASURABLE"
+        and result.get("closure_allowed") is False
+        and isinstance(stages, (list, tuple))
+        and tuple(stages) == _E2E_STAGES
+        and isinstance(errors, list)
+        and bool(errors)
+        and all(isinstance(item, str) and item for item in errors)
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "E2E_TECHNICAL_SAFE" if valid else "E2E_TECHNICAL_UNSAFE",
+        "paper_only": True,
+        "real_execution": False,
+        "economic_verdict": "UNMEASURABLE",
+        "closure_allowed": False,
+        "promotion": False,
+        "fail_closed": not valid,
+    }
+
+
 def _sha256_text(value: object) -> bool:
     text = str(value or "").strip().lower()
     return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
@@ -223,4 +272,6 @@ __all__ = [
     "build_copy_vault_e2e_receipt",
     "executer_forward",
     "executer_replay",
+    "e2e_technical_closure_receipt",
+    "paper_pipeline_safety_receipt",
 ]

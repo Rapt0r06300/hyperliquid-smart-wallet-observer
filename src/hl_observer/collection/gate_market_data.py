@@ -71,12 +71,17 @@ def _gate_timestamp_ms(payload: Mapping[str, Any]) -> int | None:
     for key in ("t", "time"):
         if key in payload:
             try:
-                seconds = float(payload.get(key))
+                value = float(payload.get(key))
             except (TypeError, ValueError):
                 return None
-            if not math.isfinite(seconds) or seconds <= 0 or seconds >= 100_000_000_000:
+            if not math.isfinite(value) or value <= 0:
                 return None
-            return int(seconds * 1000.0)
+            # Gate has emitted both seconds and millisecond epochs under the
+            # short ``t`` key. Preserve the raw millisecond value when it is
+            # already unambiguously in the millisecond range.
+            if value >= 100_000_000_000:
+                return int(value) if value <= 100_000_000_000_000 else None
+            return int(value * 1000.0)
     return None
 
 
@@ -221,10 +226,14 @@ class GateMarketState:
             self.quality, self.reason = UNMEASURABLE, "TIMESTAMP_NOT_MILLISECONDS_OR_SECONDS"
             return self.quality
         if (
-            exchange_ts is not None
+            not is_full_snapshot
+            and exchange_ts is not None
             and self.last_exchange_ts_ms is not None
             and exchange_ts < self.last_exchange_ts_ms
         ):
+            # A new authoritative REST anchor replaces the invalidated WS
+            # epoch, so its exchange timestamp may legitimately be older
+            # than the last timestamp observed in that discarded epoch.
             self.regression_count += 1
             self.quality, self.reason = DESYNC, "EXCHANGE_TIMESTAMP_REGRESSION"
             self.bids.clear()

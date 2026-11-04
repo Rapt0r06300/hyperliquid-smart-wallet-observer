@@ -2,6 +2,7 @@ from hl_observer.datasets.progress_downloader import (
     downloader_age_receipt,
     downloader_content_range_receipt,
     downloader_cutoff_receipt,
+    downloader_done_receipt,
     downloader_disk_space_receipt,
     downloader_duplicate_receipt,
     downloader_etag_receipt,
@@ -130,3 +131,13 @@ def test_hvr_0419_only_one_sync_lease_is_allowed():
 
 def test_hvr_0420_invalid_plan_is_fail_closed():
     assert downloader_preflight_receipt({"asset_count": 1})["status"] == "REJECTED"
+
+
+def test_hvr_0421_downloader_done_requires_all_proven_gates():
+    checks = [
+        downloader_required_field_receipt({"etag": "x"}, field="etag"),
+        downloader_replay_receipt(outputs=[{"bytes": 1}, {"bytes": 1}]),
+        downloader_lease_receipt(active_leases=1, lease_token_present=True),
+    ]
+    assert downloader_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert downloader_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

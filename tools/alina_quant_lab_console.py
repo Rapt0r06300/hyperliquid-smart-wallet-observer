@@ -134,6 +134,30 @@ def inspect_local_safe_corpus(root: Path) -> dict[str, Any]:
         return result
 
 
+def quant_lab_safety_receipt(result: object) -> dict[str, object]:
+    """Validate the local lab boundary without certifying economic performance."""
+    economic = result.get("economic_result") if isinstance(result, Mapping) else None
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("paper_read_only") is True
+        and result.get("network_or_collection_started") is False
+        and isinstance(economic, Mapping)
+        and economic.get("comparison_performed") is False
+        and economic.get("best_strategy_proven") is False
+        and economic.get("measured_profit_usd") is None
+        and isinstance(result.get("freeze_verdict"), str)
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "QUANT_LAB_PAPER_ONLY" if valid else "QUANT_LAB_UNSAFE",
+        "paper_read_only": True,
+        "network_or_collection_started": False,
+        "economic_verdict": "UNMEASURABLE",
+        "automatic_activation": False,
+        "fail_closed": not valid,
+    }
+
+
 def assess_physical_freeze(path: Path) -> dict[str, Any]:
     """Read and validate the physical Copy-Vault freeze without changing it."""
     if not path.is_file():

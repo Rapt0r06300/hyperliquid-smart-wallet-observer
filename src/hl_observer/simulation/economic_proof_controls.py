@@ -673,6 +673,75 @@ def economic_proof_safety_receipt(result: Any) -> dict[str, Any]:
     )
 
 
+def execution_to_economic_boundary_receipt(
+    execution_receipt: Any,
+    economic_result: Any,
+) -> dict[str, Any]:
+    """Join execution-realism and economic-proof gates without certifying economics.
+
+    The join is intentionally conservative: both sides must be explicit, paper-only,
+    non-executing and fail-closed. A valid join proves only that the two safety
+    boundaries are compatible; it never promotes a model or manufactures a result.
+    """
+    execution_valid = (
+        isinstance(execution_receipt, Mapping)
+        and execution_receipt.get("status") == "PROVEN"
+        and execution_receipt.get("paper_read_only") is True
+        and execution_receipt.get("real_execution") is False
+        and execution_receipt.get("fail_closed") is False
+    )
+    economic_receipt = economic_proof_safety_receipt(economic_result)
+    valid = execution_valid and economic_receipt.get("status") == "PROVEN"
+    return _proof_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict=(
+            "EXECUTION_TO_ECONOMIC_BOUNDARY_SAFE"
+            if valid
+            else "EXECUTION_TO_ECONOMIC_BOUNDARY_UNSAFE"
+        ),
+        execution_status=(
+            execution_receipt.get("status")
+            if isinstance(execution_receipt, Mapping)
+            else None
+        ),
+        economic_status=economic_receipt.get("status"),
+        fail_closed=not valid,
+    )
+
+
+def pnl_to_economic_proof_boundary_receipt(
+    pnl_certificate: Any,
+    economic_result: Any,
+) -> dict[str, Any]:
+    """Join paper PnL controls to the economic-proof boundary without certification."""
+    from hl_observer.control_plane.module_pnl_proof import pnl_state_safety_receipt
+
+    pnl = pnl_state_safety_receipt(pnl_certificate)
+    economic = economic_proof_safety_receipt(economic_result)
+    valid = (
+        pnl.get("status") == "PROVEN"
+        and pnl.get("paper_only") is True
+        and pnl.get("read_only") is True
+        and pnl.get("real_execution") is False
+        and pnl.get("aggregate_allowed") is False
+        and pnl.get("mutation") is False
+        and economic.get("status") == "PROVEN"
+        and economic.get("paper_read_only") is True
+        and economic.get("real_execution") is False
+        and economic.get("promotion") == "DISABLED_UNTIL_REVIEW"
+    )
+    return _proof_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="PNL_TO_ECONOMIC_PROOF_BOUNDARY_SAFE" if valid else "PNL_TO_ECONOMIC_PROOF_BOUNDARY_REJECTED",
+        pnl_status=pnl.get("status"),
+        economic_status=economic.get("status"),
+        pnl_mutation=False,
+        aggregate_allowed=False,
+        economic_promotion=False,
+        fail_closed=not valid,
+    )
+
+
 def proof_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
     valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
     return _proof_base("PROVEN" if valid else "REJECTED", verdict="PROOF_FIELD_PRESENT" if valid else "PROOF_FIELD_MISSING", field=field, fail_closed=not valid)

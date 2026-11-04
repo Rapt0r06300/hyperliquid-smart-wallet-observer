@@ -74,6 +74,7 @@ __all__ = [
     "lookahead_mark_liquidability_receipt", "lookahead_balance_receipt",
     "lookahead_funding_sign_receipt", "lookahead_conversion_receipt",
     "lookahead_commit_receipt", "lookahead_concurrent_write_receipt",
+    "lookahead_done_receipt",
 ]
 
 
@@ -218,3 +219,21 @@ def lookahead_commit_receipt(*, crashed: bool, committed: bool, checkpoint_saved
 def lookahead_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any]:
     valid = bool(write_ids) and all(str(value).strip() for value in write_ids) and len(write_ids) == len(set(write_ids))
     return _lookahead_base("PROVEN" if valid else "REJECTED", verdict="LOOKAHEAD_WRITES_UNIQUE" if valid else "LOOKAHEAD_DOUBLE_WRITE", fail_closed=not valid)
+
+
+def lookahead_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _lookahead_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="LOOKAHEAD_DONE_COVERED" if valid else "LOOKAHEAD_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )

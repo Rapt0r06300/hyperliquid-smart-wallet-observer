@@ -7,6 +7,7 @@ from hl_observer.simulation.capital_accounting import (
     capital_concurrent_write_receipt,
     capital_conversion_receipt,
     capital_cutoff_receipt,
+    capital_done_receipt,
     capital_duplicate_receipt,
     capital_field_type_receipt,
     capital_fill_duplicate_receipt,
@@ -130,3 +131,13 @@ def test_hvr_0639_crash_before_commit_is_recoverable():
 def test_hvr_0640_concurrent_writes_are_unique():
     assert capital_concurrent_write_receipt(write_ids=["w1", "w2"])["status"] == "PROVEN"
     assert capital_concurrent_write_receipt(write_ids=["w1", "w1"])["status"] == "REJECTED"
+
+
+def test_hvr_0641_capital_done_requires_all_proven_gates():
+    checks = [
+        capital_required_field_receipt({"coin": "BTC"}, field="coin"),
+        capital_replay_receipt(outputs=[{"equity": 1000.0}, {"equity": 1000.0}]),
+        capital_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert capital_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert capital_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

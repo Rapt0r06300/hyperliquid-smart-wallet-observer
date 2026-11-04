@@ -7,7 +7,7 @@ import json
 import math
 import shutil
 import zipfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -451,6 +451,26 @@ def reader_lease_receipt(*, active_leases: Any, lease_token_present: bool) -> di
     return _reader_base("PROVEN" if valid else "REJECTED", verdict="READER_SINGLE_LEASE" if valid else "READER_SPLIT_BRAIN_RISK", fail_closed=not valid)
 
 
+def reader_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Close read-only reader review only when every local gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _reader_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="READER_DONE_COVERED" if valid else "READER_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 def reader_preflight_receipt(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return reader_safety_receipt(manifest)
 
@@ -498,5 +518,6 @@ __all__ = [
     "reader_zip_slip_receipt",
     "reader_expansion_receipt",
     "reader_lease_receipt",
+    "reader_done_receipt",
     "reader_preflight_receipt",
 ]

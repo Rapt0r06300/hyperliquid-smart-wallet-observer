@@ -18,6 +18,7 @@ from hl_observer.datasets.dataset_untrusted_guard import (
     dataset_size_receipt,
     dataset_symlink_receipt,
     dataset_unique_counts_receipt,
+    dataset_done_receipt,
     dataset_zip_slip_receipt,
     untrusted_provenance_receipt,
 )
@@ -118,3 +119,13 @@ def test_hvr_0320_publication():
 def test_dataset_contract_positive():
     manifest = {"dataset_id": "safe-1", "status": "SAFE", "manifest_sha256": "a" * 64, "replay_compatible": True, "publication_complete": True}
     assert dataset_contract_receipt(manifest)["status"] == "PROVEN"
+
+
+def test_hvr_0320_done_gate_requires_all_checks(tmp_path):
+    checks = [
+        untrusted_provenance_receipt(tmp_path),
+        dataset_contract_receipt({"dataset_id": "safe-1", "status": "SAFE", "manifest_sha256": "a" * 64, "replay_compatible": True, "publication_complete": True}),
+        dataset_publication_receipt(status="COMPLETE", manifest_committed=True, receipt_written=True),
+    ]
+    assert dataset_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert dataset_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

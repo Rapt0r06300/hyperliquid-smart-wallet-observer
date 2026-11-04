@@ -270,6 +270,24 @@ def marks_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, Any
     return _marks_base("PROVEN" if valid else "REJECTED", verdict="MARKS_WRITES_UNIQUE" if valid else "MARKS_DOUBLE_WRITE", fail_closed=not valid)
 
 
+def marks_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _marks_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="MARKS_DONE_COVERED" if valid else "MARKS_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "SCHEMA_VERSION", "mark_liquidatable", "marks_depuis_bbo",
     "marks_depuis_execution_truths", "couverture", "liquidatable_marks_report",
@@ -279,4 +297,5 @@ __all__ = [
     "marks_rejection_no_debit_receipt", "marks_partial_close_receipt", "marks_total_close_release_receipt",
     "marks_mark_liquidability_receipt", "marks_balance_receipt", "marks_funding_sign_receipt",
     "marks_conversion_receipt", "marks_commit_receipt", "marks_concurrent_write_receipt",
+    "marks_done_receipt",
 ]

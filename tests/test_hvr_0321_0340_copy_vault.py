@@ -19,6 +19,7 @@ from hl_observer.datasets.strategy_data_contracts import (
     strategy_symlink_receipt,
     strategy_unique_counts_receipt,
     strategy_zip_slip_receipt,
+    strategy_done_receipt,
 )
 
 
@@ -113,3 +114,13 @@ def test_hvr_0339_manifest():
 def test_hvr_0340_publication():
     assert strategy_publication_receipt(status="COMPLETE", manifest_committed=True, receipt_written=True)["status"] == "PROVEN"
     assert strategy_publication_receipt(status="PARTIAL", manifest_committed=False, receipt_written=False)["status"] == "REJECTED"
+
+
+def test_hvr_0340_done_gate_requires_all_checks():
+    checks = [
+        strategy_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        strategy_replay_receipt(outputs=[{"ready": True}, {"ready": True}]),
+        strategy_publication_receipt(status="COMPLETE", manifest_committed=True, receipt_written=True),
+    ]
+    assert strategy_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert strategy_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

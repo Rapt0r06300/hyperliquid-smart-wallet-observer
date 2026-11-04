@@ -62,8 +62,11 @@ PROTECTED_PATH_BATCH_SIZE = 128
 # fail closed through ``_can_defer_staged_protected`` below.
 DEFERRED_STAGED_PROTECTED_ROOTS = {
     "archive", "archives", "build", "catalog", "data", "datasets", "dist",
-    "logs", "runtime", "wheelhouse",
+    "logs", "wheelhouse",
 }
+SAFE_MAIN_PUSH_REFSPEC = (
+    "push", "--progress", "origin", "HEAD:refs/heads/main",
+)
 # A shallow checkout only needs enough history to prove a common ancestor
 # with the canonical main.  Fetching the entire repository can transfer
 # millions of objects even when the two tips diverged by a handful of
@@ -2362,8 +2365,7 @@ class Synchronizer:
         staged, tracked, untracked = self._inventory()
         snapshot = self.report.get("preflight")
         allow_protected_local = (
-            self.dry_run
-            or self._allow_protected_local_checkpoint
+            self._allow_protected_local_checkpoint
             or (
             isinstance(snapshot, dict)
             and snapshot.get("remote_head_fetched")
@@ -3621,7 +3623,8 @@ class Synchronizer:
             )
             self.report["push_attempts"] = int(self.report["push_attempts"]) + 1
             pushed = self.command(
-                "push", "--porcelain", "--progress", "origin", "HEAD:refs/heads/main",
+                SAFE_MAIN_PUSH_REFSPEC[0], "--porcelain",
+                *SAFE_MAIN_PUSH_REFSPEC[1:],
                 check=False,
             )
             if pushed.returncode == 0:

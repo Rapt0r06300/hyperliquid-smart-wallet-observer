@@ -19,6 +19,7 @@ from hl_observer.copy_vault.partial_close_ratio import (
     ratio_replay_receipt,
     ratio_required_field_receipt,
     ratio_retry_receipt,
+    ratio_done_receipt,
 )
 
 
@@ -105,3 +106,13 @@ def test_hvr_0259_close_remaining():
 def test_hvr_0260_leverage_and_concurrent():
     assert ratio_leverage_receipt(leverage=2.0)["status"] == "PROVEN"
     assert ratio_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True)["status"] == "PROVEN"
+
+
+def test_hvr_0260_done_gate_requires_all_checks():
+    checks = [
+        ratio_contract_receipt({"wallet": "w", "reduced_quantity": 3.0, "leader_position_before": 10.0, "event_ts_ms": 10, "receive_ts_ms": 11}),
+        ratio_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        ratio_concurrent_add_close_receipt(actions=["ADD", "CLOSE"], ordered=True),
+    ]
+    assert ratio_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert ratio_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

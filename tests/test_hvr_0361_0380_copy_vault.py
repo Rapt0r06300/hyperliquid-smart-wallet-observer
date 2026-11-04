@@ -5,6 +5,7 @@ from hl_observer.datasets.streaming_materializer import (
     materialization_age_receipt,
     materialization_compression_receipt,
     materialization_cutoff_receipt,
+    materialization_done_receipt,
     materialization_duplicate_receipt,
     materialization_field_type_receipt,
     materialization_finite_receipt,
@@ -132,3 +133,17 @@ def test_hvr_0379_manifest_is_compatible():
 def test_hvr_0380_publication_requires_manifest_and_receipt():
     assert materialization_publication_receipt(status="COMPLETE", manifest_committed=True, receipt_written=True)["status"] == "PROVEN"
     assert materialization_publication_receipt(status="PARTIAL", manifest_committed=False, receipt_written=False)["status"] == "REJECTED"
+
+
+def test_hvr_0381_materialization_done_requires_all_proven_gates():
+    checks = [
+        materialization_required_field_receipt({"sha256": "a"}, field="sha256"),
+        materialization_replay_receipt(outputs=[{"count": 1}, {"count": 1}]),
+        materialization_publication_receipt(
+            status="COMPLETE",
+            manifest_committed=True,
+            receipt_written=True,
+        ),
+    ]
+    assert materialization_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert materialization_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

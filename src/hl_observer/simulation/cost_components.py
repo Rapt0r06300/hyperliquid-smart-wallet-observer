@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
 from typing import Any, Sequence
 
 from hl_observer.simulation.scoreboard_metrics import costs_bps as _sommer_couts
@@ -217,4 +218,175 @@ __all__ = [
     "SCHEMA_VERSION", "DEFAULT_MAX_OBSERVATION_AGE_MS", "CostComponents",
     "spread_bps", "slippage_bps", "latency_bps",
     "decompose_execution", "depuis_carnet_causal", "mark_mid_cost_receipt",
+]
+
+
+def _cost_base(status: str, **values: Any) -> dict[str, Any]:
+    """Return a non-promoting, paper-only cost-control receipt."""
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _cost_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _cost_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def cost_components_safety_receipt(result: Any) -> dict[str, Any]:
+    """Validate the cost decomposition envelope without certifying a trading edge."""
+    required = ("fees_bps", "spread_bps", "slippage_bps", "latency_bps", "total_bps", "unmeasured")
+    component_names = required[:-1]
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("schema_version") == SCHEMA_VERSION
+        and all(key in result for key in required)
+        and isinstance(result.get("unmeasured"), list)
+        and result.get("paper_only") is True
+        and result.get("real_execution") is False
+    )
+    if valid:
+        unmeasured = set(result["unmeasured"])
+        valid = (
+            unmeasured <= set(required)
+            and all(
+                value is None or _cost_finite(value)
+                for value in (result[name] for name in component_names)
+            )
+            and all(
+                (result[name] is None) == (name in unmeasured)
+                for name in component_names
+            )
+            and ((result["total_bps"] is None) == ("total_bps" in unmeasured))
+        )
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_COMPONENTS_SAFE" if valid else "COST_COMPONENTS_UNSAFE", fail_closed=not valid)
+
+
+def runtime_parity_to_cost_boundary_receipt(
+    runtime_parity_result: Any,
+    cost_result: Any,
+) -> dict[str, Any]:
+    """Join runtime/replay parity with causal cost controls without certifying PnL."""
+    parity_valid = False
+    if runtime_parity_result is not None:
+        from hl_observer.backtest.runtime_parity import runtime_parity_safety_receipt
+
+        parity_valid = runtime_parity_safety_receipt(runtime_parity_result).get("status") == "PROVEN"
+    cost_valid = cost_components_safety_receipt(cost_result).get("status") == "PROVEN"
+    valid = parity_valid and cost_valid
+    return _cost_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="RUNTIME_PARITY_TO_COST_BOUNDARY_SAFE" if valid else "RUNTIME_PARITY_TO_COST_BOUNDARY_UNSAFE",
+        parity_status="PROVEN" if parity_valid else "REJECTED",
+        cost_status="PROVEN" if cost_valid else "REJECTED",
+        fail_closed=not valid,
+    )
+
+
+def cost_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_FIELD_PRESENT" if valid else "COST_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def cost_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_FIELD_NON_NULL" if valid else "COST_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def cost_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_FIELD_TYPE_VALID" if valid else "COST_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def cost_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _cost_finite(value)
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_VALUE_FINITE" if valid else "COST_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def cost_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _cost_integer(event_ts_ms) and _cost_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_EVENT_WITHIN_CUTOFF" if valid else "COST_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def cost_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _cost_integer(event_ts_ms) and _cost_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_EVENT_AGE_VALID" if valid else "COST_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def cost_duplicate_receipt(*, event_ids: Iterable[Any]) -> dict[str, Any]:
+    values = list(event_ids)
+    valid = bool(values) and all(str(value).strip() for value in values) and len(values) == len(set(values))
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_EVENTS_UNIQUE" if valid else "COST_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def cost_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _cost_integer(attempts) and _cost_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_RETRY_BOUNDED" if valid else "COST_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def cost_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_REPLAY_DETERMINISTIC" if valid else "COST_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def cost_partition_receipt(*, train_ids: Sequence[Any], oos_ids: Sequence[Any], forward_ids: Sequence[Any]) -> dict[str, Any]:
+    train, oos, forward = set(train_ids), set(oos_ids), set(forward_ids)
+    valid = bool(train) and bool(oos) and bool(forward) and not (train & oos or train & forward or oos & forward)
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_PARTITIONS_DISJOINT" if valid else "COST_PARTITIONS_OVERLAP", fail_closed=not valid)
+
+
+def cost_holdout_receipt(*, tuned_on_holdout: bool, holdout_locked: bool) -> dict[str, Any]:
+    valid = tuned_on_holdout is False and holdout_locked is True
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_HOLDOUT_LOCKED" if valid else "COST_HOLDOUT_CONTAMINATED", fail_closed=not valid)
+
+
+def cost_embargo_receipt(*, gap_ms: Any, required_gap_ms: Any) -> dict[str, Any]:
+    valid = _cost_integer(gap_ms) and _cost_integer(required_gap_ms) and gap_ms >= 0 and gap_ms >= required_gap_ms
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_EMBARGO_SUFFICIENT" if valid else "COST_EMBARGO_INSUFFICIENT", fail_closed=not valid)
+
+
+def cost_trials_receipt(*, trials: Any, recorded_trials: Any) -> dict[str, Any]:
+    valid = _cost_integer(trials) and _cost_integer(recorded_trials) and trials > 0 and recorded_trials == trials
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_TRIALS_RECORDED" if valid else "COST_TRIALS_MISSING", fail_closed=not valid)
+
+
+def cost_effect_size_receipt(*, trade_count: Any, gain: Any, minimum_trades: Any = 2) -> dict[str, Any]:
+    valid = _cost_integer(trade_count) and _cost_integer(minimum_trades) and _cost_finite(gain) and trade_count >= minimum_trades
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_EFFECT_NOT_SINGLE_TRADE" if valid else "COST_EFFECT_UNDERPOWERED", fail_closed=not valid)
+
+
+def cost_wallet_independence_receipt(*, wallet_ids: Sequence[Any], max_correlation: Any) -> dict[str, Any]:
+    valid = bool(wallet_ids) and len(wallet_ids) == len(set(wallet_ids)) and _cost_finite(max_correlation) and 0 <= float(max_correlation) < 1
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_WALLETS_INDEPENDENT" if valid else "COST_WALLETS_CORRELATED", fail_closed=not valid)
+
+
+def cost_hash_receipt(*, code_sha_before: Any, code_sha_after: Any, data_sha_before: Any, data_sha_after: Any) -> dict[str, Any]:
+    valid = all(isinstance(value, str) and bool(value.strip()) for value in (code_sha_before, code_sha_after, data_sha_before, data_sha_after)) and code_sha_before == code_sha_after and data_sha_before == data_sha_after
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_HASHES_UNCHANGED" if valid else "COST_HASHES_CHANGED", fail_closed=not valid)
+
+
+def cost_forward_cutoff_receipt(*, forward_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _cost_integer(forward_ts_ms) and _cost_integer(cutoff_ts_ms) and forward_ts_ms > cutoff_ts_ms
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_FORWARD_AFTER_CUTOFF" if valid else "COST_FORWARD_BEFORE_CUTOFF", fail_closed=not valid)
+
+
+def cost_pessimistic_edge_receipt(*, gross_edge: Any, slippage: Any, fees: Any) -> dict[str, Any]:
+    gross = float(gross_edge) if _cost_finite(gross_edge) else None
+    slip = float(slippage) if _cost_finite(slippage) else None
+    fee = float(fees) if _cost_finite(fees) else None
+    valid = gross is not None and slip is not None and fee is not None and gross - slip - fee > 0
+    return _cost_base("PROVEN" if valid else "REJECTED", verdict="COST_EDGE_SURVIVES_COSTS" if valid else "COST_EDGE_ERASED_BY_COSTS", fail_closed=not valid)
+
+
+__all__ += [
+    "cost_components_safety_receipt", "cost_required_field_receipt", "cost_null_field_receipt",
+    "cost_field_type_receipt", "cost_finite_receipt", "cost_cutoff_receipt", "cost_age_receipt",
+    "cost_duplicate_receipt", "cost_retry_receipt", "cost_replay_receipt", "cost_partition_receipt",
+    "cost_holdout_receipt", "cost_embargo_receipt", "cost_trials_receipt", "cost_effect_size_receipt",
+    "cost_wallet_independence_receipt", "cost_hash_receipt", "cost_forward_cutoff_receipt",
+    "cost_pessimistic_edge_receipt",
 ]

@@ -15,6 +15,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -236,6 +237,26 @@ def sync_clone_expansion_receipt(*, observed_bytes: object, max_bytes: object, c
 def sync_clone_lease_receipt(*, active_leases: object, lease_token_present: bool) -> dict[str, object]:
     valid = _sync_integer(active_leases) and active_leases == 1 and lease_token_present is True
     return _sync_base("PROVEN" if valid else "REJECTED", verdict="SYNC_CLONE_SINGLE_LEASE" if valid else "SYNC_CLONE_SPLIT_BRAIN_RISK", fail_closed=not valid)
+
+
+def sync_clone_done_receipt(*, checks: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Close clone review only when every local safety gate is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _sync_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="SYNC_CLONE_DONE_COVERED" if valid else "SYNC_CLONE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
 
 
 def sync_clone_preflight_receipt(state: dict[str, object]) -> dict[str, object]:

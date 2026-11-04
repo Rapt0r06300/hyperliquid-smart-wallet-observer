@@ -153,6 +153,11 @@ def exposure_concurrent_add_close_receipt(*, actions: Sequence[Any], ordered: bo
     return _base("PROVEN" if valid else "REJECTED", verdict="ADD_CLOSE_ORDERED" if valid else "ADD_CLOSE_CONCURRENT_UNSAFE", fail_closed=not valid)
 
 
+def exposure_done_receipt(*, status: Any, coverage_status: Any, proof_ids: Sequence[Any], replay_verified: bool) -> dict[str, Any]:
+    valid = status == "PROVEN" and coverage_status == "PROVEN" and bool(proof_ids) and replay_verified is True
+    return _base("PROVEN" if valid else "REJECTED", verdict="EXPOSURE_DONE_COVERED" if valid else "EXPOSURE_DONE_UNPROVEN", fail_closed=not valid)
+
+
 __all__ = [
     "reconcilier", "UNMEASURABLE", "exposure_contract_receipt", "exposure_required_field_receipt",
     "exposure_field_type_receipt", "exposure_finite_receipt", "exposure_cutoff_receipt",
@@ -161,4 +166,5 @@ __all__ = [
     "exposure_add_without_position_receipt", "exposure_reduce_without_position_receipt",
     "exposure_close_without_position_receipt", "exposure_flip_receipt", "exposure_reduce_only_receipt",
     "exposure_close_remaining_receipt", "exposure_leverage_receipt", "exposure_concurrent_add_close_receipt",
+    "exposure_done_receipt",
 ]

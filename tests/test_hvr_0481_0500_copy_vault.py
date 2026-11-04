@@ -2,6 +2,7 @@ from tools.sync_complete_clone import (
     sync_clone_age_receipt,
     sync_clone_content_range_receipt,
     sync_clone_cutoff_receipt,
+    sync_clone_done_receipt,
     sync_clone_disk_space_receipt,
     sync_clone_duplicate_receipt,
     sync_clone_etag_receipt,
@@ -129,3 +130,13 @@ def test_hvr_0500_unsafe_state_is_fail_closed():
     state = _state()
     state["branch"] = "codex/research"
     assert sync_clone_preflight_receipt(state)["status"] == "REJECTED"
+
+
+def test_hvr_0501_sync_clone_done_requires_all_proven_gates():
+    checks = [
+        sync_clone_required_field_receipt({"branch": "main"}, field="branch"),
+        sync_clone_replay_receipt(outputs=[{"head": "a"}, {"head": "a"}]),
+        sync_clone_lease_receipt(active_leases=1, lease_token_present=True),
+    ]
+    assert sync_clone_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert sync_clone_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

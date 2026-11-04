@@ -5,6 +5,7 @@ from hl_observer.simulation.accounting_truth import (
     accounting_concurrent_write_receipt,
     accounting_conversion_receipt,
     accounting_cutoff_receipt,
+    accounting_done_receipt,
     accounting_duplicate_receipt,
     accounting_field_type_receipt,
     accounting_fill_duplicate_receipt,
@@ -120,3 +121,13 @@ def test_hvr_0619_crash_before_commit_is_recoverable():
 def test_hvr_0620_concurrent_writes_are_unique():
     assert accounting_concurrent_write_receipt(write_ids=["w1", "w2"])["status"] == "PROVEN"
     assert accounting_concurrent_write_receipt(write_ids=["w1", "w1"])["status"] == "REJECTED"
+
+
+def test_hvr_0621_accounting_done_requires_all_proven_gates():
+    checks = [
+        accounting_required_field_receipt({"coin": "BTC"}, field="coin"),
+        accounting_replay_receipt(outputs=[{"equity": 100.0}, {"equity": 100.0}]),
+        accounting_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert accounting_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert accounting_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

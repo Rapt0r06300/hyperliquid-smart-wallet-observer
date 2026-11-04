@@ -6,6 +6,7 @@ from hl_observer.simulation.paper_ledger import (
     ledger_concurrent_write_receipt,
     ledger_conversion_receipt,
     ledger_cutoff_receipt,
+    ledger_done_receipt,
     ledger_duplicate_receipt,
     ledger_field_type_receipt,
     ledger_fill_duplicate_receipt,
@@ -121,3 +122,13 @@ def test_hvr_0659_crash_before_commit_is_recoverable():
 def test_hvr_0660_concurrent_writes_are_unique():
     assert ledger_concurrent_write_receipt(write_ids=["w1", "w2"])["status"] == "PROVEN"
     assert ledger_concurrent_write_receipt(write_ids=["w1", "w1"])["status"] == "REJECTED"
+
+
+def test_hvr_0661_ledger_done_requires_all_proven_gates():
+    checks = [
+        ledger_required_field_receipt({"coin": "BTC"}, field="coin"),
+        ledger_replay_receipt(outputs=[{"equity": 1000.0}, {"equity": 1000.0}]),
+        ledger_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert ledger_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert ledger_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

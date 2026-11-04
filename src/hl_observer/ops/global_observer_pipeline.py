@@ -51,6 +51,27 @@ FRACTION_HORIZON_MAX = 0.25
 CADENCES_TOLEREES = 1.0
 
 
+def observer_scope_safety_receipt(result: object) -> dict[str, object]:
+    """Validate Copy-Vault observer output without promoting a wallet or signal."""
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("strategy_family") == "Copy-Vault"
+        and result.get("paper_only") is True
+        and result.get("read_only") is True
+        and result.get("real_execution") is False
+        and result.get("promotion") is False
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "OBSERVER_SCOPE_SAFE" if valid else "OBSERVER_SCOPE_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "promotion": False,
+        "mutation": False,
+        "fail_closed": not valid,
+    }
+
+
 def tolerance_pour(horizon_ms: float, cadence_ms: float | None) -> float | None:
     """Tolérance temporelle admissible pour un horizon donné. `None` si la cadence l'interdit.
 

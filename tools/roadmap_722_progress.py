@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -126,6 +127,12 @@ def format_progress(result: dict) -> str:
 
 
 def main() -> int:
+    # Windows commonly starts Python with a CP1252 console.  The deterministic
+    # human-readable report intentionally contains Unicode progress markers;
+    # reconfigure only this process' stdout so export/CI subprocesses never
+    # fail after the audit itself has completed.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roadmap", type=Path, default=DEFAULT_ROADMAP)
     parser.add_argument("--json", action="store_true", help="Emit structured metrics")

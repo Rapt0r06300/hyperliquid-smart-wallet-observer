@@ -20,6 +20,7 @@ from hl_observer.datasets.replay_coverage import (
     coverage_symlink_receipt,
     coverage_unique_counts_receipt,
     coverage_zip_slip_receipt,
+    coverage_done_receipt,
     safe_coverage_receipt,
 )
 
@@ -123,3 +124,13 @@ def test_hvr_0360_publication():
 def test_coverage_contract_positive():
     row = {"quality_status": "SAFE", "validation_allowed": True, "asset_verified": True, "dataset_id": "d1", "symbol": "BTC", "start_ts_ms": 10, "end_ts_ms": 20, "event_count": 2}
     assert coverage_contract_receipt(row)["status"] == "PROVEN"
+
+
+def test_hvr_0360_done_gate_requires_all_checks():
+    checks = [
+        coverage_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        coverage_replay_receipt(outputs=[{"safe": True}, {"safe": True}]),
+        coverage_publication_receipt(status="COMPLETE", manifest_committed=True, receipt_written=True),
+    ]
+    assert coverage_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert coverage_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

@@ -4,9 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import secrets
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -508,3 +509,199 @@ def select_due_campaigns(
             if rows:
                 ordered.append(rows.pop(0))
     return ordered
+
+
+def _campaign_base(status: str, **values: Any) -> dict[str, Any]:
+    """Return paper/read-only campaign evidence without changing a manifest."""
+    return {"status": status, "paper_read_only": True, "real_execution": False, "manifest_mutation": False, "closure_allowed": False, **values}
+
+
+def _campaign_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _campaign_finite(value: Any) -> bool:
+    try:
+        return not isinstance(value, bool) and math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _campaign_sha(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def campaign_state_safety_receipt(manifest: Any) -> dict[str, Any]:
+    try:
+        candidate = manifest if isinstance(manifest, CampaignManifest) else CampaignManifest.from_dict(manifest)
+        validate_manifest(candidate)
+    except (TypeError, ValueError):
+        return _campaign_base("REJECTED", verdict="CAMPAIGN_MANIFEST_INVALID", fail_closed=True)
+    return _campaign_base("PROVEN", verdict="CAMPAIGN_MANIFEST_VALID", campaign_id=candidate.campaign_id, status_value=candidate.status, fail_closed=False)
+
+
+def scoreboard_to_resumable_boundary_receipt(scoreboard_result: Any, campaign_manifest: Any) -> dict[str, Any]:
+    """Admit scoreboard evidence to a resumable campaign without promoting it."""
+    from hl_observer.simulation.scoreboard_promotion import scoreboard_promotion_safety_receipt
+
+    scoreboard = scoreboard_promotion_safety_receipt(scoreboard_result)
+    campaign = campaign_state_safety_receipt(campaign_manifest)
+    valid = (
+        scoreboard.get("status") == "PROVEN"
+        and scoreboard.get("paper_read_only") is True
+        and scoreboard.get("real_execution") is False
+        and scoreboard.get("promotion") == "DISABLED_UNTIL_REVIEW"
+        and scoreboard.get("fail_closed") is False
+        and campaign.get("status") == "PROVEN"
+        and campaign.get("paper_read_only") is True
+        and campaign.get("real_execution") is False
+        and campaign.get("manifest_mutation") is False
+        and campaign.get("fail_closed") is False
+    )
+    return _campaign_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="SCOREBOARD_CAMPAIGN_BOUNDARY_SAFE" if valid else "SCOREBOARD_CAMPAIGN_BOUNDARY_REJECTED",
+        scoreboard_status=scoreboard.get("status"),
+        campaign_status=campaign.get("status"),
+        promotion_disabled=True,
+        phase_mutation=False,
+        fail_closed=not valid,
+    )
+
+
+def native_venue_to_campaign_boundary_receipt(
+    venue_result: Any,
+    campaign_manifest: Any,
+) -> dict[str, Any]:
+    """Admit Bybit public capabilities to a resumable paper campaign."""
+    from hl_observer.venues.bybit import venue_capability_safety_receipt
+
+    venue = venue_capability_safety_receipt(venue_result)
+    campaign = campaign_state_safety_receipt(campaign_manifest)
+    valid = (
+        venue.get("status") == "PROVEN"
+        and venue.get("paper_read_only") is True
+        and venue.get("real_execution") is False
+        and venue.get("network_execution") is False
+        and campaign.get("status") == "PROVEN"
+        and campaign.get("paper_read_only") is True
+        and campaign.get("real_execution") is False
+        and campaign.get("manifest_mutation") is False
+        and campaign.get("fail_closed") is False
+    )
+    return _campaign_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="NATIVE_VENUE_CAMPAIGN_BOUNDARY_SAFE" if valid else "NATIVE_VENUE_CAMPAIGN_BOUNDARY_REJECTED",
+        venue_status=venue.get("status"),
+        campaign_status=campaign.get("status"),
+        network_execution=False,
+        manifest_mutation=False,
+        promotion_disabled=True,
+        fail_closed=not valid,
+    )
+
+
+def campaign_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and field in row and row[field] not in (None, "")
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_FIELD_PRESENT" if valid else "CAMPAIGN_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def campaign_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and field in row and row[field] is not None
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_FIELD_NON_NULL" if valid else "CAMPAIGN_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def campaign_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    value = row.get(field) if isinstance(row, Mapping) else None
+    bool_is_int = expected_type is int and isinstance(value, bool)
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and isinstance(expected_type, type) and isinstance(value, expected_type) and not bool_is_int
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_FIELD_TYPE_VALID" if valid else "CAMPAIGN_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def campaign_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _campaign_finite(value)
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_VALUE_FINITE" if valid else "CAMPAIGN_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def campaign_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _campaign_integer(event_ts_ms) and _campaign_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_EVENT_WITHIN_CUTOFF" if valid else "CAMPAIGN_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def campaign_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _campaign_integer(event_ts_ms) and _campaign_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_EVENT_AGE_VALID" if valid else "CAMPAIGN_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def campaign_duplicate_receipt(*, event_ids: Iterable[Any]) -> dict[str, Any]:
+    values = list(event_ids)
+    valid = bool(values) and all(isinstance(value, str) and value.strip() for value in values) and len(values) == len(set(values))
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_EVENTS_UNIQUE" if valid else "CAMPAIGN_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def campaign_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _campaign_integer(attempts) and _campaign_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_RETRY_BOUNDED" if valid else "CAMPAIGN_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def campaign_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    values = list(outputs)
+    valid = bool(values) and len({canonical_json(value) for value in values}) == 1
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_REPLAY_DETERMINISTIC" if valid else "CAMPAIGN_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def campaign_stage_order_receipt(*, creation_phase: Any, analysis_stage: Any, drained: bool) -> dict[str, Any]:
+    valid = creation_phase == "ANALYZE" and analysis_stage in set(ANALYSIS_STAGE_BY_KIND.values()) and drained is True
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_STAGE_AFTER_DRAIN" if valid else "CAMPAIGN_STAGE_BEFORE_DRAIN", fail_closed=not valid)
+
+
+def campaign_collect_authorization_receipt(*, kind: Any, automatic: bool, authorized: bool) -> dict[str, Any]:
+    valid = kind in COLLECT_CAMPAIGN_KINDS and isinstance(automatic, bool) and ((automatic is False and authorized is False) or (automatic is True and authorized is True))
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_COLLECT_AUTHORIZED" if valid else "CAMPAIGN_COLLECT_UNAUTHORIZED", fail_closed=not valid)
+
+
+def campaign_request_replay_receipt(*, request_ids: Sequence[Any], accepted_request_ids: Sequence[Any]) -> dict[str, Any]:
+    requests = list(request_ids)
+    accepted = list(accepted_request_ids)
+    valid = bool(requests) and len(requests) == len(set(requests)) and len(accepted) == len(set(accepted)) and set(accepted).issubset(requests)
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_REQUESTS_IDEMPOTENT" if valid else "CAMPAIGN_REQUEST_REPLAYED", fail_closed=not valid)
+
+
+def campaign_epoch_receipt(*, observed_epoch: Any, current_epoch: Any) -> dict[str, Any]:
+    valid = _campaign_integer(observed_epoch) and _campaign_integer(current_epoch) and observed_epoch == current_epoch
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_EPOCH_CURRENT" if valid else "CAMPAIGN_EPOCH_STALE", fail_closed=not valid)
+
+
+def campaign_hash_receipt(*, expected_sha: Any, actual_sha: Any) -> dict[str, Any]:
+    valid = _campaign_sha(expected_sha) and _campaign_sha(actual_sha) and expected_sha == actual_sha
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_SHA_MATCH" if valid else "CAMPAIGN_SHA_MISMATCH", fail_closed=not valid)
+
+
+def campaign_lease_receipt(*, worker_id: Any, lease_owner: Any, lease_expires_at_ms: Any, now_ms: Any) -> dict[str, Any]:
+    valid = isinstance(worker_id, str) and bool(worker_id.strip()) and worker_id == lease_owner and _campaign_integer(lease_expires_at_ms) and _campaign_integer(now_ms) and now_ms < lease_expires_at_ms
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_LEASE_ACTIVE" if valid else "CAMPAIGN_LEASE_EXPIRED_OR_MISMATCHED", fail_closed=not valid)
+
+
+def campaign_single_owner_receipt(*, owner_ids: Sequence[Any]) -> dict[str, Any]:
+    owners = list(owner_ids)
+    valid = len(owners) == 1 and isinstance(owners[0], str) and bool(owners[0].strip())
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_SINGLE_OWNER" if valid else "CAMPAIGN_SPLIT_BRAIN", fail_closed=not valid)
+
+
+def campaign_checkpoint_receipt(*, checkpoint: Mapping[str, Any], required_fields: Sequence[str]) -> dict[str, Any]:
+    required = list(required_fields)
+    valid = isinstance(checkpoint, Mapping) and bool(required) and all(isinstance(field, str) and checkpoint.get(field) not in (None, "") for field in required) and checkpoint.get("saved") is True
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_CHECKPOINT_COMPLETE" if valid else "CAMPAIGN_CHECKPOINT_PARTIAL", fail_closed=not valid)
+
+
+def campaign_runner_receipt(*, runner_label: Any) -> dict[str, Any]:
+    normalized = runner_label.strip().lower() if isinstance(runner_label, str) else ""
+    valid = bool(normalized) and "self-hosted" not in normalized and "self_hosted" not in normalized and "localhost" not in normalized and normalized in {"ubuntu-latest", "windows-latest", "macos-latest", "github-hosted"}
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_GITHUB_HOSTED" if valid else "CAMPAIGN_RUNNER_FORBIDDEN", fail_closed=not valid)
+
+
+def campaign_done_coverage_receipt(*, status: Any, coverage_status: Any, required_proofs: Sequence[Any], completed_proofs: Sequence[Any]) -> dict[str, Any]:
+    required = set(required_proofs)
+    completed = set(completed_proofs)
+    valid = status == "COMPLETE" and coverage_status == "PROVEN" and bool(required) and required.issubset(completed)
+    return _campaign_base("PROVEN" if valid else "REJECTED", verdict="CAMPAIGN_DONE_COVERAGE_COMPLETE" if valid else "CAMPAIGN_DONE_WITHOUT_COVERAGE", fail_closed=not valid)

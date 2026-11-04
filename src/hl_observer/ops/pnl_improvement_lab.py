@@ -1800,6 +1800,82 @@ def build_lab_report(
     }
 
 
+def pnl_lab_safety_receipt(report: object) -> dict[str, object]:
+    """Validate the PnL lab boundary without promoting an economic result.
+
+    The lab can prove provenance and execution isolation, but a local
+    historical report is not a profit certificate.  The economic verdict is
+    therefore intentionally kept ``UNMEASURABLE`` by this boundary receipt.
+    """
+    valid = (
+        isinstance(report, Mapping)
+        and report.get("local_historical_data_only") is True
+        and report.get("network_used") is False
+        and report.get("real_execution") is False
+        and report.get("automatic_activation") is False
+        and isinstance(report.get("truth"), Mapping)
+        and isinstance(report.get("temporal_validation"), Mapping)
+        and isinstance(report.get("experiment_backlog"), list)
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "PNL_LAB_PAPER_ONLY" if valid else "PNL_LAB_UNSAFE",
+        "economic_verdict": "UNMEASURABLE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "automatic_activation": False,
+        "promotion": False,
+        "fail_closed": not valid,
+    }
+
+
+def pnl_research_governance_receipt(result: object) -> dict[str, object]:
+    """Validate immutable research governance without proving a gain."""
+    snapshot = result.get("snapshot") if isinstance(result, Mapping) else None
+    dataset_hash = snapshot.get("dataset_sha256") if isinstance(snapshot, Mapping) else None
+    hash_valid = (
+        isinstance(dataset_hash, str)
+        and len(dataset_hash) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in dataset_hash)
+    )
+    trial_count = snapshot.get("trial_count") if isinstance(snapshot, Mapping) else None
+    seed = snapshot.get("seed") if isinstance(snapshot, Mapping) else None
+    costs = snapshot.get("costs") if isinstance(snapshot, Mapping) else None
+    valid = (
+        isinstance(result, Mapping)
+        and result.get("strategy_family") == "Copy-Vault"
+        and result.get("promotion") is False
+        and result.get("financial_target") is None
+        and result.get("champions_append_only") is True
+        and result.get("challenger_count", 0) >= 4
+        and result.get("oos_reused_for_tuning") is False
+        and result.get("cpu_first") is True
+        and result.get("safe_replay") is True
+        and result.get("launcher_audit") is True
+        and result.get("receipt_complete") is True
+        and isinstance(snapshot, Mapping)
+        and snapshot.get("status") in {"FREEZE_EXPLORATORY", "CHAMPION_VERIFIED"}
+        and hash_valid
+        and isinstance(snapshot.get("window"), str)
+        and bool(snapshot.get("window"))
+        and isinstance(seed, int)
+        and not isinstance(seed, bool)
+        and isinstance(trial_count, int)
+        and not isinstance(trial_count, bool)
+        and trial_count >= 0
+        and isinstance(costs, Mapping)
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "PNL_RESEARCH_GOVERNED" if valid else "PNL_RESEARCH_UNSAFE",
+        "paper_read_only": True,
+        "real_execution": False,
+        "economic_verdict": "UNMEASURABLE",
+        "promotion": False,
+        "fail_closed": not valid,
+    }
+
+
 def _markdown_metrics(metrics: dict[str, Any]) -> str:
     pf = metrics.get("profit_factor_actual")
     pf_text = "indisponible" if pf is None else f"{float(pf):.3f}"
@@ -2130,6 +2206,8 @@ __all__ = [
     "learn_train_only_markout_filter",
     "rank_correction_bottlenecks",
     "main",
+    "pnl_lab_safety_receipt",
+    "pnl_research_governance_receipt",
     "rule_matches",
     "write_lab_outputs",
 ]

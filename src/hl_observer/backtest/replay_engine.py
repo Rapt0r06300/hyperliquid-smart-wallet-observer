@@ -140,6 +140,24 @@ def engine_concurrent_write_receipt(*, write_ids: Sequence[Any]) -> dict[str, An
     return _engine_base("PROVEN" if valid else "REJECTED", verdict="ENGINE_WRITES_UNIQUE" if valid else "ENGINE_DOUBLE_WRITE", fail_closed=not valid)
 
 
+def engine_done_receipt(*, checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    valid = bool(checks) and all(
+        isinstance(check, Mapping)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return _engine_base(
+        "PROVEN" if valid else "REJECTED",
+        verdict="ENGINE_DONE_COVERED" if valid else "ENGINE_DONE_INCOMPLETE",
+        check_count=len(checks) if isinstance(checks, Sequence) else 0,
+        fail_closed=not valid,
+    )
+
+
 __all__ = [
     "replay_events", "replay_engine_safety_receipt", "engine_required_field_receipt",
     "engine_null_field_receipt", "engine_field_type_receipt", "engine_finite_receipt",
@@ -149,4 +167,5 @@ __all__ = [
     "engine_total_close_release_receipt", "engine_mark_liquidability_receipt",
     "engine_balance_receipt", "engine_funding_sign_receipt", "engine_conversion_receipt",
     "engine_commit_receipt", "engine_concurrent_write_receipt",
+    "engine_done_receipt",
 ]

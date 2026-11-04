@@ -2,6 +2,7 @@ from hl_observer.datasets.v2_pipeline import (
     pipeline_age_receipt,
     pipeline_compression_receipt,
     pipeline_cutoff_receipt,
+    pipeline_done_receipt,
     pipeline_duplicate_receipt,
     pipeline_field_type_receipt,
     pipeline_finite_receipt,
@@ -153,3 +154,17 @@ def test_hvr_0399_manifest_is_compatible():
 def test_hvr_0400_publication_requires_manifest_and_receipt():
     assert pipeline_publication_receipt(status="COMPLETE", manifest_committed=True, receipt_written=True)["status"] == "PROVEN"
     assert pipeline_publication_receipt(status="PARTIAL", manifest_committed=False, receipt_written=False)["status"] == "REJECTED"
+
+
+def test_hvr_0401_pipeline_done_requires_all_proven_gates():
+    checks = [
+        pipeline_required_field_receipt({"sha256": "a"}, field="sha256"),
+        pipeline_replay_receipt(outputs=[{"count": 1}, {"count": 1}]),
+        pipeline_publication_receipt(
+            status="COMPLETE",
+            manifest_committed=True,
+            receipt_written=True,
+        ),
+    ]
+    assert pipeline_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert pipeline_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"

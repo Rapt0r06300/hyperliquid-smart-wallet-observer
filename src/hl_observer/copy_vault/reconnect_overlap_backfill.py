@@ -116,4 +116,26 @@ def reconnect_heartbeat_receipt(*, previous_ts_ms: Any, current_ts_ms: Any, max_
     return {"status": "PROVEN" if valid else "REJECTED", "verdict": "RECONNECT_HEARTBEAT_CONTINUOUS" if valid else "RECONNECT_HEARTBEAT_GAP", "paper_read_only": True, "real_execution": False, "fail_closed": not valid}
 
 
-__all__ = ["fenetre_backfill", "UNMEASURABLE", "reconnect_contract_receipt", "reconnect_required_field_receipt", "reconnect_finite_receipt", "reconnect_cutoff_receipt", "reconnect_age_receipt", "reconnect_duplicate_receipt", "reconnect_retry_receipt", "reconnect_replay_receipt", "reconnect_rest_ws_receipt", "reconnect_timestamp_identity_receipt", "reconnect_tid_receipt", "reconnect_hash_receipt", "reconnect_close_open_receipt", "reconnect_wallet_receipt", "reconnect_side_receipt", "reconnect_overlap_receipt", "reconnect_position_receipt", "reconnect_heartbeat_receipt"]
+def reconnect_done_receipt(*, checks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Close reconnect/backfill only when every local safety check is proven."""
+
+    valid = bool(checks) and all(
+        isinstance(check, dict)
+        and check.get("status") == "PROVEN"
+        and check.get("paper_read_only") is True
+        and check.get("real_execution") is False
+        and check.get("fail_closed") is False
+        and bool(str(check.get("verdict") or "").strip())
+        for check in checks
+    )
+    return {
+        "status": "PROVEN" if valid else "REJECTED",
+        "verdict": "RECONNECT_DONE_COVERED" if valid else "RECONNECT_DONE_INCOMPLETE",
+        "check_count": len(checks) if isinstance(checks, list) else 0,
+        "paper_read_only": True,
+        "real_execution": False,
+        "fail_closed": not valid,
+    }
+
+
+__all__ = ["fenetre_backfill", "UNMEASURABLE", "reconnect_contract_receipt", "reconnect_required_field_receipt", "reconnect_finite_receipt", "reconnect_cutoff_receipt", "reconnect_age_receipt", "reconnect_duplicate_receipt", "reconnect_retry_receipt", "reconnect_replay_receipt", "reconnect_rest_ws_receipt", "reconnect_timestamp_identity_receipt", "reconnect_tid_receipt", "reconnect_hash_receipt", "reconnect_close_open_receipt", "reconnect_wallet_receipt", "reconnect_side_receipt", "reconnect_overlap_receipt", "reconnect_position_receipt", "reconnect_heartbeat_receipt", "reconnect_done_receipt"]

@@ -20,6 +20,7 @@ from hl_observer.copy_vault.leader_state_versioning import (
     leader_tid_receipt,
     leader_timestamp_identity_receipt,
     leader_wallet_receipt,
+    leader_done_receipt,
 )
 
 
@@ -116,3 +117,13 @@ def test_leader_contract_positive():
         "event_ts_ms": 10, "receive_ts_ms": 11,
     }
     assert leader_contract_receipt(row)["status"] == "PROVEN"
+
+
+def test_leader_done_gate_requires_all_checks():
+    checks = [
+        leader_contract_receipt({"wallet": "w", "version": 1, "equity": 100.0, "positions": {"BTC": 1.0}, "event_ts_ms": 10, "receive_ts_ms": 11}),
+        leader_cutoff_receipt(event_ts_ms=10, cutoff_ts_ms=10),
+        leader_causality_receipt(event_ts_ms=10, state_ts_ms=20, observed_before_state=True),
+    ]
+    assert leader_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert leader_done_receipt(checks=checks + [{"status": "REJECTED"}])["status"] == "REJECTED"

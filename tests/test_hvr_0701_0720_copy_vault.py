@@ -6,6 +6,7 @@ from hl_observer.backtest.book_replay import (
     replay_concurrent_write_receipt,
     replay_conversion_receipt,
     replay_cutoff_receipt,
+    replay_done_receipt,
     replay_duplicate_receipt,
     replay_field_type_receipt,
     replay_fill_duplicate_receipt,
@@ -133,3 +134,13 @@ def test_hvr_0720_atomic_commit_and_write_guards():
     assert replay_balance_receipt(balance=0.0)["status"] == "PROVEN"
     assert replay_funding_sign_receipt(amount=1.0, direction="CREDIT")["status"] == "PROVEN"
     assert replay_conversion_receipt(fee_amount=1.0, fee_token="USDC", pnl_currency="USD", token_to_pnl_rate=1.0)["status"] == "PROVEN"
+
+
+def test_hvr_0721_replay_done_requires_all_proven_gates():
+    checks = [
+        replay_required_field_receipt({"coin": "BTC"}, field="coin"),
+        replay_replay_receipt(outputs=[{"ts_ms": 100}, {"ts_ms": 100}]),
+        replay_commit_receipt(crashed=False, committed=True, checkpoint_saved=False),
+    ]
+    assert replay_done_receipt(checks=checks)["status"] == "PROVEN"
+    assert replay_done_receipt(checks=checks[:-1] + [{"status": "PROVEN"}])["status"] == "REJECTED"
