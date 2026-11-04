@@ -15,7 +15,7 @@ import json
 import math
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Sequence
 
 from .economic_campaigns import REPORT_DIR
 from .economic_objective import canonical_family
@@ -236,4 +236,135 @@ __all__ = [
     "parameter_hash",
     "reuse_or_create_freeze",
     "split_pre_post_freeze",
+]
+
+
+def _freeze_base(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _freeze_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _freeze_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def economic_freeze_safety_receipt(result: Any) -> dict[str, Any]:
+    required = ("schema_version", "family", "freeze_hash", "data_sha256", "config_sha256", "frozen_at_ms", "parameters_sha256")
+    valid = isinstance(result, Mapping) and result.get("schema_version") == SCHEMA and all(isinstance(result.get(key), str) and bool(result.get(key).strip()) for key in required if key != "frozen_at_ms") and _freeze_integer(result.get("frozen_at_ms")) and result.get("frozen_at_ms") > 0 and result.get("paper_only") is True and result.get("real_execution") is False
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="ECONOMIC_FREEZE_SAFE" if valid else "ECONOMIC_FREEZE_UNSAFE", fail_closed=not valid)
+
+
+def freeze_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_FIELD_PRESENT" if valid else "FREEZE_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def freeze_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_FIELD_NON_NULL" if valid else "FREEZE_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def freeze_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_FIELD_TYPE_VALID" if valid else "FREEZE_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def freeze_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _freeze_finite(value)
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_VALUE_FINITE" if valid else "FREEZE_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def freeze_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _freeze_integer(event_ts_ms) and _freeze_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_EVENT_WITHIN_CUTOFF" if valid else "FREEZE_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def freeze_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _freeze_integer(event_ts_ms) and _freeze_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_EVENT_AGE_VALID" if valid else "FREEZE_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def freeze_duplicate_receipt(*, event_ids: Iterable[Any]) -> dict[str, Any]:
+    values = list(event_ids)
+    valid = bool(values) and all(str(value).strip() for value in values) and len(values) == len(set(values))
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_EVENTS_UNIQUE" if valid else "FREEZE_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def freeze_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _freeze_integer(attempts) and _freeze_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_RETRY_BOUNDED" if valid else "FREEZE_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def freeze_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_REPLAY_DETERMINISTIC" if valid else "FREEZE_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def freeze_fill_duplicate_receipt(*, fill_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(fill_ids) and all(str(value).strip() for value in fill_ids) and len(fill_ids) == len(set(fill_ids))
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_FILLS_UNIQUE" if valid else "FREEZE_FILL_DUPLICATED", fail_closed=not valid)
+
+
+def freeze_partition_receipt(*, train_ids: Sequence[Any], oos_ids: Sequence[Any], forward_ids: Sequence[Any]) -> dict[str, Any]:
+    train, oos, forward = set(train_ids), set(oos_ids), set(forward_ids)
+    valid = bool(train) and bool(oos) and bool(forward) and not (train & oos or train & forward or oos & forward)
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_PARTITIONS_DISJOINT" if valid else "FREEZE_PARTITIONS_OVERLAP", fail_closed=not valid)
+
+
+def freeze_holdout_receipt(*, tuned_on_holdout: bool, holdout_locked: bool) -> dict[str, Any]:
+    valid = tuned_on_holdout is False and holdout_locked is True
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_HOLDOUT_LOCKED" if valid else "FREEZE_HOLDOUT_CONTAMINATED", fail_closed=not valid)
+
+
+def freeze_embargo_receipt(*, gap_ms: Any, required_gap_ms: Any) -> dict[str, Any]:
+    valid = _freeze_integer(gap_ms) and _freeze_integer(required_gap_ms) and gap_ms >= 0 and gap_ms >= required_gap_ms
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_EMBARGO_SUFFICIENT" if valid else "FREEZE_EMBARGO_INSUFFICIENT", fail_closed=not valid)
+
+
+def freeze_trials_receipt(*, trials: Any, recorded_trials: Any) -> dict[str, Any]:
+    valid = _freeze_integer(trials) and _freeze_integer(recorded_trials) and trials > 0 and recorded_trials == trials
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_TRIALS_RECORDED" if valid else "FREEZE_TRIALS_MISSING", fail_closed=not valid)
+
+
+def freeze_effect_size_receipt(*, trade_count: Any, gain: Any, minimum_trades: Any = 2) -> dict[str, Any]:
+    valid = _freeze_integer(trade_count) and _freeze_integer(minimum_trades) and _freeze_finite(gain) and trade_count >= minimum_trades
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_EFFECT_NOT_SINGLE_TRADE" if valid else "FREEZE_EFFECT_UNDERPOWERED", fail_closed=not valid)
+
+
+def freeze_wallet_independence_receipt(*, wallet_ids: Sequence[Any], max_correlation: Any) -> dict[str, Any]:
+    valid = bool(wallet_ids) and len(wallet_ids) == len(set(wallet_ids)) and _freeze_finite(max_correlation) and 0 <= float(max_correlation) < 1
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_WALLETS_INDEPENDENT" if valid else "FREEZE_WALLETS_CORRELATED", fail_closed=not valid)
+
+
+def freeze_hash_receipt(*, code_sha_before: Any, code_sha_after: Any, data_sha_before: Any, data_sha_after: Any) -> dict[str, Any]:
+    valid = all(isinstance(value, str) and bool(value.strip()) for value in (code_sha_before, code_sha_after, data_sha_before, data_sha_after)) and code_sha_before == code_sha_after and data_sha_before == data_sha_after
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_HASHES_UNCHANGED" if valid else "FREEZE_HASHES_CHANGED", fail_closed=not valid)
+
+
+def freeze_forward_cutoff_receipt(*, forward_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _freeze_integer(forward_ts_ms) and _freeze_integer(cutoff_ts_ms) and forward_ts_ms > cutoff_ts_ms
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_FORWARD_AFTER_CUTOFF" if valid else "FREEZE_FORWARD_BEFORE_CUTOFF", fail_closed=not valid)
+
+
+def freeze_pessimistic_edge_receipt(*, gross_edge: Any, slippage: Any, fees: Any) -> dict[str, Any]:
+    gross = float(gross_edge) if _freeze_finite(gross_edge) else None
+    slip = float(slippage) if _freeze_finite(slippage) else None
+    fee = float(fees) if _freeze_finite(fees) else None
+    valid = gross is not None and slip is not None and fee is not None and gross - slip - fee > 0
+    return _freeze_base("PROVEN" if valid else "REJECTED", verdict="FREEZE_EDGE_SURVIVES_COSTS" if valid else "FREEZE_EDGE_ERASED_BY_COSTS", fail_closed=not valid)
+
+
+__all__ += [
+    "economic_freeze_safety_receipt", "freeze_required_field_receipt", "freeze_null_field_receipt",
+    "freeze_field_type_receipt", "freeze_finite_receipt", "freeze_cutoff_receipt", "freeze_age_receipt",
+    "freeze_duplicate_receipt", "freeze_retry_receipt", "freeze_replay_receipt", "freeze_fill_duplicate_receipt",
+    "freeze_partition_receipt", "freeze_holdout_receipt", "freeze_embargo_receipt", "freeze_trials_receipt",
+    "freeze_effect_size_receipt", "freeze_wallet_independence_receipt", "freeze_hash_receipt",
+    "freeze_forward_cutoff_receipt", "freeze_pessimistic_edge_receipt",
 ]

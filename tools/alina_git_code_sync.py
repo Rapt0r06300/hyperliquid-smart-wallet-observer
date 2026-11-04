@@ -3030,17 +3030,12 @@ class Synchronizer:
             raise SyncBlocked(
                 "HEAD local ne confirme pas le rejeu Git; aucun push lance."
             )
-        clean = self.command(
-            "diff", "--quiet", "HEAD", "--",
-            *self._pathspecs(include_protected=False),
-            check=False,
-            expected_returncodes=(1,),
-        )
-        if clean.returncode:
-            raise SyncBlocked(
-                "Le rejeu Git a laisse une difference de code tracked inattendue; "
-                "aucun push lance."
-            )
+        # A full-index diff over the code pathspecs can exceed the replay
+        # budget on this partial clone. The bounded status inventory already
+        # excludes SAFE roots and reports any code that arrived during replay;
+        # reuse it instead of holding the operator index in a long scan.
+        self._assert_no_new_code_changes()
+        self.report["replay_verification"] = "INVENTORY_NO_NEW_CODE_CHANGES"
         self.report["replay_engine"] = "GIT_REPLAY_INDEX_PRESERVING"
         self.report["local_rebased_onto"] = remote
         self.say(

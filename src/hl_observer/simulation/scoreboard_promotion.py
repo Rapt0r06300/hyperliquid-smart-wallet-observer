@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, Mapping, Sequence
 
 SCHEMA_VERSION = "hypersmart.scoreboard_promotion.v1"
 
@@ -235,4 +235,134 @@ __all__ = [
     "ScoreboardPromotionEvidence", "ScoreboardPromotionVerdict",
     "absolute_net_progress_gate",
     "evaluer_promotion_scoreboard", "promotion_finale",
+]
+
+
+def _score_base(status: str, **values: Any) -> dict[str, Any]:
+    return {"status": status, "paper_read_only": True, "real_execution": False, "promotion": "DISABLED_UNTIL_REVIEW", **values}
+
+
+def _score_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _score_finite(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def scoreboard_promotion_safety_receipt(result: Any) -> dict[str, Any]:
+    valid = isinstance(result, Mapping) and result.get("paper_only") is True and result.get("real_execution") is False and result.get("promue") is False
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCOREBOARD_PROMOTION_SAFE" if valid else "SCOREBOARD_PROMOTION_UNSAFE", fail_closed=not valid)
+
+
+def score_required_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) not in (None, "")
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_FIELD_PRESENT" if valid else "SCORE_FIELD_MISSING", field=field, fail_closed=not valid)
+
+
+def score_null_field_receipt(row: Mapping[str, Any], *, field: str) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(field, str) and bool(field) and row.get(field) is not None
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_FIELD_NON_NULL" if valid else "SCORE_FIELD_NULL", field=field, fail_closed=not valid)
+
+
+def score_field_type_receipt(row: Mapping[str, Any], *, field: str, expected_type: type) -> dict[str, Any]:
+    valid = isinstance(row, Mapping) and isinstance(expected_type, type) and isinstance(row.get(field), expected_type)
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_FIELD_TYPE_VALID" if valid else "SCORE_FIELD_TYPE_INVALID", field=field, fail_closed=not valid)
+
+
+def score_finite_receipt(value: Any) -> dict[str, Any]:
+    valid = _score_finite(value)
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_VALUE_FINITE" if valid else "SCORE_VALUE_NON_FINITE", value=float(value) if valid else None, fail_closed=not valid)
+
+
+def score_cutoff_receipt(*, event_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _score_integer(event_ts_ms) and _score_integer(cutoff_ts_ms) and event_ts_ms <= cutoff_ts_ms
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_EVENT_WITHIN_CUTOFF" if valid else "SCORE_EVENT_AFTER_CUTOFF", fail_closed=not valid)
+
+
+def score_age_receipt(*, event_ts_ms: Any, oldest_allowed_ts_ms: Any) -> dict[str, Any]:
+    valid = _score_integer(event_ts_ms) and _score_integer(oldest_allowed_ts_ms) and event_ts_ms >= oldest_allowed_ts_ms
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_EVENT_AGE_VALID" if valid else "SCORE_EVENT_TOO_OLD", fail_closed=not valid)
+
+
+def score_duplicate_receipt(*, event_ids: Iterable[Any]) -> dict[str, Any]:
+    values = list(event_ids)
+    valid = bool(values) and all(str(value).strip() for value in values) and len(values) == len(set(values))
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_EVENTS_UNIQUE" if valid else "SCORE_EVENT_DUPLICATE_OR_EMPTY", fail_closed=not valid)
+
+
+def score_retry_receipt(*, attempts: Any, max_attempts: Any, checkpoint_saved: bool) -> dict[str, Any]:
+    valid = _score_integer(attempts) and _score_integer(max_attempts) and 1 <= attempts <= max_attempts and checkpoint_saved is True
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_RETRY_BOUNDED" if valid else "SCORE_RETRY_UNSAFE", fail_closed=not valid)
+
+
+def score_replay_receipt(*, outputs: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(outputs) and len({repr(value) for value in outputs}) == 1
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_REPLAY_DETERMINISTIC" if valid else "SCORE_REPLAY_DIVERGED", fail_closed=not valid)
+
+
+def score_fill_duplicate_receipt(*, fill_ids: Sequence[Any]) -> dict[str, Any]:
+    valid = bool(fill_ids) and all(str(value).strip() for value in fill_ids) and len(fill_ids) == len(set(fill_ids))
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_FILLS_UNIQUE" if valid else "SCORE_FILL_DUPLICATED", fail_closed=not valid)
+
+
+def score_partition_receipt(*, train_ids: Sequence[Any], oos_ids: Sequence[Any], forward_ids: Sequence[Any]) -> dict[str, Any]:
+    train, oos, forward = set(train_ids), set(oos_ids), set(forward_ids)
+    valid = bool(train) and bool(oos) and bool(forward) and not (train & oos or train & forward or oos & forward)
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_PARTITIONS_DISJOINT" if valid else "SCORE_PARTITIONS_OVERLAP", fail_closed=not valid)
+
+
+def score_holdout_receipt(*, tuned_on_holdout: bool, holdout_locked: bool) -> dict[str, Any]:
+    valid = tuned_on_holdout is False and holdout_locked is True
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_HOLDOUT_LOCKED" if valid else "SCORE_HOLDOUT_CONTAMINATED", fail_closed=not valid)
+
+
+def score_embargo_receipt(*, gap_ms: Any, required_gap_ms: Any) -> dict[str, Any]:
+    valid = _score_integer(gap_ms) and _score_integer(required_gap_ms) and gap_ms >= 0 and gap_ms >= required_gap_ms
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_EMBARGO_SUFFICIENT" if valid else "SCORE_EMBARGO_INSUFFICIENT", fail_closed=not valid)
+
+
+def score_trials_receipt(*, trials: Any, recorded_trials: Any) -> dict[str, Any]:
+    valid = _score_integer(trials) and _score_integer(recorded_trials) and trials > 0 and recorded_trials == trials
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_TRIALS_RECORDED" if valid else "SCORE_TRIALS_MISSING", fail_closed=not valid)
+
+
+def score_effect_size_receipt(*, trade_count: Any, gain: Any, minimum_trades: Any = 2) -> dict[str, Any]:
+    valid = _score_integer(trade_count) and _score_integer(minimum_trades) and _score_finite(gain) and trade_count >= minimum_trades
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_EFFECT_NOT_SINGLE_TRADE" if valid else "SCORE_EFFECT_UNDERPOWERED", fail_closed=not valid)
+
+
+def score_wallet_independence_receipt(*, wallet_ids: Sequence[Any], max_correlation: Any) -> dict[str, Any]:
+    valid = bool(wallet_ids) and len(wallet_ids) == len(set(wallet_ids)) and _score_finite(max_correlation) and 0 <= float(max_correlation) < 1
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_WALLETS_INDEPENDENT" if valid else "SCORE_WALLETS_CORRELATED", fail_closed=not valid)
+
+
+def score_hash_receipt(*, code_sha_before: Any, code_sha_after: Any, data_sha_before: Any, data_sha_after: Any) -> dict[str, Any]:
+    valid = all(isinstance(value, str) and bool(value.strip()) for value in (code_sha_before, code_sha_after, data_sha_before, data_sha_after)) and code_sha_before == code_sha_after and data_sha_before == data_sha_after
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_HASHES_UNCHANGED" if valid else "SCORE_HASHES_CHANGED", fail_closed=not valid)
+
+
+def score_forward_cutoff_receipt(*, forward_ts_ms: Any, cutoff_ts_ms: Any) -> dict[str, Any]:
+    valid = _score_integer(forward_ts_ms) and _score_integer(cutoff_ts_ms) and forward_ts_ms > cutoff_ts_ms
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_FORWARD_AFTER_CUTOFF" if valid else "SCORE_FORWARD_BEFORE_CUTOFF", fail_closed=not valid)
+
+
+def score_pessimistic_edge_receipt(*, gross_edge: Any, slippage: Any, fees: Any) -> dict[str, Any]:
+    gross = float(gross_edge) if _score_finite(gross_edge) else None
+    slip = float(slippage) if _score_finite(slippage) else None
+    fee = float(fees) if _score_finite(fees) else None
+    valid = gross is not None and slip is not None and fee is not None and gross - slip - fee > 0
+    return _score_base("PROVEN" if valid else "REJECTED", verdict="SCORE_EDGE_SURVIVES_COSTS" if valid else "SCORE_EDGE_ERASED_BY_COSTS", fail_closed=not valid)
+
+
+__all__ += [
+    "scoreboard_promotion_safety_receipt", "score_required_field_receipt", "score_null_field_receipt",
+    "score_field_type_receipt", "score_finite_receipt", "score_cutoff_receipt", "score_age_receipt",
+    "score_duplicate_receipt", "score_retry_receipt", "score_replay_receipt", "score_fill_duplicate_receipt",
+    "score_partition_receipt", "score_holdout_receipt", "score_embargo_receipt", "score_trials_receipt",
+    "score_effect_size_receipt", "score_wallet_independence_receipt", "score_hash_receipt",
+    "score_forward_cutoff_receipt", "score_pessimistic_edge_receipt",
 ]
