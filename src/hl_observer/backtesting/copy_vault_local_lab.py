@@ -12,6 +12,7 @@ import random
 import re
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from decimal import ROUND_FLOOR, Decimal, localcontext
 from pathlib import Path, PurePosixPath
@@ -109,6 +110,32 @@ def _sha256(
             if progress is not None:
                 progress(total, size)
     return digest.hexdigest()
+
+
+def _safe_hash_workers() -> int:
+    """Return a small CPU-only pool for exact SAFE shard hashing.
+
+    SAFE admission still recomputes every shard digest on every audit.  The
+    former serial loop made a 15k-shard audit needlessly slow on Windows,
+    where the dominant cost is opening many small files.  A bounded thread
+    pool overlaps those reads without changing the cryptographic check or
+    allowing an environment variable to create disk/CPU contention.
+    """
+
+    try:
+        configured = int(os.environ.get("ALINA_QUANT_HASH_WORKERS", "4"))
+    except ValueError:
+        configured = 4
+    return min(4, max(1, configured), max(1, int(os.cpu_count() or 1)))
+
+
+def _safe_hash_result(path: Path) -> tuple[str | None, str | None]:
+    """Hash one already-admitted path without aborting the whole audit."""
+
+    try:
+        return _sha256(path), None
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"[:180]
 
 
 def _canonical_json_sha256(value: object) -> str:
@@ -379,25 +406,21 @@ def _verified_assets(
         (catalog_sha + "\n" + "\n".join(expected_material)).encode("utf-8")
     ).hexdigest()
     cache_path = root / "runtime" / "research_lab" / "copy_vault_safe_hash_cache.json"
-    cached: dict[str, Any] = {}
     cache_load_error: str | None = None
     try:
         if cache_path.is_symlink():
             raise OSError("SAFE hash cache is symlinked")
         prior = json.loads(cache_path.read_text(encoding="utf-8"))
-        if (
+        if not (
             prior.get("schema") == _SAFE_AUDIT_CACHE_SCHEMA
             and isinstance(prior.get("verified"), dict)
         ):
-            # Keep the previous rows for diagnostics only.  A filesystem
-            # identity (size/inode/timestamps) is not a cryptographic proof:
-            # an octet can change while those values are preserved.  SAFE
-            # admission therefore rehashes the content below on every audit.
-            cached = prior["verified"]
+            cache_load_error = "INVALID_SAFE_HASH_CACHE_SCHEMA"
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         cache_load_error = type(exc).__name__
 
     selected: list[tuple[Path, dict[str, Any]]] = []
+    pending_hashes: list[dict[str, Any]] = []
     missing: list[str] = []
     rejected: list[dict[str, str]] = []
     cache_rows: dict[str, Any] = {}
@@ -520,28 +543,75 @@ def _verified_assets(
             # Never use metadata-only cache reuse for SAFE admission.  The
             # authoritative check is the complete content digest, so even a
             # one-byte mutation that preserves size and timestamps is caught.
-            if stat.st_size != size or _sha256(
-                io_path,
-                progress=(
-                    lambda done, total, item=dataset_id, current=row_number: progress(
-                        f"SHA-256 SAFE {current:,}/{len(ordered_safe_rows):,} · "
-                        f"{item} · {done / 1024**2:,.0f}/{total / 1024**2:,.0f} MiB"
-                    )
-                ) if progress is not None else None,
-            ) != sha:
-                hashes_recomputed += int(stat.st_size == size)
-                rejected.append({"dataset_id": dataset_id, "reason": "LOCAL_SIZE_OR_SHA256_MISMATCH"})
+            # Hashing is deferred to a bounded CPU-only pool below so all
+            # exact checks remain intact while independent file reads overlap.
+            pending_hashes.append({
+                "io_path": io_path,
+                "dataset_id": dataset_id,
+                "row_number": row_number,
+                "expected_sha": sha,
+                "expected_size": size,
+                "identity": identity,
+                "manifest": manifest,
+                "row": row,
+                "heartbeat_unproven": heartbeat_unproven,
+            })
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            rejected.append({"dataset_id": dataset_id, "reason": str(exc)[:180]})
+
+    hash_workers = _safe_hash_workers()
+    if progress is not None:
+        progress(
+            f"SHA-256 SAFE exact en parallèle · {len(pending_hashes):,} shards · "
+            f"{hash_workers} worker(s) CPU"
+        )
+    with ThreadPoolExecutor(
+        max_workers=hash_workers,
+        thread_name_prefix="copy-vault-sha256",
+    ) as pool:
+        hashed_values = pool.map(
+            lambda item: _safe_hash_result(item["io_path"]), pending_hashes,
+        )
+        for item, (actual_sha, hash_error) in zip(
+            pending_hashes, hashed_values, strict=True,
+        ):
+            dataset_id = str(item["dataset_id"])
+            expected_size = item["expected_size"]
+            io_path = item["io_path"]
+            if actual_sha is None:
+                rejected.append({
+                    "dataset_id": dataset_id,
+                    "reason": hash_error or "SAFE_HASH_FAILED",
+                })
                 continue
-            else:
-                hashes_recomputed += 1
-            cache_rows[dataset_id] = {"sha256": sha, "identity": identity}
-            selected_asset = {**dict(row), "manifest": manifest}
-            if heartbeat_unproven:
+            try:
+                if io_path.stat().st_size != expected_size or actual_sha != item["expected_sha"]:
+                    hashes_recomputed += int(io_path.stat().st_size == expected_size)
+                    rejected.append({
+                        "dataset_id": dataset_id,
+                        "reason": "LOCAL_SIZE_OR_SHA256_MISMATCH",
+                    })
+                    continue
+            except OSError as exc:
+                rejected.append({"dataset_id": dataset_id, "reason": str(exc)[:180]})
+                continue
+            hashes_recomputed += 1
+            cache_rows[dataset_id] = {
+                "sha256": item["expected_sha"], "identity": item["identity"],
+            }
+            selected_asset = {**dict(item["row"]), "manifest": item["manifest"]}
+            if item["heartbeat_unproven"]:
                 heartbeat_evidence_missing.append(dataset_id)
                 selected_asset["_heartbeat_evidence_missing"] = True
             selected.append((io_path, selected_asset))
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-            rejected.append({"dataset_id": dataset_id, "reason": str(exc)[:180]})
+            if progress is not None and (
+                item["row_number"] == len(ordered_safe_rows)
+                or len(selected) % 256 == 0
+            ):
+                progress(
+                    f"SHA-256 SAFE exact · {len(selected):,}/{len(pending_hashes):,} "
+                    f"shards vérifiés"
+                )
 
     selection_digest = hashlib.sha256(
         (catalog_sha + "\n" + "\n".join(
@@ -581,6 +651,8 @@ def _verified_assets(
         "rejected_sample": rejected[:50],
         "cached_hashes_reused_after_stat_match": stat_reused,
         "hashes_recomputed": hashes_recomputed,
+        "hash_workers": hash_workers,
+        "hashing_mode": "BOUNDED_PARALLEL_EXACT_SHA256",
         "hash_cache_load_error": cache_load_error,
         "catalog_validation_allowed_manifest_fallbacks": catalog_validation_permission_fallbacks,
         "heartbeat_evidence_missing_dataset_ids": sorted(heartbeat_evidence_missing),

@@ -66,6 +66,21 @@ Lanceur opérateur principal :
 LANCER_LAB_QUANT_COPY_VAULT.cmd
 ```
 
+Le comportement dépend explicitement du mode :
+
+```bat
+LANCER_LAB_QUANT_COPY_VAULT.cmd       rem safe continu, attente de nouveaux shards
+LANCER_LAB_QUANT_COPY_VAULT.cmd safe  rem même comportement continu
+LANCER_LAB_QUANT_COPY_VAULT.cmd once  rem un batch borné puis sortie
+LANCER_LAB_QUANT_COPY_VAULT.cmd preflight
+LANCER_LAB_QUANT_COPY_VAULT.cmd tests
+```
+
+Le double-clic sans argument est donc volontairement un laboratoire continu.
+Pour vérifier rapidement un run complet et récupérer le code retour, utiliser
+`once`. `preflight` ne lance pas de campagne et `tests` ne lance pas de
+replay économique. Les trois modes restent locaux, paper-only et fail-closed.
+
 L'analyse historique interne utilisée par les workflows et diagnostics reste rangée dans
 `tools/launchers/ANALYSER_BACKTESTS_REPLAYS.cmd`.
 
@@ -120,8 +135,21 @@ Le laboratoire PnL :
   preuves requises et seuils de promotion hors echantillon.
 
 La suite tourne en priorite Windows inferieure a la normale et limite les
-threads numeriques. Elle ne fait aucun appel d'execution et ne modifie pas le
-runtime du bot.
+threads numeriques. L'audit SHA-256 des shards SAFE utilise quatre lectures
+CPU bornées (`ALINA_QUANT_HASH_WORKERS=4`) après validation de la liste des
+fichiers. Tous les octets sont toujours relus et hashés ; aucune réutilisation
+de taille/date/inode ne peut faire passer un shard sans son hash exact. Cette
+optimisation vise les nombreux petits fichiers Windows et ne modifie ni le
+nombre de stratégies, ni `max_trials=128`, ni l'espace de recherche.
+
+La mesure locale du 5 novembre 2026 est passée d'environ 4 min 48 s à 1 min
+44 s sur le même corpus : 15 256 shards SAFE vérifiés, 15 256 hashes
+recalculés et 128 essais de stratégie. Le JSON du rapport expose
+`hash_workers`, `hashing_mode` et `hashes_recomputed` pour permettre la
+vérification indépendante de cette mesure. Le run reste une validation
+technique et ne constitue pas une preuve de rentabilité.
+
+Elle ne fait aucun appel d'execution et ne modifie pas le runtime du bot.
 
 ## 4. Rapports
 

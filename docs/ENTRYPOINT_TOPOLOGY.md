@@ -5,7 +5,7 @@ Le registre exécutable est `src/hl_observer/ops/entrypoint_topology.py`. À la 
 | Lanceur | Rôle |
 |---|---|
 | `LANCER_COLLECTEURS_COPY_VAULT.cmd` | Collecteurs Copy-Vault |
-| `LANCER_LAB_QUANT_COPY_VAULT.cmd` | Laboratoire principal : backtests et replays Copy-Vault |
+| `LANCER_LAB_QUANT_COPY_VAULT.cmd` | Laboratoire principal : backtests et replays Copy-Vault ; audit SHA-256 exact CPU borné |
 | `LANCER_HYPERSMART.cmd` | Moteur paper avec affichage de simulation |
 | `POUSSER-GITHUB-FORCE.cmd` | Réconciliation prudente du code avec GitHub |
 | `ALINA_SYNC_COMPLETE.cmd` | AlinaSync pour les shards SAFE |

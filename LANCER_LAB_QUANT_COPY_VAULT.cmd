@@ -13,6 +13,8 @@ set "TESTNET_ONLY=true"
 set "ALINA_QUANT_CPU_PERCENT=60"
 rem Plafond mesure: 4 workers max evite la contention disque/import sous Windows.
 set "ALINA_QUANT_MAX_WORKERS=4"
+rem Audit SAFE: 4 lectures SHA-256 exactes en parallele, sans reutiliser de cache metadata.
+set "ALINA_QUANT_HASH_WORKERS=4"
 
 set "ALINA_LAB_MODE=%~1"
 if not defined ALINA_LAB_MODE set "ALINA_LAB_MODE=safe"

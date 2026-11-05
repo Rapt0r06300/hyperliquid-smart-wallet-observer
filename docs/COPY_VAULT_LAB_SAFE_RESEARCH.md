@@ -12,6 +12,20 @@ downloads. When SAFE restoration is incomplete or lacks causal fill/L2
 evidence the command fails closed with `SAFE_RESEARCH_NO_GO`; **no fixtures
 or legacy runtime/data are silently substituted**.
 
+Without an argument, the command uses `safe`: it runs the bounded research
+batch and then remains open to detect a new SAFE corpus. This is deliberate
+continuous-lab behavior, not an unbounded strategy search. Use `once` when a
+single finished run is required:
+
+```cmd
+LANCER_LAB_QUANT_COPY_VAULT.cmd once
+```
+
+`preflight` performs only the software, freeze and SAFE-boundary checks;
+`tests` runs the software test groups; `research` consumes an explicitly
+prepared, provenance-bound workspace. The launcher never silently changes
+from one mode to another.
+
 The input is the AlinaSync-owned directory:
 
 ```text
@@ -90,6 +104,38 @@ software-only inspection. `research` consumes a separately prepared
 workspace with recognized Copy-Vault files and provenance. None performs real
 trading. The SAFE bridge **does not** transform arbitrary market L2 data
 into user fills or treat historical fill snapshots as causal or forward proof.
+
+## Exact-hash performance path
+
+The SAFE admission path has two separate phases:
+
+1. it validates the catalog rows, manifests, path boundaries, provenance and
+   replay permissions;
+2. after the admissible file list is fixed, it recalculates the complete
+   SHA-256 of every selected shard in a bounded CPU-only pool.
+
+The default pool is four workers and is controlled by
+`ALINA_QUANT_HASH_WORKERS`; the launcher pins it to `4`. The upper bound is
+four even if a machine has more cores, so disk contention cannot grow without
+limit. A value of `1` is valid for a slow disk or a diagnostic comparison.
+
+This is an I/O scheduling optimization, not a weaker cache: file size,
+content and expected catalog SHA are still checked for every shard on every
+audit. A one-byte change is therefore still rejected even if file metadata
+looks unchanged. Hashing results are consumed in deterministic catalog order,
+and a read error remains a rejected SAFE asset.
+
+The measured local run on 5 November 2026 verified `15,256/15,256` shards and
+`15,256` recomputed hashes, with `128` strategy trials in the bounded run. It
+completed in about `1 min 44 s`, versus about `4 min 48 s` before the bounded
+parallel hash path. The search space and trial limit were unchanged. This
+measurement is a performance receipt only; the run still reported no economic
+proof and remained `PAPER / READ-ONLY`.
+
+The result JSON records `hash_workers=4` and
+`hashing_mode=BOUNDED_PARALLEL_EXACT_SHA256`, allowing the performance change
+to be audited without trusting a prose estimate. Runtime reports are
+append-only outputs; SAFE source shards are not moved, rewritten or deleted.
 
 ## Remaining evidence before economic promotion
 

@@ -24,6 +24,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--process-memory", type=Path)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--task", help="compile a bounded code context for this task")
+    parser.add_argument("--context-budget", type=int, default=24_000, help="maximum context characters")
+    parser.add_argument("--repo-index", type=Path, help="optional incremental repository index path")
+    parser.add_argument("--changed", action="append", default=[], help="changed repository path, repeatable")
     return parser
 
 
@@ -40,6 +44,23 @@ def main() -> int:
     except ValueError as exc:
         print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
+    if args.task:
+        from hl_observer.agent_tools.efficiency.context_bundle import ContextRequest, compile_context
+        from hl_observer.agent_tools.efficiency.repo_index import build_incremental_index
+
+        index = build_incremental_index(
+            REPO_ROOT,
+            index_path=args.repo_index or REPO_ROOT / "runtime" / "agent_efficiency" / "repo_index.json",
+        )
+        context["bounded_code_context"] = compile_context(
+            REPO_ROOT,
+            index,
+            ContextRequest(
+                task=args.task,
+                changed_files=tuple(args.changed),
+                max_chars=max(1_000, args.context_budget),
+            ),
+        ).to_dict()
     encoded = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if args.out is None:
         print(encoded)

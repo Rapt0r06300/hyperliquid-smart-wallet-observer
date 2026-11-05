@@ -28,6 +28,48 @@ Le fonctionnement attendu est organisé autour de trois blocs et de la synchroni
 
 Le labo est le cerveau de recherche : chaque amélioration, même petite ou provisoire, reste inscrite avec son identité, ses données, ses paramètres et ses résultats ; les versions précédentes ne sont pas effacées lorsqu'un candidat ultérieur fait mieux. Un candidat TRAIN ou un score exploratoire n'est pas une preuve économique. **Aucun PnL, fill, coût, prix ou timestamp ne doit être inventé** ; une donnée manquante reste inconnue et peut rendre le résultat `UNMEASURABLE`.
 
+### Vitesse du laboratoire sans affaiblir les contrôles
+
+Le lanceur conserve deux comportements distincts :
+
+```cmd
+LANCER_LAB_QUANT_COPY_VAULT.cmd       rem mode safe continu, par défaut
+LANCER_LAB_QUANT_COPY_VAULT.cmd once  rem un passage borné puis sortie
+LANCER_LAB_QUANT_COPY_VAULT.cmd preflight
+LANCER_LAB_QUANT_COPY_VAULT.cmd tests
+```
+
+Le mode `safe` exécute le batch puis reste ouvert pour détecter une nouvelle
+version SAFE ; cette attente est intentionnelle et n'est pas un blocage. Le
+mode `once` est le mode recommandé pour mesurer une exécution terminée. Le
+mode `preflight` ne lance ni replay ni recherche économique. Aucun mode ne
+lance de collecte, de téléchargement, d'ordre ou d'exécution réelle.
+
+Le principal coût du mode `once` est l'audit cryptographique des shards. Le
+code réalise maintenant les vérifications SHA-256 exactes dans un pool borné
+de quatre workers CPU (`ALINA_QUANT_HASH_WORKERS=4`). Chaque shard admissible
+est toujours relu intégralement ; le cache de taille/date/inode ne peut jamais
+remplacer un hash. Les résultats sont réunis dans l'ordre déterministe et
+rejetés en cas de modification, d'octet illisible, de taille différente ou de
+SHA différent. La parallélisation porte uniquement sur des lectures
+indépendantes : elle ne réduit ni le corpus, ni l'espace de stratégies, ni le
+nombre d'essais.
+
+Mesure locale de référence du 5 novembre 2026 sur le corpus présent :
+
+- `15 256/15 256` shards SAFE vérifiés et `15 256` hashes recalculés ;
+- `128` nouveaux essais de stratégie dans le run borné ;
+- espace de recherche inchangé : `6 072 920 000 000` configurations ;
+- environ `4 min 48 s` avant l'optimisation, puis `1 min 44 s` avec le même
+  corpus et les mêmes essais, soit environ 64 % de réduction du temps d'audit ;
+- exécution vérifiée en `PAPER / READ-ONLY`, sans modification des octets SAFE.
+
+Les rapports horodatés sous `runtime/reports/copy_vault_quant_lab/` enregistrent
+notamment `hash_workers`, `hashing_mode`, `hashes_recomputed`, le nombre de
+shards attendu/vérifié et le code retour. Un run rapide ne constitue pas une
+preuve de rentabilité : les résultats restent soumis aux gates causales,
+replay, validation, OOS et forward.
+
 La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. La cible terminale de **+5 USD nets/jour sur 200 USD paper** ne s'évalue qu'après les réparations et preuves requises ; ce n'est ni une promesse ni une raison d'assouplir les contrôles. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
 
 Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel est déjà conforme : toute divergence entre un lanceur et ce contrat doit être réparée avant d'annoncer une simulation ou une preuve valide. Les rapports et candidats historiques restent conservés.
