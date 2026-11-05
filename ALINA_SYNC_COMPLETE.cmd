@@ -1,33 +1,82 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-cd /d "%~dp0" || (
-  echo ALINA_SYNC_FAIL: cannot open the repository directory.
+rem ALINA_SYNC_COMPLETE.cmd : alias historique.
+rem Le lanceur unifie est maintenant POUSSER-GITHUB-FORCE.cmd.
+rem AlinaSync est integree comme PHASE B de ce lanceur unique.
+rem
+rem Compatibilite preservee :
+rem   - sans argument            -> shards-only preflight (comportement historique)
+rem   - --download-safe          -> telecharge SAFE (plafond 256 GiB)
+rem   - --all-safe               -> telecharge tout SAFE sans plafond
+rem   - --unpack-safe            -> telecharge + decompresse JSONL
+rem   - --prune-cache-only       -> supprime le cache verifie inutilise
+rem   - tout autre flag avance   -> appeler directement tools/sync_complete_clone.py
+
+set "ALINA_ROOT=%~dp0"
+set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB-FORCE.cmd"
+if not exist "%UNIFIED%" (
+  echo [NO_GO] Le lanceur unifie est introuvable : %UNIFIED%
   exit /b 2
 )
-set "GIT_LFS_SKIP_SMUDGE=1"
-rem Double-click / no arguments is an explicit SAFE hydration entrypoint.
-rem Passing any arguments preserves the Python CLI choices (including --help).
-rem Existing verified gzip files are reused; existing verified JSONL outputs are reused.
-rem Unpack is disk-guarded and leaves certified compressed shards intact.
+
+echo [ALIAS] ALINA_SYNC_COMPLETE.cmd redirige vers POUSSER-GITHUB-FORCE.cmd (lanceur unifie).
+
 if "%~1"=="" (
-  echo ALINA_SYNC_MODE=DOWNLOAD_AND_UNPACK_ALL_SAFE
-  set "ALINA_SYNC_ARGS=--download-safe --all-safe --unpack-safe"
-) else (
-  set "ALINA_SYNC_ARGS=%*"
+  call "%UNIFIED%" --shards-only
+  set "RC=%ERRORLEVEL%"
+  endlocal & exit /b %RC%
 )
-if exist "%~dp0tools\python\python.exe" (
-  "%~dp0tools\python\python.exe" -c "import sys; sys.exit(sys.version_info[:2] < (3, 10))" >nul 2>nul && goto :embedded
+
+if /I "%~1"=="--download-safe" (
+  call "%UNIFIED%" --shards-only --download-safe
+  set "RC=%ERRORLEVEL%"
+  endlocal & exit /b %RC%
 )
-where py >nul 2>nul && py -3 -c "import sys; sys.exit(sys.version_info[:2] < (3, 10))" >nul 2>nul && goto :pylauncher
-where python >nul 2>nul && python -c "import sys; sys.exit(sys.version_info[:2] < (3, 10))" >nul 2>nul && goto :system
-echo ALINA_SYNC_FAIL: Python 3.10 or newer is required.
-exit /b 2
-:embedded
-"%~dp0tools\python\python.exe" tools\sync_complete_clone.py %ALINA_SYNC_ARGS%
-exit /b %ERRORLEVEL%
-:pylauncher
-py -3 tools\sync_complete_clone.py %ALINA_SYNC_ARGS%
-exit /b %ERRORLEVEL%
-:system
-python tools\sync_complete_clone.py %ALINA_SYNC_ARGS%
-exit /b %ERRORLEVEL%
+
+if /I "%~1"=="--all-safe" (
+  call "%UNIFIED%" --shards-only --all-safe
+  set "RC=%ERRORLEVEL%"
+  endlocal & exit /b %RC%
+)
+
+if /I "%~1"=="--unpack-safe" (
+  call "%UNIFIED%" --shards-only --unpack-safe
+  set "RC=%ERRORLEVEL%"
+  endlocal & exit /b %RC%
+)
+
+if /I "%~1"=="--prune-cache-only" (
+  call "%UNIFIED%" --shards-only --prune-cache
+  set "RC=%ERRORLEVEL%"
+  endlocal & exit /b %RC%
+)
+
+if /I "%~1"=="--preflight-only" (
+  call "%UNIFIED%" --shards-only
+  set "RC=%ERRORLEVEL%"
+  endlocal & exit /b %RC%
+)
+
+echo [INFO] Flag avance "%~1" non traduit par l'alias ; forward direct a sync_complete_clone.py.
+set "HYPERSMART_PYTHON="
+set "HYPERSMART_PY_ARGS="
+if exist "%ALINA_ROOT%tools\python\python.exe" set "HYPERSMART_PYTHON=%ALINA_ROOT%tools\python\python.exe"
+if not defined HYPERSMART_PYTHON (
+  where py.exe >nul 2>nul
+  if not errorlevel 1 (
+    set "HYPERSMART_PYTHON=py"
+    set "HYPERSMART_PY_ARGS=-3"
+  )
+)
+if not defined HYPERSMART_PYTHON (
+  where python.exe >nul 2>nul
+  if not errorlevel 1 set "HYPERSMART_PYTHON=python"
+)
+if not defined HYPERSMART_PYTHON (
+  echo [NO_GO] Python 3.11 ou plus introuvable.
+  endlocal & exit /b 31
+)
+set "GIT_LFS_SKIP_SMUDGE=1"
+"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ROOT%tools\sync_complete_clone.py" %*
+set "RC=%ERRORLEVEL%"
+endlocal & exit /b %RC%
