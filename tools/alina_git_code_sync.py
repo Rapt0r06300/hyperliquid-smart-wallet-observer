@@ -3099,11 +3099,20 @@ class Synchronizer:
                 f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
                 f"supprimes pour permettre la fusion (recrees par le remote)."
             )
-        with self._preserve_local_protected_index():
-            self.command(
-                "read-tree", "-u", "-m", new_tip,
-                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-            )
+        self.command(
+            "read-tree", new_tip,
+            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+        )
+        code_changed = [
+            p for p in incoming_paths
+            if not _protected(p)
+        ]
+        if code_changed:
+            for ci_start in range(0, len(code_changed), PROTECTED_PATH_BATCH_SIZE):
+                ci_batch = code_changed[ci_start:ci_start + PROTECTED_PATH_BATCH_SIZE]
+                self.command(
+                    "checkout-index", "-f", "--", *ci_batch,
+                )
         updated = self.command(
             "update-ref", "refs/heads/main", new_tip, local,
             check=False,
