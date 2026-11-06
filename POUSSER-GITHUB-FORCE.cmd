@@ -29,14 +29,14 @@ set "RC=1"
 if /I "%~1"=="--help" goto :help
 if /I "%~1"=="-h" goto :help
 if "%~1"=="" goto :args_done
-if /I "%~1"=="--dry-run" set "ALINA_DRYRUN=1" & set "ALINA_SKIP_SHARDS=1" & goto :args_done
-if /I "%~1"=="--code-only" set "ALINA_SKIP_SHARDS=1" & goto :args_done
-if /I "%~1"=="--shards-only" set "ALINA_SKIP_CODE=1" & goto :args_done
-if /I "%~1"=="--download-safe" set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256" & goto :args_done
-if /I "%~1"=="--all-safe" set "ALINA_SHARDS_ARGS=--download-safe --all-safe" & goto :args_done
-if /I "%~1"=="--unpack-safe" set "ALINA_SHARDS_ARGS=--download-safe --unpack-safe --max-download-gib 256" & goto :args_done
-if /I "%~1"=="--prune-cache" set "ALINA_SHARDS_ARGS=--prune-cache-only" & goto :args_done
-if /I "%~1"=="--catalog-budget" set "ALINA_SHARDS_ARGS=--catalog-budget" & set "ALINA_SKIP_CODE=1" & goto :args_done
+if /I "%~1"=="--dry-run" ( set "ALINA_DRYRUN=1" & set "ALINA_SKIP_SHARDS=1" & goto :args_done )
+if /I "%~1"=="--code-only" ( set "ALINA_SKIP_SHARDS=1" & goto :args_done )
+if /I "%~1"=="--shards-only" ( set "ALINA_SKIP_CODE=1" & goto :args_done )
+if /I "%~1"=="--download-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256" & goto :args_done )
+if /I "%~1"=="--all-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --all-safe" & goto :args_done )
+if /I "%~1"=="--unpack-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --unpack-safe --max-download-gib 256" & goto :args_done )
+if /I "%~1"=="--prune-cache" ( set "ALINA_SHARDS_ARGS=--prune-cache-only" & goto :args_done )
+if /I "%~1"=="--catalog-budget" ( set "ALINA_SHARDS_ARGS=--catalog-budget" & set "ALINA_SKIP_CODE=1" & goto :args_done )
 goto :bad_option
 :args_done
 
