@@ -2600,7 +2600,7 @@ class Synchronizer:
             if not (local_path.exists() or local_path.is_symlink()):
                 continue
             if path in tracked_paths:
-                if path in local_changed:
+                if path in local_changed and not _can_defer_staged_protected(path):
                     raise SyncBlocked(
                         f"GitHub toucherait un fichier protege modifie localement: {path}. "
                         "Fusion interdite pour proteger les donnees."
