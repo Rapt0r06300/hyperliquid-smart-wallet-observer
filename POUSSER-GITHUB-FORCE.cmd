@@ -14,14 +14,17 @@ rem     lanceur, il reste la pour ne jamais diverger).
 rem  Aucun push force, reset, clean, stash ou effacement de donnees.
 rem ============================================================
 set "GIT_LFS_SKIP_SMUDGE=1"
+set "GIT_OPTIONAL_LOCKS=0"
 set "ALINA_ROOT=%~dp0"
 set "ALINA_SKIP_CODE=0"
 set "ALINA_SKIP_SHARDS=0"
 set "ALINA_DRYRUN=0"
-set "ALINA_SHARDS_ARGS=--preflight-only"
+rem Defaut : telecharge les shards SAFE replayable (AlinaSync) pour backtest/replay.
+set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256"
 set "RC=1"
 set "ALINA_TMP_PY=%TEMP%\alina_reconcile_%RANDOM%%RANDOM%.py"
 set "ALINA_TMP_B64=%TEMP%\alina_reconcile_%RANDOM%%RANDOM%.b64"
+set "ALINA_TMP_TOK=%TEMP%\alina_ght_%RANDOM%%RANDOM%.txt"
 
 if /I "%~1"=="--help" goto :help
 if /I "%~1"=="-h" goto :help
@@ -29,6 +32,7 @@ if "%~1"=="" goto :args_done
 if /I "%~1"=="--dry-run" ( set "ALINA_DRYRUN=1" & set "ALINA_SKIP_SHARDS=1" & goto :args_done )
 if /I "%~1"=="--code-only" ( set "ALINA_SKIP_SHARDS=1" & goto :args_done )
 if /I "%~1"=="--shards-only" ( set "ALINA_SKIP_CODE=1" & goto :args_done )
+if /I "%~1"=="--preflight" ( set "ALINA_SHARDS_ARGS=--preflight-only" & goto :args_done )
 if /I "%~1"=="--download-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256" & goto :args_done )
 if /I "%~1"=="--all-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --all-safe" & goto :args_done )
 if /I "%~1"=="--unpack-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --unpack-safe --max-download-gib 256" & goto :args_done )
@@ -39,7 +43,7 @@ goto :bad_option
 
 echo ============================================================
 echo  ALINA SMART FLOW - RECONCILIATION LOCAL ^<-^> GITHUB (1 fichier)
-echo  Commit local + push fast-forward + shards SAFE (preflight)
+echo  Push fast-forward (greffe) + TELECHARGEMENT des shards SAFE
 echo  Aucun push force, reset, clean ou effacement de donnees
 echo ============================================================
 echo [05%%] [LANCEUR 1/9] Racine : %ALINA_ROOT%
@@ -121,9 +125,11 @@ if "%ALINA_SKIP_CODE%"=="1" goto :phase_b
 
 rem --- PHASE CODE : commit WIP + push fast-forward (un seul moteur) ---
 echo.
-echo [55%%] [LANCEUR 7/9] PHASE CODE - commit local + push fast-forward
-set "ALINA_FF_ARGS="
-if "%ALINA_DRYRUN%"=="1" set "ALINA_FF_ARGS=--dry-run"
+echo [55%%] [LANCEUR 7/9] PHASE CODE - push fast-forward (greffe, rapide)
+rem --no-commit : on pousse HEAD deja committe sans faire de 'git diff' sur
+rem l'index geant (qui gelait). Le build se fait par greffe (secondes).
+set "ALINA_FF_ARGS=--no-commit"
+if "%ALINA_DRYRUN%"=="1" set "ALINA_FF_ARGS=--no-commit --dry-run"
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_TMP_PY%" --git "%HYPERSMART_GIT%" --root "%ALINA_ROOT%." %ALINA_FF_ARGS%
 set "RC_FF=%ERRORLEVEL%"
 if not "%RC_FF%"=="0" goto :ff_failed
@@ -133,8 +139,21 @@ if "%ALINA_DRYRUN%"=="1" goto :finish_ok
 
 :phase_b
 if "%ALINA_SKIP_SHARDS%"=="1" goto :skip_shards
+rem --- Jeton GitHub pour telecharger les assets SAFE (depot prive) ---
+rem Reutilise tes identifiants (gh, sinon le gestionnaire via git credential),
+rem les memes qui authentifient le push. Aucun secret saisi a la main.
+if defined GH_TOKEN goto :have_token
+if defined GITHUB_TOKEN goto :have_token
+for /f "delims=" %%T in ('gh auth token 2^>nul') do set "GH_TOKEN=%%T"
+if defined GH_TOKEN goto :have_token
+if not exist "%ALINA_TMP_PY%" goto :have_token
+"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_TMP_PY%" --git "%HYPERSMART_GIT%" --print-github-token > "%ALINA_TMP_TOK%" 2>nul
+if exist "%ALINA_TMP_TOK%" set /p GH_TOKEN=<"%ALINA_TMP_TOK%"
+if exist "%ALINA_TMP_TOK%" del /q "%ALINA_TMP_TOK%" >nul 2>nul
+:have_token
+if not defined GH_TOKEN if not defined GITHUB_TOKEN echo        [i] Aucun jeton GitHub trouve : si le telechargement SAFE echoue (401/403), lance 'gh auth login' une fois, ou definis GH_TOKEN.
 echo.
-echo [90%%] [LANCEUR 8/9] PHASE SHARDS - AlinaSync SAFE
+echo [90%%] [LANCEUR 8/9] PHASE SHARDS - AlinaSync SAFE (telechargement, peut etre long)
 echo        Arguments : %ALINA_SHARDS_ARGS%
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_SHARDS_ENGINE%" %ALINA_SHARDS_ARGS%
 set "RC_SHARDS=%ERRORLEVEL%"
@@ -158,13 +177,14 @@ goto :finish
 :help
 echo Usage : POUSSER-GITHUB-FORCE.cmd [option]
 echo.
-echo  (defaut)         commit local + push fast-forward + shards preflight
-echo  --dry-run        construit le commit, verifie, NE POUSSE PAS
-echo  --code-only      commit + push, pas de phase shards
-echo  --shards-only    AlinaSync seul, pas de code
-echo  --download-safe  + telecharge SAFE replayable (plafond 256 GiB)
-echo  --all-safe       + telecharge tout SAFE sans plafond
-echo  --unpack-safe    + telecharge et decompresse JSONL
+echo  (defaut)         push fast-forward + TELECHARGE les shards SAFE replayable
+echo  --dry-run        construit le commit, verifie, NE POUSSE PAS, pas de shards
+echo  --code-only      push seul, pas de telechargement shards
+echo  --shards-only    telechargement SAFE seul, pas de code
+echo  --preflight      shards : inventaire seul, aucun telechargement
+echo  --download-safe  SAFE replayable (plafond 256 GiB) [= defaut]
+echo  --all-safe       tout SAFE sans plafond
+echo  --unpack-safe    SAFE + decompression JSONL (pour replay/backtest)
 echo  --prune-cache    purge le cache verifie inutilise
 echo  --catalog-budget compta offline SAFE/PARTIAL/REJECT, aucun reseau
 echo.
@@ -215,6 +235,8 @@ goto :finish
 :finish
 if exist "%ALINA_TMP_PY%" del /q "%ALINA_TMP_PY%" >nul 2>nul
 if exist "%ALINA_TMP_B64%" del /q "%ALINA_TMP_B64%" >nul 2>nul
+if exist "%ALINA_TMP_TOK%" del /q "%ALINA_TMP_TOK%" >nul 2>nul
+set "GH_TOKEN="
 echo.
 echo [100%%] [LANCEUR 9/9] Fin du lanceur - code retour %RC%
 if exist "%ALINA_ROOT%runtime\recovery\full\SYNC_REPORT.json" echo Rapport shards: %ALINA_ROOT%runtime\recovery\full\SYNC_REPORT.json
@@ -510,28 +532,45 @@ IG91IHJlZnVzIEdpdEh1Yi4gVmVyaWZpZSB0ZXMgaWRlbnRpZmlhbnRzICIKICAgICAgICAgICAg
 ICAiKHVuZSBmZW5ldHJlIGEgcHUgZXRyZSBhbm51bGVlL2Zlcm1lZSkgcHVpcyByZWxhbmNlLiIs
 CiAgICAgICAgICAgICAgZmx1c2g9VHJ1ZSkKICAgICAgICByZXR1cm4gMQoKICAgIHByaW50KCJb
 RkZdIE5PX0dPOiB0cm9wIGRlIHRlbnRhdGl2ZXMgKG9yaWdpbiBhdmFuY2UgdHJvcCB2aXRlKS4i
-LAogICAgICAgICAgZmx1c2g9VHJ1ZSkKICAgIHJldHVybiAxCgoKZGVmIG1haW4oKToKICAgIGds
-b2JhbCBHSVQsIFJPT1QKICAgIGFwID0gYXJncGFyc2UuQXJndW1lbnRQYXJzZXIoKQogICAgYXAu
-YWRkX2FyZ3VtZW50KCItLWdpdCIsIGRlZmF1bHQ9ImdpdCIpCiAgICBhcC5hZGRfYXJndW1lbnQo
-Ii0tcm9vdCIsIGRlZmF1bHQ9Tm9uZSwKICAgICAgICAgICAgICAgICAgICBoZWxwPSJyYWNpbmUg
-ZHUgZGVwb3QgKHNpbm9uIEFMSU5BX1JPT1Qgb3UgZGV1eCBuaXZlYXV4IGF1LWRlc3N1cykiKQog
-ICAgYXAuYWRkX2FyZ3VtZW50KCItLXJlbW90ZSIsIGRlZmF1bHQ9Im9yaWdpbiIpCiAgICBhcC5h
-ZGRfYXJndW1lbnQoIi0tYnJhbmNoIiwgZGVmYXVsdD1Ob25lKQogICAgYXAuYWRkX2FyZ3VtZW50
-KCItLWRyeS1ydW4iLCBhY3Rpb249InN0b3JlX3RydWUiKQogICAgYXAuYWRkX2FyZ3VtZW50KCIt
-LW5vLWZldGNoIiwgYWN0aW9uPSJzdG9yZV90cnVlIikKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1u
-by1jb21taXQiLCBhY3Rpb249InN0b3JlX3RydWUiLAogICAgICAgICAgICAgICAgICAgIGhlbHA9
-Im5lIGZpZ2UgcGFzIGxlIFdJUCwgcG91c3NlIHNldWxlbWVudCBjZSBxdWkgZXN0IGNvbW1pdGUi
-KQogICAgYXAuYWRkX2FyZ3VtZW50KCItLWJhc2UiLCBkZWZhdWx0PU5vbmUsIGhlbHA9ImRlYnVn
-OiBidWlsZCBvbiB0aGlzIHJlZiIpCiAgICBhcmdzID0gYXAucGFyc2VfYXJncygpCiAgICBHSVQg
-PSBhcmdzLmdpdAogICAgaWYgYXJncy5yb290OgogICAgICAgIFJPT1QgPSBvcy5wYXRoLmFic3Bh
-dGgoYXJncy5yb290KQogICAgYnJhbmNoID0gYXJncy5icmFuY2ggb3IgY3VycmVudF9icmFuY2go
-Im1haW4iKQoKICAgIHRyeToKICAgICAgICBpZiBub3QgYXJncy5ub19jb21taXQ6CiAgICAgICAg
-ICAgIHNuYXBzaG90X3dpcChicmFuY2gsIGFyZ3MuZHJ5X3J1bikKICAgIGV4Y2VwdCBFeGNlcHRp
-b24gYXMgZTogICMgbm9xYTogQkxFMDAxCiAgICAgICAgcHJpbnQoZiJbV0lQXSBOT19HTyBzbmFw
-c2hvdCAoe2V9KSA7IG9uIHBvdXNzZSBjZSBxdWkgZXN0IGRlamEgIgogICAgICAgICAgICAgICJj
-b21taXRlLiIsIGZsdXNoPVRydWUpCgogICAgcmV0dXJuIGZhc3RfZm9yd2FyZF9wdXNoKGJyYW5j
-aCwgYXJncy5yZW1vdGUsIGFyZ3MuYmFzZSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICBh
-cmdzLmRyeV9ydW4sIGFyZ3Mubm9fZmV0Y2gpCgoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoK
-ICAgIHN5cy5leGl0KG1haW4oKSkK
+LAogICAgICAgICAgZmx1c2g9VHJ1ZSkKICAgIHJldHVybiAxCgoKZGVmIHByaW50X2dpdGh1Yl90
+b2tlbigpOgogICAgIyBSZWN1cGVyZSBsZSBqZXRvbiBHaXRIdWIgZGVqYSBzdG9ja2UgKGNlbHVp
+IHF1aSBhdXRoZW50aWZpZSBsZSBwdXNoKQogICAgIyB2aWEgbGUgY3JlZGVudGlhbCBoZWxwZXIs
+IGV0IGwnaW1wcmltZS4gU2VydCBhIGF1dGhlbnRpZmllciBsZQogICAgIyB0ZWxlY2hhcmdlbWVu
+dCBkZXMgYXNzZXRzIFNBRkUgZHUgZGVwb3QgcHJpdmUsIGF2ZWMgbGVzIG1lbWVzCiAgICAjIGlk
+ZW50aWZpYW50cyBxdWUgbGUgcHVzaCAoYXVjdW4gc2VjcmV0IHNhaXNpIGEgbGEgbWFpbikuCiAg
+ICByID0gZ2l0KCJjcmVkZW50aWFsIiwgImZpbGwiLAogICAgICAgICAgICBpbnA9InByb3RvY29s
+PWh0dHBzXG5ob3N0PWdpdGh1Yi5jb21cblxuIikKICAgIGlmIHIucmV0dXJuY29kZSAhPSAwOgog
+ICAgICAgIHJldHVybiAxCiAgICBmb3IgbGluZSBpbiAoci5zdGRvdXQgb3IgIiIpLnNwbGl0bGlu
+ZXMoKToKICAgICAgICBpZiBsaW5lLnN0YXJ0c3dpdGgoInBhc3N3b3JkPSIpOgogICAgICAgICAg
+ICB0b2sgPSBsaW5lW2xlbigicGFzc3dvcmQ9Iik6XS5zdHJpcCgpCiAgICAgICAgICAgIGlmIHRv
+azoKICAgICAgICAgICAgICAgIHN5cy5zdGRvdXQud3JpdGUodG9rKQogICAgICAgICAgICAgICAg
+cmV0dXJuIDAKICAgIHJldHVybiAxCgoKZGVmIG1haW4oKToKICAgIGdsb2JhbCBHSVQsIFJPT1QK
+ICAgIGlmICItLXByaW50LWdpdGh1Yi10b2tlbiIgaW4gc3lzLmFyZ3Y6CiAgICAgICAgIyBtb2Rl
+IGlzb2xlIDogYXJncyAtLWdpdCBldCAtLXByaW50LWdpdGh1Yi10b2tlbiB1bmlxdWVtZW50CiAg
+ICAgICAgZm9yIGksIGEgaW4gZW51bWVyYXRlKHN5cy5hcmd2KToKICAgICAgICAgICAgaWYgYSA9
+PSAiLS1naXQiIGFuZCBpICsgMSA8IGxlbihzeXMuYXJndik6CiAgICAgICAgICAgICAgICBnbG9i
+YWxzKClbIkdJVCJdID0gc3lzLmFyZ3ZbaSArIDFdCiAgICAgICAgcmV0dXJuIHByaW50X2dpdGh1
+Yl90b2tlbigpCiAgICBhcCA9IGFyZ3BhcnNlLkFyZ3VtZW50UGFyc2VyKCkKICAgIGFwLmFkZF9h
+cmd1bWVudCgiLS1naXQiLCBkZWZhdWx0PSJnaXQiKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLXJv
+b3QiLCBkZWZhdWx0PU5vbmUsCiAgICAgICAgICAgICAgICAgICAgaGVscD0icmFjaW5lIGR1IGRl
+cG90IChzaW5vbiBBTElOQV9ST09UIG91IGRldXggbml2ZWF1eCBhdS1kZXNzdXMpIikKICAgIGFw
+LmFkZF9hcmd1bWVudCgiLS1yZW1vdGUiLCBkZWZhdWx0PSJvcmlnaW4iKQogICAgYXAuYWRkX2Fy
+Z3VtZW50KCItLWJyYW5jaCIsIGRlZmF1bHQ9Tm9uZSkKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1k
+cnktcnVuIiwgYWN0aW9uPSJzdG9yZV90cnVlIikKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1uby1m
+ZXRjaCIsIGFjdGlvbj0ic3RvcmVfdHJ1ZSIpCiAgICBhcC5hZGRfYXJndW1lbnQoIi0tbm8tY29t
+bWl0IiwgYWN0aW9uPSJzdG9yZV90cnVlIiwKICAgICAgICAgICAgICAgICAgICBoZWxwPSJuZSBm
+aWdlIHBhcyBsZSBXSVAsIHBvdXNzZSBzZXVsZW1lbnQgY2UgcXVpIGVzdCBjb21taXRlIikKICAg
+IGFwLmFkZF9hcmd1bWVudCgiLS1iYXNlIiwgZGVmYXVsdD1Ob25lLCBoZWxwPSJkZWJ1ZzogYnVp
+bGQgb24gdGhpcyByZWYiKQogICAgYXJncyA9IGFwLnBhcnNlX2FyZ3MoKQogICAgR0lUID0gYXJn
+cy5naXQKICAgIGlmIGFyZ3Mucm9vdDoKICAgICAgICBST09UID0gb3MucGF0aC5hYnNwYXRoKGFy
+Z3Mucm9vdCkKICAgIGJyYW5jaCA9IGFyZ3MuYnJhbmNoIG9yIGN1cnJlbnRfYnJhbmNoKCJtYWlu
+IikKCiAgICB0cnk6CiAgICAgICAgaWYgbm90IGFyZ3Mubm9fY29tbWl0OgogICAgICAgICAgICBz
+bmFwc2hvdF93aXAoYnJhbmNoLCBhcmdzLmRyeV9ydW4pCiAgICBleGNlcHQgRXhjZXB0aW9uIGFz
+IGU6ICAjIG5vcWE6IEJMRTAwMQogICAgICAgIHByaW50KGYiW1dJUF0gTk9fR08gc25hcHNob3Qg
+KHtlfSkgOyBvbiBwb3Vzc2UgY2UgcXVpIGVzdCBkZWphICIKICAgICAgICAgICAgICAiY29tbWl0
+ZS4iLCBmbHVzaD1UcnVlKQoKICAgIHJldHVybiBmYXN0X2ZvcndhcmRfcHVzaChicmFuY2gsIGFy
+Z3MucmVtb3RlLCBhcmdzLmJhc2UsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgYXJncy5k
+cnlfcnVuLCBhcmdzLm5vX2ZldGNoKQoKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICBz
+eXMuZXhpdChtYWluKCkpCg==
 #ALINA_B64_END
 
