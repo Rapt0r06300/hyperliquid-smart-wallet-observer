@@ -62,7 +62,7 @@ PROTECTED_PATH_BATCH_SIZE = 128
 # fail closed through ``_can_defer_staged_protected`` below.
 DEFERRED_STAGED_PROTECTED_ROOTS = {
     "archive", "archives", "build", "catalog", "data", "datasets", "dist",
-    "logs", "wheelhouse",
+    "logs", "runtime", "wheelhouse",
 }
 SAFE_MAIN_PUSH_REFSPEC = (
     "push", "--progress", "origin", "HEAD:refs/heads/main",
