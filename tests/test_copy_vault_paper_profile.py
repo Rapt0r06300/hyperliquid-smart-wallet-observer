@@ -21,7 +21,7 @@ from hl_observer.simulation.cost_components import decompose_execution
 
 def test_profile_is_the_single_paper_contract() -> None:
     profile = paper_profile()
-    assert profile.capital_usd == PAPER_EQUITY_USD == 200.0
+    assert profile.capital_usd == PAPER_EQUITY_USD == 350.0
     assert profile.leverage == PAPER_LEVERAGE == 1.0
     assert profile.target_net_usd_per_day == PAPER_TARGET_NET_USD_PER_DAY == 5.0
     assert profile.max_gross_exposure_usd == MAX_GROSS_EXPOSURE_USD

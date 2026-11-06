@@ -63,7 +63,7 @@ class AdvancedRiskConfig:
     vol_extreme_sizing_mult: float = 0.30
     alpha_decay_max_hours: float = 4.0
     max_correlation: float = 0.85
-    starting_equity_usdt: float = 200.0
+    starting_equity_usdt: float = 350.0
 
 
 @dataclass

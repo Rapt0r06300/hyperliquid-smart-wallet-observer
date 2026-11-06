@@ -49,14 +49,14 @@ def veto_order_receipt(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def leverage_cost_receipt(state: Mapping[str, Any]) -> dict[str, Any]:
-    """Expose leverage cost on the canonical 200 USD paper capital."""
+    """Expose leverage cost on the canonical 350 USD paper capital."""
     if not isinstance(state, Mapping):
         return _base("UNMEASURABLE", reason="leverage_state_missing")
     capital = _number(state.get("capital_usd"))
     leverage = _number(state.get("leverage"))
     cost = _number(state.get("leverage_cost_usd"))
-    valid = capital == 200 and leverage is not None and leverage >= 1 and cost is not None and cost >= 0
-    return _base("PROVEN" if valid else "UNMEASURABLE", verdict="LEVERAGE_COST_ON_CANONICAL_200_USD" if valid else "LEVERAGE_COST_INCOMPLETE", capital_usd=capital, leverage=leverage, leverage_cost_usd=cost)
+    valid = capital == 350 and leverage is not None and leverage >= 1 and cost is not None and cost >= 0
+    return _base("PROVEN" if valid else "UNMEASURABLE", verdict="LEVERAGE_COST_ON_CANONICAL_350_USD" if valid else "LEVERAGE_COST_INCOMPLETE", capital_usd=capital, leverage=leverage, leverage_cost_usd=cost)
 
 
 def vault_concentration_receipt(rows: Sequence[Mapping[str, Any]], *, max_fraction: Any = 0.25) -> dict[str, Any]:

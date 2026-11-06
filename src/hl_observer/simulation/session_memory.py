@@ -138,7 +138,7 @@ def evaluate_coin_side_session_memory(
     min_edge_required_bps: float,
     consensus_wallets: int,
     liquidity_score: float,
-    starting_equity_usdt: float = 200.0,
+    starting_equity_usdt: float = 350.0,
     cooldown_usdc: float | None = None,
     extra_edge_after_loss_bps: float = 35.0,
     min_consensus_after_loss: int = 3,
@@ -153,7 +153,7 @@ def evaluate_coin_side_session_memory(
 
     stats = coin_side_session_stats(events, coin=coin, side=side)
     cooldown = (
-        max(0.20, float(starting_equity_usdt or 200.0) * 0.00025)
+        max(0.20, float(starting_equity_usdt or 350.0) * 0.00025)
         if cooldown_usdc is None
         else max(0.0, float(cooldown_usdc))
     )

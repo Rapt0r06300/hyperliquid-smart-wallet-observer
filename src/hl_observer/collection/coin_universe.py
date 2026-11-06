@@ -161,7 +161,7 @@ def validate_okx_paper_notional(
     item: Mapping[str, object],
     *,
     reference_price: object,
-    paper_notional_usd: object = 200.0,
+    paper_notional_usd: object = 350.0,
 ) -> tuple[bool, str]:
     """Reject a contract whose minimum size cannot fit the paper notional."""
     try:

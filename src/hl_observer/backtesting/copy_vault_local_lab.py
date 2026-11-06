@@ -68,17 +68,17 @@ _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
 _HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
-    ("core_notional_usd", tuple(float(value) for value in range(20, 191, 5))),
-    ("probe_notional_usd", tuple(float(value) for value in range(5, 101, 5))),
-    ("minimum_leader_fill_notional_usd", tuple(float(value) for value in range(5, 201, 5))),
-    ("signed_depth_imbalance_minimum", tuple(round(-0.5 + i * 0.025, 3) for i in range(41))),
-    ("stop_loss_bps", tuple(float(value) for value in range(20, 501, 20))),
-    ("take_profit_bps", tuple(float(value) for value in range(20, 1001, 20))),
-    ("daily_profit_lock_usd", (1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 15.0, 20.0)),
-    ("horizon_ms", (300_000, 600_000, 900_000, 1_800_000, 3_600_000, 7_200_000, 14_400_000)),
-    ("vault_daily_limit", (1, 2, 3, 4, 5)),
-    ("coin_daily_limit", (1, 2, 3, 4, 5)),
-    ("max_open_positions", (1, 2, 3, 4)),
+    ("core_notional_usd", tuple(float(value) for value in range(40, 161, 10))),
+    ("probe_notional_usd", tuple(float(value) for value in range(10, 61, 10))),
+    ("minimum_leader_fill_notional_usd", tuple(float(value) for value in range(10, 101, 10))),
+    ("signed_depth_imbalance_minimum", tuple(round(-0.3 + i * 0.05, 2) for i in range(13))),
+    ("stop_loss_bps", tuple(float(value) for value in range(40, 301, 20))),
+    ("take_profit_bps", tuple(float(value) for value in range(40, 501, 20))),
+    ("daily_profit_lock_usd", (2.0, 5.0, 10.0, 15.0)),
+    ("horizon_ms", (300_000, 900_000, 1_800_000, 3_600_000)),
+    ("vault_daily_limit", (2, 3, 4)),
+    ("coin_daily_limit", (2, 3, 4)),
+    ("max_open_positions", (1, 2, 3)),
 )
 
 
@@ -973,7 +973,7 @@ def _book_row(
             received is None
             or exchange is None
             or received < exchange
-            or received - exchange > 30_000
+            or received - exchange > 60_000
         ):
             return None
         row = {
@@ -1106,7 +1106,7 @@ def _market_context_row(
         timestamp, levels = data.get("time"), data.get("bbo")
         if (
             type(timestamp) is not int or timestamp <= 0 or timestamp != exchange
-            or receive < timestamp or receive - timestamp > 30_000
+            or receive < timestamp or receive - timestamp > 60_000
             or not isinstance(levels, list) or len(levels) != 2
             or not all(isinstance(level, Mapping) for level in levels)
         ):
@@ -1144,7 +1144,7 @@ def _market_context_row(
         if (
             canonical_copy_vault_coin(row.get("coin")) != instrument
             or type(timestamp) is not int or timestamp <= 0 or timestamp != exchange
-            or receive < timestamp or receive - timestamp > 30_000
+            or receive < timestamp or receive - timestamp > 60_000
             or (not identity and type(tid) is not int)
             or price <= 0 or size <= 0 or side not in {"A", "B"}
         ):
@@ -2924,7 +2924,7 @@ def run_local_campaign(
             freeze = _candidate(params, bounds, max(timestamps) + 1, candidate_id, trial_count)
             say(
                 f"Essai {trial_count} · séquence {this_sequence:,} · "
-                f"{len(_PARAMETER_DOMAINS)} paramètres · capital {params['core_notional_usd'] + params['probe_notional_usd']:.0f}/200 USD"
+                f"{len(_PARAMETER_DOMAINS)} paramètres · capital {params['core_notional_usd'] + params['probe_notional_usd']:.0f}/350 USD"
             )
             train = evaluate_frozen_v21_segment(metaorders, books, freeze, segment="train")
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
@@ -3477,7 +3477,7 @@ def evaluate_current_copy_vault(
 
 
 def _historical_train_proxy(root: Path, freeze: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Scale the last immutable TRAIN result to 200 USD as an explicit rough proxy."""
+    """Scale the last immutable TRAIN result to 350 USD as an explicit rough proxy."""
     relative = str(freeze.get("train_report") or "")
     path = root / relative if relative else (
         root / "runtime" / "reports" / "economic_campaigns" / "research_vnext"
@@ -4415,12 +4415,12 @@ def run_historical_trade_replay(
     baseline = next(
         row for row in trials
         if row["filter"] == "ALL_EXECUTABLE_TRADES"
-        and row["capital_usd"] == 200.0
+        and row["capital_usd"] == 350.0
         and row["fee_multiplier"] == row["spread_multiplier"] == row["latency_multiplier"] == row["slippage_multiplier"] == 1.0
     )
     comparable = [
         row for row in trials
-        if row["capital_usd"] == 200.0
+        if row["capital_usd"] == 350.0
         and row["fee_multiplier"] == row["spread_multiplier"] == row["latency_multiplier"] == row["slippage_multiplier"] == 1.0
         and int(row["sample_count"]) >= 4
     ]

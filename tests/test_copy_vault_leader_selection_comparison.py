@@ -21,7 +21,7 @@ def _context() -> dict:
         "costs": {"fees_bps": "4.50", "spread_bps": "2.00", "slippage_bps": "1.00"},
         "latency": {"observed_ms": 120, "model": "causal-v1"},
         "capacity": {"entry_usd": "100.00", "max_open_positions": 2},
-        "paper_capital_usd": "200.00",
+        "paper_capital_usd": "350.00",
         "protocol": "copy_vault_canonical_replay_v1",
         "trial_accounting": {"family_trial_count": 24, "trial_number": 25},
         "replay_receipt": {

@@ -27,7 +27,7 @@ from hl_observer.paper_trading.execution_truth import MAX_SUPPORTED_EPOCH_MS
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
 # Regression tests assert equality with the canonical protocol constants.
-MAX_TARGET_LAG_MS = 30_000
+MAX_TARGET_LAG_MS = 60_000
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"

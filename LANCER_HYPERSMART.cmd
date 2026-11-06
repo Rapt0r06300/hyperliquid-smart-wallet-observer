@@ -22,7 +22,7 @@ if not defined HYPERSMART_PYTHON (
   goto :fin
 )
 REM ============================================================================
-REM  LANCER_HYPERSMART.cmd  --  LANCEUR RUNTIME OFFICIEL (2026-07-28)
+REM  LANCER_HYPERSMART.cmd  --  LANCEUR RUNTIME OFFICIEL (2026-11-06)
 REM ----------------------------------------------------------------------------
 REM  Double-clic SANS argument = RUNTIME CORE : prevol securite/paper-only,
 REM  verrou d'instance unique, moteur + dashboard + poller + stream leaders,
@@ -115,8 +115,8 @@ REM Reglages SELECTIFS Hyperliquid: runtime principal = Hyperliquid read-only + 
 REM Aucun moteur secondaire n'est lance par defaut.
 REM CALIBRATION 2026-06-19 (basee sur l'analyse de 9154 decisions reelles du ledger):
 REM   - les leaders font surtout ADD/REDUCE (9 OPEN sur 9154) -> ADD doit pouvoir entrer.
-REM   - latence reelle public-WS: age median ~11 s -> 6000 ms etait inatteignable; 30000 ms reste selectif
-REM     et rejette les fills retardes de plusieurs heures (backfill).
+REM   - latence reelle public-WS: age median ~11 s -> 6000 ms etait inatteignable; 60000 ms (protocole
+REM     11/2026) reste selectif et rejette les fills retardes de plusieurs heures (backfill).
 REM   - edge net observe rarement >=35 bps -> seuil ramene a un niveau atteignable mais POSITIF apres couts.
 REM Toujours paper-only / read-only / deny-by-default. Aucune promesse de PnL: c'est un test honnete.
 REM CORRECTIF WINRATE 2026-06-24 (analyse run perdant 24/06: 721 trades / 12.5%% WR / -20.61$ vs
@@ -125,9 +125,9 @@ REM (on chasse un move deja parti), le prix revient et le SL synthetique coupe -
 REM Le snapshot le dit: "les entrees arrivent trop tard; consensus tres chaud vise 4 s". On resserre
 REM a 15000 ms (fresh): admet la latence WS mediane ~11 s, rejette le chasing. Reversible.
 set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=10000"
-REM 20/07 — CAPITAL PAPER CANONIQUE Copy-Vault : 200 USDT, identique au contrat de replay/labo.
+REM 06/11 — CAPITAL PAPER CANONIQUE Copy-Vault : 350 USDT, aligne sur le contrat de replay/labo.
 REM Ce montant est une base de simulation, jamais un solde exchange et jamais une autorisation d'ordre.
-set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=200"
+set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=350"
 REM Legacy ARBITRAGE DE DISLOCATION paper v1 : QUARANTAINE DEFINITIVE.
 REM Le cross-venue actif est EXPERIMENTAL_PAPER v2 (deux jambes, couts complets, ledger isole).
 REM Re-activer ce flag recreerait un second chemin economique ambigu : contrat runtime = 0.
@@ -141,11 +141,9 @@ REM 23/07 (rectif Flo) — COHORTE EXPLORATORY_PAPER : apprend MAINTENANT sans a
 REM Ouvre sur mouvement LIVE d'un vault retenu + edge PRELIMINAIRE positif (copy_prelim_edge.json) +
 REM L2<1s + VWAP + couts complets + sortie definie. Budget $300, max 3, pertes plafonnees. Isole. 0 reel.
 set "HYPERSMART_EXPLORATORY_PAPER=1"
-REM 23/07 (v2) — CARRY FUNDING SUPPRIME DU SCOPE (rectif Flo) : la v1 cross-venue (funding + hold 168 h)
-REM est en QUARANTAINE (fichiers experimental_paper_positions/ledger sans suffixe, plus lus). Le scope
-REM ACTIF est experimental_paper_V2_* : cross-venue COURT TERME (dislocation de prix executable, entree/
-REM sortie rapide, ZERO funding) + lead-lag + copy-vaults. Ce flag ne gele plus que le legacy funding.
-set "HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=0"
+REM 11/2026 — CROSS-VENUE GELE : seul Copy-Vault est le scope actif (OBJECTIF.md).
+REM Le cross-venue experimental (dislocation, lead-lag) est GELE. Remettre a 0 = re-litiger.
+set "HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE=1"
 set "HYPERSMART_REDUCE_MAX_SIGNAL_AGE_MS=15000"
 REM Les reductions leader sont proportionnelles a NOTRE position paper. Sur un compte
 REM de simulation 1000 USDT, une vraie sortie partielle peut valoir moins de 10 USDT:
@@ -166,12 +164,8 @@ REM les couts (cost_model ~12 bps). "Moins de trades, plus propres": on ne prend
 REM edge net franchement positif. Aucun fake, aucun edge negatif jamais accepte.
 REM 2026-07-08: plancher edge copy releve 28->40 (replay causal: la selectivite passe le PnL net positif,
 REM les 2 gros perdants venaient des trades a edge marginal). Reversible.
-REM ── VOLUME DE DONNEES (decision de Flo, 20/07) : « un replay A/B se fait sur des
-REM    donnees ». Le plafond break-even passe de 120 h a 235 h pour ADMETTRE plus de
-REM    carrys (fenetre d'admission doublee) et produire plus d'outcomes de sorties.
-REM    ⚠️ COHERENCE VERROUILLEE PAR TEST : jamais au-dessus de 0,7 x AGE_MAX (336 h),
-REM    sinon on fabrique des positions expulsees AVANT d'avoir amorti = churn garanti.
-set "HYPERSMART_CARRY_MAX_BREAK_EVEN_H=235"
+REM ── VARIABLE MORTE RETIREE (11/2026) : CARRY_MAX_BREAK_EVEN_H n'etait lu par aucun
+REM    module Python. Le carry est DESACTIVE (HYPERSMART_CARRY_DISABLED=1 ci-dessous).
 set "HYPERSMART_SIMULATION_MIN_EDGE_BPS=16"
 set "HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE=0.55"
 set "HYPERSMART_SIMULATION_MAX_COPY_DEGRADATION_BPS=24"
@@ -389,6 +383,45 @@ set "HYPERSMART_ENABLE_AUX_STREAM=1"
 REM Contrat LCH : scope economique unique, autorite dans active_scope.py.
 set "HYPERSMART_ACTIVE_STRATEGY_SCOPE=copy_vault"
 set "HYPERSMART_SCOPE_VERSION=COPY_VAULT_PAPER_V2"
+
+REM === DIRECT COPY-VAULT RUNTIME (11/2026) : chemin fusion_persistent_adapter ===
+REM Ces variables alimentent le decider DIRECT COPY dans fusion_persistent_adapter.py.
+REM Sans elles, les defauts du code (MIN_EDGE=32, MAX_POSITIONS=3, CONSENSUS=3) sont
+REM INCOHERENTS avec les reglages SIMULATION/FUSION ci-dessus. On les aligne ici.
+set "HYPERSMART_DIRECT_COPY_MAX_OPEN_POSITIONS=20"
+set "HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS=2"
+set "HYPERSMART_DIRECT_COPY_MIN_EDGE_BPS=16"
+set "HYPERSMART_DIRECT_COPY_SINGLE_WALLET_EDGE_BONUS_BPS=45"
+set "HYPERSMART_DIRECT_COPY_MAX_SIGNAL_AGE_MS=10000"
+set "HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY=0.55"
+set "HYPERSMART_DIRECT_COPY_MAX_DEGRADATION_BPS=24"
+set "HYPERSMART_DIRECT_COPY_RECOVERY_EDGE_BONUS_BPS=24"
+set "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS=4"
+set "HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY=0.60"
+
+REM === V26 PROTECTIONS PAPER (11/2026) : filets de securite SIMULATION ===
+REM Entry vetos (funding spike + drawdown) : thread de veto active. Sans ce flag,
+REM le thread n'est JAMAIS lance (fusion_heartbeat_input.py). Paper-only, 0 ordre.
+set "HYPERSMART_V26_ENTRY_VETOS_AUTHORITATIVE=1"
+REM StoplossGuard + LowProfitMarket + WindowedDrawdown (protections_v26.py).
+set "HYPERSMART_V26_PROTECTIONS=1"
+REM Arret gradue : amber = ralentir, red = halt complet. Seuils pour 350 USDT paper.
+set "HYPERSMART_V26_HALT_AMBER_LOSS_USD=12"
+set "HYPERSMART_V26_HALT_RED_LOSS_USD=25"
+set "HYPERSMART_V26_HALT_WINDOW_MIN=60"
+set "HYPERSMART_V26_HALT_COOLDOWN_MIN=30"
+REM Drawdown glissant.
+set "HYPERSMART_V26_DD_WINDOW_MIN=120"
+set "HYPERSMART_V26_DD_MAX_LOSS_USD=18"
+set "HYPERSMART_V26_DD_HALT_MIN=45"
+REM Kelly sizing leader (optionnel, active pour dimensionner selon l'edge mesure).
+set "HYPERSMART_V26_KELLY_LEADER=1"
+set "HYPERSMART_V26_KELLY_FRACTION=0.25"
+set "HYPERSMART_V26_KELLY_MIN_TRADES=20"
+set "HYPERSMART_V26_KELLY_MIN_EDGE=5"
+set "HYPERSMART_V26_KELLY_MAX_MULT=2.0"
+set "HYPERSMART_V26_KELLY_MIN_MULT=0.3"
+set "HYPERSMART_V26_KELLY_LOOKBACK=200"
 
 REM === PREFLIGHT BLOQUANT (item 6) — env/deps/disque/dossiers/horloge/endpoints/quotas/schemas/paper.
 REM   NO-GO => le moteur NE demarre PAS. Paper strict, lecture publique HL info uniquement, 0 ordre.

@@ -62,7 +62,7 @@ def _exact_positive_int(value: object) -> int | None:
 
 @dataclass(frozen=True, slots=True)
 class V9PipelineConfig:
-    starting_equity_usdt: float = 200.0
+    starting_equity_usdt: float = 350.0
     max_position_notional_usdt: float = 50.0
     max_total_exposure_usdt: float = 100.0
     min_edge_bps: float = 10.0

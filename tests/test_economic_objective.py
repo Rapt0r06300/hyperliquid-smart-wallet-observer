@@ -130,8 +130,8 @@ def _proof(**overrides):
     return row
 
 
-def test_canonical_capital_contract_is_200_usd_and_five_usd_per_day():
-    assert STARTING_CAPITAL_USD == 200.0
+def test_canonical_capital_contract_is_350_usd_and_five_usd_per_day():
+    assert STARTING_CAPITAL_USD == 350.0
     assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 5.0
     assert PaperLedger().starting_balance_usdc == STARTING_CAPITAL_USD
 

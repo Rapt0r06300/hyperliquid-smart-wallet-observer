@@ -59,13 +59,14 @@ def test_push_launchers_share_one_safe_implementation() -> None:
     engine_text = DRIVER.read_text(encoding="utf-8")
 
     assert "tools\\alina_git_code_sync.py" in main_text
+    assert "tools\\sync_complete_clone.py" in main_text
     assert "tools\\git\\cmd\\git.exe" in main_text
-    assert '"%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%' in main_text
-    assert 'SYNC_OPTION=--dry-run' in main_text
-    assert 'SYNC_OPTION=--wip-only' in main_text
-    assert 'SYNC_OPTION=--promote-current-to-main' in main_text
-    assert 'branch --show-current' in main_text
-    assert 'promotion fast-forward securisee vers main' in main_text
+    assert 'ALINA_CODE_ARGS=--dry-run' in main_text
+    assert 'ALINA_CODE_ARGS=--wip-only' in main_text
+    assert 'ALINA_CODE_ARGS=--promote-current-to-main' in main_text
+    assert 'ALINA_SHARDS_ARGS=--preflight-only' in main_text
+    assert 'ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256' in main_text
+    assert 'ALINA_B64_START' not in main_text
     assert "GIT_SYNC_ENGINE_BUILD" in engine_text
     assert "FETCH_HEAD" not in engine_text
     assert '"push", "--progress", "origin", "HEAD:refs/heads/main"' in engine_text
@@ -77,7 +78,7 @@ def test_push_launchers_share_one_safe_implementation() -> None:
     assert "Invoke-Git" not in helper_text
     assert '"runtime", "logs", "data", "datasets"' in engine_text
 
-    for alias in ALIASES:
+    for alias in [ROOT / "ALINA_SYNC_COMPLETE.cmd", *ALIASES]:
         alias_text = alias.read_text(encoding="utf-8")
         assert "POUSSER-GITHUB-FORCE.cmd" in alias_text
         assert "FETCH_HEAD" not in alias_text

@@ -70,7 +70,7 @@ shards attendu/vérifié et le code retour. Un run rapide ne constitue pas une
 preuve de rentabilité : les résultats restent soumis aux gates causales,
 replay, validation, OOS et forward.
 
-La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. La cible terminale de **+5 USD nets/jour sur 200 USD paper** ne s'évalue qu'après les réparations et preuves requises ; ce n'est ni une promesse ni une raison d'assouplir les contrôles. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
+La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le capital paper autorisé est **350 USD**. Aucune cible chiffrée fixe n'est imposée : la recherche vise une **trajectoire monotone-positive nette de coûts** — tout candidat retenu doit améliorer le meilleur courant, même de quelques centimes, sans jamais tomber sous zéro. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
 
 Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel est déjà conforme : toute divergence entre un lanceur et ce contrat doit être réparée avant d'annoncer une simulation ou une preuve valide. Les rapports et candidats historiques restent conservés.
 
@@ -233,7 +233,7 @@ Autres statuts encodés dans `src/hl_observer/strategies/active_scope.py` :
 La cible courante est :
 
 **démontrer Copy-Vault seul en PAPER, avec des données SAFE, causales, exécutables,
-backtestables et replayables, sur 200 USD de capital paper.**
+backtestables et replayables, sur 350 USD de capital paper.**
 
 Lead-Lag, Cross-Venue, arbitrage et les autres modules ne peuvent ni contribuer au PnL,
 ni compenser Copy-Vault, ni être lancés implicitement. Leur éventuelle réactivation exigera
@@ -247,13 +247,14 @@ Les conclusions honnêtes sont :
 - `UNMEASURABLE`
 - `REJECTED`
 
-L'objectif économique final est de démontrer **au moins +5.00 USD nets/jour** pour
-Copy-Vault sur **200 USD paper**, après la fin des réparations techniques, la
-validation des données SAFE et les preuves replay/OOS/forward. Ce montant est un
-objectif à mesurer, pas une estimation actuelle ni un critère permettant de
-réduire les exigences de preuve.
+**Aucun objectif chiffré fixe n'est imposé.** La recherche vise une **trajectoire
+monotone-positive nette de coûts** sur 350 USD paper : chaque candidat retenu doit
+améliorer le meilleur courant, même de quelques centimes, sans jamais basculer en
+négatif. Le moteur de découverte reste le couple **backtest + replay** du laboratoire,
+qui doit produire de nouvelles stratégies / variantes et ne garder que celles qui
+battent le meilleur courant après coûts. Les versions précédentes ne sont pas écrasées.
 
-La cible de +5.00 USD n'est jamais obtenue en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.
+Un progrès monotone-positif n'est jamais obtenu en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.
 
 ---
 

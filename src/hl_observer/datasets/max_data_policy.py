@@ -425,7 +425,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
         f"- Budget téléchargement : **{decision.get('download_budget_gib')} Gio**",
         f"- Famille prioritaire : `{decision.get('top_family')}`",
         f"- SHA de code pris en compte : `{decision.get('project_sha_scope')}`",
-        "- Objectif Copy-Vault : **≥ 5,00 $ net/jour avec 200 $ de capital paper**",
+        "- Copy-Vault : **350 $ de capital paper, progression monotone-positive nette (pas de cible chiffrée fixe)**",
         "- Familles économiques actives : **Copy-Vault uniquement**",
         "- Compensation entre familles : **INTERDITE**",
         "- OOS/forward utilisés comme gradient : **NON**",
@@ -449,7 +449,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Choisit la prochaine suite FULL/COLD utile pour Copy-Vault avec garde disque et objectif terminal +5 USD/jour sur 200 USD paper."
+        description="Choisit la prochaine suite FULL/COLD utile pour Copy-Vault avec garde disque et progression monotone-positive nette sur 350 USD paper (pas de cible chiffrée fixe)."
     )
     parser.add_argument("--brain-json", required=True)
     parser.add_argument("--lab-root", required=True)

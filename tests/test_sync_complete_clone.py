@@ -203,10 +203,10 @@ def test_preflight_never_downloads_and_avoids_snapshot_mutation(monkeypatch, tmp
 def test_root_entrypoints_are_reusable_in_existing_checkout():
     windows = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
     unix = (ROOT / "ALINA_SYNC_COMPLETE.sh").read_text(encoding="utf-8")
-    assert 'cd /d "%~dp0"' in windows
-    assert windows.count("tools\\sync_complete_clone.py %ALINA_SYNC_ARGS%") == 3
-    assert windows.count("exit /b %ERRORLEVEL%") == 3
-    assert "GIT_LFS_SKIP_SMUDGE=1" in windows
+    assert 'set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB-FORCE.cmd"' in windows
+    assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' in windows
+    assert "EnableDelayedExpansion" in windows
+    assert "for /f \"delims=\" %%R in (\"!RC!\")" in windows
     assert 'exec python3 tools/sync_complete_clone.py "$@"' in unix
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
 
@@ -873,15 +873,11 @@ def test_directory_at_prior_report_path_fails_before_restore(monkeypatch, tmp_pa
 
 
 
-def test_double_click_cmd_downloads_safe_instead_of_preview_only():
+def test_double_click_cmd_runs_safe_preflight_and_requires_explicit_download():
     launcher = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
     assert 'if "%~1"=="" (' in launcher
-    assert (
-        'set "ALINA_SYNC_ARGS=--download-safe --all-safe --unpack-safe"'
-        in launcher
-    )
-    assert "ALINA_SYNC_MODE=DOWNLOAD_AND_UNPACK_ALL_SAFE" in launcher
+    assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' in launcher
+    assert "--download-safe" in launcher
+    assert "--all-safe" in launcher
     assert "--unpack-safe" in launcher
-    assert 'set "ALINA_SYNC_ARGS=%*"' in launcher
-    assert launcher.count("sync_complete_clone.py %ALINA_SYNC_ARGS%") == 3
-    assert "sync_complete_clone.py %*" not in launcher
+    assert "Option AlinaSync inconnue" in launcher

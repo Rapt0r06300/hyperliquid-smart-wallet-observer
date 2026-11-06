@@ -1963,8 +1963,8 @@ def test_protocol_signature_invalidates_pre_vwap_pre_complete_day_freezes() -> N
     assert signature["causal_book_gap_identity_policy"] == (
         "same_connection_and_explicit_gap_epoch_required_for_causal_stream_triplets_v1"
     )
-    assert signature["paper_equity_usd"] == 200.0
-    assert signature["max_gross_exposure_usd"] == 200.0
+    assert signature["paper_equity_usd"] == 350.0
+    assert signature["max_gross_exposure_usd"] == 350.0
     assert signature["notional_usd"] == 150.0
     assert signature["execution_pricing_policy"] == (
         "observed_side_specific_l2_vwap_full_size_v1"

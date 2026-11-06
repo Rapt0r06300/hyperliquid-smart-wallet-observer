@@ -28,7 +28,7 @@ from hl_observer.simulation.paper_ledger import PaperLedger
 
 @dataclass(frozen=True, slots=True)
 class PaperEngineConfig:
-    starting_cash_usdt: float = 200.0
+    starting_cash_usdt: float = 350.0
     max_position_usdt: float = 40.0  # Margin per position.
     # Backward-compatible name: this setting has always capped margin, not
     # gross notional. New callers should prefer max_total_margin_usdt.

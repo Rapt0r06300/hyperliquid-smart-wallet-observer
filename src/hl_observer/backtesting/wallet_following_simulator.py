@@ -30,7 +30,7 @@ class WalletFollowingResult:
     economic_proof_status: str = "UNMEASURABLE"
 
 
-def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = 200.0, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:
+def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = 350.0, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:
     equity = float(starting_equity)
     curve = [equity]
     trades: list[BacktestTrade] = []

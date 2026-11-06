@@ -1,200 +1,137 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
-pushd "%~dp0"
+pushd "%~dp0" >nul 2>nul
 if errorlevel 1 goto :bad_location
 
 rem ============================================================
-rem  RECONCILIATEUR UNIQUE  Local <-> GitHub  (fichier autonome)
-rem  - Moteur commit + push fast-forward EMBARQUE dans ce .cmd
-rem    (base64, decode certutil, extrait dans %TEMP% puis efface).
-rem  - Phase shards SAFE via le moteur data du depot
-rem    (tools\sync_complete_clone.py : moteur du depot, pas un
-rem     lanceur, il reste la pour ne jamais diverger).
-rem  Aucun push force, reset, clean, stash ou effacement de donnees.
+rem  ALINA SMART FLOW - lanceur local unique
+rem  - appelle les moteurs canoniques du depot (pas de copie embarquee)
+rem  - code : tools\alina_git_code_sync.py
+rem  - SAFE : tools\sync_complete_clone.py
+rem  - aucun force-push, reset, clean, stash ou suppression
+rem  - aucun telechargement SAFE sans option explicite
 rem ============================================================
-set "GIT_LFS_SKIP_SMUDGE=1"
-set "GIT_OPTIONAL_LOCKS=0"
 set "ALINA_ROOT=%~dp0"
-set "ALINA_SKIP_CODE=0"
-set "ALINA_SKIP_SHARDS=0"
-set "ALINA_DRYRUN=0"
-rem Defaut : telecharge les shards SAFE replayable (AlinaSync) pour backtest/replay.
-set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256"
+set "ALINA_MODE=all"
+set "ALINA_CODE_ARGS="
+set "ALINA_SHARDS_ARGS=--preflight-only"
+set "ALINA_SKIP_UPDATE=0"
 set "RC=1"
-set "ALINA_TMP_PY=%TEMP%\alina_reconcile_%RANDOM%%RANDOM%.py"
-set "ALINA_TMP_B64=%TEMP%\alina_reconcile_%RANDOM%%RANDOM%.b64"
-set "ALINA_TMP_TOK=%TEMP%\alina_ght_%RANDOM%%RANDOM%.txt"
 
 if /I "%~1"=="--help" goto :help
 if /I "%~1"=="-h" goto :help
-if "%~1"=="" goto :args_done
-if /I "%~1"=="--dry-run" ( set "ALINA_DRYRUN=1" & set "ALINA_SKIP_SHARDS=1" & goto :args_done )
-if /I "%~1"=="--code-only" ( set "ALINA_SKIP_SHARDS=1" & goto :args_done )
-if /I "%~1"=="--shards-only" ( set "ALINA_SKIP_CODE=1" & goto :args_done )
-if /I "%~1"=="--preflight" ( set "ALINA_SHARDS_ARGS=--preflight-only" & goto :args_done )
-if /I "%~1"=="--download-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256" & goto :args_done )
-if /I "%~1"=="--all-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --all-safe" & goto :args_done )
-if /I "%~1"=="--unpack-safe" ( set "ALINA_SHARDS_ARGS=--download-safe --unpack-safe --max-download-gib 256" & goto :args_done )
-if /I "%~1"=="--prune-cache" ( set "ALINA_SHARDS_ARGS=--prune-cache-only" & goto :args_done )
-if /I "%~1"=="--catalog-budget" ( set "ALINA_SHARDS_ARGS=--catalog-budget" & set "ALINA_SKIP_CODE=1" & goto :args_done )
-goto :bad_option
-:args_done
 
-echo ============================================================
-echo  ALINA SMART FLOW - RECONCILIATION LOCAL ^<-^> GITHUB (1 fichier)
-echo  Push fast-forward (greffe) + TELECHARGEMENT des shards SAFE
-echo  Aucun push force, reset, clean ou effacement de donnees
-echo ============================================================
-echo [05%%] [LANCEUR 1/9] Racine : %ALINA_ROOT%
-if "%ALINA_DRYRUN%"=="1" echo        Mode : DRY-RUN (construit le commit, ne pousse rien)
-if "%ALINA_SKIP_CODE%"=="1" echo        Mode : shards uniquement (pas de code)
-echo        Shards : %ALINA_SHARDS_ARGS%
+:parse_args
+if "%~1"=="" goto :args_done
+if /I "%~1"=="--dry-run" set "ALINA_CODE_ARGS=--dry-run"&set "ALINA_MODE=dry"&shift&goto :parse_args
+if /I "%~1"=="--wip-only" set "ALINA_CODE_ARGS=--wip-only"&set "ALINA_MODE=code"&shift&goto :parse_args
+if /I "%~1"=="--promote-current-to-main" set "ALINA_CODE_ARGS=--promote-current-to-main"&set "ALINA_MODE=code"&shift&goto :parse_args
+if /I "%~1"=="--code-only" set "ALINA_MODE=code"&shift&goto :parse_args
+if /I "%~1"=="--shards-only" set "ALINA_MODE=shards"&shift&goto :parse_args
+if /I "%~1"=="--preflight" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--preflight-only"&shift&goto :parse_args
+if /I "%~1"=="--preflight-only" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--preflight-only"&shift&goto :parse_args
+if /I "%~1"=="--download-safe" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--download-safe --max-download-gib 256"&shift&goto :parse_args
+if /I "%~1"=="--all-safe" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--download-safe --all-safe"&shift&goto :parse_args
+if /I "%~1"=="--unpack-safe" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--download-safe --unpack-safe --max-download-gib 256"&shift&goto :parse_args
+if /I "%~1"=="--prune-cache" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--prune-cache-only"&shift&goto :parse_args
+if /I "%~1"=="--prune-cache-only" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--prune-cache-only"&shift&goto :parse_args
+if /I "%~1"=="--catalog-budget" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--catalog-budget"&shift&goto :parse_args
+if /I "%~1"=="--skip-update" set "ALINA_SKIP_UPDATE=1"&shift&goto :parse_args
+goto :bad_option
+
+:args_done
+if "%ALINA_SKIP_UPDATE%"=="1" set "ALINA_SHARDS_ARGS=%ALINA_SHARDS_ARGS% --skip-update"
 
 rem --- Git ---
+set "HYPERSMART_GIT="
 if exist "%ALINA_ROOT%tools\git\cmd\git.exe" set "HYPERSMART_GIT=%ALINA_ROOT%tools\git\cmd\git.exe"
 if not defined HYPERSMART_GIT if exist "%ProgramFiles%\Git\cmd\git.exe" set "HYPERSMART_GIT=%ProgramFiles%\Git\cmd\git.exe"
 if not defined HYPERSMART_GIT if exist "%LOCALAPPDATA%\Programs\Git\cmd\git.exe" set "HYPERSMART_GIT=%LOCALAPPDATA%\Programs\Git\cmd\git.exe"
 if not defined HYPERSMART_GIT for %%G in (git.exe) do if not "%%~$PATH:G"=="" set "HYPERSMART_GIT=%%~$PATH:G"
 if not defined HYPERSMART_GIT goto :missing_git
-echo [15%%] [LANCEUR 2/9] Git : %HYPERSMART_GIT%
-"%HYPERSMART_GIT%" --version
-if errorlevel 1 goto :missing_git
 
-rem --- Python 3.11+ ---
-echo [22%%] [LANCEUR 3/9] Recherche de Python 3.11 ou plus
+rem --- Python ---
 set "HYPERSMART_PYTHON="
 set "PYARGS="
 if exist "%ALINA_ROOT%tools\python\python.exe" set "HYPERSMART_PYTHON=%ALINA_ROOT%tools\python\python.exe"
-if defined HYPERSMART_PYTHON goto :python_ready
-where py.exe >nul 2>nul
-if errorlevel 1 goto :try_python
-set "HYPERSMART_PYTHON=py"
-set "PYARGS=-3"
-goto :python_ready
-:try_python
-where python.exe >nul 2>nul
-if errorlevel 1 goto :missing_python
-set "HYPERSMART_PYTHON=python"
-:python_ready
+if not defined HYPERSMART_PYTHON (
+  where py.exe >nul 2>nul
+  if not errorlevel 1 (
+    set "HYPERSMART_PYTHON=py"
+    set "PYARGS=-3"
+  )
+)
+if not defined HYPERSMART_PYTHON (
+  where python.exe >nul 2>nul
+  if not errorlevel 1 set "HYPERSMART_PYTHON=python"
+)
+if not defined HYPERSMART_PYTHON goto :missing_python
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
 if errorlevel 1 goto :missing_python
-"%HYPERSMART_PYTHON%" %PYARGS% --version
 
-rem --- Extraction du moteur embarque (base64 -> %TEMP%) ---
-rem  Primaire : PowerShell (FromBase64String, le plus fiable).
-rem  Secours  : for/f + certutil (base64 natif Windows).
-echo [30%%] [LANCEUR 4/9] Extraction du moteur reconcile embarque
-if exist "%ALINA_TMP_B64%" del /q "%ALINA_TMP_B64%" >nul 2>nul
-if exist "%ALINA_TMP_PY%" del /q "%ALINA_TMP_PY%" >nul 2>nul
-set "ALINA_EXTRACT_OK="
-where powershell.exe >nul 2>nul
-if errorlevel 1 goto :extract_certutil
-powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $f=Get-Content -LiteralPath '%~f0'; $s=[array]::IndexOf($f,'#ALINA_B64_START'); $e=[array]::IndexOf($f,'#ALINA_B64_END'); if($s -lt 0 -or $e -le $s){exit 9}; [IO.File]::WriteAllBytes('%ALINA_TMP_PY%',[Convert]::FromBase64String(($f[($s+1)..($e-1)] -join '')))" >nul 2>nul
-if not errorlevel 1 if exist "%ALINA_TMP_PY%" set "ALINA_EXTRACT_OK=1"
-if defined ALINA_EXTRACT_OK goto :extract_validate
-:extract_certutil
-where certutil.exe >nul 2>nul
-if errorlevel 1 goto :extract_failed
-set "ALINA_GRAB="
-for /f "usebackq delims=" %%L in ("%~f0") do (
-  if "%%L"=="#ALINA_B64_END" set "ALINA_GRAB="
-  if defined ALINA_GRAB echo(%%L>>"%ALINA_TMP_B64%"
-  if "%%L"=="#ALINA_B64_START" set "ALINA_GRAB=1"
-)
-if not exist "%ALINA_TMP_B64%" goto :extract_failed
-certutil -decode "%ALINA_TMP_B64%" "%ALINA_TMP_PY%" >nul 2>nul
-if errorlevel 1 goto :extract_failed
-del /q "%ALINA_TMP_B64%" >nul 2>nul
-if exist "%ALINA_TMP_PY%" set "ALINA_EXTRACT_OK=1"
-:extract_validate
-if not defined ALINA_EXTRACT_OK goto :extract_failed
-if not exist "%ALINA_TMP_PY%" goto :extract_failed
-"%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_TMP_PY%" >nul 2>nul
-if errorlevel 1 goto :extract_failed
-echo [35%%] [LANCEUR 5/9] Moteur reconcile extrait et valide
-
-rem --- Moteur shards (module du depot) ---
+set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
 set "ALINA_SHARDS_ENGINE=%ALINA_ROOT%tools\sync_complete_clone.py"
+if not exist "%ALINA_ENGINE%" goto :missing_engine
 if not exist "%ALINA_SHARDS_ENGINE%" goto :missing_shards_engine
+"%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_ENGINE%" >nul 2>nul
+if errorlevel 1 goto :invalid_engine
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_SHARDS_ENGINE%" >nul 2>nul
 if errorlevel 1 goto :missing_shards_engine
-echo [40%%] [LANCEUR 6/9] Moteur shards du depot valide
 
-if "%ALINA_SKIP_CODE%"=="1" goto :phase_b
-
-rem --- PHASE CODE : commit WIP + push fast-forward (un seul moteur) ---
+echo ============================================================
+echo  ALINA SMART FLOW - modules canoniques du depot
+echo  Code : tools\alina_git_code_sync.py
+echo  SAFE : tools\sync_complete_clone.py
+echo  Aucun force-push, reset, clean, stash ou suppression
+echo ============================================================
+if /I "%ALINA_MODE%"=="dry" echo Mode : DRY-RUN (aucune publication)
+if /I "%ALINA_MODE%"=="code" echo Mode : CODE uniquement
+if /I "%ALINA_MODE%"=="shards" echo Mode : SAFE uniquement
 echo.
-echo [55%%] [LANCEUR 7/9] PHASE CODE - push fast-forward (greffe, rapide)
-rem --no-commit : on pousse HEAD deja committe sans faire de 'git diff' sur
-rem l'index geant (qui gelait). Le build se fait par greffe (secondes).
-set "ALINA_FF_ARGS=--no-commit"
-if "%ALINA_DRYRUN%"=="1" set "ALINA_FF_ARGS=--no-commit --dry-run"
-"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_TMP_PY%" --git "%HYPERSMART_GIT%" --root "%ALINA_ROOT%." %ALINA_FF_ARGS%
-set "RC_FF=%ERRORLEVEL%"
-if not "%RC_FF%"=="0" goto :ff_failed
-if "%ALINA_DRYRUN%"=="1" echo [80%%] [DRY-RUN] commit construit et verifie ; aucun push effectue.
-if not "%ALINA_DRYRUN%"=="1" echo [80%%] [OK] Code pousse sur origin/main.
-if "%ALINA_DRYRUN%"=="1" goto :finish_ok
 
-:phase_b
-if "%ALINA_SKIP_SHARDS%"=="1" goto :skip_shards
-rem --- Jeton GitHub pour telecharger les assets SAFE (depot prive) ---
-rem Reutilise tes identifiants (gh, sinon le gestionnaire via git credential),
-rem les memes qui authentifient le push. Aucun secret saisi a la main.
-if defined GH_TOKEN goto :have_token
-if defined GITHUB_TOKEN goto :have_token
-for /f "delims=" %%T in ('gh auth token 2^>nul') do set "GH_TOKEN=%%T"
-if defined GH_TOKEN goto :have_token
-if not exist "%ALINA_TMP_PY%" goto :have_token
-"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_TMP_PY%" --git "%HYPERSMART_GIT%" --print-github-token > "%ALINA_TMP_TOK%" 2>nul
-if exist "%ALINA_TMP_TOK%" set /p GH_TOKEN=<"%ALINA_TMP_TOK%"
-if exist "%ALINA_TMP_TOK%" del /q "%ALINA_TMP_TOK%" >nul 2>nul
-:have_token
-if not defined GH_TOKEN if not defined GITHUB_TOKEN echo        [i] Aucun jeton GitHub trouve : si le telechargement SAFE echoue (401/403), lance 'gh auth login' une fois, ou definis GH_TOKEN.
-echo.
-echo [90%%] [LANCEUR 8/9] PHASE SHARDS - AlinaSync SAFE (telechargement, peut etre long)
-echo        Arguments : %ALINA_SHARDS_ARGS%
+if /I "%ALINA_MODE%"=="shards" goto :run_shards
+echo [1/2] Synchronisation du code local vers GitHub main...
+"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %ALINA_CODE_ARGS%
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" goto :finish
+if /I "%ALINA_MODE%"=="dry" goto :finish
+if /I "%ALINA_MODE%"=="code" goto :finish
+echo [OK] Code termine et verifie.
+
+:run_shards
+if /I "%ALINA_MODE%"=="all" echo [2/2] Preflight SAFE (aucun telechargement par defaut)...
+if /I "%ALINA_MODE%"=="shards" echo [1/1] Operation SAFE : %ALINA_SHARDS_ARGS%
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_SHARDS_ENGINE%" %ALINA_SHARDS_ARGS%
-set "RC_SHARDS=%ERRORLEVEL%"
-if not "%RC_SHARDS%"=="0" goto :shards_failed
-echo [98%%] [OK] Phase shards terminee.
-goto :finish_ok
+set "RC=%ERRORLEVEL%"
+goto :finish
 
-:skip_shards
-echo [90%%] [LANCEUR 8/9] PHASE SHARDS - ignoree
-goto :finish_ok
-
-:finish_ok
+:help
+echo Usage : POUSSER-GITHUB-FORCE.cmd [options]
+echo.
+echo  (defaut)              code push fast-forward + preflight SAFE rapide
+echo  --dry-run             code en lecture seule, aucune publication
+echo  --code-only           synchronisation du code uniquement
+echo  --shards-only         operation SAFE uniquement
+echo  --preflight-only      inventaire SAFE sans telechargement
+echo  --download-safe       telechargement SAFE plafonne a 256 GiB
+echo  --all-safe            telechargement SAFE sans plafond
+echo  --unpack-safe         telechargement SAFE + decompression JSONL
+echo  --prune-cache         purge du cache verifie inutilise
+echo  --catalog-budget      comptabilite SAFE offline, sans reseau
+echo  --skip-update         SAFE sans fetch ni fusion Git
+echo.
+echo Le lanceur appelle les modules canoniques du depot; aucune copie Python embarquee.
+echo Aucun force-push, reset, clean, stash ou suppression silencieuse.
 set "RC=0"
 goto :finish
 
 :bad_option
-echo [NO_GO] Option inconnue : %~1  (voir --help)
+echo [NO_GO] Option inconnue : %~1 (voir --help)
 set "RC=2"
 goto :finish
-
-:help
-echo Usage : POUSSER-GITHUB-FORCE.cmd [option]
-echo.
-echo  (defaut)         push fast-forward + TELECHARGE les shards SAFE replayable
-echo  --dry-run        construit le commit, verifie, NE POUSSE PAS, pas de shards
-echo  --code-only      push seul, pas de telechargement shards
-echo  --shards-only    telechargement SAFE seul, pas de code
-echo  --preflight      shards : inventaire seul, aucun telechargement
-echo  --download-safe  SAFE replayable (plafond 256 GiB) [= defaut]
-echo  --all-safe       tout SAFE sans plafond
-echo  --unpack-safe    SAFE + decompression JSONL (pour replay/backtest)
-echo  --prune-cache    purge le cache verifie inutilise
-echo  --catalog-budget compta offline SAFE/PARTIAL/REJECT, aucun reseau
-echo.
-echo  Tout est dans ce seul fichier (moteur commit+push embarque).
-echo  Aucun force-push, reset, clean, stash ou suppression silencieuse.
-set "RC=0"
-goto :finish
-
 :bad_location
-echo [NO_GO] Impossible d'ouvrir le dossier du CMD.
+echo [NO_GO] Impossible d'ouvrir le dossier du depot.
 set "RC=3"
 goto :finish
 :missing_git
@@ -205,372 +142,22 @@ goto :finish
 echo [NO_GO] Python 3.11 ou plus requis.
 set "RC=31"
 goto :finish
-:missing_certutil
-echo [NO_GO] certutil introuvable (decodeur base64 Windows requis).
-set "RC=36"
-goto :finish
-:extract_failed
-echo [NO_GO] Extraction du moteur embarque impossible (base64/certutil).
-if exist "%ALINA_TMP_B64%" del /q "%ALINA_TMP_B64%" >nul 2>nul
-set "RC=37"
+:missing_engine
+echo [NO_GO] Module manquant : tools\alina_git_code_sync.py
+set "RC=34"
 goto :finish
 :missing_shards_engine
-echo [NO_GO] Moteur shards manquant/invalide : tools\sync_complete_clone.py
+echo [NO_GO] Module manquant/invalide : tools\sync_complete_clone.py
 set "RC=35"
 goto :finish
-:ff_failed
-echo.
-echo [NO_GO] Reconciliation code echouee avec code %RC_FF%. Aucune operation de force.
-echo         Les lignes [WIP]/[FF] ci-dessus donnent la cause exacte.
-echo         Ton HEAD local est sauvegarde dans la ref refs/alina/local-work.
-set "RC=%RC_FF%"
-goto :finish
-:shards_failed
-echo.
-echo [NO_GO] Phase shards echouee avec code %RC_SHARDS%.
-if not "%ALINA_SKIP_CODE%"=="1" echo         Le code a deja ete pousse (phase code OK).
-set "RC=%RC_SHARDS%"
+:invalid_engine
+echo [NO_GO] Syntaxe invalide dans tools\alina_git_code_sync.py.
+set "RC=36"
 goto :finish
 
 :finish
-if exist "%ALINA_TMP_PY%" del /q "%ALINA_TMP_PY%" >nul 2>nul
-if exist "%ALINA_TMP_B64%" del /q "%ALINA_TMP_B64%" >nul 2>nul
-if exist "%ALINA_TMP_TOK%" del /q "%ALINA_TMP_TOK%" >nul 2>nul
-set "GH_TOKEN="
 echo.
-echo [100%%] [LANCEUR 9/9] Fin du lanceur - code retour %RC%
-if exist "%ALINA_ROOT%runtime\recovery\full\SYNC_REPORT.json" echo Rapport shards: %ALINA_ROOT%runtime\recovery\full\SYNC_REPORT.json
-if /I "%HYPERSMART_PUSH_NO_PAUSE%"=="1" goto :finish_cleanup
-pause
-:finish_cleanup
+echo [FIN] Lanceur termine - code retour %RC%
+if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
 popd
 endlocal & exit /b %RC%
-
-rem Le moteur reconcile (commit WIP + push fast-forward) est embarque
-rem ci-dessous en base64 entre les marqueurs. Ne rien editer a la main :
-rem regenerer via l'outil de build si le moteur change.
-#ALINA_B64_START
-
-IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwoiIiJSZWNvbmNpbGlhdGV1ciB1bmlxdWUgTG9jYWwgPC0+
-IEdpdEh1YiAoY29tbWl0IFdJUCArIHB1c2ggZmFzdC1mb3J3YXJkKS4KCkVtYmFycXVlIGRhbnMg
-UE9VU1NFUi1HSVRIVUItRk9SQ0UuY21kIChiYXNlNjQpLCBleHRyYWl0IGEgbCdleGVjdXRpb24u
-CgpQb3VycXVvaSBsYSBwbG9tYmVyaWUgOiBjZSBkZXBvdCBlc3QgdW4gY2xvbmUgc2hhbGxvdyAr
-IHBhcnRpZWwKKGZpbHRlcj1ibG9iOm5vbmUpIDsgYGdpdCByZWJhc2VgIG5lIGZhaXQgUklFTiBk
-ZXNzdXMsIGV0IGBnaXQgYWRkYC8KYGdpdCBzdGF0dXNgL2BnaXQgd3JpdGUtdHJlZWAgc3VyIGwn
-aW5kZXggZ2VhbnQgKGNhdGFsb2cvID0gbWlsbGllcnMgZGUKZmljaGllcnMgKyBncm9zIEpTT04p
-IHRpbWUtb3V0LiBPbiBwYXNzZSBkb25jIHBhciA6CiAgMSkgc25hcHNob3QgZHUgY29kZSBsb2Nh
-bCBtb2RpZmllIC0+IGNvbW1pdCBsb2NhbCAoaW5kZXggdGVtcG9yYWlyZSwgSEVBRAogICAgIGNv
-bW1lIGJhc2UsIG9uIG5lIHRvdWNoZSBRVUUgbGVzIGNoZW1pbnMgZGUgY29kZSwgamFtYWlzIGNh
-dGFsb2cvKSA7CiAgMikgcmVjb25zdHJ1Y3Rpb24gZCd1biBjb21taXQgPSBhcmJyZSBkJ29yaWdp
-bi9tYWluICsgU0VVTFMgbGVzIGZpY2hpZXJzCiAgICAgY2hhbmdlcyBwYXIgbGUgbG9jYWwsIHB1
-aXMgYXZhbmNlIGRlIHJlZnMvaGVhZHMvPGJyYW5jaD4gZXQgcHVzaC4KQXVjdW4gcmViYXNlLCBh
-dWN1biBmb3JjZSwgYXVjdW4gcmVzZXQsIGF1Y3VuIGNsZWFuLiBjYXRhbG9nLyByZXN0ZQpleGFj
-dGVtZW50IGEgb3JpZ2luL21haW4gc2F1ZiBzaSB1biBjb21taXQgbG9jYWwgYSBjaGFuZ2UgdW4g
-Y2hlbWluIGNhdGFsb2cvLgoKU2VjdXJpdGUgOiBwYXBlci9yZWFkLW9ubHkgOyBuZSBwb3Vzc2Ug
-cXVlIGR1IGNvZGUuIEVuIGNhcyBkJ2VjaGVjLCBsYWlzc2UKdW5lIHJlZiBkZSBzZWNvdXJzIHJl
-ZnMvYWxpbmEvbG9jYWwtd29yayBzdXIgbGUgSEVBRCBsb2NhbCBkJ29yaWdpbmUuCiIiIgpmcm9t
-IF9fZnV0dXJlX18gaW1wb3J0IGFubm90YXRpb25zCmltcG9ydCBhcmdwYXJzZQppbXBvcnQgb3MK
-aW1wb3J0IHN1YnByb2Nlc3MKaW1wb3J0IHN5cwoKUk9PVCA9IG9zLmVudmlyb24uZ2V0KCJBTElO
-QV9ST09UIikgb3Igb3MucGF0aC5kaXJuYW1lKAogICAgb3MucGF0aC5kaXJuYW1lKG9zLnBhdGgu
-YWJzcGF0aChfX2ZpbGVfXykpKQpHSVQgPSAiZ2l0IgoKIyBDaGVtaW5zIEpBTUFJUyBpbmNsdXMg
-ZGFucyB1biBzbmFwc2hvdCBkZSBjb2RlIChkYXRhLXBsYW5lIC8gcnVudGltZSAvIGdpdCkuCkVY
-Q0xVREVfUFJFRklYRVMgPSAoCiAgICAiY2F0YWxvZy8iLCAicnVudGltZS8iLCAibG9ncy8iLCAi
-bG9nLyIsICIuZ2l0LyIsICJkYXRhLyIsICJkYXRhc2V0cy8iLAogICAgImNhY2hlLyIsICIuY2Fj
-aGUvIiwgInRtcC8iLCAidGVtcC8iLCAib3V0cHV0cy8iLCAicnVudGltZV9yZWNvdmVyeS8iLAop
-CiMgU3VmZml4ZXMgZGF0YSB2b2x1bWluZXV4IHF1ZSBsJ29uIG5lIGNvbW1pdGUgamFtYWlzIGVu
-IFdJUCBhdXRvbWF0aXF1ZS4KRVhDTFVERV9TVUZGSVhFUyA9ICgKICAgICIuZGIiLCAiLnNxbGl0
-ZSIsICIuc3FsaXRlMyIsICIuZGItd2FsIiwgIi5kYi1zaG0iLCAiLnBhcnF1ZXQiLCAiLmpzb25s
-IiwKICAgICIuemlwIiwgIi5neiIsICIudGFyIiwgIi43eiIsICIubG9nIiwgIi5weWMiLCAiLnB5
-byIsCikKIyBQbGFmb25kIGRlIHRhaWxsZSAob2N0ZXRzKSBwb3VyIHVuIGZpY2hpZXIgZGUgY29k
-ZSBjb21taXR0ZSBhdXRvbWF0aXF1ZW1lbnQuCk1BWF9XSVBfRklMRV9CWVRFUyA9IDIgKiAxMDI0
-ICogMTAyNCAgIyAyIE1pQgoKCmRlZiBfaW5kZXhfZGlyKCk6CiAgICAjIERvc3NpZXIgZGVzIGlu
-ZGV4IHRlbXBvcmFpcmVzLiBQYXIgZGVmYXV0IC5naXQgKGNvcnJlY3Qgc3VyIFdpbmRvd3MsCiAg
-ICAjIFNTRCByYXBpZGUpLiBBTElOQV9JTkRFWF9ESVIgcGVybWV0IGRlIGxlIHBvc2VyIHN1ciB1
-biBkaXNxdWUgcmFwaWRlCiAgICAjIHF1YW5kIC5naXQgZXN0IHN1ciB1biBtb250YWdlIGxlbnQg
-KHBvbnQpIDsgYXVjdW4gZWZmZXQgc3VyIFdpbmRvd3MuCiAgICByZXR1cm4gb3MuZW52aXJvbi5n
-ZXQoIkFMSU5BX0lOREVYX0RJUiIpIG9yIG9zLnBhdGguam9pbihST09ULCAiLmdpdCIpCgoKZGVm
-IF9iYXNlX2VudigpOgogICAgIyBHSVRfT1BUSU9OQUxfTE9DS1M9MCA6IGdpdCBuZSBwcmVuZCBK
-QU1BSVMgbGUgdmVycm91IG9wdGlvbm5lbCBkZSBsJ2luZGV4CiAgICAjIG5pIG5lIHJlZWNyaXQg
-bCdpbmRleCBnZWFudCAoMzQ2IE1vKSBsb3JzIGQndW4gZGlmZi9zdGF0dXMgLT4gcGx1cyBkZQog
-ICAgIyAuZ2l0L2luZGV4LmxvY2sgZmlnZSBuaSBkZSBnZWwgc3VyIHVuIGdyb3MgZGVwb3QuIExl
-cyBlY3JpdHVyZXMgZCdpbmRleAogICAgIyBSRVFVSVNFUyAocmVhZC10cmVlL3VwZGF0ZS1pbmRl
-eC93cml0ZS10cmVlIHZpYSBHSVRfSU5ERVhfRklMRSkgbWFyY2hlbnQuCiAgICByZXR1cm4gZGlj
-dChvcy5lbnZpcm9uLCBHSVRfTEZTX1NLSVBfU01VREdFPSIxIiwgR0lUX09QVElPTkFMX0xPQ0tT
-PSIwIikKCgpkZWYgZ2l0KCphLCBlbnZfZXh0cmE9Tm9uZSwgaW5wPU5vbmUpOgogICAgZW52ID0g
-X2Jhc2VfZW52KCkKICAgIGlmIGVudl9leHRyYToKICAgICAgICBlbnYudXBkYXRlKGVudl9leHRy
-YSkKICAgIHJldHVybiBzdWJwcm9jZXNzLnJ1bihbR0lULCAqYV0sIGN3ZD1ST09ULCBjYXB0dXJl
-X291dHB1dD1UcnVlLAogICAgICAgICAgICAgICAgICAgICAgICAgIHRleHQ9VHJ1ZSwgZW52PWVu
-diwgaW5wdXQ9aW5wKQoKCmRlZiBnaXRfb2soKmEsICoqayk6CiAgICByID0gZ2l0KCphLCAqKmsp
-CiAgICBpZiByLnJldHVybmNvZGUgIT0gMDoKICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoZiJn
-aXQgeycgJy5qb2luKGEpfToge3Iuc3RkZXJyLnN0cmlwKClbOjMwMF19IikKICAgIHJldHVybiBy
-LnN0ZG91dAoKCmRlZiBpc19jb2RlX3BhdGgocDogc3RyKSAtPiBib29sOgogICAgcSA9IHAucmVw
-bGFjZSgiXFwiLCAiLyIpCiAgICBsb3cgPSBxLmxvd2VyKCkKICAgIGlmIGFueShsb3cuc3RhcnRz
-d2l0aCh4KSBmb3IgeCBpbiBFWENMVURFX1BSRUZJWEVTKToKICAgICAgICByZXR1cm4gRmFsc2UK
-ICAgIGlmIGFueShsb3cuZW5kc3dpdGgoeCkgZm9yIHggaW4gRVhDTFVERV9TVUZGSVhFUyk6CiAg
-ICAgICAgcmV0dXJuIEZhbHNlCiAgICByZXR1cm4gVHJ1ZQoKCmRlZiBjdXJyZW50X2JyYW5jaChk
-ZWZhdWx0PSJtYWluIikgLT4gc3RyOgogICAgciA9IGdpdCgic3ltYm9saWMtcmVmIiwgIi0tc2hv
-cnQiLCAiLXEiLCAiSEVBRCIpCiAgICBiID0gci5zdGRvdXQuc3RyaXAoKQogICAgcmV0dXJuIGIg
-b3IgZGVmYXVsdAoKCmRlZiBleGNsdWRlX3BhdGhzcGVjcygpOgogICAgIyBQYXRoc3BlYyBwb3Np
-dGlmICIuIiArIGV4Y2x1c2lvbnMgZGVzIGRvc3NpZXJzIGRhdGEvcnVudGltZSwgcG91ciBuZQog
-ICAgIyBKQU1BSVMgcGFyY291cmlyIGNhdGFsb2cvIChkZXMgbWlsbGllcnMgZGUgZmljaGllcnMp
-IDogcmFwaWRlIGV0IHN1ci4KICAgIHNwZWNzID0gWyIuIl0KICAgIGZvciBwZnggaW4gRVhDTFVE
-RV9QUkVGSVhFUzoKICAgICAgICBkID0gcGZ4LnJzdHJpcCgiLyIpCiAgICAgICAgaWYgZCBhbmQg
-ZCAhPSAiLmdpdCI6CiAgICAgICAgICAgIHNwZWNzLmFwcGVuZChmIjooZXhjbHVkZSl7ZH0iKQog
-ICAgcmV0dXJuIHNwZWNzCgoKIyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQojIFBIQVNFIDEgOiBzbmFwc2hv
-dCBkdSBjb2RlIGxvY2FsIG5vbiBjb21taXR0ZSAtPiBjb21taXQgbG9jYWwKIyAtLS0tLS0tLS0t
-LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-LS0tLS0tLQpkZWYgc25hcHNob3Rfd2lwKGJyYW5jaDogc3RyLCBkcnk6IGJvb2wpOgogICAgaGVh
-ZCA9IGdpdF9vaygicmV2LXBhcnNlIiwgIkhFQUQiKS5zdHJpcCgpCgogICAgIyBGaWNoaWVycyBz
-dWl2aXMgbW9kaWZpZXMvc3VwcHJpbWVzICh2cyB3b3JraW5nIHRyZWUpLiBPbiBleGNsdXQgbGVz
-CiAgICAjIGRvc3NpZXJzIGRhdGEvcnVudGltZSBhdSBuaXZlYXUgcGF0aHNwZWMgOiBjYXRhbG9n
-LyBuJ2VzdCBqYW1haXMgcGFyY291cnUuCiAgICB4cCA9IGV4Y2x1ZGVfcGF0aHNwZWNzKCkKICAg
-IG1vZGlmaWVkLCBkZWxldGVkID0gW10sIFtdCiAgICBvdXQgPSBnaXQoImRpZmYiLCAiLS1uYW1l
-LXN0YXR1cyIsICIteiIsICJIRUFEIiwgIi0tIiwgKnhwKQogICAgaWYgb3V0LnJldHVybmNvZGUg
-PT0gMCBhbmQgb3V0LnN0ZG91dDoKICAgICAgICB0b2tzID0gb3V0LnN0ZG91dC5zcGxpdCgiXDAi
-KQogICAgICAgIGkgPSAwCiAgICAgICAgd2hpbGUgaSA8IGxlbih0b2tzKToKICAgICAgICAgICAg
-c3QgPSB0b2tzW2ldCiAgICAgICAgICAgIGlmIG5vdCBzdDoKICAgICAgICAgICAgICAgIGkgKz0g
-MQogICAgICAgICAgICAgICAgY29udGludWUKICAgICAgICAgICAgY29kZSA9IHN0WzBdCiAgICAg
-ICAgICAgIGlmIGNvZGUgaW4gKCJSIiwgIkMiKSBhbmQgaSArIDIgPCBsZW4odG9rcyk6CiAgICAg
-ICAgICAgICAgICAjIHJlbmFtZS9jb3B5IDogb2xkLCBuZXcKICAgICAgICAgICAgICAgIG5ld3Ag
-PSB0b2tzW2kgKyAyXQogICAgICAgICAgICAgICAgbW9kaWZpZWQuYXBwZW5kKG5ld3ApCiAgICAg
-ICAgICAgICAgICBkZWxldGVkLmFwcGVuZCh0b2tzW2kgKyAxXSkKICAgICAgICAgICAgICAgIGkg
-Kz0gMwogICAgICAgICAgICBlbGlmIGkgKyAxIDwgbGVuKHRva3MpOgogICAgICAgICAgICAgICAg
-cGF0aCA9IHRva3NbaSArIDFdCiAgICAgICAgICAgICAgICBpZiBjb2RlID09ICJEIjoKICAgICAg
-ICAgICAgICAgICAgICBkZWxldGVkLmFwcGVuZChwYXRoKQogICAgICAgICAgICAgICAgZWxzZToK
-ICAgICAgICAgICAgICAgICAgICBtb2RpZmllZC5hcHBlbmQocGF0aCkKICAgICAgICAgICAgICAg
-IGkgKz0gMgogICAgICAgICAgICBlbHNlOgogICAgICAgICAgICAgICAgaSArPSAxCgogICAgIyBG
-aWNoaWVycyBub24gc3VpdmlzIChob3JzIC5naXRpZ25vcmUpLCBtZW1lcyBleGNsdXNpb25zLgog
-ICAgdW50cmFja2VkID0gW3AgZm9yIHAgaW4gZ2l0X29rKAogICAgICAgICJscy1maWxlcyIsICIt
-LW90aGVycyIsICItLWV4Y2x1ZGUtc3RhbmRhcmQiLCAiLXoiLCAiLS0iLCAqeHAKICAgICkuc3Bs
-aXQoIlwwIikgaWYgcF0KCiAgICAjIEdhcmRlIHVuaXF1ZW1lbnQgbGUgY29kZSwgZGUgdGFpbGxl
-IHJhaXNvbm5hYmxlLCBwcmVzZW50IHN1ciBkaXNxdWUuCiAgICBhZGQgPSBbXQogICAgZm9yIHAg
-aW4gc29ydGVkKHNldChtb2RpZmllZCkgfCBzZXQodW50cmFja2VkKSk6CiAgICAgICAgaWYgbm90
-IGlzX2NvZGVfcGF0aChwKToKICAgICAgICAgICAgY29udGludWUKICAgICAgICBhcCA9IG9zLnBh
-dGguam9pbihST09ULCBwKQogICAgICAgIGlmIG5vdCBvcy5wYXRoLmlzZmlsZShhcCk6CiAgICAg
-ICAgICAgIGNvbnRpbnVlCiAgICAgICAgdHJ5OgogICAgICAgICAgICBpZiBvcy5wYXRoLmdldHNp
-emUoYXApID4gTUFYX1dJUF9GSUxFX0JZVEVTOgogICAgICAgICAgICAgICAgY29udGludWUKICAg
-ICAgICBleGNlcHQgT1NFcnJvcjoKICAgICAgICAgICAgY29udGludWUKICAgICAgICBhZGQuYXBw
-ZW5kKHApCiAgICBybSA9IFtwIGZvciBwIGluIHNvcnRlZChzZXQoZGVsZXRlZCkpIGlmIGlzX2Nv
-ZGVfcGF0aChwKV0KCiAgICBpZiBub3QgYWRkIGFuZCBub3Qgcm06CiAgICAgICAgcHJpbnQoIltX
-SVBdIGF1Y3VuIGNoYW5nZW1lbnQgZGUgY29kZSBsb2NhbCBhIGZpZ2VyLiIsIGZsdXNoPVRydWUp
-CiAgICAgICAgcmV0dXJuIGhlYWQsIDAKCiAgICBwcmludChmIltXSVBdIHtsZW4oYWRkKX0gZmlj
-aGllcihzKSBjb2RlIG1vZGlmaWUocykvbm91dmVhdSh4KSwgIgogICAgICAgICAgZiJ7bGVuKHJt
-KX0gc3VwcHJlc3Npb24ocykuIiwgZmx1c2g9VHJ1ZSkKICAgIGlmIGRyeToKICAgICAgICBmb3Ig
-cCBpbiBhZGRbOjIwXToKICAgICAgICAgICAgcHJpbnQoZiIgICAgICAgKyB7cH0iLCBmbHVzaD1U
-cnVlKQogICAgICAgIGZvciBwIGluIHJtWzoyMF06CiAgICAgICAgICAgIHByaW50KGYiICAgICAg
-IC0ge3B9IiwgZmx1c2g9VHJ1ZSkKCiAgICAjIENvbnN0cnVjdGlvbiBwYXIgZ3JlZmZlIHN1ciBs
-J2FyYnJlIGRlIEhFQUQgOiBvbiBuZSBsaXQgcXVlIGxlcwogICAgIyByZXBlcnRvaXJlcyBkZXMg
-ZmljaGllcnMgbW9kaWZpZXMsIGphbWFpcyBsJ2FyYnJlIGdlYW50IG5pIGwnaW5kZXggcmVlbC4K
-ICAgIGhlYWRfdHJlZSA9IGdpdF9vaygicmV2LXBhcnNlIiwgZiJ7aGVhZH1ee3t0cmVlfX0iKS5z
-dHJpcCgpCiAgICBjaGFuZ2VzID0gW10KICAgIGZvciBwIGluIGFkZDoKICAgICAgICBhcCA9IG9z
-LnBhdGguam9pbihST09ULCBwKQogICAgICAgIHNoYSA9IGdpdF9vaygiaGFzaC1vYmplY3QiLCAi
-LXciLCAiLS0iLCBhcCkuc3RyaXAoKQogICAgICAgIG1vZGUgPSAiMTAwNjQ0IgogICAgICAgIGx0
-ID0gZ2l0KCJscy10cmVlIiwgaGVhZCwgIi0tIiwgcCkKICAgICAgICBpZiBsdC5yZXR1cm5jb2Rl
-ID09IDAgYW5kIGx0LnN0ZG91dC5zdHJpcCgpOgogICAgICAgICAgICBtMCA9IGx0LnN0ZG91dC5z
-cGxpdCgpWzBdCiAgICAgICAgICAgIGlmIG0wIGluICgiMTAwNjQ0IiwgIjEwMDc1NSIsICIxMjAw
-MDAiKToKICAgICAgICAgICAgICAgIG1vZGUgPSBtMAogICAgICAgIGNoYW5nZXMuYXBwZW5kKChw
-LnNwbGl0KCIvIiksIG1vZGUsIHNoYSkpCiAgICBmb3IgcCBpbiBybToKICAgICAgICBjaGFuZ2Vz
-LmFwcGVuZCgocC5zcGxpdCgiLyIpLCBOb25lLCBOb25lKSkKCiAgICB0cnk6CiAgICAgICAgdHJl
-ZSA9IGJ1aWxkX3RyZWUoaGVhZF90cmVlLCBjaGFuZ2VzKQogICAgZXhjZXB0IFJ1bnRpbWVFcnJv
-ciBhcyBleGM6CiAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKGYiYnVpbGQtdHJlZSBXSVA6IHtl
-eGN9IikKICAgIGlmIHRyZWUgPT0gaGVhZF90cmVlOgogICAgICAgIHByaW50KCJbV0lQXSBhcmJy
-ZSBpZGVudGlxdWUgYSBIRUFELCByaWVuIGEgY29tbWl0dGVyLiIsIGZsdXNoPVRydWUpCiAgICAg
-ICAgcmV0dXJuIGhlYWQsIDAKCiAgICBpZiBkcnk6CiAgICAgICAgcHJpbnQoZiJbV0lQXSBEUlkt
-UlVOIDogYXJicmUgV0lQPXt0cmVlWzoxMl19IChjb21taXQgbm9uIGVjcml0KS4iLAogICAgICAg
-ICAgICAgIGZsdXNoPVRydWUpCiAgICAgICAgcmV0dXJuIGhlYWQsIGxlbihhZGQpICsgbGVuKHJt
-KQoKICAgIG1zZyA9ICgiY2hvcmUoc3luYyk6IHNuYXBzaG90IGxvY2FsIGNvZGUgV0lQXG5cbiIK
-ICAgICAgICAgICAiQ29kZSBsb2NhbCBub24gY29tbWl0dGUgZmlnZSBhdmFudCByZWNvbmNpbGlh
-dGlvbiAoY2F0YWxvZy8gZXQgIgogICAgICAgICAgICJkYXRhIGV4Y2x1cykuXG5cbiIKICAgICAg
-ICAgICAiQ28tQXV0aG9yZWQtQnk6IENsYXVkZSBPcHVzIDQuOCA8bm9yZXBseUBhbnRocm9waWMu
-Y29tPiIpCiAgICBjb21taXQgPSBnaXRfb2soImNvbW1pdC10cmVlIiwgdHJlZSwgIi1wIiwgaGVh
-ZCwgIi1tIiwgbXNnKS5zdHJpcCgpCiAgICBnaXRfb2soInVwZGF0ZS1yZWYiLCBmInJlZnMvaGVh
-ZHMve2JyYW5jaH0iLCBjb21taXQpCiAgICBwcmludChmIltXSVBdIGNvbW1pdCBsb2NhbCB7Y29t
-bWl0WzoxMl19ICh7bGVuKGFkZCkrbGVuKHJtKX0gY2hlbWlucykuIiwKICAgICAgICAgIGZsdXNo
-PVRydWUpCiAgICByZXR1cm4gY29tbWl0LCBsZW4oYWRkKSArIGxlbihybSkKCgojIC0tLS0tLS0t
-LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-LS0tLS0tLS0tCiMgUEhBU0UgMiA6IHB1c2ggZmFzdC1mb3J3YXJkIHBhciBwbG9tYmVyaWUKIyAt
-LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-LS0tLS0tLS0tLS0tLS0tLQojIFNIQSBkZSBsJ2FyYnJlIHZpZGUgKGdpdCkuCkVNUFRZX1RSRUUg
-PSAiNGI4MjVkYzY0MmNiNmViOWEwNjBlNTRiZjhkNjkyODhmYmVlNDkwNCIKCgpkZWYgZGlmZl9j
-aGFuZ2VzKGJhc2UsIHdvcmspOgogICAgIyBSZXRvdXJuZSBsYSBsaXN0ZSBkZXMgY2hhbmdlbWVu
-dHMgKGNoZW1pbiBkZWNvdXBlLCBtb2RlLCBibG9iKSBkZSBiYXNlCiAgICAjIHZlcnMgd29yay4g
-bW9kZT1Ob25lID0+IHN1cHByZXNzaW9uLiAxIGFwcGVsIGRpZmYtdHJlZSAocmFwaWRlKS4KICAg
-IGRpZmYgPSBnaXRfb2soIi1jIiwgImNvcmUucXVvdGVwYXRoPWZhbHNlIiwgImRpZmYtdHJlZSIs
-ICItciIsCiAgICAgICAgICAgICAgICAgICItLW5vLXJlbmFtZXMiLCAiLS1uby1jb21taXQtaWQi
-LCBiYXNlLCB3b3JrKQogICAgY2hhbmdlcywgY2gsIGRsID0gW10sIDAsIDAKICAgIGZvciByYXcg
-aW4gZGlmZi5zcGxpdGxpbmVzKCk6CiAgICAgICAgaWYgbm90IHJhdy5zdGFydHN3aXRoKCI6Iik6
-CiAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgbWV0YSwgdGFiLCBwYXRoID0gcmF3LnBhcnRp
-dGlvbigiXHQiKQogICAgICAgIGlmIG5vdCB0YWI6CiAgICAgICAgICAgIGNvbnRpbnVlCiAgICAg
-ICAgcGFydHMgPSBtZXRhWzE6XS5zcGxpdCgpCiAgICAgICAgaWYgbGVuKHBhcnRzKSA8IDU6CiAg
-ICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgZHN0bW9kZSwgZHN0c2hhLCBzdGF0dXMgPSBwYXJ0
-c1sxXSwgcGFydHNbM10sIHBhcnRzWzRdWzBdCiAgICAgICAgaWYgc3RhdHVzID09ICJEIjoKICAg
-ICAgICAgICAgY2hhbmdlcy5hcHBlbmQoKHBhdGguc3BsaXQoIi8iKSwgTm9uZSwgTm9uZSkpCiAg
-ICAgICAgICAgIGRsICs9IDEKICAgICAgICBlbHNlOgogICAgICAgICAgICBjaGFuZ2VzLmFwcGVu
-ZCgocGF0aC5zcGxpdCgiLyIpLCBkc3Rtb2RlLCBkc3RzaGEpKQogICAgICAgICAgICBjaCArPSAx
-CiAgICByZXR1cm4gY2hhbmdlcywgY2gsIGRsCgoKZGVmIGxzX3RyZWVfZGlyZWN0KHRyZWVfc2hh
-KToKICAgICMgRW50cmVlcyBESVJFQ1RFUyBkJ3VuIGFyYnJlIChub24gcmVjdXJzaWYpIDogMSBz
-ZXVsIG9iamV0LWFyYnJlIGx1LgogICAgZCA9IHt9CiAgICBpZiBub3QgdHJlZV9zaGEgb3IgdHJl
-ZV9zaGEgPT0gRU1QVFlfVFJFRToKICAgICAgICByZXR1cm4gZAogICAgb3V0ID0gZ2l0X29rKCJs
-cy10cmVlIiwgdHJlZV9zaGEpCiAgICBmb3IgbGluZSBpbiBvdXQuc3BsaXRsaW5lcygpOgogICAg
-ICAgIG1ldGEsIHRhYiwgbmFtZSA9IGxpbmUucGFydGl0aW9uKCJcdCIpCiAgICAgICAgaWYgbm90
-IHRhYjoKICAgICAgICAgICAgY29udGludWUKICAgICAgICBtb2RlLCB0eXAsIHNoYSA9IG1ldGEu
-c3BsaXQoKQogICAgICAgIGRbbmFtZV0gPSAobW9kZSwgdHlwLCBzaGEpCiAgICByZXR1cm4gZAoK
-CmRlZiBidWlsZF90cmVlKGJhc2VfdHJlZV9zaGEsIGNoYW5nZXMpOgogICAgIyBDb25zdHJ1aXQg
-dW4gYXJicmUgPSBiYXNlX3RyZWUgYXZlYyBTRVVMRU1FTlQgbGVzIGNoZW1pbnMgZGUgYGNoYW5n
-ZXNgCiAgICAjIG1vZGlmaWVzLiBPbiBuZSBsaXQgcXVlIGxlcyBhcmJyZXMgbGUgbG9uZyBkZXMg
-Y2hlbWlucyBjaGFuZ2VzIDogbGVzCiAgICAjIHNvdXMtYXJicmVzIGludGFjdHMgKGNhdGFsb2cv
-ICEpIGdhcmRlbnQgbGV1ciBTSEEgc2FucyBldHJlIGx1cy4KICAgICMgY2hhbmdlcyA6IGxpc3Rl
-IGRlIChwYXJ0cywgbW9kZSwgc2hhKSA7IHBhcnRzIG5vbiB2aWRlIDsgbW9kZSBOb25lID0gc3Vw
-cHIuCiAgICBlbnRyaWVzID0gbHNfdHJlZV9kaXJlY3QoYmFzZV90cmVlX3NoYSkKICAgIGdyb3Vw
-cyA9IHt9CiAgICBmb3IgcGFydHMsIG1vZGUsIHNoYSBpbiBjaGFuZ2VzOgogICAgICAgIGdyb3Vw
-cy5zZXRkZWZhdWx0KHBhcnRzWzBdLCBbXSkuYXBwZW5kKChwYXJ0c1sxOl0sIG1vZGUsIHNoYSkp
-CiAgICBmb3IgY29tcCwgaXRlbXMgaW4gZ3JvdXBzLml0ZW1zKCk6CiAgICAgICAgbGVhZiA9IE5v
-bmUKICAgICAgICBuZXN0ZWQgPSBbXQogICAgICAgIGZvciByZW0sIG1vZGUsIHNoYSBpbiBpdGVt
-czoKICAgICAgICAgICAgaWYgcmVtOgogICAgICAgICAgICAgICAgbmVzdGVkLmFwcGVuZCgocmVt
-LCBtb2RlLCBzaGEpKQogICAgICAgICAgICBlbHNlOgogICAgICAgICAgICAgICAgbGVhZiA9ICht
-b2RlLCBzaGEpCiAgICAgICAgaWYgbmVzdGVkOgogICAgICAgICAgICBzdWJfYmFzZSA9IChlbnRy
-aWVzW2NvbXBdWzJdCiAgICAgICAgICAgICAgICAgICAgICAgIGlmIGNvbXAgaW4gZW50cmllcyBh
-bmQgZW50cmllc1tjb21wXVsxXSA9PSAidHJlZSIKICAgICAgICAgICAgICAgICAgICAgICAgZWxz
-ZSBOb25lKQogICAgICAgICAgICBuZXdfc3ViID0gYnVpbGRfdHJlZShzdWJfYmFzZSwgbmVzdGVk
-KQogICAgICAgICAgICBpZiBuZXdfc3ViID09IEVNUFRZX1RSRUU6CiAgICAgICAgICAgICAgICBl
-bnRyaWVzLnBvcChjb21wLCBOb25lKQogICAgICAgICAgICBlbHNlOgogICAgICAgICAgICAgICAg
-ZW50cmllc1tjb21wXSA9ICgiMDQwMDAwIiwgInRyZWUiLCBuZXdfc3ViKQogICAgICAgIGlmIGxl
-YWYgaXMgbm90IE5vbmU6CiAgICAgICAgICAgIG1vZGUsIHNoYSA9IGxlYWYKICAgICAgICAgICAg
-aWYgbW9kZSBpcyBOb25lOgogICAgICAgICAgICAgICAgZW50cmllcy5wb3AoY29tcCwgTm9uZSkK
-ICAgICAgICAgICAgZWxzZToKICAgICAgICAgICAgICAgIGVudHJpZXNbY29tcF0gPSAobW9kZSwg
-ImJsb2IiLCBzaGEpCiAgICBpZiBub3QgZW50cmllczoKICAgICAgICByZXR1cm4gRU1QVFlfVFJF
-RQogICAgbGluZXMgPSBbZiJ7bW9kZX0ge3R5cH0ge3NoYX1cdHtuYW1lfSIKICAgICAgICAgICAg
-IGZvciBuYW1lLCAobW9kZSwgdHlwLCBzaGEpIGluIGVudHJpZXMuaXRlbXMoKV0KICAgIHJldHVy
-biBnaXRfb2soIm1rdHJlZSIsIGlucD0iXG4iLmpvaW4obGluZXMpICsgIlxuIikuc3RyaXAoKQoK
-CmRlZiBmYXN0X2ZvcndhcmRfcHVzaChicmFuY2gsIHJlbW90ZSwgYmFzZV9yZWYsIGRyeSwgbm9f
-ZmV0Y2gpOgogICAgaGVhZCA9IGdpdF9vaygicmV2LXBhcnNlIiwgIkhFQUQiKS5zdHJpcCgpCiAg
-ICBnaXRfb2soInVwZGF0ZS1yZWYiLCAicmVmcy9hbGluYS9sb2NhbC13b3JrIiwgaGVhZCkKICAg
-IHByaW50KGYiW0ZGXSBIRUFEIGxvY2FsIHNhdXZlZ2FyZGUgOiB7aGVhZFs6MTJdfSAiCiAgICAg
-ICAgICBmIihyZWYgcmVmcy9hbGluYS9sb2NhbC13b3JrKSIsIGZsdXNoPVRydWUpCgogICAgcmVt
-b3RlX3JlZiA9IGJhc2VfcmVmIG9yIGYie3JlbW90ZX0ve2JyYW5jaH0iCgogICAgZm9yIGF0dGVt
-cHQgaW4gcmFuZ2UoMSwgNik6CiAgICAgICAgcHJpbnQoZiJbRkZdIC0tLSB0ZW50YXRpdmUge2F0
-dGVtcHR9LzUgLS0tIiwgZmx1c2g9VHJ1ZSkKICAgICAgICBpZiBub3Qgbm9fZmV0Y2ggYW5kIGJh
-c2VfcmVmIGlzIE5vbmU6CiAgICAgICAgICAgICMgU0FOUyAtLW5vLWZpbHRlciA6IHN1ciB1biBj
-bG9uZSBwYXJ0aWVsIChibG9iOm5vbmUpLCAtLW5vLWZpbHRlcgogICAgICAgICAgICAjIGZvcmNl
-IGxlIHRlbGVjaGFyZ2VtZW50IGRlIFRPVVMgbGVzIGJsb2JzIG1hbnF1YW50cyAodG91dAogICAg
-ICAgICAgICAjIGwnaGlzdG9yaXF1ZSBjYXRhbG9nLywgZGVzIEdvKSAtPiBnZWwgYXBwYXJlbnQu
-IE9uIG4nZW4gYSBwYXMKICAgICAgICAgICAgIyBiZXNvaW4gOiBsZSBwdXNoIG5lIHJlZmVyZW5j
-ZSBsZXMgYmxvYnMgY2F0YWxvZyBxdWUgcGFyIFNIQS4KICAgICAgICAgICAgcHJpbnQoZiJbRkZd
-IGZldGNoIHtyZW1vdGV9IHticmFuY2h9IChzYW5zIGJhY2tmaWxsIGJsb2JzKSAuLi4iLAogICAg
-ICAgICAgICAgICAgICBmbHVzaD1UcnVlKQogICAgICAgICAgICBmID0gZ2l0KCJmZXRjaCIsIHJl
-bW90ZSwgYnJhbmNoLCAiLS1xdWlldCIpCiAgICAgICAgICAgIGlmIGYucmV0dXJuY29kZSAhPSAw
-OgogICAgICAgICAgICAgICAgcHJpbnQoZiJbRkZdIFdBUk4gZmV0Y2g6IHtmLnN0ZGVyci5zdHJp
-cCgpWzoyMDBdfSIsIGZsdXNoPVRydWUpCgogICAgICAgIHRyeToKICAgICAgICAgICAgYmFzZV9z
-aGEgPSBnaXRfb2soInJldi1wYXJzZSIsIHJlbW90ZV9yZWYpLnN0cmlwKCkKICAgICAgICBleGNl
-cHQgUnVudGltZUVycm9yIGFzIGU6CiAgICAgICAgICAgIHByaW50KGYiW0ZGXSBOT19HTzoge3Jl
-bW90ZV9yZWZ9IGludHJvdXZhYmxlICh7ZX0pIiwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAgcmV0
-dXJuIDIKICAgICAgICBtYiA9IGdpdF9vaygibWVyZ2UtYmFzZSIsICJyZWZzL2FsaW5hL2xvY2Fs
-LXdvcmsiLCBiYXNlX3NoYSkuc3RyaXAoKQogICAgICAgIGNoYW5nZXMsIGNoLCBkbCA9IGRpZmZf
-Y2hhbmdlcyhtYiwgInJlZnMvYWxpbmEvbG9jYWwtd29yayIpCiAgICAgICAgcHJpbnQoZiJbRkZd
-IGJhc2U9e2Jhc2Vfc2hhWzoxMl19IG1lcmdlLWJhc2U9e21iWzoxMl19ICIKICAgICAgICAgICAg
-ICBmInwge2NofSBtb2RpZi9ham91dCwge2RsfSBzdXBwcmVzc2lvbihzKSIsIGZsdXNoPVRydWUp
-CiAgICAgICAgaWYgbm90IGNoYW5nZXM6CiAgICAgICAgICAgIHByaW50KCJbRkZdIGF1Y3VuIGNo
-YW5nZW1lbnQgbG9jYWwgYSBwb3Vzc2VyIDsgcmllbiBhIGZhaXJlLiIsCiAgICAgICAgICAgICAg
-ICAgIGZsdXNoPVRydWUpCiAgICAgICAgICAgIHJldHVybiAwCgogICAgICAgIGJhc2VfdHJlZSA9
-IGdpdF9vaygicmV2LXBhcnNlIiwgZiJ7YmFzZV9zaGF9Xnt7dHJlZX19Iikuc3RyaXAoKQogICAg
-ICAgIHByaW50KCJbRkZdIGNvbnN0cnVjdGlvbiBkZSBsJ2FyYnJlIHBhciBncmVmZmUgKGNhdGFs
-b2cvIGdhcmRlIHNvbiAiCiAgICAgICAgICAgICAgIlNIQSwgYXVjdW5lIGxlY3R1cmUgZGUgbCdh
-cmJyZSBnZWFudCkgLi4uIiwgZmx1c2g9VHJ1ZSkKICAgICAgICB0cnk6CiAgICAgICAgICAgIHRy
-ZWUgPSBidWlsZF90cmVlKGJhc2VfdHJlZSwgY2hhbmdlcykKICAgICAgICBleGNlcHQgUnVudGlt
-ZUVycm9yIGFzIGV4YzoKICAgICAgICAgICAgcHJpbnQoZiJbRkZdIE5PX0dPIGJ1aWxkLXRyZWU6
-IHtleGN9IiwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAgcmV0dXJuIDIKICAgICAgICBwcmludChm
-IltGRl0gdHJlZT17dHJlZVs6MTJdfSIsIGZsdXNoPVRydWUpCiAgICAgICAgbXNnID0gKCJjaG9y
-ZShzeW5jKTogcmVjb25jaWxlIGxvY2FsIHdvcmsgb250byBvcmlnaW4vbWFpblxuXG4iCiAgICAg
-ICAgICAgICAgICJGYXN0LWZvcndhcmQgcGx1bWJpbmcgKHJlYmFzZSBpbXBvc3NpYmxlIG9uIHNo
-YWxsb3crcGFydGlhbCAiCiAgICAgICAgICAgICAgICJjbG9uZSkuIENvZGUgZmlsZXMgZnJvbSBs
-b2NhbCBjb21taXRzIG9ubHk7IGNhdGFsb2cvIGtlcHQgYXQgIgogICAgICAgICAgICAgICAib3Jp
-Z2luL21haW4uXG5cbiIKICAgICAgICAgICAgICAgIkNvLUF1dGhvcmVkLUJ5OiBDbGF1ZGUgT3B1
-cyA0LjggPG5vcmVwbHlAYW50aHJvcGljLmNvbT4iKQogICAgICAgIHIgPSBnaXQoImNvbW1pdC10
-cmVlIiwgdHJlZSwgIi1wIiwgYmFzZV9zaGEsICItbSIsIG1zZykKICAgICAgICBpZiByLnJldHVy
-bmNvZGU6CiAgICAgICAgICAgIHByaW50KGYiW0ZGXSBOT19HTyBjb21taXQtdHJlZToge3Iuc3Rk
-ZXJyLnN0cmlwKClbOjMwMF19IiwKICAgICAgICAgICAgICAgICAgZmx1c2g9VHJ1ZSkKICAgICAg
-ICAgICAgcmV0dXJuIDIKICAgICAgICBjb21taXQgPSByLnN0ZG91dC5zdHJpcCgpCiAgICAgICAg
-cHJpbnQoZiJbRkZdIGNvbW1pdD17Y29tbWl0WzoxMl19IiwgZmx1c2g9VHJ1ZSkKCiAgICAgICAg
-aWYgZHJ5OgogICAgICAgICAgICAjIFZlcmlmaWUgU0VVTEVNRU5UIGxlcyBjaGVtaW5zIGdyZWZm
-ZXMgKHBhdGhzcGVjKSAtPiByYXBpZGUsCiAgICAgICAgICAgICMgcGFzIGRlIGRpZmYgZGUgbCdh
-cmJyZSBnZWFudC4KICAgICAgICAgICAgcGF0aHMgPSBbIi8iLmpvaW4ocGFydHMpIGZvciBwYXJ0
-cywgX20sIF9zIGluIGNoYW5nZXNdCiAgICAgICAgICAgIGQgPSBnaXRfb2soImRpZmYiLCAiLS1u
-YW1lLW9ubHkiLCBjb21taXQsICJyZWZzL2FsaW5hL2xvY2FsLXdvcmsiLAogICAgICAgICAgICAg
-ICAgICAgICAgICItLSIsICpwYXRocykKICAgICAgICAgICAgbG9zdCA9IFtwIGZvciBwIGluIGQu
-c3BsaXRsaW5lcygpIGlmIHBdCiAgICAgICAgICAgIGlmIGxvc3Q6CiAgICAgICAgICAgICAgICBw
-cmludChmIltGRl0gRFJZLVJVTiBQUk9CTEVNRSA6IHtsZW4obG9zdCl9IGZpY2hpZXIocykgZGUg
-Y29kZSAiCiAgICAgICAgICAgICAgICAgICAgICBmIm1hbCBncmVmZmVzIDoge2xvc3RbOjhdfSIs
-IGZsdXNoPVRydWUpCiAgICAgICAgICAgICAgICByZXR1cm4gMQogICAgICAgICAgICBwcmludChm
-IltGRl0gRFJZLVJVTiBPSyA6IHtsZW4ocGF0aHMpfSBjaGFuZ2VtZW50KHMpIGRlIGNvZGUgIgog
-ICAgICAgICAgICAgICAgICAiY29ycmVjdGVtZW50IGdyZWZmZXMgc3VyIG9yaWdpbi9tYWluLiIs
-IGZsdXNoPVRydWUpCiAgICAgICAgICAgIHByaW50KCJbRkZdIGNhdGFsb2cvIGV0IGZpY2hpZXJz
-IG5vbiBtb2RpZmllcyBnYXJkZW50IG9yaWdpbi4gIgogICAgICAgICAgICAgICAgICAibWFpbiBp
-bmNoYW5nZSwgYXVjdW4gcHVzaCAoZHJ5LXJ1bikuIiwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAg
-cmV0dXJuIDAKCiAgICAgICAgZ2l0X29rKCJ1cGRhdGUtcmVmIiwgZiJyZWZzL2hlYWRzL3ticmFu
-Y2h9IiwgY29tbWl0KQogICAgICAgIHByaW50KGYiW0ZGXSBwdXNoIHtyZW1vdGV9IHticmFuY2h9
-IC4uLiAoc2kgdW5lIGZlbmV0cmUgZCdpZGVudGlmaWFudHMgIgogICAgICAgICAgICAgICJHaXRI
-dWIgcydvdXZyZSwgdmFsaWRlLWxhKSIsIGZsdXNoPVRydWUpCiAgICAgICAgIyBzdGRpbyBIRVJJ
-VEUgKHBhcyBkZSBjYXB0dXJlKSA6IGxlcyBpbnZpdGVzIGQnaWRlbnRpZmlhbnRzCiAgICAgICAg
-IyAoZmVuZXRyZSBHaXQgQ3JlZGVudGlhbCBNYW5hZ2VyIG91IGNvbnNvbGUpIGZvbmN0aW9ubmVu
-dCwgZXQgdHUKICAgICAgICAjIHZvaXMgbGEgcHJvZ3Jlc3Npb24gZHUgcHVzaCBlbiBkaXJlY3Qu
-CiAgICAgICAgcHIgPSBzdWJwcm9jZXNzLnJ1bihbR0lULCAicHVzaCIsIHJlbW90ZSwgYnJhbmNo
-XSwgY3dkPVJPT1QsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBlbnY9X2Jhc2VfZW52KCkp
-CiAgICAgICAgaWYgcHIucmV0dXJuY29kZSA9PSAwOgogICAgICAgICAgICBwcmludCgiW0ZGXSA9
-PT0+IFBVU0ggT0sgPD09PSIsIGZsdXNoPVRydWUpCiAgICAgICAgICAgIHByaW50KGYiW0ZGXSBI
-RUFEIHBvdXNzZSA6IHtjb21taXRbOjEyXX0iLCBmbHVzaD1UcnVlKQogICAgICAgICAgICByZXR1
-cm4gMAogICAgICAgICMgZWNoZWMgOiBjb3Vyc2UgKG9yaWdpbiBhIGF2YW5jZSkgb3UgcmVmdXMv
-YXV0aCA/CiAgICAgICAgZ2l0KCJmZXRjaCIsIHJlbW90ZSwgYnJhbmNoLCAiLS1xdWlldCIpCiAg
-ICAgICAgdHJ5OgogICAgICAgICAgICBuZXdiYXNlID0gZ2l0X29rKCJyZXYtcGFyc2UiLCByZW1v
-dGVfcmVmKS5zdHJpcCgpCiAgICAgICAgZXhjZXB0IFJ1bnRpbWVFcnJvcjoKICAgICAgICAgICAg
-bmV3YmFzZSA9IGJhc2Vfc2hhCiAgICAgICAgaWYgbmV3YmFzZSAhPSBiYXNlX3NoYToKICAgICAg
-ICAgICAgcHJpbnQoIltGRl0gb3JpZ2luIGEgYXZhbmNlIHBlbmRhbnQgbGUgcHVzaCA7IG5vdXZl
-bGxlICIKICAgICAgICAgICAgICAgICAgInRlbnRhdGl2ZS4uLiIsIGZsdXNoPVRydWUpCiAgICAg
-ICAgICAgIGNvbnRpbnVlCiAgICAgICAgcHJpbnQoZiJbRkZdIE5PX0dPIHB1c2ggKGNvZGUge3By
-LnJldHVybmNvZGV9KSA6IGVjaGVjICIKICAgICAgICAgICAgICAiZCdhdXRoZW50aWZpY2F0aW9u
-IG91IHJlZnVzIEdpdEh1Yi4gVmVyaWZpZSB0ZXMgaWRlbnRpZmlhbnRzICIKICAgICAgICAgICAg
-ICAiKHVuZSBmZW5ldHJlIGEgcHUgZXRyZSBhbm51bGVlL2Zlcm1lZSkgcHVpcyByZWxhbmNlLiIs
-CiAgICAgICAgICAgICAgZmx1c2g9VHJ1ZSkKICAgICAgICByZXR1cm4gMQoKICAgIHByaW50KCJb
-RkZdIE5PX0dPOiB0cm9wIGRlIHRlbnRhdGl2ZXMgKG9yaWdpbiBhdmFuY2UgdHJvcCB2aXRlKS4i
-LAogICAgICAgICAgZmx1c2g9VHJ1ZSkKICAgIHJldHVybiAxCgoKZGVmIHByaW50X2dpdGh1Yl90
-b2tlbigpOgogICAgIyBSZWN1cGVyZSBsZSBqZXRvbiBHaXRIdWIgZGVqYSBzdG9ja2UgKGNlbHVp
-IHF1aSBhdXRoZW50aWZpZSBsZSBwdXNoKQogICAgIyB2aWEgbGUgY3JlZGVudGlhbCBoZWxwZXIs
-IGV0IGwnaW1wcmltZS4gU2VydCBhIGF1dGhlbnRpZmllciBsZQogICAgIyB0ZWxlY2hhcmdlbWVu
-dCBkZXMgYXNzZXRzIFNBRkUgZHUgZGVwb3QgcHJpdmUsIGF2ZWMgbGVzIG1lbWVzCiAgICAjIGlk
-ZW50aWZpYW50cyBxdWUgbGUgcHVzaCAoYXVjdW4gc2VjcmV0IHNhaXNpIGEgbGEgbWFpbikuCiAg
-ICByID0gZ2l0KCJjcmVkZW50aWFsIiwgImZpbGwiLAogICAgICAgICAgICBpbnA9InByb3RvY29s
-PWh0dHBzXG5ob3N0PWdpdGh1Yi5jb21cblxuIikKICAgIGlmIHIucmV0dXJuY29kZSAhPSAwOgog
-ICAgICAgIHJldHVybiAxCiAgICBmb3IgbGluZSBpbiAoci5zdGRvdXQgb3IgIiIpLnNwbGl0bGlu
-ZXMoKToKICAgICAgICBpZiBsaW5lLnN0YXJ0c3dpdGgoInBhc3N3b3JkPSIpOgogICAgICAgICAg
-ICB0b2sgPSBsaW5lW2xlbigicGFzc3dvcmQ9Iik6XS5zdHJpcCgpCiAgICAgICAgICAgIGlmIHRv
-azoKICAgICAgICAgICAgICAgIHN5cy5zdGRvdXQud3JpdGUodG9rKQogICAgICAgICAgICAgICAg
-cmV0dXJuIDAKICAgIHJldHVybiAxCgoKZGVmIG1haW4oKToKICAgIGdsb2JhbCBHSVQsIFJPT1QK
-ICAgIGlmICItLXByaW50LWdpdGh1Yi10b2tlbiIgaW4gc3lzLmFyZ3Y6CiAgICAgICAgIyBtb2Rl
-IGlzb2xlIDogYXJncyAtLWdpdCBldCAtLXByaW50LWdpdGh1Yi10b2tlbiB1bmlxdWVtZW50CiAg
-ICAgICAgZm9yIGksIGEgaW4gZW51bWVyYXRlKHN5cy5hcmd2KToKICAgICAgICAgICAgaWYgYSA9
-PSAiLS1naXQiIGFuZCBpICsgMSA8IGxlbihzeXMuYXJndik6CiAgICAgICAgICAgICAgICBnbG9i
-YWxzKClbIkdJVCJdID0gc3lzLmFyZ3ZbaSArIDFdCiAgICAgICAgcmV0dXJuIHByaW50X2dpdGh1
-Yl90b2tlbigpCiAgICBhcCA9IGFyZ3BhcnNlLkFyZ3VtZW50UGFyc2VyKCkKICAgIGFwLmFkZF9h
-cmd1bWVudCgiLS1naXQiLCBkZWZhdWx0PSJnaXQiKQogICAgYXAuYWRkX2FyZ3VtZW50KCItLXJv
-b3QiLCBkZWZhdWx0PU5vbmUsCiAgICAgICAgICAgICAgICAgICAgaGVscD0icmFjaW5lIGR1IGRl
-cG90IChzaW5vbiBBTElOQV9ST09UIG91IGRldXggbml2ZWF1eCBhdS1kZXNzdXMpIikKICAgIGFw
-LmFkZF9hcmd1bWVudCgiLS1yZW1vdGUiLCBkZWZhdWx0PSJvcmlnaW4iKQogICAgYXAuYWRkX2Fy
-Z3VtZW50KCItLWJyYW5jaCIsIGRlZmF1bHQ9Tm9uZSkKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1k
-cnktcnVuIiwgYWN0aW9uPSJzdG9yZV90cnVlIikKICAgIGFwLmFkZF9hcmd1bWVudCgiLS1uby1m
-ZXRjaCIsIGFjdGlvbj0ic3RvcmVfdHJ1ZSIpCiAgICBhcC5hZGRfYXJndW1lbnQoIi0tbm8tY29t
-bWl0IiwgYWN0aW9uPSJzdG9yZV90cnVlIiwKICAgICAgICAgICAgICAgICAgICBoZWxwPSJuZSBm
-aWdlIHBhcyBsZSBXSVAsIHBvdXNzZSBzZXVsZW1lbnQgY2UgcXVpIGVzdCBjb21taXRlIikKICAg
-IGFwLmFkZF9hcmd1bWVudCgiLS1iYXNlIiwgZGVmYXVsdD1Ob25lLCBoZWxwPSJkZWJ1ZzogYnVp
-bGQgb24gdGhpcyByZWYiKQogICAgYXJncyA9IGFwLnBhcnNlX2FyZ3MoKQogICAgR0lUID0gYXJn
-cy5naXQKICAgIGlmIGFyZ3Mucm9vdDoKICAgICAgICBST09UID0gb3MucGF0aC5hYnNwYXRoKGFy
-Z3Mucm9vdCkKICAgIGJyYW5jaCA9IGFyZ3MuYnJhbmNoIG9yIGN1cnJlbnRfYnJhbmNoKCJtYWlu
-IikKCiAgICB0cnk6CiAgICAgICAgaWYgbm90IGFyZ3Mubm9fY29tbWl0OgogICAgICAgICAgICBz
-bmFwc2hvdF93aXAoYnJhbmNoLCBhcmdzLmRyeV9ydW4pCiAgICBleGNlcHQgRXhjZXB0aW9uIGFz
-IGU6ICAjIG5vcWE6IEJMRTAwMQogICAgICAgIHByaW50KGYiW1dJUF0gTk9fR08gc25hcHNob3Qg
-KHtlfSkgOyBvbiBwb3Vzc2UgY2UgcXVpIGVzdCBkZWphICIKICAgICAgICAgICAgICAiY29tbWl0
-ZS4iLCBmbHVzaD1UcnVlKQoKICAgIHJldHVybiBmYXN0X2ZvcndhcmRfcHVzaChicmFuY2gsIGFy
-Z3MucmVtb3RlLCBhcmdzLmJhc2UsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgYXJncy5k
-cnlfcnVuLCBhcmdzLm5vX2ZldGNoKQoKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICBz
-eXMuZXhpdChtYWluKCkpCg==
-#ALINA_B64_END
-

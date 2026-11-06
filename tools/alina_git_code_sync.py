@@ -41,7 +41,7 @@ PROTECTED_DIRS = {
 # This root contains millions of tracked immutable data paths. A full worktree
 # scan cannot complete within the launcher read budget; remote changes to one
 # of these paths are still checked individually before any merge.
-UNSCANNABLE_PROTECTED_ROOTS = {"datasets"}
+UNSCANNABLE_PROTECTED_ROOTS = {"datasets", "catalog"}
 PROTECTED_EXTENSIONS = {
     ".bundle", ".zip", ".7z", ".rar", ".tar", ".gz", ".zst", ".sqlite",
     ".sqlite3", ".db", ".parquet", ".feather", ".pkl", ".pickle",
@@ -82,7 +82,7 @@ HISTORY_DEEPEN_STEPS = (512,)
 # fetched explicitly by Git itself, while SAFE/shard data is never bulk-read.
 HISTORY_FETCH_FILTER = "--filter=tree:0"
 HISTORY_FETCH_TIMEOUT_SECONDS = 300
-MERGE_TREE_TIMEOUT_SECONDS = 30
+MERGE_TREE_TIMEOUT_SECONDS = 120
 # A rebase is bounded and receives a small budget per local commit.  A fixed
 # five-minute wait made a double-click look hung when Git was waiting on a
 # conflict, hook, or missing object.  The budget is deliberately capped: a
@@ -97,8 +97,8 @@ REBASE_ABORT_TIMEOUT_SECONDS = 8
 # checkout cost that made the classic rebase exceed the launcher budget on
 # this partial clone.  The command is experimental; older Git versions fall
 # back to the existing bounded rebase path.
-GIT_REPLAY_TIMEOUT_SECONDS = 30
-REPLAY_WORKTREE_TIMEOUT_SECONDS = 30
+GIT_REPLAY_TIMEOUT_SECONDS = 120
+REPLAY_WORKTREE_TIMEOUT_SECONDS = 120
 # Keep every network-bound Git operation bounded even when a future call site
 # forgets to pass an explicit timeout.  The launcher is code-only, so a
 # stalled authentication, SSH host-key prompt, or unreachable remote must
@@ -110,7 +110,7 @@ DEFAULT_GIT_TIMEOUT_SECONDS = 300
 # closed if either operation stops making progress.
 COMMIT_TIMEOUT_SECONDS = 300
 REMOTE_READ_TIMEOUT_SECONDS = 20
-LOCAL_READ_TIMEOUT_SECONDS = 30
+LOCAL_READ_TIMEOUT_SECONDS = 600
 MIN_GIT_VERSION = (2, 30)
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
@@ -1584,13 +1584,35 @@ class Synchronizer:
         # protected tree. Protected paths that are scanned are still rejected
         # as checkpoint candidates; an incoming remote change to the massive
         # tree is checked individually before any merge.
+        # The publishable inventory must cover every code root, but it must
+        # not stat SAFE/runtime trees on every launcher invocation.  SAFE
+        # worktree edits are never eligible for a code commit; staged SAFE
+        # paths are read separately from the index so they can still be
+        # reported and preserved without a full worktree scan.
         staged, tracked = _status_entries(
             self.command(
                 "status", "--porcelain=v1", "-z", "--no-renames",
                 "--untracked-files=no",
-                "--", *self._pathspecs(include_protected=True),
+                "--", *self._pathspecs(include_protected=False),
             ).stdout
         )
+        staged_protected = _paths(
+            self.command(
+                "diff", "--cached", "--name-only", "-z",
+                "--no-renames", "--",
+                *self._pathspecs(include_protected=True),
+            ).stdout
+        )
+        staged.extend(staged_protected)
+        # Worktree diff on protected paths (without --cached) requires Git to
+        # lstat every matched path.  On a shallow clone whose index exceeds one
+        # million entries this takes 10+ minutes and times out the launcher.
+        # Protected paths are never eligible for a code commit — the --cached
+        # diff above already catches anything staged — so the worktree scan is
+        # skipped entirely.  If a protected file is modified on disk it will
+        # still appear when the operator runs a manual ``git status``.
+        tracked_protected: list[str] = []
+        tracked.extend(tracked_protected)
         # Git prunes excluded directories; never descend into SAFE shards.
         args = ["ls-files", "--others", "--exclude-standard", "-z"]
         for pattern in self._excluded_untracked_patterns():
@@ -1630,7 +1652,13 @@ class Synchronizer:
         cached = self._pathspec_cache.get(include_protected)
         if cached is not None:
             return cached
-        paths = [":(top,glob)*"]
+        # Do not add a root-wide glob here.  Git expands that glob into every
+        # tracked path, including the multi-million-file ``datasets`` tree,
+        # before it applies the explicit directory exclusions below.  Listing
+        # root files and bounded top-level directories directly preserves the
+        # complete code inventory without accidentally reintroducing the
+        # expensive SAFE/data scan.
+        paths: list[str] = []
         for child in self.root.iterdir():
             if child.name in UNSCANNABLE_PROTECTED_ROOTS:
                 continue
@@ -2388,9 +2416,13 @@ class Synchronizer:
         for path in eligible:
             self._check_file_payload(path, self.root / path)
         if self.dry_run and eligible:
+            pathspec_bytes = (
+                b"\0".join(p.encode("utf-8") for p in eligible) + b"\0"
+            )
             proposed_diff = self.command(
-                "diff", "HEAD", "--no-ext-diff", "--unified=0", "--",
-                *eligible, check=False,
+                "diff", "HEAD", "--no-ext-diff", "--unified=0",
+                "--pathspec-from-file=-", "--pathspec-file-nul",
+                input_bytes=pathspec_bytes, check=False,
             )
             proposed_message = _commit_subject(
                 eligible,
@@ -2437,9 +2469,16 @@ class Synchronizer:
                 self.report["checkpoint_sha"] = self._commit_staged_index(
                     commit_message
                 )
-                published_index_info = self.command(
-                    "ls-files", "-s", "-z", "--", *eligible,
-                ).stdout
+                _chunks = [
+                    eligible[i:i + 200]
+                    for i in range(0, len(eligible), 200)
+                ]
+                published_index_info = b"".join(
+                    self.command(
+                        "ls-files", "-s", "-z", "--", *chunk,
+                    ).stdout
+                    for chunk in _chunks
+                )
                 self.report["local_commit_created"] = True
         if self.report.get("local_commit_created"):
             self._align_operator_index(eligible, published_index_info)
