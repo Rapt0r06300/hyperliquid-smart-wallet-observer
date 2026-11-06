@@ -3099,10 +3099,11 @@ class Synchronizer:
                 f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
                 f"supprimes pour permettre la fusion (recrees par le remote)."
             )
-        self.command(
-            "read-tree", "-u", "-m", new_tip,
-            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-        )
+        with self._preserve_local_protected_index():
+            self.command(
+                "read-tree", "-u", "-m", new_tip,
+                timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            )
         updated = self.command(
             "update-ref", "refs/heads/main", new_tip, local,
             check=False,
