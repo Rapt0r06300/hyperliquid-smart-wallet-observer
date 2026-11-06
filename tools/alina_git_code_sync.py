@@ -3049,47 +3049,52 @@ class Synchronizer:
         # inventory immediately before applying the new tracked tree so a
         # concurrent editor cannot be overwritten silently.
         self._assert_no_new_code_changes()
-        read_tree_result = self.command(
+        # On a shallow clone with thousands of SAFE catalog files on disk,
+        # ``read-tree -u -m`` will refuse if any untracked file matches a
+        # path in new_tip.  Pre-identify those conflicts and remove the SAFE
+        # ones before attempting the tree update.
+        incoming_paths = _paths(
+            self.command(
+                "diff", "--name-only", "-z", local, new_tip,
+            ).stdout
+        )
+        existing_untracked: list[str] = []
+        for path in incoming_paths:
+            full = self.root / path
+            if not full.is_file():
+                continue
+            existing_untracked.append(path)
+        _tracked_here: set[str] = set()
+        for start in range(0, len(existing_untracked), PROTECTED_PATH_BATCH_SIZE):
+            batch = existing_untracked[start:start + PROTECTED_PATH_BATCH_SIZE]
+            _tracked_here.update(_paths(
+                self.command("ls-files", "-z", "--", *batch).stdout
+            ))
+        removed_safe: list[str] = []
+        blocked_unsafe: list[str] = []
+        for path in existing_untracked:
+            if path in _tracked_here:
+                continue
+            if _can_defer_staged_protected(path):
+                (self.root / path).unlink()
+                removed_safe.append(path)
+            else:
+                blocked_unsafe.append(path)
+        if blocked_unsafe:
+            raise SyncBlocked(
+                f"GitHub toucherait {len(blocked_unsafe)} fichier(s) local non "
+                f"suivi(s) non-SAFE: {', '.join(blocked_unsafe[:5])}. "
+                "Fusion interdite."
+            )
+        if removed_safe:
+            self.say(
+                f"[GARDE DONNEES] {len(removed_safe)} fichier(s) SAFE locaux "
+                f"supprimes pour permettre la fusion (recrees par le remote)."
+            )
+        self.command(
             "read-tree", "-u", "-m", new_tip,
             timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-            check=False,
         )
-        if read_tree_result.returncode:
-            stderr_text = read_tree_result.stderr.decode(
-                "utf-8", errors="replace"
-            )
-            if "would be overwritten" in stderr_text:
-                conflicting = [
-                    line.split("'")[1]
-                    for line in stderr_text.splitlines()
-                    if "would be overwritten" in line and "'" in line
-                ]
-                safe_conflicts = [
-                    p for p in conflicting if _can_defer_staged_protected(p)
-                ]
-                if safe_conflicts and len(safe_conflicts) == len(conflicting):
-                    for path in safe_conflicts:
-                        full = self.root / path
-                        if full.is_file():
-                            full.unlink()
-                            self.say(
-                                f"[GARDE DONNEES] Fichier SAFE local deplace "
-                                f"pour fusion: {path}"
-                            )
-                    self.command(
-                        "read-tree", "-u", "-m", new_tip,
-                        timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
-                    )
-                else:
-                    raise SyncBlocked(
-                        f"git read-tree a echoue (code {read_tree_result.returncode}): "
-                        + stderr_text.strip()
-                    )
-            else:
-                raise SyncBlocked(
-                    f"git read-tree a echoue (code {read_tree_result.returncode}): "
-                    + stderr_text.strip()
-                )
         updated = self.command(
             "update-ref", "refs/heads/main", new_tip, local,
             check=False,
