@@ -41,7 +41,7 @@ PROTECTED_DIRS = {
 # This root contains millions of tracked immutable data paths. A full worktree
 # scan cannot complete within the launcher read budget; remote changes to one
 # of these paths are still checked individually before any merge.
-UNSCANNABLE_PROTECTED_ROOTS = {"datasets", "catalog"}
+UNSCANNABLE_PROTECTED_ROOTS = {"datasets"}
 PROTECTED_EXTENSIONS = {
     ".bundle", ".zip", ".7z", ".rar", ".tar", ".gz", ".zst", ".sqlite",
     ".sqlite3", ".db", ".parquet", ".feather", ".pkl", ".pickle",
@@ -2597,6 +2597,11 @@ class Synchronizer:
                         f"GitHub toucherait un fichier protege modifie localement: {path}. "
                         "Fusion interdite pour proteger les donnees."
                     )
+                continue
+            if _can_defer_staged_protected(path):
+                self.say(
+                    f"[GARDE DONNEES] Fichier SAFE non suivi tolere: {path}"
+                )
                 continue
             raise SyncBlocked(
                 f"GitHub toucherait un fichier local protege non suivi: {path}. "
