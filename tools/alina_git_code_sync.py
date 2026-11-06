@@ -1607,11 +1607,19 @@ class Synchronizer:
         # Worktree diff on protected paths (without --cached) requires Git to
         # lstat every matched path.  On a shallow clone whose index exceeds one
         # million entries this takes 10+ minutes and times out the launcher.
-        # Protected paths are never eligible for a code commit — the --cached
-        # diff above already catches anything staged — so the worktree scan is
-        # skipped entirely.  If a protected file is modified on disk it will
-        # still appear when the operator runs a manual ``git status``.
+        # Instead, list protected paths from the index directly (fast, reads
+        # only index metadata without stat) so that _preserve_local_protected_
+        # index can set skip-worktree before merge/replay.
+        protected_ps = self._pathspecs(include_protected=True)
+        code_ps = self._pathspecs(include_protected=False)
+        protected_only_ps = tuple(p for p in protected_ps if p not in set(code_ps))
         tracked_protected: list[str] = []
+        if protected_only_ps:
+            tracked_protected = _paths(
+                self.command(
+                    "ls-files", "-z", "--", *protected_only_ps,
+                ).stdout
+            )
         tracked.extend(tracked_protected)
         # Git prunes excluded directories; never descend into SAFE shards.
         args = ["ls-files", "--others", "--exclude-standard", "-z"]
