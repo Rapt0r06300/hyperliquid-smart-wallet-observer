@@ -4,7 +4,7 @@
     "broad_rest_universe_count": 3054,
     "campaigns": [
       {
-        "campaign_id": "copy-vault-e8-broad-2026110520-v8",
+        "campaign_id": "copy-vault-e8-broad-2026110601-v8",
         "collected": false,
         "completed_units": 1,
         "published": false,
@@ -16,7 +16,7 @@
     "collected_lane_count": 0,
     "collection_mode": "two_speed_broad_rest_priority_ws",
     "completed_unit_count": 1,
-    "created_at_max": "2026-11-05T20:39:39.854127+00:00",
+    "created_at_max": "2026-11-06T01:41:56.449886+00:00",
     "declared_universe_count": 3054,
     "duplicate_lane_indices": [],
     "explicit_unavailable_lane_count": 0,
@@ -34,8 +34,8 @@
     "qualified_shard_count": 0,
     "scheduled_lane_count": 1,
     "selected_count": 3054,
-    "selection_file": "catalog/copy_vault_selections/e8/2026110520.json",
-    "selection_sha256": "5499ff034e66104891f1a1d73913572921448bf0928db4e247128de4a6182125",
+    "selection_file": "catalog/copy_vault_selections/e8/2026110601.json",
+    "selection_sha256": "e72d3abb801a560ae348a1202afa020a509c751d959838113f09d4f8bb9f23fe",
     "selection_verified": true,
     "status": "MORE_DATA",
     "terminal_lane_count": 1,
@@ -44,7 +44,7 @@
     "ws_subscription_limit_verified": true,
     "ws_users_per_largest_lane": 10
   },
-  "candidate_campaign_count": 134,
+  "candidate_campaign_count": 135,
   "collection_cutoff_at_utc": null,
   "invalid_manifest_paths": [],
   "paper_only": true,
@@ -6080,11 +6080,56 @@
       "users_per_largest_lane": 3054,
       "ws_subscription_limit_verified": true,
       "ws_users_per_largest_lane": 10
+    },
+    {
+      "active_lane_count": 0,
+      "broad_rest_universe_count": 3054,
+      "campaigns": [
+        {
+          "campaign_id": "copy-vault-e8-broad-2026110601-v8",
+          "collected": false,
+          "completed_units": 1,
+          "published": false,
+          "shard_index": 0,
+          "status": "PARTIAL",
+          "status_reason": "collection_publication_unproven"
+        }
+      ],
+      "collected_lane_count": 0,
+      "collection_mode": "two_speed_broad_rest_priority_ws",
+      "completed_unit_count": 1,
+      "created_at_max": "2026-11-06T01:41:56.449886+00:00",
+      "declared_universe_count": 3054,
+      "duplicate_lane_indices": [],
+      "explicit_unavailable_lane_count": 0,
+      "fully_published": false,
+      "lane_indices": [
+        0
+      ],
+      "manifest_lane_count": 1,
+      "max_users_per_lane_contract": 10,
+      "missing_lane_indices": [],
+      "no_silent_loss": true,
+      "out_of_range_lane_indices": [],
+      "plan_valid": true,
+      "published_lane_count": 0,
+      "qualified_shard_count": 0,
+      "scheduled_lane_count": 1,
+      "selected_count": 3054,
+      "selection_file": "catalog/copy_vault_selections/e8/2026110601.json",
+      "selection_sha256": "e72d3abb801a560ae348a1202afa020a509c751d959838113f09d4f8bb9f23fe",
+      "selection_verified": true,
+      "status": "MORE_DATA",
+      "terminal_lane_count": 1,
+      "unexpected_failures": [],
+      "users_per_largest_lane": 3054,
+      "ws_subscription_limit_verified": true,
+      "ws_users_per_largest_lane": 10
     }
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "6dd399744682807cac33319f9d84fdc3599f7bca43539c67bb54583d045719a6",
+  "receipt_digest": "7d398f7fc486b411973b7f57bbb5be31aa1807df30c04bf6d34ac9f0ffb7dd6b",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
