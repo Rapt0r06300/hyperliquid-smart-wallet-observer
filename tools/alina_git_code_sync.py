@@ -3049,10 +3049,47 @@ class Synchronizer:
         # inventory immediately before applying the new tracked tree so a
         # concurrent editor cannot be overwritten silently.
         self._assert_no_new_code_changes()
-        self.command(
+        read_tree_result = self.command(
             "read-tree", "-u", "-m", new_tip,
             timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+            check=False,
         )
+        if read_tree_result.returncode:
+            stderr_text = read_tree_result.stderr.decode(
+                "utf-8", errors="replace"
+            )
+            if "would be overwritten" in stderr_text:
+                conflicting = [
+                    line.split("'")[1]
+                    for line in stderr_text.splitlines()
+                    if "would be overwritten" in line and "'" in line
+                ]
+                safe_conflicts = [
+                    p for p in conflicting if _can_defer_staged_protected(p)
+                ]
+                if safe_conflicts and len(safe_conflicts) == len(conflicting):
+                    for path in safe_conflicts:
+                        full = self.root / path
+                        if full.is_file():
+                            full.unlink()
+                            self.say(
+                                f"[GARDE DONNEES] Fichier SAFE local deplace "
+                                f"pour fusion: {path}"
+                            )
+                    self.command(
+                        "read-tree", "-u", "-m", new_tip,
+                        timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+                    )
+                else:
+                    raise SyncBlocked(
+                        f"git read-tree a echoue (code {read_tree_result.returncode}): "
+                        + stderr_text.strip()
+                    )
+            else:
+                raise SyncBlocked(
+                    f"git read-tree a echoue (code {read_tree_result.returncode}): "
+                    + stderr_text.strip()
+                )
         updated = self.command(
             "update-ref", "refs/heads/main", new_tip, local,
             check=False,
