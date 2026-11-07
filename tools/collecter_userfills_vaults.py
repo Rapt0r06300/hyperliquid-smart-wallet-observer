@@ -218,8 +218,23 @@ def _univers_observation(root: Path) -> list[dict]:
     return result
 
 
+def _rotation_offset() -> int:
+    """Decalage de page fixe pour repartir les vaults entre instances a IP distinctes.
+
+    Deux instances sur des IP differentes (ex. PC et une lane GitHub) suivent
+    chacune 10 vaults. Avec un offset distinct (PC=0, GitHub=N), elles demarrent
+    sur des pages differentes de l'univers trie et suivent donc des leaders
+    distincts au lieu de se chevaucher. Variable : ALINA_VAULT_ROTATION_OFFSET.
+    """
+    raw = os.environ.get("ALINA_VAULT_ROTATION_OFFSET", "0")
+    try:
+        return max(0, min(int(raw), 10_000))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _prochain_index_rotation(root: Path) -> int:
-    """Retourne la page courante et persiste la suivante pour survivre aux redémarrages."""
+    """Retourne la page courante (+offset d'instance) et persiste la suivante."""
     path = root / ROTATION_STATE
     try:
         current = max(0, int(json.loads(path.read_text(encoding="utf-8")).get("next_index") or 0))
@@ -229,7 +244,7 @@ def _prochain_index_rotation(root: Path) -> int:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps({"next_index": current + 1, "updated_at_ms": int(time.time() * 1000)}), encoding="utf-8")
     tmp.replace(path)
-    return current
+    return current + _rotation_offset()
 
 
 def charger_sentinelles(root: Path, *, k: int = SENTINELLES_K) -> list[str]:

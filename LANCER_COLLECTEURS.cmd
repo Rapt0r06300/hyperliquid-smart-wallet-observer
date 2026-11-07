@@ -110,6 +110,9 @@ set "HYPERSMART_EXPERIMENTAL_PAPER=0"
 rem Journal d'audit des evenements canoniques desactive : non relu par les
 rem replays/backtests, il gonflait a plusieurs Go. Mettre 1 pour le reactiver.
 set "ALINA_CANONICAL_EVENT_LEDGER=0"
+rem Page de vaults suivie par ce PC = 0. La lane GitHub en suit une autre
+rem (offset distinct) pour couvrir des leaders differents sans chevauchement.
+set "ALINA_VAULT_ROTATION_OFFSET=0"
 set "PYTHONPATH=%CV_ROOT%src;%CV_ROOT%tools;%PYTHONPATH%"
 
 rem --- Dossiers runtime ---
