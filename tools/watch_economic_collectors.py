@@ -5,6 +5,8 @@ import argparse
 import ctypes
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -380,6 +382,101 @@ def run_watchdog(
             break
         sleep_fn(min(max(1.0, float(interval_s)), remaining))
     return 0
+
+
+def _pids_campagne(root: Path) -> dict[str, int]:
+    """Lire les PID des collecteurs de la campagne persistée (vide si absent)."""
+    chemin = root / STATE_RELPATH
+    try:
+        donnees = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    pids = donnees.get("pids") if isinstance(donnees, Mapping) else None
+    if not isinstance(pids, Mapping):
+        return {}
+    resultat: dict[str, int] = {}
+    for nom, pid in pids.items():
+        try:
+            resultat[str(nom)] = int(pid)
+        except (TypeError, ValueError):
+            continue
+    return resultat
+
+
+def _est_process_python(pid: int, runner: Callable[..., Any]) -> bool:
+    """Vrai si le PID est vivant ET porté par un interpréteur python.
+
+    Garde-fou anti-recyclage : Windows réattribue les PID, donc on ne tue jamais
+    un PID sans avoir confirmé qu'il s'agit bien d'un de nos python.
+    """
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+    try:
+        done = runner(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    sortie = (getattr(done, "stdout", "") or "").lower()
+    return "python" in sortie or "py.exe" in sortie
+
+
+def arreter_campagne_immediatement(
+    root: Path,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Arrêt IMMÉDIAT et sûr de la campagne de collecte (sans attendre le bail).
+
+    - invalide le bail (tout survivant s'arrête à son prochain sondage, en secondes) ;
+    - tue chaque PID worker APRÈS avoir vérifié que c'est bien un python (jamais à
+      l'aveugle). Lecture seule vis-à-vis du marché : on n'arrête que nos process.
+    """
+    root = Path(root)
+    bail = root / LEASE_RELPATH
+    bail_supprime = False
+    try:
+        if bail.exists():
+            bail.unlink()
+            bail_supprime = True
+    except OSError:
+        bail_supprime = False
+    tues: list[int] = []
+    ignores: list[int] = []
+    for _nom, pid in sorted(_pids_campagne(root).items()):
+        if not _est_process_python(pid, runner):
+            ignores.append(pid)
+            continue
+        try:
+            if os.name == "nt":
+                runner(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            else:
+                os.kill(pid, signal.SIGTERM)
+            tues.append(pid)
+        except OSError:
+            ignores.append(pid)
+    if verbose:
+        print(
+            f"[ARRÊT] Campagne stoppée immédiatement : {len(tues)} collecteur(s) arrêté(s), "
+            f"bail {'invalidé' if bail_supprime else 'déjà absent'}.",
+            flush=True,
+        )
+    return {"tues": tues, "ignores": ignores, "bail_supprime": bail_supprime}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
