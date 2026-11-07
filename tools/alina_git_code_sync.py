@@ -97,20 +97,24 @@ REBASE_ABORT_TIMEOUT_SECONDS = 8
 # checkout cost that made the classic rebase exceed the launcher budget on
 # this partial clone.  The command is experimental; older Git versions fall
 # back to the existing bounded rebase path.
-GIT_REPLAY_TIMEOUT_SECONDS = 120
-REPLAY_WORKTREE_TIMEOUT_SECONDS = 120
+# Ce depot suit ~1,9 M fichiers (index git ~331 Mo) : write-tree/read-tree
+# prennent plusieurs minutes. Budget genereux pour laisser aboutir le fast path
+# index-only (tree-plumbing), qui reste borne et renvoie un recu s'il stagne.
+GIT_REPLAY_TIMEOUT_SECONDS = 900
+REPLAY_WORKTREE_TIMEOUT_SECONDS = 900
 # Keep every network-bound Git operation bounded even when a future call site
 # forgets to pass an explicit timeout.  The launcher is code-only, so a
 # stalled authentication, SSH host-key prompt, or unreachable remote must
 # fail closed quickly instead of leaving a double-click apparently hung.
-DEFAULT_GIT_TIMEOUT_SECONDS = 300
+DEFAULT_GIT_TIMEOUT_SECONDS = 900
 # A checkpoint is built with the plumbing path below, which avoids Git's
 # full-index refresh and hook/LFS scan on this partial clone.  Keep a generous
 # bound for object creation and the atomic ref update, while still failing
-# closed if either operation stops making progress.
-COMMIT_TIMEOUT_SECONDS = 300
+# closed if either operation stops making progress.  Large on this ~1,9 M file
+# index where a single write-tree can exceed two minutes.
+COMMIT_TIMEOUT_SECONDS = 900
 REMOTE_READ_TIMEOUT_SECONDS = 20
-LOCAL_READ_TIMEOUT_SECONDS = 600
+LOCAL_READ_TIMEOUT_SECONDS = 900
 MIN_GIT_VERSION = (2, 30)
 # A second double-click should wait for a short, bounded hand-off instead of
 # forcing the user to rerun the launcher after a transient collision.  The
