@@ -2002,64 +2002,93 @@ async def _superviser_rotation_vaults(root: Path, file: asyncio.Queue) -> None:
     """
     global _CURRENT_ROTATION_VAULTS, _DEMARRAGE_MS
     last_universe_refresh = 0.0
-    while True:
-        now_mono = time.monotonic()
-        if now_mono - last_universe_refresh >= UNIVERSE_REFRESH_SECONDS:
-            try:
-                refreshed = await asyncio.to_thread(CV.rafraichir_univers_public, root)
+    running_tasks: list = []
+    running_vaults: tuple = ()
+    try:
+        while True:
+            now_mono = time.monotonic()
+            if now_mono - last_universe_refresh >= UNIVERSE_REFRESH_SECONDS:
+                try:
+                    refreshed = await asyncio.to_thread(CV.rafraichir_univers_public, root)
+                    print(
+                        "[userfills] univers public rafraichi: %d vaults observation-only"
+                        % len(refreshed.get("vaults") or []),
+                        flush=True,
+                    )
+                except Exception as exc:  # noqa: BLE001 - ancien univers conservé fail-closed
+                    print("[userfills] univers public conserve (%s)" % str(exc)[:80], flush=True)
+                last_universe_refresh = time.monotonic()
+
+            page = _prochain_index_rotation(root)
+            roles = vaults_et_roles(root, rotation_index=page)
+            if not roles:
+                print("[userfills] aucun vault valide; nouvelle tentative dans 30s", flush=True)
+                await asyncio.sleep(30.0)
+                continue
+            vaults = [vault for vault, _role, _why in roles]
+            if len(vaults) > MAX_SLOTS:
+                raise RuntimeError("rotation userFills au-dessus du plafond dur")
+
+            # DELTA DE CONNEXIONS : si l'ensemble de vaults est IDENTIQUE a la
+            # page en cours et que les sockets sont vivantes, on NE reconstruit
+            # PAS. Les vaults actifs (sticky) restent abonnes sans interruption
+            # -> aucun trou de reconnexion -> tous leurs fills causaux sont
+            # captes. On ne reconstruit que lorsque l'ensemble change reellement
+            # (rotation d'un slot silencieux). Fail-closed inchange : au moindre
+            # changement on retombe sur le comportement complet (aucune regression).
+            if (
+                tuple(vaults) == running_vaults
+                and running_tasks
+                and all(not task.done() for task in running_tasks)
+            ):
                 print(
-                    "[userfills] univers public rafraichi: %d vaults observation-only"
-                    % len(refreshed.get("vaults") or []),
+                    "[userfills] ensemble de vaults stable -> connexions maintenues "
+                    "(aucune reconnexion, zero trou causal)",
                     flush=True,
                 )
-            except Exception as exc:  # noqa: BLE001 - ancien univers conservé fail-closed
-                print("[userfills] univers public conserve (%s)" % str(exc)[:80], flush=True)
-            last_universe_refresh = time.monotonic()
+                await asyncio.sleep(ROLE_ROTATION_SECONDS)
+                continue
 
-        page = _prochain_index_rotation(root)
-        roles = vaults_et_roles(root, rotation_index=page)
-        if not roles:
-            print("[userfills] aucun vault valide; nouvelle tentative dans 30s", flush=True)
-            await asyncio.sleep(30.0)
-            continue
-        vaults = [vault for vault, _role, _why in roles]
-        if len(vaults) > MAX_SLOTS:
-            raise RuntimeError("rotation userFills au-dessus du plafond dur")
+            # L'ensemble a change : fermer proprement l'ancienne page, ouvrir la nouvelle.
+            if running_tasks:
+                await _arreter_page_rotation(running_tasks)
+                running_tasks = []
 
-        _DEMARRAGE_MS = time.time() * 1000
-        _CURRENT_ROTATION_VAULTS = tuple(vaults)
-        _HEARTBEAT_WS["acknowledged_userfills"] = set()
-        _HEARTBEAT_WS["acks"] = 0
-        for vault in vaults:
-            _WS_KEYS.pop(vault, None)
-        print(
-            "[userfills] PAGE ROTATION %d - %d vaults pendant %.0fs"
-            % (page, len(vaults), ROLE_ROTATION_SECONDS),
-            flush=True,
-        )
-        for vault, role, why in roles:
-            print("[userfills]   %s [%s] %s" % (vault[:12], role, why), flush=True)
-
-        _refresh_copy_vault_prewarm_once(root, vaults)
-        shards = _shards_userfills(vaults)
-        for sid, group in shards:
+            _DEMARRAGE_MS = time.time() * 1000
+            _CURRENT_ROTATION_VAULTS = tuple(vaults)
+            _HEARTBEAT_WS["acknowledged_userfills"] = set()
+            _HEARTBEAT_WS["acks"] = 0
+            for vault in vaults:
+                _WS_KEYS.pop(vault, None)
             print(
-                "[userfills] shard socket %s (%d vaults): %s"
-                % (sid, len(group), ", ".join(v[:10] for v in group)),
+                "[userfills] PAGE ROTATION %d - %d vaults pendant %.0fs"
+                % (page, len(vaults), ROLE_ROTATION_SECONDS),
                 flush=True,
             )
-        page_tasks = [
-            asyncio.create_task(_garde_reconciliation_rest(root, shards)),
-            asyncio.create_task(_refresh_copy_vault_prewarm_periodically(root, vaults)),
-            *[
-                asyncio.create_task(_userfills_multiplex(root, group, file, sid))
-                for sid, group in shards
-            ],
-        ]
-        try:
+            for vault, role, why in roles:
+                print("[userfills]   %s [%s] %s" % (vault[:12], role, why), flush=True)
+
+            _refresh_copy_vault_prewarm_once(root, vaults)
+            shards = _shards_userfills(vaults)
+            for sid, group in shards:
+                print(
+                    "[userfills] shard socket %s (%d vaults): %s"
+                    % (sid, len(group), ", ".join(v[:10] for v in group)),
+                    flush=True,
+                )
+            running_tasks = [
+                asyncio.create_task(_garde_reconciliation_rest(root, shards)),
+                asyncio.create_task(_refresh_copy_vault_prewarm_periodically(root, vaults)),
+                *[
+                    asyncio.create_task(_userfills_multiplex(root, group, file, sid))
+                    for sid, group in shards
+                ],
+            ]
+            running_vaults = tuple(vaults)
             await asyncio.sleep(ROLE_ROTATION_SECONDS)
-        finally:
-            await _arreter_page_rotation(page_tasks)
+    finally:
+        if running_tasks:
+            await _arreter_page_rotation(running_tasks)
 
 
 # ── TAPE L2/OFI SHADOW v2 : buffer WS l2Book (snapshots SUCCESSIFS horodatés) + consommateur (états pré/post
