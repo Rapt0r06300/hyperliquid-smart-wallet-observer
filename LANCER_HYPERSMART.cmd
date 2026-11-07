@@ -22,7 +22,7 @@ if not defined HYPERSMART_PYTHON (
   goto :fin
 )
 REM ENG-033 : verifier Python 3.11+ (requis pour tomllib, TaskGroup, ExceptionGroup).
-"%HYPERSMART_PYTHON%" -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>nul
+"%HYPERSMART_PYTHON%" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>nul
 if errorlevel 1 (
   echo   [ERREUR] Python 3.11+ requis. Version detectee :
   "%HYPERSMART_PYTHON%" --version
