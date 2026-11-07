@@ -1,13 +1,13 @@
 {
-  "matrix_digest": "e0d5622fcdfa497c05f0c89f707d96a056df46874dce31044046955eefeb3b7a",
+  "matrix_digest": "1d259cd48ca1d4bae08aea55b81b0016e181f7c476092a3809541dad5d1b6b73",
   "policy": "FILE_PRESENT and registry.wired are not IMPORT_OK, COLLECTOR_ACTIVE, SOURCE_HEALTHY, REPLAY_COMPATIBLE or PNL_READY",
   "runtime_evidence": {
-    "github_run_id": "42374477193",
-    "github_sha": "84f5bbabe9fc9e26ccc0e3b796d1a6065b5940af",
+    "github_run_id": "42417338337",
+    "github_sha": "65f1f88f2cdb9e17a1a22b74a38f1cf6d53da5d8",
     "paper_read_only": true,
     "path": "docs/source-capability-runtime.json",
     "real_execution": false,
-    "receipt_digest": "87b45c42eac69c5c22728307edfdb8fcdfb77b5544319eeea3894bd08e91db62",
+    "receipt_digest": "f32901047c1ddc18b5c0cdfa61b9b30444ae3cefdb1cc6fa36a2333581195faa",
     "runner_kind": "github-hosted"
   },
   "schema_version": "alina.source_capability_matrix.v4",
@@ -22,6 +22,7 @@
         "bbo": {
           "evidence": [
             "src/hl_observer/backtest/runtime_parity.py",
+            "src/hl_observer/backtesting/copy_vault_book_loader.py",
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_v21_frozen.py",
             "src/hl_observer/backtesting/cross_venue_v3_train.py",
@@ -39,8 +40,7 @@
             "src/hl_observer/collection/subscription_universe.py",
             "src/hl_observer/collection/userfills_live.py",
             "src/hl_observer/config/cross_venue_instruments.py",
-            "src/hl_observer/control_plane/campaign_adapters.py",
-            "src/hl_observer/data_sources/provider_registry.py"
+            "src/hl_observer/control_plane/campaign_adapters.py"
           ],
           "runtime_reason": "HYPERLIQUID_META_OK:235",
           "runtime_status": "HEALTHY",
@@ -63,11 +63,11 @@
             "src/hl_observer/collection/archive_s3.py",
             "src/hl_observer/collection/collector.py",
             "src/hl_observer/collection/copy_vault_checkpoint_tail.py",
+            "src/hl_observer/collection/forward_poll_fills.py",
             "src/hl_observer/collection/hyperliquid_clock_sync.py",
             "src/hl_observer/collection/hyperliquid_funding_history.py",
             "src/hl_observer/collection/l2_snapshot_cache.py",
-            "src/hl_observer/collection/native_venue_coordinator.py",
-            "src/hl_observer/collection/tick_dataset.py"
+            "src/hl_observer/collection/native_venue_coordinator.py"
           ],
           "runtime_reason": "HYPERLIQUID_META_OK:235",
           "runtime_status": "HEALTHY",
@@ -141,14 +141,14 @@
             "src/hl_observer/collection/__init__.py",
             "src/hl_observer/collection/candle_backfill.py",
             "src/hl_observer/collection/copy_vault_checkpoint_tail.py",
+            "src/hl_observer/collection/forward_poll_fills.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/collection/node_fills_backfill.py",
             "src/hl_observer/collection/tick_dataset.py",
             "src/hl_observer/collection/trades_recorder.py",
             "src/hl_observer/collection/vault_fills_backfill.py",
             "src/hl_observer/config/settings.py",
-            "src/hl_observer/control_plane/campaign_adapters.py",
-            "src/hl_observer/copying/v9_paper_pipeline.py"
+            "src/hl_observer/control_plane/campaign_adapters.py"
           ],
           "runtime_reason": "HYPERLIQUID_META_OK:235",
           "runtime_status": "HEALTHY",
@@ -311,6 +311,7 @@
         "src/hl_observer/collection/collector.py",
         "src/hl_observer/collection/concurrent_fetch.py",
         "src/hl_observer/collection/copy_vault_checkpoint_tail.py",
+        "src/hl_observer/collection/forward_poll_fills.py",
         "src/hl_observer/collection/hyperliquid_clock_sync.py",
         "src/hl_observer/collection/hyperliquid_funding_history.py",
         "src/hl_observer/collection/l2_snapshot_cache.py",
@@ -362,8 +363,7 @@
         "src/hl_observer/decision_engine/noyau_unique.py",
         "src/hl_observer/economics/families.py",
         "src/hl_observer/edge/edge_remaining.py",
-        "src/hl_observer/edge/exit_quality.py",
-        "src/hl_observer/event_intelligence/candidates.py"
+        "src/hl_observer/edge/exit_quality.py"
       ],
       "native_entrypoints": [
         "src/hl_observer/venues/hyperliquid.py",
@@ -379,7 +379,7 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-07T13:02:00.854602Z",
+      "runtime_observed_at_utc": "2026-11-07T22:31:14.280379Z",
       "runtime_reason": "HYPERLIQUID_META_OK:235",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
@@ -410,7 +410,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/archive_library.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -437,7 +437,7 @@
             "src/hl_observer/hyperliquid/rest_info_client.py",
             "src/hl_observer/ops/pre_run_cross_venue_466_545.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -464,7 +464,7 @@
             "src/hl_observer/datasets/archive_library.py",
             "src/hl_observer/datasets/catalog_profiler.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -491,7 +491,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/ops/lead_lag_causal_gap_diagnostic.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -518,7 +518,7 @@
             "src/hl_observer/ops/edge_decay.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -545,7 +545,7 @@
             "src/hl_observer/collection/tick_dataset.py",
             "src/hl_observer/collection/trade_reconciliation.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -572,7 +572,7 @@
             "src/hl_observer/collection/binance_market_context.py",
             "src/hl_observer/collection/hf_recorder_multiplex.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -599,7 +599,7 @@
             "src/hl_observer/collection/trade_reconciliation.py",
             "src/hl_observer/config/settings.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -626,7 +626,7 @@
             "src/hl_observer/control_plane/campaign_adapters.py",
             "src/hl_observer/control_plane/phase_controller.py"
           ],
-          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -746,8 +746,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-07T13:02:00.854602Z",
-      "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=52:l2_full=208:l2_partial=0:l2_exploitable=208",
+      "runtime_observed_at_utc": "2026-11-07T22:31:14.280379Z",
+      "runtime_reason": "BINANCE_WS_OBSERVED:bbo=1:trades=242:l2_full=208:l2_partial=0:l2_exploitable=208",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "binance"
@@ -772,7 +772,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -794,7 +794,7 @@
             "src/hl_observer/research/frontiere.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -821,7 +821,7 @@
             "src/hl_observer/research/multi_venue.py",
             "src/hl_observer/research/run_factory.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -840,7 +840,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -863,7 +863,7 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -890,7 +890,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -917,7 +917,7 @@
             "src/hl_observer/markets/venues/bybit.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -944,7 +944,7 @@
             "src/hl_observer/hyperliquid/rest_info_client.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -971,7 +971,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         }
@@ -1036,8 +1036,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-07T13:02:00.854602Z",
-      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;WS=wss://stream.bybit.com/v5/public/linear:TimeoutError: ;channels=missing",
+      "runtime_observed_at_utc": "2026-11-07T22:31:14.280379Z",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403;channels=missing",
       "runtime_status": "DEGRADED",
       "status": "FILE_PRESENT",
       "venue": "bybit"
@@ -1312,7 +1312,7 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-07T13:02:00.854602Z",
+      "runtime_observed_at_utc": "2026-11-07T22:31:14.280379Z",
       "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;channels=missing",
       "runtime_status": "DEGRADED",
       "status": "FILE_PRESENT",
@@ -1338,7 +1338,7 @@
             "src/hl_observer/collection/okx_market_data.py",
             "src/hl_observer/control_plane/campaign_adapters.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1360,12 +1360,12 @@
             "src/hl_observer/collection/binance_funding_history.py",
             "src/hl_observer/collection/binance_market_context.py",
             "src/hl_observer/collection/depth_capacity.py",
+            "src/hl_observer/collection/forward_poll_fills.py",
             "src/hl_observer/collection/gate_market_data.py",
             "src/hl_observer/collection/hyperliquid_funding_history.py",
-            "src/hl_observer/collection/native_funding_history.py",
-            "src/hl_observer/collection/native_market_tape.py"
+            "src/hl_observer/collection/native_funding_history.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1392,7 +1392,7 @@
             "src/hl_observer/backtesting/lead_lag_queue_replay.py",
             "src/hl_observer/backtesting/queue_model.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1419,7 +1419,7 @@
             "src/hl_observer/collection/gate_market_data.py",
             "src/hl_observer/collection/reconciliation.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1439,14 +1439,14 @@
             "src/hl_observer/cli.py",
             "src/hl_observer/collection/binance_depth_live.py",
             "src/hl_observer/collection/binance_market_context.py",
+            "src/hl_observer/collection/forward_poll_fills.py",
             "src/hl_observer/collection/gate_market_data.py",
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/collection/okx_market_data.py",
             "src/hl_observer/collection/partitioned_tick_dataset.py",
-            "src/hl_observer/collection/tick_dataset.py",
-            "src/hl_observer/config/settings.py"
+            "src/hl_observer/collection/tick_dataset.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1473,7 +1473,7 @@
             "src/hl_observer/backtesting/copy_vault_scientific_controls.py",
             "src/hl_observer/backtesting/copy_vault_task_closure_plans.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1500,7 +1500,7 @@
             "src/hl_observer/backtesting/copy_vault_robustness_controls.py",
             "src/hl_observer/backtesting/copy_vault_scientific_controls.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1527,7 +1527,7 @@
             "src/hl_observer/backtesting/copy_vault_local_lab.py",
             "src/hl_observer/backtesting/copy_vault_protocol.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1554,7 +1554,7 @@
             "src/hl_observer/backtesting/copy_vault_snapshot_contract.py",
             "src/hl_observer/backtesting/copy_vault_task_closure_plans.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1636,6 +1636,7 @@
         "src/hl_observer/collection/binance_market_context.py",
         "src/hl_observer/collection/coin_universe.py",
         "src/hl_observer/collection/depth_capacity.py",
+        "src/hl_observer/collection/forward_poll_fills.py",
         "src/hl_observer/collection/gate_market_data.py",
         "src/hl_observer/collection/hyperliquid_funding_history.py",
         "src/hl_observer/collection/market_capture_tiers.py",
@@ -1658,8 +1659,7 @@
         "src/hl_observer/copy_fidelity/tracking_error.py",
         "src/hl_observer/copy_vault/coherent_snapshot_open.py",
         "src/hl_observer/copy_vault/copyability_erosion_monitor.py",
-        "src/hl_observer/copy_vault/dual_source_verification.py",
-        "src/hl_observer/copy_vault/leader_available_margin_gate.py"
+        "src/hl_observer/copy_vault/dual_source_verification.py"
       ],
       "native_entrypoints": [
         "src/hl_observer/venues/gate.py"
@@ -1674,8 +1674,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-07T13:02:00.854602Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486362;channels=bbo:566,l2:848,trades:58",
+      "runtime_observed_at_utc": "2026-11-07T22:31:14.280379Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090624214;channels=bbo:902,l2:800,trades:266",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "gate"
@@ -1692,7 +1692,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1708,7 +1708,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1725,7 +1725,7 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1738,7 +1738,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1752,7 +1752,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1771,7 +1771,7 @@
             "src/hl_observer/venues/bitget.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1790,7 +1790,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1807,7 +1807,7 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1827,7 +1827,7 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1865,8 +1865,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-11-07T13:02:00.854602Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1794056486354;channels=bbo:596,l2:682,trades:1308",
+      "runtime_observed_at_utc": "2026-11-07T22:31:14.280379Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1794090637664;channels=bbo:579,l2:719,trades:1307",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "bitget"
