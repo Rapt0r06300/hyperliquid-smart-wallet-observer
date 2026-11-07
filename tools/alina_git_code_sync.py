@@ -812,6 +812,8 @@ def _git_operation_label(args: list[str]) -> str:
         return "Enregistrer le checkpoint Git local"
     if verb == "show":
         return "Lire une version Git pour le diagnostic de conflit"
+    if verb == "cat-file":
+        return "Precharger les blobs manquants du clone partiel"
     return "Commande Git de controle"
 
 
@@ -1127,6 +1129,25 @@ class Synchronizer:
             "verified_historical_relocations": [],
             "git_commands": [],
         }
+
+    def _prefetch_blobs(self, treeish: str, paths: list[str]) -> None:
+        """Backfill blobs missing from a blob:none partial clone.
+
+        ``checkout-index`` never triggers the promisor lazy fetch, so a path
+        whose blob is not yet local fails closed with "not in the cache".
+        ``cat-file --batch-check`` resolves each ``<treeish>:<path>`` and pulls
+        any missing blob from the promisor remote first.  A non-promisor clone
+        already has every blob, so this is a cheap no-op there.
+        """
+        if not paths:
+            return
+        payload = "".join(f"{treeish}:{path}\n" for path in paths)
+        self.command(
+            "cat-file", "--batch-check=%(objectname)", "--buffer",
+            input_bytes=payload.encode("utf-8"),
+            check=False,
+            timeout=REPLAY_WORKTREE_TIMEOUT_SECONDS,
+        )
 
     def command(self, *args: str, input_bytes: bytes | None = None,
                 check: bool = True, timeout: int = 300,
@@ -3108,6 +3129,7 @@ class Synchronizer:
             if not _protected(p)
         ]
         if code_changed:
+            self._prefetch_blobs(new_tip, code_changed)
             for ci_start in range(0, len(code_changed), PROTECTED_PATH_BATCH_SIZE):
                 ci_batch = code_changed[ci_start:ci_start + PROTECTED_PATH_BATCH_SIZE]
                 self.command(
@@ -3360,6 +3382,7 @@ class Synchronizer:
                 )
             apply_paths = [path for path in code_paths if path not in deferred]
             if apply_paths:
+                self._prefetch_blobs(current, apply_paths)
                 self.command(
                     "checkout-index", "--force", "-z", "--stdin",
                     input_bytes=b"\0".join(
