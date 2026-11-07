@@ -3267,6 +3267,17 @@ class Synchronizer:
                 os.environ["GIT_INDEX_FILE"] = previous
             index.unlink(missing_ok=True)
 
+    def _tree_replay_approved(self, path: str) -> bool:
+        """Chemin résoluble par le fast path index-only : conflit de gouvernance
+        approuvé, OU workflow GitHub en conflit modify/delete (GitHub canonique).
+        Le fast path évite le rafraîchissement de l'index de 346 Mo du rebase."""
+        if path in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS:
+            return True
+        return (
+            path in getattr(self, "_predicted_modify_delete", set())
+            and _is_ci_workflow_path(path)
+        )
+
     def _try_tree_plumbing_replay(
         self, remote: str, local: str, base: str,
         predicted: list[str],
@@ -3281,7 +3292,7 @@ class Synchronizer:
         The operator's real index is never used during planning.
         """
         if not predicted or any(
-            path not in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
+            not self._tree_replay_approved(path)
             for path in predicted
         ):
             return False
@@ -3344,7 +3355,7 @@ class Synchronizer:
                     mode, oid, stage_text = mode_oid_stage
                     stage_rows.setdefault(fields[1], {})[int(stage_text)] = (mode, oid)
                 if stage_rows:
-                    if any(path not in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
+                    if any(not self._tree_replay_approved(path)
                            for path in stage_rows):
                         self.report["tree_replay_fallback_reason"] = {
                             "phase": "unapproved_stage",
@@ -3355,9 +3366,22 @@ class Synchronizer:
                     for path, stages in stage_rows.items():
                         upstream = stages.get(2)
                         if upstream is None:
+                            # GitHub (canonique) a supprime ce fichier -> accepte.
                             self.command("update-index", "--remove", "--", path)
                         else:
                             mode, oid = upstream
+                            # Workflow repris d'upstream : valider l'absence de
+                            # self-hosted / execution reelle avant de l'accepter.
+                            if _is_ci_workflow_path(path):
+                                blob = self.command("cat-file", "-p", oid, check=False)
+                                lowered = (blob.stdout or b"").decode("utf-8", errors="replace").casefold()
+                                if "runs-on: ubuntu-latest" not in lowered or any(
+                                    m.casefold() in lowered for m in FORBIDDEN_HOSTED_CI_MARKERS
+                                ):
+                                    self.report["tree_replay_fallback_reason"] = {
+                                        "phase": "workflow_marker_reject", "path": path,
+                                    }
+                                    return False
                             self.command(
                                 "update-index", "--add", "--cacheinfo",
                                 f"{mode},{oid},{path}",
@@ -3702,7 +3726,7 @@ class Synchronizer:
         rebase_resolved = False
         with self._preserve_local_protected_index():
             if predicted and all(
-                path in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS
+                self._tree_replay_approved(path)
                 for path in predicted
             ) and self._try_tree_plumbing_replay(
                 remote, local, base, predicted,
