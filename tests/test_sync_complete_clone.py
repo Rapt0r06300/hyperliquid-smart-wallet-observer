@@ -47,6 +47,11 @@ def _stub_main(monkeypatch, module, root, *, dirty=False, origin=None):
         return responses[args]
 
     monkeypatch.setattr(module, "_git", command)
+    # synchronize_main interroge désormais _modified_code_paths (code seul).
+    monkeypatch.setattr(
+        module, "_modified_code_paths",
+        lambda _root: (["tools/example.py"] if dirty else []),
+    )
     monkeypatch.setattr(module, "_tracked_files_changed", lambda _root: dirty)
     return calls
 
@@ -65,7 +70,7 @@ def test_clean_local_main_fetches_then_fast_forwards_without_reset(monkeypatch, 
 def test_dirty_tracked_files_abort_before_fetch(monkeypatch, tmp_path):
     module = _module()
     calls = _stub_main(monkeypatch, module, tmp_path.resolve(), dirty=True)
-    with pytest.raises(module.SyncError, match="local tracked files"):
+    with pytest.raises(module.SyncError, match="local CODE files were modified"):
         module.synchronize_main(tmp_path)
     assert not any(command[0] == "fetch" for command in calls)
 
@@ -75,6 +80,8 @@ def test_stat_only_false_dirty_does_not_abort_before_fetch(monkeypatch, tmp_path
     module = _module()
     root = tmp_path.resolve()
     calls = _stub_main(monkeypatch, module, root, dirty=True)
+    # Le contrôle de contenu (code seul) est propre malgré un stat `.M`.
+    monkeypatch.setattr(module, "_modified_code_paths", lambda _root: [])
     monkeypatch.setattr(module, "_tracked_files_changed", lambda _root: False)
 
     assert module.synchronize_main(root) == "b" * 40

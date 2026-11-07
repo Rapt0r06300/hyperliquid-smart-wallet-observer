@@ -29,6 +29,24 @@ TRUSTED_ORIGINS = {
 }
 
 
+# Source unique de vérité du classement données/code : le moteur POUSSER
+# (alina_git_code_sync). AlinaSync réutilise EXACTEMENT les mêmes règles pour
+# ne jamais diverger : les données suivies (catalog/, runtime/, data/…) ne
+# bloquent pas une synchro ; seul du CODE non commité la bloque.
+try:  # exécution directe : tools/ est sur sys.path[0]
+    from alina_git_code_sync import (  # type: ignore
+        PROTECTED_DIRS as _PROTECTED_DIRS,
+        UNSCANNABLE_PROTECTED_ROOTS as _UNSCANNABLE_PROTECTED_ROOTS,
+        _protected as _is_protected_path,
+    )
+except ImportError:  # importé comme paquet (tests : tools.sync_complete_clone)
+    from tools.alina_git_code_sync import (  # type: ignore
+        PROTECTED_DIRS as _PROTECTED_DIRS,
+        UNSCANNABLE_PROTECTED_ROOTS as _UNSCANNABLE_PROTECTED_ROOTS,
+        _protected as _is_protected_path,
+    )
+
+
 class SyncError(RuntimeError):
     """An update cannot be completed without risking locally owned files."""
 
@@ -57,31 +75,73 @@ def _git(root: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def _tracked_files_changed(root: Path) -> bool:
-    """Return whether tracked content differs, ignoring Windows stat-cache noise."""
+def _code_pathspecs(root: Path) -> list[str]:
+    """Pathspecs top-level de CODE uniquement (mêmes règles que POUSSER).
+
+    Les arbres de données (catalog/, runtime/, data/, datasets/, archive/…) sont
+    exclus : ils sont réécrits en permanence par la collecte et ne constituent
+    pas une modification de code. Restreindre le diff à ces pathspecs évite aussi
+    de stat l'arbre géant datasets/ (le diff reste rapide, cf. moteur POUSSER).
+    """
+    specs: list[str] = []
+    try:
+        children = sorted(root.iterdir(), key=lambda c: c.name)
+    except OSError as exc:
+        raise SyncError("cannot inspect repository root for code changes") from exc
+    for child in children:
+        if child.name in _UNSCANNABLE_PROTECTED_ROOTS:
+            continue
+        if child.name in _PROTECTED_DIRS:
+            continue
+        specs.append(
+            f"{child.name}/**"
+            if child.is_dir() and not child.is_symlink()
+            else child.name
+        )
+    return specs
+
+
+def _modified_code_paths(root: Path) -> list[str]:
+    """Chemins de CODE non commités (vides si seules des données ont changé).
+
+    Combine arbre-vs-index et index-vs-HEAD, restreint aux pathspecs de code,
+    puis filtre par le classifieur ``_protected`` (anti-faux positifs : un .jsonl
+    ou binaire de données déposé sous un dossier de code reste ignoré).
+    """
+    specs = _code_pathspecs(root)
+    if not specs:
+        return []
     checks = (
-        ("diff", "--quiet", "--no-ext-diff", "--ignore-submodules", "--"),
-        ("diff", "--cached", "--quiet", "--no-ext-diff", "--ignore-submodules", "--"),
+        ("diff", "--name-only", "--no-ext-diff", "--ignore-submodules", "--", *specs),
+        ("diff", "--cached", "--name-only", "--no-ext-diff", "--ignore-submodules", "--", *specs),
     )
+    offenders: set[str] = set()
     for args in checks:
         try:
             done = subprocess.run(
                 ["git", "-C", str(root), *args],
                 check=False,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
         except OSError as exc:
             raise SyncError("Git is required to verify local tracked files") from exc
-        if done.returncode == 1:
-            return True
         if done.returncode != 0:
             detail = (done.stderr or "").strip()[:600]
             raise SyncError(
                 f"git tracked-file safety check failed (exit {done.returncode}): {detail}"
             )
-    return False
+        for line in done.stdout.splitlines():
+            path = line.strip()
+            if path and not _is_protected_path(path):
+                offenders.add(path)
+    return sorted(offenders)
+
+
+def _tracked_files_changed(root: Path) -> bool:
+    """Vrai si du CODE suivi a changé (le churn de données suivies est ignoré)."""
+    return bool(_modified_code_paths(root))
 
 
 def synchronize_main(root: Path, *, update: bool = True) -> str:
@@ -101,10 +161,14 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
 
     # This intentionally ignores untracked/ignored research files; Git itself
     # must refuse a merge that would overwrite any of those paths.
-    if _tracked_files_changed(root):
+    modified_code = _modified_code_paths(root)
+    if modified_code:
+        apercu = ", ".join(modified_code[:5])
+        suite = "…" if len(modified_code) > 5 else ""
         raise SyncError(
-            "local tracked files were modified: commit or preserve them before "
-            "sync; no reset, stash, forced checkout or overwritten files"
+            "local CODE files were modified (" + apercu + suite + "): commit or "
+            "preserve them before sync; no reset, stash, forced checkout or "
+            "overwritten files. Data churn (catalog/, runtime/…) is ignored."
         )
     _git(root, "fetch", "--no-tags", "origin", "main")
     remote_sha = _git(root, "rev-parse", "refs/remotes/origin/main")

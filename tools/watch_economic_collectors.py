@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.ops.bounded_collection import (  # noqa: E402
+    LEASE_RELPATH,
     STATE_RELPATH,
     ensure_bounded_collectors,
     renew_bounded_collection_lease,
@@ -384,6 +385,11 @@ def run_watchdog(
     return 0
 
 
+# Exposé au niveau module pour que les tests puissent forcer le chemin Windows
+# (taskkill/tasklist) de façon déterministe quel que soit l'OS d'exécution.
+_IS_WINDOWS = os.name == "nt"
+
+
 def _pids_campagne(root: Path) -> dict[str, int]:
     """Lire les PID des collecteurs de la campagne persistée (vide si absent)."""
     chemin = root / STATE_RELPATH
@@ -411,7 +417,7 @@ def _est_process_python(pid: int, runner: Callable[..., Any]) -> bool:
     """
     if pid <= 0:
         return False
-    if os.name != "nt":
+    if not _IS_WINDOWS:
         try:
             os.kill(pid, 0)
         except OSError:
@@ -458,7 +464,7 @@ def arreter_campagne_immediatement(
             ignores.append(pid)
             continue
         try:
-            if os.name == "nt":
+            if _IS_WINDOWS:
                 runner(
                     ["taskkill", "/PID", str(pid), "/T", "/F"],
                     capture_output=True,
@@ -495,7 +501,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=float,
         help="collector lease TTL renewed while this watchdog runs; bounded to seven days",
     )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="arrêt propre et immédiat de la campagne (invalide le bail, stoppe les workers), puis sortie",
+    )
     args = parser.parse_args(argv)
+    if args.stop:
+        arreter_campagne_immediatement(Path(args.root).resolve())
+        return 0
     _idle_priority()
     requested_names = list(DEFAULT_NAMES) if args.profile == "copy-vault" else None
     try:
@@ -507,8 +521,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             requested_names=requested_names,
         )
     except KeyboardInterrupt:
+        recu = arreter_campagne_immediatement(Path(args.root).resolve())
         print(
-            "\n[ARRÊT] Ctrl+C reçu. Le bail n'est plus renouvelé; les collecteurs liés à cette campagne s'arrêteront à son expiration.",
+            "\n[ARRÊT] Ctrl+C reçu — arrêt immédiat de {} collecteur(s). "
+            "Le bail est invalidé; aucun survivant à attendre.".format(len(recu["tues"])),
             flush=True,
         )
         return 130

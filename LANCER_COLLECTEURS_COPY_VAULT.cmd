@@ -6,6 +6,7 @@ cd /d "%~dp0" || (
   exit /b 2
 )
 chcp 65001 >nul
+title ALINA SMART FLOW - COLLECTEURS (Copy-Vault)
 
 rem ============================================================
 rem  ALINA SMART FLOW - COLLECTE COPY-VAULT
@@ -44,6 +45,8 @@ set "CV_LOCKFILE=%CV_ROOT%runtime\data\collecteurs.lock"
 if /I "%~1"=="--help" goto :help
 if /I "%~1"=="-h" goto :help
 if /I "%~1"=="--status" goto :status
+if /I "%~1"=="--stop" set "CV_MODE=stop"&shift
+if /I "%~1"=="--arreter" set "CV_MODE=stop"&shift
 if /I "%~1"=="--once" set "CV_MODE=once"&shift
 if /I "%~1"=="--duration" set "CV_DURATION=%~2"&shift&shift
 
@@ -119,6 +122,9 @@ rem --- Dossiers runtime ---
 if not exist "%CV_ROOT%runtime\logs" mkdir "%CV_ROOT%runtime\logs"
 if not exist "%CV_ROOT%runtime\data" mkdir "%CV_ROOT%runtime\data"
 
+rem --- Arret propre immediat demande (--stop) : rien a demarrer ---
+if /I "%CV_MODE%"=="stop" goto :stop
+
 rem --- Detection d'instance existante ---
 if exist "%CV_LOCKFILE%" (
   for /f "usebackq tokens=*" %%A in ("%CV_LOCKFILE%") do set "CV_LOCK_PID=%%A"
@@ -132,6 +138,15 @@ if exist "%CV_LOCKFILE%" (
     )
   )
 )
+
+rem --- Auto-reparation : restes d'un Ctrl+C precedent. CMD ne peut pas
+rem     piéger Ctrl+C ; si "Terminate batch job" a coupe sans :cleanup, le
+rem     poll a pu rester. On le neutralise AVANT une nouvelle campagne. ---
+if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
+  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
+  del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
+)
+taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
 
 rem --- Ecrire le verrou (PID du cmd courant) ---
 echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
@@ -157,7 +172,8 @@ echo   Verification toutes les %CV_INTERVAL%s
 echo   Campagne de %CV_DURATION%s (%CV_MODE%)
 echo   Auto-recovery : backoff %CV_BACKOFF_INIT%s-%CV_BACKOFF_MAX%s
 echo   Securite : PAPER / READ-ONLY / FAIL-CLOSED
-echo   Arret propre : Ctrl+C
+echo   Arret propre : relancez ce .cmd avec  --stop   ^(recommande^)
+echo   Sinon Ctrl+C puis N : arret immediat ^(plus de gel^), nettoyage au prochain lancement.
 echo.
 echo   Le panneau de recolte s'affiche a chaque passe.
 echo ================================================================
@@ -294,6 +310,7 @@ echo  (defaut)         Boucle resiliente : collecte continue avec auto-recovery
 echo  --once           Une seule campagne, pas de boucle de recovery
 echo  --duration N     Duree de chaque campagne en secondes (defaut: 518400 = 6 jours)
 echo  --status         Afficher l'etat des collecteurs sans lancer
+echo  --stop           Arret propre et immediat ^(invalide le bail, stoppe tout^)
 echo  --help / -h      Cette aide
 echo.
 echo Collecteurs lances (profil copy-vault / harvest, 14 collecteurs) :
@@ -350,6 +367,24 @@ echo.
 echo [FIN] %CV_END_TIME% — %CV_RESTARTS% campagne(s) executee(s)
 set "RC=0"
 if defined CV_CONSECUTIVE_FAILS if %CV_CONSECUTIVE_FAILS% GTR 0 set "RC=1"
+goto :end
+
+:stop
+echo.
+echo === ARRET PROPRE DES COLLECTEURS COPY-VAULT ===
+rem Arret immediat : invalide le bail + tue les workers verifies (watchdog --stop).
+if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop
+rem Arret du poll des leaders.
+if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
+  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
+  del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
+)
+taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
+rem Liberer le verrou.
+if exist "%CV_LOCKFILE%" del /f /q "%CV_LOCKFILE%" >nul 2>nul
+echo [OK] Collecteurs arretes proprement. Vous pouvez relancer sans souci.
+set "RC=0"
+goto :end
 
 :end
 echo.
