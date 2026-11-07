@@ -121,6 +121,37 @@ def test_parser_message_userfills_separe_exchange_et_reception_ws():
     assert fill["is_snapshot"] is None
 
 
+def test_parser_message_userfills_repli_etat_connexion_quand_flag_absent():
+    """Hyperliquid a retiré ``isSnapshot`` (~2026-10-27). Sans le flag, le repli
+    par état de connexion classe la 1re trame post-ACK comme snapshot historique
+    (à exclure) et les suivantes comme live — l'anti-look-ahead reste garanti."""
+    msg = {"channel": "userFills", "data": {"user": "0xA", "fills": [
+        {"coin": "SOL", "px": "150", "sz": "10", "side": "B", "dir": "Open Long",
+         "time": 1000, "tid": 7, "oid": 11, "hash": "0xabc"}]}}
+
+    # 1re trame (snapshot historique) → exclue du live
+    [snap] = UL.parser_message_userfills(
+        msg, vault="0xA", received_at_ms=1500, fallback_is_snapshot=True)
+    assert snap["isSnapshot"] is True and snap["is_snapshot"] is True
+
+    # trame suivante (live) → exploitable
+    [livef] = UL.parser_message_userfills(
+        msg, vault="0xA", received_at_ms=1500, fallback_is_snapshot=False)
+    assert livef["isSnapshot"] is False and livef["is_snapshot"] is False
+
+    # sans repli → inconnu, fail-closed inchangé
+    [unknown] = UL.parser_message_userfills(
+        msg, vault="0xA", received_at_ms=1500, fallback_is_snapshot=None)
+    assert unknown["isSnapshot"] is None
+
+    # un flag explicite de la venue prime toujours sur le repli
+    msg_flag = {"channel": "userFills", "data": {
+        "user": "0xA", "isSnapshot": True, "fills": msg["data"]["fills"]}}
+    [flagged] = UL.parser_message_userfills(
+        msg_flag, vault="0xA", received_at_ms=1500, fallback_is_snapshot=False)
+    assert flagged["isSnapshot"] is True
+
+
 @pytest.mark.parametrize("sequence", [True, 1.5, -1, "1.5", "-1"])
 def test_parser_ne_tronque_pas_une_sequence_non_entier(sequence):
     msg = {"channel": "userFills", "sequence": sequence, "data": {"fills": [

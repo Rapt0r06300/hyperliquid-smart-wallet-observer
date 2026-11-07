@@ -1448,6 +1448,7 @@ def _parse_userfills_frame(
     received_at_ms: int | None,
     receive_mono_ns: int | None,
     connection_id: str | None,
+    fallback_is_snapshot: bool | None = None,
 ) -> list[dict]:
     """Parse valid fills while durably recording bounded diagnostics for rejected rows."""
     audit: dict[str, Any] = {}
@@ -1458,6 +1459,7 @@ def _parse_userfills_frame(
         receive_mono_ns=receive_mono_ns,
         connection_id=connection_id,
         audit=audit,
+        fallback_is_snapshot=fallback_is_snapshot,
     )
     rejected_count = int(audit.get("rejected_count") or 0)
     if rejected_count:
@@ -1608,34 +1610,21 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     _HEARTBEAT_WS["messages"] += 1
                     data = msg.get("data")
                     snapshot_flag = data.get("isSnapshot") if isinstance(data, dict) else None
-                    if type(snapshot_flag) is not bool:
-                        _HEARTBEAT_WS["unclassified_snapshot_frames"] += 1
-                        try:
-                            _journal_userfills_non_classe(
-                                root,
-                                vault=vault,
-                                message=msg,
-                                received_at_ms=recv_wall_ms,
-                                connection_id=connection_id,
-                                ack_received_at_ms=(
-                                    _HEARTBEAT_WS.get("ack_received_at_ms_by_vault", {})
-                                    .get(vault)
-                                ),
-                                capture_epoch=(
-                                    _HEARTBEAT_WS.get("capture_epoch_by_vault", {})
-                                    .get(vault)
-                                ),
-                            )
-                        except (OSError, TypeError, ValueError) as exc:
-                            _HEARTBEAT_WS["unclassified_frame_write_failures"] = int(
-                                _HEARTBEAT_WS.get("unclassified_frame_write_failures") or 0
-                            ) + 1
-                            print(
-                                "[userfills] frame non classe non sauvegardee (%s)"
-                                % type(exc).__name__,
-                                flush=True,
-                            )
-                    if vault not in premiers_messages:
+                    # Hyperliquid dropped the per-frame ``isSnapshot`` marker (~2026-10-27).
+                    # Classify by connection state when the venue omits it: the FIRST
+                    # post-ACK frame on this socket replays the historical snapshot
+                    # (excluded, anti-look-ahead), every later frame is a live update.
+                    # A reconnect rebuilds ``premiers_messages``, so the resubscribe
+                    # snapshot is excluded again. An explicit bool still wins.
+                    est_premier_frame = vault not in premiers_messages
+                    if type(snapshot_flag) is bool:
+                        frame_is_snapshot: bool = snapshot_flag
+                    else:
+                        frame_is_snapshot = est_premier_frame
+                        _HEARTBEAT_WS["isSnapshot_inferred_frames"] = int(
+                            _HEARTBEAT_WS.get("isSnapshot_inferred_frames") or 0
+                        ) + 1
+                    if est_premier_frame:
                         premiers_messages.add(vault)
                         print(
                             "[userfills] socket %s premier message post-ACK %s [%d/%d]"
@@ -1661,6 +1650,7 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                         received_at_ms=recv_wall_ms,
                         receive_mono_ns=recv_mono_ns,
                         connection_id=connection_id,
+                        fallback_is_snapshot=frame_is_snapshot,
                     )
                     if not fills:
                         continue

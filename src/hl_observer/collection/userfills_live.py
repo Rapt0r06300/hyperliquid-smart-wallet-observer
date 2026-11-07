@@ -302,6 +302,7 @@ def parser_message_userfills(
     receive_mono_ns: int | None = None,
     connection_id: str | None = None,
     audit: dict[str, Any] | None = None,
+    fallback_is_snapshot: bool | None = None,
 ) -> list[dict]:
     """Normalise un message WS userFills en conservant DEUX horloges distinctes.
 
@@ -316,8 +317,17 @@ def parser_message_userfills(
     data = msg.get("data") if isinstance(msg, dict) else None
     fills = (data or {}).get("fills") if isinstance(data, dict) else None
     snapshot_value = data.get("isSnapshot") if isinstance(data, dict) else None
-    # Missing or malformed isSnapshot is unknown, never an implicit live event.
-    est_snapshot = snapshot_value if type(snapshot_value) is bool else None
+    # Hyperliquid dropped the per-frame ``isSnapshot`` marker (~2026-10-27).
+    # When the venue still sends an explicit bool we trust it; otherwise we fall
+    # back to the caller's connection-state classification (first post-ACK frame
+    # on a connection = snapshot/history, every later frame = live). A missing
+    # flag with no fallback stays unknown and fails closed, never implicit live.
+    if type(snapshot_value) is bool:
+        est_snapshot = snapshot_value
+    elif type(fallback_is_snapshot) is bool:
+        est_snapshot = fallback_is_snapshot
+    else:
+        est_snapshot = None
     sequence_raw = msg.get("sequence", msg.get("seq")) if isinstance(msg, dict) else None
     if sequence_raw is None and isinstance(data, dict):
         sequence_raw = data.get("sequence", data.get("seq"))
