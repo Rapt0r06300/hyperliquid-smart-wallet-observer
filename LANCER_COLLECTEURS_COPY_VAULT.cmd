@@ -179,8 +179,12 @@ rem les autres lanes pour un scaling lineaire sans chevauchement.
 if not defined ALINA_POLL_SHARD_COUNT set "ALINA_POLL_SHARD_COUNT=1"
 if not defined ALINA_POLL_SHARD_INDEX set "ALINA_POLL_SHARD_INDEX=0"
 if exist "%CV_ROOT%tools\collecter_userfills_poll.py" (
-  start "ALINA-POLL-LEADERS" /MIN "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\collecter_userfills_poll.py" --root "%CV_ROOT%." --intervalle 5 --shard-count %ALINA_POLL_SHARD_COUNT% --shard-index %ALINA_POLL_SHARD_INDEX%
-  echo [POLL] Collecteur fills leaders par poll REST demarre - shard %ALINA_POLL_SHARD_INDEX%/%ALINA_POLL_SHARD_COUNT% - fenetre ALINA-POLL-LEADERS
+  del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
+  start "ALINA-POLL-LEADERS" /B "%CV_ROOT%tools\_run_poll_leaders.cmd"
+  echo [POLL] Collecteur fills leaders demarre SANS fenetre - log: runtime\logs\poll-leaders.log
+  echo [AFFICHAGE] Ouverture de la page de sante unique - tous les collecteurs...
+  timeout /t 4 /nobreak >nul 2>nul
+  if exist "%CV_ROOT%runtime\data\collecteurs_sante.html" start "" "%CV_ROOT%runtime\data\collecteurs_sante.html"
 )
 
 :campagne
@@ -333,6 +337,10 @@ goto :end
 
 :cleanup
 rem --- Arreter le poll des leaders (fenetre dediee) ---
+if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
+  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
+  del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
+)
 taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
 rem --- Supprimer le verrou ---
 if exist "%CV_LOCKFILE%" del /f /q "%CV_LOCKFILE%" >nul 2>nul

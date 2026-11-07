@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -228,28 +229,30 @@ def _lire_retenus(root: Path) -> list[str]:
     return [str(v) for v in ret] if isinstance(ret, list) else []
 
 
-#: Flux surveillés par la page de santé (nom lisible -> chemin relatif).
-_STREAMS_SURVEILLES = {
-    "Fills poll (LIVE_POLL)": "runtime/data/vault_fills_poll.jsonl",
-    "Fills live (LIVE_WS)": "runtime/data/vault_fills_live.jsonl",
-    "Carnets BBO": "runtime/data/bbo_tape.jsonl",
-    "Carnets L2 copy-vault": "runtime/data/copy_vault_l2_tape.jsonl",
-    "Carnets venues": "runtime/data/carnet_venues.jsonl",
-    "Fills journal": "runtime/data/fills_journal.jsonl",
-    "Vault fills (agrégé)": "runtime/data/vault_fills.jsonl",
-    "Vault épisodes": "runtime/data/vault_episodes.jsonl",
-    "Snapshots vaults": "runtime/data/vault_snapshots.jsonl",
-}
-
-#: Au-delà de 2 min sans écriture -> STALE ; au-delà de 20 min -> DEAD.
-_SANTE_INTERVALLE_MS = 120_000.0
+#: Flux surveillés par la page de santé : (nom, chemin, intervalle attendu ms).
+#: L'intervalle attendu DÉPEND de la cadence réelle du flux : au-delà, STALE ;
+#: au-delà de 10x, FIGÉ. Un flux « backfill » (cadence 4 h) ne doit PAS être
+#: signalé figé après 2 min — d'où les intervalles par flux.
+_MIN = 60_000.0
+_STREAMS_SURVEILLES = (
+    ("Fills poll (LIVE_POLL)", "runtime/data/vault_fills_poll.jsonl", 3 * _MIN),
+    ("Fills live (LIVE_WS)", "runtime/data/vault_fills_live.jsonl", 5 * _MIN),
+    ("Carnets BBO", "runtime/data/bbo_tape.jsonl", 3 * _MIN),
+    ("Carnets L2 copy-vault", "runtime/data/copy_vault_l2_tape.jsonl", 3 * _MIN),
+    ("Carnets venues", "runtime/data/carnet_venues.jsonl", 5 * _MIN),
+    ("Fills journal", "runtime/data/fills_journal.jsonl", 5 * _MIN),
+    ("Snapshots vaults", "runtime/data/vault_snapshots.jsonl", 10 * _MIN),
+    # Sorties de BACKFILL (cadence ~4 h) : intervalle large, sinon faux « FIGÉ ».
+    ("Vault fills (backfill ~4h)", "runtime/data/vault_fills.jsonl", 360 * _MIN),
+    ("Vault épisodes (backfill ~4h)", "runtime/data/vault_episodes.jsonl", 360 * _MIN),
+)
 
 
 def _streams_health(root: Path, now_ms: float) -> list[dict[str, Any]]:
     """#5 Santé de chaque flux collecté : taille, dernier écrit, âge, verdict.
     Répond directement à « est-ce que ça monte ? » sans deviner."""
     out: list[dict[str, Any]] = []
-    for nom, rel in _STREAMS_SURVEILLES.items():
+    for nom, rel, intervalle_ms in _STREAMS_SURVEILLES:
         p = root / rel
         try:
             st = p.stat()
@@ -257,11 +260,13 @@ def _streams_health(root: Path, now_ms: float) -> list[dict[str, Any]]:
             taille = st.st_size
         except OSError:
             mtime_ms, taille = 0.0, 0
-        verdict = collector_stream_health(mtime_ms, now_ms, expected_interval_ms=_SANTE_INTERVALLE_MS)
+        verdict = collector_stream_health(mtime_ms, now_ms, expected_interval_ms=intervalle_ms)
+        # Âge borné à 0 : un mtime légèrement « futur » (écrit pendant la passe)
+        # ne doit pas afficher un âge négatif.
+        age_s = max(0.0, round((now_ms - mtime_ms) / 1000.0, 1)) if mtime_ms else None
         out.append({
             "nom": nom, "fichier": rel, "taille_octets": taille,
-            "dernier_ecrit_ms": int(mtime_ms), "age_s": round((now_ms - mtime_ms) / 1000.0, 1) if mtime_ms else None,
-            "verdict": verdict,
+            "dernier_ecrit_ms": int(mtime_ms), "age_s": age_s, "verdict": verdict,
         })
     return out
 
@@ -371,6 +376,19 @@ def main(argv: list[str] | None = None) -> int:
     bucket = TokenBucket(rate_per_s=rpm / 60.0, burst=min(10.0, max(1.0, rpm / 6.0)))
     cooldown = LeaderCooldown()  # #3 backoff 429 par leader
     due_ms: dict[str, float] = {v: 0.0 for v in leaders}
+    # Pidfile : le lanceur tue CE PID au nettoyage (le poll tourne sans fenêtre).
+    pid_path = root / "runtime" / "data" / "poll_leaders.pid"
+    try:
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    except OSError:
+        pass
+    # Écrit la page de santé immédiatement pour qu'elle existe à l'ouverture auto.
+    try:
+        _ecrire_page_sante(root, time.time() * 1000.0,
+                           {"leaders": len(leaders), "polles": 0, "fills_emis": 0, "en_backoff": 0})
+    except Exception:  # noqa: BLE001
+        pass
     while True:
         now = time.time() * 1000.0
         # S2 : ne poll que les leaders « dus » ; cadence adaptative à l'activité.

@@ -1,0 +1,88 @@
+name: copy-vault-poll-lanes
+
+# Solution #8 — « plus de fills » par MULTI-IP.
+# Hyperliquid limite le debit par IP (~1200 poids/min). Sur une seule IP (ton PC)
+# le poll plafonne. Ici, chaque job de la matrice tourne sur un runner GitHub =
+# une IP DIFFERENTE, et ne suit qu'une TRANCHE DISJOINTE des leaders
+# (--shard-index). Capacite de collecte ~x(nombre de lanes), sans 429.
+#
+# PAPER / LECTURE SEULE : endpoint public userFillsByTime, aucun secret, aucun
+# ordre, aucune cle. Discipline causale identique au PC (high-water + fraicheur).
+#
+# RECUPERATION : chaque lane publie ses fills causaux en ARTEFACT
+# (poll-fills-shard-N). Telecharge-les puis concatene-les dans
+# runtime/data/vault_fills_poll.jsonl en local — le labo deduplique par identite.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duree_s:
+        description: "Duree de collecte par lane (s)"
+        default: "1500"
+      max_req_min:
+        description: "Debit max requetes/min par lane (AIMD, anti-429)"
+        default: "55"
+  schedule:
+    - cron: "17 * * * *"   # une fenetre de collecte par heure (ajuste si besoin)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copy-vault-poll-lanes
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4 lanes = 4 IP distinctes = ~x4 de capacite. Pour en ajouter, etends
+        # cette liste ET passe --shard-count au meme nombre ci-dessous.
+        shard_index: [0, 1, 2, 3]
+    env:
+      SHARD_COUNT: "4"
+    steps:
+      - name: Checkout (shallow + sparse, evite de tirer les millions de fichiers data)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            src
+            tools
+            runtime/data
+          sparse-checkout-cone-mode: true
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restaurer l'etat causal (high-water) de cette lane
+        uses: actions/cache@v4
+        with:
+          path: runtime/data/userfills_poll_watermarks.json
+          key: poll-watermarks-shard-${{ matrix.shard_index }}-${{ github.run_id }}
+          restore-keys: |
+            poll-watermarks-shard-${{ matrix.shard_index }}-
+
+      - name: Collecte causale (lane ${{ matrix.shard_index }}/${{ env.SHARD_COUNT }})
+        run: |
+          export PYTHONPATH=src
+          timeout "${{ github.event.inputs.duree_s || '1500' }}" \
+            python -B tools/collecter_userfills_poll.py \
+              --shard-count "${SHARD_COUNT}" \
+              --shard-index "${{ matrix.shard_index }}" \
+              --max-requests-per-min "${{ github.event.inputs.max_req_min || '55' }}" \
+            || true   # timeout sort non-zero : c'est normal (fenetre ecoulee)
+
+      - name: Publier les fills causaux de la lane
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poll-fills-shard-${{ matrix.shard_index }}
+          path: runtime/data/vault_fills_poll.jsonl
+          if-no-files-found: ignore
+          retention-days: 5

@@ -308,6 +308,14 @@ def _download_to_path(
                 elif status not in (200, None):
                     raise RestoreError(f"unexpected HTTP status {status} for {url}")
                 append = existing_size > 0 and status == 206
+                # Total attendu (pour %, debit et ETA) : Content-Length est le
+                # RESTE a transferer (plein en 200, reliquat en 206).
+                cl_raw = getattr(response, "headers", {}).get("Content-Length")
+                try:
+                    reste = int(cl_raw) if cl_raw is not None else None
+                except (TypeError, ValueError):
+                    reste = None
+                total_attendu = (existing_size + reste) if reste is not None else None
                 if append:
                     with target.open("rb") as prefix:
                         for chunk in iter(lambda: prefix.read(8 * 1024 * 1024), b""):
@@ -317,6 +325,8 @@ def _download_to_path(
                     size = 0
                 with target.open("ab" if append else "wb") as output:
                     last_heartbeat = time.monotonic()
+                    t_depart = time.monotonic()
+                    size_depart = size
                     while True:
                         chunk = response.read(8 * 1024 * 1024)
                         if not chunk:
@@ -326,11 +336,27 @@ def _download_to_path(
                         output.write(chunk)
                         digest.update(chunk)
                         size += len(chunk)
-                        if time.monotonic() - last_heartbeat >= 10:
-                            print(
-                                f"ALINA_DOWNLOAD_BYTES asset={target.name} received={size}",
-                                file=sys.stderr, flush=True,
-                            )
+                        if time.monotonic() - last_heartbeat >= 3:
+                            ecoule = max(1e-6, time.monotonic() - t_depart)
+                            debit = (size - size_depart) / ecoule  # octets/s
+                            mo = 1024.0 * 1024.0
+                            if total_attendu and total_attendu > 0:
+                                pct = min(100.0, 100.0 * size / total_attendu)
+                                reste_o = max(0, total_attendu - size)
+                                eta = int(reste_o / debit) if debit > 0 else -1
+                                eta_txt = f"{eta // 60}m{eta % 60:02d}s" if eta >= 0 else "?"
+                                print(
+                                    f"ALINA_DOWNLOAD asset={target.name} "
+                                    f"{pct:5.1f}% {size/mo:.1f}/{total_attendu/mo:.1f} Mo "
+                                    f"{debit/mo:.1f} Mo/s ETA {eta_txt}",
+                                    file=sys.stderr, flush=True,
+                                )
+                            else:
+                                print(
+                                    f"ALINA_DOWNLOAD asset={target.name} "
+                                    f"{size/mo:.1f} Mo {debit/mo:.1f} Mo/s",
+                                    file=sys.stderr, flush=True,
+                                )
                             last_heartbeat = time.monotonic()
             return size, digest.hexdigest()
         except urllib.error.HTTPError as exc:
@@ -3906,6 +3932,20 @@ def restore_everything(
         f"ALINA_RESTORE_PHASE=TRANSFER_AND_VERIFY releases={len(releases)} assets={sum(len(r.get('assets', [])) for r in releases)}",
         file=sys.stderr, flush=True,
     )
+    # Progression GLOBALE : total d'assets + d'octets a traiter, pour afficher
+    # un pourcentage et une ETA d'ensemble (sinon la synchro semble bloquee).
+    _total_assets = sum(
+        len(r.get("assets", [])) for r in releases if isinstance(r.get("assets"), list)
+    )
+    _total_bytes = sum(
+        int(a.get("size") or 0)
+        for r in releases for a in (r.get("assets") or []) if isinstance(a, Mapping)
+    )
+    _done_assets = 0
+    _done_bytes = 0
+    _transfer_t0 = time.monotonic()
+    _last_glob = 0.0
+    _mo = 1024.0 * 1024.0
     for release_idx, release in enumerate(releases, 1):
         tag = str(release.get("tag_name") or "")
         if not tag:
@@ -3931,6 +3971,22 @@ def restore_everything(
         for asset in assets:
             if not isinstance(asset, Mapping):
                 continue
+            # Avancement global (asset k/N + % + ETA), limite a ~1 ligne / 3 s.
+            _done_assets += 1
+            if _total_bytes > 0 and (time.monotonic() - _last_glob >= 3 or _done_assets == _total_assets):
+                _pct = min(100.0, 100.0 * _done_bytes / _total_bytes)
+                _el = max(1e-6, time.monotonic() - _transfer_t0)
+                _rate = _done_bytes / _el
+                _eta = int((_total_bytes - _done_bytes) / _rate) if _rate > 0 else -1
+                _eta_txt = f"{_eta // 60}m{_eta % 60:02d}s" if _eta >= 0 else "?"
+                print(
+                    f"ALINA_DOWNLOAD_GLOBAL asset {_done_assets}/{_total_assets} "
+                    f"{_pct:4.1f}% {_done_bytes / _mo:.0f}/{_total_bytes / _mo:.0f} Mo "
+                    f"ETA {_eta_txt}",
+                    file=sys.stderr, flush=True,
+                )
+                _last_glob = time.monotonic()
+            _done_bytes += int(asset.get("size") or 0)
             report["asset_count"] += 1
             identity = {
                 "source_repository": repository,
