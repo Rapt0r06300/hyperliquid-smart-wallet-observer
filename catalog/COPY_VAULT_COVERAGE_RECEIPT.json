@@ -9,8 +9,8 @@
         "completed_units": 0,
         "published": false,
         "shard_index": 0,
-        "status": "RUNNING",
-        "status_reason": "worker_started"
+        "status": "STUCK",
+        "status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
       }
     ],
     "collected_lane_count": 0,
@@ -39,7 +39,13 @@
     "selection_verified": true,
     "status": "MORE_DATA",
     "terminal_lane_count": 0,
-    "unexpected_failures": [],
+    "unexpected_failures": [
+      {
+        "campaign_id": "copy-vault-e8-broad-2026110702-v8",
+        "reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+        "status": "STUCK"
+      }
+    ],
     "users_per_largest_lane": 3052,
     "ws_subscription_limit_verified": true,
     "ws_users_per_largest_lane": 10
@@ -6361,8 +6367,8 @@
           "completed_units": 0,
           "published": false,
           "shard_index": 0,
-          "status": "RUNNING",
-          "status_reason": "worker_started"
+          "status": "STUCK",
+          "status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
         }
       ],
       "collected_lane_count": 0,
@@ -6391,7 +6397,13 @@
       "selection_verified": true,
       "status": "MORE_DATA",
       "terminal_lane_count": 0,
-      "unexpected_failures": [],
+      "unexpected_failures": [
+        {
+          "campaign_id": "copy-vault-e8-broad-2026110702-v8",
+          "reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+          "status": "STUCK"
+        }
+      ],
       "users_per_largest_lane": 3052,
       "ws_subscription_limit_verified": true,
       "ws_users_per_largest_lane": 10
@@ -6399,7 +6411,7 @@
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "fcfb04fa4c25d74f1454f040e5d9b117382807d510625779df3d58571e9739ad",
+  "receipt_digest": "b39e3f6e1326b73e3fc8a0044e2fba3535ed78be2942b46d1dba6728ea14453a",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
