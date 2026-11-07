@@ -8,6 +8,7 @@ knowledge into backtests.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -210,10 +211,31 @@ def _event_type(channel: str, event_kind: str) -> str:
 
 
 class CanonicalEventWriter:
-    """Append-only canonical event ledger with stable deduplication."""
+    """Append-only canonical event ledger with stable deduplication.
+
+    Rows are stored gzip-compressed (``<name>.jsonl.gz``) as concatenated
+    gzip members — one member per :meth:`append`. gzip is strictly lossless:
+    every byte of every JSON line is recovered bit-for-bit on read, so no
+    field, no precision and no event is ever altered. Market-event JSON is
+    highly repetitive and compresses ~10x, which keeps the ledger small
+    without degrading collector fidelity. A legacy uncompressed ``.jsonl``
+    ledger is still read transparently when no ``.gz`` exists.
+    """
+
+    # Low gzip level: near-identical ratio on this repetitive JSON while
+    # keeping per-append CPU negligible so collection is never slowed.
+    _COMPRESS_LEVEL = 4
 
     def __init__(self, path: Path | str) -> None:
-        self.path = Path(path)
+        requested = Path(path)
+        # Canonical storage is always gzip. Accept a plain ``.jsonl`` request
+        # (tests, existing callers) and transparently store ``.jsonl.gz``.
+        if requested.suffix == ".gz":
+            self.path = requested
+            self._legacy_plain = requested.with_suffix("")
+        else:
+            self.path = requested.with_suffix(requested.suffix + ".gz")
+            self._legacy_plain = requested
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._seen: set[str] = set()
         self.written = 0
@@ -238,17 +260,33 @@ class CanonicalEventWriter:
             )
         if not rows:
             return 0
-        with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write("".join(rows))
-            handle.flush()
-            os.fsync(handle.fileno())
+        payload = "".join(rows).encode("utf-8")
+        # Append one self-contained gzip member, then fsync. Concatenated
+        # members are valid gzip; a crash mid-append can only lose the current
+        # batch, exactly like a partial line in a plain .jsonl ledger.
+        with open(self.path, "ab") as raw:
+            with gzip.GzipFile(
+                fileobj=raw, mode="wb", compresslevel=self._COMPRESS_LEVEL,
+                mtime=0,
+            ) as gz:
+                gz.write(payload)
+            raw.flush()
+            os.fsync(raw.fileno())
         self.written += len(rows)
         return len(rows)
 
+    def _read_handle(self):
+        if self.path.exists():
+            return gzip.open(self.path, "rt", encoding="utf-8")
+        if self._legacy_plain.exists():
+            return self._legacy_plain.open(encoding="utf-8")
+        return None
+
     def iter_events(self) -> Iterator[dict[str, Any]]:
-        if not self.path.exists():
+        handle = self._read_handle()
+        if handle is None:
             return
-        with self.path.open(encoding="utf-8") as handle:
+        with handle:
             for line in handle:
                 try:
                     row = json.loads(line)

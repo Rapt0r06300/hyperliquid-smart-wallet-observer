@@ -117,14 +117,21 @@ _DATA_SOURCES: tuple[tuple[str, str, str], ...] = (
     ("Native venues", "runtime/data/native_*.jsonl", "continu"),
     ("Backfill fills", "runtime/data/backfill_fills_*.jsonl", "batch 4h"),
     ("Backfill candles", "runtime/data/backfill_candles_*.jsonl", "batch 4h"),
-    ("Evenements", "runtime/data/canonical_events/*.jsonl", "continu"),
+    # ``*.jsonl*`` matches both the active ``.jsonl`` and sealed ``.jsonl.gz``
+    # ledgers so the panel keeps reporting events after gzip compression.
+    ("Evenements", "runtime/data/canonical_events/*.jsonl*", "continu"),
 )
+
+# Remembers the previous pass totals so the panel can show live growth deltas,
+# which is what makes the display visibly "move" between passes.
+_PANNEAU_ETAT: dict[str, float] = {}
 
 
 def _panneau_recolte(root: Path) -> None:
     sep = "  +------------------+----------+------------+-----------------+"
+    horodatage = time.strftime("%H:%M:%S")
     print("\n" + sep, flush=True)
-    print("  |        PANNEAU DE RECOLTE -- DONNEES COLLECTEES           |", flush=True)
+    print(f"  |   PANNEAU DE RECOLTE -- DONNEES COLLECTEES  {horodatage}    |", flush=True)
     print(sep, flush=True)
     print("  | Source           | Fichiers | Taille     | Cadence         |", flush=True)
     print(sep, flush=True)
@@ -144,11 +151,22 @@ def _panneau_recolte(root: Path) -> None:
                 flush=True,
             )
     print(sep, flush=True)
+    # Growth delta since the previous panel so the operator sees, at a glance,
+    # that collection is live and progressing — not a frozen snapshot.
+    prev = _PANNEAU_ETAT.get("total_bytes")
+    if prev is None:
+        delta_txt = "1er releve"
+    else:
+        diff = total_bytes - prev
+        signe = "+" if diff >= 0 else "-"
+        delta_txt = f"{signe}{_format_size(abs(diff))} depuis la passe"
+    _PANNEAU_ETAT["total_bytes"] = float(total_bytes)
     print(
         f"  | TOTAL            | {total_files:>8d} | {_format_size(total_bytes):>10s} |                 |",
         flush=True,
     )
     print(sep, flush=True)
+    print(f"  Croissance : {delta_txt}", flush=True)
 
 
 def _last_collector_log_line(root: Path, name: str, *, max_bytes: int = 8_192) -> str:
@@ -178,10 +196,13 @@ def run_watchdog(
     monotonic_fn: Callable[[], float] = time.monotonic,
     max_passes: int | None = None,
 ) -> int:
-    deadline = monotonic_fn() + max(0.0, float(duration_s))
-    passes = 0
     _start_mono = monotonic_fn()
-    while monotonic_fn() < deadline:
+    deadline = _start_mono + max(0.0, float(duration_s))
+    passes = 0
+    while True:
+        now = monotonic_fn()
+        if now >= deadline:
+            break
         names = (
             list(dict.fromkeys(str(name) for name in requested_names if name))
             if requested_names is not None
@@ -259,7 +280,7 @@ def run_watchdog(
                 "real_execution": False,
             }
             from progress_display import _format_duration
-            elapsed_s = monotonic_fn() - _start_mono
+            elapsed_s = now - _start_mono
             print(
                 "\n[COLLECTE] %s | %d/%d actifs | passe #%d | depuis %s"
                 % (
@@ -284,8 +305,15 @@ def run_watchdog(
                     "  [%s] %-25s %s" % (marker, name, pid_str),
                     flush=True,
                 )
-            if passes % 5 == 0:
-                _panneau_recolte(root)
+                # Live visibility: show each active worker's latest log line so
+                # the operator sees what every collector is actually doing.
+                if pid is not None:
+                    print(
+                        "  [WORKER] %s — PID %s — %s"
+                        % (name, pid, _last_collector_log_line(root, name)),
+                        flush=True,
+                    )
+            _panneau_recolte(root)
             if protocol_status == "À CORRIGER":
                 print(
                     "[PROTOCOLE] userfills=%s; checkpoints=%s; aucune preuve causale ne doit être admise tant que les deux protocoles attendus ne sont pas actifs"
@@ -316,7 +344,7 @@ def run_watchdog(
         passes += 1
         if max_passes is not None and passes >= int(max_passes):
             break
-        remaining = deadline - monotonic_fn()
+        remaining = deadline - now
         if remaining <= 0:
             break
         sleep_fn(min(max(1.0, float(interval_s)), remaining))
