@@ -317,8 +317,20 @@ def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index:
         reverse=True,
     )
     if reste and cands:
-        start = (max(0, int(rotation_index)) * reste) % len(cands)
-        selection = [cands[(start + offset) % len(cands)] for offset in range(min(reste, len(cands)))]
+        # Rotation ADAPTATIVE : ne jamais lacher un leader qui trade MAINTENANT.
+        # Les vaults actifs (fills recents) sont colles (sticky), tries par
+        # activite ; seuls les slots restants tournent parmi les silencieux
+        # pour continuer a decouvrir de l'activite. Maximise les fills/jour.
+        actifs = [c for c in cands if act.get(c["vault"], 0) > 0]
+        silencieux = [c for c in cands if act.get(c["vault"], 0) <= 0]
+        selection = actifs[:reste]
+        libres = reste - len(selection)
+        if libres > 0 and silencieux:
+            start = (max(0, int(rotation_index)) * libres) % len(silencieux)
+            selection += [
+                silencieux[(start + offset) % len(silencieux)]
+                for offset in range(min(libres, len(silencieux)))
+            ]
     else:
         selection = []
     for c in selection:
