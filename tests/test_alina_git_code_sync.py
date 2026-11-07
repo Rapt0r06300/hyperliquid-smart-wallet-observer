@@ -1377,6 +1377,39 @@ def test_tracked_protected_collision_still_fails_closed(repos):
     assert receipt["push_attempts"] == 0
 
 
+def test_workflow_modify_delete_resolves_to_github_deletion_and_pushes(repos):
+    # Cas reel : un workflow .github/ supprime cote GitHub mais modifie en local.
+    # POUSSER ne doit plus NO_GO : GitHub est canonique -> il accepte la
+    # suppression (via le fast path index-only) et pousse le reste du code.
+    local, cloud, origin = repos
+    wf = ".github/workflows/recover-x.yml"
+    valid = (
+        "name: x\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps: []\n"
+    )
+    cloud_commit(cloud, wf, valid)                 # GitHub a le workflow
+    git(local, "fetch", "origin", "main")
+    git(local, "merge", "--ff-only", "origin/main")
+    (local / wf).write_text(valid + "    # modifie\n", encoding="utf-8")  # local le modifie
+    (local / "tools").mkdir(exist_ok=True)
+    (local / "tools" / "nouveau.py").write_text("x = 1\n", encoding="utf-8")  # + vrai code
+    git(local, "add", "-A")
+    git(local, "commit", "-m", "local: modifie workflow + nouveau code")  # commit local
+    (cloud / wf).unlink()                          # GitHub (canonique) le SUPPRIME
+    git(cloud, "add", "-A")
+    git(cloud, "commit", "-m", "supprime workflow")
+    git(cloud, "push", "origin", "main")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    assert wf in (receipt.get("predicted_modify_delete") or [])  # bien detecte
+    assert git(origin, "ls-tree", "main", wf) == ""               # supprime sur GitHub
+    assert git(local, "ls-files", wf) == ""                       # plus suivi en local
+    assert git(origin, "show", "main:tools/nouveau.py") == "x = 1"  # reste pousse
+    assert git(local, "rev-parse", "HEAD") == git(origin, "rev-parse", "main")
+    assert receipt["force_push"] is False
+
+
 def test_concurrent_cloud_push_retries_without_force(repos):
     local, cloud, origin = repos
     (local / "src" / "local.py").write_text("local = 1\n")

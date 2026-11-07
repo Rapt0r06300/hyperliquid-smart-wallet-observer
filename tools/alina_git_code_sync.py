@@ -3371,7 +3371,10 @@ class Synchronizer:
                         upstream = stages.get(2)
                         if upstream is None:
                             # GitHub (canonique) a supprime ce fichier -> accepte.
-                            self.command("update-index", "--remove", "--", path)
+                            # --force-remove retire l'entree meme si le fichier
+                            # existe encore dans le worktree (sinon --remove le
+                            # re-stagerait et le fichier survivrait a tort).
+                            self.command("update-index", "--force-remove", "--", path)
                         else:
                             mode, oid = upstream
                             # Workflow repris d'upstream : valider l'absence de
@@ -3441,13 +3444,35 @@ class Synchronizer:
                 ).stdout)
                 if not _protected(path)
             ]
-            if deleted_code_paths:
+            # Une suppression APPROUVEE (workflow GitHub en modify/delete que
+            # GitHub, canonique, a supprime) est INTENTIONNELLE : on l'accepte et
+            # on nettoie le worktree. Toute autre suppression de code reste refusee.
+            approved_deletions = [
+                path for path in deleted_code_paths
+                if self._tree_replay_approved(path)
+            ]
+            refused_deletions = [
+                path for path in deleted_code_paths
+                if path not in set(approved_deletions)
+            ]
+            if refused_deletions:
                 raise SyncBlocked(
                     "Replay arbre avec suppression de code refuse sans "
                     "nettoyage implicite: "
-                    + ", ".join(deleted_code_paths[:8])
+                    + ", ".join(refused_deletions[:8])
                 )
-            code_paths = [path for path in changed_paths if not _protected(path)]
+            for path in approved_deletions:
+                # Nettoyage implicite : le fichier n'est plus dans l'arbre pousse.
+                try:
+                    (self.root / path).unlink()
+                except OSError:
+                    pass
+            if approved_deletions:
+                self.report["workflow_deletions_accepted"] = sorted(approved_deletions)
+            code_paths = [
+                path for path in changed_paths
+                if not _protected(path) and path not in set(deleted_code_paths)
+            ]
             # Inspect late edits against the operator's real index, not the
             # temporary merge index.  They are deliberately deferred: the
             # checkpoint being replayed remains publishable, while the new
@@ -3516,6 +3541,11 @@ class Synchronizer:
                 "update-index", "-z", "--index-info",
                 input_bytes=replay_index_info,
             )
+        # Propager les suppressions approuvees a l'index operateur : sinon
+        # ls-files les reverrait comme "modifs locales" au prochain sync et
+        # tenterait de les re-pousser (la boucle de churn que l'on casse).
+        for path in approved_deletions:
+            self.command("update-index", "--force-remove", "--", path, check=False)
         updated = self.command(
             "update-ref", "refs/heads/main", current, local, check=False,
         )
