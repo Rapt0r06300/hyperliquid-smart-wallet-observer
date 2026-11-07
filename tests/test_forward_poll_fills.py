@@ -142,6 +142,49 @@ def test_adaptive_interval_shortens_when_active_and_spaces_when_idle() -> None:
     assert adaptive_interval_s(100.0, 0, min_s=2.0, max_s=60.0) == 60.0
 
 
+def test_stale_backlog_fill_is_rejected_as_causal_but_advances_high_water() -> None:
+    # Anti-pollution : un fill observé LONGTEMPS après son trade (backlog ancien)
+    # n'est pas un signal de copie exploitable -> pas causal, mais high-water avance.
+    _, wm = partition_forward_fills(
+        LeaderWatermark(), [_fill(1_000_000, 1)], observed_at_ms=1_000_000)
+    stale_ts = 1_000_050                      # juste après le high-water
+    now = stale_ts + 3_600_000                # mais observé 1 h plus tard
+    causal, new_wm = partition_forward_fills(
+        wm, [_fill(stale_ts, 2)], observed_at_ms=now, max_observation_lag_ms=600_000)
+    assert causal == []                        # trop vieux (>10 min) -> rejeté
+    assert new_wm.high_water_ms >= now - 60_000  # mais le high-water a avancé
+
+
+def test_inactive_leader_high_water_never_stays_zero() -> None:
+    # LE bug des 285 jours : un leader sans fill gardait high_water=0 et re-tirait
+    # tout son historique. Désormais le high-water plancher = observed − marge.
+    causal, wm = partition_forward_fills(
+        LeaderWatermark(), [], observed_at_ms=10_000_000)
+    assert causal == []
+    assert wm.high_water_ms == 10_000_000 - 60_000
+    assert wm.initialised is True
+
+
+def test_token_bucket_global_pause_on_429_penalize() -> None:
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def now():
+        return clock["t"]
+
+    def sleep(s):
+        slept.append(s)
+        clock["t"] += s
+
+    tb = TokenBucket(rate_per_s=100.0, burst=100.0, now=now, sleep=sleep, penalty_base_s=10.0)
+    tb.take()                         # jetons dispo -> pas d'attente
+    tb.penalize()                     # 429 -> pause globale 10 s
+    waited = tb.take()
+    assert waited >= 10.0             # a bien attendu la pause globale
+    tb.reward(); tb.reward()          # succès -> la pause se résorbe
+    assert tb._cooldown_s < 10.0
+
+
 def test_token_bucket_allows_burst_then_throttles_to_rate() -> None:
     # #1 : rafale jusqu'à `burst` sans attente, puis ~1/rate entre requêtes.
     clock = {"t": 0.0}

@@ -241,6 +241,8 @@ class TokenBucket:
     def __init__(
         self, rate_per_s: float, burst: float, *, now=None, sleep=None,
         penalty_base_s: float = 10.0, penalty_max_s: float = 300.0,
+        min_rate_per_s: float | None = None, max_rate_per_s: float | None = None,
+        aimd_step_per_s: float = 0.02,
     ) -> None:
         self.rate = max(1e-6, float(rate_per_s))
         self.burst = max(1.0, float(burst))
@@ -248,6 +250,12 @@ class TokenBucket:
         self._sleep = sleep or time.sleep
         self._tokens = self.burst
         self._last = self._now()
+        # AIMD : le débit s'auto-règle au budget RÉEL de l'IP (partagée avec le
+        # collecteur principal). +pas à chaque succès (jusqu'au plafond), ÷2 sur
+        # 429. On converge vers le débit max soutenable sans 429 -> plus de fills.
+        self.min_rate = max(1e-6, float(min_rate_per_s if min_rate_per_s is not None else self.rate / 4.0))
+        self.max_rate = max(self.rate, float(max_rate_per_s if max_rate_per_s is not None else self.rate))
+        self.aimd_step_per_s = max(0.0, float(aimd_step_per_s))
         # Coupe-circuit GLOBAL anti-429 : le 429 d'Hyperliquid est au niveau de
         # l'IP entiere, donc on met TOUT le poll en pause (pas un seul leader).
         self.penalty_base_s = max(0.0, float(penalty_base_s))
@@ -261,16 +269,18 @@ class TokenBucket:
         self._last = t
 
     def penalize(self) -> None:
-        """429 observe : pause globale croissante (exponentielle, bornee)."""
+        """429 observe : pause globale croissante + débit divisé par 2 (AIMD)."""
         self._cooldown_s = min(
             self.penalty_max_s,
             max(self.penalty_base_s, self._cooldown_s * 2.0),
         )
         self._pause_until = self._now() + self._cooldown_s
+        self.rate = max(self.min_rate, self.rate * 0.5)  # multiplicative decrease
 
     def reward(self) -> None:
-        """Requete reussie : on relache progressivement la pause globale."""
+        """Requete reussie : relache la pause + remonte le débit d'un pas (AIMD)."""
         self._cooldown_s = max(0.0, self._cooldown_s / 2.0)
+        self.rate = min(self.max_rate, self.rate + self.aimd_step_per_s)  # additive increase
 
     def take(self) -> float:
         """Consomme un jeton (attend si nécessaire). Renvoie le temps attendu (s)."""
