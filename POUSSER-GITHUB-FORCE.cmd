@@ -17,6 +17,7 @@ set "ALINA_MODE=all"
 set "ALINA_CODE_ARGS="
 set "ALINA_SHARDS_ARGS=--download-safe --all-safe"
 set "ALINA_SKIP_UPDATE=0"
+set "ALINA_COPY_VAULT_ONLY="
 set "RC=1"
 
 if /I "%~1"=="--help" goto :help
@@ -38,10 +39,12 @@ if /I "%~1"=="--prune-cache" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--pr
 if /I "%~1"=="--prune-cache-only" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--prune-cache-only"&shift&goto :parse_args
 if /I "%~1"=="--catalog-budget" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--catalog-budget"&shift&goto :parse_args
 if /I "%~1"=="--skip-update" set "ALINA_SKIP_UPDATE=1"&shift&goto :parse_args
+if /I "%~1"=="--copy-vault-only" set "ALINA_MODE=shards"&set "ALINA_COPY_VAULT_ONLY=--copy-vault-only"&shift&goto :parse_args
 goto :bad_option
 
 :args_done
 if "%ALINA_SKIP_UPDATE%"=="1" set "ALINA_SHARDS_ARGS=%ALINA_SHARDS_ARGS% --skip-update"
+if defined ALINA_COPY_VAULT_ONLY set "ALINA_SHARDS_ARGS=%ALINA_SHARDS_ARGS% %ALINA_COPY_VAULT_ONLY%"
 
 rem --- Git ---
 set "HYPERSMART_GIT="
@@ -90,23 +93,46 @@ if /I "%ALINA_MODE%"=="code" echo Mode : CODE uniquement
 if /I "%ALINA_MODE%"=="shards" echo Mode : SAFE uniquement
 echo.
 
+rem Nombre max de tentatives auto (self-healing). Chaque echec transitoire
+rem (verrou perime, blip reseau, rate-limit) est retente apres nettoyage sur;
+rem un vrai conflit echoue proprement apres ces tentatives, sans jamais
+rem forcer, reset ni clean (invariant fail-closed preserve).
+set "ALINA_MAX_ATTEMPTS=4"
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" start > "%TEMP%\alina_cmd_start.tmp" 2>nul
 set /p ALINA_CMD_START=<"%TEMP%\alina_cmd_start.tmp"
 if /I "%ALINA_MODE%"=="shards" goto :run_shards
+
+set "ALINA_ATTEMPT=0"
+:code_attempt
+set /a ALINA_ATTEMPT+=1
+call :ensure_no_stale_lock
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" phase "Synchronisation code vers GitHub" 1 2
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %ALINA_CODE_ARGS%
 set "RC=%ERRORLEVEL%"
-if not "%RC%"=="0" goto :finish
+if "%RC%"=="0" goto :code_ok
+if %ALINA_ATTEMPT% GEQ %ALINA_MAX_ATTEMPTS% goto :finish
+echo [AUTO-REPAIR] Sync code echouee ^(code %RC%^); nettoyage verrou + tentative %ALINA_ATTEMPT%/%ALINA_MAX_ATTEMPTS% dans 3s...
+timeout /t 3 /nobreak >nul 2>nul
+goto :code_attempt
+:code_ok
 if /I "%ALINA_MODE%"=="dry" goto :finish
 if /I "%ALINA_MODE%"=="code" goto :finish
 echo [OK] Code termine et verifie.
 
 :run_shards
+set "ALINA_ATTEMPT=0"
+:shards_attempt
+set /a ALINA_ATTEMPT+=1
+call :ensure_no_stale_lock
 if /I "%ALINA_MODE%"=="all" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" phase "Telechargement SAFE (tous les shards)" 2 2
 if /I "%ALINA_MODE%"=="shards" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" phase "Operation SAFE" 1 1
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_SHARDS_ENGINE%" %ALINA_SHARDS_ARGS%
 set "RC=%ERRORLEVEL%"
-goto :finish
+if "%RC%"=="0" goto :finish
+if %ALINA_ATTEMPT% GEQ %ALINA_MAX_ATTEMPTS% goto :finish
+echo [AUTO-REPAIR] Operation SAFE echouee ^(code %RC%^); nettoyage + tentative %ALINA_ATTEMPT%/%ALINA_MAX_ATTEMPTS% dans 5s...
+timeout /t 5 /nobreak >nul 2>nul
+goto :shards_attempt
 
 :help
 echo Usage : POUSSER-GITHUB-FORCE.cmd [options]
@@ -164,3 +190,20 @@ echo [FIN] Lanceur termine - code retour %RC%
 if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
 popd
 endlocal & exit /b %RC%
+
+rem ============================================================
+rem  Self-healing SUR : supprime un verrou Git index.lock PERIME
+rem  (uniquement si AUCUN processus git ne tourne). Jamais de reset,
+rem  force, clean ou stash. Un verrou tenu par un git actif est
+rem  respecte. Appele via `call`, retourne par `goto :eof`.
+rem ============================================================
+:ensure_no_stale_lock
+if not exist "%ALINA_ROOT%.git\index.lock" goto :eof
+tasklist /FI "IMAGENAME eq git.exe" /NH 2>nul | findstr /I "git.exe" >nul 2>nul
+if not errorlevel 1 (
+  echo [VERROU] Un processus git est actif; verrou respecte ^(pas de suppression^).
+  goto :eof
+)
+echo [AUTO-REPAIR] Verrou Git perime detecte ^(aucun git actif^) -^> suppression securisee.
+del /f /q "%ALINA_ROOT%.git\index.lock" >nul 2>nul
+goto :eof
