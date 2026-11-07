@@ -139,9 +139,18 @@ def _strict_positive_timestamp_ms(value) -> int | None:
     return int(numeric)
 
 
-def _activite_par_vault(root: Path, *, fenetre_h: float = 2.0, max_lignes: int = 4000) -> dict:
+def _activite_par_vault(root: Path, *, fenetre_h: float | None = None, max_lignes: int = 8000) -> dict:
     """Fills récents par vault (activité LIVE) depuis vault_fills_live.jsonl — un vault qui trade offre plus
-    d'occasions de mesure. Lecture bornée (les dernières lignes)."""
+    d'occasions de mesure. Lecture bornée (les dernières lignes).
+
+    Fenetre courte (defaut 45 min, reglable via HYPERSMART_VAULT_ACTIVITE_FENETRE_MIN) :
+    les 10 slots collent aux leaders ACTIFS MAINTENANT, pas a ceux qui tradaient
+    il y a 2h. Reaction plus rapide = plus de fills captes."""
+    if fenetre_h is None:
+        try:
+            fenetre_h = max(0.1, float(os.getenv("HYPERSMART_VAULT_ACTIVITE_FENETRE_MIN", "45")) / 60.0)
+        except (TypeError, ValueError):
+            fenetre_h = 0.75
     seuil = time.time() * 1000 - fenetre_h * 3_600_000.0
     cnt: dict[str, int] = {}
     try:
@@ -174,7 +183,7 @@ def _shadow_par_vault(root: Path) -> dict:
 MAX_SLOTS = 10                          # plafond dur des places userFills (inchangé)
 DEFAULT_CORE_SLOTS = 2                  # production : comportement historique ; campagne configurable par env
 SENTINELLES_K = max(0, int(os.getenv("HYPERSMART_VAULT_SENTINELLES_K", "1")))  # slots top-liquidateurs. Reduit a 1 par defaut: libere 2 slots pour les traders les PLUS ACTIFS -> plus de fills copy-vault/jour dans la limite des 10.
-ROLE_ROTATION_SECONDS = max(60.0, float(os.getenv("HYPERSMART_VAULT_ROLE_ROTATION_SECONDS", "120")))
+ROLE_ROTATION_SECONDS = max(60.0, float(os.getenv("HYPERSMART_VAULT_ROLE_ROTATION_SECONDS", "75")))
 UNIVERSE_REFRESH_SECONDS = max(900.0, float(os.getenv("HYPERSMART_VAULT_UNIVERSE_REFRESH_SECONDS", "1800")))
 ROTATION_STATE = Path("runtime") / "data" / "vault_role_rotation.json"
 PROMOTION_TAPE_META = Path("runtime") / "data" / "promotion_shadow_tape_meta.json"
@@ -301,7 +310,7 @@ def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index:
         a = act.get(v, 0) / a_max if a_max else 0.0                   # activité live
         s = max(0.0, sha.get(v, 0.0)) / s_max if s_max else 0.0       # qualité shadow (positive)
         cp = float(f.get("copyabilite") or 0.0)                       # copyabilité
-        return 0.45 * a + 0.30 * s + 0.25 * cp
+        return 0.60 * a + 0.22 * s + 0.18 * cp                        # activite priorisee -> plus de fills
     reste = max(0, min(n_candidats, MAX_SLOTS - len(out)))            # les autres slots pour le runtime existant
     candidats_par_vault = {
         c["vault"]: dict(c)
