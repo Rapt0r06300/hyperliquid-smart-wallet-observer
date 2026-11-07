@@ -107,6 +107,9 @@ set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "REAL_MAINNET_TRADING=false"
 set "TESTNET_ONLY=true"
 set "HYPERSMART_EXPERIMENTAL_PAPER=0"
+rem Journal d'audit des evenements canoniques desactive : non relu par les
+rem replays/backtests, il gonflait a plusieurs Go. Mettre 1 pour le reactiver.
+set "ALINA_CANONICAL_EVENT_LEDGER=0"
 set "PYTHONPATH=%CV_ROOT%src;%CV_ROOT%tools;%PYTHONPATH%"
 
 rem --- Dossiers runtime ---
@@ -144,14 +147,15 @@ echo   et vaults depuis Hyperliquid + venues secondaires (Binance,
 echo   Bybit, OKX, Gate, Bitget) pour alimenter les backtests et
 echo   replays du laboratoire quant Copy-Vault.
 echo.
-echo   15 collecteurs actifs (profil %CV_PROFILE%)
+echo   14 collecteurs actifs (profil %CV_PROFILE%)
+echo   Journal evenements : desactive (economie d'espace disque)
 echo   Verification toutes les %CV_INTERVAL%s
 echo   Campagne de %CV_DURATION%s (%CV_MODE%)
 echo   Auto-recovery : backoff %CV_BACKOFF_INIT%s-%CV_BACKOFF_MAX%s
 echo   Securite : PAPER / READ-ONLY / FAIL-CLOSED
 echo   Arret propre : Ctrl+C
 echo.
-echo   Le panneau de recolte s'affiche toutes les 5 passes.
+echo   Le panneau de recolte s'affiche a chaque passe.
 echo ================================================================
 echo.
 
@@ -270,13 +274,13 @@ echo  --duration N     Duree de chaque campagne en secondes (defaut: 518400 = 6 
 echo  --status         Afficher l'etat des collecteurs sans lancer
 echo  --help / -h      Cette aide
 echo.
-echo Collecteurs lances (profil copy-vault / harvest, 15 collecteurs) :
+echo Collecteurs lances (profil copy-vault / harvest, 14 collecteurs) :
 echo   CORE     : allmids-collector, bbo-collector, userfills-live
 echo   DONNEES  : carnet-collector, venues-collector, marks-collector
 echo   ANALYSE  : liq-collector, overshoot-collector, vault-collector, scorer-vaults
 echo   BACKFILL : backfill-fills, backfill-candles-vaults
 echo   CAUSAL   : copy-vault-checkpoints (L2 lie aux fills leaders)
-echo   ENRICHI  : native-venues, lab-microstructure, asset-ctx-collector
+echo   ENRICHI  : native-venues, lab-microstructure
 echo.
 echo Auto-recovery :
 echo   Si le superviseur crash, il est relance avec un backoff exponentiel

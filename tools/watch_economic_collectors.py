@@ -40,7 +40,6 @@ DEFAULT_NAMES = (
     "userfills-live",
     "native-venues",
     "lab-microstructure",
-    "asset-ctx-collector",
 )
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3
@@ -117,9 +116,6 @@ _DATA_SOURCES: tuple[tuple[str, str, str], ...] = (
     ("Native venues", "runtime/data/native_*.jsonl", "continu"),
     ("Backfill fills", "runtime/data/backfill_fills_*.jsonl", "batch 4h"),
     ("Backfill candles", "runtime/data/backfill_candles_*.jsonl", "batch 4h"),
-    # ``*.jsonl*`` matches both the active ``.jsonl`` and sealed ``.jsonl.gz``
-    # ledgers so the panel keeps reporting events after gzip compression.
-    ("Evenements", "runtime/data/canonical_events/*.jsonl*", "continu"),
 )
 
 # Remembers the previous pass totals so the panel can show live growth deltas,

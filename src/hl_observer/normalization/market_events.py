@@ -226,7 +226,7 @@ class CanonicalEventWriter:
     # keeping per-append CPU negligible so collection is never slowed.
     _COMPRESS_LEVEL = 4
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, enabled: bool = True) -> None:
         requested = Path(path)
         # Canonical storage is always gzip. Accept a plain ``.jsonl`` request
         # (tests, existing callers) and transparently store ``.jsonl.gz``.
@@ -236,7 +236,13 @@ class CanonicalEventWriter:
         else:
             self.path = requested.with_suffix(requested.suffix + ".gz")
             self._legacy_plain = requested
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # When disabled, the ledger is a pure in-memory counter: no directory,
+        # no file, zero bytes on disk. Replays and backtests never read this
+        # ledger from disk, so disabling it loses nothing they rely on — it
+        # only drops an audit trail that otherwise grows to multiple GB.
+        self.enabled = bool(enabled)
+        if self.enabled:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         self._seen: set[str] = set()
         self.written = 0
         self.duplicates = 0
@@ -260,6 +266,10 @@ class CanonicalEventWriter:
             )
         if not rows:
             return 0
+        if not self.enabled:
+            # Count for telemetry parity, but never touch the filesystem.
+            self.written += len(rows)
+            return len(rows)
         payload = "".join(rows).encode("utf-8")
         # Append one self-contained gzip member, then fsync. Concatenated
         # members are valid gzip; a crash mid-append can only lose the current

@@ -654,8 +654,12 @@ async def _boucle(
     cache = CF.CacheDedup()
     atomic_bbo_cache = CF.CacheDedup()
     dataset = PartitionedTickDatasetWriter(root / TICK_DATASET_DIR, flush_every=1)
+    # Canonical event ledger is a disk audit trail only — replays and backtests
+    # never read it back. It is disabled by default to avoid a multi-GB file;
+    # set ALINA_CANONICAL_EVENT_LEDGER=1 to re-enable the on-disk ledger.
     canonical_writer = CanonicalEventWriter(
-        root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl"
+        root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl",
+        enabled=os.environ.get("ALINA_CANONICAL_EVENT_LEDGER", "0") == "1",
     )
     raw_queue: deque[TickEnvelope] = deque()
     hl_asset_ctx: dict[str, dict[str, Any]] = {}
