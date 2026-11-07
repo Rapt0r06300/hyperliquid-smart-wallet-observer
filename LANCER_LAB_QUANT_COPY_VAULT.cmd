@@ -45,6 +45,8 @@ if not defined ALINA_LAB_PYTHON (
   goto :done
 )
 
+"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\cmd_progress.py" start > "%TEMP%\alina_cmd_start.tmp" 2>nul
+set /p ALINA_CMD_START=<"%TEMP%\alina_cmd_start.tmp"
 if /I "%ALINA_LAB_MODE%"=="tests" (
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% -c "import pytest, typer" >nul 2>nul
   if errorlevel 1 (
@@ -85,6 +87,7 @@ if /I "%ALINA_LAB_MODE%"=="tests" (
 set "RC=%ERRORLEVEL%"
 :done
 echo.
+"%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\cmd_progress.py" elapsed
 if "%RC%"=="0" (
   echo [FIN] Commande executee; seuls les rapports economiques determinent le resultat.
 ) else if "%RC%"=="130" (

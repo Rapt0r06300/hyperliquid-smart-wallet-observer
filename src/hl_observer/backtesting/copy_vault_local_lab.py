@@ -75,7 +75,7 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("stop_loss_bps", tuple(float(value) for value in range(40, 301, 20))),
     ("take_profit_bps", tuple(float(value) for value in range(40, 501, 20))),
     ("daily_profit_lock_usd", (2.0, 5.0, 10.0, 15.0)),
-    ("horizon_ms", (300_000, 900_000, 1_800_000, 3_600_000)),
+    ("horizon_ms", (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)),
     ("vault_daily_limit", (2, 3, 4)),
     ("coin_daily_limit", (2, 3, 4)),
     ("max_open_positions", (1, 2, 3)),
@@ -1786,12 +1786,25 @@ def _signal_coverage(timestamps: list[int]) -> dict[str, int | float | None]:
     )
     day_ms = 86_400_000
     distinct_days = len({timestamp // day_ms for timestamp in valid})
+    median_gap_s: float | None = None
+    p95_gap_s: float | None = None
+    gap_count_gt_60s = 0
+    if len(valid) >= 2:
+        gaps = [valid[i + 1] - valid[i] for i in range(len(valid) - 1)]
+        gaps.sort()
+        median_gap_s = round(gaps[len(gaps) // 2] / 1000.0, 3)
+        p95_gap_s = round(gaps[int(len(gaps) * 0.95)] / 1000.0, 3)
+        gap_count_gt_60s = sum(1 for g in gaps if g > 60_000)
     return {
         "distinct_utc_days": distinct_days,
         "minimum_utc_days_required": _MINIMUM_SIGNAL_UTC_DAYS,
         "signal_start_ms": valid[0] if valid else None,
         "signal_end_ms": valid[-1] if valid else None,
         "signal_span_hours": round((valid[-1] - valid[0]) / 3_600_000, 3) if valid else None,
+        "signal_count": len(valid),
+        "median_gap_s": median_gap_s,
+        "p95_gap_s": p95_gap_s,
+        "gaps_gt_60s": gap_count_gt_60s,
     }
 
 

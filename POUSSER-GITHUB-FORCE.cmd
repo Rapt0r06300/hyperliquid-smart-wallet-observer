@@ -9,13 +9,13 @@ rem  ALINA SMART FLOW - lanceur local unique
 rem  - appelle les moteurs canoniques du depot (pas de copie embarquee)
 rem  - code : tools\alina_git_code_sync.py
 rem  - SAFE : tools\sync_complete_clone.py
-rem  - aucun force-push, reset, clean, stash ou suppression
-rem  - aucun telechargement SAFE sans option explicite
+rem  - AUCUN PUSH FORCE, reset, clean, stash ou suppression
+rem  - AUCUN TELECHARGEMENT DE SHARDS sans option explicite
 rem ============================================================
 set "ALINA_ROOT=%~dp0"
 set "ALINA_MODE=all"
 set "ALINA_CODE_ARGS="
-set "ALINA_SHARDS_ARGS=--preflight-only"
+set "ALINA_SHARDS_ARGS=--download-safe --all-safe"
 set "ALINA_SKIP_UPDATE=0"
 set "RC=1"
 
@@ -90,8 +90,10 @@ if /I "%ALINA_MODE%"=="code" echo Mode : CODE uniquement
 if /I "%ALINA_MODE%"=="shards" echo Mode : SAFE uniquement
 echo.
 
+"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" start > "%TEMP%\alina_cmd_start.tmp" 2>nul
+set /p ALINA_CMD_START=<"%TEMP%\alina_cmd_start.tmp"
 if /I "%ALINA_MODE%"=="shards" goto :run_shards
-echo [1/2] Synchronisation du code local vers GitHub main...
+"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" phase "Synchronisation code vers GitHub" 1 2
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %ALINA_CODE_ARGS%
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" goto :finish
@@ -100,8 +102,8 @@ if /I "%ALINA_MODE%"=="code" goto :finish
 echo [OK] Code termine et verifie.
 
 :run_shards
-if /I "%ALINA_MODE%"=="all" echo [2/2] Preflight SAFE (aucun telechargement par defaut)...
-if /I "%ALINA_MODE%"=="shards" echo [1/1] Operation SAFE : %ALINA_SHARDS_ARGS%
+if /I "%ALINA_MODE%"=="all" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" phase "Telechargement SAFE (tous les shards)" 2 2
+if /I "%ALINA_MODE%"=="shards" "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" phase "Operation SAFE" 1 1
 "%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_SHARDS_ENGINE%" %ALINA_SHARDS_ARGS%
 set "RC=%ERRORLEVEL%"
 goto :finish
@@ -109,7 +111,7 @@ goto :finish
 :help
 echo Usage : POUSSER-GITHUB-FORCE.cmd [options]
 echo.
-echo  (defaut)              code push fast-forward + preflight SAFE rapide
+echo  (defaut)              code push fast-forward + telechargement SAFE complet
 echo  --dry-run             code en lecture seule, aucune publication
 echo  --code-only           synchronisation du code uniquement
 echo  --shards-only         operation SAFE uniquement
@@ -157,6 +159,7 @@ goto :finish
 
 :finish
 echo.
+"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ROOT%tools\cmd_progress.py" elapsed
 echo [FIN] Lanceur termine - code retour %RC%
 if /I not "%HYPERSMART_PUSH_NO_PAUSE%"=="1" pause
 popd

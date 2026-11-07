@@ -26,14 +26,16 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable
 
+from hl_observer.following.scoring_robuste import borne_basse_confiance
+
 # bornes de normalisation (transparentes, ajustables) — choisies conservatrices
 DD_MAX_TOLERE_PCT = 40.0            # au-delà : score drawdown = 0
 AGE_PLEIN_J = 365.0                # 1 an de track record = score ancienneté plein
-TVL_REF_LOG = (5.0, 7.5)          # log10(TVL) de 100k$ (5.0) à ~30M$ (7.5) mappé sur [0,1]
+TVL_REF_LOG = (4.7, 7.5)          # log10(TVL) de 50k$ (4.7) à ~30M$ (7.5) mappé sur [0,1]
 TURNOVER_OPTIMUM = 0.15            # ~15 % du NAV re-déployé par période = sweet spot copiable
 TURNOVER_LARGEUR = 0.20            # largeur de la cloche autour de l'optimum
 # filtre de rétention (un vault non retenu n'est jamais copié)
-SEUIL_AGE_J = 45.0
+SEUIL_AGE_J = 30.0
 SEUIL_DD_PCT = 45.0
 SEUIL_COPYABILITE = 0.5
 SEUIL_COMPOSITE = 0.45
@@ -146,8 +148,9 @@ def _norm_turnover(t: float) -> float:
     return math.exp(-((t - TURNOVER_OPTIMUM) ** 2) / (2 * TURNOVER_LARGEUR ** 2))
 
 
-POIDS = {"pnl_net": 0.24, "regularite": 0.18, "drawdown": 0.16, "anciennete": 0.08,
-         "concentration": 0.08, "turnover": 0.08, "capacite": 0.08, "copyabilite": 0.10}
+POIDS = {"pnl_net": 0.20, "regularite": 0.16, "drawdown": 0.14, "anciennete": 0.08,
+         "concentration": 0.07, "turnover": 0.07, "capacite": 0.07, "copyabilite": 0.09,
+         "robustesse": 0.12}
 
 
 def scorer_vault(snaps: list[dict], *, age_j: float = 0.0, tvl_usd: float = 0.0,
@@ -167,8 +170,11 @@ def scorer_vault(snaps: list[dict], *, age_j: float = 0.0, tvl_usd: float = 0.0,
     tno = turnover_moyen(snaps)
     cap_log = math.log10(tvl_usd) if tvl_usd > 0 else 0.0
     copy = copyabilite(dernier, coins_executables)
+    rets = _returns_par_periode(snaps)
+    lcb = borne_basse_confiance(rets) if len(rets) >= 8 else None
     brut = {"pnl_net": rn, "regularite": reg, "drawdown_pct": dd, "anciennete_j": age_j,
-            "concentration_hhi": hhi, "turnover": tno, "tvl_usd": tvl_usd, "copyabilite": copy}
+            "concentration_hhi": hhi, "turnover": tno, "tvl_usd": tvl_usd, "copyabilite": copy,
+            "borne_basse": lcb}
     norm = {
         "pnl_net": _clamp(0.5 + rn * 5.0),                       # +10 %/fenêtre -> ~1.0 ; −10 % -> 0
         "regularite": _clamp(reg),
@@ -178,6 +184,7 @@ def scorer_vault(snaps: list[dict], *, age_j: float = 0.0, tvl_usd: float = 0.0,
         "turnover": _clamp(_norm_turnover(tno)),
         "capacite": _clamp((cap_log - TVL_REF_LOG[0]) / (TVL_REF_LOG[1] - TVL_REF_LOG[0])),
         "copyabilite": _clamp(copy),
+        "robustesse": _clamp(0.5 + (lcb or 0.0) * 50.0),
     }
     composite = round(sum(POIDS[k] * norm[k] for k in POIDS), 4)
     return {"facteurs": brut, "normalises": {k: round(v, 4) for k, v in norm.items()},

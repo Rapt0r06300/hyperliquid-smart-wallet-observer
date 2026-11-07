@@ -23,6 +23,7 @@ from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
     CHECKPOINT_COLLECTOR_PROTOCOL,
     UNBOUND_L2_SOURCE_PROTOCOL,
 )
+from progress_display import ProgressTracker  # noqa: E402
 
 DEFAULT_NAMES = (
     "allmids-collector",
@@ -37,7 +38,9 @@ DEFAULT_NAMES = (
     "backfill-fills",
     "backfill-candles-vaults",
     "userfills-live",
-    "copy-vault-checkpoints",
+    "native-venues",
+    "lab-microstructure",
+    "asset-ctx-collector",
 )
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3
@@ -79,6 +82,75 @@ def _append_log(root: Path, payload: dict[str, Any]) -> None:
         handle.write(line)
 
 
+def _format_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} o"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} Ko"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / 1024 / 1024:.1f} Mo"
+    return f"{n / 1024 / 1024 / 1024:.2f} Go"
+
+
+def _count_jsonl_lines(path: Path) -> int:
+    try:
+        with path.open("rb") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
+
+
+_DATA_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("Prix AllMids", "runtime/data/allmids_*.jsonl", "continu"),
+    ("BBO L1", "runtime/data/bbo_tape*.jsonl", "continu"),
+    ("BBO shards", "runtime/data/bbo_shards/*.gz", "continu"),
+    ("Carnet L2", "runtime/data/carnet_*.jsonl", "batch 30s"),
+    ("Marks", "runtime/data/marks_*.jsonl", "batch 30s"),
+    ("UserFills", "runtime/data/userfills_*.jsonl", "continu"),
+    ("Liquidations", "runtime/data/liq_*.jsonl", "batch 5m"),
+    ("Overshoots", "runtime/data/overshoots_*.jsonl", "batch 10s"),
+    ("Vaults", "runtime/data/vault_*.jsonl", "batch 5m"),
+    ("Scorer vaults", "runtime/data/scorer_*.jsonl", "batch 10m"),
+    ("Venues multi", "runtime/data/venues_*.jsonl", "batch 60s"),
+    ("OI/Funding", "runtime/data/asset_ctx_*.jsonl", "batch 15s"),
+    ("Microstructure", "runtime/research_lab/micro_*.jsonl", "continu"),
+    ("Native venues", "runtime/data/native_*.jsonl", "continu"),
+    ("Backfill fills", "runtime/data/backfill_fills_*.jsonl", "batch 4h"),
+    ("Backfill candles", "runtime/data/backfill_candles_*.jsonl", "batch 4h"),
+    ("Evenements", "runtime/data/canonical_events/*.jsonl", "continu"),
+)
+
+
+def _panneau_recolte(root: Path) -> None:
+    sep = "  +------------------+----------+------------+-----------------+"
+    print("\n" + sep, flush=True)
+    print("  |        PANNEAU DE RECOLTE -- DONNEES COLLECTEES           |", flush=True)
+    print(sep, flush=True)
+    print("  | Source           | Fichiers | Taille     | Cadence         |", flush=True)
+    print(sep, flush=True)
+    import glob as glob_mod
+    total_files = 0
+    total_bytes = 0
+    for label, pattern, cadence in _DATA_SOURCES:
+        full_pattern = str(root / pattern)
+        matches = glob_mod.glob(full_pattern)
+        n_files = len(matches)
+        size = sum(Path(m).stat().st_size for m in matches if Path(m).is_file())
+        total_files += n_files
+        total_bytes += size
+        if n_files > 0:
+            print(
+                f"  | {label:<16s} | {n_files:>8d} | {_format_size(size):>10s} | {cadence:<15s} |",
+                flush=True,
+            )
+    print(sep, flush=True)
+    print(
+        f"  | TOTAL            | {total_files:>8d} | {_format_size(total_bytes):>10s} |                 |",
+        flush=True,
+    )
+    print(sep, flush=True)
+
+
 def _last_collector_log_line(root: Path, name: str, *, max_bytes: int = 8_192) -> str:
     path = root / "runtime" / "logs" / f"economic-{name}.log"
     try:
@@ -108,6 +180,7 @@ def run_watchdog(
 ) -> int:
     deadline = monotonic_fn() + max(0.0, float(duration_s))
     passes = 0
+    _start_mono = monotonic_fn()
     while monotonic_fn() < deadline:
         names = (
             list(dict.fromkeys(str(name) for name in requested_names if name))
@@ -185,26 +258,34 @@ def run_watchdog(
                 "paper_read_only": result.get("paper_read_only") is True,
                 "real_execution": False,
             }
+            from progress_display import _format_duration
+            elapsed_s = monotonic_fn() - _start_mono
             print(
-                "[COLLECTE COPY-VAULT] %s — processus %d/%d; manquants: %s; protocole causal: %s; bail: %s"
+                "\n[COLLECTE] %s | %d/%d actifs | passe #%d | depuis %s"
                 % (
                     status,
                     len(active),
                     len(names),
-                    ", ".join(missing) if missing else "aucun",
-                    protocol_status,
-                    lease_id or "indisponible",
+                    passes + 1,
+                    _format_duration(elapsed_s),
                 ),
                 flush=True,
             )
-            for name in names:
-                pid = active_map.get(name)
-                worker_status = f"PID {pid}" if pid is not None else "ABSENT"
+            if missing:
                 print(
-                    "  [WORKER] %s — %s — %s"
-                    % (name, worker_status, _last_collector_log_line(root, name)),
+                    "  MANQUANTS: %s" % ", ".join(missing),
                     flush=True,
                 )
+            for name in names:
+                pid = active_map.get(name)
+                marker = "OK" if pid is not None else "!!"
+                pid_str = f"PID {pid}" if pid is not None else "ABSENT"
+                print(
+                    "  [%s] %-25s %s" % (marker, name, pid_str),
+                    flush=True,
+                )
+            if passes % 5 == 0:
+                _panneau_recolte(root)
             if protocol_status == "À CORRIGER":
                 print(
                     "[PROTOCOLE] userfills=%s; checkpoints=%s; aucune preuve causale ne doit être admise tant que les deux protocoles attendus ne sont pas actifs"

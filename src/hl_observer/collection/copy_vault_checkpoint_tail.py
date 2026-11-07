@@ -42,7 +42,7 @@ STATE_RELPATH = Path("runtime") / "data" / "copy_vault_checkpoint_tail_state.jso
 INFO_URL = "https://api.hyperliquid.xyz/info"
 
 COPY_DELAY_MS = 60_000
-HORIZONS_MS = (300_000, 900_000, 1_800_000, 3_600_000)
+HORIZONS_MS = (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)
 MAX_TARGET_LAG_MS = 60_000
 METAORDER_GAP_MS = 60_000
 CONTINUATION_SIGNAL_FILL_COUNT = 3

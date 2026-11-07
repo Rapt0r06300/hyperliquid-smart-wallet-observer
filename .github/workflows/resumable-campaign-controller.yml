@@ -8,7 +8,7 @@ on:
       - 'catalog/campaigns/analysis-*.json'
       - 'catalog/campaigns/canary-market-*.json'
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/3 * * * *'
   workflow_dispatch:
   workflow_call:
 
@@ -188,8 +188,8 @@ jobs:
           copy_ids=copy_ids[:1]
           if active_copy:
               copy_ids=[]
-          # Keep four hosted-runner slots free for Copy-Vault, watchdog, quality, and control jobs.
-          other_capacity=max(0,16-active_other)
+          # Keep slots free for Copy-Vault, watchdog, quality, and control jobs.
+          other_capacity=max(0,20-active_other)
           # One explicitly bounded canary may use a control-plane slot even while
           # all normal market lanes are occupied. It is short, isolated, and the
           # worker's campaign lock prevents duplicate execution.
@@ -228,7 +228,7 @@ jobs:
     if: ${{ needs.select.outputs.other_count != '0' }}
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 20
       matrix: ${{ fromJSON(needs.select.outputs.other_matrix) }}
     uses: ./.github/workflows/resumable-campaign-worker.yml
     with:

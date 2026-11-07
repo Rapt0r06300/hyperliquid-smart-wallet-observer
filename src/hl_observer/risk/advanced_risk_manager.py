@@ -50,9 +50,9 @@ class RiskVeto(StrEnum):
 @dataclass
 class AdvancedRiskConfig:
     """Configuration for advanced risk manager."""
-    daily_loss_halt_pct: float = 20.0
-    max_drawdown_halt_pct: float = 50.0
-    max_per_position_pct: float = 15.0
+    daily_loss_halt_pct: float = 1.0
+    max_drawdown_halt_pct: float = 14.0
+    max_per_position_pct: float = 30.0
     max_per_category_pct: float = 80.0
     max_total_exposure_pct: float = 100.0
     max_var_pct: float = 8.0
