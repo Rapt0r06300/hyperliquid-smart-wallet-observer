@@ -185,6 +185,21 @@ def test_token_bucket_global_pause_on_429_penalize() -> None:
     assert tb._cooldown_s < 10.0
 
 
+def test_token_bucket_aimd_rate_halves_on_429_and_recovers_on_success() -> None:
+    # Le débit s'auto-règle au budget réel de l'IP : ÷2 sur 429, +pas sur succès.
+    tb = TokenBucket(
+        rate_per_s=1.0, burst=1.0, now=lambda: 0.0, sleep=lambda s: None,
+        min_rate_per_s=0.25, max_rate_per_s=1.0, aimd_step_per_s=0.1,
+    )
+    tb.penalize()
+    assert tb.rate == 0.5                 # multiplicative decrease
+    tb.penalize()
+    assert tb.rate == 0.25                # plancher min_rate
+    for _ in range(50):
+        tb.reward()
+    assert tb.rate == 1.0                 # remonte jusqu'au plafond
+
+
 def test_token_bucket_allows_burst_then_throttles_to_rate() -> None:
     # #1 : rafale jusqu'à `burst` sans attente, puis ~1/rate entre requêtes.
     clock = {"t": 0.0}

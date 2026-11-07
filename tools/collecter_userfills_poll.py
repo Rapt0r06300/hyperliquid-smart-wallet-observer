@@ -346,7 +346,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--shard-count", type=int, default=1, help="nb de lanes (IP) distinctes")
     p.add_argument("--shard-index", type=int, default=0, help="index de cette lane [0, count)")
     p.add_argument("--max-requests-per-min", type=float, default=55.0,
-                   help="débit max de requêtes/min (token-bucket, anti-429). HL ~60/min")
+                   help="débit MAX de requêtes/min (token-bucket AIMD, anti-429). HL ~60/min")
+    p.add_argument("--max-leaders", type=int, default=0,
+                   help="0=illimité ; sinon ne suit que les N leaders de plus forte valeur "
+                        "(polls fiables -> fills FRAIS), le reste va sur d'autres lanes/IP")
     p.add_argument("--min-request-interval", type=float, default=0.0,
                    help="(déprécié) remplacé par --max-requests-per-min")
     p.add_argument("--une-fois", action="store_true")
@@ -356,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
     leaders = shard_leaders(_lire_leaders(args, root), args.shard_count, args.shard_index)
     # #2 priorisation : les leaders retenus (forte valeur) sont pollés en premier.
     leaders = prioritize_leaders(leaders, _lire_retenus(root))
+    if args.max_leaders and args.max_leaders > 0:
+        leaders = leaders[:args.max_leaders]  # focalise le budget sur les meilleurs
     if not leaders:
         print("[poll] aucun leader à suivre (voir --leaders / --leaders-file / --shard-*)", flush=True)
         return 0
