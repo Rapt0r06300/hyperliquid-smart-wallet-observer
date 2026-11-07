@@ -146,6 +146,14 @@ MUTATING_GIT_COMMANDS = {
 }
 
 
+def _is_ci_workflow_path(path: str) -> bool:
+    """Un fichier de workflow GitHub Actions (géré côté GitHub par les
+    collecteurs). Pour un conflit modify/delete sur ce type de fichier, GitHub
+    est la source canonique : POUSSER aligne le local dessus et pousse le reste."""
+    p = str(path).replace("\\", "/")
+    return p.startswith(".github/workflows/") and p.endswith((".yml", ".yaml"))
+
+
 def _rebase_timeout_budget(replay_count: int) -> int:
     """Return a bounded, deterministic timeout for a local replay.
 
@@ -1561,8 +1569,9 @@ class Synchronizer:
         ).decode("utf-8", errors="replace")
         if outcome.returncode == 0:
             self.report["predicted_conflicts"] = []
+            self._predicted_modify_delete = set()
             return []
-        conflicts = sorted({
+        content_conflicts = {
             match.group(1).strip()
             for match in re.finditer(
                 r"^CONFLICT .*?: Merge conflict in (.+)$",
@@ -1570,19 +1579,39 @@ class Synchronizer:
                 flags=re.MULTILINE,
             )
             if match.group(1).strip()
-        })
+        }
+        # Conflit modify/delete (ex. workflow supprime cote GitHub et modifie en
+        # local) : non capture par la regex "Merge conflict in" ci-dessus. On le
+        # parse explicitement pour ne plus NO_GO sur un payload "illisible".
+        modify_delete = {
+            match.group(1).strip()
+            for match in re.finditer(
+                r"^CONFLICT \(modify/delete\): (.+?) (?:deleted|is deleted) in ",
+                payload,
+                flags=re.MULTILINE,
+            )
+            if match.group(1).strip()
+        }
+        self._predicted_modify_delete = set(modify_delete)
+        conflicts = sorted(content_conflicts | modify_delete)
         if not conflicts:
             raise SyncBlocked(
                 "Precontrole merge-tree impossible; rebase non lance. "
                 + payload[:900].strip()
             )
         self.report["predicted_conflicts"] = conflicts
+        if modify_delete:
+            self.report["predicted_modify_delete"] = sorted(modify_delete)
         return conflicts
 
-    @staticmethod
-    def _preflight_auto_resolvable_conflict(path: str) -> bool:
+    def _preflight_auto_resolvable_conflict(self, path: str) -> bool:
         """Return whether the existing post-rebase resolver may inspect it."""
         if path in AUTO_RESOLVABLE_CI_CONFLICTS | AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS:
+            return True
+        # Workflow GitHub en conflit modify/delete : GitHub est canonique, le
+        # resolveur alignera le local dessus (suppression acceptee ou version
+        # upstream validee) -> on pousse le reste sans bloquer sur ce fichier.
+        if path in getattr(self, "_predicted_modify_delete", set()) and _is_ci_workflow_path(path):
             return True
         return (
             path.startswith(("src/", "tools/", "tests/"))
@@ -2842,9 +2871,17 @@ class Synchronizer:
         """
         if not conflicted:
             return False
-        if any(path not in AUTO_RESOLVABLE_CI_CONFLICTS for path in conflicted):
-            return self._resolve_trivial_code_conflicts(conflicted)
-        for path in conflicted:
+        # Workflows GitHub en conflit modify/delete : GitHub est canonique.
+        md = getattr(self, "_predicted_modify_delete", set())
+        wf_modify_delete = [p for p in conflicted if p in md and _is_ci_workflow_path(p)]
+        rest = [p for p in conflicted if p not in set(wf_modify_delete)]
+        if wf_modify_delete and not self._resolve_workflow_modify_delete(wf_modify_delete):
+            return False
+        if not rest:
+            return True
+        if any(path not in AUTO_RESOLVABLE_CI_CONFLICTS for path in rest):
+            return self._resolve_trivial_code_conflicts(rest)
+        for path in rest:
             upstream = self.command("show", f":2:{path}", check=False)
             if upstream.returncode:
                 return False
@@ -2863,10 +2900,45 @@ class Synchronizer:
                 "path": path,
                 "resolution": "UPSTREAM_HOSTED_CI_CONTRACT",
                 "reason": "validated_no_self_hosted_or_real_execution_markers",
-            } for path in conflicted)
+            } for path in rest)
         self.say(
             "Conflit CI resolu automatiquement: version hosted upstream "
             "validee, sans self-hosted ni execution reelle."
+        )
+        return True
+
+    def _resolve_workflow_modify_delete(self, paths: list[str]) -> bool:
+        """Résout un conflit modify/delete sur un workflow GitHub en prenant la
+        décision CANONIQUE de GitHub (upstream = ``ours`` pendant le rebase) :
+        - GitHub a SUPPRIMÉ le workflow -> on accepte la suppression (``git rm``) ;
+        - GitHub le GARDE (local l'a supprimé) -> on reprend sa version, mais
+          seulement après avoir validé l'absence de self-hosted / exécution réelle.
+        Le fichier local « en conflit » ne bloque plus le push du reste du code."""
+        resolutions = self.report.setdefault("ci_conflict_resolutions", [])
+        for path in paths:
+            upstream = self.command("show", f":2:{path}", check=False)
+            if upstream.returncode == 0:
+                lowered = upstream.stdout.decode("utf-8", errors="replace").casefold()
+                if "runs-on: ubuntu-latest" not in lowered or any(
+                    marker.casefold() in lowered for marker in FORBIDDEN_HOSTED_CI_MARKERS
+                ):
+                    return False  # on ne reprend jamais un workflow douteux
+                self.command("checkout", "--ours", "--", path)
+                self.command("add", "--", path)
+                resolution = "KEEP_UPSTREAM_WORKFLOW"
+            else:
+                # GitHub (canonique) a supprimé ce workflow -> on l'accepte.
+                self.command("rm", "-f", "--", path, check=False)
+                resolution = "ACCEPT_UPSTREAM_DELETION"
+            if isinstance(resolutions, list):
+                resolutions.append({
+                    "path": path,
+                    "resolution": resolution,
+                    "reason": "github_canonical_workflow_modify_delete",
+                })
+        self.say(
+            "Conflit workflow modify/delete resolu (GitHub canonique) : "
+            + ", ".join(paths[:8]) + "."
         )
         return True
 
