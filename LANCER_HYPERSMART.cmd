@@ -884,7 +884,7 @@ echo     stop                arret cible ^(collecteurs + userfills^), jamais un 
 echo     restart             stop puis autopilot
 echo     restart-userfills   recharge le collecteur userfills avec le code courant
 echo     collectors          demarre/reanime allMids + BBO + userFills ^(CORE^)
-echo     collectors-harvest  collecte HARVEST; checkpoints causaux via LANCER_COLLECTEURS.cmd
+echo     collectors-harvest  collecte HARVEST; checkpoints causaux via LANCER_COLLECTEURS_COPY_VAULT.cmd
 echo     collectors-maintenance   outils periodiques explicites
 echo     collectors-research      collecteurs de recherche explicites
 echo     collectors-all           tous les collecteurs ^(diagnostic exceptionnel^)

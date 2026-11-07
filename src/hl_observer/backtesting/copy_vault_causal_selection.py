@@ -13,6 +13,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     canonical_metaorder_id,
     expected_open_direction,
 )
+from hl_observer.collection.forward_poll_fills import is_causal_live_source
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _MAX_CONFIRMED_L2_LAG_MS = 30_000
@@ -82,7 +83,7 @@ def causal_live_observation(row: Mapping[str, Any]) -> bool:
     event_ts_ms = _strict_positive_int(row.get("ts_ms"))
     received_at_ms = _local_receipt_timestamp_ms(row)
     return bool(
-        row.get("source") == "LIVE_WS"
+        is_causal_live_source(row.get("source"))
         and _snapshot_flag(row) is False
         and event_ts_ms is not None
         and received_at_ms is not None
@@ -123,7 +124,7 @@ def _source_evidence_reference(row: Mapping[str, Any], *, event_id: str) -> dict
     catalog_sha256 = row.get("source_catalog_sha256")
     source = str(row.get("source") or "")
     received_at_ms = row.get("received_at_ms")
-    if source != "LIVE_WS" and received_at_ms is None:
+    if not is_causal_live_source(source) and received_at_ms is None:
         received_at_ms = row.get("observed_at_ms")
     event_ts_ms = row.get("ts_ms")
     if (
@@ -424,7 +425,7 @@ def select_observed_continuations(
             observed_at_ms = _strict_positive_int(row.get("observed_at_ms"))
             if (
                 row.get("causal_forward_eligible") is not True
-                or str(row.get("source") or "") != "LIVE_WS"
+                or not is_causal_live_source(row.get("source"))
                 or event_ts_ms is None
                 or observed_at_ms is None
                 or observed_at_ms < event_ts_ms
@@ -448,7 +449,7 @@ def select_observed_continuations(
         candidate = {
             **dict(raw),
             "signal_ts_ms": signal_ts_ms,
-            "signal_source": "LIVE_WS",
+            "signal_source": str(raw.get("source") or "LIVE_WS"),
             "causal_forward_eligible": True,
             "confirmation_fill_count": required,
             "confirmation_event_id": str(confirmation["event_id"]),
@@ -512,7 +513,7 @@ def select_causal_protocol_inputs(
     for row in all_metaorders:
         if (
             row.get("causal_forward_eligible") is not True
-            or str(row.get("signal_source") or "") != "LIVE_WS"
+            or not is_causal_live_source(row.get("signal_source"))
         ):
             continue
         if _strict_positive_int(row.get("signal_ts_ms")) is None:

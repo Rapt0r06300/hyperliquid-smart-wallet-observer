@@ -975,7 +975,7 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
             "<h2>Revues des leaders et incidents</h2>"
             "<p class='status warn'>Registre non consulté; son contenu reste inconnu.</p>"
         )
-    auto_refresh = "<meta http-equiv='refresh' content='5'>" if live.get("active") is True else ""
+    auto_refresh = "<meta http-equiv='refresh' content='2'>" if live.get("active") is True else ""
     status_class = "ok" if status == "PROVEN" else (
         "warn" if status in {
             "PROMISING", "MORE_DATA", "UNMEASURABLE", "PREFLIGHT_ONLY", "RUNNING",
@@ -1114,110 +1114,253 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         else "écart contre le Copy‑Vault actuel, comparable seulement sur le même segment"
     )
     target = report_dir / "RAPPORT.html"
+    live_active = live.get("active") is True
+    verdict_oui = bool(proven)
+    # --- Decomposition du LCB (pourquoi il est la ou il est, et la cible de donnees).
+    def _num_or_none(value: Any) -> float | None:
+        return (
+            float(value)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(float(value)) else None
+        )
+    lcb_mean = _num_or_none(last_trial.get("daily_mean_usd_per_active_day"))
+    lcb_value = _num_or_none(last_trial.get("daily_lcb_usd_per_active_day"))
+    _lcb_days = last_trial.get("active_day_count")
+    lcb_days = int(_lcb_days) if isinstance(_lcb_days, int) and not isinstance(_lcb_days, bool) and _lcb_days > 0 else None
+    _lcb_trials = last_trial.get("bonferroni_trial_count")
+    lcb_trials = int(_lcb_trials) if isinstance(_lcb_trials, int) and not isinstance(_lcb_trials, bool) and _lcb_trials > 0 else None
+    lcb_margin = (lcb_mean - lcb_value) if (lcb_mean is not None and lcb_value is not None) else None
+    # Jours actifs requis pour que le LCB franchisse zero, a moyenne/ecart-type courants.
+    # z tenu fixe -> estimation conservatrice (z croit lentement, en sqrt(log essais)).
+    lcb_days_target = None
+    if lcb_mean is not None and lcb_margin is not None and lcb_days is not None and lcb_mean > 0 and lcb_margin > 0:
+        lcb_days_target = int(lcb_days * (lcb_margin / lcb_mean) ** 2) + 1
+    # Diagnostic #8 (exploratoire, PAS le verdict) : candidats scoreables + LCB
+    # sous une famille de test restreinte a eux (cette campagne).
+    _scoreable = last_trial.get("campaign_scoreable_count")
+    scoreable_count = (
+        int(_scoreable)
+        if isinstance(_scoreable, int) and not isinstance(_scoreable, bool) else None
+    )
+    exploratory_scoreable_lcb = _num_or_none(
+        last_trial.get("exploratory_scoreable_only_daily_lcb_usd")
+    )
+    # Plain-French one-line meaning for the headline status.
+    status_plain = {
+        "PROVEN": "Stratégie prouvée rentable sur données indépendantes.",
+        "MEASURABLE": "Assez de données pour mesurer, résultat en cours d'évaluation.",
+        "NON_MESURABLE": "Pas encore assez de données exploitables pour conclure — il faut continuer à collecter.",
+        "NON_MEASURABLE": "Pas encore assez de données exploitables pour conclure — il faut continuer à collecter.",
+        "UNMEASURABLE": "Pas encore assez de données exploitables pour conclure — il faut continuer à collecter.",
+    }.get(status.upper(), "Analyse en cours.")
+    verified_a = int(verified_assets_display or 0)
+    expected_a = int(expected_assets_display or 0)
+    pct_safe = (100.0 * verified_a / expected_a) if expected_a else 0.0
+    causal_fills = economic.get("causal_live_fill_rows")
+    causal_fills_txt = f"{int(causal_fills):,}" if type(causal_fills) is int else "non mesuré"
+
+    def tile(label: str, value_html: str, hint: str = "") -> str:
+        hint_html = f"<span class='hint'>{html.escape(hint)}</span>" if hint else ""
+        return (
+            f"<div class='tile'><span class='tile-label'>{html.escape(label)}</span>"
+            f"<span class='tile-value'>{value_html}</span>{hint_html}</div>"
+        )
+
+    recent_trials = live.get("recent_trials")
+    recent_trials = recent_trials if isinstance(recent_trials, list) else []
+    feed_rows = []
+    for ev in recent_trials[:30]:
+        if not isinstance(ev, Mapping):
+            continue
+        pnl = ev.get("pnl")
+        pnl_html = (
+            f"<span class='{'ok' if pnl >= 0 else 'bad'}'>{pnl:+.4f} USD/j</span>"
+            if isinstance(pnl, (int, float)) else "<span class='muted'>—</span>"
+        )
+        star = "⭐ " if ev.get("found") else ""
+        feed_rows.append(
+            f"<tr><td class='muted'>{html.escape(str(ev.get('ts') or ''))}</td>"
+            f"<td>#{html.escape(str(ev.get('trial') or '—'))}</td>"
+            f"<td>{star}{html.escape(str(ev.get('status') or '—'))}</td>"
+            f"<td style='text-align:right'>{pnl_html}</td></tr>"
+        )
+    feed_html = (
+        "<h2>Activité en direct (derniers essais)</h2>"
+        "<p class='sub'>Ce que le labo vient de tester, du plus récent au plus ancien. "
+        "⭐ = meilleure config trouvée (gelée, exploratoire).</p>"
+        "<table><thead><tr><th>Heure</th><th>Essai</th><th>Résultat</th>"
+        "<th style='text-align:right'>PnL/jour</th></tr></thead>"
+        f"<tbody>{''.join(feed_rows)}</tbody></table>"
+        if feed_rows else
+        "<h2>Activité en direct</h2><p class='sub'>En attente du premier essai…</p>"
+    )
+
     html_content = (
         "<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         + auto_refresh
-        + "<title>Laboratoire CopyVault</title><style>"
-        ":root{color-scheme:dark}body{font:16px system-ui;margin:0;background:#09111f;color:#e7edf7}"
-        "main{max-width:1050px;margin:auto;padding:32px}h1{margin-bottom:6px}.muted{color:#9fb0c8}"
-        ".hero,.card{background:#111d30;border:1px solid #29405f;border-radius:14px;padding:20px}"
-        ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0}"
-        ".status{font-weight:800;font-size:1.15rem}.ok{color:#54e38e}.warn{color:#ffd166}.bad{color:#ff6b7a}"
-        ".answer{font-size:1.25rem}.path{overflow-wrap:anywhere;color:#9fb0c8}"
-        "code{color:#8fd3ff}li{margin:.5rem 0}table{width:100%;border-collapse:collapse}"
-        ".live{border-left:5px solid #43c7f5}.live strong{color:#8fd3ff}.small{font-size:.95rem}"
-        "th,td{text-align:left;padding:9px;border-bottom:1px solid #29405f}</style></head><body><main>"
+        + "<title>Labo CopyVault</title><style>"
+        ":root{color-scheme:dark;--bg:#0b1322;--panel:#13203a;--panel2:#0f1a30;--line:#263a5c;"
+        "--fg:#eaf1fb;--muted:#9bb0cd;--accent:#5bc8ff;--ok:#43d98b;--warn:#ffcf5c;--bad:#ff6d7f}"
+        "*{box-sizing:border-box}body{font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;"
+        "margin:0;background:var(--bg);color:var(--fg)}"
+        "main{max-width:980px;margin:auto;padding:24px 18px 64px}"
+        "h1{font-size:1.5rem;margin:0 0 2px}h2{font-size:1.15rem;margin:34px 0 12px;"
+        "padding-bottom:6px;border-bottom:1px solid var(--line)}h3{font-size:.95rem;margin:0 0 6px;color:var(--muted);"
+        "font-weight:600;text-transform:uppercase;letter-spacing:.04em}"
+        ".muted{color:var(--muted)}.sub{color:var(--muted);font-size:.9rem;margin:2px 0 0}"
+        ".verdict{border-radius:16px;padding:22px 24px;margin:18px 0;border:1px solid var(--line);background:var(--panel)}"
+        ".verdict.ok{border-color:#1f7a4d;background:linear-gradient(180deg,#0f2a1e,#13203a)}"
+        ".verdict.bad{border-color:#7a2230;background:linear-gradient(180deg,#2a1118,#13203a)}"
+        ".verdict .big{font-size:1.9rem;font-weight:800;margin:2px 0}"
+        ".badge{display:inline-block;font-weight:700;font-size:.8rem;padding:3px 10px;border-radius:999px;"
+        "letter-spacing:.05em}.badge.ok{background:#123a28;color:var(--ok)}"
+        ".badge.warn{background:#3a3112;color:var(--warn)}.badge.bad{background:#3a1420;color:var(--bad)}"
+        ".ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}"
+        ".live{border-left:4px solid var(--accent);background:var(--panel2);border-radius:12px;padding:16px 18px;margin:16px 0}"
+        ".live .stage{color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.82rem}"
+        ".live .msg{font-size:1.1rem;margin:4px 0 8px}"
+        ".tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}"
+        ".tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:3px}"
+        ".tile-label{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}"
+        ".tile-value{font-size:1.5rem;font-weight:700}.hint{color:var(--muted);font-size:.82rem}"
+        ".bar{height:7px;border-radius:999px;background:#22314c;overflow:hidden;margin-top:6px}"
+        ".bar>i{display:block;height:100%;background:var(--accent)}"
+        ".cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}"
+        ".cmp .tile-value{font-size:1.35rem}"
+        "details{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:12px 0;padding:0 16px}"
+        "details[open]{padding-bottom:12px}summary{cursor:pointer;padding:14px 0;font-weight:600}"
+        "table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}"
+        "th{color:var(--muted);font-weight:600}code{color:var(--accent);word-break:break-all}"
+        "ul{padding-left:20px}li{margin:.4rem 0}.path{color:var(--muted);font-size:.82rem;word-break:break-all}"
+        "</style></head><body><main>"
+        # -- Header --
         "<h1>Laboratoire CopyVault</h1>"
-        f"<p class='muted'>Run {html.escape(str(summary.get('run_id') or ''))} · HEAD "
-        f"<code>{html.escape(str(summary.get('head') or ''))}</code></p>"
-        f"<section class='hero live'><h2>En direct : {html.escape(str(live.get('stage') or 'ÉTAT DU LABORATOIRE'))}</h2>"
-        f"<p class='answer'>{html.escape(str(live.get('message') or 'Aucune activité en cours.'))}</p>"
-        f"<p class='small'>Durée de cette session : {html.escape(elapsed_display)} · "
-        f"Essais uniques : {int(progress_count):,}"
-        f"{(' / ' + format(int(search_bound), ',') + ' combinaisons déclarées') if search_bound is not None else ''} · "
-        f"Shards SAFE vérifiés : {int(verified_assets_display or 0):,} / {int(expected_assets_display or 0):,} · "
-        f"Fills / carnets reconstruits : {int(unique_fills_display or 0):,} / {int(unique_books_display or 0):,}</p>"
-        f"<p class='small'>Catalogue : {html.escape(catalog_status_display)} · "
-        f"shards locaux absents : {html.escape(str(missing_shards_display if missing_shards_display is not None else 'calcul en cours'))} · "
+        f"<p class='sub'>Run {html.escape(str(summary.get('run_id') or '—'))} · "
+        f"HEAD <code>{html.escape(str(summary.get('head') or '—')[:12])}</code> · "
+        f"maj {html.escape(str(live.get('updated_at_utc') or '—'))} · "
+        f"{'🟢 en direct (rafraîchi 5 s)' if live_active else '⏸ session arrêtée (rapport final)'}</p>"
+        # -- Verdict --
+        f"<section class='verdict {'ok' if verdict_oui else 'bad'}'>"
+        f"<span class='badge {status_class}'>{html.escape(status)}</span>"
+        f"<p class='big'>{'✅ Stratégie prouvée rentable' if verdict_oui else '⏳ Pas encore prouvée rentable'}</p>"
+        f"<p>{html.escape(status_plain)}</p>"
+        "<p class='sub'><b>But :</b> gagner un peu plus à chaque jour, chaque backtest et chaque replay. "
+        "Pas de cible figée — la barre monte à chaque amélioration réellement prouvée.</p>"
+        f"<p class='sub'><b>Pourquoi ce verdict :</b> {html.escape(reason_display)}</p></section>"
+        # -- Live --
+        f"<div class='live'><div class='stage'>En direct · {html.escape(str(live.get('stage') or 'état du laboratoire'))}</div>"
+        f"<div class='msg'>{html.escape(str(live.get('message') or 'Aucune activité en cours.'))}</div>"
+        f"<p class='sub'>Durée de session {html.escape(elapsed_display)} · essais testés {int(progress_count):,}"
+        f"{(' / ' + format(int(search_bound), ',')) if search_bound is not None else ''} · "
+        f"dernier essai #{html.escape(str(last_trial.get('trial_number') or '—'))} ({html.escape(str(last_trial.get('status') or '—'))})</p></div>"
+        # -- Live activity feed --
+        + feed_html
+        # -- Key metrics tiles --
+        + "<h2>Données collectées (le carburant des backtests)</h2>"
+        "<section class='tiles'>"
+        + tile("Shards SAFE", f"{verified_a:,}<span class='hint'> / {expected_a:,}</span>",
+               "fichiers de marché vérifiés (octets + SHA-256)")
+        + f"<div class='tile'><span class='tile-label'>Couverture SAFE</span>"
+          f"<span class='tile-value'>{pct_safe:.0f}%</span>"
+          f"<div class='bar'><i style='width:{min(100.0,max(0.0,pct_safe)):.0f}%'></i></div></div>"
+        + tile("Fills leaders", f"{int(unique_fills_display or 0):,}", "trades de leaders reconstruits")
+        + tile("Carnets L2", f"{int(unique_books_display or 0):,}", "snapshots de carnet uniques")
+        + tile("Fills causaux live", causal_fills_txt, "fills exploitables pour le replay (hors backfill)")
+        + tile("Configs testées", f"{int(economic.get('candidates_tested') or 0) + int(historical.get('trial_count') or 0):,}",
+               "paramétrages rejoués, coûts inclus")
+        + "</section>"
+        f"<p class='sub'>Catalogue : {html.escape(catalog_status_display)} · "
+        f"shards locaux absents : {html.escape(str(missing_shards_display if missing_shards_display is not None else 'calcul…'))} · "
         f"shards PARTIAL exclus : {partial_shards_display:,} · "
-        f"corpus complet : {'oui' if inputs.get('data_complete') is True else 'non' if inputs.get('data_complete') is False else 'calcul en cours'}</p>"
-        f"<p class='small'>Contenu refusé : {html.escape(payload_rejection_text)}. "
-        "Les fichiers SAFE vérifiés et la qualité de leurs événements sont affichés séparément.</p>"
-        f"<p class='small'>{html.escape(historical_coverage_text)}</p>"
-        f"<p class='small'>Contexte SAFE hors replay économique : {html.escape(safe_exclusion_summary)}.</p>"
+        f"corpus complet : {'oui' if inputs.get('data_complete') is True else 'non' if inputs.get('data_complete') is False else 'calcul…'}</p>"
         + (
-            f"<p class='small'>Signaux leader : {int(signal_day_count):,} / {int(signal_day_minimum):,} jours UTC distincts · "
-            f"fenêtre observée : {signal_span_text} h · cycles reconstruits : {int(economic.get('metaorders') or 0):,} · "
-            f"fills live causaux : {html.escape(str(economic.get('causal_live_fill_rows') if economic.get('causal_live_fill_rows') is not None else 'non mesuré'))} · "
-            f"signaux ADD avec L2 causal dans les 30 s : "
-            f"{aligned_add_signals_text}</p>"
+            f"<p class='sub'>Signaux leader : {int(signal_day_count):,} / {int(signal_day_minimum):,} jours UTC distincts · "
+            f"fenêtre {signal_span_text} h · cycles {int(economic.get('metaorders') or 0):,} · "
+            f"signaux ADD alignés au L2 (&lt;30 s) : {aligned_add_signals_text}</p>"
             if type(signal_day_count) is int and type(signal_day_minimum) is int else ""
         )
-        + f"<p class='small'>Dernier essai : {html.escape(str(last_trial.get('trial_number') or '—'))} · "
-        f"{html.escape(str(last_trial.get('status') or '—'))} · "
-        f"score conservateur du meilleur candidat TRAIN : {display(current_candidate_score)} · "
-        f"moyenne TRAIN actuelle : {display(baseline_mean)}</p>"
-        f"<p class='small'>Base de comparaison : {html.escape(str(economic.get('baseline_comparison_basis') or 'pas encore calculée'))}. "
-        "Le score LCB pénalise les essais multiples; le résultat TRAIN ne vaut pas preuve indépendante.</p>"
-        f"<p class='muted'>Mis à jour : {html.escape(str(live.get('updated_at_utc') or '—'))}. "
-        f"{('Cette page s’actualise toutes les 5 secondes.' if live.get('active') is True else 'Session arrêtée; rapport final.')}</p></section>"
-        f"<section class='hero'><p class='status {status_class}'>VERDICT : {html.escape(status)}</p>"
-        f"<p class='answer'><b>Stratégie économiquement prouvée :</b> {'OUI' if proven else 'NON'}</p>"
-        f"<p><b>Candidat gelé pour comparaison suivante :</b> {'OUI' if frozen else 'NON'}</p>"
-        f"<p><b>Hausses mesurées du PnL moyen TRAIN gelées :</b> {pnl_uplift_freeze_count} · "
+        # -- Comparison --
+        + "<h2>Rentabilité : est-ce qu'on gagne plus qu'avant ?</h2>"
+        "<section class='cmp'>"
+        + tile("Copy-Vault actuel",
+               f"{'≈ ' if current_daily is None and current_display_daily is not None else ''}{display(current_display_daily)}",
+               f"{str(current.get('status') or 'non mesuré')} — {_human_reason(current.get('reason'))}")
+        + tile("Meilleur candidat (TRAIN)", display(candidate_daily),
+               str((historical.get('status') if candidate_is_historical else economic.get('status')) or 'non mesuré'))
+        + tile("Amélioration mesurée", display(improvement), f"{improvement_note} — c'est ça qu'on veut voir monter")
+        + "</section>"
+        "<p class='sub'>⚠️ Le résultat TRAIN sert à la recherche : il ne vaut pas une preuve. Une stratégie "
+        "n'est « prouvée » qu'après validation indépendante (VALIDATION / OOS / FORWARD).</p>"
+        # -- Décomposition du LCB (#11 décomposer, #12 moyenne vs LCB, #13 projection) --
+        + "<h2>Pourquoi le LCB est là où il est</h2>"
+        "<p class='sub'>Le verdict « prouvé » exige que la borne basse (LCB) dépasse zéro. "
+        "LCB = moyenne − marge statistique, et la marge rétrécit en √(jours actifs) : "
+        "plus de jours actifs = barre plus facile à franchir, à stratégie égale.</p>"
+        "<section class='tiles'>"
+        + tile("Moyenne / jour", display(lcb_mean), "PnL moyen par jour actif (TRAIN)")
+        + tile("LCB / jour", display(lcb_value), "borne basse — doit passer > 0 pour « prouvé »")
+        + tile("Jours actifs n", (f"{lcb_days:,}" if lcb_days is not None else "—"),
+               "le levier dominant (√n au dénominateur)")
+        + tile("Marge statistique", display(lcb_margin), "moyenne − LCB = pénalité d'incertitude")
+        + tile("Essais (Bonferroni)", (f"{lcb_trials:,}" if lcb_trials is not None else "—"),
+               "chaque essai relève un peu la barre")
+        + (
+            tile("Cible : LCB > 0 vers", f"≈ {lcb_days_target:,} jours",
+                 "à moyenne/écart-type actuels (z tenu fixe, estimation conservatrice)")
+            if lcb_days_target is not None else
+            tile("Cible LCB > 0", "—",
+                 "moyenne encore ≤ 0 : améliorer d'abord la stratégie et les données")
+        )
+        + "</section>"
+        + (
+            "<p class='sub'>🔬 <b>Diagnostic exploratoire (#8, pas le verdict)</b> : "
+            f"{scoreable_count if scoreable_count is not None else '—'} candidats scoreables "
+            "(≥ 3 jours actifs) cette campagne ; sous une famille de test restreinte à eux, "
+            f"le LCB serait {display(exploratory_scoreable_lcb)}. "
+            "Informatif seulement — le verdict officiel reste conservateur (tous les essais comptés).</p>"
+        )
+        # -- Details (technical, collapsible) --
+        + "<h2>Détails techniques</h2>"
+        "<details><summary>Résultats par phase (TRAIN · VALIDATION · OOS · FORWARD)</summary>"
+        "<table><thead><tr><th>Phase</th><th>Actuel</th><th>Candidat</th></tr></thead><tbody>"
+        f"<tr><td>TRAIN</td><td>—</td><td>{display(value(economic, 'train'))}</td></tr>"
+        f"<tr><td>VALIDATION</td><td>{display(value(current, 'validation'))}</td><td>{display(value(economic, 'validation'))}</td></tr>"
+        f"<tr><td>OOS</td><td>{display(value(current, 'oos'))}</td><td>{display(value(economic, 'oos'))}</td></tr>"
+        f"<tr><td>FORWARD</td><td>{display(value(current, 'forward'))}</td><td>{display(value(economic, 'forward'))}</td></tr>"
+        "</tbody></table>"
+        "<p class='sub'>TRAIN = réglage. VALIDATION/OOS/FORWARD = vérifications indépendantes jamais utilisées pour régler. "
+        f"Candidat gelé : {'oui' if frozen else 'non'}. "
+        f"<b>Hausses mesurées du PnL moyen TRAIN gelées :</b> {pnl_uplift_freeze_count} — "
         "exploratoires; le champion reste inchangé sans preuve indépendante.</p>"
-        f"<p><b>Objectif :</b> {OBJECTIVE_USD_PER_DAY:.2f} USD nets/jour avec {PAPER_CAPITAL_USD:.0f} USD paper.</p>"
-        f"<p><b>Pourquoi :</b> {html.escape(reason_display)}</p></section>"
-        "<h2>Comparaison avec le Copy‑Vault actuel</h2><section class='grid'>"
-        f"<article class='card'><h3>Copy‑Vault actuel</h3><p class='answer'>{'≈ ' if current_daily is None and current_display_daily is not None else ''}{display(current_display_daily)}</p>"
-        f"<p class='muted'>{html.escape(str(current.get('status') or 'NON MESURÉ'))} — {html.escape(_human_reason(current.get('reason')))}</p></article>"
-        f"<article class='card'><h3>Meilleur candidat TRAIN</h3><p class='answer'>{display(candidate_daily)}</p>"
-        f"<p class='muted'>{html.escape(str((historical.get('status') if candidate_is_historical else economic.get('status')) or 'NON MESURÉ'))}</p></article>"
-        f"<article class='card'><h3>Amélioration mesurée</h3><p class='answer'>{display(improvement)}</p>"
-        f"<p class='muted'>{html.escape(improvement_note)}</p></article></section>"
+        "</details>"
+        "<details><summary>Replay historique de secours</summary>"
+        f"<p>{int(historical.get('trial_count') or 0)} scénarios recalculés sur "
+        f"{int(historical.get('source_trade_count') or 0)} trades exécutables conservés, couvrant "
+        f"{int(historical.get('unique_filter_count') or 0)} sous-ensembles issus de "
+        f"{int(historical.get('mechanism_count') or 0)} mécanismes. Baseline {display(historical_baseline.get('daily_net_pnl_usd'))} · "
+        f"meilleur {display(historical_best.get('daily_net_pnl_usd'))} · écart {display(historical.get('improvement_usd_per_day'))}. "
+        "Exploratoire TRAIN, jamais présenté comme preuve.</p></details>"
+        "<details><summary>Historique des améliorations gelées</summary>"
         + (
-            "<p class='muted'>Estimation actuelle fondée sur le dernier TRAIN V21 : "
-            f"environ {display(current_display_daily)}, borne statistique conservatrice "
-            f"{display(float(current_approximation['conservative_lcb_usd_per_day']))}, "
-            f"sur {int(current_approximation.get('sample_count') or 0)} trades / "
-            f"{int(current_approximation.get('distinct_days') or 0)} jours. "
-            "C'est un ordre de grandeur redimensionné à 200 USD, pas une preuve OOS/forward.</p>"
-            if current_approximation else ""
-        )
-        +
-        "<h2>Replay historique de secours</h2>"
-        f"<p><b>{int(historical.get('trial_count') or 0)} scénarios</b> recalculés sur "
-        f"<b>{int(historical.get('source_trade_count') or 0)} trades exécutables</b> conservés. "
-        f"La recherche couvre {int(historical.get('unique_filter_count') or 0)} sous-ensembles distincts "
-        f"issus de {int(historical.get('mechanism_count') or 0)} mécanismes. "
-        f"Baseline comparable : {display(historical_baseline.get('daily_net_pnl_usd'))}; "
-        f"meilleur candidat : {display(historical_best.get('daily_net_pnl_usd'))}; "
-        f"écart : {display(historical.get('improvement_usd_per_day'))}. "
-        "Résultat exploratoire TRAIN, conservé mais jamais présenté comme preuve OOS/forward.</p>"
-        "<h2>Résultats économiques séparés</h2><section class='grid'>"
-        f"<article class='card'><h3>TRAIN candidat</h3><p>{display(value(economic, 'train'))}</p></article>"
-        f"<article class='card'><h3>VALIDATION</h3><p>actuel {display(value(current, 'validation'))}<br>candidat {display(value(economic, 'validation'))}</p></article>"
-        f"<article class='card'><h3>OOS</h3><p>actuel {display(value(current, 'oos'))}<br>candidat {display(value(economic, 'oos'))}</p></article>"
-        f"<article class='card'><h3>FORWARD</h3><p>actuel {display(value(current, 'forward'))}<br>candidat {display(value(economic, 'forward'))}</p></article></section>"
-        "<h2>Historique conservé des améliorations</h2>"
-        + (
-            "<table><thead><tr><th>Run</th><th>État</th><th>Avant/jour</th><th>Candidat/jour</th><th>Gain moyen</th><th>Gain LCB TRAIN</th><th>Prouvé</th></tr></thead>"
+            "<table><thead><tr><th>Run</th><th>État</th><th>Avant/j</th><th>Candidat/j</th><th>Gain</th><th>Gain LCB</th><th>Prouvé</th></tr></thead>"
             f"<tbody>{''.join(history_rows)}</tbody></table>"
-            if history_rows else "<p>Aucun candidat amélioré n'a encore pu être mesuré et gelé.</p>"
+            if history_rows else "<p>Aucun candidat amélioré gelé pour l'instant.</p>"
         )
-        +
-        review_history_html
-        +
-        "<h2>Ce que ce run a réellement fait</h2><ul>"
-        f"<li>{int(inputs.get('verified_assets') or 0)} shards SAFE contrôlés par taille et identité locale; "
-        f"{verified_hashes_recomputed:,} SHA‑256 calculés cette passe et {verified_hashes_reused:,} réutilisés après identité inchangée.</li>"
-        f"<li>{int(inputs.get('unique_fills') or 0)} fills leader uniques et {int(inputs.get('unique_books') or 0)} carnets L2 uniques reconstruits.</li>"
-        f"<li>{int(economic.get('candidates_tested') or 0) + int(historical.get('trial_count') or 0)} configurations réellement rejouées, coûts et liquidité observée inclus.</li>"
-        "<li>Recherche sur TRAIN uniquement; VALIDATION, OOS et FORWARD ne servent jamais au réglage.</li>"
-        "<li>Aucune collecte réseau, aucun ordre, aucune clé et aucune transaction.</li></ul>"
-        f"<h2>Verdict simple</h2><p>{html.escape(str(summary.get('freeze_verdict') or ''))}</p>"
-        f"<p class='path'>Données machine : {html.escape(str(report_dir / 'resultat.json'))}</p>"
+        + "</details>"
+        "<details><summary>Ce que ce run a réellement fait</summary><ul>"
+        f"<li>{int(inputs.get('verified_assets') or 0):,} shards SAFE contrôlés (taille + identité locale) ; "
+        f"{verified_hashes_recomputed:,} SHA-256 recalculés, {verified_hashes_reused:,} réutilisés.</li>"
+        f"<li>{int(inputs.get('unique_fills') or 0):,} fills leaders uniques, {int(inputs.get('unique_books') or 0):,} carnets L2 uniques.</li>"
+        f"<li>{int(economic.get('candidates_tested') or 0) + int(historical.get('trial_count') or 0):,} configurations rejouées (coûts + liquidité observée inclus).</li>"
+        "<li>Recherche sur TRAIN uniquement.</li>"
+        "<li>Aucune collecte réseau, aucun ordre, aucune clé privée, aucune transaction (PAPER / lecture seule).</li>"
+        f"<li class='muted'>Contenu refusé : {html.escape(payload_rejection_text)}.</li>"
+        f"<li class='muted'>{html.escape(historical_coverage_text)}</li>"
+        f"<li class='muted'>Contexte SAFE hors replay : {html.escape(safe_exclusion_summary)}.</li>"
+        "</ul></details>"
+        + (review_history_html if review_history_html else "")
+        + f"<p class='path'>Données machine complètes : {html.escape(str(report_dir / 'resultat.json'))}</p>"
         "</main></body></html>"
     )
     temporary = target.with_suffix(".html.partial")
@@ -1467,10 +1610,29 @@ def _run_continuous_safe_lab(
                 return _local_safe_watch_fingerprint(ROOT, watched_files) != baseline_fingerprint
 
             last_dashboard = 0.0
+            recent_feed: list[dict[str, Any]] = []
 
             def on_update(result: Mapping[str, Any]) -> None:
                 nonlocal last_dashboard
                 result_trial = dict(result.get("last_trial") or {})
+                # Fil roulant : ce que le labo vient de tester/trouver, pour un
+                # suivi quasi seconde par seconde dans le dashboard.
+                trial_no = result_trial.get("trial_number")
+                if trial_no is not None:
+                    found = bool(result_trial.get("strict_improvement_over_baseline_and_prior_best"))
+                    pnl_val = (
+                        result_trial.get("daily_net_pnl_usd")
+                        if result_trial.get("daily_net_pnl_usd") is not None
+                        else result_trial.get("score_usd_per_active_day")
+                    )
+                    recent_feed.append({
+                        "ts": time.strftime("%H:%M:%S"),
+                        "trial": trial_no,
+                        "status": result_trial.get("status") or "—",
+                        "pnl": pnl_val if isinstance(pnl_val, (int, float)) else None,
+                        "found": found,
+                    })
+                    del recent_feed[:-30]
                 fields: dict[str, Any] = {
                     "economic_result": dict(result),
                     "status": "RUNNING",
@@ -1497,6 +1659,7 @@ def _run_continuous_safe_lab(
                     "candidates_tested": result.get("candidates_tested"),
                     "search_space_upper_bound": result.get("search_space_upper_bound"),
                     "last_trial": result_trial,
+                    "recent_trials": list(reversed(recent_feed)),
                 })
                 now = time.monotonic()
                 if result_trial.get("strict_improvement_over_baseline_and_prior_best") or now - last_dashboard >= 5:

@@ -236,16 +236,37 @@ def _lire_dispersion_recente(root: Path, *, max_lignes: int = 5000) -> list[dict
     return out
 
 
+def coins_a_suivre(root: Path, lignes: list[dict], *, n_coins: int, n_premium: int) -> list[str]:
+    """Ordre de collecte L2 priorisé copy-vault.
+
+    Les coins bougés par les leaders (vaults suivis) viennent D'ABORD : ce sont
+    eux qui produisent des fills à répliquer, donc leur carnet L2 est le plus
+    utile pour transformer un fill en jour actif scoreable. Viennent ensuite les
+    coins prioritaires / premium funding / carry / survivants. La déduplication
+    conserve la première place, de sorte qu'une passe limitée en débit collecte
+    d'abord les coins utiles au copy-vault.
+    """
+    selected: dict[str, None] = {}
+    for coin in (
+        coins_bouges_par_vaults(root)
+        + coins_prioritaires(lignes, n=n_coins)
+        + coins_premium_funding(lignes, n=n_premium)
+        + list(CIBLES_CARRY_PERSISTANT)
+        + coins_survivants_baseline(root)
+    ):
+        if coin:
+            selected.setdefault(str(coin).upper(), None)
+    return list(selected)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Collecteur carnet HL/Binance read-only.")
     parser.add_argument("--root", default=str(RACINE)); parser.add_argument("--n-coins", type=int, default=N_COINS_PRIORITAIRES)
     parser.add_argument("--n-premium", type=int, default=N_COINS_PREMIUM_FUNDING); parser.add_argument("--intervalle", type=float, default=INTERVALLE_S_DEFAUT); parser.add_argument("--une-fois", action="store_true")
     args = parser.parse_args(argv); root = Path(args.root); limiter, cache = CF.Limiteur(0.15), CF.CacheDedup(); total, failures = 0, 0
     while True:
-        lines = _lire_dispersion_recente(root); selected: dict[str, None] = {}
-        for coin in coins_prioritaires(lines, n=args.n_coins) + coins_premium_funding(lines, n=args.n_premium) + list(CIBLES_CARRY_PERSISTANT) + coins_survivants_baseline(root) + coins_bouges_par_vaults(root):
-            selected.setdefault(coin, None)
-        coins = list(selected)
+        lines = _lire_dispersion_recente(root)
+        coins = coins_a_suivre(root, lines, n_coins=args.n_coins, n_premium=args.n_premium)
         if not coins:
             print("[carnet] aucun coin a suivre ce tour", flush=True)
         else:

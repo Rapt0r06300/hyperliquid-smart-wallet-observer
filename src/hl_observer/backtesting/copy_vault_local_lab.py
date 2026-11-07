@@ -33,6 +33,7 @@ from hl_observer.backtesting.train_statistics import (
     lcb_rank_is_numerically_resolved,
     summarize_daily_values,
 )
+from hl_observer.collection.forward_poll_fills import is_causal_live_source
 from hl_observer.collection.userfills_live import userfill_required_fields_reason
 from hl_observer.datasets.v2_pipeline import copy_vault_heartbeat_reason
 from hl_observer.economics.numeric import (
@@ -66,7 +67,7 @@ _LEADER_REVIEW_MAX_EVIDENCE_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _TRIAL_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
-_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31)
+_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("core_notional_usd", tuple(float(value) for value in range(40, 161, 10))),
     ("probe_notional_usd", tuple(float(value) for value in range(10, 61, 10))),
@@ -79,6 +80,40 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("vault_daily_limit", (2, 3, 4)),
     ("coin_daily_limit", (2, 3, 4)),
     ("max_open_positions", (1, 2, 3)),
+    # Plafond de perte journalière : stoppe la journée après -X USD réalisés
+    # (miroir risque de daily_profit_lock) -> écrête les pires jours, réduit σ.
+    ("daily_loss_cap_usd", (5.0, 10.0, 20.0, 40.0)),
+    # Sizing ciblé-volatilité : échelle la taille par cible/vol_réalisée causale
+    # récente (0.0 = désactivé) -> homogénéise le PnL quotidien, réduit σ.
+    ("vol_target_move_frac", (0.0, 0.002, 0.005, 0.01)),
+)
+
+
+def _center_out_order(domain: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Reorder a domain median-first, alternating outward (plausibility prior).
+
+    The value SET is unchanged, only the order: moderate/central values come
+    first so the Halton proposal surfaces plausible configurations at low
+    sequence indices (lower Bonferroni penalty when a winner is found early).
+    Deterministic and reproducible; does not alter the search space.
+    """
+    size = len(domain)
+    if size <= 1:
+        return tuple(domain)
+    mid = (size - 1) // 2
+    order: list[int] = [mid]
+    step = 1
+    while len(order) < size:
+        for candidate in (mid + step, mid - step):
+            if 0 <= candidate < size and candidate not in order:
+                order.append(candidate)
+        step += 1
+    return tuple(domain[index] for index in order)
+
+
+# Same values as _PARAMETER_DOMAINS, reordered so plausible configs come first.
+_PLAUSIBILITY_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = tuple(
+    (name, _center_out_order(domain)) for name, domain in _PARAMETER_DOMAINS
 )
 
 
@@ -897,6 +932,8 @@ def _fill_rows(
                     if source_id == "hyperliquid_public_userfills_backfill"
                     else "WS_BOOTSTRAP"
                     if snapshot
+                    else "LIVE_POLL"
+                    if source_id == "hyperliquid_public_userfills_poll"
                     else "LIVE_WS"
                 ),
                 "source_id": source_id,
@@ -973,7 +1010,7 @@ def _book_row(
             received is None
             or exchange is None
             or received < exchange
-            or received - exchange > 60_000
+            or received - exchange > 30_000
         ):
             return None
         row = {
@@ -1047,6 +1084,9 @@ def _book_row(
 
 def _market_context_row(
     wrapper: Mapping[str, Any], *, family: str, audit: Counter[str],
+    source_dataset_id: str | None = None,
+    source_shard_sha256: str | None = None,
+    source_catalog_sha256: str | None = None,
 ) -> dict[str, Any] | None:
     """Revalidate SAFE market-context rows; never turn them into leader fills."""
     raw = wrapper.get("_raw")
@@ -1106,7 +1146,7 @@ def _market_context_row(
         timestamp, levels = data.get("time"), data.get("bbo")
         if (
             type(timestamp) is not int or timestamp <= 0 or timestamp != exchange
-            or receive < timestamp or receive - timestamp > 60_000
+            or receive < timestamp or receive - timestamp > 30_000
             or not isinstance(levels, list) or len(levels) != 2
             or not all(isinstance(level, Mapping) for level in levels)
         ):
@@ -1121,7 +1161,7 @@ def _market_context_row(
         if bid_px <= 0 or ask_px <= bid_px or bid_sz < 0 or ask_sz < 0:
             audit["COPY_VAULT_BBO_MARKET_INVALID"] += 1
             return None
-        return {
+        bbo_row = {
             "schema_version": "hypersmart.copy_vault_bbo.v1",
             **common,
             "exchange_ts_ms": timestamp,
@@ -1130,6 +1170,20 @@ def _market_context_row(
             "ask_px": ask_px,
             "ask_sz": ask_sz,
         }
+        # SAFE provenance parity with L2 books so the BBO fallback can serve as
+        # a causal, replay-grade top-of-book carnet (see _book_row).
+        dataset_id = source_dataset_id.strip() if isinstance(source_dataset_id, str) else ""
+        shard_sha = source_shard_sha256.lower() if isinstance(source_shard_sha256, str) else ""
+        catalog_sha = source_catalog_sha256.lower() if isinstance(source_catalog_sha256, str) else ""
+        if dataset_id and len(shard_sha) == 64 and all(c in "0123456789abcdef" for c in shard_sha):
+            bbo_row["source_dataset_id"] = dataset_id
+            bbo_row["source_shard_sha256"] = shard_sha
+            if len(catalog_sha) == 64 and all(c in "0123456789abcdef" for c in catalog_sha):
+                bbo_row["source_catalog_sha256"] = catalog_sha
+                bbo_row["source_quality_status"] = "SAFE"
+                bbo_row["source_manifest_verified"] = True
+                bbo_row["source_replay_compatible"] = True
+        return bbo_row
     if family == "copy_vault_trades":
         row = trade_first
         timestamp = row.get("time")
@@ -1144,7 +1198,7 @@ def _market_context_row(
         if (
             canonical_copy_vault_coin(row.get("coin")) != instrument
             or type(timestamp) is not int or timestamp <= 0 or timestamp != exchange
-            or receive < timestamp or receive - timestamp > 60_000
+            or receive < timestamp or receive - timestamp > 30_000
             or (not identity and type(tid) is not int)
             or price <= 0 or size <= 0 or side not in {"A", "B"}
         ):
@@ -1427,7 +1481,18 @@ def materialize_safe_workspace(
                     "copy_vault_active_asset_ctx",
                 }:
                     row = _market_context_row(
-                        wrapper, family=family, audit=payload_audit
+                        wrapper, family=family, audit=payload_audit,
+                        source_dataset_id=(
+                            str(asset.get("dataset_id"))
+                            if isinstance(asset.get("dataset_id"), str) and asset.get("dataset_id")
+                            else None
+                        ),
+                        source_shard_sha256=(
+                            str(asset.get("sha256"))
+                            if isinstance(asset.get("sha256"), str) and asset.get("sha256")
+                            else None
+                        ),
+                        source_catalog_sha256=str(audit.get("source_index_sha256") or ""),
                     )
                     if row is not None:
                         if family == "copy_vault_bbo":
@@ -1502,7 +1567,7 @@ def materialize_safe_workspace(
     historical_fill_rows = [row for row in fill_rows if row.get("isSnapshot") is True]
     live_fill_rows = [
         row for row in fill_rows
-        if row.get("isSnapshot") is False and row.get("source") == "LIVE_WS"
+        if row.get("isSnapshot") is False and is_causal_live_source(row.get("source"))
     ]
     historical_unique_fills = len(historical_fill_rows)
     verified_source_assets = [
@@ -1823,7 +1888,7 @@ def _candidate_parameters(sequence_index: int) -> dict[str, Any] | None:
     if sequence_index <= 0:
         raise ValueError("candidate sequence index must be positive")
     params: dict[str, Any] = {}
-    for (name, domain), base in zip(_PARAMETER_DOMAINS, _HALTON_BASES, strict=True):
+    for (name, domain), base in zip(_PLAUSIBILITY_DOMAINS, _HALTON_BASES, strict=True):
         position = min(len(domain) - 1, int(_radical_inverse(sequence_index, base) * len(domain)))
         params[name] = domain[position]
     if params["core_notional_usd"] + params["probe_notional_usd"] > PAPER_CAPITAL_USD:
@@ -1836,12 +1901,15 @@ def _campaign_search_config(bounds: Mapping[str, Any]) -> tuple[dict[str, Any], 
     config = {
         "schema": "hypersmart.copy_vault_search_config.v1",
         "family": "copy_vault",
-        "proposal_method": "HALTON_RADICAL_INVERSE_V1",
+        "proposal_method": "HALTON_PLAUSIBILITY_ORDERED_V2",
         "proposal_seed": 0,
         "first_sequence_index": 1,
         "halton_bases": list(_HALTON_BASES),
         "parameter_domains": {
             name: list(domain) for name, domain in _PARAMETER_DOMAINS
+        },
+        "parameter_proposal_order": {
+            name: list(domain) for name, domain in _PLAUSIBILITY_DOMAINS
         },
         "paper_capital_usd": PAPER_CAPITAL_USD,
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
@@ -1995,7 +2063,9 @@ def _load_campaign_attempts(path: Path, selection_digest: str) -> list[dict[str,
                 ):
                     raise ValueError(f"attempt ledger lineage invalid at line {number}: {key}")
             if (
-                row.get("proposal_method") != "HALTON_RADICAL_INVERSE_V1"
+                row.get("proposal_method") not in {
+                    "HALTON_RADICAL_INVERSE_V1", "HALTON_PLAUSIBILITY_ORDERED_V2",
+                }
                 or type(row.get("proposal_seed")) is not int
                 or row.get("proposal_seed") != 0
                 or not isinstance(row.get("temporal_windows"), dict)
@@ -2159,6 +2229,8 @@ def _candidate(
         "core_notional_usd": params["core_notional_usd"],
         "probe_notional_usd": params["probe_notional_usd"],
         "daily_profit_lock_usd": params["daily_profit_lock_usd"],
+        "daily_loss_cap_usd": params["daily_loss_cap_usd"],
+        "vol_target_move_frac": params["vol_target_move_frac"],
         "stop_loss_bps": params["stop_loss_bps"],
         "take_profit_bps": params["take_profit_bps"],
         "horizon_ms": params["horizon_ms"],
@@ -2246,7 +2318,9 @@ def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, A
                 if (
                     type(row.get("proposal_seed")) is not int
                     or row.get("proposal_seed") != 0
-                    or row.get("proposal_method") != "HALTON_RADICAL_INVERSE_V1"
+                    or row.get("proposal_method") not in {
+                        "HALTON_RADICAL_INVERSE_V1", "HALTON_PLAUSIBILITY_ORDERED_V2",
+                    }
                     or not isinstance(row.get("temporal_windows"), dict)
                 ):
                     raise ValueError(f"trial ledger search config is invalid at line {number}")
@@ -2824,6 +2898,16 @@ def run_local_campaign(
         base["baseline_comparison_basis"] = baseline_comparison_basis
 
         completed_this_run = 0
+        # Diagnostic #8 : nombre de candidats scoreables (>= 3 jours actifs, le
+        # minimum pour produire un LCB). EXPLORATOIRE : sert a montrer l'impact
+        # d'une famille de test restreinte aux scoreables, JAMAIS le verdict
+        # officiel (qui reste conservateur : tous les essais comptes).
+        campaign_scoreable = 0
+        # Cache de la partie INVARIANTE de l'appariement d'entrée (features de
+        # profondeur + notional, indépendants des params cherchés). metaorders &
+        # books sont fixes pour toute la boucle -> calculé une fois, réutilisé à
+        # chaque essai. Accélère fortement sans changer le moindre résultat.
+        segment_prepared_cache: dict[Any, Any] = {}
         duplicates_since_checkpoint = 0
         baseline_days = (
             (baseline_train.get("statistics") or {}).get(
@@ -2939,7 +3023,10 @@ def run_local_campaign(
                 f"Essai {trial_count} · séquence {this_sequence:,} · "
                 f"{len(_PARAMETER_DOMAINS)} paramètres · capital {params['core_notional_usd'] + params['probe_notional_usd']:.0f}/350 USD"
             )
-            train = evaluate_frozen_v21_segment(metaorders, books, freeze, segment="train")
+            train = evaluate_frozen_v21_segment(
+                metaorders, books, freeze, segment="train",
+                prepared_cache=segment_prepared_cache,
+            )
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
             daily_values = list(stats.get("daily_net_pnl_usd") or [])
             daily_exact_values = list(
@@ -2948,6 +3035,20 @@ def run_local_campaign(
             candidate_lcb = _daily_lcb(daily_exact_values, trial_count)
             baseline_lcb = _daily_lcb(baseline_days, trial_count)
             incumbent_lcb = _daily_lcb(best_days, trial_count)
+            # Diagnostic #8 (exploratoire, hors verdict) : un candidat est
+            # "scoreable" s'il produit >= 3 jours actifs (un LCB existe). Le LCB
+            # ci-dessous applique une famille de test restreinte aux candidats
+            # scoreables DE CETTE CAMPAGNE (ignore les essais anterieurs) : c'est
+            # une borne HAUTE du benefice de #8, jamais le verdict conservateur.
+            candidate_is_scoreable = len(daily_exact_values) >= 3
+            if candidate_is_scoreable:
+                campaign_scoreable += 1
+            exploratory_scoreable_lcb = _daily_lcb(
+                daily_exact_values, max(1, campaign_scoreable)
+            )
+            exploratory_scoreable_score = decimal_value(
+                exploratory_scoreable_lcb.get("daily_mean_lcb_usd_exact_decimal")
+            )
             candidate_score = decimal_value(
                 candidate_lcb.get("daily_mean_lcb_usd_exact_decimal")
             )
@@ -3104,6 +3205,14 @@ def run_local_campaign(
                 "numeric_rank_resolved_against_comparators": comparison_rank_resolved,
                 "strict_improvement_over_baseline_and_prior_best": bool(improvement),
                 "bonferroni_trial_count": trial_count,
+                # Diagnostic #8 (EXPLORATOIRE, hors verdict officiel).
+                "scoreable_candidate": bool(candidate_is_scoreable),
+                "campaign_scoreable_count": int(campaign_scoreable),
+                "exploratory_scoreable_only_daily_lcb_usd": (
+                    float_not_above(exploratory_scoreable_score)
+                    if exploratory_scoreable_score is not None else None
+                ),
+                "exploratory_scoreable_only_family": "CETTE_CAMPAGNE_SEULEMENT_PAS_LE_VERDICT",
                 "data_complete": input_manifest.get("data_complete") is True,
                 "paper_read_only": True,
                 "real_execution": False,
@@ -4400,7 +4509,7 @@ def run_historical_trade_replay(
         }
 
     trials: list[dict[str, Any]] = []
-    capitals = tuple(float(value) for value in range(40, 201, 20))
+    capitals = tuple(float(value) for value in range(40, 201, 20)) + (PAPER_CAPITAL_USD,)
     multipliers = (1.0, 1.25, 1.5, 2.0)
     total = len(capitals) * len(multipliers) ** 4 * len(filters)
     progress_step = max(1, total // 20)
@@ -4428,7 +4537,7 @@ def run_historical_trade_replay(
     baseline = next(
         row for row in trials
         if row["filter"] == "ALL_EXECUTABLE_TRADES"
-        and row["capital_usd"] == 350.0
+        and row["capital_usd"] == PAPER_CAPITAL_USD
         and row["fee_multiplier"] == row["spread_multiplier"] == row["latency_multiplier"] == row["slippage_multiplier"] == 1.0
     )
     comparable = [

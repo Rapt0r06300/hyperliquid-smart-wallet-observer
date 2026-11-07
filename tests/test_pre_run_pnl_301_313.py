@@ -39,7 +39,7 @@ def _proof(family: str, *, oos_net: float = 2.6, forward_net: float = 2.6):
         "family": family,
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 200.0,
+        "starting_capital_usd": 350.0,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,

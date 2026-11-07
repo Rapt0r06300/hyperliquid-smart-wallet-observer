@@ -315,11 +315,11 @@ def test_portfolio_exposure_uses_decimal_before_comparing_the_paper_cap(monkeypa
     trades = {
         "first": {
             "trade_id": "trade-first", "entry_ts_ms": 10, "exit_ts_ms": 100,
-            "notional_usd": 100.00000000000001,
+            "notional_usd": 175.00000000000006,
         },
         "second": {
             "trade_id": "trade-second", "entry_ts_ms": 20, "exit_ts_ms": 200,
-            "notional_usd": 100.0,
+            "notional_usd": 175.0,
         },
     }
 
@@ -339,7 +339,7 @@ def test_portfolio_exposure_uses_decimal_before_comparing_the_paper_cap(monkeypa
     assert [trade["trade_id"] for trade in accepted] == ["trade-first"]
     assert counters["capital_margin_rejected"] == 1
 
-    trades["first"]["notional_usd"] = 100.0
+    trades["first"]["notional_usd"] = 175.0
     accepted_at_limit, exact_limit_counters = replay_metaorders(
         metaorders, {}, horizon_ms=1_000
     )

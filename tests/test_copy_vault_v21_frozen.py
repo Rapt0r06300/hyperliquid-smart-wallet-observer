@@ -683,7 +683,7 @@ def test_settle_rejects_overlapping_positions_above_paper_gross_limit(
         "coin_daily_limit": 10,
         "max_open_positions": 10,
         "daily_profit_lock_usd": 4.0,
-        "core_notional_usd": 150.0,
+        "core_notional_usd": 200.0,
         "probe_notional_usd": 75.0,
         "stop_loss_bps": 50.0,
         "take_profit_bps": 100.0,
@@ -706,7 +706,7 @@ def test_settle_rejects_overlapping_positions_above_paper_gross_limit(
     )
 
     assert len(trades) == 1
-    assert calls == [150.0, 150.0]
+    assert calls == [200.0, 200.0]
     assert audit["PAPER_GROSS_EXPOSURE_REJECTED"] == 1
 
 
@@ -756,9 +756,9 @@ def test_capacity_scenario_scales_frozen_sizing_but_remains_diagnostic_only(
     trades, _placebos, audit = V21._settle(
         [candidate],
         {"BTC": []},
-        segment="capacity_400",
+        segment="capacity_700",
         params=params,
-        capital_scenario_usd=400.0,
+        capital_scenario_usd=700.0,
     )
 
     assert calls == [300.0, 300.0]

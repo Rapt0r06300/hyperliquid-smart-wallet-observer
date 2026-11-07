@@ -44,8 +44,8 @@ SCHEMA_VERSION = "hypersmart.copy_vault_v21_frozen_evaluation.v3"
 PROTOCOL = "copy_v21_entry_capacity_daily_lock_v1"
 REFERENCE_DAILY_OBJECTIVE_USD = 5.0
 FROZEN_COPY_DELAY_MS = 60_000
-FROZEN_MAX_REFERENCE_LAG_MS = 60_000
-FROZEN_MAX_TARGET_LAG_MS = 60_000
+FROZEN_MAX_REFERENCE_LAG_MS = 30_000
+FROZEN_MAX_TARGET_LAG_MS = 30_000
 CAPACITY_SCENARIOS_USD = (10.0, 50.0, 100.0, 200.0, 400.0, 1_000.0, 2_000.0, 5_000.0, 10_000.0)
 REQUIRED_FUNDING_SEGMENTS = ("validation", "oos", "forward")
 
@@ -605,17 +605,22 @@ def _verified_freeze(raw: Mapping[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _segment_candidates(
+def _prepare_segment_rows(
     metaorders: Sequence[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
-    *,
     start_ms: int,
     end_ms: int | None,
-    minimum_leader_fill_notional_usd: float,
-    signed_depth_imbalance_minimum: float,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+) -> tuple[list[tuple[dict[str, Any], float, float | None]], dict[str, int]]:
+    """Partie INVARIANTE d'un segment (indépendante des 2 paramètres de filtre).
+
+    Calcule, par metaorder du segment, les features de profondeur causale et le
+    notional du 1er fill leader. Mémoïsable car ne dépend que de
+    (metaorders, books, bornes) — pas des params cherchés. Accélère chaque essai
+    sans changer le moindre résultat (le filtrage param reste dans
+    `_segment_candidates`, dans le même ordre -> audit identique).
+    """
     audit: dict[str, int] = defaultdict(int)
-    candidates: list[dict[str, Any]] = []
+    prepared: list[tuple[dict[str, Any], float, float | None]] = []
     for raw in metaorders:
         signal_ms = _strict_positive_int(raw.get("signal_ts_ms"))
         if signal_ms is None:
@@ -636,20 +641,96 @@ def _segment_candidates(
             continue
         row["signed_reference_depth_imbalance"] = features[0]
         row["reference_two_sided_capacity_usd"] = features[1]
-        if float(features[0]) < float(signed_depth_imbalance_minimum):
+        first_notional = _first_fill_notional_usd(row)
+        if first_notional is not None:
+            row["first_fill_leader_notional_usd"] = first_notional
+        prepared.append((row, features[0], first_notional))
+    return prepared, dict(audit)
+
+
+def _segment_candidates(
+    metaorders: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    *,
+    start_ms: int,
+    end_ms: int | None,
+    minimum_leader_fill_notional_usd: float,
+    signed_depth_imbalance_minimum: float,
+    prepared_cache: dict[Any, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    # Partie invariante (features/notional) : calculée une fois puis réutilisée
+    # via le cache fourni par l'appelant (le labo, qui en contrôle la durée de
+    # vie : un cache par corpus chargé). Résultats strictement identiques.
+    if prepared_cache is not None:
+        key = (start_ms, end_ms)
+        cached = prepared_cache.get(key)
+        if cached is None:
+            cached = _prepare_segment_rows(metaorders, books_by_coin, start_ms, end_ms)
+            prepared_cache[key] = cached
+        prepared, base_audit = cached
+    else:
+        prepared, base_audit = _prepare_segment_rows(
+            metaorders, books_by_coin, start_ms, end_ms
+        )
+    audit: dict[str, int] = defaultdict(int)
+    for name, count in base_audit.items():
+        audit[name] += count
+    candidates: list[dict[str, Any]] = []
+    for row, imbalance, first_notional in prepared:
+        if float(imbalance) < float(signed_depth_imbalance_minimum):
             audit["DEPTH_IMBALANCE_REJECTED"] += 1
             continue
-        first_notional = _first_fill_notional_usd(row)
         if first_notional is None:
             audit["LEADER_FILL_NOTIONAL_UNMEASURABLE"] += 1
             continue
         if first_notional < float(minimum_leader_fill_notional_usd):
             audit["LEADER_FILL_NOTIONAL_REJECTED"] += 1
             continue
-        row["first_fill_leader_notional_usd"] = first_notional
-        candidates.append(row)
+        # Copie fraîche par essai (comme l'original faisait `dict(raw)`) : le
+        # settle ne doit jamais muter la ligne mémoïsée partagée entre essais.
+        candidates.append(dict(row))
         audit["FIXED_POLICY_CANDIDATE"] += 1
     return candidates, dict(audit)
+
+
+_VOL_LOOKBACK_MS = 3_600_000  # fenêtre causale de 1 h pour la volatilité réalisée
+
+
+def _causal_realized_move_frac(
+    books: Sequence[Mapping[str, Any]], signal_ms: int | None,
+    lookback_ms: int = _VOL_LOOKBACK_MS,
+) -> float | None:
+    """Volatilité réalisée *causale* : écart-type des variations relatives du mid
+    sur les carnets observés dans [signal-lookback, signal]. Aucun look-ahead
+    (ne lit que des carnets au plus tard au signal)."""
+    if not isinstance(signal_ms, int):
+        return None
+    mids: list[float] = []
+    for row in books:
+        ts = row.get("ts_ms")
+        if not isinstance(ts, int) or ts > signal_ms or ts < signal_ms - lookback_ms:
+            continue
+        try:
+            bid = float(row["bid"])
+            ask = float(row["ask"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(bid) and math.isfinite(ask) and bid > 0.0 and ask > bid:
+            mids.append((bid + ask) / 2.0)
+    if len(mids) < 5:
+        return None
+    rets = [
+        (mids[i] - mids[i - 1]) / mids[i - 1]
+        for i in range(1, len(mids))
+        if mids[i - 1] > 0.0
+    ]
+    if len(rets) < 4:
+        return None
+    mean = sum(rets) / len(rets)
+    variance = sum((value - mean) ** 2 for value in rets) / (len(rets) - 1)
+    if not math.isfinite(variance) or variance < 0.0:
+        return None
+    return math.sqrt(variance)
 
 
 def _settle(
@@ -681,6 +762,11 @@ def _settle(
     scenario_params["core_notional_usd"] = float(params["core_notional_usd"]) * sizing_scale
     scenario_params["probe_notional_usd"] = float(params["probe_notional_usd"]) * sizing_scale
     scenario_params["daily_profit_lock_usd"] = float(params["daily_profit_lock_usd"]) * sizing_scale
+    if params.get("daily_loss_cap_usd") is not None:
+        try:
+            scenario_params["daily_loss_cap_usd"] = float(params["daily_loss_cap_usd"]) * sizing_scale
+        except (TypeError, ValueError, OverflowError):
+            scenario_params["daily_loss_cap_usd"] = None
     audit: dict[str, int] = defaultdict(int)
     trades: list[dict[str, Any]] = []
     placebos: list[dict[str, Any]] = []
@@ -717,12 +803,45 @@ def _settle(
             if int(trade["exit_ts_ms"]) <= signal_ms
             and int(trade["exit_ts_ms"]) // 86_400_000 == day
         )
+        # Plafond de perte journalière : une fois -X USD réalisés dans la journée,
+        # on cesse d'ouvrir (écrête les pires jours). Causal : ne compte que les
+        # trades déjà clôturés au plus tard au signal.
+        loss_cap = scenario_params.get("daily_loss_cap_usd")
+        if loss_cap is not None:
+            try:
+                loss_cap_value = float(loss_cap)
+            except (TypeError, ValueError, OverflowError):
+                loss_cap_value = None
+            if (
+                loss_cap_value is not None
+                and math.isfinite(loss_cap_value)
+                and loss_cap_value > 0.0
+                and realized_today <= -loss_cap_value
+            ):
+                audit["DAILY_LOSS_CAP_REJECTED"] += 1
+                continue
         locked = realized_today >= float(scenario_params["daily_profit_lock_usd"])
         notional_usd = (
             float(scenario_params["probe_notional_usd"])
             if locked
             else float(scenario_params["core_notional_usd"])
         )
+        # Sizing ciblé-volatilité (optionnel) : réduit la taille quand la
+        # volatilité réalisée causale récente dépasse la cible (et inversement),
+        # borné [0.5, 1.5]. Homogénéise le PnL quotidien -> σ plus bas.
+        vol_target = scenario_params.get("vol_target_move_frac")
+        if vol_target is not None:
+            try:
+                vol_target_value = float(vol_target)
+            except (TypeError, ValueError, OverflowError):
+                vol_target_value = 0.0
+            if math.isfinite(vol_target_value) and vol_target_value > 0.0:
+                realized = _causal_realized_move_frac(
+                    books_by_coin.get(str(metaorder["coin"]), []), signal_ms
+                )
+                if realized is not None and realized > 0.0:
+                    vol_scale = max(0.5, min(1.5, vol_target_value / realized))
+                    notional_usd = notional_usd * vol_scale
         active_gross_usd = sum(notional for _, notional in active_positions)
         if (
             not math.isfinite(notional_usd)
@@ -833,6 +952,7 @@ def _evaluate_segment(
     execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
     fee_bps: float | None = None,
     complete_utc_day_starts_ms: Sequence[object] | None = None,
+    prepared_cache: dict[Any, Any] | None = None,
 ) -> dict[str, Any]:
     candidates, candidate_audit = _segment_candidates(
         metaorders,
@@ -841,6 +961,7 @@ def _evaluate_segment(
         end_ms=end_ms,
         minimum_leader_fill_notional_usd=float(params["minimum_leader_fill_notional_usd"]),
         signed_depth_imbalance_minimum=float(params["signed_depth_imbalance_minimum"]),
+        prepared_cache=prepared_cache,
     )
     trades, placebos, replay_audit = _settle(
         candidates,
@@ -938,8 +1059,14 @@ def evaluate_frozen_v21_segment(
     segment: str,
     capital_scenario_usd: float | None = None,
     complete_utc_day_starts_ms: Sequence[object] | None = None,
+    prepared_cache: dict[Any, Any] | None = None,
 ) -> dict[str, Any]:
-    """Reproduce one named segment with the immutable V21 policy."""
+    """Reproduce one named segment with the immutable V21 policy.
+
+    ``prepared_cache`` (optionnel) : dict fourni par l'appelant pour mémoïser la
+    partie invariante de l'appariement d'entrée entre essais partageant le MÊME
+    corpus (metaorders/books). Accélère sans changer le moindre résultat.
+    """
     freeze = _verified_freeze(freeze_payload)
     params = dict(freeze["parameters"])
     bounds = dict(params.get("bounds") or {})
@@ -967,6 +1094,7 @@ def evaluate_frozen_v21_segment(
         params=params,
         capital_scenario_usd=capital_scenario_usd,
         complete_utc_day_starts_ms=complete_utc_day_starts_ms,
+        prepared_cache=prepared_cache,
     )
 
 

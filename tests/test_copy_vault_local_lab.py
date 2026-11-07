@@ -115,7 +115,7 @@ def test_campaign_checkpoint_reconciles_durable_trials_and_invalidates_changed_c
     config, config_digest = _campaign_search_config(
         {"train_start_ms": 1, "train_end_ms": 2, "oos_start_ms": 3}
     )
-    assert config["proposal_method"] == "HALTON_RADICAL_INVERSE_V1"
+    assert config["proposal_method"] == "HALTON_PLAUSIBILITY_ORDERED_V2"
     assert config["proposal_seed"] == 0
 
     rows = []
@@ -131,7 +131,7 @@ def test_campaign_checkpoint_reconciles_durable_trials_and_invalidates_changed_c
             "source_asset_inventory_sha256": "c" * 64,
             "engine_source_sha256": "f" * 64,
             "campaign_config_sha256": config_digest,
-            "proposal_method": "HALTON_RADICAL_INVERSE_V1",
+            "proposal_method": "HALTON_PLAUSIBILITY_ORDERED_V2",
             "proposal_seed": 0,
             "temporal_windows": {"train_start_ms": 1},
             "sequence_index": index,
@@ -280,7 +280,7 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     evaluated_segments = []
     evaluated_input_counts = []
 
-    def evaluate(_metaorders, _books, _freeze, *, segment):
+    def evaluate(_metaorders, _books, _freeze, *, segment, **_kwargs):
         evaluated_segments.append(segment)
         evaluated_input_counts.append(len(_metaorders))
         calls["count"] += 1
@@ -365,7 +365,7 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
         == manifest["source_asset_inventory_sha256"]
         and len(row["engine_source_sha256"]) == 64
         and len(row["campaign_config_sha256"]) == 64
-        and row["proposal_method"] == "HALTON_RADICAL_INVERSE_V1"
+        and row["proposal_method"] == "HALTON_PLAUSIBILITY_ORDERED_V2"
         and row["proposal_seed"] == 0
         and row["temporal_windows"]["train_start_ms"]
         < row["temporal_windows"]["train_end_ms"]
@@ -381,6 +381,19 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
         and trial["temporal_windows"] == attempt["temporal_windows"]
         for trial, attempt in zip(trials, attempts[1:], strict=True)
     )
+    # Diagnostic #8 (exploratoire) : present sur chaque essai, SANS toucher le
+    # verdict officiel, qui reste indexe sur le Bonferroni conservateur (tous
+    # les essais comptes : bonferroni_trial_count == numero d'essai global).
+    for trial in trials:
+        assert isinstance(trial["scoreable_candidate"], bool)
+        assert isinstance(trial["campaign_scoreable_count"], int)
+        assert trial["campaign_scoreable_count"] >= 0
+        assert (
+            trial["exploratory_scoreable_only_family"]
+            == "CETTE_CAMPAGNE_SEULEMENT_PAS_LE_VERDICT"
+        )
+        assert trial["bonferroni_trial_count"] == trial["trial_number"]
+        assert "strict_improvement_over_baseline_and_prior_best" in trial
     assert checkpoint["campaign_trials"] == 3
     assert checkpoint["campaign_attempts"] == 4
     assert [row["new_train_pnl_high"] for row in trials] == [True, True, False]
@@ -752,6 +765,10 @@ def test_signal_coverage_reports_short_sample_without_inventing_days() -> None:
         "signal_start_ms": day_ms + 1_000,
         "signal_end_ms": 2 * day_ms + 1_000,
         "signal_span_hours": 24.0,
+        "signal_count": 3,
+        "median_gap_s": 79_200.0,
+        "p95_gap_s": 79_200.0,
+        "gaps_gt_60s": 2,
     }
 
 
@@ -1811,7 +1828,7 @@ def test_restoration_snapshot_is_ready_only_with_complete_lineage() -> None:
         "source_asset_inventory_sha256": "d" * 64,
         "source_asset_inventory_count": 2,
         "proposal_seed": 0,
-        "paper_capital_usd": 200.0,
+        "paper_capital_usd": 350.0,
         "global_trial_count": 7,
         "temporal_windows": {"train_start_ms": 10, "train_end_ms": 20},
         "trial_number": 7,
@@ -2063,7 +2080,7 @@ def test_champion_requires_full_proof_and_never_downgrades(tmp_path: Path) -> No
             "paper_read_only": True,
             "real_execution": False,
             "data_complete": True,
-            "paper_capital_usd": 200.0,
+            "paper_capital_usd": 350.0,
             "selected_candidate": {"freeze": {"campaign_id": run_id}},
             "validation": {"daily_mean_net_pnl_usd": daily_net},
             "oos": {"daily_mean_net_pnl_usd": daily_net},
@@ -2129,7 +2146,7 @@ def test_record_frozen_candidate_rejects_unsafe_run_id_before_writing(tmp_path: 
     assert not (tmp_path.parent / "escape.json").exists()
 
 
-def test_historical_train_proxy_scales_to_200_usd_without_claiming_proof(tmp_path: Path) -> None:
+def test_historical_train_proxy_scales_to_350_usd_without_claiming_proof(tmp_path: Path) -> None:
     relative = "runtime/reports/train.json"
     target = tmp_path / relative
     target.parent.mkdir(parents=True)
@@ -2153,8 +2170,8 @@ def test_historical_train_proxy_scales_to_200_usd_without_claiming_proof(tmp_pat
     proxy = _historical_train_proxy(tmp_path, {"train_report": relative})
 
     assert proxy is not None
-    assert proxy["daily_net_usd"] == 2.0
-    assert proxy["conservative_lcb_usd_per_day"] == 1.0
+    assert proxy["daily_net_usd"] == 3.5
+    assert proxy["conservative_lcb_usd_per_day"] == 1.75
     assert proxy["economically_proven"] is False
 
 
@@ -2211,8 +2228,8 @@ def test_historical_replay_does_not_round_a_below_target_net_up(tmp_path: Path) 
         trades.append({
             "trade_id": f"precision-{index}",
             "exit_ts_ms": 86_400_001 + index,
-            "net_pnl_usd": "2.1093749999875",
-            "gross_pnl_usd": "2.5093749999875",
+            "net_pnl_usd": "1.2499999999875",
+            "gross_pnl_usd": "1.6499999999875",
             "fees_usd": "0.1",
             "spread_cost_usd": "0.1",
             "slippage_cost_usd": "0.1",
@@ -2231,7 +2248,7 @@ def test_historical_replay_does_not_round_a_below_target_net_up(tmp_path: Path) 
         "real_execution": False,
         "selected": {
             "eligible": True,
-            "core_maximum_notional_usd": 600.0,
+            "core_maximum_notional_usd": 625.0,
             "probe_notional_usd": 75.0,
             "trades": trades,
         },

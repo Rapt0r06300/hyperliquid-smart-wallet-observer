@@ -27,7 +27,7 @@ from hl_observer.paper_trading.execution_truth import MAX_SUPPORTED_EPOCH_MS
 # Keep this import-free from copy_vault_executable: that module re-exports this
 # loader, so importing it here creates a circular import in a cold interpreter.
 # Regression tests assert equality with the canonical protocol constants.
-MAX_TARGET_LAG_MS = 60_000
+MAX_TARGET_LAG_MS = 30_000
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
@@ -93,6 +93,7 @@ def load_observed_books(
     as_of_ms: int | None = None,
     relative_path: str = "runtime/data/carnet_venues.jsonl",
     causal_relative_path: str = "runtime/data/copy_vault_l2_tape.jsonl",
+    bbo_relative_path: str = "runtime/data/copy_vault_bbo_tape.jsonl",
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
     """Load books visible no later than ``as_of_ms``.
 
@@ -107,6 +108,7 @@ def load_observed_books(
     resolved_root = Path(root).resolve()
     path = resolved_root / relative_path
     causal_path = resolved_root / causal_relative_path
+    bbo_path = resolved_root / bbo_relative_path
     checkpoint_state_path = resolved_root / CHECKPOINT_STATE_RELPATH
     try:
         checkpoint_state = json.loads(checkpoint_state_path.read_text(encoding="utf-8"))
@@ -578,6 +580,92 @@ def load_observed_books(
                     )
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     invalid += 1
+
+    # --- Repli BBO : top-of-book causal observe (1 niveau) la ou le L2 complet
+    # manque. Donnees reelles, causales (fraicheur 30 s), profondeur honnetement
+    # limitee au meilleur bid/ask observe. Augmente les jours actifs sans inventer
+    # de profondeur ni introduire de look-ahead.
+    bbo_rows_read = 0
+    if bbo_path.is_file():
+        with bbo_path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line_number, line in enumerate(handle, 1):
+                rows_read += 1
+                bbo_rows_read += 1
+                try:
+                    raw = json.loads(line)
+                    coin = canonical_copy_vault_coin(raw.get("coin"))
+                    if wanted is not None and coin not in wanted:
+                        continue
+                    if raw.get("schema_version") != "hypersmart.copy_vault_bbo.v1":
+                        continue
+                    if any(
+                        isinstance(raw.get(name), bool)
+                        for name in (
+                            "received_at_ms", "exchange_ts_ms",
+                            "bid_px", "bid_sz", "ask_px", "ask_sz",
+                        )
+                    ):
+                        invalid += 1
+                        continue
+                    received = _required_epoch_ms(raw["received_at_ms"], "received_at_ms")
+                    exchange_ts = _required_epoch_ms(raw["exchange_ts_ms"], "exchange_ts_ms")
+                    bid_px = float(raw["bid_px"])
+                    bid_sz = float(raw["bid_sz"])
+                    ask_px = float(raw["ask_px"])
+                    ask_sz = float(raw["ask_sz"])
+                    if not (
+                        received >= exchange_ts > 0
+                        and received - exchange_ts <= MAX_TARGET_LAG_MS
+                        and all(math.isfinite(v) for v in (bid_px, bid_sz, ask_px, ask_sz))
+                        and bid_px > 0
+                        and ask_px > bid_px
+                        and bid_sz > 0
+                        and ask_sz > 0
+                    ):
+                        invalid += 1
+                        continue
+                    capacity_usd = min(bid_px * bid_sz, ask_px * ask_sz)
+                    if capacity_usd <= 0:
+                        invalid += 1
+                        continue
+                    add_row(
+                        coin=coin,
+                        ts_ms=received,
+                        bid=bid_px,
+                        ask=ask_px,
+                        capacity_usd=capacity_usd,
+                        source="HYPERLIQUID_BBO_WS",
+                        source_line=line_number,
+                        causal_observation=True,
+                        exchange_ts_ms=exchange_ts,
+                        bids5=[[bid_px, bid_sz]],
+                        asks5=[[ask_px, ask_sz]],
+                        source_dataset_id=(
+                            raw.get("source_dataset_id")
+                            if isinstance(raw.get("source_dataset_id"), str) else None
+                        ),
+                        source_shard_sha256=(
+                            raw.get("source_shard_sha256")
+                            if isinstance(raw.get("source_shard_sha256"), str) else None
+                        ),
+                        source_raw_sha256=(
+                            raw.get("source_raw_sha256")
+                            if isinstance(raw.get("source_raw_sha256"), str) else None
+                        ),
+                        source_catalog_sha256=(
+                            raw.get("source_catalog_sha256")
+                            if isinstance(raw.get("source_catalog_sha256"), str) else None
+                        ),
+                        source_quality_status=(
+                            raw.get("source_quality_status")
+                            if isinstance(raw.get("source_quality_status"), str) else None
+                        ),
+                        source_manifest_verified=raw.get("source_manifest_verified"),
+                        source_replay_compatible=raw.get("source_replay_compatible"),
+                    )
+                except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
+                    invalid += 1
+
     for rows in by_coin.values():
         rows.sort(key=lambda row: row["ts_ms"])
     valid = sum(len(rows) for rows in by_coin.values())
@@ -605,9 +693,10 @@ def load_observed_books(
         replay_grade_blockers.append("CAUSAL_L2_LEVELS_INCOMPLETE")
     replay_grade_ready = not replay_grade_blockers
     return by_coin, {
-        "sources": [relative_path, causal_relative_path],
-        "exists": path.is_file() or causal_path.is_file(),
+        "sources": [relative_path, causal_relative_path, bbo_relative_path],
+        "exists": path.is_file() or causal_path.is_file() or bbo_path.is_file(),
         "rows_read": rows_read,
+        "bbo_rows_read": bbo_rows_read,
         "as_of_ms": as_of_ms,
         "future_rows_rejected": future_rows_rejected,
         "valid_rows": valid,

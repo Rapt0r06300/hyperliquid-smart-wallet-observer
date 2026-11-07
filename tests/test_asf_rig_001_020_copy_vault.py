@@ -241,7 +241,10 @@ def test_rig_019_official_launchers_use_portable_safety_contracts() -> None:
     assert "push force" in push and "aucun telechargement de shards" in push
     sync = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8", errors="replace").lower()
     assert "--download-safe" in sync and "--unpack-safe" in sync
-    assert "force" not in sync and "reset" not in sync and "clean" not in sync
+    # Interdire les vraies operations git destructrices, sans faux positif sur le
+    # nom de fichier POUSSER-GITHUB-FORCE.cmd (reference obligatoire pour le preflight).
+    assert "push --force" not in sync and "--force" not in sync
+    assert "reset --hard" not in sync and "git clean" not in sync
 
 
 def test_rig_020_all_current_receipts_are_exactly_revalidated() -> None:

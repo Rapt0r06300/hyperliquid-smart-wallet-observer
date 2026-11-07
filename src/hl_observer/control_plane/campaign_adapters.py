@@ -925,7 +925,7 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
 
     if ctx.kind == "copy_vault_collection":
         duration = _bounded_float(ctx.partition.get("duration_s"), 3600.0, 18_000.0)
-        max_vaults = _bounded_int(ctx.partition.get("max_vaults"), 15, 1, 100_000)
+        max_vaults = _bounded_int(ctx.partition.get("max_vaults"), 10, 1, 100_000)
         shard_count = _bounded_int(ctx.partition.get("vault_shard_count"), 1, 1, 10_000)
         shard_index = _bounded_int(
             ctx.partition.get("vault_shard_index"),

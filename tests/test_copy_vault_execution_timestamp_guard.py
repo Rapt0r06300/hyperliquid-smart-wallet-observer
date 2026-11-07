@@ -236,7 +236,7 @@ def test_copy_vote_adapter_reports_timestamp_refusal_without_paper_fill(monkeypa
         assert result.accepted_count == 0
         assert result.decisions == ()
         assert result.refusal_reasons == ("SOURCE_TIMESTAMP_MISSING",)
-        assert result.equity_usdt == 200.0
+        assert result.equity_usdt == 350.0
     finally:
         l2_snapshot_cache.clear()
 
@@ -269,6 +269,6 @@ def test_copy_vote_adapter_surfaces_invalid_l2_freshness_config(monkeypatch):
         assert result.accepted_count == 0
         assert result.decisions == ()
         assert result.refusal_reasons == ("INVALID_L2_FRESHNESS_CONFIG",)
-        assert result.equity_usdt == 200.0
+        assert result.equity_usdt == 350.0
     finally:
         l2_snapshot_cache.clear()

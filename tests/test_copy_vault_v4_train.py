@@ -186,7 +186,7 @@ def test_exploration_reste_train_only_et_ne_rejoue_pas_un_petit_echantillon() ->
 
     assert result["heldout_evaluated"] is False
     assert result["selection_scope"] == "TRAIN_ONLY_PRE_FREEZE"
-    assert result["fixed_grid"]["trial_count"] == 16
+    assert result["fixed_grid"]["trial_count"] == 32
     assert result["selection_eligible"] is False
     assert result["physical_freeze_allowed"] is False
     assert all(

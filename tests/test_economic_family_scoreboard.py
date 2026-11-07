@@ -60,7 +60,7 @@ def test_scoreboards_keep_families_separate_and_deny_incomplete_evidence(tmp_pat
     assert result["families"]["copy_vault"]["verdict"] == "MORE_DATA"
     assert "lead_lag" in result["disabled_families"]
     assert "cross_venue_dislocation" in result["disabled_families"]
-    assert result["starting_capital_usd"] == 200.0
+    assert result["starting_capital_usd"] == 350.0
     assert result["real_execution"] is False
 
 
@@ -96,7 +96,7 @@ def test_stored_paused_campaign_is_not_promoted_to_current_scoreboard(tmp_path: 
     ).receipt()
     campaign = {
         "family": "cross_venue_dislocation_v2",
-        "starting_capital_usd": 200.0,
+        "starting_capital_usd": 350.0,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

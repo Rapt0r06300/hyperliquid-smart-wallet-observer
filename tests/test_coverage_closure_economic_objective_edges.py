@@ -34,7 +34,7 @@ def _proof(**overrides):
         "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 200.0,
+        "starting_capital_usd": 350.0,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,
