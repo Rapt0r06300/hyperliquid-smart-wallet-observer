@@ -23,6 +23,7 @@ collecteur réseau l'utilise. Lecture seule, PAPER : jamais d'ordre ni de clé.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -198,6 +199,126 @@ def is_causal_live_source(source: object) -> bool:
     return source in {"LIVE_WS", LIVE_POLL_SOURCE}
 
 
+# ---------------------------------------------------------------------------
+# « Plus de fills » — leviers purs et testables, branchés sur le collecteur.
+# Chacun augmente le NOMBRE de fills causaux collectés par minute SANS jamais
+# dépasser le plafond de requêtes Hyperliquid ni affaiblir la causalité.
+# ---------------------------------------------------------------------------
+
+
+class TokenBucket:
+    """#1 Limiteur à jetons — débit soutenu ``rate_per_s`` avec rafales jusqu'à
+    ``burst``. Il MAXIMISE le nombre de requêtes sous le plafond HL (donc plus de
+    fills/min qu'un espacement fixe), tout en absorbant les creux sans jamais le
+    franchir. Horloge/sommeil injectables -> déterministe en test."""
+
+    def __init__(self, rate_per_s: float, burst: float, *, now=None, sleep=None) -> None:
+        self.rate = max(1e-6, float(rate_per_s))
+        self.burst = max(1.0, float(burst))
+        self._now = now or time.monotonic
+        self._sleep = sleep or time.sleep
+        self._tokens = self.burst
+        self._last = self._now()
+
+    def _refill(self) -> None:
+        t = self._now()
+        self._tokens = min(self.burst, self._tokens + max(0.0, t - self._last) * self.rate)
+        self._last = t
+
+    def take(self) -> float:
+        """Consomme un jeton (attend si nécessaire). Renvoie le temps attendu (s)."""
+        self._refill()
+        waited = 0.0
+        if self._tokens < 1.0:
+            waited = (1.0 - self._tokens) / self.rate
+            self._sleep(waited)
+            self._refill()
+        self._tokens = max(0.0, self._tokens - 1.0)
+        return waited
+
+
+def prioritize_leaders(
+    leaders: Sequence[str], retained: Sequence[str] | None,
+) -> list[str]:
+    """#2 Priorisation par valeur — met les leaders retenus/scorés EN PREMIER (sans
+    doublon, ordre stable). Le budget de requêtes frappe d'abord les leaders les
+    plus productifs -> plus de fills causaux par minute pour un même budget."""
+    retained_set = {str(r).lower() for r in (retained or [])}
+    ordered = [v for v in leaders if str(v).lower() in retained_set]
+    ordered += [v for v in leaders if str(v).lower() not in retained_set]
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in ordered:
+        k = str(v).lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(v)
+    return out
+
+
+class LeaderCooldown:
+    """#3 Backoff par leader — après un 429/erreur sur UN leader, on le met en
+    pause (exponentielle bornée) pour ne pas gaspiller le budget dessus ; les
+    autres continuent d'être pollés. Un succès réarme le leader. Résultat : plus
+    de fills utiles au total, zéro tempête de 429 sur un leader fautif."""
+
+    def __init__(self, base_ms: float = 5_000.0, max_ms: float = 300_000.0) -> None:
+        self.base_ms = max(0.0, float(base_ms))
+        self.max_ms = max(self.base_ms, float(max_ms))
+        self._until: dict[str, float] = {}
+        self._streak: dict[str, int] = {}
+
+    def penalize(self, vault: str, now_ms: float) -> None:
+        n = self._streak.get(vault, 0) + 1
+        self._streak[vault] = n
+        self._until[vault] = now_ms + min(self.max_ms, self.base_ms * (2 ** (n - 1)))
+
+    def reset(self, vault: str) -> None:
+        self._streak.pop(vault, None)
+        self._until.pop(vault, None)
+
+    def due(self, vault: str, now_ms: float) -> bool:
+        return now_ms >= self._until.get(vault, 0.0)
+
+
+def merge_dedup_fills(*streams: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """#4 Fusion WS+poll — réunit plusieurs flux de fills en dédupliquant par
+    identité source-indépendante ``(vault,coin,time,tid/hash,oid,px,sz,side)`` et
+    en PRÉFÉRANT l'observation causale non-snapshot. Garantit qu'un même trade vu
+    par le WS et par le poll ne compte qu'une fois (aucune donnée double)."""
+    best: dict[tuple, dict[str, Any]] = {}
+    for stream in streams:
+        for f in stream:
+            if not isinstance(f, Mapping):
+                continue
+            key = (
+                f.get("vault"), f.get("coin"), f.get("time"), _fill_identity(f),
+                f.get("oid"), f.get("px"), f.get("sz"), f.get("side"),
+            )
+            prev = best.get(key)
+            if prev is None:
+                best[key] = dict(f)
+            elif prev.get("isSnapshot") and not f.get("isSnapshot"):
+                best[key] = dict(f)  # préfère la vue causale non-snapshot
+    return list(best.values())
+
+
+def collector_stream_health(
+    mtime_ms: float | None, now_ms: float, *, expected_interval_ms: float,
+) -> str:
+    """#5 Santé d'un flux — verdict de fraîcheur : ``ABSENT`` (jamais écrit),
+    ``FRESH`` (écrit récemment), ``STALE`` (en retard), ``DEAD`` (figé depuis
+    longtemps). Base de la page de santé des collecteurs (répond à « ça monte ? »)."""
+    if not mtime_ms or mtime_ms <= 0:
+        return "ABSENT"
+    age = now_ms - mtime_ms
+    if age <= max(1.0, expected_interval_ms):
+        return "FRESH"
+    if age <= expected_interval_ms * 10.0:
+        return "STALE"
+    return "DEAD"
+
+
 __all__ = [
     "LIVE_POLL_SOURCE",
     "RESPONSE_PAGE_CAP",
@@ -206,4 +327,9 @@ __all__ = [
     "shard_leaders",
     "adaptive_interval_s",
     "is_causal_live_source",
+    "TokenBucket",
+    "prioritize_leaders",
+    "LeaderCooldown",
+    "merge_dedup_fills",
+    "collector_stream_health",
 ]

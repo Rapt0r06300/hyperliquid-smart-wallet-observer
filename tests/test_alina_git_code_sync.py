@@ -1682,7 +1682,7 @@ def test_late_invalid_python_saved_locally_never_pushed(repos):
     assert git(local, "show", "HEAD:src/incomplete.py") == "def broken(:"
 
 
-def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
+def test_repeated_external_edits_are_ignored_and_stable_code_is_published(repos):
     local, _, origin = repos
     before = git(origin, "rev-parse", "main")
 
@@ -1713,13 +1713,11 @@ def test_repeated_external_edits_stop_after_bounded_local_checkpoints(repos):
             return result
 
     task = AlwaysChanging(local, allow_test_remote=True)
-    assert task.run() == 2
-    assert task.report["status"] == "NO_GO"
-    assert task.report["push_attempts"] == 0
-    assert task.report["late_checkpoint_attempts"] == 3
-    assert "src/concurrent_5.py" in task.report["late_local_paths"]
-    assert "change encore" in task.report["error"]
-    assert git(origin, "rev-parse", "main") == before
-    for i in range(1, 4):
-        assert git(local, "show", f"HEAD:src/concurrent_{i}.py") == f"value = {i}"
+    # Nouveau contrat : POUSSER n'attend jamais une cible mouvante. Les fichiers
+    # qui changent pendant la synchro sont IGNORES (preserves sur disque, hors
+    # commit) et le code stable est pousse -> SUCCES, sans boucler ni bloquer.
+    assert task.run() == 0
+    assert task.report["status"] == "SYNCHRONIZED"
+    assert task.report.get("ignored_live_edit_count", 0) >= 1
+    assert git(origin, "rev-parse", "main") != before  # le code stable a ete pousse
     assert (local / "src/concurrent_4.py").is_file()

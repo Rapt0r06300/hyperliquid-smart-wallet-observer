@@ -13,10 +13,15 @@ from __future__ import annotations
 
 from hl_observer.collection.forward_poll_fills import (
     LIVE_POLL_SOURCE,
+    LeaderCooldown,
     LeaderWatermark,
+    TokenBucket,
     adaptive_interval_s,
+    collector_stream_health,
     is_causal_live_source,
+    merge_dedup_fills,
     partition_forward_fills,
+    prioritize_leaders,
     shard_leaders,
 )
 
@@ -135,6 +140,66 @@ def test_adaptive_interval_shortens_when_active_and_spaces_when_idle() -> None:
     # bornes respectées
     assert adaptive_interval_s(1.0, 100, min_s=2.0, max_s=60.0) == 2.0
     assert adaptive_interval_s(100.0, 0, min_s=2.0, max_s=60.0) == 60.0
+
+
+def test_token_bucket_allows_burst_then_throttles_to_rate() -> None:
+    # #1 : rafale jusqu'à `burst` sans attente, puis ~1/rate entre requêtes.
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def now():
+        return clock["t"]
+
+    def sleep(s):
+        slept.append(s)
+        clock["t"] += s  # le sommeil fait avancer l'horloge
+
+    tb = TokenBucket(rate_per_s=2.0, burst=3.0, now=now, sleep=sleep)
+    assert [tb.take() for _ in range(3)] == [0.0, 0.0, 0.0]  # rafale gratuite
+    waited = tb.take()                                       # 4e -> doit attendre
+    assert waited > 0.0
+    assert abs(waited - 0.5) < 1e-9                          # 1 jeton à 2/s = 0.5 s
+
+
+def test_prioritize_leaders_puts_retained_first_without_dup() -> None:
+    # #2 : les retenus passent devant, ordre stable, pas de doublon (casse insensible).
+    leaders = ["0xAAA", "0xBBB", "0xCCC", "0xBBB"]
+    out = prioritize_leaders(leaders, retained=["0xccc"])
+    assert out == ["0xCCC", "0xAAA", "0xBBB"]
+
+
+def test_leader_cooldown_backs_off_one_leader_and_spares_others() -> None:
+    # #3 : un leader fautif est mis en pause croissante ; les autres restent dus.
+    cd = LeaderCooldown(base_ms=1_000.0, max_ms=10_000.0)
+    assert cd.due("0xA", now_ms=0.0) is True
+    cd.penalize("0xA", now_ms=0.0)
+    assert cd.due("0xA", now_ms=500.0) is False   # en pause
+    assert cd.due("0xA", now_ms=1_000.0) is True  # pause finie
+    assert cd.due("0xB", now_ms=0.0) is True       # un autre leader non affecté
+    cd.penalize("0xA", now_ms=1_000.0)             # 2e strike -> 2x plus long
+    assert cd.due("0xA", now_ms=2_500.0) is False
+    cd.reset("0xA")                                # un succès réarme
+    assert cd.due("0xA", now_ms=2_500.0) is True
+
+
+def test_merge_dedup_prefers_non_snapshot_and_drops_doubles() -> None:
+    # #4 : même trade vu par WS (snapshot) et poll (causal) -> 1 ligne causale.
+    ws = [{"vault": "0xV", "coin": "BTC", "time": 1_000, "tid": 7, "isSnapshot": True}]
+    poll = [{"vault": "0xV", "coin": "BTC", "time": 1_000, "tid": 7, "isSnapshot": False},
+            {"vault": "0xV", "coin": "ETH", "time": 2_000, "tid": 8, "isSnapshot": False}]
+    merged = merge_dedup_fills(ws, poll)
+    assert len(merged) == 2                                   # pas de doublon
+    btc = [m for m in merged if m["coin"] == "BTC"][0]
+    assert btc["isSnapshot"] is False                         # vue causale préférée
+
+
+def test_collector_stream_health_verdicts() -> None:
+    # #5 : FRESH / STALE / DEAD / ABSENT selon l'âge du dernier écrit.
+    now = 1_000_000.0
+    assert collector_stream_health(now - 500, now, expected_interval_ms=1_000) == "FRESH"
+    assert collector_stream_health(now - 5_000, now, expected_interval_ms=1_000) == "STALE"
+    assert collector_stream_health(now - 50_000, now, expected_interval_ms=1_000) == "DEAD"
+    assert collector_stream_health(0, now, expected_interval_ms=1_000) == "ABSENT"
 
 
 def test_poll_causal_fill_keeps_dedup_identity_fields() -> None:

@@ -3365,7 +3365,10 @@ class Synchronizer:
             finally:
                 if previous_index is not None:
                     os.environ["GIT_INDEX_FILE"] = previous_index
-            deferred = set(late_candidates)
+            # Accumule les chemins deja ignores ce run : un fichier en cours de
+            # modification (reecrit par les collecteurs GitHub) reste exclu du
+            # commit une fois mis de cote, au lieu de reapparaitre et bloquer.
+            deferred = set(late_candidates) | set(self._deferred_local_paths)
             if code_paths:
                 deferred.update(
                     self._worktree_mismatched_tree_paths(local, code_paths)
@@ -3705,12 +3708,35 @@ class Synchronizer:
     def publish(self) -> None:
         local_retries = 0
         push_races = 0
+        deferral_rounds = 0
         while local_retries <= MAX_LOCAL_CHANGE_RETRIES and push_races <= MAX_RACE_RETRIES:
             try:
                 self.reconcile()
                 self._assert_no_new_code_changes(allow_deferred=True)
             except LocalEditsDetected as exc:
                 if local_retries >= MAX_LOCAL_CHANGE_RETRIES:
+                    # Apres N sauvegardes, le(s) fichier(s) changent ENCORE (ex.
+                    # workflows reecrits en continu par les collecteurs GitHub) :
+                    # au lieu de bloquer, on les IGNORE -- conserves sur disque,
+                    # exclus du commit -- et on pousse le reste.
+                    late = [
+                        str(p) for p in (self.report.get("late_local_paths") or [])
+                        if str(p) not in self._deferred_local_paths
+                    ]
+                    # Churn normal (meme fichier reecrit) : on l'ignore une fois et
+                    # on pousse le reste. Churn pathologique (nom different a chaque
+                    # commit) : borne pour ne pas boucler -> NO_GO au-dela.
+                    if late and deferral_rounds < MAX_LOCAL_CHANGE_RETRIES:
+                        deferral_rounds += 1
+                        self._deferred_local_paths.update(late)
+                        self.report["ignored_live_edit_paths"] = sorted(self._deferred_local_paths)[:100]
+                        self.report["ignored_live_edit_count"] = len(self._deferred_local_paths)
+                        self.say(
+                            f"[IGNORE] {len(late)} fichier(s) en cours de modification "
+                            "ignore(s) (conserves sur disque, hors commit); push du reste : "
+                            + ", ".join(late[:12])
+                        )
+                        continue
                     raise SyncBlocked(
                         "Le code change encore pendant la synchronisation "
                         f"apres {MAX_LOCAL_CHANGE_RETRIES} sauvegardes : {exc}. "
@@ -3776,7 +3802,20 @@ class Synchronizer:
                     self.report["status"] = "SYNCHRONIZED"
                     self.report["head_after"] = local
                     self.report["checkpoint_sha_after_reconcile"] = local
+                    # SHA local == SHA GitHub => meme commit => meme arbre Git =>
+                    # le CODE local et GitHub sont byte-identiques (meme poids),
+                    # aux seuls exclus pres : shards/runtime (jamais pousses par
+                    # conception) et fichiers ignores car en cours de modification.
+                    ignored = len(self._deferred_local_paths)
+                    self.report["code_weight_identical_excluding_shards"] = True
+                    self.report["local_only_ignored_count"] = ignored
                     self.say("SHA local = SHA GitHub; synchronisation verifiee.")
+                    self.say(
+                        "[RECONCILIE] Code local = code GitHub, byte-identique "
+                        "(meme SHA, meme poids) hors shards/runtime"
+                        + (f" et {ignored} fichier(s) ignore(s)" if ignored else "")
+                        + "."
+                    )
                     return
                 self.say("GitHub a de nouveau avance; fusion supplementaire.")
                 push_races += 1
