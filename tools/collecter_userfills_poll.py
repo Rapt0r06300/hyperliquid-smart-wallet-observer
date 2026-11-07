@@ -113,7 +113,11 @@ def poll_once(
         if cooldown is not None and not cooldown.due(vault, now_ms):
             continue  # #3 ce leader est en backoff 429 -> on passe au suivant
         wm = state.get(vault, LeaderWatermark())
-        start_ms = wm.high_water_ms if wm.initialised else max(1, now_ms - BOOTSTRAP_LOOKBACK_MS)
+        # Plancher dur : jamais démarrer plus de BOOTSTRAP_LOOKBACK avant maintenant.
+        # Sinon un high_water périmé (ex. 0) ferait tirer des MOIS d'historique et
+        # l'émettrait comme « causal » — la pollution que l'on élimine ici.
+        floor_start = max(1, now_ms - BOOTSTRAP_LOOKBACK_MS)
+        start_ms = max(wm.high_water_ms, floor_start) if wm.initialised else floor_start
         # Amorçage : une seule page suffit à fixer le high-water (fills exclus).
         # Forward : pagination complète pour ne perdre aucun nouveau fill.
         max_pages = 1 if not wm.initialised else 8
@@ -122,10 +126,14 @@ def poll_once(
         except Exception as exc:  # noqa: BLE001 (collecteur résilient, fail-soft)
             if cooldown is not None:
                 cooldown.penalize(vault, now_ms)  # 429/erreur -> backoff ce leader
+            if bucket is not None and getattr(exc, "code", None) == 429:
+                bucket.penalize()  # 429 = limite IP globale -> pause TOUT le poll
             print(f"[poll] {vault[:10]} erreur {type(exc).__name__}: {str(exc)[:80]}", flush=True)
             continue
         if cooldown is not None:
             cooldown.reset(vault)  # succès -> on réarme le leader
+        if bucket is not None:
+            bucket.reward()  # requête OK -> on relâche progressivement la pause
         for fill in fills:
             if isinstance(fill, dict):
                 fill.setdefault("vault", vault)

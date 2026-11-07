@@ -94,11 +94,23 @@ class LeaderWatermark:
         }
 
 
+# Marge anti-straggler : le high-water avance jusqu'à (fin de fenêtre − marge),
+# de sorte qu'un leader SANS fill ne garde jamais high_water=0 (ce qui le ferait
+# re-tirer tout son historique au poll suivant) tout en re-couvrant la dernière
+# minute pour rattraper un fill arrivé en léger différé.
+_STRAGGLER_MARGIN_MS = 60_000
+# Fraîcheur : un fill observé plus de N ms après son trade n'est PAS un signal de
+# copie exploitable (on ne peut pas agir dessus à temps). On ne l'émet donc pas
+# comme causal — cela élimine le backlog/historique ancien qui polluait le jeu.
+DEFAULT_MAX_OBSERVATION_LAG_MS = 600_000  # 10 min (large : couvre poll + backoff)
+
+
 def partition_forward_fills(
     watermark: LeaderWatermark,
     polled_fills: Sequence[Mapping[str, Any]],
     *,
     observed_at_ms: int,
+    max_observation_lag_ms: int | None = DEFAULT_MAX_OBSERVATION_LAG_MS,
 ) -> tuple[list[dict[str, Any]], LeaderWatermark]:
     """Partitionne une passe de poll en fills causaux + nouveau high-water.
 
@@ -107,7 +119,9 @@ def partition_forward_fills(
     - sinon, uniquement les fills strictement nouveaux depuis le high-water,
       chacun estampillé ``observed_at_ms`` (l'instant réel du poll), ``source``
       = ``LIVE_POLL``, ``isSnapshot`` = False ;
-    - jamais un fill antérieur ou déjà vu.
+    - jamais un fill antérieur, déjà vu, OU observé trop tard (backlog ancien) ;
+    - le high-water avance au moins jusqu'à (observed_at − marge) : aucun leader
+      ne régresse vers un historique profond.
     """
     if not isinstance(observed_at_ms, int) or isinstance(observed_at_ms, bool) or observed_at_ms <= 0:
         raise ValueError("observed_at_ms doit être un entier d'epoch ms positif")
@@ -136,6 +150,11 @@ def partition_forward_fills(
             new_ids = {identity}
         elif ts == new_hw:
             new_ids.add(identity)
+        # Gate de fraîcheur : un fill observé trop tard (backlog/historique) n'est
+        # pas un signal causal exploitable -> on l'a vu (high-water avance) mais on
+        # ne l'émet PAS. C'est ce qui bloque la pollution des fills vieux de jours.
+        if max_observation_lag_ms is not None and (observed_at_ms - ts) > int(max_observation_lag_ms):
+            continue
         # Causal UNIQUEMENT si le leader était déjà observé (sinon : préexistant).
         if watermark.initialised:
             causal.append({
@@ -147,6 +166,13 @@ def partition_forward_fills(
                 "received_at_ms": int(observed_at_ms),
                 "observation_transport": "hyperliquid_rest_poll",
             })
+
+    # Plancher anti-régression : le high-water ne reste jamais bloqué dans le passé
+    # profond (sinon startTime=high_water re-tirerait des centaines de jours).
+    floor = int(observed_at_ms) - _STRAGGLER_MARGIN_MS
+    if floor > new_hw:
+        new_hw = floor
+        new_ids = set()
 
     return causal, LeaderWatermark(
         initialised=True,
@@ -212,26 +238,52 @@ class TokenBucket:
     fills/min qu'un espacement fixe), tout en absorbant les creux sans jamais le
     franchir. Horloge/sommeil injectables -> déterministe en test."""
 
-    def __init__(self, rate_per_s: float, burst: float, *, now=None, sleep=None) -> None:
+    def __init__(
+        self, rate_per_s: float, burst: float, *, now=None, sleep=None,
+        penalty_base_s: float = 10.0, penalty_max_s: float = 300.0,
+    ) -> None:
         self.rate = max(1e-6, float(rate_per_s))
         self.burst = max(1.0, float(burst))
         self._now = now or time.monotonic
         self._sleep = sleep or time.sleep
         self._tokens = self.burst
         self._last = self._now()
+        # Coupe-circuit GLOBAL anti-429 : le 429 d'Hyperliquid est au niveau de
+        # l'IP entiere, donc on met TOUT le poll en pause (pas un seul leader).
+        self.penalty_base_s = max(0.0, float(penalty_base_s))
+        self.penalty_max_s = max(self.penalty_base_s, float(penalty_max_s))
+        self._pause_until = 0.0
+        self._cooldown_s = 0.0
 
     def _refill(self) -> None:
         t = self._now()
         self._tokens = min(self.burst, self._tokens + max(0.0, t - self._last) * self.rate)
         self._last = t
 
+    def penalize(self) -> None:
+        """429 observe : pause globale croissante (exponentielle, bornee)."""
+        self._cooldown_s = min(
+            self.penalty_max_s,
+            max(self.penalty_base_s, self._cooldown_s * 2.0),
+        )
+        self._pause_until = self._now() + self._cooldown_s
+
+    def reward(self) -> None:
+        """Requete reussie : on relache progressivement la pause globale."""
+        self._cooldown_s = max(0.0, self._cooldown_s / 2.0)
+
     def take(self) -> float:
         """Consomme un jeton (attend si nécessaire). Renvoie le temps attendu (s)."""
-        self._refill()
         waited = 0.0
-        if self._tokens < 1.0:
-            waited = (1.0 - self._tokens) / self.rate
+        now = self._now()
+        if now < self._pause_until:              # pause globale active (429)
+            waited += self._pause_until - now
             self._sleep(waited)
+        self._refill()
+        if self._tokens < 1.0:
+            extra = (1.0 - self._tokens) / self.rate
+            self._sleep(extra)
+            waited += extra
             self._refill()
         self._tokens = max(0.0, self._tokens - 1.0)
         return waited
