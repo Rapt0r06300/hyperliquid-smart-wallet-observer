@@ -182,6 +182,22 @@ def _panneau_recolte(root: Path) -> None:
     )
     print(sep, flush=True)
     print(f"  Croissance : {delta_txt}", flush=True)
+    # Fills leaders captes EN DIRECT : c'est le signal qui alimente les
+    # backtests copy-vault (le marche ci-dessus n'est que le contexte).
+    fills_path = root / "runtime" / "data" / "vault_fills_live.jsonl"
+    try:
+        with fills_path.open("rb") as handle:
+            fills_total = sum(1 for _ in handle)
+    except OSError:
+        fills_total = 0
+    prev_fills = _PANNEAU_ETAT.get("fills_live")
+    _PANNEAU_ETAT["fills_live"] = float(fills_total)
+    if prev_fills is None:
+        fills_delta = ""
+    else:
+        diff = fills_total - int(prev_fills)
+        fills_delta = f"  (+{diff} cette passe)" if diff else "  (aucun nouveau)"
+    print(f"  Fills leaders (live) : {fills_total}{fills_delta}", flush=True)
 
 
 def _last_collector_log_line(root: Path, name: str, *, max_bytes: int = 8_192) -> str:
