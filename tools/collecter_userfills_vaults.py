@@ -183,7 +183,7 @@ def _shadow_par_vault(root: Path) -> dict:
 MAX_SLOTS = 10                          # plafond dur des places userFills (inchangé)
 DEFAULT_CORE_SLOTS = 2                  # production : comportement historique ; campagne configurable par env
 SENTINELLES_K = max(0, int(os.getenv("HYPERSMART_VAULT_SENTINELLES_K", "1")))  # slots top-liquidateurs. Reduit a 1 par defaut: libere 2 slots pour les traders les PLUS ACTIFS -> plus de fills copy-vault/jour dans la limite des 10.
-ROLE_ROTATION_SECONDS = max(60.0, float(os.getenv("HYPERSMART_VAULT_ROLE_ROTATION_SECONDS", "75")))
+ROLE_ROTATION_SECONDS = max(60.0, float(os.getenv("HYPERSMART_VAULT_ROLE_ROTATION_SECONDS", "150")))
 UNIVERSE_REFRESH_SECONDS = max(900.0, float(os.getenv("HYPERSMART_VAULT_UNIVERSE_REFRESH_SECONDS", "1800")))
 ROTATION_STATE = Path("runtime") / "data" / "vault_role_rotation.json"
 PROMOTION_TAPE_META = Path("runtime") / "data" / "promotion_shadow_tape_meta.json"
