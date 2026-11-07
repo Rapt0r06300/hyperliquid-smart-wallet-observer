@@ -40,7 +40,11 @@ SUIVIS = Path("runtime") / "data" / "vaults_suivis.json"
 OUT_FILLS = Path("runtime") / "data" / "vault_fills.jsonl"
 OUT_EPISODES = Path("runtime") / "data" / "vault_episodes.jsonl"
 OUT_COUVERTURE = Path("runtime") / "data" / "vault_fills_couverture.json"
-LOOKBACK_J_DEFAUT = 14
+# Deeper leader-fill history = more copyable signals to backtest against,
+# which shortens the calendar time to a measurable edge. Hyperliquid's
+# userFillsByTime serves well beyond this; 90 days stays within the 8h
+# collector budget and the time-windowed paginator.
+LOOKBACK_J_DEFAUT = 90
 MIN_PAGINATION_WINDOW_MS = 60_000
 MAX_FILL_BACKFILL_REQUESTS = 512
 

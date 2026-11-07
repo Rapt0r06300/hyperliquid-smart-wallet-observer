@@ -124,12 +124,29 @@ _PANNEAU_ETAT: dict[str, float] = {}
 
 
 def _panneau_recolte(root: Path) -> None:
-    sep = "  +------------------+----------+------------+-----------------+"
+    sep = "  +------------------+----------+------------+------------+-----------------+"
     horodatage = time.strftime("%H:%M:%S")
+    now = time.monotonic()
+    prev_ts = _PANNEAU_ETAT.get("ts")
+    dt = (now - prev_ts) if isinstance(prev_ts, float) and now > prev_ts else None
+
+    def _delta_cell(label: str, size: int) -> str:
+        key = f"src:{label}"
+        prev = _PANNEAU_ETAT.get(key)
+        _PANNEAU_ETAT[key] = float(size)
+        if prev is None:
+            return "-"
+        diff = size - prev
+        if diff == 0:
+            # A continuous source stuck at 0 is the signal of a stalled feed.
+            return "0"
+        signe = "+" if diff > 0 else "-"
+        return f"{signe}{_format_size(abs(diff))}"
+
     print("\n" + sep, flush=True)
-    print(f"  |   PANNEAU DE RECOLTE -- DONNEES COLLECTEES  {horodatage}    |", flush=True)
+    print(f"  |      PANNEAU DE RECOLTE -- DONNEES COLLECTEES  {horodatage}        |", flush=True)
     print(sep, flush=True)
-    print("  | Source           | Fichiers | Taille     | Cadence         |", flush=True)
+    print("  | Source           | Fichiers | Taille     | Delta/passe| Cadence         |", flush=True)
     print(sep, flush=True)
     import glob as glob_mod
     total_files = 0
@@ -143,11 +160,11 @@ def _panneau_recolte(root: Path) -> None:
         total_bytes += size
         if n_files > 0:
             print(
-                f"  | {label:<16s} | {n_files:>8d} | {_format_size(size):>10s} | {cadence:<15s} |",
+                f"  | {label:<16s} | {n_files:>8d} | {_format_size(size):>10s} | {_delta_cell(label, size):>10s} | {cadence:<15s} |",
                 flush=True,
             )
     print(sep, flush=True)
-    # Growth delta since the previous panel so the operator sees, at a glance,
+    # Total growth delta + throughput rate, so the operator sees at a glance
     # that collection is live and progressing — not a frozen snapshot.
     prev = _PANNEAU_ETAT.get("total_bytes")
     if prev is None:
@@ -155,10 +172,12 @@ def _panneau_recolte(root: Path) -> None:
     else:
         diff = total_bytes - prev
         signe = "+" if diff >= 0 else "-"
-        delta_txt = f"{signe}{_format_size(abs(diff))} depuis la passe"
+        rate = f" ({_format_size(abs(diff) / dt)}/s)" if dt else ""
+        delta_txt = f"{signe}{_format_size(abs(diff))} depuis la passe{rate}"
     _PANNEAU_ETAT["total_bytes"] = float(total_bytes)
+    _PANNEAU_ETAT["ts"] = now
     print(
-        f"  | TOTAL            | {total_files:>8d} | {_format_size(total_bytes):>10s} |                 |",
+        f"  | TOTAL            | {total_files:>8d} | {_format_size(total_bytes):>10s} | {'':>10s} |                 |",
         flush=True,
     )
     print(sep, flush=True)

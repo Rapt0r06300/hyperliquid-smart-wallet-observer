@@ -1749,7 +1749,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     )
     a = p.parse_args(argv)
     if a.coins.strip().upper() == "AUTO":
-        requested_coins = coins_couverture(a.root)
+        # Wider universe = more independent trades/day across more markets,
+        # which shortens the calendar time needed to reach a statistically
+        # measurable Copy-Vault edge. 8 majors + top-40 liquidation coins
+        # (+ promoted lead-lag) ~= 45-50 instruments, well within HL's per-
+        # connection subscription budget (3 streams/coin).
+        requested_coins = coins_couverture(a.root, k=40)
     else:
         requested_coins = [c.strip() for c in a.coins.split(",") if c.strip()]
     try:
