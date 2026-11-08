@@ -22,6 +22,9 @@ on:
       max_req_min:
         description: "Debit max requetes/min par lane (AIMD, anti-429)"
         default: "55"
+      leaders_file:
+        description: "Fichier JSON des leaders a suivre (commitable, relatif au repo)"
+        default: "config/copy_vault_leaders.json"
   schedule:
     - cron: "17 * * * *"   # une fenetre de collecte par heure (ajuste si besoin)
 
@@ -52,6 +55,7 @@ jobs:
           sparse-checkout: |
             src
             tools
+            config
             runtime/data
           sparse-checkout-cone-mode: true
 
@@ -68,11 +72,28 @@ jobs:
           restore-keys: |
             poll-watermarks-shard-${{ matrix.shard_index }}-
 
+      - name: Garde-fou — la liste de leaders existe et est non vide
+        env:
+          LEADERS_FILE: ${{ github.event.inputs.leaders_file || 'config/copy_vault_leaders.json' }}
+        run: |
+          export PYTHONPATH=src
+          # Echoue TOT et clairement si aucun leader n'est fourni au runner
+          # (cause historique des runs a 0 fill : runtime/data/ protege, jamais commite).
+          n=$(python -B -c "import json,sys; d=json.load(open('${LEADERS_FILE}',encoding='utf-8')); v=d.get('vaults',d) if isinstance(d,dict) else d; print(len([x for x in v if isinstance(x,str) and x.lower().startswith('0x')]))")
+          echo "Leaders dans ${LEADERS_FILE}: ${n}"
+          if [ "${n}" -lt 1 ]; then
+            echo "::error::Aucun leader dans ${LEADERS_FILE} — la collecte ne produirait rien. Commite une liste non vide."
+            exit 1
+          fi
+
       - name: Collecte causale (lane ${{ matrix.shard_index }}/${{ env.SHARD_COUNT }})
+        env:
+          LEADERS_FILE: ${{ github.event.inputs.leaders_file || 'config/copy_vault_leaders.json' }}
         run: |
           export PYTHONPATH=src
           timeout "${{ github.event.inputs.duree_s || '1500' }}" \
             python -B tools/collecter_userfills_poll.py \
+              --leaders-file "${LEADERS_FILE}" \
               --shard-count "${SHARD_COUNT}" \
               --shard-index "${{ matrix.shard_index }}" \
               --max-requests-per-min "${{ github.event.inputs.max_req_min || '55' }}" \
