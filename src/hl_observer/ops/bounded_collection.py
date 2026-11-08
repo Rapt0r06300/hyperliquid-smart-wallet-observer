@@ -54,7 +54,24 @@ def _atomic_write(path: Path, payload: Mapping[str, Any]) -> None:
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    # Windows : os.replace peut echouer transitoirement (WinError 5 / PermissionError)
+    # quand la cible est momentanement verrouillee (antivirus, lecteur concurrent).
+    # On retente brievement au lieu de faire planter le cycle du collecteur.
+    import time as _t
+    derniere: OSError | None = None
+    for tentative in range(8):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError as exc:
+            derniere = exc
+            _t.sleep(0.05 * (tentative + 1))
+    try:
+        temporary.unlink()
+    except OSError:
+        pass
+    if derniere is not None:
+        raise derniere
 
 
 def resolve_project_python(root: str | Path) -> Path:

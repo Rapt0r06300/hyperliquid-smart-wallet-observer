@@ -117,6 +117,10 @@ rem Page de vaults suivie par ce PC = 0. La lane GitHub en suit une autre
 rem (offset distinct) pour couvrir des leaders differents sans chevauchement.
 set "ALINA_VAULT_ROTATION_OFFSET=0"
 set "PYTHONPATH=%CV_ROOT%src;%CV_ROOT%tools;%PYTHONPATH%"
+rem Sorties en UTF-8 pour TOUS les sous-collecteurs : evite les UnicodeEncodeError
+rem (ex. caractere « fleche » non encodable en cp1252 qui faisait planter des cycles).
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
 
 rem --- Dossiers runtime ---
 if not exist "%CV_ROOT%runtime\logs" mkdir "%CV_ROOT%runtime\logs"
@@ -207,6 +211,12 @@ rem DISJOINTE de leaders. Defaut 1/0 (tout en local) ; surcharger par env sur
 rem les autres lanes pour un scaling lineaire sans chevauchement.
 if not defined ALINA_POLL_SHARD_COUNT set "ALINA_POLL_SHARD_COUNT=1"
 if not defined ALINA_POLL_SHARD_INDEX set "ALINA_POLL_SHARD_INDEX=0"
+rem --- Suivi ADAPTATIF des leaders : base curee + traders ACTIFS decouverts par l'explorer ---
+rem     (diversifie les fills ; le debit REST reste cape par l'AIMD anti-429 du poll) ---
+if exist "%CV_ROOT%tools\fusionner_leaders_actifs.py" (
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\fusionner_leaders_actifs.py" --root "%CV_ROOT%." 2>nul
+)
+
 if exist "%CV_ROOT%tools\collecter_userfills_poll.py" (
   del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
   start "ALINA-POLL-LEADERS" /B "%CV_ROOT%tools\_run_poll_leaders.cmd"

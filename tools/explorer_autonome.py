@@ -33,6 +33,7 @@ TAPE_EXPLORER = Path("runtime") / "data" / "explorer_tx_tape.jsonl"
 TAPE_TRADES = Path("runtime") / "data" / "copy_vault_trades_lane.jsonl"
 TAPE_INFERRED = Path("runtime") / "data" / "explorer_inferred_fills.jsonl"
 CANDIDATS = Path("config") / "copy_vault_leaders_candidats.json"
+CLASSEMENT = Path("config") / "leaders_actifs_classement.json"
 LEADERS = Path("config") / "copy_vault_leaders.json"
 
 
@@ -134,6 +135,16 @@ def cycle(root: Path, duree: int, univers: list[str], etat: dict) -> dict:
         (root / CANDIDATS).write_text(json.dumps(
             {"genere_le_ms": now_ms, "candidats": candidats,
              "scores": {u: round(s, 3) for u, s in classement[:50]}},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 1bis) classement d'activité COMPLET (y compris leaders suivis) -> priorisation du suivi.
+    #       Permet de suivre en priorité les traders RÉELLEMENT actifs (budget constant).
+    complet = rang_activite(rows_exp, now_ms=now_ms)
+    if complet:
+        (root / CLASSEMENT).parent.mkdir(parents=True, exist_ok=True)
+        (root / CLASSEMENT).write_text(json.dumps(
+            {"genere_le_ms": now_ms, "n": len(complet),
+             "actifs": [{"vault": u, "score": round(s, 3)} for u, s in complet[:200]]},
             ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 2) ordres (intention) des leaders connus -> estimation de fills via trades
