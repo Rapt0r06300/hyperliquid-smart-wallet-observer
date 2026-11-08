@@ -111,15 +111,25 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at_utc": "2026-11-08T16:14:41.198546Z",
+      "event": "WATCHDOG_OWNER_RUN_TERMINATED",
+      "owner_run_conclusion": "failure",
+      "owner_run_id": "42451572383",
+      "owner_run_status": "completed",
+      "previous_lease": {
+        "acquired_at": "2026-11-08T05:41:45.771294Z",
+        "expires_at": "2026-11-08T11:26:45.771294Z",
+        "lease_token_sha256": "48af2be737367e75399bb06b5e52f65b38935544fda67d7f4e23a705daedf401",
+        "owner_run_id": "42451572383"
+      },
+      "previous_status": "RUNNING",
+      "reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
     }
   ],
   "kind": "event_intelligence_collection",
-  "lease": {
-    "acquired_at": "2026-11-08T05:41:45.771294Z",
-    "expires_at": "2026-11-08T11:26:45.771294Z",
-    "lease_token_sha256": "48af2be737367e75399bb06b5e52f65b38935544fda67d7f4e23a705daedf401",
-    "owner_run_id": "42451572383"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -137,9 +147,10 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+  "stuck_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
   "terminal_evidence_digest": "ed83cbc0f9b0a78b9c2c5c4c1e14869efd669dd350fff052ece2f7fe018ed40e",
-  "updated_at": "2026-11-08T05:41:45.771357Z",
+  "updated_at": "2026-11-08T16:14:41.198546Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
