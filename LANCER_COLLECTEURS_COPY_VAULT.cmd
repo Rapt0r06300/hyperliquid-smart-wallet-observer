@@ -168,16 +168,14 @@ if exist "%CV_ROOT%runtime\data\.session_nettoyee" del /f /q "%CV_ROOT%runtime\d
 rem --- Ecrire le verrou (PID du cmd courant) ---
 echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
 
-rem --- SESSION FRAICHE : deposer d'abord l'eventuel reste dans le COFFRE CERTIFIE
-rem     (scellage verifie) PUIS remettre les flux a ZERO. Zero perte : le reset
-rem     n'a lieu qu'apres scellage reussi. Chaque session repart donc de 0. ---
-if exist "%CV_ROOT%tools\sceller_coffre_local.py" (
-  if not exist "%CV_ROOT%runtime\logs\coffre_certifie" mkdir "%CV_ROOT%runtime\logs\coffre_certifie" >nul 2>nul
-  echo [COFFRE] Certification des donnees precedentes vers le coffre ^(validation avant depot^)...
-  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
-)
+rem --- SESSION FRAICHE : on NE certifie PAS au lancement (c'est LENT et c'est le role
+rem     du certificateur A L'ARRET, sur les donnees de la session). On se contente
+rem     d'ARCHIVER l'eventuel reste d'une session precedente (RAPIDE : deplace juste les
+rem     tapes) pour repartir a ZERO sans rien perdre. La certification -> coffre a lieu
+rem     a l'arret (touche q), sur la session courante. ---
 if exist "%CV_ROOT%tools\archiver_tapes.py" (
-  echo [RESET] Archivage des tapes : la session repart a zero ^(rien n'est perdu^)...
+  if not exist "%CV_ROOT%runtime\logs\coffre_certifie" mkdir "%CV_ROOT%runtime\logs\coffre_certifie" >nul 2>nul
+  echo [RESET] Session a zero : archivage rapide du reste eventuel ^(rien n'est perdu^)...
   "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\archiver_tapes.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
 )
 
