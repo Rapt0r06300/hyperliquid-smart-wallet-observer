@@ -1536,7 +1536,10 @@ def test_modified_historical_jsonl_relocation_stays_protected(repos):
 
     rc, receipt = run_sync(local)
 
-    assert rc == 2 and receipt["status"] == "NO_GO"
+    # Donnee protegee modifiee localement + GitHub aligne : plus de faux NO_GO.
+    # Le resultat correct est SYNCHRONIZED « rien a publier » -- l'INVARIANT reste
+    # la PROTECTION : rien n'est committe, rien n'est pousse, rien n'est ecrase.
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
     assert receipt["local_commit_created"] is False
     assert receipt["push_attempts"] == 0
     assert archived.read_text(encoding="utf-8") == payload + '{"task":"changed"}\n'
@@ -1555,7 +1558,10 @@ def test_tracked_modified_data_never_overwritten(repos):
     git(local, "push", "origin", "main")
     data.write_text("my latest local bytes\n")
     rc, receipt = run_sync(local)
-    assert rc == 2 and receipt["status"] == "NO_GO"
+    # GitHub aligne + seule une donnee locale protegee a change : SYNCHRONIZED
+    # « rien a faire » (plus de faux NO_GO). INVARIANT : la donnee n'est JAMAIS
+    # ecrasee ni publiee.
+    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
     assert data.read_text() == "my latest local bytes\n"
     assert git(origin, "show", "main:data/safe.jsonl") == "initial"
 
