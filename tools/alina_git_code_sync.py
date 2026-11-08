@@ -1907,12 +1907,24 @@ class Synchronizer:
             path for path in staged + tracked + untracked if _protected(path)
         })
         if observed_remote == local and protected_local:
+            # Etat NORMAL apres une collecte : aucun CODE a publier, GitHub deja
+            # aligne, il ne reste que des DONNEES locales protegees (runtime/data,
+            # configs runtime, archives...). Ce n'est PAS un echec et il n'y a rien
+            # a reconcilier -- on termine PROPREMENT en laissant ces donnees intactes
+            # (jamais publiees, par design) au lieu de faire croire a un blocage.
             self.report["protected_local_changes"] = protected_local
-            raise SyncBlocked(
-                "Donnees locales protegees modifiees alors que GitHub est deja "
-                "aligne; aucun raccourci silencieux. Relancer apres traitement "
-                "manuel des donnees SAFE."
+            self.report["remote_sha_observed"] = observed_remote
+            self.report["fast_path"] = "CLEAN_REMOTE_MATCH_PROTECTED_DATA_ONLY"
+            self.report["local_syntax_check"] = "NO_PYTHON_CHANGED"
+            self.report["status"] = "SYNCHRONIZED"
+            self.report["head_after"] = local
+            self.report["checkpoint_sha_after_reconcile"] = local
+            self.say(
+                f"[RIEN A FAIRE] Code deja a jour sur GitHub ({local[:12]}). "
+                f"{len(protected_local)} fichier(s) de DONNEES locales laisse(s) "
+                f"intact(s) -- jamais publie(s), c'est normal apres une collecte."
             )
+            return True
         if observed_remote != local:
             fetched_remote = self._fetch_remote_snapshot(observed_remote)
             if fetched_remote == local:
