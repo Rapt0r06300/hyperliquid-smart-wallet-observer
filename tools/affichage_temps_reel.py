@@ -8,6 +8,7 @@ n'écrit rien, n'interfère pas avec les collecteurs. Ctrl+C pour quitter.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -57,7 +58,15 @@ def formater_fill(obj: dict) -> str | None:
         sens = "  -  "
     vault = str(obj.get("vault") or obj.get("user") or "")
     court = (vault[:6] + ".." + vault[-4:]) if len(vault) > 12 else vault
-    return f"{sens:<5} {str(coin):<7} px={px:<12.6g} sz={sz:<12.6g} {court}"
+    ts = obj.get("ts_ms") or obj.get("exchange_ts_ms") or obj.get("observed_at_ms") or obj.get("time")
+    heure = "  --:--  "
+    if isinstance(ts, (int, float)) and ts > 1e12:
+        try:
+            heure = datetime.datetime.fromtimestamp(ts / 1000).strftime("%H:%M:%S")
+        except (OSError, ValueError, OverflowError):
+            pass
+    valeur = px * sz
+    return f"{heure}  {sens:<5} {str(coin):<7} px={px:<11.6g} sz={sz:<11.6g} ~{valeur:>9.0f}$  {court}"
 
 
 def _fichiers(data_dir: Path, motif: str) -> list[Path]:
@@ -72,8 +81,10 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 12) -> 
     offsets: dict[str, int] = {}
     totaux: dict[str, int] = {label: 0 for label, _, _ in FLUX}
     precedents: dict[str, int] = dict(totaux)
+    maj_ts: dict[str, float] = {}
     derniers_fills: list[str] = []
     debut = time.time()
+    total_initial: int | None = None
     try:
         while True:
             for label, motif, est_fill in FLUX:
