@@ -6,8 +6,8 @@ echo.
 echo Noeud Hyperliquid - distro DEDIEE Ubuntu. On ne touche PAS Salad.
 echo Laisse la fenetre OUVERTE. Ctrl+C pour arreter.
 echo.
-wsl -d Ubuntu -e true 2>nul
-if errorlevel 1 goto noubuntu
+wsl -d Ubuntu -e true >nul 2>nul
+if not "%errorlevel%"=="0" goto noubuntu
 for /f "delims=" %%p in ('wsl -d Ubuntu wslpath "%~dp0tools\noeud_run.sh"') do set "SHP=%%p"
 wsl -d Ubuntu bash -c "sed -i 's/\r$//' '%SHP%'"
 wsl -d Ubuntu bash "%SHP%"
