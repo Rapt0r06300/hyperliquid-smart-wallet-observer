@@ -246,6 +246,18 @@ if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" del /f /q "%CV_ROOT%runti
 rem --- Superviseur des collecteurs EN ARRIERE-PLAN (boucle resiliente, log dedie) ---
 start "ALINA-SUPERVISOR" /B "%CV_ROOT%tools\_run_supervisor_loop.cmd"
 echo [SUPERVISEUR] Collecteurs demarres en arriere-plan - log: runtime\logs\supervisor.log
+
+rem --- Declenche AUSSI les lanes de collecte sur GitHub (multi-IP, gratuit car repo public) ---
+rem     fail-soft : si gh absent/non connecte, la collecte locale continue normalement.
+where gh >nul 2>nul
+if errorlevel 1 (
+  echo [GITHUB] gh CLI absent : lanes GitHub non declenchees. ^(Installe gh + 'gh auth login' pour le multi-IP.^)
+) else (
+  echo [GITHUB] Declenchement des lanes de collecte sur GitHub ^(poll/WS/L2/market/contexte/explorer^)...
+  for %%W in (copy-vault-poll-lanes userfills-live-lanes copy-vault-l2-lanes copy-vault-market-lanes copy-vault-contexte-lanes explorer-collecte) do (
+    gh workflow run "%%W.yml" --ref main >nul 2>nul && echo   [GITHUB] %%W : declenche || echo   [GITHUB] %%W : non declenche
+  )
+)
 echo.
 echo   ============================================================
 echo     ECRAN UNIQUE : tous les collecteurs + toutes les donnees
