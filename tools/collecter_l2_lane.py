@@ -30,8 +30,65 @@ from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E40
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_l2_lane.jsonl"
+BBO_OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_bbo_lane.jsonl"
 DEFAULT_COINS_FILE = "config/copy_vault_coins.json"
 COINS_PAR_CONNEXION = 40          # l2Book non cap par user ; on groupe pour limiter les connexions
+LAG_MAX_MS = 30_000               # fraîcheur causale (aligné sur le labo MAX_TARGET_LAG_MS)
+
+
+def _nb(v):
+    try:
+        import math
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def construire_bbo(data: Any, *, recv_ms: int) -> tuple[dict[str, Any] | None, str]:
+    """Construit un top-of-book BBO (schema ``hypersmart.copy_vault_bbo.v1``) depuis
+    une frame HL l2Book, pour nourrir le REPLI BBO du labo (apparie plus de fills
+    quand le L2 complet manque). Validation causale : received >= exchange, lag borné,
+    non croisé, positif. Renvoie (row|None, raison).
+    """
+    if not isinstance(data, dict):
+        return None, "frame_invalide"
+    coin = data.get("coin")
+    exch = data.get("time")
+    niveaux = data.get("levels")
+    if not isinstance(niveaux, list) or len(niveaux) != 2:
+        return None, "niveaux_absents"
+
+    def top(side):
+        if isinstance(side, list) and side:
+            e = side[0]
+            if isinstance(e, dict):
+                return _nb(e.get("px")), _nb(e.get("sz"))
+            if isinstance(e, (list, tuple)) and len(e) >= 2:
+                return _nb(e[0]), _nb(e[1])
+        return None, None
+
+    bid_px, bid_sz = top(niveaux[0])
+    ask_px, ask_sz = top(niveaux[1])
+    if None in (bid_px, bid_sz, ask_px, ask_sz):
+        return None, "cote_vide"
+    if not isinstance(exch, int) or exch <= 0:
+        return None, "exchange_ts_invalide"
+    if not (recv_ms >= exch and recv_ms - exch <= LAG_MAX_MS):
+        return None, "lag_causal_depasse"
+    if not (bid_px > 0 and ask_px > bid_px and bid_sz > 0 and ask_sz > 0):
+        return None, "bbo_invalide_ou_croise"
+    from hl_observer.datasets.coffre_certifie import _canonical_coin  # léger
+    c = _canonical_coin(coin)
+    if not c:
+        return None, "coin_absent"
+    return {
+        "schema_version": "hypersmart.copy_vault_bbo.v1", "coin": c,
+        "received_at_ms": int(recv_ms), "exchange_ts_ms": int(exch),
+        "bid_px": bid_px, "bid_sz": bid_sz, "ask_px": ask_px, "ask_sz": ask_sz,
+        "source": "HYPERLIQUID_BBO_WS", "data_origin": "REAL_OBSERVED",
+        "causal_observation": True,
+    }, ""
 
 
 def construire_carnet(data: Any, *, recv_ms: int) -> tuple[dict[str, Any] | None, str]:
@@ -74,12 +131,17 @@ def construire_carnet(data: Any, *, recv_ms: int) -> tuple[dict[str, Any] | None
 
 
 class LaneL2:
-    def __init__(self, out_path: Path) -> None:
+    def __init__(self, out_path: Path, bbo_out_path: Path) -> None:
         self.out_path = out_path
+        self.bbo_out_path = bbo_out_path
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
+        self.bbo_out_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
-        self.dernier_ts: dict[str, int] = {}   # coin -> dernier exchange_ts ecrit (dedup)
+        self._lock_bbo = asyncio.Lock()
+        self.dernier_ts: dict[str, int] = {}       # coin -> dernier exchange_ts carnet (dedup)
+        self.dernier_ts_bbo: dict[str, int] = {}   # coin -> dernier exchange_ts BBO (dedup)
         self.emis = 0
+        self.emis_bbo = 0
         self.rejets = 0
         self.reconnects = 0
 
@@ -93,6 +155,17 @@ class LaneL2:
             with self.out_path.open("a", encoding="utf-8") as h:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
             self.emis += 1
+
+    async def ecrire_bbo(self, row: dict[str, Any]) -> None:
+        coin = str(row.get("coin"))
+        exch = int(row.get("exchange_ts_ms") or 0)
+        if exch <= self.dernier_ts_bbo.get(coin, 0):
+            return
+        self.dernier_ts_bbo[coin] = exch
+        async with self._lock_bbo:
+            with self.bbo_out_path.open("a", encoding="utf-8") as h:
+                h.write(json.dumps(row, ensure_ascii=False) + "\n")
+            self.emis_bbo += 1
 
 
 async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: float) -> None:
@@ -127,6 +200,11 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                     data = msg.get("data")
                     if not isinstance(data, dict) or str(data.get("coin") or "").upper() not in connus:
                         continue
+                    # BBO (top-of-book) : nourrit le repli BBO du labo, meme si le L2
+                    # complet est rejete sur ce frame.
+                    bbo, _rb = construire_bbo(data, recv_ms=recv_ms)
+                    if bbo is not None:
+                        await lane.ecrire_bbo(bbo)
                     row, _raison = construire_carnet(data, recv_ms=recv_ms)
                     if row is None:
                         lane.rejets += 1
@@ -162,7 +240,10 @@ async def _boucle(args: argparse.Namespace) -> int:
         print("[l2-lane] aucun coin pour cette lane.", flush=True)
         return 0
     out = Path(args.out) if args.out else (root / OUT_DEFAUT)
-    lane = LaneL2(out if out.is_absolute() else root / out)
+    out = out if out.is_absolute() else root / out
+    bbo_out = Path(args.bbo_out) if args.bbo_out else (root / BBO_OUT_DEFAUT)
+    bbo_out = bbo_out if bbo_out.is_absolute() else root / bbo_out
+    lane = LaneL2(out, bbo_out)
     pas = max(1, int(args.coins_par_connexion))
     groupes = [lane_coins[i:i + pas] for i in range(0, len(lane_coins), pas)]
     deadline = time.monotonic() + max(10.0, float(args.duree_s))
@@ -171,8 +252,8 @@ async def _boucle(args: argparse.Namespace) -> int:
     taches = [asyncio.create_task(_connexion(lane, grp, chr(65 + i), deadline))
               for i, grp in enumerate(groupes)]
     await asyncio.gather(*taches, return_exceptions=True)
-    print(f"[l2-lane] fini : {lane.emis} carnets L2 emis, {lane.rejets} rejets, "
-          f"{lane.reconnects} reconnexions -> {lane.out_path}", flush=True)
+    print(f"[l2-lane] fini : {lane.emis} carnets L2 + {lane.emis_bbo} BBO emis, "
+          f"{lane.rejets} rejets, {lane.reconnects} reconnexions -> {lane.out_path}", flush=True)
     return 0
 
 
@@ -185,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--coins-par-connexion", type=int, default=COINS_PAR_CONNEXION)
     p.add_argument("--duree-s", type=float, default=1500.0)
     p.add_argument("--out", default="")
+    p.add_argument("--bbo-out", default="")
     args = p.parse_args(argv)
     try:
         return asyncio.run(_boucle(args))

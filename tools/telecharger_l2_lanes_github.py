@@ -26,6 +26,9 @@ from telecharger_fills_lanes_github import _gh_reel, gh_disponible, telecharger_
 WORKFLOW = "copy-vault-l2-lanes.yml"
 CIBLE = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 MOTIF = "copy_vault_l2_lane.jsonl"
+CIBLE_BBO = Path("runtime") / "data" / "copy_vault_bbo_tape.jsonl"
+MOTIF_BBO = "copy_vault_bbo_lane.jsonl"
+LAG_MAX_MS = 30_000
 
 
 def _lire_jsonl(path: Path) -> list[dict]:
@@ -100,6 +103,54 @@ def fusionner_carnets(root: Path, artefacts: Path, *, now_ms: int | None = None)
             "total_final": len(fusionnes)}
 
 
+def _bbo_valide(r: dict, now_ms: int) -> bool:
+    if not isinstance(r, dict) or r.get("schema_version") != "hypersmart.copy_vault_bbo.v1":
+        return False
+    try:
+        recv = int(r["received_at_ms"]); exch = int(r["exchange_ts_ms"])
+        bpx = float(r["bid_px"]); bsz = float(r["bid_sz"])
+        apx = float(r["ask_px"]); asz = float(r["ask_sz"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (recv >= exch > 0 and recv - exch <= LAG_MAX_MS
+            and bpx > 0 and apx > bpx and bsz > 0 and asz > 0)
+
+
+def fusionner_bbo(root: Path, artefacts: Path, *, now_ms: int | None = None) -> dict:
+    """Fusionne les BBO locaux + ceux des lanes (schema v1), dédup (coin, exchange_ts)."""
+    import time as _t
+    now_ms = int(now_ms if now_ms is not None else _t.time() * 1000)
+    cible = root / CIBLE_BBO
+    sources: list[Path] = []
+    if cible.exists():
+        sources.append(cible)
+    sources.extend(sorted(p for p in artefacts.rglob(MOTIF_BBO) if p.resolve() != cible.resolve()))
+    par_cle: dict[tuple, dict] = {}
+    rejets = entrees = 0
+    for src in sources:
+        for row in _lire_jsonl(src):
+            entrees += 1
+            if not _bbo_valide(row, now_ms):
+                rejets += 1
+                continue
+            par_cle.setdefault((row.get("coin"), row.get("exchange_ts_ms")), row)
+    fusionnes = sorted(par_cle.values(), key=lambda r: (int(r.get("received_at_ms") or 0), str(r.get("coin"))))
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cible.with_suffix(".jsonl.fusion.tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        for row in fusionnes:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    if cible.exists():
+        bak = cible.with_suffix(".jsonl.avant-fusion.bak")
+        if bak.exists():
+            bak.unlink()
+        cible.rename(bak)
+    tmp.rename(cible)
+    return {"entrees": entrees, "rejets_qualite": rejets,
+            "doublons_retires": max(0, entrees - len(fusionnes) - rejets),
+            "total_final": len(fusionnes)}
+
+
 def _lister_runs(gh, cwd: Path, limite: int) -> list[str]:
     res = gh(["run", "list", "--workflow", WORKFLOW, "-L", str(max(1, limite * 3)),
               "--json", "databaseId,status,conclusion"], cwd)
@@ -129,7 +180,8 @@ def telecharger_et_fusionner(root: Path, *, gh=_gh_reel, limite_runs: int = 3) -
         telecharges = telecharger_runs(gh, root, run_ids, tmp)
         if telecharges == 0:
             return {"statut": "telechargement_vide", "runs": 0, "fusion": None}
-        return {"statut": "OK", "runs": telecharges, "fusion": fusionner_carnets(root, tmp)}
+        return {"statut": "OK", "runs": telecharges,
+                "fusion": fusionner_carnets(root, tmp), "fusion_bbo": fusionner_bbo(root, tmp)}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -151,8 +203,10 @@ def main(argv: list[str] | None = None) -> int:
         print("[l2-lanes] aucun artefact telecharge (expires ?) -> rien a fusionner.", flush=True)
         return 0
     f = res["fusion"]
-    print(f"[l2-lanes] {res['runs']} run(s) rapatrie(s) ; total final {f['total_final']} carnets "
-          f"(doublons {f['doublons_retires']}, rejets {f['rejets_qualite']}).", flush=True)
+    fb = res.get("fusion_bbo") or {}
+    print(f"[l2-lanes] {res['runs']} run(s) rapatrie(s) ; L2 total {f['total_final']} carnets "
+          f"(doublons {f['doublons_retires']}, rejets {f['rejets_qualite']}) ; "
+          f"BBO total {fb.get('total_final', 0)} (repli).", flush=True)
     return 0
 
 

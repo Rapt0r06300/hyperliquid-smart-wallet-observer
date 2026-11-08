@@ -79,6 +79,7 @@ jobs:
             --shard-index "${{ matrix.shard_index }}" \
             --duree-s "${{ github.event.inputs.duree_s || '1500' }}" \
             --out runtime/data/copy_vault_l2_lane.jsonl \
+            --bbo-out runtime/data/copy_vault_bbo_lane.jsonl \
           || true
 
       - name: Publier les carnets L2 causaux de la lane
@@ -86,6 +87,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: l2-shard-${{ matrix.shard_index }}
-          path: runtime/data/copy_vault_l2_lane.jsonl
+          path: |
+            runtime/data/copy_vault_l2_lane.jsonl
+            runtime/data/copy_vault_bbo_lane.jsonl
           if-no-files-found: ignore
           retention-days: 5

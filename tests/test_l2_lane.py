@@ -53,6 +53,26 @@ def test_charger_coins(tmp_path):
     assert coins == ["ETH", "BTC", "SOL"]  # dédupliqué, normalisé en majuscules
 
 
+def test_construire_bbo_valide():
+    row, raison = L.construire_bbo(_frame(), recv_ms=NOW)
+    assert row is not None and raison == ""
+    assert row["schema_version"] == "hypersmart.copy_vault_bbo.v1"
+    assert row["bid_px"] == 2000.0 and row["ask_px"] == 2001.0
+    assert row["bid_sz"] == 5.0 and row["ask_sz"] == 4.0
+    assert row["coin"] == "ETH" and row["source"] == "HYPERLIQUID_BBO_WS"
+
+
+def test_construire_bbo_croise_rejete():
+    row, raison = L.construire_bbo(
+        _frame(bids=[{"px": "2002", "sz": "1"}], asks=[{"px": "2001", "sz": "1"}]), recv_ms=NOW)
+    assert row is None and raison == "bbo_invalide_ou_croise"
+
+
+def test_construire_bbo_lag_rejete():
+    row, raison = L.construire_bbo(_frame(exch=NOW - 10_000_000), recv_ms=NOW)
+    assert row is None and raison == "lag_causal_depasse"
+
+
 def test_fusionner_carnets_dedup(tmp_path):
     import telecharger_l2_lanes_github as T
     root = tmp_path
@@ -76,4 +96,26 @@ def test_fusionner_carnets_dedup(tmp_path):
     # 2 instants distincts (NOW-1000 et NOW-999), doublons retirés
     assert rap["total_final"] == 2
     cible = root / "runtime" / "data" / "copy_vault_l2_tape.jsonl"
+    assert cible.exists() and len(cible.read_text().splitlines()) == 2
+
+
+def test_fusionner_bbo_dedup(tmp_path):
+    import telecharger_l2_lanes_github as T
+    root = tmp_path
+    (root / "runtime" / "data").mkdir(parents=True)
+
+    def _bbo(exch):
+        return {"schema_version": "hypersmart.copy_vault_bbo.v1", "coin": "ETH",
+                "received_at_ms": exch + 50, "exchange_ts_ms": exch,
+                "bid_px": 2000.0, "bid_sz": 5.0, "ask_px": 2001.0, "ask_sz": 4.0,
+                "source": "HYPERLIQUID_BBO_WS"}
+
+    art = root / "art"
+    d = art / "l2-shard-0"
+    d.mkdir(parents=True)
+    rows = [_bbo(NOW - 1000), _bbo(NOW - 1000), _bbo(NOW - 500)]  # 1 doublon
+    (d / "copy_vault_bbo_lane.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    rap = T.fusionner_bbo(root, art, now_ms=NOW)
+    assert rap["total_final"] == 2  # 2 instants distincts
+    cible = root / "runtime" / "data" / "copy_vault_bbo_tape.jsonl"
     assert cible.exists() and len(cible.read_text().splitlines()) == 2
