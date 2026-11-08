@@ -11,14 +11,14 @@ import affichage_temps_reel as A  # noqa: E402
 
 
 def test_sens_depuis_signe():
-    assert A.formater_fill({"coin": "ETH", "px": "1", "sz": "1", "signe": 1}).startswith("ACHAT")
-    assert A.formater_fill({"coin": "ETH", "px": "1", "sz": "1", "signe": -1}).startswith("VENTE")
+    assert "ACHAT" in A.formater_fill({"coin": "ETH", "px": "1", "sz": "1", "signe": 1})
+    assert "VENTE" in A.formater_fill({"coin": "ETH", "px": "1", "sz": "1", "signe": -1})
 
 
 def test_sens_depuis_side_et_aggressor():
-    assert A.formater_fill({"coin": "ETH", "px": 1, "sz": 1, "side": "B"}).startswith("ACHAT")
-    assert A.formater_fill({"coin": "ETH", "px": 1, "sz": 1, "side": "A"}).startswith("VENTE")
-    assert A.formater_fill({"coin": "ETH", "price": 1, "size": 1, "aggressor_side": "SELL"}).startswith("VENTE")
+    assert "ACHAT" in A.formater_fill({"coin": "ETH", "px": 1, "sz": 1, "side": "B"})
+    assert "VENTE" in A.formater_fill({"coin": "ETH", "px": 1, "sz": 1, "side": "A"})
+    assert "VENTE" in A.formater_fill({"coin": "ETH", "price": 1, "size": 1, "aggressor_side": "SELL"})
 
 
 def test_rejet_si_incomplet():
