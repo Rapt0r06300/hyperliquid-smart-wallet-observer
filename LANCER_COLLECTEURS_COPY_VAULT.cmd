@@ -151,6 +151,14 @@ if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
   del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
 )
 taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
+rem Idem explorer autonome + superviseur de fond (orphelins d'un Ctrl+C+O precedent).
+if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
+  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
+  del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
+)
+taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
+if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 
 rem --- Ecrire le verrou (PID du cmd courant) ---
 echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
@@ -239,7 +247,8 @@ echo [SUPERVISEUR] Collecteurs demarres en arriere-plan - log: runtime\logs\supe
 echo.
 echo   ============================================================
 echo     ECRAN UNIQUE : tous les collecteurs + toutes les donnees
-echo     Ctrl+C ici = arret propre + envoi au coffre certifie + reset
+echo     Appuyez sur  q  pour ARRETER proprement ^(evite le prompt O/N^)
+echo     -^> envoi au coffre certifie + reset + rapport automatiques
 echo   ============================================================
 echo.
 timeout /t 2 /nobreak >nul 2>nul

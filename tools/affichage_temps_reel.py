@@ -105,6 +105,28 @@ def _cls():
     os.system("cls" if os.name == "nt" else "clear")
 
 
+def _attendre_ou_quitter(duree: float) -> bool:
+    """Attend `duree` secondes ; renvoie True si l'utilisateur a appuye sur 'q'.
+
+    Sur Windows, 'q' permet un arret PROPRE sans declencher le prompt cmd
+    « Terminer le programme (O/N) ? » (qui, repondu O, tue le batch avant le
+    nettoyage et laisse les collecteurs de fond orphelins).
+    """
+    try:
+        import msvcrt  # Windows uniquement
+    except ImportError:
+        time.sleep(duree)
+        return False
+    fin = time.time() + duree
+    while time.time() < fin:
+        if msvcrt.kbhit():
+            touche = msvcrt.getch()
+            if touche in (b"q", b"Q"):
+                return True
+        time.sleep(0.05)
+    return False
+
+
 def _et(ok: bool) -> str:
     return "ACTIF " if ok else "arrete"
 
@@ -167,7 +189,7 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> 
             maintenant = time.time()
             print("=" * 74)
             print("  ALINA - ECRAN UNIQUE : TOUS LES COLLECTEURS + TOUTES LES DONNEES")
-            print(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}        (Ctrl+C pour quitter)")
+            print(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}    >>> Appuyez sur  q  pour ARRETER proprement <<<")
             print("=" * 74)
             sup = (data_dir / "collecteurs.lock").exists()
             poll = (data_dir / "poll_leaders.pid").exists()
@@ -217,7 +239,9 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> 
             else:
                 print("   (en attente de fills...)")
             print("=" * 74, flush=True)
-            time.sleep(intervalle)
+            if _attendre_ou_quitter(intervalle):
+                print("\n[q] Arret demande. Nettoyage et depot au coffre en cours...")
+                return 0
     except KeyboardInterrupt:
         print("\nArret de l'affichage.")
         return 0
