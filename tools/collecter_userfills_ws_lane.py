@@ -110,6 +110,7 @@ class LaneWS:
         self.emis = 0
         self.reconnects = 0
         self.gapfills = 0
+        self.resubscribes = 0
 
     async def emettre(self, fills: list[dict[str, Any]], *, observed_at_ms: int) -> None:
         if not fills:
@@ -155,21 +156,38 @@ async def _connexion(lane: LaneWS, users: list[str], socket_id: str, deadline: f
     serie = 0
     while time.monotonic() < deadline:
         try:
-            async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
+            # compression="deflate" : permessage-deflate explicite (plus de subs/bande passante).
+            async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22,
+                                          compression="deflate") as ws:
                 serie += 1
                 connection_id = f"ws-lane-{socket_id}-{int(time.time()*1000)}-{serie}"
-                for v in users:
-                    await ws.send(json.dumps({"method": "subscribe",
-                                              "subscription": {"type": "userFills", "user": v}}))
-                    await asyncio.sleep(0.3)   # throttle anti-drop HL
+
+                async def _souscrire(cibles):
+                    for v in cibles:
+                        await ws.send(json.dumps({"method": "subscribe",
+                                                  "subscription": {"type": "userFills", "user": v}}))
+                        await asyncio.sleep(0.3)   # throttle anti-drop HL
+
+                await _souscrire(users)
+                acks: set[str] = set()
+                t_check = time.monotonic()
                 print(f"[ws-lane] socket {socket_id} : {len(users)} userFills souscrits", flush=True)
                 while time.monotonic() < deadline:
                     reste = max(0.0, deadline - time.monotonic())
                     try:
-                        brut = await asyncio.wait_for(ws.recv(), timeout=min(30.0, reste or 1.0))
+                        brut = await asyncio.wait_for(ws.recv(), timeout=min(10.0, reste or 1.0))
                     except asyncio.TimeoutError:
                         if time.monotonic() >= deadline:
                             return
+                        # A23 : re-subscribe des users NON confirmes (subscribe perdu cote HL).
+                        if time.monotonic() - t_check >= 12.0:
+                            manquants = [connus[u] for u in connus if u not in acks]
+                            if manquants:
+                                lane.resubscribes += len(manquants)
+                                print(f"[ws-lane] socket {socket_id} re-subscribe "
+                                      f"{len(manquants)} non confirme(s)", flush=True)
+                                await _souscrire(manquants)
+                            t_check = time.monotonic()
                         continue
                     recv_mono_ns = time.monotonic_ns()
                     recv_wall_ms = int(time.time() * 1000)
@@ -180,7 +198,11 @@ async def _connexion(lane: LaneWS, users: list[str], socket_id: str, deadline: f
                     if not isinstance(msg, dict):
                         continue
                     if msg.get("channel") == "subscriptionResponse":
-                        continue  # ACK (confirmation)
+                        d = msg.get("data")
+                        sub = d.get("subscription") if isinstance(d, dict) else None
+                        if isinstance(sub, dict) and str(sub.get("user") or "").lower() in connus:
+                            acks.add(str(sub.get("user")).lower())   # confirmation reelle
+                        continue
                     data = msg.get("data")
                     if msg.get("channel") != "userFills" or not isinstance(data, dict):
                         continue
@@ -244,7 +266,17 @@ async def _boucle(args: argparse.Namespace) -> int:
               for i, grp in enumerate(groupes)]
     await asyncio.gather(*taches, return_exceptions=True)
     print(f"[ws-lane] fini : {lane.emis} fills LIVE_WS emis, {lane.gapfills} par gap-fill, "
-          f"{lane.reconnects} reconnexions -> {lane.out_path}", flush=True)
+          f"{lane.reconnects} reconnexions, {lane.resubscribes} re-subscribes -> {lane.out_path}", flush=True)
+    # B29 : sante JSON de la lane (metriques, sans changer l'affichage console).
+    try:
+        sante = {"lane": f"{args.shard_index}/{args.shard_count}", "leaders": len(lane_leaders),
+                 "fills_emis": lane.emis, "gapfills": lane.gapfills,
+                 "reconnects": lane.reconnects, "resubscribes": lane.resubscribes,
+                 "genere_ms": int(time.time() * 1000)}
+        (lane.out_path.parent / f"ws_lane_sante_{args.shard_index}.json").write_text(
+            json.dumps(sante, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
     return 0
 
 

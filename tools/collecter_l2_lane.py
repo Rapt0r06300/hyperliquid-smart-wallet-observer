@@ -34,6 +34,7 @@ BBO_OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_bbo_lane.jsonl"
 DEFAULT_COINS_FILE = "config/copy_vault_coins.json"
 COINS_PAR_CONNEXION = 40          # l2Book non cap par user ; on groupe pour limiter les connexions
 LAG_MAX_MS = 30_000               # fraîcheur causale (aligné sur le labo MAX_TARGET_LAG_MS)
+GAP_L2_MS = 15_000                # B6 : au-delà, un coin silencieux compte comme un trou L2
 
 
 def _nb(v):
@@ -144,12 +145,17 @@ class LaneL2:
         self.emis_bbo = 0
         self.rejets = 0
         self.reconnects = 0
+        self.gaps = 0        # B6 : trous L2 detectes (coin silencieux > seuil)
 
     async def ecrire(self, row: dict[str, Any]) -> None:
         coin = str(row.get("coin"))
         exch = int(row.get("exchange_ts_ms") or 0)
-        if exch <= self.dernier_ts.get(coin, 0):
+        precedent = self.dernier_ts.get(coin, 0)
+        if exch <= precedent:
             return  # deja un carnet >= cet instant pour ce coin
+        # B6 : detection de trou (le coin est reste silencieux plus longtemps que le seuil).
+        if precedent and exch - precedent > GAP_L2_MS:
+            self.gaps += 1
         self.dernier_ts[coin] = exch
         async with self._lock:
             with self.out_path.open("a", encoding="utf-8") as h:
@@ -175,7 +181,8 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
     serie = 0
     while time.monotonic() < deadline:
         try:
-            async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
+            async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22,
+                                          compression="deflate") as ws:  # A22 permessage-deflate
                 serie += 1
                 for c in coins:
                     await ws.send(json.dumps({"method": "subscribe",
@@ -253,7 +260,18 @@ async def _boucle(args: argparse.Namespace) -> int:
               for i, grp in enumerate(groupes)]
     await asyncio.gather(*taches, return_exceptions=True)
     print(f"[l2-lane] fini : {lane.emis} carnets L2 + {lane.emis_bbo} BBO emis, "
-          f"{lane.rejets} rejets, {lane.reconnects} reconnexions -> {lane.out_path}", flush=True)
+          f"{lane.rejets} rejets, {lane.reconnects} reconnexions, {lane.gaps} trous L2 "
+          f"-> {lane.out_path}", flush=True)
+    # B29 : sante JSON de la lane (metriques, sans changer l'affichage console).
+    try:
+        sante = {"lane": f"{args.shard_index}/{args.shard_count}", "coins": len(lane_coins),
+                 "carnets_emis": lane.emis, "bbo_emis": lane.emis_bbo, "rejets": lane.rejets,
+                 "reconnects": lane.reconnects, "trous_l2": lane.gaps,
+                 "genere_ms": int(time.time() * 1000)}
+        (lane.out_path.parent / f"l2_lane_sante_{args.shard_index}.json").write_text(
+            json.dumps(sante, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
     return 0
 
 
