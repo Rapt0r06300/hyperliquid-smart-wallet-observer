@@ -182,7 +182,8 @@ DEFAULT_LEADERS_FILE = "runtime/data/copy_whitelist.json"
 def _extract_vaults(data: Any) -> list[str]:
     """Extrait des adresses de leaders depuis divers formats (robuste, fail-soft)."""
     if isinstance(data, dict):
-        for key in ("vaults", "whitelist", "adresses", "addresses", "retenus", "leaders"):
+        for key in ("vaults", "whitelist", "adresses", "addresses", "retenus", "leaders",
+                    "candidats", "actifs"):
             if key in data:
                 return _extract_vaults(data[key])
         # dict {adresse: ...} -> les clés qui ressemblent à une adresse
@@ -204,11 +205,16 @@ def _extract_vaults(data: Any) -> list[str]:
 
 #: Solution #5 — couverture maximale : à défaut de liste explicite, le poll
 #: fusionne toutes les sources de leaders disponibles (whitelist prédictive +
-#: vaults scorés + vaults suivis) pour suivre le plus de leaders candidats.
+#: vaults scorés + vaults suivis + liste ADAPTATIVE curés+actifs) pour suivre le
+#: plus de leaders candidats. ``config/copy_vault_leaders.json`` est produit par
+#: ``fusionner_leaders_actifs.py`` (base curée + traders ACTIFS découverts par
+#: l'explorer) : c'est ce qui diversifie les fills au lieu de suivre des leaders inactifs.
 _DEFAULT_LEADER_SOURCES = (
     DEFAULT_LEADERS_FILE,
     "runtime/data/vaults_scores.json",
     "runtime/data/vaults_suivis.json",
+    "config/copy_vault_leaders.json",
+    "config/copy_vault_leaders_candidats.json",
 )
 
 
