@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Collecteur WS L2 (l2Book) LÉGER pour LANE multi-IP — plus de carnets causaux.
+
+Le labo apparie chaque fill a un carnet L2 observe a <=30 s. Plus on couvre de coins
+(ceux que les leaders tradent), plus de fills deviennent scoreables -> LCB qui monte.
+Hyperliquid pousse l2Book en continu (non cap par user). On repartit les coins en
+TRANCHES DISJOINTES par lane (--shard-index), chaque lane sur une IP (runner GitHub).
+
+Discipline causale : on garde chaque carnet observe (received >= exchange, lag <= borne,
+niveaux ordonnes/non croises), estampille a l'instant reel de reception. Dedup par
+(coin, exchange_ts). Schema ``hypersmart.copy_vault_l2.v1`` = celui que le labo/coffre lit.
+
+LECTURE SEULE / PAPER : aucune cle, aucun ordre.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+RACINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RACINE / "src"))
+
+from hl_observer.datasets.coffre_certifie import certifier_book, QUARANTAINE  # noqa: E402
+from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402 (shard generique)
+
+WS_URL = "wss://api.hyperliquid.xyz/ws"
+OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_l2_lane.jsonl"
+DEFAULT_COINS_FILE = "config/copy_vault_coins.json"
+COINS_PAR_CONNEXION = 40          # l2Book non cap par user ; on groupe pour limiter les connexions
+
+
+def construire_carnet(data: Any, *, recv_ms: int) -> tuple[dict[str, Any] | None, str]:
+    """Construit un carnet v1 depuis une frame HL l2Book, valide via ``certifier_book``.
+
+    Renvoie (row|None, raison). ``data`` = frame.data : {coin, time, levels:[bids, asks]}
+    ou chaque niveau est {px, sz, n}.
+    """
+    if not isinstance(data, dict):
+        return None, "frame_invalide"
+    coin = data.get("coin")
+    exch = data.get("time")
+    niveaux = data.get("levels")
+    if not isinstance(niveaux, list) or len(niveaux) != 2:
+        return None, "niveaux_absents"
+
+    def cinq(side: Any) -> list[list[float]]:
+        out: list[list[float]] = []
+        if isinstance(side, list):
+            for e in side[:5]:
+                if isinstance(e, dict) and "px" in e and "sz" in e:
+                    out.append([e.get("px"), e.get("sz")])
+                elif isinstance(e, (list, tuple)) and len(e) >= 2:
+                    out.append([e[0], e[1]])
+        return out
+
+    bids5, asks5 = cinq(niveaux[0]), cinq(niveaux[1])
+    if not bids5 or not asks5:
+        return None, "cote_vide"
+    row = {
+        "schema_version": "hypersmart.copy_vault_l2.v1", "coin": coin,
+        "received_at_ms": recv_ms, "exchange_ts_ms": exch,
+        "bid": bids5[0][0], "ask": asks5[0][0], "bids5": bids5, "asks5": asks5,
+        "source": "HYPERLIQUID_L2_WS", "data_origin": "REAL_OBSERVED", "causal_observation": True,
+    }
+    norm, decision, raison = certifier_book(row, source="HYPERLIQUID_L2_WS", now_ms=recv_ms)
+    if decision == QUARANTAINE:
+        return None, raison
+    return norm, ""
+
+
+class LaneL2:
+    def __init__(self, out_path: Path) -> None:
+        self.out_path = out_path
+        self.out_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = asyncio.Lock()
+        self.dernier_ts: dict[str, int] = {}   # coin -> dernier exchange_ts ecrit (dedup)
+        self.emis = 0
+        self.rejets = 0
+        self.reconnects = 0
+
+    async def ecrire(self, row: dict[str, Any]) -> None:
+        coin = str(row.get("coin"))
+        exch = int(row.get("exchange_ts_ms") or 0)
+        if exch <= self.dernier_ts.get(coin, 0):
+            return  # deja un carnet >= cet instant pour ce coin
+        self.dernier_ts[coin] = exch
+        async with self._lock:
+            with self.out_path.open("a", encoding="utf-8") as h:
+                h.write(json.dumps(row, ensure_ascii=False) + "\n")
+            self.emis += 1
+
+
+async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: float) -> None:
+    import websockets
+
+    connus = {str(c).upper() for c in coins}
+    serie = 0
+    while time.monotonic() < deadline:
+        try:
+            async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
+                serie += 1
+                for c in coins:
+                    await ws.send(json.dumps({"method": "subscribe",
+                                              "subscription": {"type": "l2Book", "coin": c}}))
+                    await asyncio.sleep(0.05)
+                print(f"[l2-lane] socket {socket_id} : {len(coins)} l2Book souscrits", flush=True)
+                while time.monotonic() < deadline:
+                    reste = max(0.0, deadline - time.monotonic())
+                    try:
+                        brut = await asyncio.wait_for(ws.recv(), timeout=min(30.0, reste or 1.0))
+                    except asyncio.TimeoutError:
+                        if time.monotonic() >= deadline:
+                            return
+                        continue
+                    recv_ms = int(time.time() * 1000)
+                    try:
+                        msg = json.loads(brut)
+                    except ValueError:
+                        continue
+                    if not isinstance(msg, dict) or msg.get("channel") != "l2Book":
+                        continue
+                    data = msg.get("data")
+                    if not isinstance(data, dict) or str(data.get("coin") or "").upper() not in connus:
+                        continue
+                    row, _raison = construire_carnet(data, recv_ms=recv_ms)
+                    if row is None:
+                        lane.rejets += 1
+                        continue
+                    await lane.ecrire(row)
+        except Exception as exc:  # noqa: BLE001 (reconnexion resiliente)
+            lane.reconnects += 1
+            print(f"[l2-lane] socket {socket_id} reconnexion ({type(exc).__name__})", flush=True)
+            await asyncio.sleep(min(5.0, 1.0 + lane.reconnects * 0.5))
+
+
+def _charger_coins(root: Path, chemin: str) -> list[str]:
+    try:
+        data = json.loads((root / chemin).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    coins = data.get("coins") if isinstance(data, dict) else data
+    if not isinstance(coins, list):
+        return []
+    vus: dict[str, None] = {}
+    for c in coins:
+        s = str(c).strip().upper()
+        if s:
+            vus.setdefault(s, None)
+    return list(vus)
+
+
+async def _boucle(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    tous = _charger_coins(root, args.coins_file)
+    lane_coins = shard_leaders(tous, args.shard_count, args.shard_index)
+    if not lane_coins:
+        print("[l2-lane] aucun coin pour cette lane.", flush=True)
+        return 0
+    out = Path(args.out) if args.out else (root / OUT_DEFAUT)
+    lane = LaneL2(out if out.is_absolute() else root / out)
+    pas = max(1, int(args.coins_par_connexion))
+    groupes = [lane_coins[i:i + pas] for i in range(0, len(lane_coins), pas)]
+    deadline = time.monotonic() + max(10.0, float(args.duree_s))
+    print(f"[l2-lane] lane {args.shard_index}/{args.shard_count} : {len(lane_coins)} coins "
+          f"sur {len(groupes)} connexion(s), {int(args.duree_s)}s.", flush=True)
+    taches = [asyncio.create_task(_connexion(lane, grp, chr(65 + i), deadline))
+              for i, grp in enumerate(groupes)]
+    await asyncio.gather(*taches, return_exceptions=True)
+    print(f"[l2-lane] fini : {lane.emis} carnets L2 emis, {lane.rejets} rejets, "
+          f"{lane.reconnects} reconnexions -> {lane.out_path}", flush=True)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="Collecteur WS l2Book léger pour lane multi-IP (lecture seule).")
+    p.add_argument("--root", default=str(RACINE))
+    p.add_argument("--coins-file", default=DEFAULT_COINS_FILE)
+    p.add_argument("--shard-index", type=int, default=0)
+    p.add_argument("--shard-count", type=int, default=1)
+    p.add_argument("--coins-par-connexion", type=int, default=COINS_PAR_CONNEXION)
+    p.add_argument("--duree-s", type=float, default=1500.0)
+    p.add_argument("--out", default="")
+    args = p.parse_args(argv)
+    try:
+        return asyncio.run(_boucle(args))
+    except KeyboardInterrupt:
+        return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

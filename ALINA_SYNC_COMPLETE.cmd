@@ -39,5 +39,9 @@ python "%ALINA_ROOT%tools\sync_complete_clone.py" %*
 set "RC=!ERRORLEVEL!"
 rem AlinaSync : rapatrie aussi les fills des lanes GitHub (fail-soft, non bloquant).
 python "%ALINA_ROOT%tools\telecharger_fills_lanes_github.py" --root "%ALINA_ROOT%." 2>nul
+rem AlinaSync : rapatrie aussi les fills LIVE_WS des lanes WS (fail-soft).
+python "%ALINA_ROOT%tools/telecharger_fills_ws_lanes_github.py" --root "%ALINA_ROOT%." 2>nul
+rem AlinaSync : rapatrie aussi les carnets L2 des lanes L2 (fail-soft).
+python "%ALINA_ROOT%tools/telecharger_l2_lanes_github.py" --root "%ALINA_ROOT%." 2>nul
 for /f "delims=" %%R in ("!RC!") do set "RC=%%R"
 endlocal & exit /b %RC%

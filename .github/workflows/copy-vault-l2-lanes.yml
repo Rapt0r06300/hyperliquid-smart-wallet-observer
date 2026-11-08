@@ -1,0 +1,91 @@
+name: copy-vault-l2-lanes
+
+# Solution « plus de carnets L2 causaux » par MULTI-IP. Le labo apparie chaque fill
+# a un carnet observe <=30 s ; plus on couvre de coins (ceux que les leaders tradent),
+# plus de fills deviennent scoreables -> LCB qui monte. Chaque lane suit une TRANCHE
+# DISJOINTE des coins (--shard-index) sur une IP distincte (runner GitHub).
+#
+# PAPER / LECTURE SEULE : WS public l2Book, aucun secret, aucun ordre.
+# RECUPERATION : chaque lane publie ses carnets en ARTEFACT (l2-shard-N). Telecharge
+# puis fusionne dans runtime/data/copy_vault_l2_tape.jsonl (dedup coin+exchange_ts).
+
+on:
+  workflow_dispatch:
+    inputs:
+      duree_s:
+        description: "Duree de collecte L2 par lane (s)"
+        default: "1500"
+      coins_file:
+        description: "Fichier JSON des coins a suivre (commitable, relatif au repo)"
+        default: "config/copy_vault_coins.json"
+  schedule:
+    - cron: "47 * * * *"   # une fenetre L2 par heure (decalee des fills-lanes)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copy-vault-l2-lanes
+  cancel-in-progress: false
+
+jobs:
+  l2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2, 3]
+    env:
+      SHARD_COUNT: "4"
+    steps:
+      - name: Checkout (shallow + sparse)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            src
+            tools
+            config
+          sparse-checkout-cone-mode: true
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependance WS
+        run: pip install --quiet "websockets>=12,<16"
+
+      - name: Garde-fou — la liste de coins existe et est non vide
+        env:
+          COINS_FILE: ${{ github.event.inputs.coins_file || 'config/copy_vault_coins.json' }}
+        run: |
+          n=$(python -B -c "import json; d=json.load(open('${COINS_FILE}',encoding='utf-8')); v=d.get('coins',d) if isinstance(d,dict) else d; print(len([x for x in v if isinstance(x,str) and x.strip()]))")
+          echo "Coins dans ${COINS_FILE}: ${n}"
+          if [ "${n}" -lt 1 ]; then
+            echo "::error::Aucun coin dans ${COINS_FILE} — la collecte L2 ne produirait rien."
+            exit 1
+          fi
+
+      - name: Collecte L2 causale (lane ${{ matrix.shard_index }}/${{ env.SHARD_COUNT }})
+        env:
+          COINS_FILE: ${{ github.event.inputs.coins_file || 'config/copy_vault_coins.json' }}
+        run: |
+          export PYTHONPATH=src
+          python -B tools/collecter_l2_lane.py \
+            --coins-file "${COINS_FILE}" \
+            --shard-count "${SHARD_COUNT}" \
+            --shard-index "${{ matrix.shard_index }}" \
+            --duree-s "${{ github.event.inputs.duree_s || '1500' }}" \
+            --out runtime/data/copy_vault_l2_lane.jsonl \
+          || true
+
+      - name: Publier les carnets L2 causaux de la lane
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l2-shard-${{ matrix.shard_index }}
+          path: runtime/data/copy_vault_l2_lane.jsonl
+          if-no-files-found: ignore
+          retention-days: 5
