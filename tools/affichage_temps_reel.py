@@ -168,6 +168,12 @@ def nettoyer_session(root: Path) -> None:
         (data / "stop_collecteurs.flag").unlink()
     except OSError:
         pass
+    # Marqueur : indique au .cmd que le nettoyage COMPLET est deja fait (evite un
+    # double scellage/rapport). Le lanceur le supprime au prochain demarrage.
+    try:
+        (data / ".session_nettoyee").write_text("1", encoding="utf-8")
+    except OSError:
+        pass
     print("  [arret] TERMINE. runtime/data certifie -> runtime/coffre_certifie (le labo y lit), "
           "session reset, rapport: runtime/logs/rapport_collecteurs.log", flush=True)
 

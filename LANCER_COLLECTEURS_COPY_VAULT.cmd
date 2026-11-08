@@ -129,18 +129,21 @@ if not exist "%CV_ROOT%runtime\data" mkdir "%CV_ROOT%runtime\data"
 rem --- Arret propre immediat demande (--stop) : rien a demarrer ---
 if /I "%CV_MODE%"=="stop" goto :stop
 
-rem --- Detection d'instance existante ---
-if exist "%CV_LOCKFILE%" (
-  for /f "usebackq tokens=*" %%A in ("%CV_LOCKFILE%") do set "CV_LOCK_PID=%%A"
-  if defined CV_LOCK_PID (
-    tasklist /FI "PID eq !CV_LOCK_PID!" /NH 2>nul | findstr /I "python py" >nul 2>nul
-    if not errorlevel 1 (
-      echo [DEJA EN COURS] Un superviseur tourne deja (PID !CV_LOCK_PID!^).
-      echo Pour forcer un redemarrage, arreter l'instance existante d'abord.
-      echo Ou supprimer le verrou : %CV_LOCKFILE%
-      goto :fail_lock
+rem --- Detection d'instance existante : collecteurs REELLEMENT vivants ? ---
+rem     On verifie les PID des collecteurs (le verrou n'etait qu'un nombre aleatoire,
+rem     donc l'ancienne detection ne matchait jamais un vrai process).
+set "CV_DEJA="
+for %%F in (poll_leaders.pid explorer_autonome.pid) do (
+  if exist "%CV_ROOT%runtime\data\%%F" (
+    for /f "usebackq tokens=*" %%A in ("%CV_ROOT%runtime\data\%%F") do (
+      tasklist /FI "PID eq %%A" /NH 2>nul | findstr /I "python" >nul 2>nul && set "CV_DEJA=1"
     )
   )
+)
+if defined CV_DEJA (
+  echo [DEJA EN COURS] Des collecteurs tournent deja sur ce PC.
+  echo   Arretez-les d'abord : appuyez sur  q  dans leur ecran, ou relancez avec  --stop.
+  goto :fail_lock
 )
 
 rem --- Auto-reparation : restes d'un Ctrl+C precedent. CMD ne peut pas
@@ -159,6 +162,7 @@ if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
 taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
 taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
 if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
+if exist "%CV_ROOT%runtime\data\.session_nettoyee" del /f /q "%CV_ROOT%runtime\data\.session_nettoyee" >nul 2>nul
 
 rem --- Ecrire le verrou (PID du cmd courant) ---
 echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
@@ -192,15 +196,13 @@ echo   replays du laboratoire quant Copy-Vault.
 echo.
 echo   14 collecteurs actifs (profil %CV_PROFILE%)
 echo   + poll causal des leaders (REST) : casse le cap WebSocket ~10/IP
-echo   Journal evenements : desactive (economie d'espace disque)
-echo   Verification toutes les %CV_INTERVAL%s
-echo   Campagne de %CV_DURATION%s (%CV_MODE%)
-echo   Auto-recovery : backoff %CV_BACKOFF_INIT%s-%CV_BACKOFF_MAX%s
+echo   + explorer autonome : decouvre les traders ACTIFS (suivi adaptatif)
 echo   Securite : PAPER / READ-ONLY / FAIL-CLOSED
-echo   Arret propre : relancez ce .cmd avec  --stop   ^(recommande^)
-echo   Sinon Ctrl+C puis N : arret immediat ^(plus de gel^), nettoyage au prochain lancement.
 echo.
-echo   Le panneau de recolte s'affiche a chaque passe.
+echo   ARRET : appuyez sur  q  dans l'ecran -^> certification coffre + reset + rapport auto.
+echo   ^(Ctrl+C marche aussi : le nettoyage se fait AVANT tout prompt O/N.^)
+echo.
+echo   L'ecran unique affiche tous les collecteurs + toutes les donnees en temps reel.
 echo ================================================================
 echo.
 
@@ -263,19 +265,17 @@ goto :cleanup
 echo.
 echo === ETAT DES COLLECTEURS COPY-VAULT ===
 echo.
-if exist "%CV_LOCKFILE%" (
-  for /f "usebackq tokens=*" %%A in ("%CV_LOCKFILE%") do set "CV_LOCK_PID=%%A"
-  echo Verrou : %CV_LOCKFILE% (contenu: !CV_LOCK_PID!^)
-  if defined CV_LOCK_PID (
-    tasklist /FI "PID eq !CV_LOCK_PID!" /NH 2>nul | findstr /I "python py" >nul 2>nul
-    if not errorlevel 1 (
-      echo Statut : EN COURS (PID !CV_LOCK_PID!^)
-    ) else (
-      echo Statut : ARRETE (verrou orphelin^)
+set "CV_DEJA="
+for %%F in (poll_leaders.pid explorer_autonome.pid) do (
+  if exist "%CV_ROOT%runtime\data\%%F" (
+    for /f "usebackq tokens=*" %%A in ("%CV_ROOT%runtime\data\%%F") do (
+      tasklist /FI "PID eq %%A" /NH 2>nul | findstr /I "python" >nul 2>nul && set "CV_DEJA=1"
     )
   )
+)
+if defined CV_DEJA (
+  echo Statut : EN COURS ^(collecteurs vivants^)
 ) else (
-  echo Verrou : absent
   echo Statut : ARRETE
 )
 echo.
@@ -303,12 +303,20 @@ goto :end
 echo.
 echo Usage : LANCER_COLLECTEURS_COPY_VAULT.cmd [options]
 echo.
-echo  (defaut)         Boucle resiliente : collecte continue avec auto-recovery
+echo  (defaut)         Collecte continue + ECRAN UNIQUE temps reel ; auto-recovery.
 echo  --once           Une seule campagne, pas de boucle de recovery
 echo  --duration N     Duree de chaque campagne en secondes (defaut: 518400 = 6 jours)
 echo  --status         Afficher l'etat des collecteurs sans lancer
 echo  --stop           Arret propre et immediat ^(invalide le bail, stoppe tout^)
 echo  --help / -h      Cette aide
+echo.
+echo Fonctionnement :
+echo   - Collecteurs + poll + explorer autonome tournent EN ARRIERE-PLAN.
+echo   - Un ECRAN UNIQUE affiche tous les flux et derniers fills en temps reel.
+echo   - Pour ARRETER : appuyez sur  q  -^> stop + CERTIFICATION ^(runtime/data vers
+echo     runtime/coffre_certifie, que le labo lit^) + reset session + rapport auto.
+echo   - Suivi ADAPTATIF des leaders : base curee + traders actifs decouverts.
+echo   - Rapport detaille : runtime/logs/rapport_collecteurs.log ^(erreurs + ameliorations^).
 echo.
 echo Collecteurs lances (profil copy-vault / harvest, 14 collecteurs) :
 echo   CORE     : allmids-collector, bbo-collector, userfills-live
@@ -350,10 +358,17 @@ set "RC=33"
 goto :end
 
 :cleanup
+rem Si l'ecran Python a deja tout nettoye (certif + reset + rapport), ne pas le refaire.
+if exist "%CV_ROOT%runtime\data\.session_nettoyee" (
+  del /f /q "%CV_ROOT%runtime\data\.session_nettoyee" >nul 2>nul
+  echo.
+  echo [ARRET] Nettoyage deja fait par l'ecran ^(certification + reset + rapport^).
+  goto :cleanup_fin
+)
 echo.
 echo [ARRET] Arret propre en cours...
 rem --- Signal d'arret au superviseur de fond + arret des workers collecteurs ---
-echo 1> "%CV_ROOT%runtime\data\stop_collecteurs.flag"
+>"%CV_ROOT%runtime\data\stop_collecteurs.flag" echo 1
 if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop >nul 2>nul
 taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
 rem --- Arreter l'explorer autonome ---
@@ -387,6 +402,7 @@ if exist "%CV_ROOT%tools\rapport_collecteurs.py" (
   "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\rapport_collecteurs.py" --root "%CV_ROOT%." 2>nul
   echo [RAPPORT] Tout est dans : runtime\logs\rapport_collecteurs.log
 )
+:cleanup_fin
 rem --- Supprimer le verrou ---
 if exist "%CV_LOCKFILE%" del /f /q "%CV_LOCKFILE%" >nul 2>nul
 for /f "tokens=1-2 delims=." %%A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "CV_END_TIME=%%A"
@@ -401,7 +417,7 @@ goto :end
 echo.
 echo === ARRET PROPRE DES COLLECTEURS COPY-VAULT ===
 rem Arret immediat : invalide le bail + tue les workers verifies (watchdog --stop).
-echo 1> "%CV_ROOT%runtime\data\stop_collecteurs.flag"
+>"%CV_ROOT%runtime\data\stop_collecteurs.flag" echo 1
 if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop
 taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
 rem Arret de l'explorer autonome.
