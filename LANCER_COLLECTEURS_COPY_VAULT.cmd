@@ -160,6 +160,7 @@ if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
   del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
 )
 taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
 taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
 if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 if exist "%CV_ROOT%runtime\data\.session_nettoyee" del /f /q "%CV_ROOT%runtime\data\.session_nettoyee" >nul 2>nul
@@ -238,6 +239,12 @@ if exist "%CV_ROOT%tools\explorer_autonome.py" (
   del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
   start "ALINA-EXPLORER-AUTO" /B "%CV_ROOT%tools\_run_explorer_autonome.cmd"
   echo [EXPLORER] Explorer autonome demarre SANS fenetre - log: runtime\logs\explorer-autonome.log
+)
+
+rem --- Asset-ctx : OI/funding/premium (metaAndAssetCtxs), flux SEPARE (zero contention), utilise par le labo ---
+if exist "%CV_ROOT%tools\collecter_asset_ctx.py" (
+  start "ALINA-ASSET-CTX" /B "%CV_ROOT%tools\_run_asset_ctx.cmd"
+  echo [ASSET-CTX] OI/funding/premium demarre SANS fenetre - log: runtime\logs\asset-ctx.log
 )
 
 rem --- Nettoyer un eventuel drapeau d'arret precedent ---
@@ -389,6 +396,7 @@ if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
   del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
 )
 taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
 rem --- Arreter le poll des leaders (fenetre dediee) ---
 if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
   for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
@@ -438,6 +446,7 @@ if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
   del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
 )
 taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+taskkill /FI "WINDOWTITLE eq ALINA-ASSET-CTX*" /T /F >nul 2>nul
 del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 rem Arret du poll des leaders.
 if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (

@@ -157,7 +157,7 @@ def nettoyer_session(root: Path) -> None:
             p.unlink()
         except OSError:
             pass
-    for titre in ("ALINA-SUPERVISOR", "ALINA-EXPLORER-AUTO", "ALINA-POLL-LEADERS"):
+    for titre in ("ALINA-SUPERVISOR", "ALINA-EXPLORER-AUTO", "ALINA-POLL-LEADERS", "ALINA-ASSET-CTX"):
         _kill("taskkill", "/FI", f"WINDOWTITLE eq {titre}*", "/T", "/F")
     # 2) certifier -> coffre, 3) archiver (reset a zero), 4) rapport
     _py("tools/sceller_coffre_local.py")
