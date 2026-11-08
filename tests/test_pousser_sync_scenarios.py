@@ -8,6 +8,7 @@ conflit préservé sans perte (#5), vérification du résultat (#10).
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -76,8 +77,12 @@ def _repo_avec_remote(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _run_sync(work: Path, **kw) -> tuple[int, dict]:
-    sync = S.Synchronizer(work, allow_test_remote=True, **kw)
-    code = sync.run()
+    os.environ["ALINA_SYNC_TEST_REMOTE_ALLOWED"] = "1"   # autorise le remote de test
+    try:
+        sync = S.Synchronizer(work, allow_test_remote=True, **kw)
+        code = sync.run()
+    finally:
+        os.environ.pop("ALINA_SYNC_TEST_REMOTE_ALLOWED", None)
     return code, sync.report
 
 
