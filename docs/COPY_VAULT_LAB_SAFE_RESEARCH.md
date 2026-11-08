@@ -26,6 +26,24 @@ LANCER_LAB_QUANT_COPY_VAULT.cmd once
 prepared, provenance-bound workspace. The launcher never silently changes
 from one mode to another.
 
+## Certified vault inputs (2 tiers) — 2026-11-08
+
+`materialize_safe_workspace` now loads, in addition to the SAFE-cloud corpus, the
+**LOCAL tier of the certified vault** (`runtime/coffre_certifie/`, produced by
+`Certificateur Coffre Fort.cmd`). `_charger_tier_local` reads `LOCAL_INDEX.json`,
+**re-verifies each shard SHA-256** (fail-closed: a tampered shard is ignored), and
+merges the certified fills / L2 books / BBO into the in-memory replay inputs, tagged
+`provenance_tier="LOCAL"`. Measured on the current corpus: causal fills loaded
+`0 → 88,090`, books `50,170 → 433,920`.
+
+**The economic proof stays SAFE-only by design.** LOCAL rows are never given
+`quality="SAFE"`: they feed the exploratory TRAIN search but can never be
+"economically proven". Every proof layer (signal confirmation, leader evidence,
+execution-book evidence) still requires SAFE provenance (`dataset_id` +
+`catalog_sha` + `quality="SAFE"` + `replay_compatible`). There is **no fake
+certification**: proven profitable backtests require fresh SAFE-cloud data, which the
+multi-IP collection lanes feed into the SAFE campaign pipeline.
+
 The input is the AlinaSync-owned directory:
 
 ```text

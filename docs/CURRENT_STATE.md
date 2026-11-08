@@ -1,10 +1,26 @@
 # Alina SmartFlow — état courant autoritatif
 
-Dernière mise à jour : **2026-10-28**.
+Dernière mise à jour : **2026-11-08**.
 
 L'ancre **`c40263c8a5188fb6c39d5a92b149635243c6155e`** est un audit historique du 2026-09-10, pas une certification du HEAD actuel. Le scope Copy-Vault-only a été recontrôlé dans le checkout local au HEAD de base **`755441d3b442c9c981d2876d07bf71f9459e1ad5`** ; la copie de travail est modifiée et cette vérification ciblée ne vaut pas validation globale.
 
 Ce document est la **source de vérité lisible actuelle** pour l'état du projet. Il ne remplace pas les contrats exécutables : en cas de divergence, le code, les tests, les gates CI et les registres machine gagnent toujours.
+
+## 0. Nouveautés (2026-11-08)
+
+- **Lanes de collecte multi-IP** (franchissent les plafonds par IP d'Hyperliquid) : `userfills-live-lanes.yml`
+  (fills `LIVE_WS`), `copy-vault-poll-lanes.yml` (fills `LIVE_POLL`), `copy-vault-l2-lanes.yml` (carnets L2 +
+  BBO). Leaders/coins commitables : `config/copy_vault_leaders.json`, `config/copy_vault_coins.json`.
+  Rapatriement + fusion automatiques dans `ALINA_SYNC_COMPLETE.cmd` (dédup + fraîcheur).
+- **Coffre-fort « données certifiées » 2 tiers** (`Certificateur Coffre Fort.cmd` +
+  `src/hl_observer/datasets/coffre_certifie.py`) : tier LOCAL (certifié-local : répare/salvage/quarantaine)
+  + tier SAFE-cloud référencé. Le labo charge les deux (`_charger_tier_local` dans `materialize_safe_workspace`,
+  SHA-256 revérifié). **Mesuré** : fills causaux chargés `0 → 88 090`, carnets `50 170 → 433 920`.
+- **Frontière vérifiée** : le moteur de décision/preuve du labo est **SAFE-provenance-bound** ; le tier
+  LOCAL nourrit la recherche exploratoire mais ne peut jamais être « prouvé » (pas de fausse certification).
+  La rentabilité prouvée exige du SAFE-cloud frais (que les lanes alimentent).
+- **`POUSSER-GITHUB-FORCE.cmd` : défaut = code seul** (push rapide, plus de téléchargement SAFE de 153 Go) ;
+  `--full` pour l'ancien comportement complet.
 
 ## 1. Périmètre économique actif
 

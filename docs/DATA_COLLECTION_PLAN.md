@@ -29,6 +29,22 @@
 - **Historique long (⑦)** : conclure sur grid/réversion/momentum sur plusieurs régimes (pas
   survivorship de 6 h calmes).
 
+## Mise en œuvre actuelle (2026-11-08) — lanes multi-IP
+
+La collecte à l'échelle est désormais assurée par des **lanes GitHub Actions multi-IP** (chaque runner =
+une IP distincte, franchit les plafonds par IP d'Hyperliquid), chaque lane ne suivant qu'une tranche
+disjointe (`--shard-index`/`--shard-count`) :
+
+- **Fills `LIVE_WS`** (temps réel) — `userfills-live-lanes.yml` → `tools/collecter_userfills_ws_lane.py`.
+- **Fills `LIVE_POLL`** (REST forward causal) — `copy-vault-poll-lanes.yml` → `tools/collecter_userfills_poll.py`.
+- **Carnets L2 (④) + BBO (repli de prix)** — `copy-vault-l2-lanes.yml` → `tools/collecter_l2_lane.py`.
+
+Discipline causale : 1ʳᵉ observation = snapshot (fixe le high-water, n'émet rien), ensuite forward
+uniquement ; gap-fill REST au reconnect ; dédup par identité. Leaders/coins commitables :
+`config/copy_vault_leaders.json`, `config/copy_vault_coins.json`. Rapatriement + fusion automatiques
+(dédup + fraîcheur) dans `ALINA_SYNC_COMPLETE.cmd`. Les flux certifiés alimentent le coffre-fort
+(`Certificateur Coffre Fort.cmd`) que le labo charge (tier LOCAL + SAFE-cloud).
+
 ## Discipline (rappel)
 Toute donnée collectée passera par la **même** méthodologie : hors-échantillon + coûts réels + contrôle
 aléatoire + critère d'arrêt écrit à l'avance (étape 10). On ne relâche jamais la rigueur, même — surtout
