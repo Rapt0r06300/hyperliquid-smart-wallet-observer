@@ -1,0 +1,77 @@
+name: explorer-collecte
+
+# Feed explorer Hyperliquid (wss://rpc.hyperliquid.xyz/ws) — HORS du cap 10 users.
+# Diffuse TOUTES les transactions on-chain (explorerTxs) et les blocs (explorerBlock),
+# non filtrees par user. On en tire : l'ACTIVITE causale des leaders (tape pour le labo)
+# et la DECOUVERTE de nouveaux leaders actifs. 100% gratuit (WS public, runner GitHub).
+# PAPER / LECTURE SEULE : aucun ordre, aucune cle.
+#
+# RECUPERATION : chaque job publie son artefact. Telecharge puis fusionne dans
+# runtime/data/explorer_tx_tape.jsonl (dedup par hash).
+
+on:
+  workflow_dispatch:
+    inputs:
+      duree_s:
+        description: "Duree de collecte (s)"
+        default: "1500"
+  schedule:
+    - cron: "7 * * * *"   # une fenetre par heure (decalee des autres lanes)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: explorer-collecte
+  cancel-in-progress: false
+
+jobs:
+  explorer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: leaders     # activite des leaders suivis -> tape pour le labo
+            args: "--leaders-file config/copy_vault_leaders.json"
+          - mode: decouverte  # TOUS les users -> trouver de nouveaux leaders actifs
+            args: ""
+    steps:
+      - name: Checkout (shallow + sparse)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            src
+            tools
+            config
+          sparse-checkout-cone-mode: true
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependance WS
+        run: pip install --quiet "websockets>=12,<16"
+
+      - name: Collecte explorer (${{ matrix.mode }})
+        run: |
+          export PYTHONPATH=src
+          python -B tools/collecter_explorer_lane.py \
+            --duree-s "${{ github.event.inputs.duree_s || '1500' }}" \
+            ${{ matrix.args }} \
+            --out runtime/data/explorer_tx_tape.jsonl \
+          || true
+
+      - name: Publier
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: explorer-${{ matrix.mode }}
+          path: |
+            runtime/data/explorer_tx_tape.jsonl
+            runtime/data/explorer_users_decouverts.json
+          if-no-files-found: ignore
+          retention-days: 5
