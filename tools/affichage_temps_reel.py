@@ -13,6 +13,7 @@ import argparse
 import datetime
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -103,6 +104,71 @@ def formater_fill(obj: dict) -> str | None:
 
 def _cls():
     os.system("cls" if os.name == "nt" else "clear")
+
+
+_nettoyage_fait = False
+
+
+def nettoyer_session(root: Path) -> None:
+    """Arrêt PROPRE piloté par Python (robuste au piège Ctrl+C du .cmd).
+
+    Fait TOUT le nettoyage ici — avant que le batch puisse être tué par la réponse
+    O au prompt « Terminer O/N ? » : stoppe les collecteurs, dépose au coffre certifié,
+    remet la session à zéro (archive), génère le rapport. Idempotent.
+    """
+    global _nettoyage_fait
+    if _nettoyage_fait:
+        return
+    _nettoyage_fait = True
+    data = root / "runtime" / "data"
+    env = {**os.environ, "PYTHONPATH": str(root / "src"), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
+    def _py(rel: str, *args: str, timeout: float = 240) -> None:
+        cible = root / rel
+        if not cible.exists():
+            return
+        try:
+            subprocess.run([sys.executable, "-B", str(cible), "--root", str(root), *args],
+                           cwd=str(root), env=env, timeout=timeout,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    def _kill(*cmd: str) -> None:
+        try:
+            subprocess.run(list(cmd), timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    print("\n  [arret] Stop des collecteurs, depot au coffre, reset et rapport en cours...", flush=True)
+    try:
+        (data / "stop_collecteurs.flag").write_text("1", encoding="utf-8")
+    except OSError:
+        pass
+    # 1) stopper les collecteurs (lease invalide + workers), puis explorer/poll/superviseur
+    _py("tools/watch_economic_collectors.py", "--stop", timeout=60)
+    for pidf in ("explorer_autonome.pid", "poll_leaders.pid"):
+        p = data / pidf
+        try:
+            pid = p.read_text(encoding="utf-8").strip()
+            if pid:
+                _kill("taskkill", "/PID", pid, "/T", "/F")
+            p.unlink()
+        except OSError:
+            pass
+    for titre in ("ALINA-SUPERVISOR", "ALINA-EXPLORER-AUTO", "ALINA-POLL-LEADERS"):
+        _kill("taskkill", "/FI", f"WINDOWTITLE eq {titre}*", "/T", "/F")
+    # 2) certifier -> coffre, 3) archiver (reset a zero), 4) rapport
+    _py("tools/sceller_coffre_local.py")
+    _py("tools/archiver_tapes.py")
+    _py("tools/rapport_collecteurs.py")
+    try:
+        (data / "collecteurs.lock").unlink()
+        (data / "stop_collecteurs.flag").unlink()
+    except OSError:
+        pass
+    print("  [arret] TERMINE. Donnees certifiees au coffre, session reset, "
+          "rapport: runtime/logs/rapport_collecteurs.log", flush=True)
 
 
 def _attendre_ou_quitter(duree: float) -> bool:
@@ -240,10 +306,12 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> 
                 print("   (en attente de fills...)")
             print("=" * 74, flush=True)
             if _attendre_ou_quitter(intervalle):
-                print("\n[q] Arret demande. Nettoyage et depot au coffre en cours...")
+                nettoyer_session(data_dir.parent.parent)
                 return 0
     except KeyboardInterrupt:
-        print("\nArret de l'affichage.")
+        # Ctrl+C : on nettoie IMMEDIATEMENT depuis Python, avant que le prompt
+        # « Terminer O/N ? » du .cmd ne puisse tuer le batch sans nettoyage.
+        nettoyer_session(data_dir.parent.parent)
         return 0
 
 
