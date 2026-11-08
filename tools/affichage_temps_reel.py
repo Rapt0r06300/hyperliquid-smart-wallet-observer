@@ -140,7 +140,8 @@ def nettoyer_session(root: Path) -> None:
         except (OSError, subprocess.SubprocessError):
             pass
 
-    print("\n  [arret] Stop des collecteurs, depot au coffre, reset et rapport en cours...", flush=True)
+    print("\n  [arret] Stop des collecteurs, CERTIFICATION (runtime/data -> coffre_certifie), "
+          "reset et rapport...", flush=True)
     try:
         (data / "stop_collecteurs.flag").write_text("1", encoding="utf-8")
     except OSError:
@@ -167,8 +168,8 @@ def nettoyer_session(root: Path) -> None:
         (data / "stop_collecteurs.flag").unlink()
     except OSError:
         pass
-    print("  [arret] TERMINE. Donnees certifiees au coffre, session reset, "
-          "rapport: runtime/logs/rapport_collecteurs.log", flush=True)
+    print("  [arret] TERMINE. runtime/data certifie -> runtime/coffre_certifie (le labo y lit), "
+          "session reset, rapport: runtime/logs/rapport_collecteurs.log", flush=True)
 
 
 def _attendre_ou_quitter(duree: float) -> bool:
