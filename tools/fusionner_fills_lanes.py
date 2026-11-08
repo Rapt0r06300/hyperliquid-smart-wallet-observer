@@ -68,14 +68,20 @@ def _frais_et_causal(row: dict, max_lag_ms: int) -> bool:
     return 0 <= lag <= max_lag_ms
 
 
-def fusionner(root: Path, artefacts: Path, max_lag_ms: int) -> dict:
-    cible = root / CIBLE
-    # 1) Rassemble le fichier local + tous les vault_fills_poll.jsonl des lanes.
+def fusionner(root: Path, artefacts: Path, max_lag_ms: int, *,
+              cible_rel: Path = CIBLE, motif: str = "vault_fills_poll.jsonl") -> dict:
+    """Fusionne les fills de lanes dans ``root/cible_rel`` (défaut : le tape poll).
+
+    ``motif`` = nom des fichiers d'artefact à rassembler (poll : vault_fills_poll.jsonl ;
+    WS : vault_fills_ws_lane.jsonl). La dédup/fraîcheur/écriture sont identiques.
+    """
+    cible = root / cible_rel
+    # 1) Rassemble le fichier local + tous les <motif> des lanes.
     sources: list[Path] = []
     if cible.exists():
         sources.append(cible)
     lanes = sorted(
-        p for p in artefacts.rglob("vault_fills_poll.jsonl")
+        p for p in artefacts.rglob(motif)
         if p.resolve() != cible.resolve()
     )
     sources.extend(lanes)

@@ -1,0 +1,98 @@
+name: userfills-live-lanes
+
+# Solution « plus de fills LIVE_WS » par MULTI-IP.
+# Hyperliquid cape ~10 users userFills uniques PAR IP (et ~5/connexion). Sur une
+# seule IP (ton PC) le WS plafonne a 10 leaders. Ici, chaque job de la matrice
+# tourne sur un runner GitHub = une IP DIFFERENTE, et ne suit qu'une TRANCHE
+# DISJOINTE des leaders (--shard-index). Capacite LIVE_WS ~ x(nombre de lanes).
+#
+# PAPER / LECTURE SEULE : WS public userFills, aucun secret, aucun ordre, aucune cle.
+# Discipline causale identique au PC (snapshot = high-water, forward uniquement,
+# gap-fill REST au reconnect, dedup par identite partagee avec le poll).
+#
+# RECUPERATION : chaque lane publie ses fills LIVE_WS causaux en ARTEFACT
+# (ws-fills-shard-N). Telecharge-les puis concatene-les dans
+# runtime/data/vault_fills_live.jsonl en local — le labo deduplique par identite.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duree_s:
+        description: "Duree de collecte WS par lane (s)"
+        default: "1500"
+      leaders_file:
+        description: "Fichier JSON des leaders a suivre (commitable, relatif au repo)"
+        default: "config/copy_vault_leaders.json"
+  schedule:
+    - cron: "37 * * * *"   # une fenetre de collecte WS par heure (decalee des poll-lanes)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: userfills-live-lanes
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4 lanes = 4 IP distinctes = ~x4 de capacite WS. Pour en ajouter, etends
+        # cette liste ET passe --shard-count au meme nombre ci-dessous.
+        shard_index: [0, 1, 2, 3]
+    env:
+      SHARD_COUNT: "4"
+    steps:
+      - name: Checkout (shallow + sparse, evite de tirer les millions de fichiers data)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            src
+            tools
+            config
+          sparse-checkout-cone-mode: true
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependance WS
+        run: pip install --quiet "websockets>=12,<16"
+
+      - name: Garde-fou — la liste de leaders existe et est non vide
+        env:
+          LEADERS_FILE: ${{ github.event.inputs.leaders_file || 'config/copy_vault_leaders.json' }}
+        run: |
+          n=$(python -B -c "import json,sys; d=json.load(open('${LEADERS_FILE}',encoding='utf-8')); v=d.get('vaults',d) if isinstance(d,dict) else d; print(len([x for x in v if isinstance(x,str) and x.lower().startswith('0x')]))")
+          echo "Leaders dans ${LEADERS_FILE}: ${n}"
+          if [ "${n}" -lt 1 ]; then
+            echo "::error::Aucun leader dans ${LEADERS_FILE} — la collecte WS ne produirait rien."
+            exit 1
+          fi
+
+      - name: Collecte WS causale (lane ${{ matrix.shard_index }}/${{ env.SHARD_COUNT }})
+        env:
+          LEADERS_FILE: ${{ github.event.inputs.leaders_file || 'config/copy_vault_leaders.json' }}
+        run: |
+          export PYTHONPATH=src
+          python -B tools/collecter_userfills_ws_lane.py \
+            --leaders-file "${LEADERS_FILE}" \
+            --shard-count "${SHARD_COUNT}" \
+            --shard-index "${{ matrix.shard_index }}" \
+            --duree-s "${{ github.event.inputs.duree_s || '1500' }}" \
+            --out runtime/data/vault_fills_ws_lane.jsonl \
+          || true   # une coupure WS ne doit pas faire echouer la lane
+
+      - name: Publier les fills LIVE_WS causaux de la lane
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-fills-shard-${{ matrix.shard_index }}
+          path: runtime/data/vault_fills_ws_lane.jsonl
+          if-no-files-found: ignore
+          retention-days: 5
