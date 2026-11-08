@@ -28,6 +28,40 @@ Le fonctionnement attendu est organisé autour de trois blocs et de la synchroni
 
 Le labo est le cerveau de recherche : chaque amélioration, même petite ou provisoire, reste inscrite avec son identité, ses données, ses paramètres et ses résultats ; les versions précédentes ne sont pas effacées lorsqu'un candidat ultérieur fait mieux. Un candidat TRAIN ou un score exploratoire n'est pas une preuve économique. **Aucun PnL, fill, coût, prix ou timestamp ne doit être inventé** ; une donnée manquante reste inconnue et peut rendre le résultat `UNMEASURABLE`.
 
+### Nouveautés — collecte multi-IP, coffre-fort certifié, push rapide
+
+**Lanes de collecte multi-IP (GitHub Actions).** Pour franchir les plafonds par IP
+d'Hyperliquid (≈ 10 users `userFills`/IP, débit L2/poll borné), trois workflows collectent en
+parallèle sur plusieurs runners = plusieurs IP distinctes, chaque lane ne suivant qu'une tranche
+disjointe (`--shard-index`/`--shard-count`) :
+
+| Workflow | Collecte | Config commitée |
+|---|---|---|
+| `userfills-live-lanes.yml` | fills `LIVE_WS` (WebSocket temps réel) | `config/copy_vault_leaders.json` |
+| `copy-vault-poll-lanes.yml` | fills `LIVE_POLL` (REST forward causal) | `config/copy_vault_leaders.json` |
+| `copy-vault-l2-lanes.yml` | carnets L2 complets + top-of-book BBO | `config/copy_vault_coins.json` |
+
+Chaque lane publie ses observations **causales** en artefact (snapshot → high-water, forward
+uniquement, gap-fill REST au reconnect, dédup par identité). `ALINA_SYNC_COMPLETE.cmd` rapatrie et
+fusionne automatiquement les trois flux (dédup + gate de fraîcheur) dans `runtime/data/` via
+`telecharger_fills_lanes_github.py`, `telecharger_fills_ws_lanes_github.py` et
+`telecharger_l2_lanes_github.py`. Lecture seule / PAPER : endpoints publics, aucun secret, aucun ordre.
+
+**Coffre-fort « données certifiées » (2 tiers).** `Certificateur Coffre Fort.cmd` (lancement
+**manuel**, affichage étape par étape avec % et ETA) fait passer toutes les données locales par un
+module de certification (`src/hl_observer/datasets/coffre_certifie.py`) : il ne garde que ce qui est
+**replayable / backtestable** (il **répare** ou **salvage** ce qui est récupérable, sinon met en
+**quarantaine** avec la raison — jamais de suppression silencieuse), scelle les passants en shards
+gzip SHA-256 sous `runtime/coffre_certifie/` (tier **LOCAL**), et référence le tier **SAFE-cloud**
+(shards certifiés publiés sur GitHub). Le labo charge les deux tiers du coffre
+(`materialize_safe_workspace` → `_charger_tier_local`, SHA-256 revérifié à l'injection). **La preuve
+économique reste SAFE-only par conception** : le tier LOCAL nourrit la recherche exploratoire mais ne
+peut jamais être estampillé « prouvé » (aucune fausse certification).
+
+**Push rapide par défaut.** `POUSSER-GITHUB-FORCE.cmd` (double-clic, sans argument) pousse désormais
+**le code seul**, en quelques minutes, sans re-télécharger le corpus SAFE. L'ancien comportement
+(push du code *puis* téléchargement SAFE complet) reste accessible via `--full`.
+
 ### Vitesse du laboratoire sans affaiblir les contrôles
 
 Le lanceur conserve deux comportements distincts :
