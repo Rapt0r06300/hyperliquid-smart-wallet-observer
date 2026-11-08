@@ -13,7 +13,7 @@ rem  - AUCUN PUSH FORCE, reset, clean, stash ou suppression
 rem  - AUCUN TELECHARGEMENT DE SHARDS sans option explicite
 rem ============================================================
 set "ALINA_ROOT=%~dp0"
-set "ALINA_MODE=all"
+set "ALINA_MODE=code"
 set "ALINA_CODE_ARGS="
 set "ALINA_SHARDS_ARGS=--download-safe --all-safe"
 set "ALINA_SKIP_UPDATE=0"
@@ -29,6 +29,8 @@ if /I "%~1"=="--dry-run" set "ALINA_CODE_ARGS=--dry-run"&set "ALINA_MODE=dry"&sh
 if /I "%~1"=="--wip-only" set "ALINA_CODE_ARGS=--wip-only"&set "ALINA_MODE=code"&shift&goto :parse_args
 if /I "%~1"=="--promote-current-to-main" set "ALINA_CODE_ARGS=--promote-current-to-main"&set "ALINA_MODE=code"&shift&goto :parse_args
 if /I "%~1"=="--code-only" set "ALINA_MODE=code"&shift&goto :parse_args
+if /I "%~1"=="--full" set "ALINA_MODE=all"&shift&goto :parse_args
+if /I "%~1"=="--code-plus-safe" set "ALINA_MODE=all"&shift&goto :parse_args
 if /I "%~1"=="--shards-only" set "ALINA_MODE=shards"&shift&goto :parse_args
 if /I "%~1"=="--preflight" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--preflight-only"&shift&goto :parse_args
 if /I "%~1"=="--preflight-only" set "ALINA_MODE=shards"&set "ALINA_SHARDS_ARGS=--preflight-only"&shift&goto :parse_args
@@ -137,9 +139,10 @@ goto :shards_attempt
 :help
 echo Usage : POUSSER-GITHUB-FORCE.cmd [options]
 echo.
-echo  (defaut)              code push fast-forward + telechargement SAFE complet
+echo  (defaut)              code push rapide SEUL ^(pas de telechargement 153 Go^)
 echo  --dry-run             code en lecture seule, aucune publication
-echo  --code-only           synchronisation du code uniquement
+echo  --code-only           synchronisation du code uniquement ^(identique au defaut^)
+echo  --full                code push PUIS telechargement SAFE complet ^(ancien defaut^)
 echo  --shards-only         operation SAFE uniquement
 echo  --preflight-only      inventaire SAFE sans telechargement
 echo  --download-safe       telechargement SAFE plafonne a 256 GiB
