@@ -1,0 +1,67 @@
+name: copy-vault-market-lanes
+
+# Trades + candle publics Hyperliquid (gratuit) par lane multi-IP. Trades -> execution
+# realiste ; candle -> volatilite/regimes. Chaque lane suit une tranche disjointe de coins.
+# PAPER / LECTURE SEULE.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duree_s:
+        description: "Duree (s)"
+        default: "1500"
+      coins_file:
+        description: "Fichier coins"
+        default: "config/copy_vault_coins.json"
+  schedule:
+    - cron: "52 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copy-vault-market-lanes
+  cancel-in-progress: false
+
+jobs:
+  market:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2, 3]
+    env:
+      SHARD_COUNT: "4"
+    steps:
+      - name: Checkout (shallow + sparse)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            src
+            tools
+            config
+          sparse-checkout-cone-mode: true
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependance WS
+        run: pip install --quiet "websockets>=12,<16"
+      - name: Collecte trades+candle (lane ${{ matrix.shard_index }})
+        env:
+          COINS_FILE: ${{ github.event.inputs.coins_file || 'config/copy_vault_coins.json' }}
+        run: |
+          export PYTHONPATH=src
+          python -B tools/collecter_market_lane.py             --coins-file "${COINS_FILE}"             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --trades-out runtime/data/copy_vault_trades_lane.jsonl             --candle-out runtime/data/copy_vault_candle_lane.jsonl           || true
+      - name: Publier
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-shard-${{ matrix.shard_index }}
+          path: |
+            runtime/data/copy_vault_trades_lane.jsonl
+            runtime/data/copy_vault_candle_lane.jsonl
+          if-no-files-found: ignore
+          retention-days: 5
