@@ -107,6 +107,8 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 12) -> 
                             offsets[cle] = fh.tell()
                     except OSError:
                         continue
+                    if nouveau.strip():
+                        maj_ts[label] = time.time()
                     for ligne in nouveau.splitlines():
                         ligne = ligne.strip()
                         if not ligne:
@@ -129,16 +131,25 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 12) -> 
             print(f"  dossier : {data_dir}")
             print("=" * 72)
             grand_total = 0
+            maintenant = time.time()
             for label, _, _ in FLUX:
                 t = totaux[label]
                 grand_total += t
                 dps = (t - precedents[label]) / intervalle
                 barre = "*" if dps > 0 else "."
-                print(f"  {barre} {label:<20} {t:>10d}   ({dps:>6.1f}/s)")
+                if label in maj_ts:
+                    age = maintenant - maj_ts[label]
+                    frais = "a l'instant" if age < intervalle * 1.5 else f"il y a {int(age):>4d}s"
+                else:
+                    frais = "   --   "
+                print(f"  {barre} {label:<20} {t:>10d}  ({dps:>6.1f}/s)  MAJ {frais}")
                 precedents[label] = t
+            if total_initial is None:
+                total_initial = grand_total
             print("-" * 72)
-            print(f"  TOTAL collecte : {grand_total:>10d} enregistrements  "
-                  f"| {time.strftime('%H:%M:%S')}")
+            session = grand_total - total_initial
+            print(f"  TOTAL : {grand_total:>10d}   |   NOUVEAUX cette session : {session:>8d}   "
+                  f"|   {time.strftime('%H:%M:%S')}")
             print("=" * 72)
             print(f"  Derniers fills ({len(derniers_fills)}) :")
             if derniers_fills:
