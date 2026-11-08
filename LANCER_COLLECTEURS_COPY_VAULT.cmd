@@ -151,6 +151,19 @@ taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
 rem --- Ecrire le verrou (PID du cmd courant) ---
 echo %RANDOM%%RANDOM%> "%CV_LOCKFILE%"
 
+rem --- SESSION FRAICHE : deposer d'abord l'eventuel reste dans le COFFRE CERTIFIE
+rem     (scellage verifie) PUIS remettre les flux a ZERO. Zero perte : le reset
+rem     n'a lieu qu'apres scellage reussi. Chaque session repart donc de 0. ---
+if exist "%CV_ROOT%tools\sceller_coffre_local.py" (
+  if not exist "%CV_ROOT%runtime\logs\coffre_certifie" mkdir "%CV_ROOT%runtime\logs\coffre_certifie" >nul 2>nul
+  echo [COFFRE] Certification des donnees precedentes vers le coffre ^(validation avant depot^)...
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
+)
+if exist "%CV_ROOT%tools\archiver_tapes.py" (
+  echo [RESET] Archivage des tapes : la session repart a zero ^(rien n'est perdu^)...
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\archiver_tapes.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
+)
+
 rem --- Affichage ---
 for /f "tokens=1-2 delims=." %%A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "CV_START_TIME=%%A"
 echo.
@@ -198,69 +211,34 @@ if exist "%CV_ROOT%tools\collecter_userfills_poll.py" (
   del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
   start "ALINA-POLL-LEADERS" /B "%CV_ROOT%tools\_run_poll_leaders.cmd"
   echo [POLL] Collecteur fills leaders demarre SANS fenetre - log: runtime\logs\poll-leaders.log
-  echo [AFFICHAGE] Ouverture de la page de sante unique - tous les collecteurs...
-  timeout /t 4 /nobreak >nul 2>nul
-  if exist "%CV_ROOT%runtime\data\collecteurs_sante.html" start "" "%CV_ROOT%runtime\data\collecteurs_sante.html"
 )
 
-:campagne
-set /a CV_RESTARTS+=1
-if %CV_RESTARTS% GTR %CV_MAX_RESTARTS% (
-  echo [ABANDON] Limite de %CV_MAX_RESTARTS% redemarrages atteinte. Intervention manuelle requise.
-  goto :cleanup
+rem --- Explorer autonome : auto-decouverte de leaders + estimation de fills, SANS fenetre ---
+if exist "%CV_ROOT%tools\explorer_autonome.py" (
+  del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
+  start "ALINA-EXPLORER-AUTO" /B "%CV_ROOT%tools\_run_explorer_autonome.cmd"
+  echo [EXPLORER] Explorer autonome demarre SANS fenetre - log: runtime\logs\explorer-autonome.log
 )
 
-for /f "tokens=1-2 delims=." %%A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "CV_NOW=%%A"
+rem --- Nettoyer un eventuel drapeau d'arret precedent ---
+if exist "%CV_ROOT%runtime\data\stop_collecteurs.flag" del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 
-if %CV_RESTARTS% GTR 1 (
-  echo.
-  echo [RESTART %CV_RESTARTS%/%CV_MAX_RESTARTS%] %CV_NOW%
-  echo   Redemarrage automatique apres une pause de %CV_BACKOFF%s.
-  echo   Les donnees deja collectees sont conservees.
-)
-
-"%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --profile %CV_PROFILE% --interval-s %CV_INTERVAL% --duration-s %CV_DURATION% --lease-duration-s %CV_LEASE%
-set "RC=!ERRORLEVEL!"
-
-if "!RC!"=="130" (
-  echo.
-  echo [ARRET] Interruption Ctrl+C. Les workers s'arretent sous %CV_LEASE%s max.
-  goto :cleanup
-)
-
-if "!RC!"=="0" (
-  rem Campagne terminee normalement (duree ecoulee), reset backoff
-  set "CV_BACKOFF=%CV_BACKOFF_INIT%"
-  set "CV_CONSECUTIVE_FAILS=0"
-  if /I "%CV_MODE%"=="once" (
-    echo [OK] Campagne unique terminee avec succes.
-    goto :cleanup
-  )
-  goto :campagne
-)
-
-rem --- Erreur : appliquer backoff exponentiel ---
-set /a CV_CONSECUTIVE_FAILS+=1
-for /f "tokens=1-2 delims=." %%A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "CV_ERR_TIME=%%A"
+rem --- Superviseur des collecteurs EN ARRIERE-PLAN (boucle resiliente, log dedie) ---
+start "ALINA-SUPERVISOR" /B "%CV_ROOT%tools\_run_supervisor_loop.cmd"
+echo [SUPERVISEUR] Collecteurs demarres en arriere-plan - log: runtime\logs\supervisor.log
 echo.
-echo [ERREUR] %CV_ERR_TIME% — Le superviseur a retourne le code !RC! (echec consecutif %CV_CONSECUTIVE_FAILS%)
-echo [ATTENTE] Backoff de %CV_BACKOFF%s avant nouvelle tentative...
+echo   ============================================================
+echo     ECRAN UNIQUE : tous les collecteurs + toutes les donnees
+echo     Ctrl+C ici = arret propre + envoi au coffre certifie + reset
+echo   ============================================================
+echo.
+timeout /t 2 /nobreak >nul 2>nul
 
-rem --- Log l'erreur ---
->>"%CV_ROOT%runtime\logs\collecteur_restarts.log" echo %CV_ERR_TIME% RESTART=%CV_RESTARTS% RC=!RC! BACKOFF=%CV_BACKOFF%s CONSECUTIVE=%CV_CONSECUTIVE_FAILS%
+rem --- ECRAN UNIQUE au premier plan (lecture seule) ---
+"%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\affichage_temps_reel.py" --root "%CV_ROOT%." --intervalle 2
 
-rem --- Attente avec backoff ---
-timeout /t %CV_BACKOFF% /nobreak >nul 2>nul
-
-rem --- Doubler le backoff (plafonné) ---
-set /a CV_BACKOFF=%CV_BACKOFF% * 2
-if %CV_BACKOFF% GTR %CV_BACKOFF_MAX% set "CV_BACKOFF=%CV_BACKOFF_MAX%"
-
-if /I "%CV_MODE%"=="once" (
-  echo [ABANDON] Mode once : pas de retry apres erreur.
-  goto :cleanup
-)
-goto :campagne
+rem --- L'utilisateur a quitte l'ecran : nettoyage + depot coffre ---
+goto :cleanup
 
 :status
 echo.
@@ -353,12 +331,37 @@ set "RC=33"
 goto :end
 
 :cleanup
+echo.
+echo [ARRET] Arret propre en cours...
+rem --- Signal d'arret au superviseur de fond + arret des workers collecteurs ---
+echo 1> "%CV_ROOT%runtime\data\stop_collecteurs.flag"
+if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop >nul 2>nul
+taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
+rem --- Arreter l'explorer autonome ---
+if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
+  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
+  del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
+)
+taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
 rem --- Arreter le poll des leaders (fenetre dediee) ---
 if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
   for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul
   del /f /q "%CV_ROOT%runtime\data\poll_leaders.pid" >nul 2>nul
 )
 taskkill /FI "WINDOWTITLE eq ALINA-POLL-LEADERS*" /T /F >nul 2>nul
+
+rem --- ENVOYER LES DONNEES AU BON ENDROIT : depot dans le COFFRE CERTIFIE
+rem     (scellage verifie) puis remise a zero des flux. Zero perte. ---
+if exist "%CV_ROOT%tools\sceller_coffre_local.py" (
+  echo [COFFRE] Certification + envoi des donnees de la session vers le coffre certifie...
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
+  echo [COFFRE] Donnees validees rangees dans runtime\coffre_certifie ^(le labo y puisera^).
+)
+if exist "%CV_ROOT%tools\archiver_tapes.py" (
+  echo [RESET] Archivage des tapes : prochaine session a zero ^(rien n'est perdu^)...
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\archiver_tapes.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
+)
+del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 rem --- Supprimer le verrou ---
 if exist "%CV_LOCKFILE%" del /f /q "%CV_LOCKFILE%" >nul 2>nul
 for /f "tokens=1-2 delims=." %%A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "CV_END_TIME=%%A"
@@ -373,7 +376,16 @@ goto :end
 echo.
 echo === ARRET PROPRE DES COLLECTEURS COPY-VAULT ===
 rem Arret immediat : invalide le bail + tue les workers verifies (watchdog --stop).
+echo 1> "%CV_ROOT%runtime\data\stop_collecteurs.flag"
 if defined CV_PYTHON "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\watch_economic_collectors.py" --root "%CV_ROOT%." --stop
+taskkill /FI "WINDOWTITLE eq ALINA-SUPERVISOR*" /T /F >nul 2>nul
+rem Arret de l'explorer autonome.
+if exist "%CV_ROOT%runtime\data\explorer_autonome.pid" (
+  for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\explorer_autonome.pid") do taskkill /PID %%P /T /F >nul 2>nul
+  del /f /q "%CV_ROOT%runtime\data\explorer_autonome.pid" >nul 2>nul
+)
+taskkill /FI "WINDOWTITLE eq ALINA-EXPLORER-AUTO*" /T /F >nul 2>nul
+del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
 rem Arret du poll des leaders.
 if exist "%CV_ROOT%runtime\data\poll_leaders.pid" (
   for /f "usebackq tokens=*" %%P in ("%CV_ROOT%runtime\data\poll_leaders.pid") do taskkill /PID %%P /T /F >nul 2>nul

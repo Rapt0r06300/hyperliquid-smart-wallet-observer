@@ -43,21 +43,48 @@ except Exception:  # pragma: no cover
 # --------------------------------------------------------------------------- #
 
 #: Familles reconnues. La valeur est le préfixe de nom de fichier caractéristique.
-FAMILLE_FILLS_FORWARD = "fills_forward"   # LIVE_POLL + LIVE_WS (causaux)
-FAMILLE_FILLS_BACKFILL = "fills_backfill"  # REST backfill (historique, non causal)
+FAMILLE_FILLS_FORWARD = "fills_forward"   # LIVE_POLL + LIVE_WS + LIVE_TWAP (causaux)
+FAMILLE_FILLS_BACKFILL = "fills_backfill"  # REST backfill + NODE_FILLS (mesure, non causal)
 FAMILLE_BOOK_L2 = "book_l2"                # carnets L2 copy-vault
 FAMILLE_BBO = "bbo"                        # BBO / trades venues (repli)
 FAMILLE_SNAPSHOT = "snapshot"             # snapshots vault
+FAMILLE_TRADES = "trades_marche"          # trades marché publics (exécution réaliste)
+FAMILLE_CANDLE = "candle"                 # bougies OHLCV (volatilité)
+FAMILLE_POSITION = "position"             # positions leaders (clearinghouseState)
+
+#: Sources JAMAIS certifiables : données ESTIMÉES/inférées (non observées directement).
+#: Elles ne doivent JAMAIS entrer dans le coffre comme du SAFE — intégrité du labo.
+#: Reconnues par la sous-chaîne (comparaison en majuscules).
+SOURCES_NON_CERTIFIABLES = ("INFERRED", "ESTIM", "SHADOW", "RECONSTRUIT")
 
 #: association nom de fichier -> (famille, étiquette de flux source)
 _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "vault_fills_poll.jsonl": (FAMILLE_FILLS_FORWARD, "LIVE_POLL"),
     "vault_fills_live.jsonl": (FAMILLE_FILLS_FORWARD, "LIVE_WS"),
+    "copy_vault_twap_lane.jsonl": (FAMILLE_FILLS_FORWARD, "LIVE_TWAP"),
     "vault_fills.jsonl": (FAMILLE_FILLS_BACKFILL, "REST_BACKFILL"),
+    "node_fills_tape.jsonl": (FAMILLE_FILLS_BACKFILL, "NODE_FILLS"),
+    "leader_fills_bruts.jsonl": (FAMILLE_FILLS_BACKFILL, "LEADER_FILLS_BRUTS"),
     "copy_vault_l2_tape.jsonl": (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS"),
     "bbo_tape.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
+    "copy_vault_bbo_tape.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
+    "copy_vault_bbo_lane.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
     "vault_snapshots.jsonl": (FAMILLE_SNAPSHOT, "SNAPSHOT"),
+    "copy_vault_positions_lane.jsonl": (FAMILLE_POSITION, "CLEARINGHOUSE_WS"),
+    "copy_vault_trades_lane.jsonl": (FAMILLE_TRADES, "HYPERLIQUID_TRADES_WS"),
+    "copy_vault_candle_lane.jsonl": (FAMILLE_CANDLE, "HYPERLIQUID_CANDLE_WS"),
 }
+
+
+def _source_certifiable(record: Any) -> bool:
+    """False si l'enregistrement est une estimation/inférence (jamais SAFE)."""
+    if isinstance(record, dict):
+        if record.get("certifie") is False or record.get("inferred") is True:
+            return False
+        src = str(record.get("source") or "").upper()
+        if any(marqueur in src for marqueur in SOURCES_NON_CERTIFIABLES):
+            return False
+    return True
 
 # Décisions de certification (ordre = gravité croissante côté « non déposé »).
 PASS = "PASS"              # valide tel quel -> déposé
@@ -170,14 +197,25 @@ def sniffer_famille(record: Any) -> tuple[str, str] | None:
     """
     if not isinstance(record, dict):
         return None
+    # INTÉGRITÉ : une donnée estimée/inférée n'est JAMAIS certifiable comme SAFE.
+    if not _source_certifiable(record):
+        return None
+    sv = record.get("schema_version")
     # Carnet L2 : schéma explicite OU niveaux bid/ask
-    if record.get("schema_version") == "hypersmart.copy_vault_l2.v1" or (
-        "bids5" in record and "asks5" in record
-    ):
+    if sv == "hypersmart.copy_vault_l2.v1" or ("bids5" in record and "asks5" in record):
         return (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS")
-    # BBO / trade de venue
-    if "venue" in record and "px" in record and "side" in record:
+    # BBO : schéma dédié OU venue/px/side
+    if sv == "hypersmart.copy_vault_bbo.v1" or ("venue" in record and "px" in record and "side" in record):
         return (FAMILLE_BBO, "BBO_TAPE")
+    # Trades marché public
+    if sv == "hypersmart.copy_vault_trades.v1":
+        return (FAMILLE_TRADES, str(record.get("source") or "HYPERLIQUID_TRADES_WS"))
+    # Bougies OHLCV
+    if sv == "hypersmart.copy_vault_candle.v1":
+        return (FAMILLE_CANDLE, str(record.get("source") or "HYPERLIQUID_CANDLE_WS"))
+    # Positions leaders
+    if sv == "hypersmart.copy_vault_positions.v1" or ("szi" in record and "coin" in record and "vault" in record):
+        return (FAMILLE_POSITION, str(record.get("source") or "CLEARINGHOUSE_WS"))
     # Fill : vault + px + sz + un timestamp d'exchange
     a_ts = ("ts_ms" in record) or ("time" in record)
     if "vault" in record and "px" in record and "sz" in record and a_ts:
@@ -364,6 +402,90 @@ def certifier_bbo(
     return out, (REPARE if repare else PASS), ""
 
 
+def certifier_trade(record: Any, *, source: str, now_ms: int,
+                    ) -> tuple[dict[str, Any] | None, str, str]:
+    """Certifie un trade marché public. Replayable si coin, px>0, sz>0, ts causal."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out: dict[str, Any] = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    px = _nombre_fini(record.get("price") if record.get("price") is not None else record.get("px"))
+    if px is None or px <= 0:
+        return None, QUARANTAINE, "px_invalide"
+    sz = _nombre_fini(record.get("size") if record.get("size") is not None else record.get("sz"))
+    if sz is None or sz <= 0:
+        return None, QUARANTAINE, "sz_invalide"
+    out["price"], out["size"] = px, sz
+    ts = _entier_positif(record.get("exchange_ts_ms")) or _entier_positif(record.get("time"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["exchange_ts_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
+def certifier_candle(record: Any, *, source: str, now_ms: int,
+                     ) -> tuple[dict[str, Any] | None, str, str]:
+    """Certifie une bougie OHLCV. Replayable si OHLC cohérents (>0) et ts d'ouverture causal."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out: dict[str, Any] = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    o = _nombre_fini(record.get("open"))
+    h = _nombre_fini(record.get("high"))
+    l = _nombre_fini(record.get("low"))
+    c = _nombre_fini(record.get("close"))
+    if None in (o, h, l, c) or min(o, h, l, c) <= 0:
+        return None, QUARANTAINE, "ohlc_invalide"
+    if h < l or h < o or h < c or l > o or l > c:
+        return None, QUARANTAINE, "ohlc_incoherent"
+    ts = _entier_positif(record.get("open_ts_ms")) or _entier_positif(record.get("t"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["open"], out["high"], out["low"], out["close"] = o, h, l, c
+    out["open_ts_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
+def certifier_position(record: Any, *, source: str, now_ms: int,
+                       ) -> tuple[dict[str, Any] | None, str, str]:
+    """Certifie un snapshot de position leader. Replayable si vault+coin, szi fini, ts causal."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out: dict[str, Any] = dict(record)
+    vault = str(record.get("vault") or "").strip().lower()
+    if not vault.startswith("0x") or len(vault) < 10:
+        return None, QUARANTAINE, "vault_absent_ou_invalide"
+    out["vault"] = vault
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    szi = _nombre_fini(record.get("szi"))
+    if szi is None:
+        return None, QUARANTAINE, "szi_invalide"
+    out["szi"] = szi
+    ts = _entier_positif(record.get("received_at_ms")) or _entier_positif(record.get("time"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["received_at_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
 # --------------------------------------------------------------------------- #
 # Identité (déduplication inter-lots / inter-tiers)
 # --------------------------------------------------------------------------- #
@@ -379,6 +501,14 @@ def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
     if famille == FAMILLE_BOOK_L2:
         return ("book", record.get("coin"), record.get("exchange_ts_ms"),
                 record.get("bid"), record.get("ask"))
+    if famille == FAMILLE_TRADES:
+        return ("trade", record.get("coin"), record.get("exchange_ts_ms"),
+                record.get("tid"), record.get("hash"), record.get("price"), record.get("size"))
+    if famille == FAMILLE_CANDLE:
+        return ("candle", record.get("coin"), record.get("interval"), record.get("open_ts_ms"))
+    if famille == FAMILLE_POSITION:
+        return ("position", record.get("vault"), record.get("coin"),
+                record.get("received_at_ms"), record.get("szi"))
     # BBO
     return ("bbo", record.get("event_id") or (
         record.get("venue"), record.get("coin"), record.get("ts_ex"), record.get("sequence")))
@@ -388,12 +518,21 @@ def certifier_record(
     record: Any, *, famille: str, source: str, now_ms: int,
 ) -> tuple[dict[str, Any] | None, str, str]:
     """Aiguille vers le certificateur de la famille."""
+    # INTÉGRITÉ (défense en profondeur) : une estimation/inférence n'entre jamais SAFE.
+    if not _source_certifiable(record):
+        return None, QUARANTAINE, "source_non_certifiable_inference"
     if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL, FAMILLE_SNAPSHOT):
         return certifier_fill(record, source=source, famille=famille, now_ms=now_ms)
     if famille == FAMILLE_BOOK_L2:
         return certifier_book(record, source=source, now_ms=now_ms)
     if famille == FAMILLE_BBO:
         return certifier_bbo(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_TRADES:
+        return certifier_trade(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_CANDLE:
+        return certifier_candle(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_POSITION:
+        return certifier_position(record, source=source, now_ms=now_ms)
     return None, QUARANTAINE, "famille_inconnue"
 
 
@@ -450,8 +589,9 @@ def certifier_lignes(
 
 __all__ = [
     "FAMILLE_FILLS_FORWARD", "FAMILLE_FILLS_BACKFILL", "FAMILLE_BOOK_L2",
-    "FAMILLE_BBO", "FAMILLE_SNAPSHOT", "PASS", "REPARE", "QUARANTAINE",
+    "FAMILLE_BBO", "FAMILLE_SNAPSHOT", "FAMILLE_TRADES", "FAMILLE_CANDLE",
+    "FAMILLE_POSITION", "SOURCES_NON_CERTIFIABLES", "PASS", "REPARE", "QUARANTAINE",
     "StatsCertif", "detecter_famille", "sniffer_famille", "certifier_fill", "certifier_book",
-    "certifier_bbo", "certifier_record", "certifier_lignes", "identite",
-    "MAX_TARGET_LAG_MS",
+    "certifier_bbo", "certifier_trade", "certifier_candle", "certifier_position",
+    "certifier_record", "certifier_lignes", "identite", "MAX_TARGET_LAG_MS",
 ]

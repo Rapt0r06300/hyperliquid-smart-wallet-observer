@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -161,6 +162,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-cycles", type=int, default=0, help="0 = infini")
     args = p.parse_args(argv)
     root = Path(args.root)
+    pid_file = root / "runtime" / "data" / "explorer_autonome.pid"
+    try:
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(os.getpid()), encoding="utf-8")
+    except OSError:
+        pass
     print("[auto] Explorer autonome démarré. Ctrl+C pour arrêter.", flush=True)
     univers = charger_univers()
     print(f"[auto] univers : {len(univers)} coins.", flush=True)
@@ -187,6 +194,11 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(attente)
     except KeyboardInterrupt:
         print("\n[auto] arrêt demandé. À bientôt.", flush=True)
+    finally:
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
     return 0
 
 

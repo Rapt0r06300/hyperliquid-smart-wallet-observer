@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Affichage TEMPS RÉEL de tout ce que les collecteurs écrivent — tableau de bord terminal.
+"""ECRAN UNIQUE — tout ce que les collecteurs recoltent, en temps reel.
 
-Lit les tapes de `runtime/data/` au fil de l'eau (offset incrémental, gère la rotation),
-affiche par flux le total + le débit (lignes/s) et les derniers FILLS observés. Lecture seule,
-n'écrit rien, n'interfère pas avec les collecteurs. Ctrl+C pour quitter.
+Decouvre AUTOMATIQUEMENT tous les flux `.jsonl` de `runtime/data/` (toutes les ameliorations :
+fills WS/poll/noeud/TWAP/estimes, L2, BBO, trades, bougies, positions, explorer, venues,
+asset-ctx, liquidations, vaults, etc.), affiche pour chacun le total + le debit + la fraicheur,
+l'etat des collecteurs (superviseur / poll / explorer) et les derniers fills. Lecture seule :
+n'ecrit rien, n'interfere pas. Ctrl+C pour quitter.
 """
 from __future__ import annotations
 
@@ -17,19 +19,49 @@ from pathlib import Path
 
 RACINE = Path(__file__).resolve().parents[1]
 
-# (label, glob, est_fill)
-FLUX = [
-    ("Fills WS (live)",    "vault_fills_live*.jsonl",        True),
-    ("Fills poll (REST)",  "vault_fills_poll*.jsonl",        True),
-    ("Fills noeud local",  "node_fills_tape*.jsonl",         True),
-    ("Fills TWAP",         "copy_vault_twap*.jsonl",         True),
-    ("Carnets L2",         "*l2*tape*.jsonl",                False),
-    ("BBO (top of book)",  "copy_vault_bbo*.jsonl",          False),
-    ("Trades marche",      "copy_vault_trades*.jsonl",       False),
-    ("Bougies (candles)",  "copy_vault_candle*.jsonl",       False),
-    ("Positions leaders",  "copy_vault_positions*.jsonl",    False),
-    ("Explorer (activite)", "explorer_tx_tape*.jsonl",       False),
-]
+# Libelles lisibles pour les flux connus : nom_fichier -> (libelle, est_flux_de_fills)
+LABELS: dict[str, tuple[str, bool]] = {
+    "vault_fills_live.jsonl": ("Fills WS (live)", True),
+    "vault_fills_poll.jsonl": ("Fills poll (REST)", True),
+    "vault_fills.jsonl": ("Fills consolides", True),
+    "leader_fills_bruts.jsonl": ("Fills leaders bruts", True),
+    "node_fills_tape.jsonl": ("Fills noeud local", True),
+    "explorer_inferred_fills.jsonl": ("Fills estimes explorer", True),
+    "copy_vault_twap_lane.jsonl": ("Fills TWAP", True),
+    "fills_journal.jsonl": ("Journal fills", True),
+    "copy_vault_l2_tape.jsonl": ("Carnets L2", False),
+    "raw_l2_lifecycle.jsonl": ("L2 cycle de vie", False),
+    "metaorder_l2_tape.jsonl": ("L2 metaordres", False),
+    "bbo_tape.jsonl": ("BBO (top of book)", False),
+    "copy_vault_bbo_lane.jsonl": ("BBO lane", False),
+    "copy_vault_trades_lane.jsonl": ("Trades marche", False),
+    "copy_vault_candle_lane.jsonl": ("Bougies (OHLCV)", False),
+    "copy_vault_positions_lane.jsonl": ("Positions leaders", False),
+    "vault_snapshots.jsonl": ("Snapshots vaults", False),
+    "vault_episodes.jsonl": ("Episodes vaults", False),
+    "vault_ledger.jsonl": ("Ledger vaults", False),
+    "explorer_tx_tape.jsonl": ("Explorer (activite)", False),
+    "asset_ctx_tape.jsonl": ("Asset-ctx (OI/funding)", False),
+    "hl_allmids_tape.jsonl": ("Prix (allMids)", False),
+    "carnet_venues.jsonl": ("Carnets venues", False),
+    "dispersion_venues.jsonl": ("Dispersion venues", False),
+    "liquidations_confirmees.jsonl": ("Liquidations", False),
+    "overshoots_liquidation.jsonl": ("Overshoots liquidation", False),
+    "lead_lag_event_decisions.jsonl": ("Lead-lag decisions", False),
+    "metaorder_shadow_ledger.jsonl": ("Metaorder shadow", False),
+    "userfills_integrity_diagnostics.jsonl": ("Diag. integrite fills", False),
+    "userfills_unclassified.jsonl": ("Fills non classes", False),
+    "recap_historique.jsonl": ("Recap historique", False),
+}
+
+
+def label_pour(nom: str) -> tuple[str, bool]:
+    if nom in LABELS:
+        return LABELS[nom]
+    base = nom[:-6] if nom.endswith(".jsonl") else nom
+    joli = base.replace("_", " ").strip()
+    joli = (joli[:1].upper() + joli[1:]) if joli else nom
+    return joli, ("fill" in nom.lower())
 
 
 def _nb(v):
@@ -69,95 +101,122 @@ def formater_fill(obj: dict) -> str | None:
     return f"{heure}  {sens:<5} {str(coin):<7} px={px:<11.6g} sz={sz:<11.6g} ~{valeur:>9.0f}$  {court}"
 
 
-def _fichiers(data_dir: Path, motif: str) -> list[Path]:
-    return sorted(p for p in data_dir.glob(motif) if p.is_file())
-
-
 def _cls():
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 12) -> int:
+def _et(ok: bool) -> str:
+    return "ACTIF " if ok else "arrete"
+
+
+def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> int:
     offsets: dict[str, int] = {}
-    totaux: dict[str, int] = {label: 0 for label, _, _ in FLUX}
-    precedents: dict[str, int] = dict(totaux)
+    totaux: dict[str, int] = {}
+    precedents: dict[str, int] = {}
     maj_ts: dict[str, float] = {}
+    meta: dict[str, tuple[str, bool]] = {}   # path -> (label, est_fill)
+    premiere_vue: set[str] = set()
     derniers_fills: list[str] = []
-    debut = time.time()
     total_initial: int | None = None
     try:
         while True:
-            for label, motif, est_fill in FLUX:
-                for fich in _fichiers(data_dir, motif):
-                    cle = str(fich)
-                    try:
-                        taille = fich.stat().st_size
-                    except OSError:
+            for fich in sorted(data_dir.glob("*.jsonl")):
+                cle = str(fich)
+                if cle not in meta:
+                    meta[cle] = label_pour(fich.name)
+                    totaux.setdefault(cle, 0)
+                    precedents.setdefault(cle, 0)
+                est_fill = meta[cle][1]
+                try:
+                    taille = fich.stat().st_size
+                except OSError:
+                    continue
+                pos = offsets.get(cle, 0)
+                if taille < pos:            # fichier reecrit -> repart de 0
+                    pos = 0
+                if taille <= pos:
+                    offsets[cle] = pos
+                    continue
+                try:
+                    with fich.open("r", encoding="utf-8", errors="replace") as fh:
+                        fh.seek(pos)
+                        nouveau = fh.read()
+                        offsets[cle] = fh.tell()
+                except OSError:
+                    continue
+                if nouveau.strip():
+                    maj_ts[cle] = time.time()
+                for ligne in nouveau.splitlines():
+                    ligne = ligne.strip()
+                    if not ligne:
                         continue
-                    pos = offsets.get(cle, 0)
-                    if taille < pos:        # fichier reecrit (fusion) -> repart de 0
-                        pos = 0
-                        offsets[cle] = 0
-                    if taille <= pos:
-                        continue
-                    try:
-                        with fich.open("r", encoding="utf-8", errors="replace") as fh:
-                            fh.seek(pos)
-                            nouveau = fh.read()
-                            offsets[cle] = fh.tell()
-                    except OSError:
-                        continue
-                    if nouveau.strip():
-                        maj_ts[label] = time.time()
-                    for ligne in nouveau.splitlines():
-                        ligne = ligne.strip()
-                        if not ligne:
+                    totaux[cle] += 1
+                    if est_fill:
+                        try:
+                            obj = json.loads(ligne)
+                        except (ValueError, TypeError):
                             continue
-                        totaux[label] += 1
-                        if est_fill:
-                            try:
-                                obj = json.loads(ligne)
-                            except (ValueError, TypeError):
-                                continue
-                            if isinstance(obj, dict):
-                                txt = formater_fill(obj)
-                                if txt:
-                                    derniers_fills.append(txt)
+                        if isinstance(obj, dict):
+                            txt = formater_fill(obj)
+                            if txt:
+                                derniers_fills.append(txt)
             derniers_fills[:] = derniers_fills[-n_derniers:]
 
+            # --- rendu ---
             _cls()
-            print("=" * 72)
-            print("  COLLECTE HYPERLIQUID - TEMPS REEL   (Ctrl+C pour quitter)")
-            print(f"  dossier : {data_dir}")
-            print("=" * 72)
-            grand_total = 0
             maintenant = time.time()
-            for label, _, _ in FLUX:
-                t = totaux[label]
+            print("=" * 74)
+            print("  ALINA - ECRAN UNIQUE : TOUS LES COLLECTEURS + TOUTES LES DONNEES")
+            print(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}        (Ctrl+C pour quitter)")
+            print("=" * 74)
+            sup = (data_dir / "collecteurs.lock").exists()
+            poll = (data_dir / "poll_leaders.pid").exists()
+            expl = (data_dir / "explorer_autonome.pid").exists()
+            print(f"  Superviseur: {_et(sup)}    Poll leaders: {_et(poll)}    "
+                  f"Explorer auto: {_et(expl)}")
+            print("-" * 74)
+
+            actifs = sorted(meta, key=lambda c: (-(totaux.get(c, 0) > 0), -totaux.get(c, 0), c))
+            grand_total = 0
+            vides = 0
+            for cle in actifs:
+                label = meta[cle][0]
+                t = totaux.get(cle, 0)
                 grand_total += t
-                dps = (t - precedents[label]) / intervalle
-                barre = "*" if dps > 0 else "."
-                if label in maj_ts:
-                    age = maintenant - maj_ts[label]
-                    frais = "a l'instant" if age < intervalle * 1.5 else f"il y a {int(age):>4d}s"
+                if t == 0:
+                    vides += 1
+                    continue
+                if cle not in premiere_vue:   # 1re frame : pas de debit gonfle par l'historique
+                    premiere_vue.add(cle)
+                    precedents[cle] = t
+                    dps = 0.0
                 else:
-                    frais = "   --   "
-                print(f"  {barre} {label:<20} {t:>10d}  ({dps:>6.1f}/s)  MAJ {frais}")
-                precedents[label] = t
+                    dps = (t - precedents.get(cle, 0)) / intervalle
+                    precedents[cle] = t
+                barre = "*" if dps > 0 else " "
+                age = maintenant - maj_ts[cle] if cle in maj_ts else None
+                if age is None:
+                    frais = "    --   "
+                elif age < intervalle * 1.5:
+                    frais = "a l'instant"
+                else:
+                    frais = f"il y a {int(age):>4d}s"
+                print(f"  {barre} {label:<24} {t:>10d}  ({dps:>6.1f}/s)  {frais}")
+            if vides:
+                print(f"    (+ {vides} flux encore vides, en attente de donnees)")
             if total_initial is None:
                 total_initial = grand_total
-            print("-" * 72)
-            session = grand_total - total_initial
-            print(f"  TOTAL : {grand_total:>10d}   |   NOUVEAUX cette session : {session:>8d}   "
-                  f"|   {time.strftime('%H:%M:%S')}")
-            print("=" * 72)
-            print(f"  Derniers fills ({len(derniers_fills)}) :")
+            print("-" * 74)
+            print(f"  TOTAL : {grand_total:>11d} enregistrements   |   "
+                  f"NOUVEAUX cette session : {grand_total - total_initial:>8d}")
+            print("=" * 74)
+            print(f"  Derniers fills :")
             if derniers_fills:
                 for f in derniers_fills:
-                    print(f"    {f}")
+                    print(f"   {f}")
             else:
-                print("    (en attente de fills... lance les collecteurs / le noeud)")
-            print("=" * 72, flush=True)
+                print("   (en attente de fills...)")
+            print("=" * 74, flush=True)
             time.sleep(intervalle)
     except KeyboardInterrupt:
         print("\nArret de l'affichage.")
@@ -165,7 +224,7 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 12) -> 
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Affichage temps reel de la collecte (lecture seule).")
+    p = argparse.ArgumentParser(description="Ecran unique temps reel de la collecte (lecture seule).")
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--intervalle", type=float, default=2.0)
     args = p.parse_args(argv)
