@@ -362,6 +362,12 @@ if exist "%CV_ROOT%tools\archiver_tapes.py" (
   "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\archiver_tapes.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
 )
 del /f /q "%CV_ROOT%runtime\data\stop_collecteurs.flag" >nul 2>nul
+rem --- RAPPORT detaille : toutes les erreurs + ameliorations detectees ---
+if exist "%CV_ROOT%tools\rapport_collecteurs.py" (
+  echo [RAPPORT] Generation du rapport detaille ^(erreurs + ameliorations^)...
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\rapport_collecteurs.py" --root "%CV_ROOT%." 2>nul
+  echo [RAPPORT] Tout est dans : runtime\logs\rapport_collecteurs.log
+)
 rem --- Supprimer le verrou ---
 if exist "%CV_LOCKFILE%" del /f /q "%CV_LOCKFILE%" >nul 2>nul
 for /f "tokens=1-2 delims=." %%A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "CV_END_TIME=%%A"
