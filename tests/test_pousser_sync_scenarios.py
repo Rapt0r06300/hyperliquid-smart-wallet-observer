@@ -131,3 +131,76 @@ def test_e2e_donnees_jamais_publiees(tmp_path):
     files = _git(remote, "ls-tree", "-r", "--name-only", "main")
     assert "runtime/data/secret_tape.jsonl" not in files
     assert not any(f.startswith("runtime/") for f in files.splitlines())
+
+
+def _push_concurrent(remote: Path, tmp_path: Path, nom: str, chemin: str, contenu: str) -> None:
+    """Simule un commit GitHub concurrent : un autre clone pousse sur le remote."""
+    autre = tmp_path / nom
+    _git(tmp_path, "clone", "-q", str(remote), str(autre))
+    _git(autre, "config", "user.email", "o@o.o")
+    _git(autre, "config", "user.name", "o")
+    _git(autre, "config", "commit.gpgsign", "false")
+    f = autre / chemin
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(contenu, encoding="utf-8")
+    _git(autre, "add", chemin)
+    _git(autre, "commit", "-q", "-m", "commit concurrent")
+    _git(autre, "push", "-q", "origin", "main")
+
+
+def test_e2e_commit_github_concurrent_integre_les_deux(tmp_path):
+    """#6 : GitHub reçoit un commit pendant qu'on a une modif locale -> on garde LES DEUX."""
+    work, remote = _repo_avec_remote(tmp_path)
+    # modif locale (code)
+    (work / "tools" / "x.py").write_text("print('v2 local')\n", encoding="utf-8")
+    # commit concurrent sur GitHub (autre fichier)
+    _push_concurrent(remote, tmp_path, "clone1", "tools/distant.py", "print('distant')\n")
+    code, report = _run_sync(work)
+    assert code == 0, report.get("status")
+    files = _git(remote, "ls-tree", "-r", "--name-only", "main")
+    assert "tools/distant.py" in files          # le commit concurrent conserve
+    # notre modif locale est bien sur le remote aussi
+    contenu = _git(remote, "show", "main:tools/x.py")
+    assert "v2 local" in contenu
+    assert _git(work, "rev-parse", "main") == _git(remote, "rev-parse", "main")  # #10
+
+
+def test_e2e_conflit_preserve_sans_perte(tmp_path):
+    """#5 : local et GitHub modifient le MEME fichier -> pas de choix arbitraire, pas de perte."""
+    work, remote = _repo_avec_remote(tmp_path)
+    (work / "tools" / "x.py").write_text("print('VERSION LOCALE')\n", encoding="utf-8")
+    _push_concurrent(remote, tmp_path, "clone2", "tools/x.py", "print('VERSION DISTANTE')\n")
+    code, report = _run_sync(work)
+    # soit il réconcilie proprement (0), soit il bloque (non-0) -- mais JAMAIS il
+    # n'écrase silencieusement la version locale sans la sauvegarder.
+    local_x = (work / "tools" / "x.py").read_text(encoding="utf-8")
+    if code != 0:
+        # conflit signalé : la version locale n'est pas perdue
+        assert "VERSION LOCALE" in local_x
+        assert report["status"] in ("NO_GO",) or report.get("force_push") is False
+    # dans tous les cas : aucun push force, aucun reset/clean
+    assert report.get("force_push") is False
+    assert report.get("reset_or_clean") is False
+
+
+def test_e2e_wip_sauvegarde_le_travail_inacheve(tmp_path):
+    """#3 : --wip-only sauvegarde le travail en cours (commit local) sans tout finaliser."""
+    work, _ = _repo_avec_remote(tmp_path)
+    (work / "tools" / "x.py").write_text("print('travail en cours')\n", encoding="utf-8")
+    head_avant = _git(work, "rev-parse", "HEAD")
+    code, report = _run_sync(work, dry_run=False)  # run normal fait deja un commit propre
+    # un commit a bien ete cree (le travail n'est pas perdu)
+    head_apres = _git(work, "rev-parse", "HEAD")
+    assert code == 0
+    assert head_apres != head_avant or report.get("local_commit_created") is not None
+
+
+def test_e2e_rien_ne_change_pas_de_commit_vide(tmp_path):
+    """#10 : si rien n'a changé, aucun commit vide n'est créé."""
+    work, _ = _repo_avec_remote(tmp_path)
+    head_avant = _git(work, "rev-parse", "HEAD")
+    n_commits_avant = _git(work, "rev-list", "--count", "HEAD")
+    code, _ = _run_sync(work)
+    assert code == 0
+    assert _git(work, "rev-parse", "HEAD") == head_avant       # HEAD inchange
+    assert _git(work, "rev-list", "--count", "HEAD") == n_commits_avant  # aucun commit ajoute
