@@ -42,11 +42,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 4 lanes = 4 IP distinctes = ~x4 de capacite. Pour en ajouter, etends
-        # cette liste ET passe --shard-count au meme nombre ci-dessous.
-        shard_index: [0, 1, 2, 3]
+        # 8 lanes = 8 IP distinctes = ~x8 de capacite poll (chaque shard suit 1/8 des
+        # leaders -> polling bien plus frais). Sous la limite GitHub de 20 jobs concurrents.
+        # Pour ajuster, etends/reduis cette liste ET passe --shard-count au meme nombre ci-dessous.
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
-      SHARD_COUNT: "4"
+      SHARD_COUNT: "8"
     steps:
       - name: Checkout (shallow + sparse, evite de tirer les millions de fichiers data)
         uses: actions/checkout@v4
