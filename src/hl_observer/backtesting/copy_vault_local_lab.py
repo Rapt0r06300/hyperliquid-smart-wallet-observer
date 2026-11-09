@@ -1889,6 +1889,45 @@ def _charger_tier_local(
     }
 
 
+def _charger_asset_ctx_safe(workspace: Path) -> list[dict[str, Any]]:
+    """Charge l'asset_ctx SAFE matérialisé et l'adapte en ``{coin, ts_ms, mark, oracle}``
+    pour le signal overshoot. Robuste aux deux shapes (``context.markPx/oraclePx`` ou
+    direct). Fail-soft : ``[]`` si absent/illisible (l'exploration tourne sans planter)."""
+    chemin = workspace / "copy_vault_active_asset_ctx_tape.jsonl"
+    if chemin.is_symlink() or not chemin.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        with chemin.open("r", encoding="utf-8") as fh:
+            for ligne in fh:
+                ligne = ligne.strip()
+                if not ligne:
+                    continue
+                try:
+                    row = json.loads(ligne)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                ctx = row.get("context") if isinstance(row.get("context"), Mapping) else row
+                coin = row.get("coin") or ctx.get("coin")
+                ts = row.get("ts_ms") or row.get("received_at_ms") or row.get("exchange_ts_ms")
+                mark = ctx.get("markPx", ctx.get("mark", row.get("mark")))
+                oracle = ctx.get("oraclePx", ctx.get("oracle", row.get("oracle")))
+                if coin is None or ts is None or mark is None or oracle is None:
+                    continue
+                try:
+                    out.append({
+                        "coin": str(coin), "ts_ms": int(ts),
+                        "mark": float(mark), "oracle": float(oracle),
+                    })
+                except (TypeError, ValueError):
+                    continue
+    except OSError:
+        return []
+    return out
+
+
 def _source_asset_inventory_sha256(assets: Sequence[Mapping[str, Any]]) -> str:
     material = "\n".join(
         "\0".join(
@@ -2794,8 +2833,39 @@ def run_local_campaign(
             index = bisect.bisect_right(timestamps_for_coin, signal_ms) - 1
             if index >= 0 and signal_ms - timestamps_for_coin[index] <= 30_000:
                 aligned_adds += 1
+    # --- Exploration AUTOMATIQUE de la variante overshoot (consultative, additive) ---
+    # Tourne à CHAQUE run du labo sur le SAFE : rapporte si un filtre anti-débordement
+    # (overshoot = mark vs oracle) bat la baseline. N'altère NI la campagne gelée NI son
+    # verdict officiel (purement exploratoire ; les gates canoniques restent autoritaires).
+    overshoot_exploration: dict[str, Any] = {"status": "NOT_RUN"}
+    try:
+        from hl_observer.backtesting.copy_vault_overshoot_train import (
+            explore_overshoot_filtered_train,
+        )
+        _asset_ctx_safe = _charger_asset_ctx_safe(workspace)
+        _ov_result = explore_overshoot_filtered_train(metaorders, books, _asset_ctx_safe)
+        _ov_eligibles = [v for v in _ov_result.get("variants", []) if v.get("eligible")]
+        overshoot_exploration = {
+            "status": "OK",
+            "trial_count": _ov_result.get("trial_count"),
+            "variants_eligibles": len(_ov_eligibles),
+            "asset_ctx_points": len(_asset_ctx_safe),
+            "seuils_eligibles_bps": sorted(
+                {v.get("overshoot_seuil_bps") for v in _ov_eligibles
+                 if v.get("overshoot_seuil_bps") is not None}
+            ),
+            "decision_authority": "CONSULTATIVE_ONLY_CANONICAL_GATES_REMAIN_AUTHORITATIVE",
+        }
+        say(
+            f"Exploration overshoot (auto) : {len(_ov_eligibles)} variante(s) éligible(s) "
+            f"/ {_ov_result.get('trial_count')} essais · {len(_asset_ctx_safe):,} points asset_ctx"
+        )
+    except Exception as _exc:  # noqa: BLE001 - exploratoire, jamais autoritaire
+        overshoot_exploration = {"status": "FAILED", "reason": f"{type(_exc).__name__}: {_exc}"}
+
     base = {
         "paper_read_only": True, "real_execution": False,
+        "overshoot_exploration": overshoot_exploration,
         "objective_usd_per_day": OBJECTIVE_USD_PER_DAY,
         "paper_capital_usd": PAPER_CAPITAL_USD,
         "pnl_uplift_freeze_count": 0,
