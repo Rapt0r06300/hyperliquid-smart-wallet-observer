@@ -42,8 +42,23 @@ from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 URL_HL = "https://api.hyperliquid.xyz/info"
 SORTIE = Path("runtime") / "data" / "hl_allmids.json"
 TAPE = Path("runtime") / "data" / "hl_allmids_tape.jsonl"   # HISTORIQUE (pour mesurer l'edge forward de copie)
-TAPE_INTERVALLE_S = 60.0                                    # on n'archive qu'1 point/min (le cache reste à 15 s)
-INTERVALLE_S_DEFAUT = 15.0
+
+
+def _env_f(nom: str, defaut: float) -> float:
+    """Surcharge par variable d'environnement (tuning sans toucher au code). Fail-soft."""
+    try:
+        v = float(os.environ.get(nom, ""))
+        return v if v > 0 else defaut
+    except (TypeError, ValueError):
+        return defaut
+
+
+# Plus de points historiques = plus de matière backtest (écritures locales, gratuit).
+TAPE_INTERVALLE_S = _env_f("ALLMIDS_TAPE_S", 30.0)          # 1 point / 30 s (était 60 s)
+INTERVALLE_S_DEFAUT = _env_f("ALLMIDS_INTERVALLE_S", 8.0)   # cache mids plus frais (était 15 s)
+_PLANCHER_S = _env_f("ALLMIDS_PLANCHER_S", 6.0)             # garde-fou mini entre 2 passes
+# En-têtes polis : User-Agent identifie le client (évite certains blocages), connexion réutilisable.
+_HEADERS = {"Content-Type": "application/json", "User-Agent": "alina-smart-flow/allmids (read-only)"}
 
 
 def parser_allmids(rep: Any) -> dict[str, float]:
@@ -65,11 +80,42 @@ def parser_allmids(rep: Any) -> dict[str, float]:
     return out
 
 
-def _post_allmids(*, timeout_s: float = 8.0) -> Any:
+def _retry_after_s(exc: urllib.error.HTTPError) -> float | None:
+    """Secondes demandées par le serveur via l'en-tête Retry-After (si fourni)."""
+    try:
+        v = exc.headers.get("Retry-After") if exc.headers else None
+        s = float(v) if v else None
+        return s if (s is not None and 0 < s <= 30) else None
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _post_allmids(*, timeout_s: float = 8.0, tentatives: int = 3) -> Any:
+    """POST allMids avec RETRY interne : un blip réseau ou un 429 transitoire est
+    réessayé silencieusement (respecte Retry-After sur 429) au lieu de compter comme
+    un échec. Un seul appel public et léger ; aucune signature, aucune clé."""
     corps = json.dumps({"type": "allMids"}).encode("utf-8")
-    req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+    derniere: Exception | None = None
+    for essai in range(1, max(1, tentatives) + 1):
+        req = urllib.request.Request(URL_HL, data=corps, headers=_HEADERS)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
+                return json.loads(rep.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            derniere = exc
+            if exc.code == 429 and essai < tentatives:
+                time.sleep(_retry_after_s(exc) or min(1.5 * essai, 5.0))
+                continue
+            raise
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            derniere = exc
+            if essai < tentatives:
+                time.sleep(min(0.4 * essai, 1.5))  # petit délai + jitter implicite réseau
+                continue
+            raise
+    if derniere is not None:
+        raise derniere
+    raise RuntimeError("allMids: tentatives epuisees")
 
 
 def _cache_sample_hash(payload: dict[str, Any]) -> str:
@@ -189,19 +235,20 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 echecs += 1
                 d = CF.backoff_jitter(echecs)
-                print(f"[allmids] fetch vide/KO — backoff {d:.1f}s", flush=True)
+                # 1er échec = blip transitoire (déjà réessayé en interne) : on ne
+                # pollue pas le log. On n'alerte qu'à partir du 2e échec consécutif.
+                if echecs >= 2:
+                    print(f"[allmids] fetch vide/KO x{int(echecs)} — backoff {d:.1f}s", flush=True)
                 time.sleep(d)
-        except Exception as exc:  # noqa: BLE001 — on ne meurt pas
+        except Exception as exc:  # noqa: BLE001 — on ne meurt jamais
             echecs += 1
             d = CF.backoff_jitter(echecs)
-            print(
-                f"[allmids] erreur ({str(exc)[:60]}) — backoff {d:.1f}s",
-                flush=True,
-            )
+            if echecs >= 2:
+                print(f"[allmids] erreur ({str(exc)[:60]}) x{int(echecs)} — backoff {d:.1f}s", flush=True)
             time.sleep(d)
         if a.une_fois:
             return 0
-        time.sleep(max(10.0, float(a.intervalle)))
+        time.sleep(max(_PLANCHER_S, float(a.intervalle)))
 
 
 if __name__ == "__main__":

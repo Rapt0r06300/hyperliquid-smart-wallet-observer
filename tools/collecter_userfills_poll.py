@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -53,14 +54,46 @@ BOOTSTRAP_LOOKBACK_MS = 3_600_000  # 1 h
 # tous deux importés de ``forward_poll_fills`` et prouvés par tests.
 
 
-def _post_userfills(vault: str, start_ms: int, end_ms: int, *, timeout_s: float = 10.0) -> Any:
+_UA_POLL = {"Content-Type": "application/json", "User-Agent": "alina-smart-flow/poll (read-only)"}
+
+
+def _retry_after_s(exc: Any) -> float | None:
+    """Secondes demandées par le serveur via l'en-tête Retry-After (bornées)."""
+    try:
+        h = getattr(exc, "headers", None)
+        v = h.get("Retry-After") if h else None
+        s = float(v) if v else None
+        return s if (s is not None and 0 < s <= 60) else None
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _post_userfills(vault: str, start_ms: int, end_ms: int, *, timeout_s: float = 10.0,
+                    tentatives: int = 2) -> Any:
+    """userFillsByTime avec retry des blips RÉSEAU transitoires (timeout/URLError).
+    Les HTTPError (dont 429) remontent telles quelles : l'AIMD global DOIT les voir
+    pour ralentir. Aucun ordre, aucune clé, aucune signature."""
     corps = json.dumps(
         {"type": "userFillsByTime", "user": vault,
          "startTime": int(start_ms), "endTime": int(end_ms)}
     ).encode("utf-8")
-    req = urllib.request.Request(URL_HL, data=corps, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+    derniere: Exception | None = None
+    for essai in range(1, max(1, tentatives) + 1):
+        req = urllib.request.Request(URL_HL, data=corps, headers=_UA_POLL)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
+                return json.loads(rep.read().decode("utf-8"))
+        except urllib.error.HTTPError:
+            raise  # 429 & co. DOIVENT remonter a l'AIMD (ne jamais masquer le signal)
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            derniere = exc
+            if essai < tentatives:
+                time.sleep(0.4 * essai)  # blip transitoire -> courte attente puis retry
+                continue
+            raise
+    if derniere is not None:
+        raise derniere
+    raise RuntimeError("userFillsByTime: tentatives epuisees")
 
 
 def _load_state(path: Path) -> dict[str, LeaderWatermark]:
@@ -110,6 +143,10 @@ def poll_once(
     met en pause un leader fautif (429) sans pénaliser les autres."""
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     emitted = 0
+    n_429 = 0           # throttles serveur (comportement adaptatif, PAS une erreur)
+    n_blip = 0          # blips reseau transitoires
+    dernier_blip = ""
+    retry_after_max = 0.0
     for vault in leaders:
         if cooldown is not None and not cooldown.due(vault, now_ms):
             continue  # #3 ce leader est en backoff 429 -> on passe au suivant
@@ -127,9 +164,16 @@ def poll_once(
         except Exception as exc:  # noqa: BLE001 (collecteur résilient, fail-soft)
             if cooldown is not None:
                 cooldown.penalize(vault, now_ms)  # 429/erreur -> backoff ce leader
-            if bucket is not None and getattr(exc, "code", None) == 429:
-                bucket.penalize()  # 429 = limite IP globale -> pause TOUT le poll
-            print(f"[poll] {vault[:10]} erreur {type(exc).__name__}: {str(exc)[:80]}", flush=True)
+            if getattr(exc, "code", None) == 429:
+                n_429 += 1
+                if bucket is not None:
+                    bucket.penalize()  # 429 = limite IP globale -> pause TOUT le poll
+                ra = _retry_after_s(exc)
+                if ra:
+                    retry_after_max = max(retry_after_max, ra)
+            else:
+                n_blip += 1
+                dernier_blip = f"{vault[:10]} {type(exc).__name__}: {str(exc)[:50]}"
             continue
         if cooldown is not None:
             cooldown.reset(vault)  # succès -> on réarme le leader
@@ -143,6 +187,16 @@ def poll_once(
         _append_fills(root / OUT_FILLS, causal)
         _LAST_FILL_COUNT[vault] = len(causal)
         emitted += len(causal)
+    # Log GROUPÉ et propre : un 429 géré par l'AIMD est un THROTTLE (flow control),
+    # pas une erreur. On n'écrit qu'une ligne/passe au lieu d'une par leader.
+    if n_429:
+        extra = f" (serveur demande ~{retry_after_max:.0f}s)" if retry_after_max else ""
+        print(f"[poll] throttle 429 x{n_429} — pause adaptative AIMD{extra}", flush=True)
+    if n_blip:
+        print(f"[poll] {n_blip} blip(s) reseau transitoire(s) — ex: {dernier_blip}", flush=True)
+    # Respecte le Retry-After du serveur (borné) : on ne re-tape pas avant l'heure.
+    if retry_after_max:
+        time.sleep(min(retry_after_max, 10.0))
     return emitted
 
 

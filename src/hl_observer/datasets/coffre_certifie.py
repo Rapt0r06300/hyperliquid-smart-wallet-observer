@@ -51,6 +51,12 @@ FAMILLE_SNAPSHOT = "snapshot"             # snapshots vault
 FAMILLE_TRADES = "trades_marche"          # trades marché publics (exécution réaliste)
 FAMILLE_CANDLE = "candle"                 # bougies OHLCV (volatilité)
 FAMILLE_POSITION = "position"             # positions leaders (clearinghouseState)
+FAMILLE_ALLMIDS = "allmids"               # prix allMids tous-coins (contexte d'exécution)
+FAMILLE_ASSET_CTX = "asset_ctx"           # OI / funding / mark / oracle / premium par coin
+FAMILLE_LIQUIDATION = "liquidation"       # liquidations confirmées (événements réels)
+FAMILLE_OVERSHOOT = "overshoot"           # overshoots oracle↔mid + réversion mesurée
+FAMILLE_VENUE = "venue_book"              # carnet cross-venue (HL vs Binance, top-of-book)
+FAMILLE_DISPERSION = "venue_dispersion"   # dispersion de prix cross-venue (bps)
 
 #: Sources JAMAIS certifiables : données ESTIMÉES/inférées (non observées directement).
 #: Elles ne doivent JAMAIS entrer dans le coffre comme du SAFE — intégrité du labo.
@@ -73,6 +79,12 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "copy_vault_positions_lane.jsonl": (FAMILLE_POSITION, "CLEARINGHOUSE_WS"),
     "copy_vault_trades_lane.jsonl": (FAMILLE_TRADES, "HYPERLIQUID_TRADES_WS"),
     "copy_vault_candle_lane.jsonl": (FAMILLE_CANDLE, "HYPERLIQUID_CANDLE_WS"),
+    "hl_allmids_tape.jsonl": (FAMILLE_ALLMIDS, "HYPERLIQUID_ALLMIDS"),
+    "asset_ctx_tape.jsonl": (FAMILLE_ASSET_CTX, "HYPERLIQUID_ASSET_CTX"),
+    "liquidations_confirmees.jsonl": (FAMILLE_LIQUIDATION, "LIQUIDATION_CONFIRMEE"),
+    "overshoots_liquidation.jsonl": (FAMILLE_OVERSHOOT, "OVERSHOOT_MESURE"),
+    "carnet_venues.jsonl": (FAMILLE_VENUE, "CROSS_VENUE_BOOK"),
+    "dispersion_venues.jsonl": (FAMILLE_DISPERSION, "CROSS_VENUE_DISPERSION"),
 }
 
 
@@ -509,9 +521,185 @@ def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
     if famille == FAMILLE_POSITION:
         return ("position", record.get("vault"), record.get("coin"),
                 record.get("received_at_ms"), record.get("szi"))
+    if famille == FAMILLE_ALLMIDS:
+        return ("allmids", record.get("ts_ms"), record.get("n"))
+    if famille == FAMILLE_ASSET_CTX:
+        return ("assetctx", record.get("coin"), record.get("ts_ms"))
+    if famille == FAMILLE_LIQUIDATION:
+        return ("liq", record.get("coin"), record.get("ts_ms"),
+                record.get("stable_event_id") or record.get("hash"), record.get("tid"))
+    if famille == FAMILLE_OVERSHOOT:
+        return ("overshoot", record.get("coin"), record.get("ts_ms"), record.get("sens"))
+    if famille == FAMILLE_VENUE:
+        return ("venue", record.get("coin"), record.get("snapshot_ts_ms"),
+                record.get("observation_id"))
+    if famille == FAMILLE_DISPERSION:
+        return ("disp", record.get("coin"), record.get("ts_ms"))
     # BBO
     return ("bbo", record.get("event_id") or (
         record.get("venue"), record.get("coin"), record.get("ts_ex"), record.get("sequence")))
+
+
+def certifier_allmids(record: Any, *, source: str, now_ms: int,
+                      ) -> tuple[dict[str, Any] | None, str, str]:
+    """Snapshot de prix allMids {ts_ms, mids:{coin:px}}. Replayable si ts causal et au
+    moins un mid fini > 0. On garde les mids valides (répare en écartant les non finis)."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    ts = _entier_positif(record.get("ts_ms"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    brut = record.get("mids")
+    if not isinstance(brut, dict) or not brut:
+        return None, QUARANTAINE, "mids_absent"
+    mids: dict[str, float] = {}
+    for c, v in brut.items():
+        px = _nombre_fini(v)
+        if px is not None and px > 0:
+            mids[str(c)] = px
+    if not mids:
+        return None, QUARANTAINE, "aucun_mid_valide"
+    repare = len(mids) != len(brut)
+    out = {"ts_ms": ts, "n": len(mids), "mids": mids,
+           "source": str(record.get("source") or source)}
+    return out, (REPARE if repare else PASS), ""
+
+
+def certifier_asset_ctx(record: Any, *, source: str, now_ms: int,
+                        ) -> tuple[dict[str, Any] | None, str, str]:
+    """Contexte marché (OI/funding/mark/oracle/premium). Replayable si coin, ts causal,
+    et au moins mark OU oracle > 0."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    ts = _entier_positif(record.get("ts_ms"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    mark = _nombre_fini(record.get("mark"))
+    oracle = _nombre_fini(record.get("oracle"))
+    if (mark is None or mark <= 0) and (oracle is None or oracle <= 0):
+        return None, QUARANTAINE, "ni_mark_ni_oracle"
+    out["ts_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
+def certifier_liquidation(record: Any, *, source: str, now_ms: int,
+                          ) -> tuple[dict[str, Any] | None, str, str]:
+    """Liquidation confirmée (événement réel). Replayable si coin, px>0, sz>0, ts causal."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    px = _nombre_fini(record.get("px"))
+    if px is None or px <= 0:
+        return None, QUARANTAINE, "px_invalide"
+    sz = _nombre_fini(record.get("sz"))
+    if sz is None or sz <= 0:
+        return None, QUARANTAINE, "sz_invalide"
+    out["px"], out["sz"] = px, sz
+    ts = _entier_positif(record.get("ts_ms")) or _entier_positif(record.get("observed_at_ms"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["ts_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
+def certifier_overshoot(record: Any, *, source: str, now_ms: int,
+                        ) -> tuple[dict[str, Any] | None, str, str]:
+    """Overshoot de liquidation (mesure oracle↔mid + réversion). Replayable si coin,
+    overshoot_bps fini, ts causal. ``ts0`` est en SECONDES -> normalisé en ms."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    ov = _nombre_fini(record.get("overshoot_bps"))
+    if ov is None:
+        return None, QUARANTAINE, "overshoot_bps_absent"
+    ts = _entier_positif(record.get("ts_ms"))
+    if ts is None:
+        ts0 = _nombre_fini(record.get("ts0"))
+        ts = int(ts0 * 1000) if (ts0 and ts0 > 0) else None
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["ts_ms"] = ts
+    out["overshoot_bps"] = ov
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
+def certifier_venue(record: Any, *, source: str, now_ms: int,
+                    ) -> tuple[dict[str, Any] | None, str, str]:
+    """Carnet cross-venue (HL vs Binance, top-of-book). Replayable si coin, ts causal,
+    et un top-of-book positif d'au moins une venue."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    hl = (_nombre_fini(record.get("hl_bid")), _nombre_fini(record.get("hl_ask")))
+    bn = (_nombre_fini(record.get("bin_bid")), _nombre_fini(record.get("bin_ask")))
+    ok_hl = all(x is not None and x > 0 for x in hl)
+    ok_bn = all(x is not None and x > 0 for x in bn)
+    if not (ok_hl or ok_bn):
+        return None, QUARANTAINE, "aucun_top_of_book_valide"
+    ts = _entier_positif(record.get("snapshot_ts_ms")) or _entier_positif(record.get("hl_received_at_ms"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["snapshot_ts_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
+
+
+def certifier_dispersion(record: Any, *, source: str, now_ms: int,
+                         ) -> tuple[dict[str, Any] | None, str, str]:
+    """Dispersion cross-venue (bps). Replayable si coin, dispersion_bps_h fini, ts causal.
+    ``ts`` est en SECONDES -> normalisé en ms."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    out = dict(record)
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    out["coin"] = coin
+    disp = _nombre_fini(record.get("dispersion_bps_h"))
+    if disp is None:
+        return None, QUARANTAINE, "dispersion_absente"
+    out["dispersion_bps_h"] = disp
+    ts = _entier_positif(record.get("ts_ms"))
+    if ts is None:
+        tss = _nombre_fini(record.get("ts"))
+        ts = int(tss * 1000) if (tss and tss > 0) else None
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    out["ts_ms"] = ts
+    out["source"] = str(record.get("source") or source)
+    return out, PASS, ""
 
 
 def certifier_record(
@@ -533,6 +721,18 @@ def certifier_record(
         return certifier_candle(record, source=source, now_ms=now_ms)
     if famille == FAMILLE_POSITION:
         return certifier_position(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_ALLMIDS:
+        return certifier_allmids(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_ASSET_CTX:
+        return certifier_asset_ctx(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_LIQUIDATION:
+        return certifier_liquidation(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_OVERSHOOT:
+        return certifier_overshoot(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_VENUE:
+        return certifier_venue(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_DISPERSION:
+        return certifier_dispersion(record, source=source, now_ms=now_ms)
     return None, QUARANTAINE, "famille_inconnue"
 
 
@@ -590,8 +790,12 @@ def certifier_lignes(
 __all__ = [
     "FAMILLE_FILLS_FORWARD", "FAMILLE_FILLS_BACKFILL", "FAMILLE_BOOK_L2",
     "FAMILLE_BBO", "FAMILLE_SNAPSHOT", "FAMILLE_TRADES", "FAMILLE_CANDLE",
-    "FAMILLE_POSITION", "SOURCES_NON_CERTIFIABLES", "PASS", "REPARE", "QUARANTAINE",
+    "FAMILLE_POSITION", "FAMILLE_ALLMIDS", "FAMILLE_ASSET_CTX", "FAMILLE_LIQUIDATION",
+    "FAMILLE_OVERSHOOT", "FAMILLE_VENUE", "FAMILLE_DISPERSION",
+    "SOURCES_NON_CERTIFIABLES", "PASS", "REPARE", "QUARANTAINE",
     "StatsCertif", "detecter_famille", "sniffer_famille", "certifier_fill", "certifier_book",
     "certifier_bbo", "certifier_trade", "certifier_candle", "certifier_position",
+    "certifier_allmids", "certifier_asset_ctx", "certifier_liquidation",
+    "certifier_overshoot", "certifier_venue", "certifier_dispersion",
     "certifier_record", "certifier_lignes", "identite", "MAX_TARGET_LAG_MS",
 ]

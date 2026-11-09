@@ -172,11 +172,37 @@ def ligne_carnet(coin: str, hl: tuple, binance: tuple, *, binance_symbol: str | 
     }
 
 
-def _post_hl(coin: str, *, timeout_s: float = 8.0) -> Any:
+_HEADERS_HL = {"Content-Type": "application/json", "User-Agent": "alina-smart-flow/carnet (read-only)"}
+
+
+def _post_hl(coin: str, *, timeout_s: float = 8.0, tentatives: int = 3) -> Any:
+    """l2Book HL avec retry des blips réseau + respect de Retry-After sur 429. UA poli."""
     body = json.dumps({"type": "l2Book", "coin": coin}).encode("utf-8")
-    request = urllib.request.Request(URL_HL, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
-        return json.loads(response.read().decode("utf-8"))
+    derniere: Exception | None = None
+    for essai in range(1, max(1, tentatives) + 1):
+        request = urllib.request.Request(URL_HL, data=body, headers=_HEADERS_HL)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            derniere = exc
+            if exc.code == 429 and essai < tentatives:
+                try:
+                    ra = float(exc.headers.get("Retry-After") or 0) if exc.headers else 0.0
+                except (ValueError, TypeError, AttributeError):
+                    ra = 0.0
+                time.sleep(ra if 0 < ra <= 30 else min(1.5 * essai, 5.0))
+                continue
+            raise
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            derniere = exc
+            if essai < tentatives:
+                time.sleep(min(0.4 * essai, 1.5))
+                continue
+            raise
+    if derniere is not None:
+        raise derniere
+    raise RuntimeError("carnet l2Book: tentatives epuisees")
 
 
 def _get_binance(symbol_or_coin: str, *, timeout_s: float = 8.0) -> Any:
@@ -275,7 +301,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("[carnet] %s ecrits=%d cumul=%d (%d coins)" % (time.strftime("%H:%M:%S"), count, total, len(coins)), flush=True)
             except Exception as exc:  # noqa: BLE001
                 failures += 1; delay = CF.backoff_jitter(failures)
-                print("[carnet] erreur (%s) - backoff %.1fs" % (str(exc)[:60], delay), flush=True); time.sleep(delay)
+                if failures >= 2:  # 1er echec = blip deja retente en interne
+                    print("[carnet] erreur (%s) x%d - backoff %.1fs" % (str(exc)[:60], int(failures), delay), flush=True)
+                time.sleep(delay)
         if args.une_fois: return 0
         time.sleep(max(30.0, float(args.intervalle)))
 

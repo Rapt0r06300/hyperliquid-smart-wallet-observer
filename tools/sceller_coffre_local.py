@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.datasets.coffre_certifie import (  # noqa: E402
     FAMILLE_BBO, FAMILLE_BOOK_L2, FAMILLE_FILLS_BACKFILL, FAMILLE_FILLS_FORWARD,
+    FAMILLE_VENUE,
     PASS, QUARANTAINE, REPARE, StatsCertif, certifier_record, detecter_famille,
     identite, sniffer_famille,
 )
@@ -51,6 +52,10 @@ LOG_RELDIR = Path("runtime") / "logs" / "coffre_certifie"
 FLUX_VIVANTS = (
     "vault_fills_poll.jsonl", "vault_fills_live.jsonl",
     "copy_vault_l2_tape.jsonl", "bbo_tape.jsonl", "vault_snapshots.jsonl",
+    "copy_vault_trades_lane.jsonl", "copy_vault_candle_lane.jsonl",
+    "hl_allmids_tape.jsonl", "asset_ctx_tape.jsonl",
+    "liquidations_confirmees.jsonl", "overshoots_liquidation.jsonl",
+    "carnet_venues.jsonl", "dispersion_venues.jsonl",
 )
 # Dossiers jamais descendus par --tout. On exclut : le VCS/éditeurs/caches, les
 # stores canoniques déjà SAFE ou volumineux (gérés par référence), et tout le
@@ -116,6 +121,8 @@ def _ts_primaire(record: dict[str, Any], famille: str) -> int | None:
         return record.get("exchange_ts_ms")
     if famille == FAMILLE_BBO:
         return record.get("recv_wall_ts_ms")
+    if famille == FAMILLE_VENUE:
+        return record.get("snapshot_ts_ms")
     return record.get("ts_ms")
 
 
@@ -274,13 +281,31 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
     """
     trouves: list[tuple[Path, str, str]] = []
     if not tout:
+        # Scan EXHAUSTIF de runtime/data : on ne se limite plus a une liste figee.
+        # Chaque .jsonl est classe par NOM (familles connues) puis, si inconnu, par
+        # CONTENU (reniflage) -> le coffre trouve TOUT, y compris de nouveaux flux.
         data = root / "runtime" / "data"
-        for nom in FLUX_VIVANTS:
-            p = data / nom
-            if p.is_file() and p.stat().st_size > 0:
+        if not data.is_dir():
+            return trouves
+        try:
+            entrees = sorted(data.iterdir(), key=lambda e: e.name)
+        except OSError:
+            return trouves
+        for p in entrees:
+            try:
+                nom = p.name
+                if not (nom.endswith(".jsonl") or nom.endswith(".jsonl.gz")):
+                    continue
+                if not p.is_file() or p.stat().st_size == 0:
+                    continue
                 info = detecter_famille(nom)
-                if info:
-                    trouves.append((p, info[0], info[1]))
+                if info is None:
+                    info = _sniffer_fichier(p)   # inconnu par nom -> on renifle le contenu
+                    if info is None:
+                        continue
+                trouves.append((p, info[0], info[1]))
+            except OSError:
+                continue
         return trouves
     # --tout : scan récursif borné via os.scandir. Sur Windows, DirEntry.stat()
     # est MIS EN CACHE par scandir -> aucun appel système par fichier, donc rapide

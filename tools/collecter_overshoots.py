@@ -55,12 +55,38 @@ INTERVALLE_MAX_S = 90.0     # au-delà, une donnée est trop vieille pour situer
 
 # ─────────────────────────────── réseau (borné, poli) ───────────────────────────────
 
-def _post_info(charge: dict[str, Any], *, timeout_s: float = 10.0) -> Any:
+_HEADERS = {"Content-Type": "application/json", "User-Agent": "alina-smart-flow/overshoots (read-only)"}
+
+
+def _post_info(charge: dict[str, Any], *, timeout_s: float = 10.0, tentatives: int = 3) -> Any:
+    """POST /info avec retry des blips RÉSEAU transitoires + respect de Retry-After
+    sur 429. En-tête User-Agent poli. Aucun ordre, aucune clé, aucune signature."""
     corps = json.dumps(charge).encode("utf-8")
-    req = urllib.request.Request(URL_INFO, data=corps,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+    derniere: Exception | None = None
+    for essai in range(1, max(1, tentatives) + 1):
+        req = urllib.request.Request(URL_INFO, data=corps, headers=_HEADERS)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
+                return json.loads(rep.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            derniere = exc
+            if exc.code == 429 and essai < tentatives:
+                try:
+                    ra = float(exc.headers.get("Retry-After") or 0) if exc.headers else 0.0
+                except (ValueError, TypeError, AttributeError):
+                    ra = 0.0
+                time.sleep(ra if 0 < ra <= 30 else min(1.5 * essai, 5.0))
+                continue
+            raise
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            derniere = exc
+            if essai < tentatives:
+                time.sleep(min(0.4 * essai, 1.5))
+                continue
+            raise
+    if derniere is not None:
+        raise derniere
+    raise RuntimeError("overshoots /info: tentatives epuisees")
 
 
 def lire_all_mids(*, timeout_s: float = 10.0) -> dict[str, float]:
@@ -237,7 +263,9 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 — on ne meurt jamais, on recule
             echecs += 1
             d = CF.backoff_jitter(echecs)
-            print("[overshoots] erreur (%s) — backoff %.1fs" % (str(exc)[:60], d), flush=True)
+            # 1er échec = blip (déjà réessayé en interne) : on n'alerte qu'au 2e consécutif.
+            if echecs >= 2:
+                print("[overshoots] erreur (%s) x%d — backoff %.1fs" % (str(exc)[:60], int(echecs), d), flush=True)
             time.sleep(d)
             continue
         if a.une_fois:
