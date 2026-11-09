@@ -290,6 +290,26 @@ def _lancer_scellage_detache(root: Path):
     return log
 
 
+def _ouvrir_suivi_coffre(root: Path) -> None:
+    """Ouvre l'écran de suivi coffre dans une NOUVELLE fenêtre (best-effort).
+
+    Permet de suivre la certification détachée (%, débit, ETA) même après la
+    fermeture de l'écran des collecteurs. Ne bloque jamais, n'échoue jamais fort.
+    """
+    cmd = root / "SUIVI_COFFRE.cmd"
+    try:
+        if os.name == "nt" and cmd.exists():
+            # 'start' ouvre une console séparée qui survit à la fermeture de cet écran.
+            subprocess.Popen(["cmd", "/c", "start", "", str(cmd)], cwd=str(root),
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+                             close_fds=True)
+        elif (root / "tools" / "suivi_coffre.py").exists():
+            subprocess.Popen([sys.executable, "-B", str(root / "tools" / "suivi_coffre.py")],
+                             cwd=str(root), close_fds=True)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+
+
 def nettoyer_session(root: Path) -> None:
     """Arrêt PROPRE piloté par Python, INSTANTANÉ et garanti.
 
@@ -307,6 +327,8 @@ def nettoyer_session(root: Path) -> None:
     tues = _arreter_collecteurs(root)
     print(f"  [arret] {len(tues)} collecteur(s) arrete(s). Collecte stoppee.", flush=True)
     log = _lancer_scellage_detache(root)
+    if log:
+        _ouvrir_suivi_coffre(root)   # ouvre l'écran de suivi (%, débit, ETA) automatiquement
     # Marqueur : le .cmd sait que le nettoyage est pris en charge (pas de double
     # scellage). Le lanceur le supprime au prochain demarrage.
     try:

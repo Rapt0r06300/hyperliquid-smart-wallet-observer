@@ -350,6 +350,22 @@ def _sniffer_fichier(path: Path) -> tuple[str, str] | None:
     return None
 
 
+STATUT_RELPATH = COFFRE_RELDIR / "SUIVI_COFFRE.json"  # statut live lu par tools/suivi_coffre.py
+
+
+def _ecrire_statut(root: Path, **champs: Any) -> None:
+    """Écrit/merge le statut live de la certification (best-effort, jamais bloquant)."""
+    try:
+        chemin = root / STATUT_RELPATH
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        base = _lire_json(chemin) or {}
+        base.update(champs)
+        base["updated_ms"] = int(time.time() * 1000)
+        _ecrire_json_atomique(chemin, base)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Scelle les données locales certifiées dans le coffre-fort.")
     p.add_argument("--root", default=str(ROOT))
@@ -365,6 +381,9 @@ def main(argv: list[str] | None = None) -> int:
     now_ms = args.now_ms or int(time.time() * 1000)
     from uuid import uuid4
     batch_id = f"{_horodate()}_{uuid4().hex[:8]}"  # unique même si 2 runs/seconde
+    _ecrire_statut(root, active=True, stage="SCAN", batch_id=batch_id, pct=0.0,
+                   i=0, n=0, fichier="", octets_faits=0, octets_total=0,
+                   eta_s=0.0, debit_mo_s=0.0, termine=False, code=None, resume=None)
 
     log_dir = root / LOG_RELDIR
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -402,6 +421,8 @@ def main(argv: list[str] | None = None) -> int:
         _log(log, "ETAPE 2/3 - Je certifie chaque fichier (% = progression totale) :")
         t0 = time.monotonic()
         faits_octets = 0
+        _ecrire_statut(root, active=True, stage="CERTIFICATION", n=n,
+                       octets_total=total_octets, pct=0.0, i=0)
         for i, (source, famille, source_tag) in enumerate(fichiers, 1):
             try:
                 src_etat = _etat_source(source)
@@ -413,6 +434,11 @@ def main(argv: list[str] | None = None) -> int:
             eta = (ecoule * (total_octets - faits_octets) / faits_octets) if faits_octets else 0
             tete = f"[{pct:4.0f}% | {i}/{n} | reste ~{_fmt_duree(eta)}]"
             _log(log, f"{tete} {source.name}  ({taille / 1048576:.1f} Mo)")
+            _ecrire_statut(root, active=True, stage="CERTIFICATION", i=i, n=n,
+                           fichier=source.name, pct=round(pct, 1),
+                           octets_faits=faits_octets, octets_total=total_octets,
+                           eta_s=round(eta, 1), batch_id=batch_id,
+                           debit_mo_s=round((faits_octets / 1048576) / ecoule, 2) if ecoule > 0 else 0.0)
             cle_src = str(source.relative_to(root)) if root in source.parents else str(source)
             sha_src = _sha256_fichier(source)
             ancien = etat.get(cle_src)
@@ -442,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
             _ecrire_json_atomique(etat_path, etat)
             _log(log, "")
             _log(log, "Rien de nouveau : toutes les donnees etaient deja dans le coffre. Rien a faire.")
+            _ecrire_statut(root, active=False, termine=True, code=0, pct=100.0,
+                           stage="RIEN DE NOUVEAU", eta_s=0.0, resume=total.resume())
             return 0
 
         # Manifeste du lot
@@ -493,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
         _log(log, "     runtime\\coffre_certifie\\quarantine\\")
         _log(log, "  Le labo pourra puiser dans ce coffre pour ses backtests et replays.")
         _log(log, f"  Coffre : {coffre}")
+        _ecrire_statut(root, active=False, termine=True, code=0, pct=100.0,
+                       stage="TERMINE", eta_s=0.0, fichier="", resume=total.resume())
     return 0
 
 
