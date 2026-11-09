@@ -159,10 +159,18 @@ def _apply_risk_exit(
     take_profit_bps: float,
     horizon_ms: int,
     copy_delay_ms: int = FROZEN_COPY_DELAY_MS,
+    book_timestamps: list[int] | None = None,
 ) -> tuple[dict[str, Any], str]:
     entry_ms = int(trade["entry_ts_ms"])
     fallback_exit_ms = int(trade["exit_ts_ms"])
-    timestamps = [int(row["ts_ms"]) for row in books]
+    # Les horodatages du carnet ne dépendent que de ``books`` (invariants entre les
+    # 2 appels actual/placebo et entre metaorders d'un même coin). On réutilise la
+    # liste pré-calculée si elle correspond (même longueur) -> valeurs/ordre et donc
+    # indices bisect strictement identiques ; sinon on reconstruit (fallback sûr).
+    if book_timestamps is not None and len(book_timestamps) == len(books):
+        timestamps = book_timestamps
+    else:
+        timestamps = [int(row["ts_ms"]) for row in books]
     start = bisect.bisect_right(timestamps, entry_ms)
     end = bisect.bisect_right(timestamps, fallback_exit_ms)
     trigger_book: Mapping[str, Any] | None = None
@@ -773,6 +781,9 @@ def _settle(
     vault_day: dict[tuple[str, int], int] = defaultdict(int)
     coin_day: dict[tuple[str, int], int] = defaultdict(int)
     active_positions: list[tuple[int, float]] = []
+    # Index d'horodatages par coin, calculé une seule fois (réutilisé par
+    # `_apply_risk_exit`). Pur, ne change aucun résultat.
+    ts_by_coin: dict[str, list[int]] = {}
 
     for metaorder in sorted(
         candidates,
@@ -855,7 +866,13 @@ def _settle(
             if locked
             else "PRE_LOCK_DEPTH_CAPPED_CORE"
         )
-        books = list(books_by_coin.get(str(metaorder["coin"]), []))
+        _coin_name = str(metaorder["coin"])
+        _coin_books = books_by_coin.get(_coin_name, [])
+        books = list(_coin_books)
+        _coin_ts = ts_by_coin.get(_coin_name)
+        if _coin_ts is None:
+            _coin_ts = [int(row["ts_ms"]) for row in _coin_books]
+            ts_by_coin[_coin_name] = _coin_ts
         actual, actual_reason = cv.execute_metaorder(
             metaorder,
             books,
@@ -896,6 +913,7 @@ def _settle(
             take_profit_bps=float(scenario_params["take_profit_bps"]),
             horizon_ms=int(scenario_params["horizon_ms"]),
             copy_delay_ms=execution_delay_ms,
+            book_timestamps=_coin_ts,
         )
         placebo, placebo_trigger = _apply_risk_exit(
             placebo,
@@ -905,6 +923,7 @@ def _settle(
             take_profit_bps=float(scenario_params["take_profit_bps"]),
             horizon_ms=int(scenario_params["horizon_ms"]),
             copy_delay_ms=execution_delay_ms,
+            book_timestamps=_coin_ts,
         )
         common = {
             "mechanism": "copy_v21_entry_capacity_daily_lock",
