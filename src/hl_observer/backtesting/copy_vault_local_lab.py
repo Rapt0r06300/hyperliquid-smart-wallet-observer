@@ -1568,6 +1568,11 @@ def materialize_safe_workspace(
         except KeyError:
             continue
         bbo_rows.setdefault(_id, _row)
+    # Signaux de contexte LOCAL (liquidations/overshoots/OI-funding/prix/cross-venue) :
+    # retirés du résumé (pour ne pas gonfler le résultat) et mis à DISPOSITION de la
+    # recherche exploratoire. Les COMPTES restent dans coffre_local_resume (visibles).
+    signaux_locaux = coffre_local_resume.pop("_signaux", {})
+    coffre_local_resume["signaux_familles_disponibles"] = sorted(signaux_locaux.keys())
     fill_rows = sorted(fills.values(), key=lambda row: (row["ts_ms"], row["vault"], str(row.get("tid"))))
     book_rows = sorted(books.values(), key=lambda row: (row["received_at_ms"], row["coin"]))
     bbo_tape_rows = sorted(
@@ -1759,6 +1764,13 @@ def materialize_safe_workspace(
 
 #: familles du coffre LOCAL qui alimentent les fills de replay.
 _COFFRE_FAMILLES_FILLS = {"fills_forward", "fills_backfill", "snapshot"}
+#: familles LOCAL de SIGNAUX de contexte (PAS le replay PnL) : nouvelles observations
+#: certifiées (liquidations, overshoots, OI/funding, prix, cross-venue, bougies). Elles
+#: sont mises à DISPOSITION de la recherche exploratoire, séparées du calcul PnL SAFE.
+_COFFRE_FAMILLES_SIGNAUX = {
+    "liquidation", "overshoot", "asset_ctx", "allmids",
+    "venue_book", "venue_dispersion", "trades_marche", "candle", "position",
+}
 
 
 def _charger_tier_local(
@@ -1774,8 +1786,9 @@ def _charger_tier_local(
     """
     import gzip as _gzip
 
-    vide = {"statut": "ABSENT", "_fills": [], "_books": [], "_bbo": [],
+    vide = {"statut": "ABSENT", "_fills": [], "_books": [], "_bbo": [], "_signaux": {},
             "fills_causaux": 0, "fills_backfill": 0, "carnets": 0, "bbo": 0,
+            "signaux_par_famille": {}, "signaux_total": 0,
             "shards_injectes": 0, "shards_rejetes": 0}
     index_path = repository_root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
     if index_path.is_symlink() or not index_path.is_file():
@@ -1791,13 +1804,16 @@ def _charger_tier_local(
     _fills: list[dict[str, Any]] = []
     _books: list[dict[str, Any]] = []
     _bbo: list[dict[str, Any]] = []
+    _signaux: dict[str, list[dict[str, Any]]] = {}
     shards_ok = 0
     shards_rejetes = 0
     for entree in shards:
         if not isinstance(entree, dict):
             continue
         famille = str(entree.get("famille") or "")
-        if famille not in _COFFRE_FAMILLES_FILLS and famille not in ("book_l2", "bbo"):
+        est_signal = famille in _COFFRE_FAMILLES_SIGNAUX
+        if (famille not in _COFFRE_FAMILLES_FILLS
+                and famille not in ("book_l2", "bbo") and not est_signal):
             continue
         rel = entree.get("shard")
         if not isinstance(rel, str):
@@ -1847,6 +1863,11 @@ def _charger_tier_local(
                                 and row.get("coin") and row.get("bid_px") is not None
                                 and row.get("ask_px") is not None):
                             _bbo.append(row)
+                    elif est_signal:
+                        # Signal de contexte LOCAL : tout enregistrement certifié avec
+                        # un horodatage (ts_ms ou snapshot_ts_ms) est mis à disposition.
+                        if row.get("ts_ms") is not None or row.get("snapshot_ts_ms") is not None:
+                            _signaux.setdefault(famille, []).append(row)
         except OSError:
             shards_rejetes += 1
             continue
@@ -1860,9 +1881,11 @@ def _charger_tier_local(
     )
     return {
         "statut": "OK", "shards_injectes": shards_ok, "shards_rejetes": shards_rejetes,
-        "_fills": _fills, "_books": _books, "_bbo": _bbo,
+        "_fills": _fills, "_books": _books, "_bbo": _bbo, "_signaux": _signaux,
         "fills_causaux": fills_causaux, "fills_backfill": len(_fills) - fills_causaux,
         "carnets": len(_books), "bbo": len(_bbo),
+        "signaux_par_famille": {f: len(r) for f, r in sorted(_signaux.items())},
+        "signaux_total": sum(len(r) for r in _signaux.values()),
     }
 
 
