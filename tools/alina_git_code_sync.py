@@ -42,6 +42,17 @@ PROTECTED_DIRS = {
 # scan cannot complete within the launcher read budget; remote changes to one
 # of these paths are still checked individually before any merge.
 UNSCANNABLE_PROTECTED_ROOTS = {"datasets"}
+# Fichiers sous un dossier de CODE mais réécrits en permanence par la collecte
+# (classements / candidats de leaders rafraîchis par le poll). Ce sont des
+# DONNÉES runtime, pas du code : on les traite comme du churn (ignorés par la
+# garde sync/pousse) pour ne pas bloquer AlinaSync à chaque rafraîchissement.
+# N'ajouter ici QUE des fichiers purement runtime — jamais du vrai code ni un
+# secret. Chemins repo-relatifs POSIX, en minuscules. config/copy_vault_leaders.json
+# reste volontairement du CODE (commitable, source des lanes) : NE PAS l'ajouter.
+RUNTIME_CHURN_FILES = {
+    "config/copy_vault_leaders_candidats.json",
+    "config/leaders_actifs_classement.json",
+}
 PROTECTED_EXTENSIONS = {
     ".bundle", ".zip", ".7z", ".rar", ".tar", ".gz", ".zst", ".sqlite",
     ".sqlite3", ".db", ".parquet", ".feather", ".pkl", ".pickle",
@@ -718,6 +729,8 @@ def _protected(path: str) -> bool:
     normalized = path.replace("\\", "/")
     parts = PurePosixPath(normalized).parts
     if not parts or normalized.startswith("/") or ".." in parts:
+        return True
+    if normalized.casefold() in RUNTIME_CHURN_FILES:  # données runtime sous un dossier de code
         return True
     lower = tuple(part.casefold() for part in parts)
     # Root data trees are excluded; equally named Python package subfolders
