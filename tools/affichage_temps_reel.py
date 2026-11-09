@@ -55,6 +55,44 @@ LABELS: dict[str, tuple[str, bool]] = {
     "recap_historique.jsonl": ("Recap historique", False),
 }
 
+# Flux produits PAR LOT (batch), pas en continu : le collecteur `backfill-fills`
+# (tools/backfill_vault_fills.py) ne tourne qu'une fois toutes les 4 h (interval=14400s).
+# Entre deux passes, un debit "0.0/s" et un age qui grimpe sont NORMAUX, pas un blocage.
+# On les affiche comme un lot avec l'heure de la prochaine passe ; si la passe est en
+# retard (collecteur mort), l'ecran le signale explicitement.
+CADENCE_LOT: dict[str, float] = {
+    "vault_ledger.jsonl": 14400.0,
+    "vault_episodes.jsonl": 14400.0,
+    "vault_fills.jsonl": 14400.0,
+}
+
+
+def _duree_courte(secondes: float) -> str:
+    s = int(secondes)
+    if s and s % 3600 == 0:
+        return f"{s // 3600}h"
+    if s and s % 60 == 0:
+        return f"{s // 60}min"
+    return f"{s}s"
+
+
+def _frais_lot(chemin: str, cadence: float, maj: float | None, maintenant: float) -> str:
+    """Libelle de fraicheur pour un flux par lot : prochaine passe, ou retard si due."""
+    dernier: float | None
+    try:
+        dernier = os.path.getmtime(chemin)   # survit aux redemarrages de l'ecran
+    except OSError:
+        dernier = maj
+    cad = _duree_courte(cadence)
+    if not dernier:
+        return f"lot {cad}"
+    prochaine = dernier + cadence
+    hpro = time.strftime("%H:%M", time.localtime(prochaine))
+    reste = prochaine - maintenant
+    if reste >= 0:
+        return f"lot {cad} - prochaine ~{hpro}"
+    return f"lot {cad} - attendue ~{hpro} (RETARD {int((-reste) // 60)}min)"
+
 
 def label_pour(nom: str) -> tuple[str, bool]:
     if nom in LABELS:
@@ -280,6 +318,14 @@ def boucle(data_dir: Path, *, intervalle: float = 2.0, n_derniers: int = 10) -> 
                 grand_total += t
                 if t == 0:
                     vides += 1
+                    continue
+                nom = os.path.basename(cle)
+                cadence_lot = CADENCE_LOT.get(nom)
+                if cadence_lot:   # flux par lot : "0.0/s" entre passes est NORMAL
+                    premiere_vue.add(cle)
+                    precedents[cle] = t
+                    frais = _frais_lot(cle, cadence_lot, maj_ts.get(cle), maintenant)
+                    print(f"    {label:<24} {t:>10d}  [{frais}]")
                     continue
                 if cle not in premiere_vue:   # 1re frame : pas de debit gonfle par l'historique
                     premiere_vue.add(cle)
