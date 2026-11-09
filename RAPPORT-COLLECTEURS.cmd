@@ -16,5 +16,5 @@ if exist "runtime\logs\rapport_collecteurs.log" (
 ) else (
   echo [ERREUR] Rapport non genere.
 )
-pause
+if /I not "%CV_NO_PAUSE%"=="1" pause
 endlocal
