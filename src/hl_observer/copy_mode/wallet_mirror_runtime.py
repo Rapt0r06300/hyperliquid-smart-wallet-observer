@@ -64,6 +64,10 @@ class MirrorRuntimeConfig:
     max_signal_age_ms: int = 3_000
     slippage_budget_bps: float = 18.0
     strategy_id: str = "wallet_mirror_copy_follow"
+    # Porte overshoot du champion gelé par le labo (cliquet). None = désactivée
+    # (comportement historique inchangé). Ne s'active que si le moteur a opté
+    # (HL_APPLY_CHAMPION=1) ET que l'overshoot causal live est fourni à la décision.
+    overshoot_seuil_bps: float | None = None
 
 
 def mirror_candidate_from_delta(
@@ -75,6 +79,7 @@ def mirror_candidate_from_delta(
     copyability_score: float,
     config: MirrorRuntimeConfig | None = None,
     source_fill_refs: Iterable[str] = (),
+    overshoot_bps: float | None = None,
 ) -> MirrorCandidate:
     """Build a paper mirror candidate from a leader delta.
 
@@ -104,6 +109,14 @@ def mirror_candidate_from_delta(
         reasons.append("WALLET_SCORE_TOO_LOW")
     if copyability_score < cfg.min_copyability_score:
         reasons.append("COPYABILITY_TOO_LOW")
+    # Porte overshoot du champion gelé : ne bloque QUE si le seuil est actif ET que
+    # l'overshoot causal live fourni le dépasse. Sans l'un ou l'autre -> inchangé.
+    if (
+        cfg.overshoot_seuil_bps is not None
+        and overshoot_bps is not None
+        and abs(float(overshoot_bps)) >= float(cfg.overshoot_seuil_bps)
+    ):
+        reasons.append("MIRROR_OVERSHOOT_BLOCKED")
 
     fill_refs = tuple(str(ref) for ref in source_fill_refs if str(ref))
     if delta.evidence_ref and delta.evidence_ref not in fill_refs:

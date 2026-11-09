@@ -115,6 +115,7 @@ def run_wallet_mirror_pipeline(
     sizing_config: ProportionalSizingConfig | None = None,
     mirror_config: MirrorRuntimeConfig | None = None,
     leader_expected_edge_bps: float | None = None,
+    overshoot_bps: float | None = None,
 ) -> MirrorPipelineResult:
     """Run a full paper-only wallet mirror decision.
 
@@ -136,6 +137,7 @@ def run_wallet_mirror_pipeline(
         wallet_score=rank_decay.decayed_score,
         copyability_score=copyability_score,
         config=mirror_config,
+        overshoot_bps=overshoot_bps,
     )
     sizing = size_proportional_to_leader(
         leader_notional_usdt=leader_notional_usdt,

@@ -2474,6 +2474,115 @@ def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+CHEMIN_CHAMPION_DEPLOYE = ("runtime", "champion_deploye.json")
+
+
+def _ecrire_champion_deploye(
+    root: str | Path,
+    best: Mapping[str, Any],
+    *,
+    extra: Mapping[str, Any] | None = None,
+) -> Path | None:
+    """Écrit (atomiquement) le champion gelé dans un fichier de déploiement stable.
+
+    Étape 1 du cliquet labo->moteur. PUREMENT additif et fail-soft : ne lève jamais,
+    n'altère ni la campagne ni ses gardiens. Le moteur ne l'applique QUE s'il opte
+    explicitement (voir ``note``). ``best['candidate']`` = params que v21 interprète,
+    dont ``overshoot_seuil_bps``.
+    """
+    try:
+        if not isinstance(best, Mapping):
+            return None
+        params = best.get("candidate")
+        if not isinstance(params, Mapping):
+            return None
+        root = Path(root)
+        cible = root.joinpath(*CHEMIN_CHAMPION_DEPLOYE)
+        cible.parent.mkdir(parents=True, exist_ok=True)
+        if cible.is_symlink():
+            raise OSError("CHAMPION_DEPLOYE_SYMLINKED")
+        payload: dict[str, Any] = {
+            "schema_version": "hypersmart.copy_vault_champion_deploy.v1",
+            "ecrit_le_utc": datetime.now(UTC).isoformat(),
+            "candidate_id": best.get("candidate_id"),
+            "params": dict(params),
+            "overshoot_seuil_bps": params.get("overshoot_seuil_bps"),
+            "score_usd_per_active_day": best.get("score_usd_per_active_day"),
+            "train_daily_mean_net_pnl_usd": (
+                best.get("train", {}).get("daily_mean_net_pnl_usd")
+                if isinstance(best.get("train"), Mapping) else None
+            ),
+            "trial_number": best.get("trial_number"),
+            "paper_read_only": True,
+            "real_execution": False,
+            "applique_par_defaut": False,
+            "note": (
+                "Champion gelé par le labo. Le moteur ne l'applique QUE si "
+                "HL_APPLY_CHAMPION=1. Aucun ordre, aucune clé, aucune signature."
+            ),
+        }
+        if extra:
+            for cle, valeur in extra.items():
+                payload.setdefault(str(cle), valeur)
+        tmp = cible.with_suffix(cible.suffix + ".tmp")
+        texte = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False, indent=2)
+        with tmp.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(texte)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, cible)
+        return cible
+    except Exception:  # fail-soft : jamais bloquer la campagne pour un fichier annexe
+        return None
+
+
+def charger_champion_deploye(
+    root: str | Path,
+    *,
+    respecter_opt_in: bool = True,
+) -> dict[str, Any] | None:
+    """Lit le champion déployé par le labo (côté moteur). Read-only, fail-soft.
+
+    Par défaut, ne renvoie quelque chose QUE si le moteur a opté explicitement via
+    ``HL_APPLY_CHAMPION=1`` (garde-fou : rien n'est appliqué sans décision humaine).
+    Renvoie le payload (dont ``overshoot_seuil_bps``) ou ``None``.
+    """
+    try:
+        if respecter_opt_in and os.environ.get("HL_APPLY_CHAMPION") != "1":
+            return None
+        cible = Path(root).joinpath(*CHEMIN_CHAMPION_DEPLOYE)
+        if cible.is_symlink() or not cible.is_file():
+            return None
+        payload = json.loads(cible.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema_version") != "hypersmart.copy_vault_champion_deploy.v1":
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def seuil_overshoot_champion(
+    root: str | Path,
+    *,
+    respecter_opt_in: bool = True,
+) -> float | None:
+    """Raccourci : le seuil overshoot du champion déployé, ou ``None`` (porte off)."""
+    payload = charger_champion_deploye(root, respecter_opt_in=respecter_opt_in)
+    if not payload:
+        return None
+    seuil = payload.get("overshoot_seuil_bps")
+    try:
+        seuil = float(seuil) if seuil is not None else None
+    except (TypeError, ValueError):
+        return None
+    # Valeur « off » conventionnelle du labo (très grande) -> porte désactivée.
+    if seuil is None or seuil >= 1_000_000.0:
+        return None
+    return seuil
+
+
 def _load_campaign_trials(path: Path, selection_digest: str) -> list[dict[str, Any]]:
     if path.is_symlink():
         raise ValueError("unsafe Copy-Vault trial ledger symlink")
@@ -3646,8 +3755,21 @@ def run_local_campaign(
                 status, reason = "DATASET_CHANGED", "LOCAL_SAFE_INPUTS_CHANGED_DURING_SEARCH"
                 break
         final_best_train = best.get("train") if isinstance(best, dict) else None
+        champion_deploye_path = None
+        if best is not None:
+            champion_deploye_path = _ecrire_champion_deploye(
+                repository_root,
+                best,
+                extra={
+                    "campaign_config_sha256": campaign_config_sha,
+                    "engine_source_sha256": engine_source_sha,
+                },
+            )
         return {
             **base,
+            "champion_deploye_path": (
+                str(champion_deploye_path) if champion_deploye_path else None
+            ),
             "status": status,
             "reason": reason,
             "candidates_tested": len(history_rows),
