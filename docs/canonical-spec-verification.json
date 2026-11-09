@@ -1,68 +1,68 @@
 {
-  "dataset_v2_head": "3523af58afaa643ab9a67d78f7c5623580c07afe",
-  "generated_at_utc": "2026-11-08T20:24:59.222447Z",
+  "dataset_v2_head": "df1335fb0ff72c9cd81fd12addb4429c426e8778",
+  "generated_at_utc": "2026-11-09T12:53:46.625576Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "edb3f6a07070bb6179afc6b054dde13737593bc781885daf514f0603b168a5d1",
-      "output_tail": "................................F...................................     [100%]\n=================================== FAILURES ===================================\n________ test_controller_worker_are_bounded_hosted_and_collect_relayed _________\n\n    def test_controller_worker_are_bounded_hosted_and_collect_relayed():\n        controller = _workflow(\"resumable-campaign-controller.yml\")\n        worker = _workflow(\"resumable-campaign-worker.yml\")\n>       assert \"cron: '*/5 * * * *'\" in controller\nE       assert \"cron: '*/5 * * * *'\" in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...r workflows are the durable fallback.\"\\n              exit 0\\n            fi\\n            exit \"$rc\"\\n          done\\n'\n\ntests/test_workflow_bounds.py:128: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - assert \"cron: '*/5 * * * *'\" in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...r workflows are the durable fallback.\"\\n              exit 0\\n            fi\\n            exit \"$rc\"\\n          done\\n'\n1 failed, 67 passed in 4.63s\n",
+      "output_sha256": "4befed782ff9ce881dced3299623c7e06447aea3d5ed071a18c49cb8978b1895",
+      "output_tail": "................................F...................................     [100%]\n=================================== FAILURES ===================================\n________ test_controller_worker_are_bounded_hosted_and_collect_relayed _________\n\n    def test_controller_worker_are_bounded_hosted_and_collect_relayed():\n        controller = _workflow(\"resumable-campaign-controller.yml\")\n        worker = _workflow(\"resumable-campaign-worker.yml\")\n>       assert \"cron: '*/5 * * * *'\" in controller\nE       assert \"cron: '*/5 * * * *'\" in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...r workflows are the durable fallback.\"\\n              exit 0\\n            fi\\n            exit \"$rc\"\\n          done\\n'\n\ntests/test_workflow_bounds.py:128: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - assert \"cron: '*/5 * * * *'\" in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...r workflows are the durable fallback.\"\\n              exit 0\\n            fi\\n            exit \"$rc\"\\n          done\\n'\n1 failed, 67 passed in 3.12s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "02ebf5fd64283556873657427575b1a5a1e6d865b014caf557a71b62f77ae2f4",
-      "output_tail": "...................................................................      [100%]\n67 passed in 3.80s\n",
+      "output_sha256": "0af19dda884818d8a36cede19d68eaf39d661905c229391372aaddd086fbfc5f",
+      "output_tail": "...................................................................      [100%]\n67 passed in 2.78s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_certification_and_replay_policy",
-      "output_sha256": "bcef7f0efadab165bb13d33c381adf3257a8128e87562cb8438b7386b026d8d6",
-      "output_tail": "........................................................................ [ 66%]\n....................................                                     [100%]\n108 passed in 5.24s\n",
+      "output_sha256": "b181b7962369d7739385e89ef77225c92596c857f1da1a8401397d369bd3eac1",
+      "output_tail": "........................................................................ [ 66%]\n....................................                                     [100%]\n108 passed in 3.44s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "08d18739dcaa35c3c76fd99d4433c9364a2c01971459c80d24513a460189ec68",
-      "output_tail": ".......................                                                  [100%]\n23 passed in 1.69s\n",
+      "output_sha256": "a2f288aa4d79e3f6005325238c4026d651a127162ad3968da36e03cf134caaa1",
+      "output_tail": ".......................                                                  [100%]\n23 passed in 1.16s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "e89ad4e8886615bcfa385f680e2f69080676d70b03f371cf5b8eb6ca0d84a9f3",
-      "output_tail": "........................................................................ [ 76%]\n......................                                                   [100%]\n94 passed in 9.97s\n",
+      "output_sha256": "427a0eb9cb50c212f3b28450cbfaae1468b746c9ce0eed1dc5ef1f7af1403b2b",
+      "output_tail": "........................................................................ [ 76%]\n......................                                                   [100%]\n94 passed in 8.90s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "6c090a1fcec10d65c55e5e2b22dbd60aeb184f4c07e8160484bfa7b0d294cbc2",
-      "output_tail": "..........................................................               [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/applications.py:4723: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n58 passed, 5 warnings in 5.92s\n",
+      "output_sha256": "b157f7ab5f2d1e3337da538f0cea61da6463246a7213dd549c23dbcbab33af37",
+      "output_tail": "..........................................................               [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/applications.py:4723: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n58 passed, 5 warnings in 3.93s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_validators",
-      "output_sha256": "53ca549e631f94edee57e3e93e28205b6bb76f6cab1e82ffc659eb01115c97bb",
-      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"6c842e6991483772ecf4802f04586b77a1786921a8e8e842bf745a0c3c5af182\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=94\n",
+      "output_sha256": "4bba2e66f8c7e16104ddb1ade3f6c4e7e8202f03befc55b10781f932dd02c820",
+      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"9ca00b3bb006629a7a2b5f47a639408442c07a765e1551ac107e6f029cc733e4\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=94\n",
       "returncode": 0,
       "status": "PASS"
     }
   ],
-  "main_alina_head": "3523af58afaa643ab9a67d78f7c5623580c07afe",
+  "main_alina_head": "df1335fb0ff72c9cd81fd12addb4429c426e8778",
   "paper_only": true,
   "python_version": "3.12.16",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "09cd8f8c7f0e60399ec3be4bf8c6a1d40491131961a9523fd5361cd8a119f161",
+  "receipt_digest": "b94c2e6d6e251958b397b81f25916ce0f996e0b603906728f919e43104229904",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-7.0.0-1019-azure-x86_64-with-glibc2.43",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "42518132057"
+  "workflow_run_id": "42619632237"
 }
