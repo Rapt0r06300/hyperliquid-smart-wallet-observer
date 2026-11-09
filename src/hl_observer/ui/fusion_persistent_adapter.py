@@ -180,6 +180,16 @@ def apply_fusion_paper_orders_to_state(
         _trim_ledger(state)
         return result
 
+    # Dernier fil du cliquet labo->moteur : garde overshoot live. INERTE par défaut
+    # (aucun champion déployé ou HL_APPLY_CHAMPION != 1) -> ne lit rien, ne bloque rien.
+    try:
+        from hl_observer.copy_mode.overshoot_live_guard import charger_garde as _charger_garde_overshoot
+        _garde_overshoot = _charger_garde_overshoot(getattr(state, "root", ".") or ".")
+    except Exception:
+        _garde_overshoot = None
+    if _garde_overshoot is not None and _garde_overshoot.actif():
+        result["overshoot_guard_active"] = True
+
     for decision in accepted_decisions:
         trade = decision.get("trade")
         position = decision.get("position")
@@ -204,6 +214,28 @@ def apply_fusion_paper_orders_to_state(
             result["skipped_count"] += 1
             result["reasons"].append("INVALID_PAPER_POSITION_FIELDS")
             continue
+        # Garde overshoot live (champion gelé) : si le coin déborde (mark vs oracle)
+        # au-delà du seuil, on ne copie pas (le débordement revient souvent vers l'oracle).
+        if _garde_overshoot is not None and _garde_overshoot.actif():
+            _bloque_ov, _ov_bps = _garde_overshoot.bloque(coin, current_ms)
+            if _bloque_ov:
+                result["skipped_count"] += 1
+                result["reasons"].append("FUSION_OVERSHOOT_BLOCKED")
+                _record_portfolio_order_refusal(
+                    state,
+                    delta_key=delta_key,
+                    current_ms=current_ms,
+                    reason="FUSION_OVERSHOOT_BLOCKED",
+                    coin=coin,
+                    side=side,
+                    wallet=str(position.get("leader_wallet") or ""),
+                    reference_price=_safe_float(position.get("entry_price")) or 0.0,
+                    notional_usdt=abs(_safe_float(position.get("notional_usdt")) or 0.0),
+                    source="FUSION_RUNTIME_REJECTED_OVERSHOOT",
+                    evidence_hash=str(decision.get("evidence_hash") or trade_id or delta_key),
+                )
+                state.simulation_processed_delta_keys.add(delta_key)
+                continue
         entry_price = _safe_float(position.get("entry_price")) or _safe_float(trade.get("fill_price")) or 0.0
         quantity = abs(_safe_float(position.get("quantity")) or 0.0)
         notional = abs(_safe_float(position.get("notional_usdt")) or _safe_float(trade.get("notional_usdt")) or 0.0)
