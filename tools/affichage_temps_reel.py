@@ -147,73 +147,179 @@ def _cls():
 _nettoyage_fait = False
 
 
-def nettoyer_session(root: Path) -> None:
-    """Arrêt PROPRE piloté par Python (robuste au piège Ctrl+C du .cmd).
+# Marqueurs identifiant un process COLLECTEUR du projet (à arrêter sur stop).
+_MARQUEURS_COLLECTEUR = (
+    "watch_economic_collectors", "collecter_", "explorer_autonome",
+    "poll_leaders", "_run_supervisor", "_run_poll", "_run_explorer", "_run_asset_ctx",
+)
+# Jamais tuer ceci même si le chemin projet matche (pas des collecteurs) :
+# l'écran lui-même, le scellage détaché, la sync, le labo.
+_MARQUEURS_EXCLUS = (
+    "affichage_temps_reel", "sceller_coffre_local", "archiver_tapes",
+    "rapport_collecteurs", "sync_complete_clone", "alina_git_code_sync",
+    "pousser-github", "alina_quant_lab", "alina_sync_complete",
+)
 
-    Fait TOUT le nettoyage ici — avant que le batch puisse être tué par la réponse
-    O au prompt « Terminer O/N ? » : stoppe les collecteurs, dépose au coffre certifié,
-    remet la session à zéro (archive), génère le rapport. Idempotent.
+
+def _pids_collecteurs_a_tuer(processus, *, self_pid, racine) -> list[int]:
+    """Sélectionne les PID de collecteurs du projet à arrêter — FONCTION PURE.
+
+    ``processus`` : itérable de ``(pid:int, cmdline:str)``. On ne retient qu'un
+    process dont la ligne de commande référence ``racine`` ET un marqueur
+    collecteur ; jamais le process courant (``self_pid``) ni un marqueur exclu
+    (écran, scellage, sync, labo). Indépendant de l'état de campagne (qui peut
+    ne lister aucun pid). Insensible à la casse et au sens des slashes.
+    """
+    racine_norm = str(racine).replace("\\", "/").casefold().rstrip("/")
+    a_tuer: set[int] = set()
+    for pid, cmd in processus:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0 or pid == int(self_pid):
+            continue
+        c = (cmd or "").replace("\\", "/").casefold()
+        if racine_norm and racine_norm not in c:
+            continue
+        if any(x in c for x in _MARQUEURS_EXCLUS):
+            continue
+        if any(m in c for m in _MARQUEURS_COLLECTEUR):
+            a_tuer.add(pid)
+    return sorted(a_tuer)
+
+
+def _lister_processus_projet(timeout: float = 30) -> list[tuple[int, str]]:
+    """[(pid, cmdline)] des python/cmd (Windows) ; [] ailleurs ou en cas d'erreur."""
+    if os.name != "nt":
+        return []
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='py.exe' "
+        "or Name='cmd.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
+    )
+    try:
+        done = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                              capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    res: list[tuple[int, str]] = []
+    for ligne in (done.stdout or "").splitlines():
+        pid, _, cmd = ligne.partition("\t")
+        pid = pid.strip()
+        if pid.isdigit():
+            res.append((int(pid), cmd))
+    return res
+
+
+def _arreter_collecteurs(root: Path, *, timeout: float = 60) -> list[int]:
+    """Arrêt IMMÉDIAT et garanti des collecteurs du projet. Ne bloque jamais sur
+    du travail lourd ; renvoie les PID tués."""
+    def _run(*cmd: str, t: float = 30) -> None:
+        try:
+            subprocess.run(list(cmd), timeout=t,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    data = root / "runtime" / "data"
+    try:
+        (data / "stop_collecteurs.flag").write_text("1", encoding="utf-8")
+    except OSError:
+        pass
+    # 1) invalider le bail (les survivants sortent en secondes)
+    cible = root / "tools" / "watch_economic_collectors.py"
+    if cible.exists():
+        try:
+            subprocess.run([sys.executable, "-B", str(cible), "--root", str(root), "--stop"],
+                           cwd=str(root), timeout=timeout,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    # 2) balayage robuste : tuer tout collecteur du projet encore vivant (arbre),
+    #    indépendamment de l'état de campagne (qui peut être vide) et du titre de fenêtre.
+    tues: list[int] = []
+    for pid in _pids_collecteurs_a_tuer(_lister_processus_projet(),
+                                        self_pid=os.getpid(), racine=root):
+        _run("taskkill", "/PID", str(pid), "/T", "/F")
+        tues.append(pid)
+    # 3) fenêtres nommées éventuelles + nettoyage des fichiers d'état
+    for titre in ("ALINA-SUPERVISOR", "ALINA-EXPLORER-AUTO", "ALINA-POLL-LEADERS", "ALINA-ASSET-CTX"):
+        _run("taskkill", "/FI", f"WINDOWTITLE eq {titre}*", "/T", "/F")
+    for nom in ("explorer_autonome.pid", "poll_leaders.pid", "collecteurs.lock", "stop_collecteurs.flag"):
+        try:
+            (data / nom).unlink()
+        except OSError:
+            pass
+    return tues
+
+
+def _lancer_scellage_detache(root: Path):
+    """Scellage coffre -> archivage -> rapport dans un process DÉTACHÉ (non bloquant).
+
+    Lourd : sorti du chemin d'arrêt pour garantir une fermeture instantanée. Survit
+    à la fermeture de l'écran et du .cmd. Ordre garanti (sceller AVANT archiver/reset).
+    Renvoie le chemin du log, ou None si rien à lancer.
+    """
+    scripts = [str(root / "tools" / s) for s in
+               ("sceller_coffre_local.py", "archiver_tapes.py", "rapport_collecteurs.py")
+               if (root / "tools" / s).exists()]
+    if not scripts:
+        return None
+    log = root / "runtime" / "logs" / "arret_scellage.log"
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(log, "a", encoding="utf-8")
+    except OSError:
+        fh = subprocess.DEVNULL
+    # Un python détaché qui enchaîne les scripts en ordre (évite tout quoting cmd).
+    chaine = (
+        "import subprocess,sys;"
+        f"scripts={scripts!r};root={str(root)!r};"
+        "[subprocess.run([sys.executable,'-B',s,'--root',root],cwd=root) for s in scripts]"
+    )
+    flags = 0
+    if os.name == "nt":
+        flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen([sys.executable, "-B", "-c", chaine], cwd=str(root),
+                         stdout=fh, stderr=subprocess.STDOUT,
+                         creationflags=flags, close_fds=True)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return log
+
+
+def nettoyer_session(root: Path) -> None:
+    """Arrêt PROPRE piloté par Python, INSTANTANÉ et garanti.
+
+    Chemin d'arrêt découplé : (1) on stoppe immédiatement TOUS les collecteurs du
+    projet (balayage par ligne de commande + kill arbre), puis (2) on lance le
+    scellage/archivage/rapport — lourd — en TÂCHE DE FOND détachée. Ainsi un Ctrl+C
+    (ou 'q') ne se coince jamais sur le scellage, et aucun collecteur n'est laissé
+    orphelin. Idempotent.
     """
     global _nettoyage_fait
     if _nettoyage_fait:
         return
     _nettoyage_fait = True
-    data = root / "runtime" / "data"
-    env = {**os.environ, "PYTHONPATH": str(root / "src"), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-
-    def _py(rel: str, *args: str, timeout: float = 240) -> None:
-        cible = root / rel
-        if not cible.exists():
-            return
-        try:
-            subprocess.run([sys.executable, "-B", str(cible), "--root", str(root), *args],
-                           cwd=str(root), env=env, timeout=timeout,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except (OSError, subprocess.SubprocessError):
-            pass
-
-    def _kill(*cmd: str) -> None:
-        try:
-            subprocess.run(list(cmd), timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except (OSError, subprocess.SubprocessError):
-            pass
-
-    print("\n  [arret] Stop des collecteurs, CERTIFICATION (runtime/data -> coffre_certifie), "
-          "reset et rapport...", flush=True)
+    print("\n  [arret] Stop IMMEDIAT de tous les collecteurs du projet...", flush=True)
+    tues = _arreter_collecteurs(root)
+    print(f"  [arret] {len(tues)} collecteur(s) arrete(s). Collecte stoppee.", flush=True)
+    log = _lancer_scellage_detache(root)
+    # Marqueur : le .cmd sait que le nettoyage est pris en charge (pas de double
+    # scellage). Le lanceur le supprime au prochain demarrage.
     try:
-        (data / "stop_collecteurs.flag").write_text("1", encoding="utf-8")
+        (root / "runtime" / "data" / ".session_nettoyee").write_text("1", encoding="utf-8")
     except OSError:
         pass
-    # 1) stopper les collecteurs (lease invalide + workers), puis explorer/poll/superviseur
-    _py("tools/watch_economic_collectors.py", "--stop", timeout=60)
-    for pidf in ("explorer_autonome.pid", "poll_leaders.pid"):
-        p = data / pidf
-        try:
-            pid = p.read_text(encoding="utf-8").strip()
-            if pid:
-                _kill("taskkill", "/PID", pid, "/T", "/F")
-            p.unlink()
-        except OSError:
-            pass
-    for titre in ("ALINA-SUPERVISOR", "ALINA-EXPLORER-AUTO", "ALINA-POLL-LEADERS", "ALINA-ASSET-CTX"):
-        _kill("taskkill", "/FI", f"WINDOWTITLE eq {titre}*", "/T", "/F")
-    # 2) certifier -> coffre, 3) archiver (reset a zero), 4) rapport
-    _py("tools/sceller_coffre_local.py")
-    _py("tools/archiver_tapes.py")
-    _py("tools/rapport_collecteurs.py")
-    try:
-        (data / "collecteurs.lock").unlink()
-        (data / "stop_collecteurs.flag").unlink()
-    except OSError:
-        pass
-    # Marqueur : indique au .cmd que le nettoyage COMPLET est deja fait (evite un
-    # double scellage/rapport). Le lanceur le supprime au prochain demarrage.
-    try:
-        (data / ".session_nettoyee").write_text("1", encoding="utf-8")
-    except OSError:
-        pass
-    print("  [arret] TERMINE. runtime/data certifie -> runtime/coffre_certifie (le labo y lit), "
-          "session reset, rapport: runtime/logs/rapport_collecteurs.log", flush=True)
+    if log:
+        print("  [arret] Certification + archivage lances EN TACHE DE FOND (non bloquant).",
+              flush=True)
+        print("          Suivi en direct : double-clic  SUIVI_COFFRE.cmd  (%, debit, ETA)", flush=True)
+        print(f"          (log brut : {log})", flush=True)
+    else:
+        print("  [arret] (scellage non lance : scripts absents)", flush=True)
 
 
 def _attendre_ou_quitter(duree: float) -> bool:
