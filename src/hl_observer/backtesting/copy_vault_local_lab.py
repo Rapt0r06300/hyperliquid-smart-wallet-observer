@@ -20,6 +20,7 @@ from typing import Any
 
 from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
+from hl_observer.backtesting.overshoot_signal import build_overshoot_index, copie_bloquee
 from hl_observer.backtesting.copy_vault_protocol import (
     PAPER_EQUITY_USD,
     PAPER_TARGET_NET_USD_PER_DAY,
@@ -67,7 +68,7 @@ _LEADER_REVIEW_MAX_EVIDENCE_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _TRIAL_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
-_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41)
+_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("core_notional_usd", tuple(float(value) for value in range(40, 161, 10))),
     ("probe_notional_usd", tuple(float(value) for value in range(10, 61, 10))),
@@ -75,7 +76,10 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("signed_depth_imbalance_minimum", tuple(round(-0.3 + i * 0.05, 2) for i in range(13))),
     ("stop_loss_bps", tuple(float(value) for value in range(40, 301, 20))),
     ("take_profit_bps", tuple(float(value) for value in range(40, 501, 20))),
-    ("daily_profit_lock_usd", (2.0, 5.0, 10.0, 15.0)),
+    # #4 — l'option 1_000_000 = "sans plafond journalier" (jamais atteint sur ce capital) :
+    # laisse la recherche découvrir des stratégies qui gagnent plus les bons jours. La
+    # rigueur anti-overfit décide si c'est vraiment mieux (sinon une valeur plafonnée gagne).
+    ("daily_profit_lock_usd", (2.0, 5.0, 10.0, 15.0, 1_000_000.0)),
     ("horizon_ms", (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)),
     ("vault_daily_limit", (2, 3, 4)),
     ("coin_daily_limit", (2, 3, 4)),
@@ -86,6 +90,11 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # Sizing ciblé-volatilité : échelle la taille par cible/vol_réalisée causale
     # récente (0.0 = désactivé) -> homogénéise le PnL quotidien, réduit σ.
     ("vol_target_move_frac", (0.0, 0.002, 0.005, 0.01)),
+    # #1/#2 — filtre anti-débordement (overshoot = mark vs oracle, dérivé du corpus SAFE).
+    # 1_000_000 = PAS de filtre (= v21 pur, la baseline comparable). Les autres seuils (bps)
+    # font SAUTER la copie quand le prix déborde fortement de l'oracle (fade de liquidation).
+    # Dérivé du SAFE -> cette dimension est PROUVABLE et donc GELABLE par le cliquet.
+    ("overshoot_seuil_bps", (1_000_000.0, 200.0, 100.0, 50.0)),
 )
 
 
@@ -2438,6 +2447,8 @@ def _candidate(
         "vault_daily_limit": params["vault_daily_limit"],
         "coin_daily_limit": params["coin_daily_limit"],
         "max_open_positions": params["max_open_positions"],
+        # défaut 1_000_000 (= sans filtre) pour les candidats gelés d'AVANT cette dimension.
+        "overshoot_seuil_bps": params.get("overshoot_seuil_bps", 1_000_000.0),
         "bonferroni_trial_count": max(1, int(trial_count)),
         "bounds": dict(bounds),
     }
@@ -3140,6 +3151,9 @@ def run_local_campaign(
         # books sont fixes pour toute la boucle -> calculé une fois, réutilisé à
         # chaque essai. Accélère fortement sans changer le moindre résultat.
         segment_prepared_cache: dict[Any, Any] = {}
+        # #1/#2 — index overshoot causal (depuis l'asset_ctx SAFE) : support du filtre
+        # anti-débordement GELABLE. Construit une fois, réutilisé pour chaque candidat.
+        _ov_index = build_overshoot_index(_charger_asset_ctx_safe(workspace))
         duplicates_since_checkpoint = 0
         baseline_days = (
             (baseline_train.get("statistics") or {}).get(
@@ -3255,9 +3269,23 @@ def run_local_campaign(
                 f"Essai {trial_count} · séquence {this_sequence:,} · "
                 f"{len(_PARAMETER_DOMAINS)} paramètres · capital {params['core_notional_usd'] + params['probe_notional_usd']:.0f}/350 USD"
             )
+            # #1/#2 — pré-filtre overshoot GELABLE : on écarte les copies en plein
+            # débordement (|overshoot| > seuil du candidat). Le seuil "off" (1_000_000)
+            # ne filtre rien => metaorders complets + cache partagé (identique à v21 pur).
+            # Un sous-ensemble filtré N'UTILISE JAMAIS le cache partagé (clé (start,end),
+            # pas par-metaorder) : cache dédié None, recalcul propre (pas de fuite).
+            _seuil_ov = params.get("overshoot_seuil_bps", 1_000_000.0)
+            if _ov_index and _seuil_ov < 1_000_000.0:
+                _mo_scored = [
+                    m for m in metaorders
+                    if not copie_bloquee(_ov_index, m.get("coin"), m.get("signal_ts_ms"), seuil_bps=_seuil_ov)
+                ]
+                _cache_scored = None
+            else:
+                _mo_scored, _cache_scored = metaorders, segment_prepared_cache
             train = evaluate_frozen_v21_segment(
-                metaorders, books, freeze, segment="train",
-                prepared_cache=segment_prepared_cache,
+                _mo_scored, books, freeze, segment="train",
+                prepared_cache=_cache_scored,
             )
             stats = train.get("statistics") if isinstance(train.get("statistics"), Mapping) else {}
             daily_values = list(stats.get("daily_net_pnl_usd") or [])

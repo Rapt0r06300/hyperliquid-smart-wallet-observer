@@ -394,6 +394,15 @@ def _write_html_report(report_dir: Path, summary: dict[str, Any]) -> Path:
         "<h1>Laboratoire CopyVault</h1>"
         f"<p class='muted'>Run {html.escape(str(summary.get('run_id') or ''))} · HEAD "
         f"<code>{html.escape(str(summary.get('head') or ''))}</code></p>"
+        "<section style='background:#0f1a2e;border:1px solid #5bc8ff;border-radius:14px;padding:16px 20px;margin:14px 0'>"
+        "<p style='color:#5bc8ff;font-weight:700;margin:0 0 6px'>🔬 À quoi sert ce laboratoire ? (en clair)</p>"
+        "<p style='margin:4px 0'>Il cherche <b>tout seul</b> la meilleure façon de <b>copier les bons traders</b> "
+        "sur les <b>données passées</b>, en <b>simulation</b> (aucun ordre réel, aucun risque). Il teste des milliers "
+        "de stratégies, <b>ne garde que celles qui battent STRICTEMENT la meilleure actuelle</b> (preuve anti-chance), "
+        "<b>gèle la gagnante</b> et la met sur le moteur — puis recommence en montant la barre. 🎯</p>"
+        "<p class='muted' style='margin:4px 0 0'>« Préflight » = vérification des données <b>avant</b> la recherche. "
+        "Ci-dessous : l'état du coffre SAFE (le « carburant ») et si une stratégie est déjà prouvée rentable.</p>"
+        "</section>"
         f"<section class='hero'><p class='status {status_class}'>STATUT : {html.escape(status)}</p>"
         "<p class='answer'><b>Meilleure stratégie prouvée :</b> NON</p>"
         "<p><b>Profit comparable mesuré :</b> NON MESURÉ</p>"
@@ -1113,6 +1122,72 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         if candidate_train_mean is not None and baseline_mean is not None
         else "écart contre le Copy‑Vault actuel, comparable seulement sur le même segment"
     )
+    # --- Baromètre d'amélioration (ultra simple + détaillé, pensé pour un débutant) ---
+    def _baro_nb(value: Any) -> float | None:
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return None
+        return out if out == out else None  # écarte NaN
+
+    _baro_cur = _baro_nb(current_daily)
+    _baro_cand = _baro_nb(candidate_daily)
+    # % vers une amélioration : où en est le meilleur candidat vs le niveau actuel.
+    # 100% = on égale l'actuel ; >100% = on fait MIEUX (amélioration). Base positive uniquement.
+    if _baro_cur is not None and _baro_cand is not None:
+        if _baro_cur > 0:
+            _baro_pct = max(0.0, _baro_cand / _baro_cur * 100.0)
+        elif _baro_cand > 0:
+            _baro_pct = 100.0
+        else:
+            _baro_pct = 0.0
+    else:
+        _baro_pct = None
+    _baro_mieux = _baro_cur is not None and _baro_cand is not None and _baro_cand > _baro_cur
+    if _baro_pct is None:
+        _baro_fill, _baro_cls = 6.0, "warn"
+        _baro_titre = "⏳ Mesure en cours"
+        _baro_msg = ("Le labo n'a pas encore assez de données pour comparer. Laisse-le tourner : "
+                     "il analyse le passé en continu et affinera ce baromètre tout seul.")
+    elif _baro_mieux:
+        _baro_gain = _baro_cand - _baro_cur
+        _baro_mieux_pct = ((_baro_cand / _baro_cur - 1.0) * 100.0) if _baro_cur > 0 else None
+        _baro_fill, _baro_cls = 100.0, "ok"
+        _baro_titre = "✅ On a trouvé MIEUX que la stratégie actuelle !"
+        _pct_txt = f" (+{_baro_mieux_pct:.0f}%)" if _baro_mieux_pct is not None else ""
+        _baro_msg = (f"Le meilleur candidat gagnerait <b>{display(_baro_cand)}</b> par jour, soit "
+                     f"<b>+{display(_baro_gain)} par jour de plus</b> que la stratégie actuelle{_pct_txt}. "
+                     "⚠️ C'est encore un résultat d'<b>entraînement</b> : il doit passer les tests de preuve "
+                     "(VALIDATION → OOS → FORWARD) avant d'être gelé et mis sur le moteur.")
+    else:
+        _baro_fill = min(99.0, _baro_pct)
+        _baro_cls = "accent"
+        _baro_titre = f"🔎 En recherche — {_baro_pct:.0f}% du niveau actuel"
+        _baro_msg = (f"Le meilleur candidat du moment atteint <b>{_baro_pct:.0f}%</b> du gain de la stratégie "
+                     "actuelle. Il faut <b>dépasser 100%</b> pour une amélioration. Le labo essaie "
+                     "automatiquement de nouvelles idées pour y arriver.")
+    _baro_configs = int(economic.get("candidates_tested") or 0) + int(historical.get("trial_count") or 0)
+    _baro_gels = int(summary.get("pnl_uplift_freeze_count") or 0) or len(history)
+    if history:
+        _hist_li = []
+        for _h in history[-8:][::-1]:
+            if not isinstance(_h, Mapping):
+                continue
+            _hd = (_h.get("daily_net_pnl_usd") or _h.get("daily_mean_usd_per_active_day")
+                   or _h.get("improvement_usd_per_day"))
+            _hw = _h.get("frozen_at_utc") or _h.get("updated_at_utc") or _h.get("trial_number")
+            _hist_li.append(
+                f"<li><b>{display(_baro_nb(_hd))} / jour</b> "
+                f"<span class='muted'>· {html.escape(str(_hw if _hw is not None else '—'))}</span></li>"
+            )
+        _baro_hist = (
+            "<p class='sub'><b>Historique des améliorations gelées</b> — chaque palier est un gain "
+            "prouvé qui a remplacé l'ancien sur le moteur :</p><ul class='hist'>"
+            + "".join(_hist_li) + "</ul>"
+        ) if _hist_li else ""
+    else:
+        _baro_hist = ("<p class='sub'>Aucune amélioration gelée pour l'instant — ce sera le "
+                      "<b>1<sup>er</sup> palier</b> dès que le labo prouvera une stratégie meilleure.</p>")
     target = report_dir / "RAPPORT.html"
     live_active = live.get("active") is True
     verdict_oui = bool(proven)
@@ -1233,6 +1308,31 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         "table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}"
         "th{color:var(--muted);font-weight:600}code{color:var(--accent);word-break:break-all}"
         "ul{padding-left:20px}li{margin:.4rem 0}.path{color:var(--muted);font-size:.82rem;word-break:break-all}"
+        ".explique{background:var(--panel2);border:1px solid var(--accent);border-radius:16px;padding:18px 22px;margin:16px 0}"
+        ".explique h2{margin:0 0 8px;border:none;font-size:1.15rem;color:var(--accent)}"
+        ".explique p{margin:6px 0}.explique ol.etapes{counter-reset:e;list-style:none;padding-left:0;margin:10px 0}"
+        ".explique ol.etapes>li{counter-increment:e;position:relative;padding:8px 0 8px 40px;border-bottom:1px solid var(--line)}"
+        ".explique ol.etapes>li:last-child{border-bottom:none}"
+        ".explique ol.etapes>li::before{content:counter(e);position:absolute;left:0;top:7px;width:26px;height:26px;"
+        "border-radius:999px;background:var(--accent);color:#07131f;font-weight:800;display:grid;place-items:center}"
+        ".explique .legende{margin:8px 0 0}.explique .legende li{margin:.35rem 0}"
+        ".barometre{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 22px;margin:18px 0}"
+        ".barometre h2{margin-top:0;border:none}"
+        ".baro-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}"
+        ".baro-box{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:3px}"
+        ".baro-l{color:var(--muted);font-size:.82rem;font-weight:600}"
+        ".baro-v{font-size:1.8rem;font-weight:800}.baro-v small{font-size:.9rem;color:var(--muted);font-weight:600}"
+        ".baro-titre{font-weight:800;font-size:1.1rem;margin:10px 0 6px}"
+        ".baro-titre.ok{color:var(--ok)}.baro-titre.warn{color:var(--warn)}.baro-titre.accent{color:var(--accent)}"
+        ".baro-bar{position:relative;height:26px;border-radius:999px;background:#22314c;overflow:hidden;margin:4px 0 10px}"
+        ".baro-bar>i{display:block;height:100%;border-radius:999px;min-width:3px}"
+        ".baro-bar>i.ok{background:linear-gradient(90deg,#2f9e63,#43d98b)}"
+        ".baro-bar>i.accent{background:linear-gradient(90deg,#2b6fa0,#5bc8ff)}"
+        ".baro-bar>i.warn{background:linear-gradient(90deg,#a07b24,#ffcf5c)}"
+        ".baro-100{position:absolute;right:10px;top:5px;font-size:.74rem;color:#cfe0f5}"
+        ".baro-counters{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0;color:var(--muted);font-size:.92rem}"
+        ".baro-counters b{color:var(--fg)}ul.hist{margin:6px 0 0}ul.hist li{margin:.3rem 0}"
+        "@media(max-width:640px){.baro-grid{grid-template-columns:1fr}}"
         "</style></head><body><main>"
         # -- Header --
         "<h1>Laboratoire CopyVault</h1>"
@@ -1240,6 +1340,33 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         f"HEAD <code>{html.escape(str(summary.get('head') or '—')[:12])}</code> · "
         f"maj {html.escape(str(live.get('updated_at_utc') or '—'))} · "
         f"{'🟢 en direct (rafraîchi 5 s)' if live_active else '⏸ session arrêtée (rapport final)'}</p>"
+        # -- Explication simple (en clair, pour comprendre la page) --
+        "<section class='explique'>"
+        "<h2>🔬 À quoi sert ce laboratoire ? (en clair)</h2>"
+        "<p>Ce laboratoire cherche <b>tout seul</b> la meilleure façon de <b>copier les bons traders</b> "
+        "pour gagner de l'argent, en s'entraînant sur les <b>données passées</b> du marché. "
+        "Tout est en <b>simulation (papier)</b> : <b>aucun ordre réel</b>, aucune clé, aucun risque d'argent.</p>"
+        "<ol class='etapes'>"
+        "<li><b>Il rejoue le passé.</b> Il reconstitue ce qu'auraient donné des milliers de stratégies — "
+        "frais compris — sur de vraies données (carnets d'ordres, prix, trades des leaders, liquidations…).</li>"
+        "<li><b>Il compare honnêtement.</b> Une stratégie n'est retenue que si elle <b>bat STRICTEMENT</b> "
+        "la meilleure du moment, avec une <b>preuve statistique anti-chance</b> (pas de coup de bol).</li>"
+        "<li><b>Il gèle la gagnante.</b> La meilleure stratégie prouvée est figée (« gelée ») et <b>mise sur le moteur</b>.</li>"
+        "<li><b>Il recommence.</b> Dès qu'il en trouve une encore meilleure, il la gèle et remplace l'ancienne. "
+        "La barre <b>monte toujours</b>. 🎯</li>"
+        "</ol>"
+        "<p class='sub'><b>Comment lire cette page :</b></p>"
+        "<ul class='legende'>"
+        "<li><b>Verdict</b> (juste en dessous) : a-t-on une stratégie <b>prouvée rentable</b> ? ✅ oui / ⏳ pas encore.</li>"
+        "<li><b>Données collectées</b> : le « carburant ». Plus il y en a, plus les tests sont fiables.</li>"
+        "<li><b>Rentabilité</b> : le meilleur candidat gagne-t-il <b>plus</b> que la stratégie actuelle ? "
+        "C'est ce chiffre qu'on veut voir <b>monter</b>.</li>"
+        "<li><b>TRAIN</b> = résultat d'entraînement (sert à chercher). Une stratégie n'est <b>« prouvée »</b> "
+        "qu'après des tests indépendants (VALIDATION → OOS → FORWARD), comme un médicament testé plusieurs fois.</li>"
+        "<li><b>LCB</b> = l'<b>estimation prudente</b> du gain (la fourchette basse, pas le chiffre optimiste) — "
+        "pour ne jamais surestimer.</li>"
+        "</ul>"
+        "</section>"
         # -- Verdict --
         f"<section class='verdict {'ok' if verdict_oui else 'bad'}'>"
         f"<span class='badge {status_class}'>{html.escape(status)}</span>"
@@ -1248,6 +1375,30 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         "<p class='sub'><b>But :</b> gagner un peu plus à chaque jour, chaque backtest et chaque replay. "
         "Pas de cible figée — la barre monte à chaque amélioration réellement prouvée.</p>"
         f"<p class='sub'><b>Pourquoi ce verdict :</b> {html.escape(reason_display)}</p></section>"
+        # -- Baromètre d'amélioration (simple + détaillé) --
+        "<section class='barometre'>"
+        "<h2>📈 Est-ce qu'on va gagner plus ? (le baromètre)</h2>"
+        "<p class='sub'>En une image : ce que rapporte la stratégie <b>actuelle</b>, ce que pourrait "
+        "rapporter le <b>meilleur candidat</b>, et à quel point on est <b>proche de faire mieux</b>.</p>"
+        "<div class='baro-grid'>"
+        "<div class='baro-box'><span class='baro-l'>💼 Copy-Vault ACTUEL (sur le moteur)</span>"
+        f"<span class='baro-v'>{display(current_display_daily)}<small> $/jour</small></span>"
+        "<span class='muted'>ce que la meilleure stratégie prouvée rapporte aujourd'hui</span></div>"
+        "<div class='baro-box'><span class='baro-l'>🧪 MEILLEUR candidat (à l'essai)</span>"
+        f"<span class='baro-v'>{display(candidate_daily)}<small> $/jour</small></span>"
+        "<span class='muted'>la meilleure idée trouvée par le labo, pas encore prouvée</span></div>"
+        "</div>"
+        f"<div class='baro-titre {_baro_cls}'>{_baro_titre}</div>"
+        f"<div class='baro-bar'><i class='{_baro_cls}' style='width:{_baro_fill:.0f}%'></i>"
+        "<span class='baro-100'>but : dépasser 100%</span></div>"
+        f"<p>{_baro_msg}</p>"
+        "<div class='baro-counters'>"
+        f"<span>🔍 <b>{_baro_configs:,}</b> configurations analysées</span>"
+        f"<span>📊 <b>{int(progress_count):,}</b> essais rejoués (temps réel)</span>"
+        f"<span>🧊 <b>{_baro_gels:,}</b> amélioration(s) gelée(s)</span>"
+        "</div>"
+        + _baro_hist
+        + "</section>"
         # -- Live --
         f"<div class='live'><div class='stage'>En direct · {html.escape(str(live.get('stage') or 'état du laboratoire'))}</div>"
         f"<div class='msg'>{html.escape(str(live.get('message') or 'Aucune activité en cours.'))}</div>"
