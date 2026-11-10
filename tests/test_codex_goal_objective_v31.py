@@ -26,5 +26,6 @@ def test_goal_objective_locks_discovery_local_compute_and_daily_target() -> None
     assert "gpu non préféré" in text
     assert "aucun sous-agent" in text
     assert "fast off" in text
-    assert "+4.00 usd net/jour" in text
+    assert "sans seuil quotidien fixe" in text
+    assert "champion_verified" in text
     assert "run_daily_economic_certification.py" in text
