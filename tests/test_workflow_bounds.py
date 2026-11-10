@@ -158,7 +158,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "other_matrix" in controller
     assert "active_copy=False" in controller
     assert "active_other=0" in controller
-    assert "other_capacity=max(0,16-active_other)" in controller
+    assert "other_capacity=max(0,20-active_other)" in controller
     assert "bounded_canaries=[campaign_id for campaign_id in other_ids if campaign_id.startswith(\"canary-market-\")]" in controller
     assert "reserved_canary=bounded_canaries[:1]" in controller
     assert "max(0,other_capacity-len(reserved_canary))" in controller
@@ -611,3 +611,11 @@ def test_quarantine_audit_retries_after_serialized_terminal_cleanup() -> None:
     assert "workflows: [principal dataset terminal deletion]" in audit
     assert "github.event.workflow_run.conclusion == 'success'" in audit
 
+
+
+def test_hypersmart_ci_sparse_checkout_includes_versioned_contract_dependencies():
+    """All five hosted checkouts keep small tracked CI test inputs."""
+    ci = _workflow("ci.yml")
+    assert ci.count("sparse-checkout: |") == 5
+    for path in ("/.agents/", "/outils de test/", "/*.sh", "/*.cmd"):
+        assert ci.count(path) == 5, path
