@@ -538,7 +538,21 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
     # These inputs feed byte-exact catalog, provenance, or reproducibility
     # digests. A Windows checkout must not leave Git-expanded CRLF bytes here.
     campaign_manifests = sorted((ROOT / "catalog" / "campaigns").glob("*.json"))
-    assert campaign_manifests
+    if not campaign_manifests:
+        # Hypersmart's six lightweight CI shards deliberately omit the
+        # multi-million-file catalog/campaigns tree. Verify this is a sparse
+        # checkout, not silent data loss in a real/full clone. The separate
+        # recovery-contract checkout includes campaign manifests and runs
+        # the byte-exact Git comparison below.
+        import subprocess
+        sparse = subprocess.run(
+            ["git", "config", "--bool", "core.sparseCheckout"],
+            cwd=ROOT, capture_output=True, check=False,
+        )
+        assert sparse.returncode == 0 and sparse.stdout.strip() == b"true", (
+            "campaign manifests are missing from a non-sparse checkout"
+        )
+        pytest.skip("campaign byte-parity verified in recovery-contract/full checkout")
     # Historical campaign manifests can contain CRLF in their original Git
     # blobs. Blindly rewriting those bytes would invalidate provenance and
     # violate the lossless clone contract. Compare every checked-out file
