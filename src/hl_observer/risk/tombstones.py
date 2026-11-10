@@ -63,6 +63,13 @@ class Tombe:
 
 TOMBES: tuple[Tombe, ...] = (
     # ---- la pile V9, remplacee par la pile V26 (qui, elle, est VIVANTE) ----
+    # Pure Copy-Vault audit receipts are not a live risk gate. Keep their tests,
+    # but explicitly exclude this duplicate decision layer from production.
+    Tombe("copy_vault_safety_controls", "DOUBLON",
+          "signals.v26_entry_vetos and risk.protections_v26 handle the active PAPER "
+          "risk vetoes; scoped Copy-Vault admission remains fail-closed.",
+          "The receipt-only helpers have no production callers (2026-11-10 "
+          "risk audit); green unit receipts must never masquerade as live vetoes."),
     Tombe("kill_switch", "DOUBLON",
           "risk.portfolio_drawdown_kill_switch (vivant) + graded_halt RED + le controle inline "
           "de risk_engine_v3 sur le flag de settings",
