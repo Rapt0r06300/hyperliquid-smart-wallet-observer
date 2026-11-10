@@ -211,7 +211,8 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     windows = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
     unix = (ROOT / "ALINA_SYNC_COMPLETE.sh").read_text(encoding="utf-8")
     assert 'set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB-FORCE.cmd"' in windows
-    assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' in windows
+    assert "DEFAULT_SAFE_ARGS=--download-safe --all-safe --unpack-safe" in windows
+    assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' not in windows
     assert "EnableDelayedExpansion" in windows
     assert "for /f \"delims=\" %%R in (\"!RC!\")" in windows
     assert 'exec python3 tools/sync_complete_clone.py "$@"' in unix
@@ -224,7 +225,7 @@ def test_disaster_recovery_commands_explicitly_opt_in_to_complete_safe_download(
     assert required in guide
     assert "ALINA_SYNC_COMPLETE.cmd --download-safe --max-download-gib 256" in guide
     assert "bash ALINA_SYNC_COMPLETE.sh --download-safe --max-download-gib 256" in guide
-    assert "sans option effectue uniquement un préflight" in guide
+    assert "sans argument lance la restauration SAFE complète" in guide
 
 
 def test_restore_docs_define_replay_ready_decompression_without_terabyte_duplication():
@@ -916,10 +917,12 @@ def test_directory_at_prior_report_path_fails_before_restore(monkeypatch, tmp_pa
 
 
 
-def test_double_click_cmd_runs_safe_preflight_and_requires_explicit_download():
+def test_double_click_cmd_downloads_all_safe_with_verified_unpack_and_supports_preflight():
     launcher = (ROOT / "ALINA_SYNC_COMPLETE.cmd").read_text(encoding="utf-8")
     assert 'if "%~1"=="" (' in launcher
-    assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' in launcher
+    assert "DEFAULT_SAFE_ARGS=--download-safe --all-safe --unpack-safe" in launcher
+    assert 'if /i "%MODE%"=="--preflight-only" goto :run' in launcher
+    assert 'call "%UNIFIED%" --shards-only --preflight-only --skip-update' not in launcher
     assert "--download-safe" in launcher
     assert "--all-safe" in launcher
     assert "--unpack-safe" in launcher
