@@ -49,8 +49,10 @@ jobs:
       - name: Validate dataset policy
         run: python tools/check_dataset_quality.py
       - name: Vérifier le Dataset principal (format V2 interne)
+        # The preceding step validates ALL manifests against the SHA-bound index.
+        # Keep the fast policy tests but avoid a second million-file pass.
         run: |
-          python -m pytest -q \
+          python -m pytest -q -k 'not test_every_status_counter_is_index_bound and not test_every_indexed_manifest_exists_and_matches_status' \
             tests/test_analysis_closure_dispatch_order.py \
             tests/test_analysis_frozen_coverage.py \
             tests/test_analysis_selection_freeze.py \
