@@ -59,6 +59,7 @@ Aucun ordre reel. Aucune cle privee. Aucune signature.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable

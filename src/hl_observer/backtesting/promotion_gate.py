@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+from typing import Any
 
 PROMOUVOIR_TESTNET = "PROMOUVOIR_TESTNET"
 RESTE_PAPER = "RESTE_PAPER"

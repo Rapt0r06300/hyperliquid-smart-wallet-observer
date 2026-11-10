@@ -10,7 +10,7 @@ import json
 import math
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any
