@@ -1744,7 +1744,11 @@ class Synchronizer:
                 if child.is_dir() and not child.is_symlink()
                 else child.name
             )
-        result = tuple(sorted(paths))
+        # A deleted tracked file is no longer in iterdir(), yet its removal
+        # must remain visible to Git status and the exact-blob relocation gate.
+        # These explicitly approved root histories are tiny, never SAFE trees.
+        paths.extend(SAFE_HISTORICAL_RELOCATIONS)
+        result = tuple(sorted(set(paths)))
         self._pathspec_cache[include_protected] = result
         return result
 
