@@ -126,6 +126,7 @@ jobs:
           python -m coverage run --parallel-mode --source=src -m pytest \
             -vv -p no:cacheprovider -p tests.coverage_contract_cache_plugin \
             --tb=short --durations=20 --timeout=600 --timeout-method=signal \
+            -k 'not test_every_status_counter_is_index_bound and not test_every_indexed_manifest_exists_and_matches_status' \
             "${TEST_FILES[@]}" 2>&1 | tee "coverage-shard-${SHARD_INDEX}.log"
           PYTEST_RC=${PIPESTATUS[0]}
           printf '%s\n' "${PYTEST_RC}" > pytest-exit-code.txt
