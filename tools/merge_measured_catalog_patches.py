@@ -129,11 +129,19 @@ def merge_patch(
     if contradictions:
         raise ValueError("conflicting exact immutable evidence: " + ",".join(contradictions[:8]))
 
+    # A structurally malformed or non-SHA-bound entry must never count as
+    # covered merely because it is present in the patch dictionary. Only
+    # exact verified evidence closes a row; terminal UNAVAILABLE remains
+    # separately visible through unavailable_assets.
     unresolved = [
         row for row in index_rows
-        if row["dataset_id"] not in result
-        or (isinstance(result[row["dataset_id"]], Mapping)
-            and result[row["dataset_id"]].get("retryable") is True)
+        if not _exact(
+            result.get(row["dataset_id"]), kind, str(row["sha256"]).lower()
+        ) and not (
+            isinstance(result.get(row["dataset_id"]), Mapping)
+            and result[row["dataset_id"]].get("status") == "UNAVAILABLE"
+            and result[row["dataset_id"]].get("retryable") is not True
+        )
     ]
     unavailable = sum(
         1 for value in result.values()
@@ -150,7 +158,7 @@ def merge_patch(
     merged["exact_assets"] = exact
     merged["unavailable_assets"] = unavailable
     merged["remaining_assets"] = len(unresolved)
-    merged["coverage_complete"] = not unresolved and unavailable == 0
+    merged["coverage_complete"] = exact == len(index_rows) and unavailable == 0
     merged["attempted"] = measured.get("attempted", 0)
     merged["failed"] = [dict(id=row["dataset_id"], reason="MISSING_OR_RETRYABLE")
                         for row in unresolved[:100]]
