@@ -77,3 +77,72 @@ def test_merge_directory_updates_both_without_losing_new_main_data(tmp_path):
     assert result["sizes"]["exact"] == 1
     assert result["records"]["exact"] == 1
     assert result["records"]["remaining"] == 0
+
+
+@pytest.mark.parametrize("variant", ["unique", "valid_invalid"])
+def test_same_total_with_different_exact_record_components_fails_closed(variant):
+    original = record()
+    conflicting = record()
+    if variant == "unique":
+        conflicting["unique_record_count"] = 2
+    else:
+        conflicting["valid_record_count"] = 2
+        conflicting["invalid_record_count"] = 1
+        conflicting["unique_record_count"] = 2
+    with pytest.raises(ValueError, match="conflicting exact"):
+        merge_patch(
+            {"records": {"example": original}},
+            {"records": {"example": conflicting}},
+            index_rows=[row()], kind="records",
+            schema="alina.record_count_patch.v1",
+        )
+
+
+def test_negative_record_component_is_never_certified_exact():
+    bad = record()
+    bad.update(valid_record_count=-1, invalid_record_count=4,
+               unique_record_count=0)
+    merged = merge_patch(
+        {}, {"records": {"example": bad}},
+        index_rows=[row()], kind="records",
+        schema="alina.record_count_patch.v1",
+    )
+    assert merged["exact_assets"] == 0
+    assert not merged["coverage_complete"]
+
+
+def test_oversize_second_patch_preserves_first_patch_bytes(tmp_path, monkeypatch):
+    from tools import merge_measured_catalog_patches as merger
+    root, measured = tmp_path / "repo", tmp_path / "measured"
+    (root / "catalog").mkdir(parents=True)
+    measured.mkdir()
+    (root / "catalog" / "DATA_INDEX.json").write_text(
+        json.dumps({"shards": [row()]}), encoding="utf-8")
+    originals = {}
+    values = [
+        ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", {
+            "asset_sha256": "a" * 64, "uncompressed_bytes": 200}),
+        ("RECORD_COUNT_PATCH.json", "records", record()),
+    ]
+    for filename, kind, evidence in values:
+        original = root / "catalog" / filename
+        original.write_text(json.dumps({kind: {"example": evidence}}),
+                            encoding="utf-8")
+        originals[filename] = original.read_bytes()
+        (measured / filename).write_text(
+            json.dumps({kind: {"example": {"retryable": True}}}),
+            encoding="utf-8")
+    sizes = merger.merge_patch(
+        {"sizes": {"example": values[0][2]}},
+        {"sizes": {"example": {"retryable": True}}},
+        index_rows=[row()], kind="sizes",
+        schema="alina.uncompressed_size_patch.v2",
+    )
+    size_length = len(json.dumps(
+        sizes, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")) + 1
+    monkeypatch.setattr(merger, "MAX_PATCH_BYTES", size_length + 1)
+    with pytest.raises(ValueError, match="CATALOG_PATCH_NEEDS_PARTITION: RECORD_COUNT_PATCH"):
+        merger.merge_directory(measured, root)
+    assert all((root / "catalog" / name).read_bytes() == value
+               for name, value in originals.items())
