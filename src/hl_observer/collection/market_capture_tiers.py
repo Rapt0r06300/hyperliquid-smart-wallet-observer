@@ -1,7 +1,7 @@
 """Deterministic, causal capture tiers for bounded public market collection."""
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
