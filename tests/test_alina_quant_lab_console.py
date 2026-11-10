@@ -7,7 +7,8 @@ import sqlite3
 from pathlib import Path
 
 import tools.alina_quant_lab_console as lab
-from hl_observer.backtesting.copy_vault_v21_frozen import _verified_freeze
+from hl_observer.backtesting.copy_vault_v21_frozen import PROTOCOL, _verified_freeze
+from hl_observer.backtesting.copy_vault_protocol import MAX_GROSS_EXPOSURE_USD
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.alina_quant_lab_console import (
     _pytest_counts,
@@ -17,24 +18,66 @@ from tools.alina_quant_lab_console import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-FREEZE_PATH = ROOT / "runtime" / "codex_research" / "COPY_V21_PHYSICAL_FREEZE.json"
+def _sample_physical_freeze() -> dict:
+    """Synthetic, hash-bound paper freeze: no dependence on ignored runtime files."""
+    params = {
+        "protocol": PROTOCOL,
+        "training_selection_eligible": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "minimum_leader_fill_notional_usd": 100.0,
+        "signed_depth_imbalance_minimum": 0.0,
+        "core_notional_usd": 150.0,
+        "probe_notional_usd": 75.0,
+        "daily_profit_lock_usd": 4.0,
+        "stop_loss_bps": 50.0,
+        "take_profit_bps": 100.0,
+        "horizon_ms": 3_600_000,
+        "vault_daily_limit": 1,
+        "coin_daily_limit": 1,
+        "max_open_positions": 10,
+        "bonferroni_trial_count": 432,
+        "bounds": {
+            "train_start_ms": 100,
+            "train_end_ms": 900,
+            "validation_start_ms": 1_000,
+            "validation_end_ms": 2_000,
+            "oos_start_ms": 3_000,
+            "oos_end_ms": 4_000,
+        },
+    }
+    return {"freeze": {
+        "schema_version": "hypersmart.economic_parameter_freeze.v1",
+        "campaign_id": "offline-ci-fixture",
+        "family": "copy_vault",
+        "frozen_at_ms": 5_000,
+        "selected_before_final_evaluation": True,
+        "parameters": params,
+        "parameters_sha256": parameter_hash(params),
+        "dataset_provenance": {},
+    }}
 
 
-def test_lab_reports_the_existing_over_limit_freeze_without_modifying_it() -> None:
-    before = FREEZE_PATH.read_bytes()
+def test_lab_rejects_over_limit_freeze_without_modifying_it(tmp_path: Path) -> None:
+    payload = _sample_physical_freeze()
+    params = payload["freeze"]["parameters"]
+    params["core_notional_usd"] = MAX_GROSS_EXPOSURE_USD + 0.01
+    payload["freeze"]["parameters_sha256"] = parameter_hash(params)
+    source = tmp_path / "physical-freeze.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    before = source.read_bytes()
 
-    result = assess_physical_freeze(FREEZE_PATH)
+    result = assess_physical_freeze(source)
 
     assert result["status"] == "REJECTED"
     assert result["reason"] == "COPY_V21_PAPER_GROSS_EXPOSURE_LIMIT_EXCEEDED"
-    assert FREEZE_PATH.read_bytes() == before
+    assert source.read_bytes() == before
 
 
 def test_lab_recognizes_a_valid_physical_freeze_without_promoting_it(
     tmp_path: Path,
 ) -> None:
-    source = json.loads(FREEZE_PATH.read_text(encoding="utf-8"))
-    payload = copy.deepcopy(source)
+    payload = _sample_physical_freeze()
     params = payload["freeze"]["parameters"]
     params["core_notional_usd"] = 200.0
     payload["freeze"]["parameters_sha256"] = parameter_hash(params)
