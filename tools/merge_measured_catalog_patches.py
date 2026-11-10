@@ -23,6 +23,7 @@ TABLES = (
     ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", "alina.uncompressed_size_patch.v2"),
     ("RECORD_COUNT_PATCH.json", "records", "alina.record_count_patch.v1"),
 )
+MAX_PATCH_BYTES = 95_000_000
 
 
 def _atomic_write_utf8(target: Path, payload: str) -> None:
@@ -66,6 +67,8 @@ def _exact(value: Any, kind: str, sha: str) -> bool:
         and type(value.get("valid_record_count")) is int
         and type(value.get("invalid_record_count")) is int
         and type(value.get("unique_record_count")) is int
+        and value["valid_record_count"] >= 0
+        and value["invalid_record_count"] >= 0
         and value["valid_record_count"] + value["invalid_record_count"] == value["record_count"]
         and 0 <= value["unique_record_count"] <= value["valid_record_count"]
     )
@@ -96,8 +99,11 @@ def merge_patch(
         old_exact = _exact(old, kind, sha)
         new_exact = _exact(new, kind, sha)
         if old_exact and new_exact:
-            compare = "uncompressed_bytes" if kind == "sizes" else "record_count"
-            if old[compare] != new[compare]:
+            fields = ("uncompressed_bytes",) if kind == "sizes" else (
+                "record_count", "valid_record_count",
+                "invalid_record_count", "unique_record_count",
+            )
+            if any(old[field] != new[field] for field in fields):
                 contradictions.append(dataset_id)
                 continue
         if old_exact:
@@ -157,6 +163,7 @@ def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
     if not isinstance(rows, list):
         raise ValueError("invalid active DATA_INDEX")
     out: dict[str, Any] = {}
+    pending: list[tuple[Path, str]] = []
     for file_name, kind, schema in TABLES:
         target = repo_root / "catalog" / file_name
         measured = _load(measured_root / file_name)
@@ -168,14 +175,19 @@ def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
         # Legacy indented JSON exceeded GitHub's 100 MB blob limit.
         # Compact serialization preserves all exact SHA-bound measurements.
         payload = json.dumps(updated, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
-        if len(payload.encode("utf-8")) >= 95_000_000:
+        if len(payload.encode("utf-8")) >= MAX_PATCH_BYTES:
             raise ValueError(f"CATALOG_PATCH_NEEDS_PARTITION: {file_name} exceeds 95 MB")
-        _atomic_write_utf8(target, payload)
+        # Validate BOTH complete products before replacing EITHER patch. An
+        # oversize record table must never leave an unrelated size-table
+        # update on disk from the same failed merge attempt.
+        pending.append((target, payload))
         out[kind] = {
             "exact": updated["exact_assets"],
             "remaining": updated["remaining_assets"],
             "unavailable": updated["unavailable_assets"],
         }
+    for target, payload in pending:
+        _atomic_write_utf8(target, payload)
     return out
 
 
