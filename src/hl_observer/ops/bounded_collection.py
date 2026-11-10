@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from .echec_silencieux import noter as _noter_echec
 from .collecteur_registry import COLLECTEURS_CAMPAGNE, REGISTRE
 from .collector_lease import DEFAULT_RELPATH as LEASE_RELPATH
 from .collector_lease import create_lease, public_lease, validate_lease
@@ -68,8 +69,8 @@ def _atomic_write(path: Path, payload: Mapping[str, Any]) -> None:
             _t.sleep(0.05 * (tentative + 1))
     try:
         temporary.unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        _noter_echec("ops/bounded_collection.py:temporary_cleanup", exc)
     if derniere is not None:
         raise derniere
 

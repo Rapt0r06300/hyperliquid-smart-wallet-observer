@@ -14,8 +14,6 @@ import importlib.util
 import re
 from pathlib import Path
 
-from hl_observer.funding.carry_position_lifecycle import AGE_MAX_H_DEFAUT
-
 RACINE = Path(__file__).resolve().parents[1]
 
 

@@ -14,6 +14,8 @@ from pathlib import Path
 import tempfile
 from typing import Any, Mapping, Sequence
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 MAX_PATCH_BYTES = 95_000_000
 KNOWN_DELTA_STATES = frozenset({"OPEN", "ADD", "REDUCE", "CLOSE", "UNKNOWN"})
 OFFICIAL_ENTRYPOINTS = (
@@ -53,8 +55,8 @@ def atomic_publish_bytes(path: str | Path, payload: bytes, *, max_bytes: int | N
     finally:
         try:
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
+        except FileNotFoundError as exc:
+            _noter_echec("audit/copy_vault_runtime_audit_controls.py:atomic_cleanup", exc)
 
 
 def partition_mapping(value: Mapping[str, Any], *, max_bytes: int = MAX_PATCH_BYTES) -> tuple[list[dict[str, Any]], dict[str, bytes]]:

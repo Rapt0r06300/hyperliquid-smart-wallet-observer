@@ -11,6 +11,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 logger = logging.getLogger(__name__)
 
 SIGNAL_DIR = "runtime/data"
@@ -95,8 +97,8 @@ def clear_crash_signal() -> None:
     sig_path = _project_root() / SIGNAL_DIR / SIGNAL_FILE
     try:
         sig_path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    except OSError as exc:
+        _noter_echec("ops/crash_notification.py:clear_crash_signal", exc)
 
 
 __all__ = [

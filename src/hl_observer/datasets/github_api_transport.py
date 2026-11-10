@@ -11,6 +11,8 @@ from typing import Any
 
 import requests
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 API_ROOT = "https://api.github.com"
 DEFAULT_TIMEOUT = (30.0, 300.0)
 DATASET_TOKEN_ENV = "HYPERSMART_DATASET_TOKEN"
@@ -172,8 +174,8 @@ def _retry_delay(response: object, attempt: int) -> float:
     if retry_after is not None:
         try:
             return min(max(0.0, float(str(retry_after).strip())), MAX_RETRY_DELAY_S)
-        except (TypeError, ValueError, OverflowError):
-            pass
+        except (TypeError, ValueError, OverflowError) as exc:
+            _noter_echec("datasets/github_api_transport.py:retry_after_invalid", exc)
     return min(float(2**attempt), MAX_RETRY_DELAY_S)
 
 
