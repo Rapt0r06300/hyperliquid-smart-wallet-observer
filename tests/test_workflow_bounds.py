@@ -619,3 +619,15 @@ def test_hypersmart_ci_sparse_checkout_includes_versioned_contract_dependencies(
     assert ci.count("sparse-checkout: |") == 5
     for path in ("/.agents/", "/outils de test/", "/*.sh", "/*.cmd"):
         assert ci.count(path) == 5, path
+
+
+def test_full_normal_clone_is_pinned_to_event_sha_even_when_main_moves():
+    """The long full-clone must never compare moving main with a stale run SHA."""
+    workflow = _workflow("alina-restore-safe-regression.yml")
+    assert 'git clone --no-checkout --branch "$GITHUB_REF_NAME" --single-branch' in workflow
+    assert 'git cat-file -e "${GITHUB_SHA}^{commit}"' in workflow
+    assert 'git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"' in workflow
+    assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in workflow
+    assert "git fsck --full" in workflow
+    assert "status --porcelain=v1 --untracked-files=no" in workflow
+    assert "self-hosted" not in workflow
