@@ -41,9 +41,12 @@ par toutes les lignes `SAFE` + `replay_compatible` du catalogue courant.
 Les données déjà vérifiées sont réutilisées et les téléchargements partiels
 sont repris.
 
-`ALINA_SYNC_COMPLETE` sans option effectue uniquement un préflight et ne
-télécharge aucun payload de marché. L'opt-in `--download-safe` est donc
-obligatoire pour une restauration physique. La limite de 256 GiB ci-dessus
+`ALINA_SYNC_COMPLETE.cmd` sans argument lance la restauration SAFE complète
+et sa décompression JSONL, avec contrôles de disque, taille et SHA-256.
+Pour consulter uniquement le catalogue sans réseau ni extraction, passer
+`--preflight-only` ou `--catalog-budget`. Sous Linux/macOS,
+`bash ALINA_SYNC_COMPLETE.sh` sans argument conserve le préflight ;
+le téléchargement nécessite `--download-safe`. La limite de 256 GiB ci-dessus
 couvre l'instantané courant ; si le rapport de préflight annonce davantage,
 relancer avec une limite supérieure et assez d'espace disque.
 
@@ -233,9 +236,10 @@ commencer la décompression. Les résultats économiques restent non prouvés.
 ### Lancement direct Windows (sans argument)
 
 Double-cliquer sur `ALINA_SYNC_COMPLETE.cmd` dans un clone propre lance
-maintenant **explicitement** `--download-safe --all-safe`
-plutôt que le mode prévisualisation silencieux. Il affiche
-`ALINA_SYNC_MODE=DOWNLOAD_ALL_SAFE_GZIP`, puis les phases du moteur.
+maintenant `--download-safe --all-safe --unpack-safe` au lieu du mode
+prévisualisation. Le moteur vérifie d'abord les assets compressés, puis
+l'espace disponible avant de décompresser les données. Aucun succès n'est
+annoncé si une preuve de restauration ou d'extraction manque.
 Le programme vérifie les Releases avant de récupérer les shards et reprend les
 fichiers déjà SHA-256 vérifiés. Les moteurs replay/backtest lisent les `.jsonl.gz`
 en streaming ; l'expansion en JSONL brut est facultative et peut nécessiter plusieurs
