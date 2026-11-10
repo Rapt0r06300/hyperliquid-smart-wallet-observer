@@ -110,9 +110,10 @@ def test_opens_one_connection_per_chunk():
 def test_fresh_fills_stored_across_multiplex(monkeypatch):
     stored = []
 
-    def fake_store(session_factory, wallet, fills, *, max_live_fill_age_ms, stats):
+    async def fake_store(session_factory, wallet, fills, *, max_live_fill_age_ms, stats, sleep):
         stored.append(wallet)
         stats.fresh_fills_stored += len(fills)
+        return True
 
     monkeypatch.setattr(ufl, "_store_fresh_fills", fake_store)
 
