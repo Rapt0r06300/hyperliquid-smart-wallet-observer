@@ -39,7 +39,7 @@ EXT_RESSOURCE = (
 )
 
 _DOSSIERS_IGNORES = {
-    ".git", ".venv", "venv", "env", "node_modules", "__pycache__",
+    ".git", ".venv", ".ci-venv", "venv", "env", "node_modules", "__pycache__",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis",
     "portable_runtime", ".venv-portable", "dist", "build", "htmlcov",
     "portable-build", ".portable-staging", "cache_moisson",
