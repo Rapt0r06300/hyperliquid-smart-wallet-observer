@@ -75,6 +75,10 @@ SUFFIXES_SECRETS = (".key", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
 # immutable economic evidence inside the relocatable Windows-only archive.
 FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),
                    "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json",
+                   # Historical diagnostic snapshot embeds an operator machine path.
+                   # Preserve it byte-for-byte in Git, never export it inside the
+                   # relocatable Windows application archive.
+                   "docs/audit/COPY_VAULT_FORBIDDEN_DEPENDENCIES.json",
                    "runtime/data/lanceur_session_marqueur.txt",
                    "runtime/data/COURANTE.json",
                    ".analyse.lock", NOM_MANIFESTE)

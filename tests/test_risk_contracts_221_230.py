@@ -26,8 +26,9 @@ def test_lch222_veto_precedes_paper_order() -> None:
     assert veto_order_receipt([row])["status"] == "REJECTED"
 
 
-def test_lch223_leverage_cost_uses_200_usd_capital() -> None:
-    assert leverage_cost_receipt({"capital_usd": 200, "leverage": 2, "leverage_cost_usd": 1})["status"] == "PROVEN"
+def test_lch223_leverage_cost_requires_canonical_350_usd_capital() -> None:
+    assert leverage_cost_receipt({"capital_usd": 350, "leverage": 2, "leverage_cost_usd": 1})["status"] == "PROVEN"
+    assert leverage_cost_receipt({"capital_usd": 200, "leverage": 2, "leverage_cost_usd": 1})["status"] == "UNMEASURABLE"
     assert leverage_cost_receipt({"capital_usd": 100, "leverage": 2, "leverage_cost_usd": 1})["status"] == "UNMEASURABLE"
 
 

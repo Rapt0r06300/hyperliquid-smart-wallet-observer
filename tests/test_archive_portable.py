@@ -137,6 +137,10 @@ def test_est_exclu_regles():
     assert AP.est_exclu("archive/racine-machine/trace.txt")
     assert AP.est_exclu("catalog/campaign-history/old.failed.json")
     assert AP.est_exclu("catalog/campaigns/market-e6-0.json")
+    assert AP.est_exclu("docs/audit/COPY_VAULT_FORBIDDEN_DEPENDENCIES.json")
+    assert not AP.est_exclu("docs/audit/OTHER_DIAGNOSTIC.json")
+    # The strict path scanner must still reject unsanitized runtime metadata.
+    assert AP.chemins_absolus_portables(json.dumps({"repo": "C:\\\\Users\\\\example\\\\repo"}), "runtime/active.json")
     assert not AP.est_exclu("catalog/DATA_METRICS.json")
     assert not AP.est_exclu("catalog/CAMPAIGN_RESILIENCE_RECEIPT.json")
     assert AP.est_exclu(".portable-preflight-abc/test/cert.pem")
