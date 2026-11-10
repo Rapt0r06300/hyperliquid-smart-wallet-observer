@@ -21,6 +21,11 @@ from typing import Any
 from hl_observer.alerts.durability import SingleWriterFileLock, WriterBusy
 from hl_observer.backtesting import copy_vault_executable as cv
 from hl_observer.backtesting.overshoot_signal import build_overshoot_index, copie_bloquee
+from hl_observer.backtesting.leader_quality_signal import (
+    SEUIL_LEADER_OFF_USD,
+    build_leader_quality_index,
+    copie_leader_faible,
+)
 from hl_observer.backtesting.copy_vault_protocol import (
     PAPER_EQUITY_USD,
     PAPER_TARGET_NET_USD_PER_DAY,
@@ -68,7 +73,7 @@ _LEADER_REVIEW_MAX_EVIDENCE_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _TRIAL_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
-_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67)
+_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # #8 — grille élargie et affinée (bornes plus larges + pas plus fin) pour que
     # l'optimum « entre deux points » ou « hors plage » devienne atteignable. La
@@ -112,6 +117,9 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # admettent un carnet de référence plus ancien (toujours <= signal) quand le L2 frais
     # manque -> moins de fills jetés par manque de données, sans fuite look-ahead.
     ("reference_lag_ms", (30_000, 60_000, 120_000, 300_000)),
+    # #10 — sélection des leaders CHERCHABLE : OFF = copie tous (v21 pur) ; les seuils exigent
+    # un track-record causal du leader (closedPnl réalisé cumulé <= signal) >= seuil USD.
+    ("leader_min_prior_closed_pnl_usd", (SEUIL_LEADER_OFF_USD, 0.0, 100.0, 1000.0)),
 )
 
 
@@ -1954,6 +1962,44 @@ def _charger_asset_ctx_safe(workspace: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _charger_leader_fills_safe(workspace: Path) -> list[dict[str, Any]]:
+    """Charge les fills leaders SAFE matérialisés (``vault_fills.jsonl`` + live) réduits
+    à ``{vault, ts_ms, closed_pnl}`` pour le signal de qualité leader (#10). Fail-soft :
+    ignore les fichiers absents/illisibles et les lignes invalides (l'exploration tourne
+    sans planter)."""
+    out: list[dict[str, Any]] = []
+    for nom in ("vault_fills.jsonl", "vault_fills_live.jsonl"):
+        chemin = workspace / nom
+        if chemin.is_symlink() or not chemin.is_file():
+            continue
+        try:
+            with chemin.open("r", encoding="utf-8") as fh:
+                for ligne in fh:
+                    ligne = ligne.strip()
+                    if not ligne:
+                        continue
+                    try:
+                        row = json.loads(ligne)
+                    except (ValueError, TypeError):
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    vault = row.get("vault")
+                    ts = row.get("ts_ms")
+                    cp = row.get("closed_pnl")
+                    if vault is None or ts is None or cp is None:
+                        continue
+                    try:
+                        out.append({
+                            "vault": str(vault), "ts_ms": int(ts), "closed_pnl": float(cp),
+                        })
+                    except (TypeError, ValueError):
+                        continue
+        except OSError:
+            continue
+    return out
+
+
 def _source_asset_inventory_sha256(assets: Sequence[Mapping[str, Any]]) -> str:
     material = "\n".join(
         "\0".join(
@@ -2478,6 +2524,12 @@ def _candidate(
         # plus large admet un carnet de référence plus ancien (toujours causal) quand le L2
         # frais manque -> moins de fills jetés, sans fuite look-ahead.
         "reference_lag_ms": params.get("reference_lag_ms", 30_000),
+        # #10 — sélection des leaders cherchable. Défaut OFF (= copie tous les leaders, v21
+        # pur) ; un seuil > OFF ne copie qu'un leader au track-record causal (closedPnl cumulé
+        # <= signal) prouvé >= seuil. Signal causal, gelable.
+        "leader_min_prior_closed_pnl_usd": params.get(
+            "leader_min_prior_closed_pnl_usd", SEUIL_LEADER_OFF_USD
+        ),
         "bonferroni_trial_count": max(1, int(trial_count)),
         "bounds": dict(bounds),
     }
@@ -3292,6 +3344,9 @@ def run_local_campaign(
         # #1/#2 — index overshoot causal (depuis l'asset_ctx SAFE) : support du filtre
         # anti-débordement GELABLE. Construit une fois, réutilisé pour chaque candidat.
         _ov_index = build_overshoot_index(_charger_asset_ctx_safe(workspace))
+        # #10 — index qualité leader causal (closedPnl cumulé par vault) depuis les fills
+        # SAFE matérialisés. Support du pré-filtre GELABLE « ne copier que les bons leaders ».
+        _leader_index = build_leader_quality_index(_charger_leader_fills_safe(workspace))
         duplicates_since_checkpoint = 0
         baseline_days = (
             (baseline_train.get("statistics") or {}).get(
@@ -3412,11 +3467,20 @@ def run_local_campaign(
             # ne filtre rien => metaorders complets + cache partagé (identique à v21 pur).
             # Un sous-ensemble filtré N'UTILISE JAMAIS le cache partagé (clé (start,end),
             # pas par-metaorder) : cache dédié None, recalcul propre (pas de fuite).
+            # #10 — pré-filtre qualité leader GELABLE : n'écarte un metaorder que si le
+            # track-record causal du leader (closedPnl cumulé <= signal) est < seuil. Seuil
+            # "off" (SEUIL_LEADER_OFF_USD) ne filtre rien => identique à v21 pur.
             _seuil_ov = params.get("overshoot_seuil_bps", 1_000_000.0)
-            if _ov_index and _seuil_ov < 1_000_000.0:
+            _seuil_leader = params.get("leader_min_prior_closed_pnl_usd", SEUIL_LEADER_OFF_USD)
+            _filtre_ov = bool(_ov_index) and _seuil_ov < 1_000_000.0
+            _filtre_leader = bool(_leader_index) and _seuil_leader > SEUIL_LEADER_OFF_USD
+            if _filtre_ov or _filtre_leader:
                 _mo_scored = [
                     m for m in metaorders
-                    if not copie_bloquee(_ov_index, m.get("coin"), m.get("signal_ts_ms"), seuil_bps=_seuil_ov)
+                    if (not _filtre_ov or not copie_bloquee(
+                        _ov_index, m.get("coin"), m.get("signal_ts_ms"), seuil_bps=_seuil_ov))
+                    and (not _filtre_leader or not copie_leader_faible(
+                        _leader_index, m.get("vault"), m.get("signal_ts_ms"), seuil_usd=_seuil_leader))
                 ]
                 _cache_scored = None
             else:
