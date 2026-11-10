@@ -33,7 +33,8 @@ def _validate_manifest(root_path: Path, row: dict[str, object]) -> None:
     manifest_relative = row["manifest_path"]
     assert isinstance(manifest_relative, str)
     manifest_path = root_path / manifest_relative
-    assert manifest_path.is_file()
+    # read_bytes() is the authoritative fail-closed path and type check.
+    # Skip redundant stat() for each of the million-plus indexed manifests.
     manifest = json.loads(manifest_path.read_bytes())
     assert manifest["dataset_id"] == row["dataset_id"]
     assert manifest["quality_status"] == row["quality_status"]
