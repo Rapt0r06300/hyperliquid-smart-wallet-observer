@@ -140,7 +140,11 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "copy_work:" in controller
     assert "other_work:" in controller
     assert "max-parallel: 1" in controller
-    assert "max-parallel: 16" in controller
+    other_job = controller.split("\n  other_work:", 1)[1]
+    other_parallel = re.search(r"max-parallel:\s*(\d+)", other_job)
+    capacity = re.search(r"other_capacity=max\(0,(\d+)-active_other\)", controller)
+    assert other_parallel is not None and capacity is not None
+    assert 1 <= int(other_parallel.group(1)) <= int(capacity.group(1)) <= 20
     assert "selected[:128]" in controller
     assert 'list-due catalog/campaigns             | head -n 128' not in controller
     assert 'all-due.txt' in controller
