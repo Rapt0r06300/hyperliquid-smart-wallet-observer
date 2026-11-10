@@ -16,7 +16,8 @@ permissions:
 
 concurrency:
   group: coverage-closure-fast-main
-  cancel-in-progress: true
+  # Preserve in-progress exact-SHA proof; a newer push replaces only pending checks.
+  cancel-in-progress: false
 
 jobs:
   closure-tests:
