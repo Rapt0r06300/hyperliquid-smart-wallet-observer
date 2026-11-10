@@ -165,6 +165,7 @@ BATTEMENT = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-en-
 SORTIE_MD = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-fini.md"
 FLAG_TERMINE = RACINE / "runtime" / "reports" / "legacy" / "moisson" / "moisson-termine.flag"
 SORTIE_JSON = RACINE / "data" / "reports" / "moisson_10h.json"
+DERNIERE_DATE = RACINE / "data" / "reports" / "moisson_derniere_date.txt"
 
 # 🔴 LE DEADLINE DU RUN — *une attente de quota ne doit JAMAIS dépasser le temps restant.*
 #    Sans ça (constaté sur un run court sans clé), un `403` déclenche un sommeil de 15 min qui
@@ -691,7 +692,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         print("  🔁 %d retour(s) humain(s) pris en compte pour re-pondérer." % len(retours))
 
     # #6 — le mode INCRÉMENTAL. *Ne re-scanner que le NOUVEAU depuis la dernière fois.*
-    fichier_date = RACINE / "data" / "reports" / "moisson_derniere_date.txt"
+    fichier_date = DERNIERE_DATE
     depuis = lire_derniere_date(fichier_date) if getattr(args, "depuis_dernier", False) else None
     if depuis:
         print("  🆕 mode INCRÉMENTAL : seulement ce qui est né après **%s** (%s)."
@@ -1691,6 +1692,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     prog.ecrire()                  # un dernier rafraîchissement, propre
 
     # #6 — on note la date : le prochain `--depuis-dernier` ne reprendra que le NOUVEAU.
+    fichier_date.parent.mkdir(parents=True, exist_ok=True)
     ecrire_derniere_date(fichier_date)
 
     gardes = [e for e in entrees if e["verdict"] != "SKIP_WITH_REASON"]
