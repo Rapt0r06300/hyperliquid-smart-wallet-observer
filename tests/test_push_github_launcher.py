@@ -223,8 +223,12 @@ def test_safe_push_blocks_tracked_runtime_dirt_and_reports_source_dirt_in_dry_ru
         encoding="utf-8",
         errors="replace",
     )
-    assert runtime_result.returncode == 2, runtime_result.stdout + runtime_result.stderr
-    assert "Donnees Git suivies mais modifiees localement" in runtime_result.stdout
+    # Dry-run is an inspection mode. Tracked runtime bytes are excluded from
+    # publication and must be reported, not treated as a publishable commit.
+    assert runtime_result.returncode == 0, runtime_result.stdout + runtime_result.stderr
+    assert "Modifications locales protegees conservees hors" in runtime_result.stdout
+    assert "[DRY-RUN TERMINE]" in runtime_result.stdout
+    assert "Aucun add, commit, fetch, merge ou push n'a ete execute." in runtime_result.stdout
     assert (local / "runtime" / "state.json").read_text(encoding="utf-8") == '{"live":true}\n'
     assert _git(local, "rev-parse", "HEAD") == local_head_before
     assert _git(local, "ls-remote", "origin", "refs/heads/main").split()[0] == remote_head_before
