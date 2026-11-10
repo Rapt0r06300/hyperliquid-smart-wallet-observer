@@ -42,8 +42,9 @@ jobs:
       SHARD_COUNT: "6"
     steps:
       - name: Checkout (shallow + sparse)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          persist-credentials: false
           fetch-depth: 1
           sparse-checkout: |
             src
@@ -52,7 +53,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
@@ -86,7 +87,7 @@ jobs:
 
       - name: Publier les carnets L2 causaux de la lane
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: l2-shard-${{ matrix.shard_index }}
           path: |

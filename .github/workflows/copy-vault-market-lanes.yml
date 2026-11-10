@@ -35,8 +35,9 @@ jobs:
       SHARD_COUNT: "4"
     steps:
       - name: Checkout (shallow + sparse)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          persist-credentials: false
           fetch-depth: 1
           sparse-checkout: |
             src
@@ -44,7 +45,7 @@ jobs:
             config
           sparse-checkout-cone-mode: true
       - name: Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
       - name: Dependance WS
@@ -57,7 +58,7 @@ jobs:
           python -B tools/collecter_market_lane.py             --coins-file "${COINS_FILE}"             --shard-count "${SHARD_COUNT}"             --shard-index "${{ matrix.shard_index }}"             --duree-s "${{ github.event.inputs.duree_s || '1500' }}"             --trades-out runtime/data/copy_vault_trades_lane.jsonl             --candle-out runtime/data/copy_vault_candle_lane.jsonl           || true
       - name: Publier
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: market-shard-${{ matrix.shard_index }}
           path: |

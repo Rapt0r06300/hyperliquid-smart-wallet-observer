@@ -12,9 +12,14 @@ from pathlib import Path
 import pytest
 
 
-def test_project_root_has_space():
-    root = Path(__file__).resolve().parents[1]
-    assert " " in str(root), "Le projet doit être dans un chemin avec espace"
+def test_project_root_has_space(tmp_path):
+    # GitHub-hosted runners use repository paths without spaces. Exercise the
+    # portability contract on a real path with both spaces and accents instead.
+    root = tmp_path / "projet invest été"
+    root.mkdir()
+    sample = root / "preuve témoin.txt"
+    sample.write_text("texte accentué", encoding="utf-8")
+    assert sample.read_text(encoding="utf-8") == "texte accentué"
 
 
 def test_config_runtime_flags_importable():

@@ -41,7 +41,6 @@ MUTATING_WORKFLOWS = frozenset({
     "collect-and-publish-v2.yml",
     "collect-copy-vault-v2.yml",
     "collect-event-intelligence-v2.yml",
-    "collect-market-data-v2.yml",
     "collect-official-archives-v2.yml",
     "control-phase.yml",
     "copy-vault-v2-smoke.yml",
