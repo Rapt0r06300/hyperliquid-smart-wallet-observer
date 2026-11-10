@@ -54,6 +54,10 @@ DOSSIERS_EXCLUS = ("__pycache__", ".git", ".venv", ".ci-venv", "venv", "env", "n
 PREFIXES_DOSSIERS_TRANSITOIRES = (".portable-",)
 PREFIXES_EXCLUS = (
     "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
+    # Application-only ZIP: release-backed SAFE shards and their manifest
+    # trees are restored losslessly by ALINA_SYNC_COMPLETE, not bundled here.
+    # Full Git clone and recovery manifests remain untouched in the repository.
+    "datasets/",
     "outils de test/rapports/",
     "runtime/reports/legacy/",
     # Historical orchestration evidence can contain absolute paths from old

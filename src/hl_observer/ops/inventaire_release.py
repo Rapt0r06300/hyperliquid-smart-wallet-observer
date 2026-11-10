@@ -46,6 +46,9 @@ _DOSSIERS_IGNORES = {
 }
 _PREFIXES_IGNORES = (
     "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
+    # Use the same application-only selection as archive_portable: SAFE and
+    # quarantine manifests are cloned/synced separately, not Windows ZIP.
+    "datasets/",
 )
 _RACINES_RESSOURCES_OBLIGATOIRES = (
     "config/", "configs/", "schemas/", "migrations/", "templates/",

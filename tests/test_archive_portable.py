@@ -137,6 +137,8 @@ def test_est_exclu_regles():
     assert AP.est_exclu("archive/racine-machine/trace.txt")
     assert AP.est_exclu("catalog/campaign-history/old.failed.json")
     assert AP.est_exclu("catalog/campaigns/market-e6-0.json")
+    assert AP.est_exclu("datasets/safe/shard.manifest.json")
+    assert AP.est_exclu("datasets/quarantine/old.manifest.json")
     assert AP.est_exclu("docs/audit/COPY_VAULT_FORBIDDEN_DEPENDENCIES.json")
     assert not AP.est_exclu("docs/audit/OTHER_DIAGNOSTIC.json")
     # The strict path scanner must still reject unsanitized runtime metadata.
