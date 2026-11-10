@@ -62,6 +62,7 @@ def moisson(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "SORTIE_JSON", tmp_path / "moisson_10h.json")
     monkeypatch.setattr(m, "ETAT", tmp_path / "etat.json")
     monkeypatch.setattr(m, "BATTEMENT", tmp_path / "moisson-en-cours.txt")
+    monkeypatch.setattr(m, "DERNIERE_DATE", tmp_path / "moisson_derniere_date.txt")
     from hl_observer.research.moteur import CacheBrut
     monkeypatch.setattr(m, "CACHE", CacheBrut(tmp_path / "cache"))
 
