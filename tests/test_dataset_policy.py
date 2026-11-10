@@ -117,3 +117,15 @@ def test_dataset_quality_ci_budget_covers_full_catalog_validation():
     timeout = next(int(line.split(":", 1)[1].strip()) for line in job.splitlines()
                    if line.strip().startswith("timeout-minutes:"))
     assert timeout >= 30
+
+
+def test_manifest_exhaustive_proof_remains_mandatory_in_hosted_quality_ci():
+    """Fast jobs may avoid redundant scans, but the full proof must stay wired."""
+    workflow = (ROOT / ".github/workflows/dataset-quality-ci.yml").read_text(encoding="utf-8")
+    assert "run: python tools/check_dataset_quality.py" in workflow
+    assert "run: python tools/check_dataset_quality.py --catalog-only" not in workflow
+    assert "tests/test_dataset_policy.py" in workflow
+    validator = (ROOT / "tools/check_dataset_quality.py").read_text(encoding="utf-8")
+    assert "for row in iter_index_rows(index_path):" in validator
+    assert "executor.submit(_validate_manifest, root, row)" in validator
+    assert "manifest_path.read_bytes()" in validator
