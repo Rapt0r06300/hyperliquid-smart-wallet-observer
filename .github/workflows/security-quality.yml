@@ -69,6 +69,13 @@ jobs:
           if [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
             git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch --no-tags --depth 1 origin "$BEFORE" || true
           fi
+          # Scope verification must read changed catalog receipts, not skip sparse files.
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            mapfile -t catalog_paths < <(git diff --name-only --no-renames "$BEFORE" "$GITHUB_SHA" -- catalog/)
+            if (( ${#catalog_paths[@]} > 0 )); then
+              printf '%s\n' "${catalog_paths[@]}" catalog/DATA_INDEX.json catalog/DATA_METRICS.json | git sparse-checkout add --stdin
+            fi
+          fi
           python tools/ci_change_scope.py --before "$BEFORE" --head "$GITHUB_SHA"
 
   governance:
