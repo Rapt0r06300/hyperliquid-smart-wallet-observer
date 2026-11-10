@@ -337,6 +337,18 @@ def test_commit_subject_does_not_overclaim_a_mixed_batch() -> None:
     assert subject == "chore(repository): update repository tooling and safeguards (4 paths)"
 
 
+def test_deleted_historical_root_is_still_scanned_without_global_glob(tmp_path: Path) -> None:
+    # A filesystem-only root enumeration misses tracked paths after rename.
+    # That would omit the old source and skip the SHA-exact archive gate.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "datasets").mkdir()
+    specs = Synchronizer(tmp_path)._pathspecs(include_protected=False)
+    assert "CLAUDE_TASKS.jsonl" in specs
+    assert "src/**" in specs
+    assert "datasets/**" not in specs
+    assert ":(top,glob)*" not in specs
+
+
 def test_inventory_scopes_status_away_from_massive_protected_roots(tmp_path: Path) -> None:
     task = Synchronizer(tmp_path)
     (tmp_path / "src").mkdir()
