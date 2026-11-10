@@ -49,7 +49,9 @@ def test_fresh_clone_contract_is_exact_ref_and_sha_bound() -> None:
     end = workflow.index("      - name: Exercise the one-file SAFE restore launcher", start)
     step = workflow[start:end]
 
-    assert 'git clone --branch "$GITHUB_REF_NAME" --single-branch' in step
+    assert 'git clone --no-checkout --branch "$GITHUB_REF_NAME" --single-branch' in step
+    assert 'git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"' in step
+    assert 'git cat-file -e "${GITHUB_SHA}^{commit}"' in step
     assert 'test "$(git branch --show-current)" = "$GITHUB_REF_NAME"' in step
     assert 'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"' in step
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" HEAD' not in step
