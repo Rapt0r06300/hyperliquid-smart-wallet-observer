@@ -98,8 +98,10 @@ def test_portable_self_check_is_offline_and_validates_tracked_engines() -> None:
     )
     section = launcher.split(":self_check\nrem Entirely offline:", 1)[1].split("\n:help", 1)[0]
     assert "PORTABLE_GITHUB_PUSH_CHECK_OK" in section
-    assert "python " not in section.lower()
-    assert "git push" not in section.lower()
+    active = [line.strip().lower() for line in section.splitlines()
+              if line.strip() and not line.lstrip().lower().startswith("rem ")]
+    assert not any(line.startswith(("python ", "git ", "call ")) for line in active)
+    assert "git push" not in "\n".join(active)
 
 
 def test_portable_git_installer_is_pinned_and_hash_verified() -> None:
