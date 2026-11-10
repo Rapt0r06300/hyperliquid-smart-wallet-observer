@@ -87,7 +87,7 @@ FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),
                    "runtime/data/COURANTE.json",
                    ".analyse.lock", NOM_MANIFESTE)
 _ABSOLU = re.compile(
-    r"(?:[A-Za-z]:\\|\\\\[^\\\s\"]+\\[^\\\s\"]+|/(?:home|Users)/)"
+    r"(?:(?<![A-Za-z0-9_])[A-Za-z]:\\|\\\\[^\\\s\"]+\\[^\\\s\"]+|/(?:home|Users)/)"
                    )
 
 
