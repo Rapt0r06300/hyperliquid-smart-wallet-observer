@@ -14,7 +14,7 @@ permissions:
   statuses: write
 
 concurrency:
-  group: security-quality-${{ github.ref }}-${{ github.sha }}
+  group: security-quality-${{ github.ref }}
   # Keep main verdicts durable; replace only obsolete PR runs to avoid queue deadlock.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
