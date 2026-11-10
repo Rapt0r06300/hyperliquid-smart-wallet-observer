@@ -8,8 +8,8 @@ from hl_observer.research.process_memory import (
     candidate_memory_effect,
     combine_process_records,
     load_process_records,
-    process_memory_summary,
     pivot_on_headroom_stagnation,
+    process_memory_summary,
     validate_process_record,
 )
 
