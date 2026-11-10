@@ -128,10 +128,13 @@ chunks et SHA-256 ; les secrets sont exclus. Le bouton de push Git ne
 téléverse PAS implicitement des centaines de Go de runtime vers l'historique
 Git. Cela ne sauvegarde pas rétroactivement les artifacts Actions expirés.
 
-Après publication, **`ALINA_SYNC_COMPLETE.cmd`** (ou
-**`ALINA_SYNC_COMPLETE.sh`**) met à jour `main` par avance rapide et lance par défaut
-un **préflight sans téléchargement**. Pour restaurer les données SAFE, utiliser
-explicitement `--download-safe` avec une limite de téléchargement suffisante.
+Après publication, **`ALINA_SYNC_COMPLETE.cmd`** sous Windows lance sans
+argument la restauration complète des assets SAFE puis leur décompression
+JSONL, après contrôle du disque et des SHA-256. Pour ne faire qu'un inventaire,
+passer `--preflight-only` ou `--catalog-budget`. Sous Linux/macOS,
+**`ALINA_SYNC_COMPLETE.sh`** sans argument effectue toujours un préflight :
+le téléchargement exige `--download-safe`. Les téléchargements bornés
+restent disponibles avec `--max-download-gib`.
 C'est aussi l'unique commande à relancer dans un dossier déjà cloné.
 Un checkpoint `runtime/recovery/full/SYNC_REPORT.json` lie le HEAD Git
 au résultat exact de `RESTORE_REPORT.json`.
