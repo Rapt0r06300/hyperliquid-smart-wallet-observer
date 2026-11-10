@@ -217,7 +217,8 @@ def test_write_decision_and_main_ready_and_no_go(monkeypatch, tmp_path, capsys) 
     assert json.loads(json_path.read_text())["status"] == "READY"
     markdown = md_path.read_text()
     assert "Compensation entre familles" in markdown
-    assert "5,00 $ net/jour avec 200 $ de capital paper" in markdown
+    assert f"{int(policy.STARTING_CAPITAL_USD)} $ de capital paper" in markdown
+    assert "pas de cible chiffrée fixe" in markdown
     assert "Copy-Vault uniquement" in markdown
     assert "Lead-Lag et Cross-Venue" not in markdown
 

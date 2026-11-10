@@ -1094,7 +1094,9 @@ def test_copy_vault_ttl_couvre_episode_executable_le_plus_court():
         + min(C.COPY_VAULT_HORIZONS_MS)
         + C.COPY_VAULT_MAX_TARGET_LAG_MS
     )
-    assert C.TAPE_COIN_TTL_MS > 360_000
+    # The protocol's shortest horizon is now 30s; verify the configured
+    # latency margin instead of an obsolete fixed six-minute threshold.
+    assert C.TAPE_COIN_TTL_MS > C.COPY_VAULT_DELAY_MS + min(C.COPY_VAULT_HORIZONS_MS)
 
 
 def test_checkpoints_nouveau_metaordre_et_sorties_sont_deterministes():

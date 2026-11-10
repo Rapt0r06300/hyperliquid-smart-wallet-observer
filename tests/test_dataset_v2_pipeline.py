@@ -871,6 +871,14 @@ def test_collector_replay_only_admission_never_stages_reject_payload(tmp_path) -
     # The publisher can promote only after checking the real remote digest;
     # the final download/sync must never see this provisional PARTIAL label.
     assert row["validation_allowed"] is False
-    assert not any(
-        "bad" in path.name for path in (bundle_dir / "assets").iterdir()
-    )
+    # A digest-derived asset name may legitimately contain the hex letters
+    # "bad"; inspect the actual published payload instead of substring matching.
+    import gzip
+
+    published = []
+    for asset in (bundle_dir / "assets").glob("*.jsonl.gz"):
+        with gzip.open(asset, "rt", encoding="utf-8") as handle:
+            published.extend(json.loads(line) for line in handle)
+    assert published
+    assert all(row["connection_id"] == "good" for row in published)
+    assert all(int(row["gap_count"]) == 0 for row in published)

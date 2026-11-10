@@ -180,6 +180,6 @@ def test_download_release_asset_416_and_request_failure_keep_partial(tmp_path, m
 
     response = StreamResponse(status=500, raise_exc=requests.HTTPError("bad"))
     monkeypatch.setattr(transport.requests, "get", lambda *a, **k: response)
-    with pytest.raises(transport.GitHubTransportError, match="HTTPError"):
+    with pytest.raises(transport.GitHubTransportError, match="HTTP 500"):
         transport.download_release_asset(repository="o/r", asset_id=8, destination=destination)
     assert destination.read_bytes() == b"abc"
