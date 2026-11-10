@@ -539,8 +539,30 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
     # digests. A Windows checkout must not leave Git-expanded CRLF bytes here.
     campaign_manifests = sorted((ROOT / "catalog" / "campaigns").glob("*.json"))
     assert campaign_manifests
+    # Historical campaign manifests can contain CRLF in their original Git
+    # blobs. Blindly rewriting those bytes would invalidate provenance and
+    # violate the lossless clone contract. Compare every checked-out file
+    # against the exact tracked Git blob, rather than rejecting a valid CR.
+    import subprocess
+
+    listing = subprocess.run(
+        ["git", "ls-files", "--stage", "-z", "--", "catalog/campaigns"],
+        cwd=ROOT, capture_output=True, check=True,
+    ).stdout
+    tracked = {}
+    for entry in listing.split(b"\0"):
+        if not entry:
+            continue
+        metadata, relative = entry.split(b"\t", 1)
+        mode, blob_sha, stage = metadata.split()
+        assert stage == b"0" and mode in (b"100644", b"100755")
+        tracked[relative.decode("utf-8")] = blob_sha.decode("ascii")
     for path in campaign_manifests:
-        assert b"\r" not in path.read_bytes(), path.relative_to(ROOT)
+        relative = path.relative_to(ROOT).as_posix()
+        raw = path.read_bytes()
+        # Git default SHA-1 object format; compare exact bytes, not decoded JSON.
+        blob = b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+        assert hashlib.sha1(blob).hexdigest() == tracked.get(relative), relative
     dependency_files = [ROOT / "pyproject.toml", *ROOT.glob("requirements*.txt")]
     for path in dependency_files:
         assert path.is_file()
