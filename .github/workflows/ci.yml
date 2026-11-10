@@ -264,8 +264,10 @@ jobs:
         run: |
           FICHIERS=$(python tools/ci_shard.py "$SHARD" 6)
           if [ -z "$FICHIERS" ]; then echo "shard vide"; exit 0; fi
+          # The full index and all manifest receipts are checked by the
+          # dedicated dataset-quality-ci; don't repeat a million-file scan.
           python -m pytest -q -p no:cacheprovider \
-            --junitxml=junit-shard-$SHARD.xml $FICHIERS
+            --junitxml=junit-shard-$SHARD.xml -k 'not test_every_status_counter_is_index_bound and not test_every_indexed_manifest_exists_and_matches_status' $FICHIERS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
