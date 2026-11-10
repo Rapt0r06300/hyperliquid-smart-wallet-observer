@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from math import floor
 
 from hl_observer.hyperliquid.rate_weights import (
