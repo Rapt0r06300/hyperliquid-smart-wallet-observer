@@ -113,7 +113,7 @@ def test_legacy_cross_venue_v1_is_quarantined_and_v2_is_active():
     assignments = RC.parse_cmd_set_assignments(text)
     assert assignments["HYPERSMART_ARB_DISLOCATION_PAPER"] == ["0"]
     assert assignments["HYPERSMART_EXPERIMENTAL_PAPER"] == ["1"]
-    assert assignments["HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE"] == ["0"]
+    assert assignments["HYPERSMART_EXPERIMENTAL_CROSS_VENUE_GELE"] == ["1"]
     assert assignments["HYPERSMART_FUNDING_ARB_PAPER"] == ["0"]
     assert assignments["HYPERSMART_CARRY_HYPE_PAPER"] == ["0"]
     assert assignments["HYPERSMART_CARRY_ETAPE2"] == ["0"]
