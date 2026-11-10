@@ -13,13 +13,14 @@ docs/archive/legacy_cmd/2026-07-25/TOUT-TESTER.cmd.txt text eol=crlf
 # Do not reintroduce filter=lfs, LFS migration or mirror workflows.
 
 # Replay-grade catalog metadata is SHA/byte-bound. On Windows, core.autocrlf
-# must never add CR bytes to these one-line JSON files during checkout.
+# must not normalize these one-line index JSON files during checkout.
 # Otherwise load_partitioned_index fails with PARTITION_PARITY_SIZE_MISMATCH.
 catalog/DATA_INDEX.json text eol=lf
 catalog/DATA_METRICS.json text eol=lf
 catalog/data-index-parts/*.json text eol=lf
 catalog/quarantine-audit-parts/*.json text eol=lf
-catalog/campaigns/*.json text eol=lf
+# Historical campaign manifests may contain authentic CRLF; preserve blob bytes.
+catalog/campaigns/*.json -text
 docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md text eol=lf
 pyproject.toml text eol=lf
 requirements*.txt text eol=lf
