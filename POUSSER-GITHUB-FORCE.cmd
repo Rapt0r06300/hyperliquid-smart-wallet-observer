@@ -75,11 +75,14 @@ if not defined HYPERSMART_PYTHON goto :missing_python
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
 if errorlevel 1 goto :missing_python
 
+set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13"
 set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
 set "ALINA_SHARDS_ENGINE=%ALINA_ROOT%tools\sync_complete_clone.py"
 if not exist "%ALINA_ENGINE%" goto :missing_engine
 if not exist "%ALINA_SHARDS_ENGINE%" goto :missing_shards_engine
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_ENGINE%" >nul 2>nul
+if errorlevel 1 goto :invalid_engine
+"%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; n=ast.parse(open(sys.argv[1],'rb').read()).body; v=[x.value.value for x in n if isinstance(x,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='GIT_SYNC_ENGINE_BUILD' for t in x.targets) and isinstance(x.value,ast.Constant)]; sys.exit(0 if v==[sys.argv[2]] else 3)" "%ALINA_ENGINE%" "%ALINA_ENGINE_REQUIRED_BUILD%"
 if errorlevel 1 goto :invalid_engine
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_SHARDS_ENGINE%" >nul 2>nul
 if errorlevel 1 goto :missing_shards_engine

@@ -90,10 +90,14 @@ def test_double_click_launcher_runs_canonical_engine_and_never_forces_git() -> N
 
     assert engine_build is not None
     assert f'ALINA_ENGINE_REQUIRED_BUILD={engine_build.group(1)}' in launcher
-    assert 'call :download_source "tools/alina_git_code_sync.py"' in launcher
-    assert '"%HYPERSMART_PYTHON%" %HYPERSMART_PY_ARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %SYNC_OPTION%' in launcher
-    assert 'SYNC_OPTION=--dry-run' in launcher
-    assert 'SYNC_OPTION=--wip-only' in launcher
+    # Canonical local engine is checked for syntax AND a pinned build constant;
+    # never download an unreviewed driver from the network on double-click.
+    assert 'call :download_source' not in launcher
+    assert '"%HYPERSMART_PYTHON%" %PYARGS% "%ALINA_ENGINE%" --root "%ALINA_ROOT%." --git "%HYPERSMART_GIT%" %ALINA_CODE_ARGS%' in launcher
+    assert 'ALINA_CODE_ARGS=--dry-run' in launcher
+    assert 'ALINA_CODE_ARGS=--wip-only' in launcher
+    assert 'set "ALINA_MODE=code"' in launcher
+    assert 'if /I "%ALINA_MODE%"=="code" goto :finish' in launcher
     assert "git push --force" not in launcher.casefold()
     assert "git reset --hard" not in launcher.casefold()
 
