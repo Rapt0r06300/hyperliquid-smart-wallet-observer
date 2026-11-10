@@ -8,7 +8,7 @@ echo Laisse la fenetre OUVERTE. Ctrl+C pour arreter.
 echo.
 wsl -d Ubuntu -e true >nul 2>nul
 if not "%errorlevel%"=="0" goto noubuntu
-for /f "delims=" %%p in ('wsl -d Ubuntu wslpath "%~dp0tools\noeud_run.sh"') do set "SHP=%%p"
+for /f "delims=" %%p in ('wsl -d Ubuntu wslpath "%~dp0..\..\tools\noeud_run.sh"') do set "SHP=%%p"
 wsl -d Ubuntu bash -c "sed -i 's/\r$//' '%SHP%'"
 wsl -d Ubuntu bash "%SHP%"
 echo.

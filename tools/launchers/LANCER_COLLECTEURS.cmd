@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0" || (
+cd /d "%~dp0..\.." || (
   echo [ERREUR] Impossible d'ouvrir le depot local.
   pause
   exit /b 2
@@ -30,7 +30,7 @@ rem    - Duree de campagne configurable (defaut 6 jours)
 rem    - Journal : runtime\logs\economic-collector-watchdog.jsonl
 rem ============================================================
 
-set "CV_ROOT=%~dp0"
+for %%R in ("%~dp0..\..") do set "CV_ROOT=%%~fR\"
 set "CV_DURATION=518400"
 set "CV_LEASE=120"
 set "CV_INTERVAL=30"

@@ -2,7 +2,7 @@
 setlocal enableextensions enabledelayedexpansion
 chcp 65001 >nul
 title ALINA SMART FLOW - CERTIFIER COFFRE-FORT
-set "CV_ROOT=%~dp0"
+for %%R in ("%~dp0..\..") do set "CV_ROOT=%%~fR\"
 
 rem --- Resolution de Python ---
 set "CV_PYTHON="
@@ -29,7 +29,7 @@ echo   PAPER / LECTURE SEULE - aucun reseau, aucun ordre.
 echo.
 
 rem Ouvre l'ecran de suivi (%% avancement, debit, ETA) dans une fenetre separee.
-if exist "%CV_ROOT%SUIVI_COFFRE.cmd" start "" "%CV_ROOT%SUIVI_COFFRE.cmd"
+if exist "%CV_ROOT%tools\launchers\SUIVI_COFFRE.cmd" start "" "%CV_ROOT%tools\launchers\SUIVI_COFFRE.cmd"
 
 "%CV_PYTHON%" "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." %MODE% %RESET%
 set "RC=%ERRORLEVEL%"

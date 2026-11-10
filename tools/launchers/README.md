@@ -43,3 +43,10 @@ Les scripts ci-dessous sont conservés pour les workflows, les diagnostics, la r
 - `VERIFIER_LAB_AUTONOME_ALINA.cmd`
 - `VERIFIER_REPARER_L2_LOCAL.cmd`
 - `RESTORE_ALINA.sh`
+
+- `Certificateur Coffre Fort.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `Installer Noeud HL.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `LANCER_COLLECTEURS.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `Noeud-HL.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `RAPPORT-COLLECTEURS.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `SUIVI_COFFRE.cmd` (utilitaire historique, relocalisé depuis la racine)

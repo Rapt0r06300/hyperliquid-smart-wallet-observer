@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from hl_observer.ops.entrypoint_topology import ENTRYPOINT_ROLES
+
 RACINE = Path(__file__).resolve().parents[1]
 LANCEUR = RACINE / "LANCER_HYPERSMART.cmd"
 ARCHIVE = RACINE / "docs" / "archive" / "legacy_cmd" / "2026-07-25"
@@ -156,4 +158,10 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         "POUSSER-GITHUB-FORCE.cmd",
     }
     assert (RACINE / "ALINA_SYNC_COMPLETE.sh").is_file()
-    assert len(list((RACINE / "tools" / "launchers").glob("*.cmd"))) == 33
+    support_scripts = {
+        path.relative_to(RACINE).as_posix()
+        for path in (RACINE / "tools" / "launchers").glob("*.cmd")
+    }
+    assert support_scripts == {
+        path for path in ENTRYPOINT_ROLES if path.startswith("tools/launchers/")
+    }
