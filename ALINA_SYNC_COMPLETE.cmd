@@ -6,7 +6,7 @@ rem PAPER / LECTURE SEULE : reprise apres sinistre et synchronisation du corpus
 rem SAFE. Aucun ordre, aucune cle, aucune execution reelle. Jumeau de
 rem ALINA_SYNC_COMPLETE.sh (meme moteur tools/sync_complete_clone.py).
 rem
-rem Sans argument : preflight uniquement, aucun telechargement.
+rem Sans argument : restauration SAFE complete et decompressee (opt-in par lancement).
 rem   --download-safe           : telecharge le corpus SAFE (borne par defaut).
 rem   --all-safe                : DOWNLOAD_AND_UNPACK_ALL_SAFE, corpus complet.
 rem   --unpack-safe             : decompresse les conteneurs SAFE deja presents.
@@ -17,11 +17,10 @@ set "UNIFIED=%ALINA_ROOT%POUSSER-GITHUB-FORCE.cmd"
 set "GIT_LFS_SKIP_SMUDGE=1"
 
 if "%~1"=="" (
-    echo [AlinaSync] Preflight seul ^(aucun telechargement^). Utilisez --download-safe pour recuperer le corpus SAFE.
-    call "%UNIFIED%" --shards-only --preflight-only --skip-update
-    set "RC=!ERRORLEVEL!"
-    for /f "delims=" %%R in ("!RC!") do set "RC=%%R"
-    endlocal & exit /b %RC%
+    rem The explicit operator launch requests every selected SAFE asset, SHA-verified.
+    rem Never invoke POUSSER-GITHUB-FORCE here; this entrypoint is data-only.
+    set "DEFAULT_SAFE_ARGS=--download-safe --all-safe --unpack-safe"
+    goto :run
 )
 
 set "MODE=%~1"
@@ -35,7 +34,11 @@ echo Options valides : --download-safe ^| --all-safe ^| --unpack-safe ^| --prune
 endlocal & exit /b 2
 
 :run
-python "%ALINA_ROOT%tools\sync_complete_clone.py" %*
+if defined DEFAULT_SAFE_ARGS (
+    python "%ALINA_ROOT%tools\sync_complete_clone.py" !DEFAULT_SAFE_ARGS!
+) else (
+    python "%ALINA_ROOT%tools\sync_complete_clone.py" %*
+)
 set "RC=!ERRORLEVEL!"
 rem AlinaSync : rapatrie aussi les fills des lanes GitHub (fail-soft, non bloquant).
 python "%ALINA_ROOT%tools\telecharger_fills_lanes_github.py" --root "%ALINA_ROOT%." 2>nul
