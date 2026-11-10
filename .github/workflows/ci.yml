@@ -48,11 +48,25 @@ jobs:
             /hyper_smart_observer/
             /tools/
             /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
             /conftest.py
             /pyproject.toml
             /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
             /requirements*.txt
-            /LANCER_HYPERSMART.cmd
       - name: Compare all changed files, fail closed if history is missing
         id: classify
         shell: bash
@@ -62,6 +76,13 @@ jobs:
           set -euo pipefail
           if [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
             git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch --no-tags --depth 1 origin "$BEFORE" || true
+          fi
+          # Materialize changed catalog receipts without fetching dataset shards.
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            mapfile -t catalog_paths < <(git diff --name-only --no-renames "$BEFORE" "$GITHUB_SHA" -- catalog/)
+            if (( ${#catalog_paths[@]} > 0 )); then
+              printf '%s\n' "${catalog_paths[@]}" catalog/DATA_INDEX.json catalog/DATA_METRICS.json | git sparse-checkout add --stdin
+            fi
           fi
           python tools/ci_change_scope.py --before "$BEFORE" --head "$GITHUB_SHA"
 
@@ -83,11 +104,25 @@ jobs:
             /hyper_smart_observer/
             /tools/
             /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
             /conftest.py
             /pyproject.toml
             /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
             /requirements*.txt
-            /LANCER_HYPERSMART.cmd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
@@ -164,11 +199,25 @@ jobs:
             /hyper_smart_observer/
             /tools/
             /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
             /conftest.py
             /pyproject.toml
             /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
             /requirements*.txt
-            /LANCER_HYPERSMART.cmd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
@@ -217,11 +266,25 @@ jobs:
             /hyper_smart_observer/
             /tools/
             /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
             /conftest.py
             /pyproject.toml
             /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
             /requirements*.txt
-            /LANCER_HYPERSMART.cmd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
@@ -307,11 +370,25 @@ jobs:
             /hyper_smart_observer/
             /tools/
             /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
             /conftest.py
             /pyproject.toml
             /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
             /requirements*.txt
-            /LANCER_HYPERSMART.cmd
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
