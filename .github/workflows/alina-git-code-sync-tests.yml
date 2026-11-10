@@ -48,6 +48,7 @@ jobs:
           fetch-depth: 1
           filter: blob:none
           sparse-checkout: |
+            ALINA_SYNC_COMPLETE.cmd
             POUSSER-GITHUB-FORCE.cmd
             tools
             tests/test_alina_git_code_sync.py
