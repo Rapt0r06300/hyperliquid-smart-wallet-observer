@@ -54,12 +54,17 @@ jobs:
           # Clone the exact ref that produced this run; cloning main here made
           # feature-branch SHAs unverifiable and failed before the SAFE checks.
           test -n "${GITHUB_REF_NAME:?missing GITHUB_REF_NAME}"
-          git clone --branch "$GITHUB_REF_NAME" --single-branch \
+          # Fetch the complete single-branch history, without checking out the
+          # latest moving main. A collector may push after this run starts.
+          git clone --no-checkout --branch "$GITHUB_REF_NAME" --single-branch \
             "https://github.com/${GITHUB_REPOSITORY}.git" \
             "$RUNNER_TEMP/alina-fresh-clone"
           cd "$RUNNER_TEMP/alina-fresh-clone"
-          test "$(git branch --show-current)" = "$GITHUB_REF_NAME"
           git cat-file -e "${GITHUB_SHA}^{commit}"
+          # Move only the ephemeral checkout's local branch to the exact event
+          # commit; never rewrite remote refs, and never mix dataset revisions.
+          git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          test "$(git branch --show-current)" = "$GITHUB_REF_NAME"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fsck --full
           git status --porcelain=v1 --untracked-files=no > "$RUNNER_TEMP/alina-clone-status.txt"
