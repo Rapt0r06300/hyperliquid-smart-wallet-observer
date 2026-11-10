@@ -84,6 +84,24 @@ def test_push_launchers_share_one_safe_implementation() -> None:
         assert "FETCH_HEAD" not in alias_text
 
 
+def test_portable_self_check_is_offline_and_validates_tracked_engines() -> None:
+    launcher = MAIN_LAUNCHER.read_text(encoding="utf-8")
+    # This is the actual Windows CI invocation, not a permanently green echo
+    # that bypasses missing Git, Python, invalid AST or engine-build checks.
+    assert 'if /I "%~1"=="--portable-self-check"' in launcher
+    assert 'if /I "%ALINA_MODE%"=="self-check" goto :self_check' in launcher
+    assert "ast.parse(" in launcher
+    assert "ALINA_ENGINE_REQUIRED_BUILD=" in launcher
+    assert "PORTABLE_GITHUB_PUSH_CHECK_OK" in launcher
+    assert launcher.index('if errorlevel 1 goto :missing_shards_engine') < launcher.index(
+        'if /I "%ALINA_MODE%"=="self-check" goto :self_check'
+    )
+    section = launcher.split(":self_check\nrem Entirely offline:", 1)[1].split("\n:help", 1)[0]
+    assert "PORTABLE_GITHUB_PUSH_CHECK_OK" in section
+    assert "python " not in section.lower()
+    assert "git push" not in section.lower()
+
+
 def test_portable_git_installer_is_pinned_and_hash_verified() -> None:
     installer = (ROOT / "tools" / "install_portable_git.ps1").read_text(encoding="utf-8")
     bootstrap = (ROOT / "tools/launchers/PREPARER_GIT_PORTABLE.cmd").read_text(encoding="utf-8")
