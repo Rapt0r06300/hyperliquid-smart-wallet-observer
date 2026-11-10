@@ -159,8 +159,21 @@ def assess_train_variant(
     placebo_trades: Sequence[Mapping[str, Any]],
     *,
     trial_count: int,
+    max_coin_share: float | None = None,
+    max_vault_share: float | None = None,
+    max_top_positive_share: float | None = None,
 ) -> dict[str, Any]:
-    """Applique les garde-fous économiques et statistiques pré-déclarés."""
+    """Applique les garde-fous économiques et statistiques pré-déclarés.
+
+    #6 — Les limites de concentration sont CHERCHABLES : par défaut (``None``) on
+    garde les constantes gelées (comportement v21 strictement identique), mais un
+    candidat peut proposer sa propre limite. Le garde reste actif (jamais désactivé) ;
+    c'est la rigueur LCB/placebo/multiplicité qui tranche si une stratégie concentrée
+    est vraiment meilleure. Permet à l'alpha de niche de concourir sans trou anti-overfit.
+    """
+    _max_coin = MAX_COIN_TRADE_SHARE if max_coin_share is None else float(max_coin_share)
+    _max_vault = MAX_VAULT_TRADE_SHARE if max_vault_share is None else float(max_vault_share)
+    _max_top = MAX_TOP_POSITIVE_SHARE if max_top_positive_share is None else float(max_top_positive_share)
 
     rows = [dict(row) for row in trades]
     placebo_rows = [dict(row) for row in placebo_trades]
@@ -202,11 +215,11 @@ def assess_train_variant(
         or total_lcb <= 0
     ):
         reasons.append("MULTIPLICITY_ADJUSTED_LCB_NOT_POSITIVE")
-    if not top_positive_share_within_limit(statistics, MAX_TOP_POSITIVE_SHARE):
+    if not top_positive_share_within_limit(statistics, _max_top):
         reasons.append("TOP_POSITIVE_TRADE_CONCENTRATION_TOO_HIGH")
-    if _share_exceeds(coin_count, len(rows), MAX_COIN_TRADE_SHARE):
+    if _share_exceeds(coin_count, len(rows), _max_coin):
         reasons.append("COIN_TRADE_CONCENTRATION_TOO_HIGH")
-    if _share_exceeds(vault_count, len(rows), MAX_VAULT_TRADE_SHARE):
+    if _share_exceeds(vault_count, len(rows), _max_vault):
         reasons.append("VAULT_TRADE_CONCENTRATION_TOO_HIGH")
     if placebo_net is None or net is None or net <= placebo_net:
         reasons.append("PLACEBO_NOT_BEATEN")

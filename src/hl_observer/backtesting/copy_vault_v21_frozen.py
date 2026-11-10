@@ -81,6 +81,8 @@ def _first_fill_notional_usd(metaorder: Mapping[str, Any]) -> float | None:
 def _reference_depth_features(
     metaorder: Mapping[str, Any],
     rows: Sequence[Mapping[str, Any]],
+    *,
+    max_reference_lag_ms: int = FROZEN_MAX_REFERENCE_LAG_MS,
 ) -> tuple[float, float] | None:
     if not rows:
         return None
@@ -92,7 +94,10 @@ def _reference_depth_features(
     if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
         return None
     index = bisect.bisect_right(timestamps, signal_ms) - 1
-    if index < 0 or signal_ms - timestamps[index] > FROZEN_MAX_REFERENCE_LAG_MS:
+    # #5 — fenêtre causale (lag L2) cherchable. Reste STRICTEMENT causale (dernier
+    # snapshot <= signal) ; un lag plus grand admet un carnet de référence plus ancien
+    # quand le L2 frais manque, au lieu de jeter le fill. Défaut = constante gelée.
+    if index < 0 or signal_ms - timestamps[index] > int(max_reference_lag_ms):
         return None
     row = rows[index]
     if row.get("causal_observation") is not True:
@@ -160,6 +165,7 @@ def _apply_risk_exit(
     horizon_ms: int,
     copy_delay_ms: int = FROZEN_COPY_DELAY_MS,
     book_timestamps: list[int] | None = None,
+    max_reference_lag_ms: int = FROZEN_MAX_REFERENCE_LAG_MS,
 ) -> tuple[dict[str, Any], str]:
     entry_ms = int(trade["entry_ts_ms"])
     fallback_exit_ms = int(trade["exit_ts_ms"])
@@ -206,7 +212,7 @@ def _apply_risk_exit(
         horizon_ms=dynamic_horizon,
         direction_multiplier=direction_multiplier,
         copy_delay_ms=copy_delay_ms,
-        max_reference_lag_ms=FROZEN_MAX_REFERENCE_LAG_MS,
+        max_reference_lag_ms=int(max_reference_lag_ms),
         max_target_lag_ms=FROZEN_MAX_TARGET_LAG_MS,
         notional_usd=float(trade["notional_usd"]),
         require_causal_books=True,
@@ -618,6 +624,7 @@ def _prepare_segment_rows(
     books_by_coin: Mapping[str, list[dict[str, Any]]],
     start_ms: int,
     end_ms: int | None,
+    max_reference_lag_ms: int = FROZEN_MAX_REFERENCE_LAG_MS,
 ) -> tuple[list[tuple[dict[str, Any], float, float | None]], dict[str, int]]:
     """Partie INVARIANTE d'un segment (indépendante des 2 paramètres de filtre).
 
@@ -643,7 +650,7 @@ def _prepare_segment_rows(
             audit["NON_ADD_REJECTED"] += 1
             continue
         books = books_by_coin.get(coin, [])
-        features = _reference_depth_features(row, books)
+        features = _reference_depth_features(row, books, max_reference_lag_ms=max_reference_lag_ms)
         if features is None:
             audit["REFERENCE_DEPTH_FEATURE_UNMEASURABLE"] += 1
             continue
@@ -664,21 +671,26 @@ def _segment_candidates(
     end_ms: int | None,
     minimum_leader_fill_notional_usd: float,
     signed_depth_imbalance_minimum: float,
+    max_reference_lag_ms: int = FROZEN_MAX_REFERENCE_LAG_MS,
     prepared_cache: dict[Any, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     # Partie invariante (features/notional) : calculée une fois puis réutilisée
     # via le cache fourni par l'appelant (le labo, qui en contrôle la durée de
     # vie : un cache par corpus chargé). Résultats strictement identiques.
+    # #5 — la fenêtre causale (lag) change les lignes préparées : la clé de cache
+    # L'INCLUT donc (sinon deux lags partageraient par erreur le même cache).
     if prepared_cache is not None:
-        key = (start_ms, end_ms)
+        key = (start_ms, end_ms, int(max_reference_lag_ms))
         cached = prepared_cache.get(key)
         if cached is None:
-            cached = _prepare_segment_rows(metaorders, books_by_coin, start_ms, end_ms)
+            cached = _prepare_segment_rows(
+                metaorders, books_by_coin, start_ms, end_ms, int(max_reference_lag_ms)
+            )
             prepared_cache[key] = cached
         prepared, base_audit = cached
     else:
         prepared, base_audit = _prepare_segment_rows(
-            metaorders, books_by_coin, start_ms, end_ms
+            metaorders, books_by_coin, start_ms, end_ms, int(max_reference_lag_ms)
         )
     audit: dict[str, int] = defaultdict(int)
     for name, count in base_audit.items():
@@ -750,6 +762,7 @@ def _settle(
     capital_scenario_usd: float | None = None,
     execution_delay_ms: int = FROZEN_COPY_DELAY_MS,
     fee_bps: float | None = None,
+    max_reference_lag_ms: int = FROZEN_MAX_REFERENCE_LAG_MS,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
     if capital_scenario_usd is not None:
         try:
@@ -761,10 +774,21 @@ def _settle(
         sizing_scale = capital_scenario_usd / float(PAPER_EQUITY_USD)
     else:
         sizing_scale = 1.0
+    # #3 — levier cherchable : aligne la PREUVE sur le DÉPLOIEMENT. Défaut 1.0 (absent
+    # des params v21 incumbent) -> plafond = MAX_GROSS_EXPOSURE_USD inchangé. Un candidat
+    # peut proposer 10.0 (= moteur) : le plafond d'exposition brute monte en conséquence,
+    # donc la stratégie est jugée dans les conditions réelles. N'affecte PAS le scénario
+    # capacité (déjà piloté par capital_scenario_usd).
+    try:
+        _paper_leverage = float(params.get("paper_leverage", 1.0))
+    except (TypeError, ValueError, OverflowError):
+        _paper_leverage = 1.0
+    if not math.isfinite(_paper_leverage) or _paper_leverage <= 0.0:
+        _paper_leverage = 1.0
     gross_exposure_limit = (
         float(capital_scenario_usd)
         if capital_scenario_usd is not None
-        else float(MAX_GROSS_EXPOSURE_USD)
+        else float(MAX_GROSS_EXPOSURE_USD) * _paper_leverage
     )
     scenario_params = dict(params)
     scenario_params["core_notional_usd"] = float(params["core_notional_usd"]) * sizing_scale
@@ -879,7 +903,7 @@ def _settle(
             horizon_ms=int(scenario_params["horizon_ms"]),
             direction_multiplier=1,
             copy_delay_ms=execution_delay_ms,
-            max_reference_lag_ms=FROZEN_MAX_REFERENCE_LAG_MS,
+            max_reference_lag_ms=int(max_reference_lag_ms),
             max_target_lag_ms=FROZEN_MAX_TARGET_LAG_MS,
             notional_usd=notional_usd,
             fee_bps=fee_bps,
@@ -891,7 +915,7 @@ def _settle(
             horizon_ms=int(scenario_params["horizon_ms"]),
             direction_multiplier=-1,
             copy_delay_ms=execution_delay_ms,
-            max_reference_lag_ms=FROZEN_MAX_REFERENCE_LAG_MS,
+            max_reference_lag_ms=int(max_reference_lag_ms),
             max_target_lag_ms=FROZEN_MAX_TARGET_LAG_MS,
             notional_usd=notional_usd,
             fee_bps=fee_bps,
@@ -914,6 +938,7 @@ def _settle(
             horizon_ms=int(scenario_params["horizon_ms"]),
             copy_delay_ms=execution_delay_ms,
             book_timestamps=_coin_ts,
+            max_reference_lag_ms=int(max_reference_lag_ms),
         )
         placebo, placebo_trigger = _apply_risk_exit(
             placebo,
@@ -924,6 +949,7 @@ def _settle(
             horizon_ms=int(scenario_params["horizon_ms"]),
             copy_delay_ms=execution_delay_ms,
             book_timestamps=_coin_ts,
+            max_reference_lag_ms=int(max_reference_lag_ms),
         )
         common = {
             "mechanism": "copy_v21_entry_capacity_daily_lock",
@@ -973,6 +999,9 @@ def _evaluate_segment(
     complete_utc_day_starts_ms: Sequence[object] | None = None,
     prepared_cache: dict[Any, Any] | None = None,
 ) -> dict[str, Any]:
+    # #5 — fenêtre causale (lag) cherchable : absente des params (v21 incumbent)
+    # -> constante gelée -> comportement strictement identique.
+    _reference_lag_ms = int(params.get("reference_lag_ms", FROZEN_MAX_REFERENCE_LAG_MS))
     candidates, candidate_audit = _segment_candidates(
         metaorders,
         books_by_coin,
@@ -980,6 +1009,7 @@ def _evaluate_segment(
         end_ms=end_ms,
         minimum_leader_fill_notional_usd=float(params["minimum_leader_fill_notional_usd"]),
         signed_depth_imbalance_minimum=float(params["signed_depth_imbalance_minimum"]),
+        max_reference_lag_ms=_reference_lag_ms,
         prepared_cache=prepared_cache,
     )
     trades, placebos, replay_audit = _settle(
@@ -990,11 +1020,17 @@ def _evaluate_segment(
         capital_scenario_usd=capital_scenario_usd,
         execution_delay_ms=execution_delay_ms,
         fee_bps=fee_bps,
+        max_reference_lag_ms=_reference_lag_ms,
     )
     assessment = assess_train_variant(
         trades,
         placebos,
         trial_count=int(params["bonferroni_trial_count"]),
+        # #6 — limites de concentration cherchables : absentes des params (cas v21
+        # incumbent) -> None -> constantes gelées -> comportement strictement identique.
+        max_coin_share=params.get("max_coin_trade_share"),
+        max_vault_share=params.get("max_vault_trade_share"),
+        max_top_positive_share=params.get("max_top_positive_share"),
     )
     daily_mean = _mean_daily(assessment["statistics"])
     fully_covered_days = None

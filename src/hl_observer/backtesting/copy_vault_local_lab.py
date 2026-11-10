@@ -68,14 +68,18 @@ _LEADER_REVIEW_MAX_EVIDENCE_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _TRIAL_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_CHAIN_GENESIS = "0" * 64
 _IMPROVEMENT_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
-_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43)
+_HALTON_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67)
 _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
-    ("core_notional_usd", tuple(float(value) for value in range(40, 161, 10))),
-    ("probe_notional_usd", tuple(float(value) for value in range(10, 61, 10))),
-    ("minimum_leader_fill_notional_usd", tuple(float(value) for value in range(10, 101, 10))),
+    # #8 — grille élargie et affinée (bornes plus larges + pas plus fin) pour que
+    # l'optimum « entre deux points » ou « hors plage » devienne atteignable. La
+    # pénalité anti-overfit porte sur les essais RÉELLEMENT menés (pas sur la taille
+    # du domaine), donc élargir ne dégrade pas la rigueur ; Halton explore plus finement.
+    ("core_notional_usd", tuple(float(value) for value in range(30, 201, 10))),
+    ("probe_notional_usd", tuple(float(value) for value in range(10, 81, 10))),
+    ("minimum_leader_fill_notional_usd", tuple(float(value) for value in range(5, 121, 5))),
     ("signed_depth_imbalance_minimum", tuple(round(-0.3 + i * 0.05, 2) for i in range(13))),
-    ("stop_loss_bps", tuple(float(value) for value in range(40, 301, 20))),
-    ("take_profit_bps", tuple(float(value) for value in range(40, 501, 20))),
+    ("stop_loss_bps", tuple(float(value) for value in range(30, 341, 10))),
+    ("take_profit_bps", tuple(float(value) for value in range(30, 541, 10))),
     # #4 — l'option 1_000_000 = "sans plafond journalier" (jamais atteint sur ce capital) :
     # laisse la recherche découvrir des stratégies qui gagnent plus les bons jours. La
     # rigueur anti-overfit décide si c'est vraiment mieux (sinon une valeur plafonnée gagne).
@@ -95,6 +99,19 @@ _PARAMETER_DOMAINS: tuple[tuple[str, tuple[Any, ...]], ...] = (
     # font SAUTER la copie quand le prix déborde fortement de l'oracle (fade de liquidation).
     # Dérivé du SAFE -> cette dimension est PROUVABLE et donc GELABLE par le cliquet.
     ("overshoot_seuil_bps", (1_000_000.0, 200.0, 100.0, 50.0)),
+    # #6 — concentration CHERCHABLE (le garde reste actif, jamais désactivé ; c'est la
+    # rigueur LCB/placebo qui tranche). 1re valeur = constante gelée (= v21 pur) ; les
+    # valeurs plus hautes laissent concourir l'alpha de niche concentré. 1.0 = sans plafond.
+    ("max_coin_trade_share", (0.65, 0.80, 1.0)),
+    ("max_vault_trade_share", (0.60, 0.80, 1.0)),
+    ("max_top_positive_share", (0.60, 0.80, 1.0)),
+    # #3 — levier cherchable : 1.0 = v21 pur (preuve conservatrice) ; 10.0 = levier moteur
+    # (preuve = déploiement). Le plafond d'exposition brute monte en conséquence.
+    ("paper_leverage", (1.0, 2.0, 5.0, 10.0)),
+    # #5 — fenêtre causale (lag L2) cherchable : 30_000 ms = v21 pur ; valeurs plus larges
+    # admettent un carnet de référence plus ancien (toujours <= signal) quand le L2 frais
+    # manque -> moins de fills jetés par manque de données, sans fuite look-ahead.
+    ("reference_lag_ms", (30_000, 60_000, 120_000, 300_000)),
 )
 
 
@@ -2449,6 +2466,18 @@ def _candidate(
         "max_open_positions": params["max_open_positions"],
         # défaut 1_000_000 (= sans filtre) pour les candidats gelés d'AVANT cette dimension.
         "overshoot_seuil_bps": params.get("overshoot_seuil_bps", 1_000_000.0),
+        # #6 — concentration cherchable. Défauts = constantes gelées (0.65/0.60/0.60) ->
+        # les candidats d'AVANT cette dimension reproduisent v21 à l'identique.
+        "max_coin_trade_share": params.get("max_coin_trade_share", 0.65),
+        "max_vault_trade_share": params.get("max_vault_trade_share", 0.60),
+        "max_top_positive_share": params.get("max_top_positive_share", 0.60),
+        # #3 — levier cherchable. Défaut 1.0 (= v21 pur) pour les candidats d'AVANT ;
+        # le cliquet peut prouver une stratégie au levier du moteur (10x) -> preuve = déploiement.
+        "paper_leverage": params.get("paper_leverage", 1.0),
+        # #5 — fenêtre causale (lag L2) cherchable. Défaut 30_000 ms (= v21 pur) ; un lag
+        # plus large admet un carnet de référence plus ancien (toujours causal) quand le L2
+        # frais manque -> moins de fills jetés, sans fuite look-ahead.
+        "reference_lag_ms": params.get("reference_lag_ms", 30_000),
         "bonferroni_trial_count": max(1, int(trial_count)),
         "bounds": dict(bounds),
     }
