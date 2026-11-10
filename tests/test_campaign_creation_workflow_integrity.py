@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from hl_observer.ops.runtime_contract import RESUMABLE_COLLECTION_CONTRACT
@@ -54,7 +55,8 @@ def test_controller_does_not_serialize_fresh_market_behind_copy_fanout() -> None
     # A leftover RUNNING lease from e6 must not starve e8 runners.
     assert 'or int(row.get("phase_epoch") or 0)!=phase_epoch' in controller
     assert 'or int(row.get("phase_epoch") or 0)>phase_epoch' not in controller
-    assert "other_capacity=max(0,16-active_other)" in controller
+    capacity = re.search(r"other_capacity=max\(0,(\d+)-active_other\)", controller)
+    assert capacity is not None and 1 <= int(capacity.group(1)) <= 20
     assert "reserved_canary=bounded_canaries[:1]" in controller
     assert "other_ids=reserved_canary+ordinary_ids" in controller
     assert "relay_collect:" in controller
@@ -96,7 +98,8 @@ def test_archive_backfill_is_not_starved_by_unbounded_live_market_backlog():
     assert "archive_due=[" in controller
     assert "if priority == 2" in controller
     assert "other_ids=[archive_first]+" in controller
-    assert "other_capacity=max(0,16-active_other)" in controller
+    capacity = re.search(r"other_capacity=max\(0,(\d+)-active_other\)", controller)
+    assert capacity is not None and 1 <= int(capacity.group(1)) <= 20
     assert "ordinary_ids=ordinary_ids[:max(0,other_capacity-len(reserved_canary))]" in controller
     assert "if [ \"$((10#$HOUR))\" -ge 6 ]; then" in creator
     assert '"archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"' in creator

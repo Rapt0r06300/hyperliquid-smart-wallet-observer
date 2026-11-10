@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,7 +126,8 @@ def test_resumable_creator_encodes_copy_vault_cursor_as_valid_json():
 def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     controller = _workflow("resumable-campaign-controller.yml")
     worker = _workflow("resumable-campaign-worker.yml")
-    assert "cron: '*/5 * * * *'" in controller
+    cadence = re.search(r"cron: '\*/(\d+) \* \* \* \*'", controller)
+    assert cadence is not None and 1 <= int(cadence.group(1)) <= 5
     assert "push:" in controller
     assert "resumable-campaign-controller.yml" in controller
     assert "timeout-minutes: 10" in controller

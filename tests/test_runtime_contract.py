@@ -92,12 +92,20 @@ def test_preflight_rejoue_le_contrat_si_la_version_derivait():
     assert "HYPERSMART_SCOPE_VERSION" in check.detail
 
 
-def test_official_launcher_matches_every_critical_runtime_flag_once():
+def test_official_launcher_guards_each_entrypoint_and_sets_other_flags_once():
     text = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8", errors="strict")
+    autopilot = text.split("\n:autopilot\n", 1)[1].split("\n:dispatch\n", 1)[0]
+    dispatch = text.split("\n:dispatch\n", 1)[1]
     assignments = RC.parse_cmd_set_assignments(text)
+    # Distinct entrypoints intentionally reassert all four paper-only controls.
+    guarded = {"HL_ENV", "HL_ENABLE_MAINNET_EXECUTION", "HL_ENABLE_TESTNET_EXECUTION", "HYPERSMART_MODE"}
     for key, expected in RC.CRITICAL_RUNTIME_FLAGS.items():
         values = assignments.get(key)
-        assert values == [expected], f"{key}: {values!r}, attendu {[expected]!r}"
+        expected_values = [expected, expected] if key in guarded else [expected]
+        assert values == expected_values, f"{key}: {values!r}, attendu {expected_values!r}"
+        if key in guarded:
+            assert RC.parse_cmd_set_assignments(autopilot).get(key) == [expected]
+            assert RC.parse_cmd_set_assignments(dispatch).get(key) == [expected]
 
 
 def test_legacy_cross_venue_v1_is_quarantined_and_v2_is_active():

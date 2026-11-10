@@ -25,7 +25,8 @@ def test_single_hypersmart_launcher_exists_and_forces_simulation_mode():
     assert "HYPERSMART_UI_STATE_DIR" in text
     assert "HYPERSMART_SLTP_ENABLED=1" in text
     assert "HYPERSMART_ADAPTIVE_PAPER_SIZING=" in text  # calibre -> valeur non figee
-    assert "-Port 8794" in text
+    assert 'set "HYPERSMART_PORT=8794"' in text
+    assert "-Port %HYPERSMART_PORT%" in text
     assert "-IntervalSeconds 15" in text
     assert "-MaxLeaders 50" in text
     assert "-Interactive" in text
