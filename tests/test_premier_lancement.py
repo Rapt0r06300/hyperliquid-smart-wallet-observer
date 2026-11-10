@@ -455,5 +455,6 @@ def test_lanceur_appelle_premier_lancement_avant_collecteurs():
 def test_lanceur_prepare_portabilite_avant_verrou_et_registre_pid():
     i_pl = CMD.index("hl_observer.ops.premier_lancement")
     i_lock = CMD.index("hl_observer.ops.verrou_lanceur acquerir")
-    i_pid = CMD.index("launcher_pids.json")
+    # Skip documentation comments before the lock; inspect the PID write itself.
+    i_pid = CMD.index("launcher_pids.json", i_lock)
     assert i_pl < i_lock < i_pid
