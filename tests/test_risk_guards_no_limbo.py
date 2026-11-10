@@ -688,9 +688,11 @@ def test_le_compte_tombe_juste():
                  -> paper_trading tombe de 10 a 9. Ces nombres sont un CLIQUET : on les met a
                  jour quand on DECIDE, jamais pour faire taire un test.
     """
-    assert len(modules_enterres("risk")) == 28
+    # 2026-11-10: the duplicate CopyVault audit helper was explicitly buried.
+    assert "copy_vault_safety_controls" in modules_enterres("risk")
+    assert len(modules_enterres("risk")) == 29
     assert len(modules_enterres("paper_trading")) == 9
     assert len(modules_enterres("exits")) == 7
-    assert len(TOMBES) == 44, "attendu 44 tombes au total, trouve %d" % len(TOMBES)
+    assert len(TOMBES) == 45, "attendu 45 tombes au total, trouve %d" % len(TOMBES)
     assert len(BRANCHES) == 4, "attendu 4 branchements, trouve %d" % len(BRANCHES)
     assert len(modules_enterres() & modules_branches()) == 0, "un module ne peut pas etre les deux"
