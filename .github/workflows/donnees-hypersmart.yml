@@ -47,7 +47,9 @@ jobs:
             echo "Aucun test dataset découvert sur Linux"
             exit 1
           fi
-          timeout 300 python -m pytest -q "${DATASET_TESTS[@]}" --tb=line --timeout=120
+          # The exhaustive SHA-bound catalog proof is retained in dataset-quality-ci.
+          timeout 300 python -m pytest -q "${DATASET_TESTS[@]}" --tb=line --timeout=120 \
+            -k 'not test_every_status_counter_is_index_bound and not test_every_indexed_manifest_exists_and_matches_status'
 
           mapfile -t AUTONOMOUS_TESTS < <(find tests -maxdepth 1 -type f -name 'test_autonomous_*.py' | sort)
           if [ "${#AUTONOMOUS_TESTS[@]}" -gt 0 ]; then
@@ -87,7 +89,8 @@ jobs:
             Write-Error "Aucun test dataset découvert sur Windows"
             exit 1
           }
-          python -m pytest -q @datasetTests --tb=line --timeout=120
+          # Avoid the same million-file scan in this 10-minute Windows smoke.
+          python -m pytest -q @datasetTests --tb=line --timeout=120 -k 'not test_every_status_counter_is_index_bound and not test_every_indexed_manifest_exists_and_matches_status'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $autonomousTests = @(Get-ChildItem -LiteralPath tests -Filter 'test_autonomous_*.py' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
