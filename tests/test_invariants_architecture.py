@@ -61,9 +61,12 @@ def test_pas_de_nouveau_doublon_de_nom():
     """#7 : deux modules du même nom = confusion (quel slippage_model fait foi ?)."""
     by = defaultdict(list)
     for p in SRC.rglob("*.py"):
-        if "__pycache__" in str(p) or p.name == "__init__.py":
+        if "__pycache__" in str(p) or p.name in {"__init__.py", "__main__.py"}:
             continue
         by[p.stem].append(str(p.relative_to(SRC)))
+    # __main__.py is the Python-mandated package CLI entrypoint name; each
+    # package owns a distinct namespace. Counting it as a duplicate module
+    # creates a false collision, unlike two unrelated cost_model.py modules.
     collisions = {k: v for k, v in by.items() if len(v) > 1}
     assert len(collisions) <= MAX_STEMS_EN_COLLISION, (
         "nouveau doublon de nom introduit (%d > %d) : %s"
