@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import hl_observer.wallets.user_fills_live as ufl
 from hl_observer.config.settings import Settings
@@ -19,6 +20,10 @@ from hl_observer.wallets.user_fills_multiplex import (
 
 def _wallet(i: int) -> str:
     return "0x" + f"{i:040x}"
+
+
+def _ack(wallet: str) -> str:
+    return json.dumps({"channel": "subscriptionResponse", "data": {"method": "subscribe", "subscription": {"type": "userFills", "user": wallet}}})
 
 
 def _msg(wallet: str, is_snapshot: bool, fills: list[dict]) -> str:
@@ -112,10 +117,14 @@ def test_fresh_fills_stored_across_multiplex(monkeypatch):
     monkeypatch.setattr(ufl, "_store_fresh_fills", fake_store)
 
     def fake_connect(url):
-        # chaque connexion pousse un fill FRAIS pour les 2 wallets qu'elle suit
+        # The collector must see both subscription ACKs before it accepts
+        # genuinely recent fills. Old synthetic timestamps are quarantined.
+        recent_ms = int(time.time() * 1000) - 500
         return _FakeWS([
-            _msg(_wallet(1), False, [{"coin": "BTC", "time": 123, "px": "60000"}]),
-            _msg(_wallet(2), False, [{"coin": "ETH", "time": 124, "px": "3000"}]),
+            _ack(_wallet(1)),
+            _ack(_wallet(2)),
+            _msg(_wallet(1), False, [{"coin": "BTC", "time": recent_ms, "px": "60000"}]),
+            _msg(_wallet(2), False, [{"coin": "ETH", "time": recent_ms + 1, "px": "3000"}]),
         ])
 
     res = asyncio.run(stream_user_fills_multiplex(

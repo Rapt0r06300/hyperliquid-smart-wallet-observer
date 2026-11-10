@@ -25,15 +25,12 @@ def _env_lanceur(nom: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def test_le_plafond_du_lanceur_est_ELARGI_mais_COHERENT():
-    """La demande de Flo (plus d'admissions) ET la physique du carry (amortir avant l'âge)."""
-    be = _env_lanceur("HYPERSMART_CARRY_MAX_BREAK_EVEN_H")
-    assert be is not None, "le lanceur doit fixer HYPERSMART_CARRY_MAX_BREAK_EVEN_H"
-    assert be >= 235.0, "fenetre d'admission elargie (decision volume-de-donnees du 20/07)"
-    assert be <= 0.7 * AGE_MAX_H_DEFAUT, (
-        "CLIQUET : BE %.0f h > 0,7 x age max (%.0f h) -> les positions seraient expulsees "
-        "par SORTIE_AGE avant d'avoir amorti : perte garantie par construction. On n'achete "
-        "pas du volume de donnees avec du churn." % (be, AGE_MAX_H_DEFAUT))
+def test_le_carry_historique_ne_se_reactive_pas_par_le_lanceur():
+    """Copy-Vault only: the retired carry feeder has no live paper admission."""
+    launcher = (RACINE / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
+    assert 'set "HYPERSMART_CARRY_DISABLED=1"' in launcher
+    assert 'set "HYPERSMART_FUNDING_ARB_PAPER=0"' in launcher
+    assert _env_lanceur("HYPERSMART_CARRY_MAX_BREAK_EVEN_H") is None
 
 
 def test_le_feeder_HONORE_l_env_du_lanceur(monkeypatch):

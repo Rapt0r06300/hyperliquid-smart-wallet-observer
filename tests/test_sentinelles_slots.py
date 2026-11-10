@@ -34,7 +34,8 @@ def _ecrire(root: Path, *, sentinelles=True, n_cands=12):
 
 def test_charger_sentinelles_top_liquidateur(tmp_path):
     _ecrire(tmp_path)
-    assert U.charger_sentinelles(tmp_path) == ["0xLIQ1", "0xLIQ2", "0xLIQ3"]
+    assert U.charger_sentinelles(tmp_path) == ["0xLIQ1"]  # Copy-Vault prioritizes active traders; one sentinel slot by default
+    assert U.charger_sentinelles(tmp_path, k=3) == ["0xLIQ1", "0xLIQ2", "0xLIQ3"]
 
 
 def test_sans_journal_aucune_sentinelle(tmp_path):
@@ -47,13 +48,13 @@ def test_pinning_reserve_les_slots_sans_depasser_10(tmp_path):
     roles = U.vaults_et_roles(tmp_path)
     assert len(roles) <= U.MAX_SLOTS, "jamais plus de 10 slots"
     noms = [v for v, _r, _w in roles]
-    # 2 CORE d'abord, puis les 3 sentinelles épinglées
+    # Two CORE wallets, then the explicitly bounded sentinel quota.
     assert noms[:2] == ["0xCORE1", "0xCORE2"]
     sent = [v for v, r, _w in roles if r == "LIQUIDATOR_SENTINEL"]
-    assert sent == ["0xLIQ1", "0xLIQ2", "0xLIQ3"], "les 3 top liquidateurs sont épinglés"
+    assert sent == ["0xLIQ1"], "la sentinelle prioritaire est épinglée, sans évincer les traders"
     # le reste = candidats runtime, total EXACTEMENT plafonné à 10
     assert len(roles) == U.MAX_SLOTS
-    assert sum(1 for _v, r, _w in roles if r.startswith("CANDIDAT")) == U.MAX_SLOTS - 2 - 3
+    assert sum(1 for _v, r, _w in roles if r.startswith("CANDIDAT")) == U.MAX_SLOTS - 2 - U.SENTINELLES_K
 
 
 def test_sentinelle_ne_vole_pas_un_slot_core(tmp_path):

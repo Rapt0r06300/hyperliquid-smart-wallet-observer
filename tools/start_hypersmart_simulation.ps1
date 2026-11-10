@@ -135,7 +135,7 @@ $env:HYPERSMART_RUNTIME_STOP_FILE = $runtimeStopFile
 $env:HYPERSMART_ACTIVE_STRATEGY_SCOPE = "copy_vault"
 $env:HYPERSMART_SCOPE_VERSION = "COPY_VAULT_PAPER_V2"
 $env:HYPERSMART_CONFIG_AUTHORITY = "tools/start_hypersmart_simulation.ps1"
-Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "200"
+Set-HyperSmartDefaultEnv "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "350"
 $startupProfile = [string]$env:HYPERSMART_STARTUP_PROFILE
 if ([string]::IsNullOrWhiteSpace($startupProfile)) {
     $startupProfile = "core"
@@ -341,7 +341,7 @@ Set-HyperSmartDefaultEnv "HYPERSMART_SLTP_ENABLED" "1"
 # l'exposition BRUTE (une somme d'abs()) : pour lui, 6 shorts et 1 long etaient "diversifies".
 # Sur le run precedent, 97 % de la perte venait des shorts. Ce n'est pas un portefeuille :
 # c'est le meme pari repete 9 fois.
-[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "100", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "60", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "60", "Process")
 # === CALIBRAGE #1 (candidat OOS-positif du replay 1.4M, 2026-07-09) : TP serre / SL large / trailing large ===
 [Environment]::SetEnvironmentVariable("HYPERSMART_SLTP_TAKE_PROFIT_BPS", "110", "Process")
@@ -373,7 +373,7 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MIN_REDUCE_NOTIONAL_USDT" "0"
 [Environment]::SetEnvironmentVariable("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "2", "Process")
 Set-HyperSmartDefaultEnv "HYPERSMART_FUSION_COPY_COST_BUFFER_BPS" "24"
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_ARBITRAGE_MIN_SPREAD_BPS" "30"
-[Environment]::SetEnvironmentVariable("HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS", "1", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_DIRECT_COPY_MIN_CONSENSUS_WALLETS", "2", "Process")
 # V25: aligne sur le canal consensus (28 bps single-wallet). A 18 bps le canal
 # fusion direct alimentait le book en entrees faibles (70 entrees vs 2 consensus).
 Set-HyperSmartDefaultEnv "HYPERSMART_DIRECT_COPY_MIN_EDGE_BPS" "32"
@@ -422,8 +422,8 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "100"
 # ne pose que si non-defini, et le python etait lance par la ps1). notional = marge x 5.
 # FORCE (pas "default"): une valeur "1" restee collee dans l'environnement (run precedent)
 # faisait que Set-HyperSmartDefaultEnv sautait -> levier 1 au runtime -> notional 40 = centimes.
-# On ECRASE explicitement pour garantir le levier. C'etait LA cause finale du PnL en centimes.
-[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_LEVERAGE", "10", "Process")
+# On fixe le levier de 3x du profil PAPER canonique, sans accepter de valeur Windows heritee.
+[Environment]::SetEnvironmentVariable("HYPERSMART_SIMULATION_LEVERAGE", "3", "Process")
 # V27: firehose userFills MULTIPLEXE always-on -> jusqu'a 4x10=40 leaders suivis en
 # temps reel (sub-seconde) au lieu du seul top-10 -> un MAXIMUM de signaux frais.
 # Read-only / paper-only ; borne dure a 8 connexions (anti-ban) cote code.
@@ -437,7 +437,7 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "100"
 # par position ; x levier 10 = notional $500 -> PnL = 500 x Dprix = DES DOLLARS. Solde 1000 /
 # marge 50 = 20 positions. FORCE (ecrase le 12/40/400 set-if-unset + l'env colle Windows).
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_POSITION_USDT", "50", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_OPEN_POSITIONS", "20", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_OPEN_POSITIONS", "2", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "100", "Process")
 # 2026-07-18 - mode sniper mono-wallet DECLARE FERME (sentinelle >= 1000). Voir le meme
 # commentaire dans LANCER_HYPERSMART.cmd : edge de copie mesure a -7,97 bps hors echantillon,

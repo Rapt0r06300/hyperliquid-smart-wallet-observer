@@ -61,7 +61,7 @@ def test_start_script_initializes_everything_without_execution():
     assert '$HealthUrl = "http://127.0.0.1:$Port/api/simulation/status"' in text
     assert "Invoke-WebRequest -UseBasicParsing -Uri $HealthUrl" in text
     assert "reset-simulation-state --starting-equity $paperStartingEquity" in text
-    assert 'HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "200"' in text
+    assert 'HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT" "350"' in text
     assert 'HYPERSMART_RESET_ON_LAUNCH -eq "1"' in text  # 25/07 Fix1 : reset SEULEMENT si =1 explicite
     assert "CONSERVE par defaut" in text                  # defaut garanti = conserver equity/PnL/ledgers
     assert "& $PythonExe -m hl_observer discover-markets --store --max-coins 80" in text

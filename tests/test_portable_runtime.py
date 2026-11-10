@@ -35,7 +35,7 @@ def test_portability_files_exist_and_unified_launcher_bootstraps_first():
 
     launcher = (ROOT / "LANCER_HYPERSMART.cmd").read_text(encoding="utf-8")
     bootstrap_index = launcher.index("portable_env.cmd")
-    first_python_index = launcher.index("python", bootstrap_index + len("portable_env.cmd"))
+    first_python_index = launcher.index('"%HYPERSMART_PYTHON%"', bootstrap_index + len("portable_env.cmd"))
     assert bootstrap_index < first_python_index
     assert "py -3" not in launcher
     assert "if errorlevel 1" in launcher[bootstrap_index:bootstrap_index + 400]

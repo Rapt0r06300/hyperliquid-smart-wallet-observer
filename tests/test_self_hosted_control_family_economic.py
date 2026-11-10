@@ -25,7 +25,7 @@ def _control(suite: str, mode: str = "economic") -> dict[str, object]:
 
 @pytest.mark.parametrize(
     "suite",
-    ["copy-vault-full", "lead-lag-full", "cross-venue-full"],
+    ["copy-vault-full"],
 )
 def test_control_accepts_active_family_economic_route_without_weakening_safety(suite: str) -> None:
     bundle = build_control_bundle(_control(suite), project_sha=SHA)
@@ -43,3 +43,9 @@ def test_control_accepts_active_family_economic_route_without_weakening_safety(s
 def test_control_still_rejects_unrelated_economic_suite() -> None:
     with pytest.raises(ValueError, match="mode economic"):
         build_control_bundle(_control("sqlite-all-safe"), project_sha=SHA)
+
+
+@pytest.mark.parametrize("disabled_suite", ["lead-lag-full", "cross-venue-full"])
+def test_disabled_family_economic_route_fails_closed(disabled_suite: str) -> None:
+    with pytest.raises(ValueError, match="DISABLED_BY_SCOPE"):
+        build_control_bundle(_control(disabled_suite), project_sha=SHA)

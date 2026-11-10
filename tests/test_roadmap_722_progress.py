@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from tools.roadmap_722_progress import (
     DEFAULT_ROADMAP,
+    HVR_APPENDIX,
+    INT_INDEX,
+    INT_LOTS,
     format_progress,
     inspect_roadmap,
 )
@@ -25,8 +28,11 @@ def _sample(**kwargs: object) -> str:
 
 
 def test_live_master_roadmap_has_full_tracking_metadata() -> None:
-    actual = inspect_roadmap(DEFAULT_ROADMAP.read_text(encoding="utf-8"))
-    assert actual["total"] == actual["present"] == 1100
+    # Evaluate the same canonical 3120-task inputs as the progress CLI, not
+    # just the legacy first 1100-task file.
+    parts = [DEFAULT_ROADMAP, HVR_APPENDIX, INT_INDEX, *INT_LOTS]
+    actual = inspect_roadmap("\n".join(p.read_text(encoding="utf-8") for p in parts))
+    assert actual["total"] == actual["present"] == 3120
     assert actual["errors"] == []
 
 
