@@ -130,6 +130,15 @@ def test_chemins_absolus_json_decodes_unicode_escapes_before_unc_scan():
     assert AP.chemins_absolus_residuels("C:\\Users\\test\\data")
 
 
+def test_json_ci_trace_literals_are_not_windows_absolute_paths():
+    # Diagnostic JSON can contain escaped newlines right after words ending
+    # in a colon (e.g. "push:\\n"). The suffix "h:\\" is not drive H.
+    trace = {"failure": "assert 'push:' in controller\npaths:\nother_work:\nparallel:\n"}
+    assert AP.chemins_absolus_residuels(json.dumps(trace)) == []
+    # Real absolute Windows paths must remain a strict release blocker.
+    assert AP.chemins_absolus_residuels(json.dumps({"path": r"C:\Users\runner\tmp"}))
+
+
 def test_est_exclu_regles():
     assert AP.est_exclu("runtime/data/lanceur_pids.json")
     assert AP.est_exclu("x/y/.git/config") and AP.est_exclu("a.lock") and AP.est_exclu("b/c.tmp")
