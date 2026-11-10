@@ -24,6 +24,45 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          # Functional dataset tests do not need millions of immutable manifests.
+          # Full corpus verification runs separately in dataset-quality-ci.
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /src/
+            /hyper_smart_observer/
+            /tools/
+            /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /control/
+            /clone_payload/
+            /EVIDENCE/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
+            /catalog/COLLECTION_METRICS.json
+            /catalog/COPY_VAULT_COVERAGE_RECEIPT.json
+            /catalog/QUARANTINE_CAUSES.json
+            /catalog/REPLAY_COMPATIBILITY_REASONS.json
+            /catalog/RECOVERY_PILOT_HISTORY.json
+            /catalog/ANALYSIS_SCOREBOARD_RECEIPT.json
+            /catalog/CAMPAIGN_RESILIENCE_RECEIPT.json
+            /conftest.py
+            /pyproject.toml
+            /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
+            /requirements*.txt
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -63,6 +102,45 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          # Functional dataset tests do not need millions of immutable manifests.
+          # Full corpus verification runs separately in dataset-quality-ci.
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /src/
+            /hyper_smart_observer/
+            /tools/
+            /tests/
+            /.github/
+            /docs/
+            /config/
+            /archive/
+            /control/
+            /clone_payload/
+            /EVIDENCE/
+            /catalog/DATA_INDEX.json
+            /catalog/DATA_METRICS.json
+            /catalog/DATA_CATALOG.json
+            /catalog/DATA_QUALITY_REGISTRY.json
+            /catalog/DATASET_HEALTH_RECEIPT.json
+            /catalog/SHARD_MANIFEST_SCHEMA.json
+            /catalog/COLLECTION_METRICS.json
+            /catalog/COPY_VAULT_COVERAGE_RECEIPT.json
+            /catalog/QUARANTINE_CAUSES.json
+            /catalog/REPLAY_COMPATIBILITY_REASONS.json
+            /catalog/RECOVERY_PILOT_HISTORY.json
+            /catalog/ANALYSIS_SCOREBOARD_RECEIPT.json
+            /catalog/CAMPAIGN_RESILIENCE_RECEIPT.json
+            /conftest.py
+            /pyproject.toml
+            /.env.example
+            /.gitignore
+            /.gitattributes
+            /ruff.toml
+            /*.cmd
+            /*.md
+            /requirements*.txt
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
