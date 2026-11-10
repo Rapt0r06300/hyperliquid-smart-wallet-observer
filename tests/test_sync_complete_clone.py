@@ -530,7 +530,7 @@ def test_windows_checkout_preserves_byte_exact_replay_catalog():
         "catalog/DATA_INDEX.json text eol=lf",
         "catalog/DATA_METRICS.json text eol=lf",
         "catalog/data-index-parts/*.json text eol=lf",
-        "catalog/campaigns/*.json text eol=lf",
+        "catalog/campaigns/*.json -text",
         "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md text eol=lf",
         "pyproject.toml text eol=lf",
         "requirements*.txt text eol=lf",
