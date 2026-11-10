@@ -1726,12 +1726,18 @@ def run_one_unit(
         try:
             cmd, output_root = build_command(ctx)
         except ValueError as exc:
+            # Invalid output directories are writer-path failures rather than
+            # malformed campaign definitions. Never start a collection here.
+            output_path_error = str(exc).startswith("output_root must be a directory")
+            reason = "output_root_unavailable" if output_path_error else "invalid_partition"
             payload = {
                 "status": "FAILED",
-                "reason": "invalid_partition",
+                "reason": reason,
                 "detail": str(exc),
             }
-            return finish("FAILED", payload, False, reason="invalid_partition")
+            if output_path_error:
+                payload["failure_category"] = "OUTPUT_PATH"
+            return finish("FAILED", payload, False, reason=reason)
         commands = [(cmd, output_root, "unit")]
 
     phases: list[dict[str, Any]] = []

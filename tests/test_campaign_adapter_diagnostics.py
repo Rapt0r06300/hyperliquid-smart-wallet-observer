@@ -134,7 +134,7 @@ def test_unavailable_output_root_is_a_fail_closed_diagnostic(
 
 
 def test_subprocess_timeout_preserves_checkpoint_from_output_root(tmp_path: Path) -> None:
-    output = tmp_path / "diagnostic-campaign" / "unit-001"
+    output = tmp_path / "diagnostic-campaign" / "copy_vault" / "unit-001"
     checkpoint = output / "checkpoint.json"
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     checkpoint.write_text('{"cursor": 9}\n', encoding="utf-8")
@@ -168,7 +168,7 @@ def test_subprocess_timeout_preserves_checkpoint_from_output_root(tmp_path: Path
 
 
 def test_timeout_with_durable_checkpoint_counts_as_progress(tmp_path: Path) -> None:
-    output = tmp_path / "diagnostic-campaign" / "unit-001"
+    output = tmp_path / "diagnostic-campaign" / "copy_vault" / "unit-001"
     checkpoint = output / "checkpoint.json"
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     checkpoint.write_text('{"cursor": 11}\n', encoding="utf-8")
@@ -232,7 +232,7 @@ def test_valid_empty_response_is_unavailable_and_distinct_from_timeout(
 
 
 def test_interruption_after_verified_checkpoint_is_restartable(tmp_path: Path) -> None:
-    output = tmp_path / "diagnostic-campaign" / "unit-001"
+    output = tmp_path / "diagnostic-campaign" / "copy_vault" / "unit-001"
     checkpoint = output / "checkpoint.json"
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     checkpoint.write_text('{"cursor": 17}\n', encoding="utf-8")
@@ -271,7 +271,7 @@ def test_interruption_after_verified_checkpoint_is_restartable(tmp_path: Path) -
 
 
 def test_restart_reuses_the_same_unit_output_after_checkpoint(tmp_path: Path) -> None:
-    output = tmp_path / "diagnostic-campaign" / "unit-001"
+    output = tmp_path / "diagnostic-campaign" / "copy_vault" / "unit-001"
     checkpoint = output / "checkpoint.json"
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     checkpoint.write_text('{"cursor": 17}\n', encoding="utf-8")
@@ -325,7 +325,7 @@ def test_restart_reuses_the_same_unit_output_after_checkpoint(tmp_path: Path) ->
 
 
 def test_partial_bundle_cannot_be_published_as_safe(tmp_path: Path) -> None:
-    output = tmp_path / "diagnostic-campaign" / "unit-001"
+    output = tmp_path / "diagnostic-campaign" / "copy_vault" / "unit-001"
 
     class Result:
         returncode = 0
