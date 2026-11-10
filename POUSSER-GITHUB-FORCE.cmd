@@ -25,6 +25,7 @@ if /I "%~1"=="-h" goto :help
 
 :parse_args
 if "%~1"=="" goto :args_done
+if /I "%~1"=="--portable-self-check" set "ALINA_MODE=self-check"&shift&goto :parse_args
 if /I "%~1"=="--dry-run" set "ALINA_CODE_ARGS=--dry-run"&set "ALINA_MODE=dry"&shift&goto :parse_args
 if /I "%~1"=="--wip-only" set "ALINA_CODE_ARGS=--wip-only"&set "ALINA_MODE=code"&shift&goto :parse_args
 if /I "%~1"=="--promote-current-to-main" set "ALINA_CODE_ARGS=--promote-current-to-main"&set "ALINA_MODE=code"&shift&goto :parse_args
@@ -86,6 +87,7 @@ if errorlevel 1 goto :invalid_engine
 if errorlevel 1 goto :invalid_engine
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import ast,sys; ast.parse(open(sys.argv[1],'rb').read())" "%ALINA_SHARDS_ENGINE%" >nul 2>nul
 if errorlevel 1 goto :missing_shards_engine
+if /I "%ALINA_MODE%"=="self-check" goto :self_check
 
 echo ============================================================
 echo  ALINA SMART FLOW - modules canoniques du depot
@@ -138,6 +140,13 @@ if %ALINA_ATTEMPT% GEQ %ALINA_MAX_ATTEMPTS% goto :finish
 echo [AUTO-REPAIR] Operation SAFE echouee ^(code %RC%^); nettoyage + tentative %ALINA_ATTEMPT%/%ALINA_MAX_ATTEMPTS% dans 5s...
 timeout /t 5 /nobreak >nul 2>nul
 goto :shards_attempt
+
+:self_check
+rem Entirely offline: real Git/Python lookup plus source AST and engine build gates
+rem above have completed. Never fetch, commit, restore SAFE, or contact a broker.
+echo PORTABLE_GITHUB_PUSH_CHECK_OK
+set "RC=0"
+goto :finish
 
 :help
 echo Usage : POUSSER-GITHUB-FORCE.cmd [options]
