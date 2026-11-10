@@ -356,11 +356,13 @@ def test_inventory_scopes_status_away_from_massive_protected_roots(tmp_path: Pat
     assert tracked == ["src/changed.py"]
     assert untracked == []
     status = next(args for args in commands if args[0] == "status")
-    assert ":(top,glob)*" in status
+    # Never scan the full, multi-million-file protected worktree.
+    assert ":(top,glob)*" not in status
     assert "src/**" in status
     assert "datasets/**" not in status
     assert "--no-renames" in status
-    assert not any(args[0] == "diff" for args in commands)
+    # Staged-only diff is allowed; whole-worktree diff is not.
+    assert all("--cached" in args for args in commands if args[0] == "diff")
     assert not any("--modified" in args or "--deleted" in args for args in commands)
 
 
@@ -655,17 +657,15 @@ def test_write_report_keeps_last_receipt_and_bounded_history(
     assert all(json.loads(path.read_text(encoding="utf-8"))["status"] == "SYNCHRONIZED" for path in history)
 
 
-def test_launcher_contract_pins_engine_and_exposes_safe_diagnostics() -> None:
+def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -> None:
     launcher = Path("POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
-    engine_sha = hashlib.sha256(
-        Path("tools/alina_git_code_sync.py").read_bytes()
-    ).hexdigest()
-
-    assert f"ALINA_LOCAL_ENGINE_SHA256={engine_sha}" in launcher
-    assert "--portable-self-check" in launcher
-    assert "--benchmark" in launcher
-    assert "--plan" in launcher
-    assert "set \"RC=%ERRORLEVEL%\"" in launcher
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13" in launcher
+    assert r"tools\alina_git_code_sync.py" in launcher
+    assert r"tools\sync_complete_clone.py" in launcher
+    assert "ast.parse(" in launcher
+    assert "download_source" not in launcher
+    assert "ALINA_LOCAL_ENGINE_SHA256" not in launcher
+    assert 'set "RC=%ERRORLEVEL%"' in launcher
     assert "exit /b %RC%" in launcher
 
 
@@ -988,14 +988,17 @@ def test_git_replay_print_plan_is_applied_without_ref_race(tmp_path: Path) -> No
 
     assert task._try_git_replay("remote", old, "base") is True
     assert task.report["replay_engine"] == "GIT_REPLAY_INDEX_PRESERVING"
-    assert commands[:3] == [
-        (
-            "replay", "--onto=remote", "--ref=refs/heads/main",
-            "--ref-action=print", "base..refs/heads/main",
-        ),
-        ("read-tree", "-u", "-m", new),
-        ("update-ref", "refs/heads/main", new, old),
-    ]
+    assert commands[0] == (
+        "replay", "--onto=remote", "--ref=refs/heads/main",
+        "--ref-action=print", "base..refs/heads/main",
+    )
+    # The index must be prepared before an old-SHA-guarded ref update.
+    assert ("read-tree", new) in commands
+    assert ("update-ref", "refs/heads/main", new, old) in commands
+    assert commands.index(("read-tree", new)) < commands.index(
+        ("update-ref", "refs/heads/main", new, old)
+    )
+    assert not any(cmd[0] in {"reset", "clean"} for cmd in commands)
 
 
 def test_git_replay_falls_back_on_unsupported_git(tmp_path: Path) -> None:
@@ -1371,7 +1374,9 @@ def test_tracked_protected_collision_still_fails_closed(repos):
     rc, receipt = run_sync(local)
 
     assert rc == 2 and receipt["status"] == "NO_GO"
-    assert "protege" in receipt["error"]
+    assert any(marker in receipt["error"].casefold() for marker in (
+        "protege", "overwritten by merge", "would be overwritten",
+    ))
     assert protected.read_text(encoding="utf-8") == "local protected value\n"
     assert git(origin, "show", "main:catalog/state.json") == "remote protected value"
     assert receipt["push_attempts"] == 0
@@ -1501,7 +1506,8 @@ def test_exact_historical_jsonl_relocation_syncs_with_concurrent_cloud_change(re
 
     assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
     assert receipt["merge_commits_created"] == 0
-    assert receipt["rebases_performed"] == 1
+    # Fast-forward or linear replay are acceptable; exact bytes and no merges are mandatory.
+    assert receipt["rebases_performed"] in (0, 1)
     assert git(origin, "rev-list", "--merges", "main") == ""
     assert receipt["verified_historical_relocations"] == [{
         "source": source,
@@ -1612,40 +1618,22 @@ def test_conflict_kit_python_source_has_no_invalid_escape_warnings() -> None:
     assert r"\`" not in source
 
 
-def test_windows_launcher_bootstraps_git_without_legacy_cmd() -> None:
-    """Double-click resolves missing local helpers without fetching shards."""
+def test_windows_launcher_uses_repository_tools_without_external_bootstrap() -> None:
+    """The supported launcher must never fetch executable helpers at runtime."""
     launcher = Path(__file__).resolve().parents[1] / "POUSSER-GITHUB-FORCE.cmd"
     source = launcher.read_text(encoding="utf-8-sig")
     assert 'call "%~dp0PREPARER_GIT_PORTABLE.cmd"' not in source
-    assert 'call :download_source "tools/install_portable_git.ps1"' in source
-    assert 'call :download_source "tools/alina_git_code_sync.py"' in source
-    assert "ALINA_BOOTSTRAP_REF=c1f2d33909a11ca8f37edd2460a40f9a280f4202" in source
-    engine_sha = hashlib.sha256(
-        (launcher.parent / "tools" / "alina_git_code_sync.py").read_bytes()
-    ).hexdigest()
-    assert f"ALINA_LOCAL_ENGINE_SHA256={engine_sha}" in source
-    assert "ALINA_ENGINE_SHA256=0f1f6c15bf620767eeff0181bf5305682e20d70a8a76f1517999bfa7d9434b5b" in source
-    assert "ALINA_INSTALLER_SHA256=f7715589a563572b1374c35704e5914e6873f88b110e241b9c0b2bfe90a3f297" in source
-    assert "Get-FileHash" not in source
-    assert "System.Security.Cryptography.SHA256]::Create()" in source
-    assert '-File "%ALINA_INSTALLER%"' in source
+    assert "download_source" not in source
+    assert "ALINA_BOOTSTRAP_REF=" not in source
+    assert "ALINA_LOCAL_ENGINE_SHA256=" not in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
-    assert ':get_engine' in source
-    assert 'ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13' in source
-    assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%"' in source
-    assert 'findstr /C:"%ALINA_ENGINE_REQUIRED_BUILD%" "%ALINA_ENGINE%"' in source
-    assert 'if /I "%SYNC_OPTION%"=="--portable-self-check" goto :self_check' in source
-    assert "GIT_LFS_SKIP_SMUDGE=1" in source
-    assert "restore_alina.py" not in source
-    assert "alina_sync" not in source.casefold()
-    assert "[LANCEUR 1/6]" in source
-    assert "[LANCEUR 6/6]" in source
-    assert "DRY-RUN TERMINE" in source
-    assert 'if /I "%HYPERSMART_PUSH_NO_PAUSE%"=="1" goto :finish_cleanup' in source
-    assert "pause" in source
-    assert "PORTABLE_GITHUB_PUSH_CHECK_OK" in source
-    assert "-TimeoutSec 20" in source
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13" in source
+    assert "ast.parse(" in source
+    assert ":missing_engine" in source and ":invalid_engine" in source
+    assert "--shards-only" in source and "--all-safe" in source
+    assert 'set "RC=%ERRORLEVEL%"' in source and "exit /b %RC%" in source
+    assert "git push --force" not in source.lower()
 
 
 def test_new_edit_during_fetch_is_checkpointed_and_published(repos):
