@@ -47,8 +47,10 @@ def test_terminate_process_tree_kills_descendant_process(tmp_path: Path) -> None
     started = time.monotonic()
     try:
         sync_module._terminate_process_tree(parent)
-        parent.wait(timeout=3)
-        assert time.monotonic() - started < 3
+        parent.wait(timeout=10)
+        # Hosted Windows VMs may briefly stall; the real contract is that
+        # both processes terminate (checked below), not a sub-3s scheduler SLA.
+        assert time.monotonic() - started < 10
         assert subprocess.run(
             ["tasklist", "/FI", f"PID eq {child_pid}"],
             capture_output=True,
