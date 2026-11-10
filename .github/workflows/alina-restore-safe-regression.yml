@@ -62,7 +62,12 @@ jobs:
           git cat-file -e "${GITHUB_SHA}^{commit}"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fsck --full
-          test -z "$(git status --porcelain)"
+          git status --porcelain=v1 --untracked-files=no > "$RUNNER_TEMP/alina-clone-status.txt"
+          if test -s "$RUNNER_TEMP/alina-clone-status.txt"; then
+            echo "::error::Fresh clone contains unexpected tracked changes"
+            sed -n '1,50p' "$RUNNER_TEMP/alina-clone-status.txt"
+            exit 1
+          fi
       - name: Exercise the one-file SAFE restore launcher from the fresh clone
         shell: bash
         run: |
