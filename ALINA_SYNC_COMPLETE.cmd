@@ -24,10 +24,17 @@ if "%~1"=="" (
 )
 
 set "MODE=%~1"
+if /i "%MODE%"=="--help" goto :run
+if /i "%MODE%"=="--preflight-only" goto :run
+if /i "%MODE%"=="--catalog-budget" goto :run
+if /i "%MODE%"=="--prune-cache-only" goto :run
 if /i "%MODE%"=="--download-safe" goto :run
 if /i "%MODE%"=="--all-safe" goto :run
 if /i "%MODE%"=="--unpack-safe" goto :run
-if /i "%MODE%"=="--prune-only" goto :run
+if /i "%MODE%"=="--prune-only" (
+    python "%ALINA_ROOT%tools\sync_complete_clone.py" --prune-cache-only
+    endlocal & exit /b !ERRORLEVEL!
+)
 
 echo Option AlinaSync inconnue : %MODE%
 echo Options valides : --download-safe ^| --all-safe ^| --unpack-safe ^| --prune-only
