@@ -69,8 +69,11 @@ def _campaign_inputs(workspace: Path, repository_root: Path) -> None:
 def _install_campaign_stubs(
     monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> None:
+    # Replay split requires >=10 causally aligned signals on each eligible day.
+    # Exercise the campaign lock only after representative preflight succeeds.
     signal_times = [
-        (10 + day) * 86_400_000 + 60_000 for day in range(12)
+        (10 + day) * 86_400_000 + 60_000 + slot * 1_000
+        for day in range(12) for slot in range(10)
     ]
     metaorders = [
         {"signal_ts_ms": timestamp, "action": "ADD", "coin": "BTC"}
