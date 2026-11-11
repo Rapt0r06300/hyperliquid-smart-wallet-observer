@@ -35,6 +35,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+from sous_processus_isole import creationflags  # noqa: E402
+
 from alina_roadmap_progress import (  # noqa: E402
     _file_set_fingerprint,
     load_receipts,
@@ -100,7 +102,8 @@ def recu_echec(row: dict[str, Any], *, exit_code: int | None, now_utc: str, rais
 def _rejouer(tests: tuple[str, ...], root: Path, timeout_s: int) -> int | None:
     commande = [sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests]
     try:
-        return subprocess.run(commande, cwd=root, capture_output=True, timeout=timeout_s, check=False).returncode
+        return subprocess.run(commande, cwd=root, capture_output=True, timeout=timeout_s, check=False,
+                              creationflags=creationflags()).returncode
     except (OSError, subprocess.SubprocessError):
         return None
 
