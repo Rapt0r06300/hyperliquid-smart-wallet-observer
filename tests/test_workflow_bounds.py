@@ -638,3 +638,20 @@ def test_full_normal_clone_is_pinned_to_event_sha_even_when_main_moves():
     assert "git fsck --full" in workflow
     assert "status --porcelain=v1 --untracked-files=no" in workflow
     assert "self-hosted" not in workflow
+
+
+
+def test_global_unique_publication_only_replays_disjoint_campaign_commits():
+    # Historical long-running scan must never rebase stale exact metrics across
+    # concurrent DATA_INDEX or code writes, even when the git rebase succeeds.
+    workflow = _workflow("backfill-global-unique-trade-counts.yml")
+    publish = workflow.split("      - name: Publish deduplication patch", 1)[1]
+    assert "git commit -m" in publish
+    assert "GLOBAL_UNIQUE_PATCH_NEEDS_PARTITION" in publish
+    assert "for attempt in 1 2 3 4; do" in publish
+    assert "tools/rebase_disjoint_catalog_publication.py --remote origin/main" in publish
+    assert "fresh SHA-bound reconstruction required" in publish
+    assert "git rebase origin/main" not in publish
+    assert "git push --force" not in workflow
+    assert "git reset --hard" not in workflow
+    assert "tools/rebase_disjoint_catalog_publication.py" in workflow.split("jobs:", 1)[0]
