@@ -54,8 +54,9 @@ def test_chaque_famille_certifiable_a_un_usage_labo_declare():
 def test_les_usages_consommes_pointent_vers_du_code_qui_lit_vraiment_la_famille():
     etude = (RACINE / "tools" / "etude_copiabilite.py").read_text(encoding="utf-8")
     for famille in ("fills_forward", "fills_backfill", "snapshot", "allmids", "book_l2", "bbo", "micro_bbo",
-                    "asset_ctx", "candle"):
+                    "asset_ctx", "candle", "vault_portfolio"):
         assert f'"{famille}"' in etude, f"l'étude du labo ne sélectionne pas la famille {famille}"
+    assert R.usage_par_famille()["vault_portfolio"] == R.CONSOMME
     labo = (RACINE / "src" / "hl_observer" / "backtesting" / "copy_vault_tier_local.py").read_text(encoding="utf-8")
     assert "_cotation_collecteur_vers_labo" in labo            # cotations du collecteur BBO adaptées
     for famille in ("liquidation", "overshoot", "trades_marche", "venue_book", "venue_dispersion", "position"):
@@ -119,3 +120,15 @@ def test_la_matrice_affiche_la_portee_de_chaque_famille(tmp_path):
     portee = {f["famille"]: f["portee"] for f in matrice["familles_au_coffre"]}
     assert portee["allmids"].startswith("LOCAL SEUL") and portee["bbo"] == "LOCAL + équivalent SAFE"
     assert "LOCAL SEUL" in M.rendre(matrice)
+
+
+def test_les_outils_ne_plantent_pas_sur_une_sortie_non_utf8():
+    """Lancés hors lanceur (journal redirigé, console cp1252), les outils affichent sans planter."""
+    import os
+    import subprocess
+
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252", "PYTHONPATH": str(RACINE / "src")}
+    for outil in ("matrice_couverture_donnees.py", "etude_copiabilite.py"):
+        fini = subprocess.run([sys.executable, "-B", str(RACINE / "tools" / outil), "--help"],
+                              env=env, capture_output=True, timeout=120)
+        assert fini.returncode == 0, (outil, fini.stderr[-300:])

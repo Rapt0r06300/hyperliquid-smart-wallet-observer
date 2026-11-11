@@ -88,6 +88,19 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "research-lab", "script": "tools/lancer_research_parallel.py",
      "intervalle_s": 60, "args": ("--max-ticks", "1"), "limite_minutes": 10.0,
      "heartbeat": "runtime/research_lab/heartbeat.json"},
+    # Carnets L2 + BBO CONTINUS des coins tradés par les leaders (dex HIP-3 compris). Mesuré le
+    # 2026-11-11 : 89 % des signaux des leaders n'avaient aucun carnet dans les 30 s précédentes, donc
+    # aucun coût d'exécution mesurable. Sessions bornées relancées par le superviseur ; la liste
+    # locale est régénérée au lancement (tools/generer_coins_lanes.py), sinon la liste commitée.
+    {"nom": "l2-leaders", "script": "tools/collecter_l2_lane.py",
+     "intervalle_s": 5,
+     "args": ("--coins-file", "runtime/data/copy_vault_coins_local.json", "--duree-s", "1500",
+              "--heartbeat", "l2-leaders"),
+     "limite_minutes": 5.0,
+     "heartbeat": "runtime/research_lab/heartbeats/l2-leaders.json",
+     "execution_capability": EXECUTION_CAPABILITY_NONE,
+     "source_status": SOURCE_STATUS_ACTIVE_OBSERVATION,
+     "paper_read_only": True, "real_execution": False},
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
      "intervalle_s": 30, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/research_lab/micro_heartbeat.json"},
@@ -148,6 +161,7 @@ _HARVEST_SOUHAITE = frozenset({
     "carnet-collector", "marks-collector", "liq-collector", "venues-collector",
     "overshoot-collector", "vault-collector", "scorer-vaults",
     "backfill-fills", "backfill-candles-vaults",
+    "l2-leaders",                                                      # carnets des coins de leaders
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).

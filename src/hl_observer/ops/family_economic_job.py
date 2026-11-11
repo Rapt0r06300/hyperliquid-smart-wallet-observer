@@ -19,7 +19,6 @@ from hl_observer.datasets.replay_workspace import prepare_replay_workspace
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.autonomous_research_status import status_path, write_status
 from hl_observer.ops.final_economic_certification import certify_campaign
-from hl_observer.simulation.economic_objective import TARGET_NET_USD
 from hl_observer.strategies.active_scope import strategy_can_materialize
 
 SUITE_CAMPAIGN_FAMILY = {
@@ -93,10 +92,10 @@ def record_family_economic_memory(
         return None
 
     eligible_net = recertified.get("eligible_net_pnl_usd")
-    if eligible_net is None or float(eligible_net) < TARGET_NET_USD:
-        raise RuntimeError(
-            f"canonically certified campaign has no eligible >={TARGET_NET_USD:g} USD proof"
-        )
+    # Le repère chiffré n'est pas une porte : une campagne certifiée doit porter un net
+    # réconcilié strictement positif, quel que soit son niveau.
+    if eligible_net is None or not float(eligible_net) > 0.0:
+        raise RuntimeError("canonically certified campaign has no strictly positive eligible net proof")
 
     coverage_path = workspace / "runtime" / "reports" / "datasets" / "SOURCE_CONSUMPTION_COVERAGE.json"
     coverage = _load_json_object(coverage_path)

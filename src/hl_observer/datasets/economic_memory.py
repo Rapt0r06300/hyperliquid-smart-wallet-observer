@@ -40,16 +40,27 @@ def _family(value: object) -> str:
     return name
 
 
-def _certified_net(value: object, *, label: str) -> float:
+#: Politique de certification portée par chaque preuve enregistrée depuis la réconciliation avec la
+#: spec canonique (aucun seuil de profit terminal). Une preuve SANS ce marqueur a été certifiée sous
+#: l'ancienne porte chiffrée et reste jugée avec elle : on n'élargit jamais une preuve héritée.
+CERTIFICATION_POLICY = "NET_STRICTLY_POSITIVE_ALL_QUALITY_GATES_V2"
+
+
+def _certified_net(value: object, *, label: str, policy: object = CERTIFICATION_POLICY) -> float:
     try:
         net = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise EconomicMemoryError(f"{label} must be finite") from exc
     if not math.isfinite(net):
         raise EconomicMemoryError(f"{label} must be finite")
-    if net < TARGET_NET_USD:
+    if policy == CERTIFICATION_POLICY:
+        # Toute amélioration nette positive CERTIFIÉE est conservée, même petite ; un net nul ou
+        # négatif n'est jamais une preuve. Le repère chiffré historique est rapporté, pas exigé.
+        if not net > 0.0:
+            raise EconomicMemoryError(f"{label} must be strictly positive after costs")
+    elif net < TARGET_NET_USD:
         raise EconomicMemoryError(
-            f"{label} must be >= canonical target {TARGET_NET_USD:.2f} USD"
+            f"{label} must be >= canonical target {TARGET_NET_USD:.2f} USD (legacy record without certification policy)"
         )
     return net
 
@@ -154,12 +165,18 @@ def record_certified_proof(
         "certified": True,
         "paper_only": True,
         "real_execution": False,
+        "certification_policy": CERTIFICATION_POLICY,
+        "reference_target_net_usd": TARGET_NET_USD,
+        "reference_target_reached": net >= TARGET_NET_USD,
     }
     memory = load_memory(root)
     proofs = dict(memory["proofs"])
     previous = proofs.get(key)
     if previous is not None:
-        if previous != record:
+        # une preuve héritée (sans marqueur de politique) se compare sur ses seuls champs d'origine
+        comparable = record if "certification_policy" in previous else {
+            name: value for name, value in record.items() if name in previous}
+        if previous != comparable:
             raise EconomicMemoryError(
                 "certified proof is immutable; stale/different evidence cannot silently overwrite it"
             )
@@ -203,12 +220,14 @@ def load_exact_proof(
             raise EconomicMemoryError("runtime proof mismatch")
     if record.get("analysis_complete") is not True or record.get("certified") is not True:
         raise EconomicMemoryError("stored proof is not certified complete")
-    _certified_net(record.get("net_pnl_usd"), label="stored net_pnl_usd")
+    _certified_net(record.get("net_pnl_usd"), label="stored net_pnl_usd",
+                   policy=record.get("certification_policy"))
     return dict(record)
 
 
 __all__ = [
     "CANONICAL_FAMILIES",
+    "CERTIFICATION_POLICY",
     "EconomicMemoryError",
     "RELATIVE_PATH",
     "SCHEMA",

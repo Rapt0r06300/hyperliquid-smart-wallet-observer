@@ -1,6 +1,6 @@
 # Alina Smart Flow — Feuille de route Codex complète (3 120 étapes numérotées)
 
-> Export de travail consolidé le **3 novembre 2026** depuis 13 fichiers du dépôt `Rapt0r06300/hyperliquid-smart-wallet-observer` branche `main`. **Ceci est un export pour Codex, non une deuxième spec ou un registre concurrent.** Les 13 documents sources sous `docs/superpowers/plans/` et la spec canonique `docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md` restent l'autorité. L'export ne prouve aucun DONE ni bénéfice.
+> Export de travail consolidé le **3 novembre 2026**, réconcilié avec les règles actives le **11 novembre 2026**, depuis 13 fichiers du dépôt `Rapt0r06300/hyperliquid-smart-wallet-observer` branche `main`. **Ceci est un export pour Codex, non une deuxième spec ou un registre concurrent.** Les 13 documents sources sous `docs/superpowers/plans/` et la spec canonique `docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md` restent l'autorité. L'export ne prouve aucun DONE ni bénéfice.
 >
 > Registre vérifié : **150 ASF + 72 AUD + 200 ECO + 300 LCH + 78 PNL + 300 BUG + 1 000 HVR + 1 000 INT + 20 RIG = 3 120 ID distincts**. Les 1 020 INT/RIG sont de nouvelles tâches du 3 novembre, non une restitution historique. BUG/HVR/INT sont des **hypothèses à confirmer ou réfuter**, non des bugs avérés.
 
@@ -10,7 +10,7 @@
 
 **Lecture obligatoire avant chaque modification :** HEAD réel, `SECURITY.md`, `AGENTS.md`, `docs/HYPERSMART_CONSTITUTION.md`, spec canonique, `docs/LOIS_MESUREES.md`, `CLAUDE.md`, `AGENTS.md` locaux. Runtime principal `src/hl_observer/`. Ne jamais créer un second moteur/repository/spec/orchestrateur/runner/worktree.
 
-**Garde-fous :** Copy-Vault seule famille économique active ; ALINA strictement **PAPER / READ-ONLY / FAIL-CLOSED**, aucun ordre réel ou testnet, aucun `/exchange` opérationnel, aucune signature ni clé, aucun portefeuille connecté, aucun self-hosted runner ni recours au PC via cloud. Continuer les collecteurs GitHub-hosted sans interruption. Donnée absente ou incohérente = refus documenté, jamais donnée ou PnL inventés. Capital de référence : 200 USD paper, sans seuil fixe imposé +5 USD/jour.
+**Garde-fous :** Copy-Vault seule famille économique active ; ALINA strictement **PAPER / READ-ONLY / FAIL-CLOSED**, aucun ordre réel ou testnet, aucun `/exchange` opérationnel, aucune signature ni clé, aucun portefeuille connecté, aucun self-hosted runner ni recours au PC via cloud. Continuer les collecteurs GitHub-hosted sans interruption. Donnée absente ou incohérente = refus documenté, jamais donnée ou PnL inventés. Capital de référence : **350 USD paper** ; repère de recherche : **+5 USD/jour**, sans garantie ni gate automatique.
 
 **Par ID :** (1) vérifier code et consommateur au HEAD, (2) isoler scénario/contrat et reproduire ou falsifier, (3) apporter le plus petit correctif **complet et câblé**, (4) tester positifs + négatifs + régressions + SAFE/replay si pertinent, (5) documenter état, diff réel, commande, exit code, SHA précis et preuve par tâche, (6) cocher `[x]` et `VERIFIED_DONE` **uniquement si la preuve est suffisante**. Les doublons, hypothèses réfutées, hors scope et blocages doivent avoir un statut motivé et une case non cochée. Ne jamais masquer un échec, forcer un gain ni créer un commit vide.
 

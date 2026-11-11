@@ -1,5 +1,7 @@
 # Alina Smart Flow — synchronisation Git bidirectionnelle du code
 
+Dernière mise à jour : **2026-11-11**.
+
 ## Contrat de sécurité
 
 `POUSSER-GITHUB-FORCE.cmd` conserve son nom historique pour les raccourcis
@@ -37,13 +39,15 @@ Le point d'entrée principal appelle `tools/alina_git_code_sync.py`.
 7. Pousse **sans force** uniquement `HEAD:refs/heads/main`. Si GitHub
    avance pendant le push, réessaie la réconciliation au maximum
    cinq fois. Un refus d'authentification ou de branche protégée
-   est traité comme un échec, jamais contourné.
+   est traité comme un échec, jamais contourné. La course de push est bornée à
+   cinq tentatives ; la façade CMD borne séparément ses tentatives globales.
 8. Confirme le SHA distant par `git ls-remote` et le SHA local.
    Écrit un rapport `runtime/reports/git-sync/LAST_SYNC.json`.
 
-Le script n'exécute **jamais** `reset --hard`, `git clean`,
-`git stash`, `--force`, ni de suppression des verrous internes
-`.git/index.lock`. Son verrou d'exclusion mutuelle est libéré par
+Le moteur n'exécute **jamais** `reset --hard`, `git clean`, `git stash` ou
+`push --force`. Il refuse un `.git/index.lock` actif ; la façade CMD ne retire
+un verrou que si aucun processus `git.exe` n'est présent et le signale comme
+réparation d'un verrou périmé. Son verrou d'exclusion mutuelle est libéré par
 le système d'exploitation à la fin de son processus.
 
 ## Modes
@@ -53,6 +57,9 @@ POUSSER-GITHUB-FORCE.cmd
 POUSSER-GITHUB-FORCE.cmd --dry-run
 POUSSER-GITHUB-FORCE.cmd --wip-only
 POUSSER-GITHUB-FORCE.cmd --portable-self-check
+POUSSER-GITHUB-FORCE.cmd --full
+POUSSER-GITHUB-FORCE.cmd --shards-only
+POUSSER-GITHUB-FORCE.cmd --preflight-only
 ```
 
 - **Normal** : checkpoint local, réception de GitHub, fusion prudente et
@@ -63,6 +70,8 @@ POUSSER-GITHUB-FORCE.cmd --portable-self-check
   merge ou push. Adapté aux modifications inachevées.
 - **Self-check** : vérifie que le lanceur, Git et Python sont disponibles
   sans modifier le dépôt ni contacter GitHub.
+- **Full/shards-only/preflight-only** : activent explicitement AlinaSync pour
+  les assets SAFE ; ils ne changent jamais le périmètre du push de code.
 
 ## Diagnostic de conflits conservant les deux versions
 

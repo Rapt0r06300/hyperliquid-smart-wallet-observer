@@ -1,6 +1,6 @@
 # CLAUDE.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-10-27**.
+Dernière mise à jour : **2026-11-11**.
 
 Ce fichier est volontairement **court**. Claude Code le charge à chaque session ; les détails permanents communs à tous les agents vivent dans `AGENTS.md` et la spec canonique.
 
@@ -47,7 +47,10 @@ Famille économique active unique : **Copy-Vault**.
 
 `Lead-Lag / Cross-Venue / arbitrage / Carry / Funding Carry / shadow / research-only = DISABLED_BY_SCOPE` pour simulation, labo, replay/backtest, OOS/forward, preuve PnL, certification et scoreboard. Préserver leur code et leurs preuves sans les exécuter. Aucune variable d'environnement ne peut élargir le scope.
 
-Objectif de recherche : **>= +5.00 USD NET/jour PROUVÉS pour Copy-Vault, sur 200 USD paper**.
+Capital paper opérationnel : **350 USD**. Repère de recherche : **>= +5.00 USD
+NET/jour pour Copy-Vault**, après preuves OOS/forward. Ce repère n'est ni une
+gate ni une promesse ; les anciennes références à 200 USD paper sont historiques
+et inactives, et ne peuvent pas assouplir les gates.
 
 Les statuts honnêtes restent :
 

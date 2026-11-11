@@ -28,6 +28,7 @@ import functools  # noqa: E402
 from hl_observer.collection import vault_fills_backfill as VB  # noqa: E402
 from hl_observer.collection import vault_ledger as VL  # noqa: E402
 from hl_observer.backtesting.copy_vault_causal_selection import causal_live_observation  # noqa: E402
+from hl_observer.collection.forward_poll_fills import is_causal_live_source  # noqa: E402
 from hl_observer.experimental.copy_edge_forward import (charger_prix_tape_candles, charger_prix_tape,  # noqa: E402
                                                         rendement_forward, rendement_forward_candles, geler)
 from hl_observer.experimental.copy_edge_oos import (  # noqa: E402
@@ -142,53 +143,122 @@ def _nav_asof(
     return nav_usd, nav_ts_ms
 
 
+#: Champs d'un fill live utiles à la déduplication et à la reconstruction des cycles. Le ruban
+#: live matérialisé pèse plusieurs Go : on ne garde en mémoire que ces champs, ligne par ligne.
+_CHAMPS_FILL_LIVE = (
+    "vault", "ts_ms", "coin", "px", "sz", "signe", "dir", "start_position", "startPosition",
+    "oid", "tid", "hash", "stable_event_id", "source", "isSnapshot", "is_snapshot",
+    "received_at_ms", "side", "side_raw", "fill_side", "dir_raw", "start_position_raw",
+    "crossed", "source_dataset_id", "source_shard_sha256", "source_raw_sha256",
+    "provenance_tier",
+)
+
+
+def _iter_jsonl(path: Path):
+    """Itère les objets d'un JSONL sans charger le fichier entier (rubans de plusieurs Go)."""
+    try:
+        handle = path.open("r", encoding="utf-8", errors="ignore")
+    except OSError:
+        return
+    with handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                yield row
+
+
 def _fills_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
-    """Merge backfill and causal WS increments without replaying snapshots."""
+    """Merge backfill and causal live increments (WS or disciplined poll) without snapshots.
+
+    La provenance causale suit le point unique de vérité ``is_causal_live_source`` : un fill
+    ``LIVE_POLL`` (poll forward discipliné, horodaté à NOTRE réception) est causal au même titre
+    qu'un fill ``LIVE_WS``. Son instant d'observation reste ``received_at_ms`` : il n'est jamais
+    avancé à l'heure du fill.
+    """
 
     historical = _charger_jsonl(root / FILLS)
-    live_rows = _charger_jsonl(root / FILLS_LIVE)
-    live_incremental = [
-        row for row in live_rows
-        if row.get("source") == "LIVE_WS" and row.get("isSnapshot") is False
-    ]
     causal_live: list[dict] = []
     unclocked_live: list[dict] = []
-    for row in live_incremental:
+    live_rows = live_incremental = snapshots = unprovenanced = 0
+    causal_by_source: dict[str, int] = {}
+    for row in _iter_jsonl(root / FILLS_LIVE):
+        live_rows += 1
+        source = row.get("source")
+        if row.get("isSnapshot") is True:
+            snapshots += 1
+        if not is_causal_live_source(source):
+            unprovenanced += 1
+            continue
+        if row.get("isSnapshot") is not False:
+            continue
+        live_incremental += 1
         try:
             event_ms = int(row.get("ts_ms") or 0)
             received_ms = int(row.get("received_at_ms") or 0)
         except (TypeError, ValueError, OverflowError):
             event_ms = received_ms = 0
+        slim = {key: row[key] for key in _CHAMPS_FILL_LIVE if key in row}
         if event_ms > 0 and received_ms >= event_ms:
-            causal_live.append(row)
+            causal_live.append(slim)
+            causal_by_source[str(source)] = causal_by_source.get(str(source), 0) + 1
         else:
-            unclocked_live.append(row)
+            unclocked_live.append(slim)
     # Put causal rows first. ``dedupliquer`` applies the same hierarchy
-    # independently of read order: causal WS > REST/non-live > unclocked WS.
-    # Legacy unclocked WS rows remain audit history but can never displace REST.
+    # independently of read order: causal live > REST/non-live > unclocked live.
+    # Legacy unclocked live rows remain audit history but can never displace REST.
     merged = causal_live + historical + unclocked_live
     deduped = VB.dedupliquer(merged)
     return deduped, {
         "historical_fill_rows": len(historical),
-        "live_fill_rows": len(live_rows),
-        "live_incremental_rows": len(live_incremental),
+        "live_fill_rows": live_rows,
+        "live_incremental_rows": live_incremental,
         "causal_live_fill_rows": len(causal_live),
+        "causal_live_fill_rows_by_source": dict(sorted(causal_by_source.items())),
         "live_incremental_without_valid_receive_time_audit_only": len(unclocked_live),
-        "live_snapshot_rows_rejected": sum(
-            1 for row in live_rows if row.get("isSnapshot") is True
-        ),
-        "live_unprovenanced_rows_rejected": sum(
-            1 for row in live_rows if row.get("source") != "LIVE_WS"
-        ),
+        "live_snapshot_rows_rejected": snapshots,
+        "live_unprovenanced_rows_rejected": unprovenanced,
         "merged_fill_rows": len(merged),
         "deduped_fill_rows": len(deduped),
         "cross_source_or_internal_duplicates_rejected": len(merged) - len(deduped),
         "causal_rows_preferred_on_duplicate": True,
-        "live_policy": "LIVE_WS_AND_NOT_SNAPSHOT_AND_VALID_LOCAL_RECEIVE_TIME",
+        "live_policy": "CAUSAL_LIVE_SOURCE_WS_OR_POLL_AND_NOT_SNAPSHOT_AND_VALID_LOCAL_RECEIVE_TIME",
     }
 
 
+#: Dernière reconstruction des cycles, réutilisée tant que les fichiers d'entrée sont inchangés
+#: (même chemin, même taille, même date de modification). Le labo appelait deux fois la
+#: reconstruction (entrées puis cycles de vie) : sur un ruban de plusieurs Go, c'était relire et
+#: reconstruire deux fois la même chose. Une seule entrée gardée, pour borner la mémoire.
+_CYCLES_MEMORISES: dict[tuple, tuple[list[dict], dict[str, Any]]] = {}
+
+
+def _signature_entrees(root: Path) -> tuple:
+    signature: list[tuple[str, int, int]] = []
+    for relatif in (FILLS, FILLS_LIVE, LEDGER, EPISODES):
+        chemin = Path(root) / relatif
+        try:
+            etat = chemin.stat()
+            signature.append((str(chemin.resolve()), etat.st_size, etat.st_mtime_ns))
+        except OSError:
+            signature.append((str(chemin), -1, -1))
+    return tuple(signature)
+
+
 def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
+    signature = _signature_entrees(root)
+    memorise = _CYCLES_MEMORISES.get(signature)
+    if memorise is not None:
+        return list(memorise[0]), dict(memorise[1])
+    episodes, audit = _reconstruire_episodes_canoniques(root)
+    _CYCLES_MEMORISES.clear()
+    _CYCLES_MEMORISES[signature] = (episodes, audit)
+    return list(episodes), dict(audit)
+
+
+def _reconstruire_episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
     fills, source_audit = _fills_canoniques(root)
     raw_fill_count = source_audit["merged_fill_rows"]
     if fills:

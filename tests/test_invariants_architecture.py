@@ -64,14 +64,13 @@ OVERSIZE_HISTORICAL_CEILINGS = {
     "backtesting/train_statistics.py": 869,
     "backtesting/copy_vault_executable.py": 1316,
     "backtesting/copy_vault_v21_frozen.py": 1519,
-    "backtesting/copy_vault_local_lab.py": 5074,
+    "backtesting/copy_vault_local_lab.py": 5011,   # 2026-11-11 : chargeur LOCAL extrait (copy_vault_tier_local.py)
     "backtesting/lead_lag_multiasset_train.py": 929,
     "realtime/feed_quality.py": 886,
     "collection/native_venue_coordinator.py": 866,
     "collection/trade_reconciliation.py": 909,
     "market_data/live_l2_service.py": 865,
     "datasets/v2_pipeline.py": 892,
-    "datasets/coffre_certifie.py": 802,
     "hyperliquid/rest_info_client.py": 875,
 }
 

@@ -43,6 +43,7 @@ DEFAULT_NAMES = (
     "userfills-live",
     "native-venues",
     "lab-microstructure",
+    "l2-leaders",
 )
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3

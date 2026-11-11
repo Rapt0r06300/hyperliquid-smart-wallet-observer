@@ -1327,6 +1327,31 @@ def test_dry_run_does_not_mutate_git(repos):
     assert git(local, "diff", "--cached", "--name-only") == ""
 
 
+def test_dry_run_preview_diff_runs_without_a_failing_git_command(repos, capsys):
+    """Régression 2026-11-11 : l'aperçu appelait ``git diff --pathspec-from-file``, option que
+    ``git diff`` ne connaît pas (code 129). L'écran affichait un ÉCHEC et le message proposé
+    ignorait le contenu réel des modifications."""
+    local, _cloud, origin = repos
+    suivi = local / "src" / "suivi.py"
+    suivi.write_text("valeur = 1\n")
+    git(local, "add", "src/suivi.py")
+    git(local, "commit", "-m", "base")
+    git(local, "push", "origin", "HEAD:main")
+    suivi.write_text("valeur = 2\n")                      # fichier SUIVI modifié : un vrai diff à lire
+    (local / "src" / "nouveau.py").write_text("nouveau = 1\n")
+    tete = git(local, "rev-parse", "HEAD")
+
+    rc, receipt = run_sync(local, dry=True)
+
+    sortie = capsys.readouterr().out
+    assert rc == 0 and receipt["status"] == "DRY_RUN_ONLY" and receipt["mutations"] == []
+    assert "[ECHEC] Comparer les fichiers suivis par Git" not in sortie
+    assert "Comparer les fichiers suivis par Git | code=0" in sortie
+    assert receipt["proposed_commit_message"]
+    assert git(local, "rev-parse", "HEAD") == tete and git(origin, "rev-parse", "main") == tete
+    assert git(local, "diff", "--cached", "--name-only") == ""
+
+
 def test_cloud_fast_forward_without_local_changes(repos):
     local, cloud, origin = repos
     cloud_commit(cloud, "docs/cloud.md", "cloud\n")

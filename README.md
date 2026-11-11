@@ -1,5 +1,7 @@
 # Alina Smart Flow
 
+Dernière mise à jour : **2026-11-11**.
+
 **Dataset principal** : données, manifestes, catalogues et preuves de collecte réunis dans **ce dépôt GitHub unique**, sur `main`. L'appellation historique « Dataset V2 » ne désigne pas un second dépôt actif ; les identifiants de format et les chemins techniques `v2` restent inchangés pour garantir la compatibilité.
 
 **Moteur de recherche quantitative crypto strictement paper/read-only, conçu pour produire des preuves économiques reproductibles plutôt que de simples backtests positifs.**
@@ -104,7 +106,7 @@ shards attendu/vérifié et le code retour. Un run rapide ne constitue pas une
 preuve de rentabilité : les résultats restent soumis aux gates causales,
 replay, validation, OOS et forward.
 
-La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le capital paper autorisé est **350 USD**. Aucune cible chiffrée fixe n'est imposée : la recherche vise une **trajectoire monotone-positive nette de coûts** — tout candidat retenu doit améliorer le meilleur courant, même de quelques centimes, sans jamais tomber sous zéro. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
+La preuve Copy-Vault passe par le control plane canonique : `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le capital paper opérationnel est **350 USD** et le repère de recherche est **+5 USD nets/jour**. Ce repère n'est ni une gate automatique ni une promesse : la recherche conserve une trajectoire nette de coûts, avec preuves causales et reproductibles. Copy-Vault est la seule famille économique active ; les autres restent désactivées.
 
 Ces noms fixent le rôle opérateur attendu, pas la preuve que le code actuel est déjà conforme : toute divergence entre un lanceur et ce contrat doit être réparée avant d'annoncer une simulation ou une preuve valide. Les rapports et candidats historiques restent conservés.
 
@@ -116,10 +118,16 @@ Depuis le dépôt local, utiliser **`POUSSER-GITHUB-FORCE.cmd`** lorsque les cha
 contrôle que `origin` désigne le dépôt Alina principal, ajoute les fichiers
 de code/docs/config admissibles, crée un commit non vide si nécessaire,
 intègre les nouveaux commits distants et exécute un `git push origin
-main:main` **sans `--force`**. Il vérifie ensuite le SHA réellement présent
+HEAD:refs/heads/main` **sans `--force`**. Il vérifie ensuite le SHA réellement présent
 sur GitHub. En cas de conflit, fichier secret ou fichier trop gros, il
 échoue sans écraser les commits des collecteurs. Une alternative Git système
 est admise quand le Git portable n'est pas installé.
+
+Le lanceur est compatible avec un travail local en parallèle : les changements
+de données protégées restent hors du push code-only ; si un fichier de code est
+modifié pendant la synchronisation, le moteur conserve le contenu et termine en
+`NO_GO` plutôt que de publier un état partiel. Chaque run laisse son reçu dans
+`runtime/reports/git-sync/LAST_SYNC.json` et son historique borné associé.
 
 **Pour les preuves ignorées/locales produites par Codex**, lancer
 `tools/launchers/BACKUP_LOCAL_ALINA.cmd` lorsque leur conservation sur GitHub est souhaitée.
@@ -284,12 +292,11 @@ Les conclusions honnêtes sont :
 - `UNMEASURABLE`
 - `REJECTED`
 
-**Aucun objectif chiffré fixe n'est imposé.** La recherche vise une **trajectoire
-monotone-positive nette de coûts** sur 350 USD paper : chaque candidat retenu doit
-améliorer le meilleur courant, même de quelques centimes, sans jamais basculer en
-négatif. Le moteur de découverte reste le couple **backtest + replay** du laboratoire,
-qui doit produire de nouvelles stratégies / variantes et ne garder que celles qui
-battent le meilleur courant après coûts. Les versions précédentes ne sont pas écrasées.
+Le repère de **+5 USD nets/jour sur 350 USD paper** est un objectif de recherche,
+pas une gate automatique ni une promesse. Le moteur de découverte reste le couple
+**backtest + replay** du laboratoire, qui doit produire des variantes et ne garder
+que celles qui battent le meilleur courant après coûts. Les versions précédentes
+ne sont pas écrasées et toute preuve reste soumise à OOS/forward.
 
 Un progrès monotone-positif n'est jamais obtenu en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.
 

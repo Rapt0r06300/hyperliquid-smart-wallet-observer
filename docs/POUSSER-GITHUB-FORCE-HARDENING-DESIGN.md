@@ -1,7 +1,7 @@
 # Design — Durcissement de `POUSSER-GITHUB-FORCE.cmd`
 
-Date : 2026-11-04  
-Statut : implémenté et vérifié dans le checkout local
+Date de mise à jour : 2026-11-11
+Statut : implémenté et vérifié dans le checkout local ; aucune décision d'implémentation restante
 
 ## Intention
 
@@ -18,8 +18,8 @@ ou écraser les shards/data.
 - L’inventaire borné actuellement corrigé prend environ 3 secondes sur ce
   checkout.
 - Le contrôle portable du lanceur prend environ 1,5 seconde.
-- La suite dédiée compte maintenant 100 tests ; la dernière exécution complète
-  est verte (`100 passed`).
+- La suite dédiée compte maintenant 102 tests ; la dernière exécution complète
+  est verte (`102 passed`).
 
 ## Objectifs
 
@@ -164,9 +164,11 @@ Ajouter des tests déterministes pour :
 - Un rapport peut échouer à s’écrire : l’échec du reporting ne doit jamais
   transformer une opération Git échouée en succès.
 
-## Décision demandée
+## Décision clôturée
 
-Valider l’approche A et ces critères d’acceptation avant l’implémentation.
+L’approche A a été retenue et implémentée. Les critères restent des contrôles
+de non-régression : une mesure non atteinte reste explicitement documentée et
+ne peut pas être transformée en succès.
 
 ## Extension opérateur validée le 2026-11-04
 
@@ -178,10 +180,9 @@ avec comparaison des SHA et inspection des receipts après chaque run.
 
 ## Résultats mesurés de l'implémentation
 
-- Inventaire réel via `POUSSER-GITHUB-FORCE.cmd --benchmark`, trois séries de
-  cinq répétitions : p50 observées `2,68 s`, `2,65 s` et `2,71 s`, p95
-  `2,79 s`, `2,86 s` et `2,85 s`, exactement `2` appels Git par répétition et
-  `mutations=[]`.
+- Inventaire réel via `python tools/benchmark_git_sync.py --root . --runs 5`,
+  en lecture seule : `mutations=[]` et résultats JSON conservant p50/p95 et le
+  nombre d'appels Git. Le CMD ne prétend pas exposer une option `--benchmark`.
 - Comparaison avec le baseline de la même session : p50 `3,03 s`, p95
   `3,19 s`, trois appels Git ; la fusion de l'inventaire staged/worktree
   apporte donc environ `33 %` de réduction d'appels et `11–12 %` de latence
@@ -190,14 +191,19 @@ avec comparaison des SHA et inspection des receipts après chaque run.
   checkout et n'est pas présenté comme une réussite.
 - Trois exécutions réelles de `--portable-self-check` ont renvoyé `0` avec
   `PORTABLE_GITHUB_PUSH_CHECK_OK`.
-- `--benchmark` et `--plan` ont été exécutés via CMD avec pause désactivée
-  pour le test ; le plan a renvoyé `NO_GO` code `2` à cause des modifications
-  protégées existantes, avec `mutations=0` et receipt horodaté.
+- Le dry-run du moteur et le benchmark restent sans mutation ; les tests de
+  synchronisation refusent les modifications protégées ou concurrentes avec
+  `NO_GO`, `mutations=0` et receipt horodaté.
 - Une synchronisation normale a créé le checkpoint local par la voie plomberie
   en environ `3,1 s` pour 218 chemins admissibles, puis a renvoyé `NO_GO` code
   `2` sans push : `docs/CODEX_GOAL_OBJECTIVE_V31.txt` diverge entre le local et
   GitHub et n'est pas résolvable automatiquement sans choix de contenu. Les
   changements `catalog/...` sont restés hors du commit.
+- Dernière exécution contrôlée : `NO_GO` code `2` après l'arrivée de deux
+  modifications de code pendant le run (`src/hl_observer/simulation/economic_proof_controls.py`
+  et `tests/test_hvr_0861_0880_copy_vault.py`). Le moteur a conservé ces octets,
+  n'a effectué aucun push et a écrit le reçu `LAST_SYNC.json` ; cet état externe
+  reste à réconcilier avant toute publication.
 - Le précédent `git commit` a été reproduit jusqu'au timeout de `301,5 s` avec
   un `index.lock`; après isolation des hooks, le rafraîchissement d'index
   restait le goulot. `write-tree` a été mesuré à environ `2,8 s`, puis le
@@ -207,4 +213,4 @@ avec comparaison des SHA et inspection des receipts après chaque run.
   `--portable-self-check` a renvoyé `0`.
 - Les receipts sont écrits atomiquement dans `LAST_SYNC.json` et
   `history/RUN-<run_id>.json`, avec rétention bornée à 20 fichiers générés.
-- La suite complète finale est verte : `100 passed in 205.13s`.
+- La suite complète finale vérifiée est verte : `102 passed in 167.50s`.

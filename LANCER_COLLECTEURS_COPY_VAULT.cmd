@@ -196,7 +196,7 @@ echo   et vaults depuis Hyperliquid + venues secondaires (Binance,
 echo   Bybit, OKX, Gate, Bitget) pour alimenter les backtests et
 echo   replays du laboratoire quant Copy-Vault.
 echo.
-echo   14 collecteurs actifs (profil %CV_PROFILE%)
+echo   15 collecteurs actifs (profil %CV_PROFILE%)
 echo   + poll causal des leaders (REST) : casse le cap WebSocket ~10/IP
 echo   + explorer autonome : decouvre les traders ACTIFS (suivi adaptatif)
 echo   Securite : PAPER / READ-ONLY / FAIL-CLOSED
@@ -227,6 +227,12 @@ rem --- Suivi ADAPTATIF des leaders : base curee + traders ACTIFS decouverts par
 rem     (diversifie les fills ; le debit REST reste cape par l'AIMD anti-429 du poll) ---
 if exist "%CV_ROOT%tools\fusionner_leaders_actifs.py" (
   "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\fusionner_leaders_actifs.py" --root "%CV_ROOT%." 2>nul
+)
+rem --- Carnets L2 des coins trades par les leaders, dex HIP-3 compris : liste locale regeneree
+rem     depuis les besoins mesures par le labo, chaque nom verifie aupres de l'univers officiel
+rem     (un nom inconnu ferait fermer la connexion). Lue par le collecteur l2-leaders. Fail-soft.
+if exist "%CV_ROOT%tools\generer_coins_lanes.py" (
+  "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\generer_coins_lanes.py" --root "%CV_ROOT%." 2>nul
 )
 
 if exist "%CV_ROOT%tools\collecter_userfills_poll.py" (
@@ -338,13 +344,15 @@ echo     runtime/coffre_certifie, que le labo lit^) + reset session + rapport au
 echo   - Suivi ADAPTATIF des leaders : base curee + traders actifs decouverts.
 echo   - Rapport detaille : runtime/logs/rapport_collecteurs.log ^(erreurs + ameliorations^).
 echo.
-echo Collecteurs lances (profil copy-vault / harvest, 14 collecteurs) :
+echo Collecteurs lances (profil copy-vault / harvest, 15 collecteurs) :
 echo   CORE     : allmids-collector, bbo-collector, userfills-live
 echo   DONNEES  : carnet-collector, venues-collector, marks-collector
 echo   ANALYSE  : liq-collector, overshoot-collector, vault-collector, scorer-vaults
+echo              (vault-collector : positions + courbes valeur/PnL, univers elargi vaults fermes compris)
 echo   BACKFILL : backfill-fills, backfill-candles-vaults
 echo   CAUSAL   : copy-vault-checkpoints (L2 lie aux fills leaders)
 echo   ENRICHI  : native-venues, lab-microstructure
+echo   CARNETS  : l2-leaders (L2 + BBO continus des coins trades par les leaders, dex HIP-3 compris)
 echo.
 echo Auto-recovery :
 echo   Si le superviseur crash, il est relance avec un backoff exponentiel

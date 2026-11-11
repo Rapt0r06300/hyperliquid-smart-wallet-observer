@@ -21,6 +21,8 @@ from hl_observer.simulation.vnext_promotion_protocol import validate_certificati
 from hl_observer.strategies.active_scope import strategy_can_materialize
 
 SCHEMA = "hypersmart.final_economic_certification.v2"
+#: Raisons liées au seul repère chiffré historique : rapportées, jamais bloquantes (spec canonique).
+_REFERENCE_ONLY_REASONS = frozenset({"TARGET_NET_USD_NOT_REACHED", "DAILY_NET_TARGET_NOT_REACHED"})
 CAMPAIGN_DIR = Path("runtime") / "reports" / "economic_campaigns"
 RAW_DIR = CAMPAIGN_DIR / "raw"
 
@@ -175,18 +177,23 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     ):
         reasons.append("ELIGIBLE_NET_DRIFT")
 
-    if recomputed_status != "ATTEINT":
+    # Politique canonique : le repère +5 USD est une mesure, jamais une porte. La certification
+    # exige TOUTES les portes de qualité et un net réconcilié strictement positif ; l'atteinte du
+    # repère est rapportée à part (``reference_target_reached``) et ne bloque rien.
+    quality_passed = recomputed.get("quality_gates_passed") is True
+    positive_proof = recomputed.get("positive_net_proof") is True
+    if not quality_passed:
         reasons.extend(
             str(reason)
             for reason in recomputed.get("objective_reasons", [])
-            if str(reason).strip()
+            if str(reason).strip() and str(reason) not in _REFERENCE_ONLY_REASONS
         )
 
     proof_net = _number(recomputed.get("proof_net_pnl_usd"))
-    if recomputed_eligible is None or recomputed_eligible < TARGET_NET_USD:
-        reasons.append("ELIGIBLE_TARGET_NOT_REACHED")
-    if proof_net is None or proof_net < TARGET_NET_USD:
-        reasons.append("PROOF_TARGET_NOT_REACHED")
+    if not positive_proof or proof_net is None or proof_net <= 0.0:
+        reasons.append("PROOF_NET_NOT_POSITIVE")
+    certifiable_net = proof_net if quality_passed and positive_proof else None
+    reference_reached = recomputed.get("historical_target_reached") is True
 
     oos = payload.get("oos") if isinstance(payload.get("oos"), Mapping) else {}
     forward = payload.get("forward") if isinstance(payload.get("forward"), Mapping) else {}
@@ -233,11 +240,10 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     unique_reasons = list(dict.fromkeys(reasons))
     certified = (
         actual_family == expected
-        and recomputed_status == "ATTEINT"
-        and recomputed_eligible is not None
-        and recomputed_eligible >= TARGET_NET_USD
-        and proof_net is not None
-        and proof_net >= TARGET_NET_USD
+        and quality_passed
+        and positive_proof
+        and certifiable_net is not None
+        and certifiable_net > 0.0
         and liquidatable
         and costs_complete
         and provenance["complete"] is True
@@ -253,8 +259,11 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         "family": expected,
         "status": "CERTIFIED" if certified else "NO_GO",
         "certified": certified,
-        "eligible_net_pnl_usd": recomputed_eligible,
+        "eligible_net_pnl_usd": certifiable_net,
         "proof_net_pnl_usd": proof_net,
+        "reference_target_net_usd": TARGET_NET_USD,
+        "reference_target_reached": reference_reached,
+        "reference_target_is_gate": False,
         "liquidatable_net": liquidatable,
         "oos_positive": oos_positive,
         "forward_positive": forward_positive,

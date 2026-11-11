@@ -27,6 +27,8 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.datasets.coffre_certifie import certifier_book, QUARANTAINE  # noqa: E402
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402 (shard generique)
+from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
+from hl_observer.collection.univers_perps import charger_univers, filtrer_abonnables  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 OUT_DEFAUT = Path("runtime") / "data" / "copy_vault_l2_lane.jsonl"
@@ -231,18 +233,47 @@ def _charger_coins(root: Path, chemin: str) -> list[str]:
     coins = data.get("coins") if isinstance(data, dict) else data
     if not isinstance(coins, list):
         return []
+    # Identité NATIVE du symbole : l'API est sensible à la casse (kPEPE, kSHIB, préfixes de dex
+    # HIP-3). Une mise en majuscules abonnait la lane à « KPEPE », inconnu de l'exchange : aucun
+    # carnet n'était collecté pour ces coins, sans la moindre erreur visible.
     vus: dict[str, None] = {}
     for c in coins:
-        s = str(c).strip().upper()
+        s = preserve_native_instrument_symbol(c)
         if s:
             vus.setdefault(s, None)
     return list(vus)
 
 
+async def _battre(root: Path, nom: str, lane: "LaneL2", deadline: float, *, periode_s: float = 10.0) -> None:
+    """Heartbeat du collecteur lancé en local par le superviseur (les lanes cloud n'en ont pas besoin)."""
+    sys.path.insert(0, str(RACINE / "tools"))
+    import heartbeat_collecteur as HB
+
+    deja = 0
+    while time.monotonic() < deadline:
+        total = lane.emis + lane.emis_bbo
+        try:
+            HB.battre(root, nom, n_ecrites=total - deja,
+                      note=f"{lane.emis} carnets, {lane.emis_bbo} bbo, {lane.reconnects} reconnexions")
+        except (OSError, ValueError):
+            pass
+        deja = total
+        await asyncio.sleep(periode_s)
+
+
 async def _boucle(args: argparse.Namespace) -> int:
     root = Path(args.root)
     tous = _charger_coins(root, args.coins_file)
+    if not tous and args.coins_file != DEFAULT_COINS_FILE:
+        tous = _charger_coins(root, DEFAULT_COINS_FILE)      # liste locale absente : liste commitée
     lane_coins = shard_leaders(tous, args.shard_count, args.shard_index)
+    # Un seul abonnement à un marché inconnu fait fermer TOUTE la connexion par le serveur (vérifié
+    # le 2026-11-11) : on ne s'abonne qu'aux marchés confirmés par l'univers officiel. Découpage
+    # d'abord, filtrage ensuite : la tranche d'une lane ne dépend pas du succès de la vérification.
+    lane_coins, inconnus = filtrer_abonnables(lane_coins, charger_univers(root))
+    if inconnus:
+        print(f"[l2-lane] {len(inconnus)} marche(s) inconnu(s) de l'exchange, NON abonnes : "
+              f"{', '.join(inconnus[:12])}", flush=True)
     if not lane_coins:
         print("[l2-lane] aucun coin pour cette lane.", flush=True)
         return 0
@@ -258,6 +289,8 @@ async def _boucle(args: argparse.Namespace) -> int:
           f"sur {len(groupes)} connexion(s), {int(args.duree_s)}s.", flush=True)
     taches = [asyncio.create_task(_connexion(lane, grp, chr(65 + i), deadline))
               for i, grp in enumerate(groupes)]
+    if args.heartbeat:
+        taches.append(asyncio.create_task(_battre(root, args.heartbeat, lane, deadline)))
     await asyncio.gather(*taches, return_exceptions=True)
     print(f"[l2-lane] fini : {lane.emis} carnets L2 + {lane.emis_bbo} BBO emis, "
           f"{lane.rejets} rejets, {lane.reconnects} reconnexions, {lane.gaps} trous L2 "
@@ -265,6 +298,7 @@ async def _boucle(args: argparse.Namespace) -> int:
     # B29 : sante JSON de la lane (metriques, sans changer l'affichage console).
     try:
         sante = {"lane": f"{args.shard_index}/{args.shard_count}", "coins": len(lane_coins),
+                 "marches_inconnus_non_abonnes": inconnus,
                  "carnets_emis": lane.emis, "bbo_emis": lane.emis_bbo, "rejets": lane.rejets,
                  "reconnects": lane.reconnects, "trous_l2": lane.gaps,
                  "genere_ms": int(time.time() * 1000)}
@@ -285,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--duree-s", type=float, default=1500.0)
     p.add_argument("--out", default="")
     p.add_argument("--bbo-out", default="")
+    p.add_argument("--heartbeat", default="",
+                   help="nom du collecteur pour le heartbeat du superviseur local (vide = aucun, lanes cloud)")
     args = p.parse_args(argv)
     try:
         return asyncio.run(_boucle(args))

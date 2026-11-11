@@ -9,13 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
+from hl_observer.fees.hyperliquid_fees import MIN_ORDER_VALUE_USD
+
 
 @dataclass(frozen=True, slots=True)
 class KellySizerConfig:
     fraction: float = 0.25
     min_win_probability: float = 0.52
     max_equity_fraction: float = 0.05
-    min_notional_usdt: float = 5.0
+    min_notional_usdt: float = MIN_ORDER_VALUE_USD   # jamais sous le minimum d'ordre de la plateforme
     max_notional_usdt: float = 50.0
     max_total_exposure_usdt: float = 200.0
 
@@ -93,7 +95,7 @@ def kelly_size_paper(
     raw_notional = equity * used_fraction
     remaining = max(0.0, float(cfg.max_total_exposure_usdt) - exposure)
     notional = min(raw_notional, float(cfg.max_notional_usdt), remaining)
-    if not math.isfinite(notional) or notional < float(cfg.min_notional_usdt):
+    if not math.isfinite(notional) or notional < max(MIN_ORDER_VALUE_USD, float(cfg.min_notional_usdt)):
         return KellySizingDecision(False, 0.0, round(full, 8), round(used_fraction, 8), round(p, 8), round(b, 8), ("KELLY_NOTIONAL_BELOW_MINIMUM",))
     return KellySizingDecision(True, round(notional, 8), round(full, 8), round(used_fraction, 8), round(p, 8), round(b, 8))
 

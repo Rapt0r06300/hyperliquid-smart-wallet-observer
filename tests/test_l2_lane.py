@@ -48,9 +48,21 @@ def test_carnet_lag_trop_grand_rejete():
 def test_charger_coins(tmp_path):
     cfg = tmp_path / "config" / "copy_vault_coins.json"
     cfg.parent.mkdir(parents=True)
-    cfg.write_text(json.dumps({"coins": ["eth", "BTC", "eth", " sol "]}), encoding="utf-8")
+    cfg.write_text(json.dumps({"coins": ["ETH", "BTC", "ETH", " SOL ", "kPEPE", "xyz:XYZ100", ""]}),
+                   encoding="utf-8")
     coins = L._charger_coins(tmp_path, "config/copy_vault_coins.json")
-    assert coins == ["ETH", "BTC", "SOL"]  # dédupliqué, normalisé en majuscules
+    # Dédupliqué et débarrassé des espaces, MAIS identité native conservée : l'ancien passage en
+    # majuscules abonnait la lane à « KPEPE » (inconnu de l'exchange), donc aucun carnet collecté.
+    assert coins == ["ETH", "BTC", "SOL", "kPEPE", "xyz:XYZ100"]
+
+
+def test_la_liste_reelle_des_lanes_garde_ses_symboles_sensibles_a_la_casse():
+    """La liste commitée contient des coins « k… » : ils doivent arriver intacts à l'abonnement."""
+    coins = L._charger_coins(RACINE, L.DEFAULT_COINS_FILE)
+    natifs = json.loads((RACINE / L.DEFAULT_COINS_FILE).read_text(encoding="utf-8"))["coins"]
+    assert coins == list(dict.fromkeys(str(c).strip() for c in natifs))
+    sensibles = [c for c in natifs if c != c.upper()]
+    assert sensibles and all(c in coins for c in sensibles)
 
 
 def test_construire_bbo_valide():

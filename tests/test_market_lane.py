@@ -38,8 +38,9 @@ def test_parser_candle_valide():
 def test_charger_coins(tmp_path):
     cfg = tmp_path / "config" / "copy_vault_coins.json"
     cfg.parent.mkdir(parents=True)
-    cfg.write_text(json.dumps({"coins": ["eth", "BTC", "eth"]}), encoding="utf-8")
-    assert M._charger_coins(tmp_path, "config/copy_vault_coins.json") == ["ETH", "BTC"]
+    cfg.write_text(json.dumps({"coins": ["ETH", "BTC", "ETH", "kSHIB", "xyz:SP500"]}), encoding="utf-8")
+    # identité native conservée (kSHIB, préfixe de dex HIP-3) : jamais de mise en majuscules
+    assert M._charger_coins(tmp_path, "config/copy_vault_coins.json") == ["ETH", "BTC", "kSHIB", "xyz:SP500"]
 
 
 def test_dedup_trades(tmp_path):

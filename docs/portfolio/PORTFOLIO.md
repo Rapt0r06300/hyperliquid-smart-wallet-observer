@@ -1,12 +1,17 @@
 # Alina Smart Flow — recherche et simulation Copy-Vault
 
+Dernière mise à jour : **2026-11-11**.
+
 > Projet de collecte read-only, replay et simulation paper. Le dépôt ne revendique pas de rentabilité démontrée par la simple présence d'un backtest positif.
 
 ## Mission actuelle
 
 La seule famille économique active est **Copy-Vault**. Le travail consiste à collecter des événements publics de leaders/vaults et les conditions de marché associées, à reconstruire les événements causaux, puis à chercher et évaluer des politiques de copie avec des coûts réalistes. Les autres familles, dont arbitrage, Lead-Lag, Cross-Venue, Carry, market-making et 3x4, sont hors scope actif.
 
-L'objectif terminal de recherche est **au moins +5 USD nets/jour sur 200 USD paper**, à évaluer après les réparations, contrôles de qualité, replay/backtest, OOS et forward paper. C'est une cible, pas une prévision ni une garantie.
+Le repère quantitatif de recherche est **au moins +5 USD nets/jour sur 350 USD
+paper**, à évaluer après les réparations, contrôles de qualité, replay/backtest,
+OOS et forward paper. C'est une mesure à démontrer, pas une prévision, une gate
+automatique ni une garantie.
 
 ## Parcours opérateur
 

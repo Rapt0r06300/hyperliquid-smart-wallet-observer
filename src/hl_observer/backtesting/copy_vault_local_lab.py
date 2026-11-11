@@ -1,7 +1,6 @@
 """Local PAPER Copy-Vault laboratory fed only by verified restored shards."""
 from __future__ import annotations
 
-import bisect
 import gzip
 import hashlib
 import importlib.util
@@ -53,6 +52,7 @@ from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.copy_vault_continuity import load_release_history_audits
 from hl_observer.backtesting.copy_vault_tier_local import _charger_tier_local
+from hl_observer.backtesting.copy_vault_signal_alignment import evaluable_signals
 
 OBJECTIVE_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
 PAPER_CAPITAL_USD = PAPER_EQUITY_USD
@@ -2896,24 +2896,19 @@ def run_local_campaign(
             }
             say("Revues leaders V9 TRAIN : échec de persistance explicite — " + leader_review_persistence["reason"])
     timestamps = [int(row["signal_ts_ms"]) for row in metaorders]
-    bounds = _bounds(timestamps)
-    signal_coverage = _signal_coverage(timestamps)
-    aligned_adds = 0
-    if metaorders and books:
-        for row in metaorders:
-            if str(row.get("action") or "").upper() != "ADD":
-                continue
-            timestamps_for_coin = [int(book["ts_ms"]) for book in books.get(str(row["coin"]), [])]
-            signal_ms = int(row["signal_ts_ms"])
-            index = bisect.bisect_right(timestamps_for_coin, signal_ms) - 1
-            if index >= 0 and signal_ms - timestamps_for_coin[index] <= 30_000:
-                aligned_adds += 1
-    # --- Exploration AUTOMATIQUE de la variante overshoot (consultative, additive) ---
-    # Tourne à CHAQUE run du labo sur le SAFE : rapporte si un filtre anti-débordement
-    # (overshoot = mark vs oracle) bat la baseline. N'altère NI la campagne gelée NI son
-    # verdict officiel (purement exploratoire ; les gates canoniques restent autoritaires).
+    # Découpe TRAIN/VALIDATION/OOS sur les jours ÉVALUABLES (signal + carnet causal) : un jour
+    # sans carnet ne produit aucun trade et rendait TRAIN structurellement vide (essais à vide).
+    alignment = evaluable_signals(metaorders, books)
+    aligned_adds = alignment["aligned_adds"]
+    bounds = _bounds(alignment["timestamps"])
+    signal_coverage = {**_signal_coverage(timestamps), "evaluable": alignment["summary"]}
+    # --- Exploration AUTOMATIQUE de la variante overshoot (consultative, additive) : rapporte si
+    # un filtre anti-débordement (mark vs oracle) bat la baseline, sans toucher au verdict officiel.
+    # Sautée s'il n'y a pas assez de jours évaluables : aucun essai à vide.
     overshoot_exploration: dict[str, Any] = {"status": "NOT_RUN"}
     try:
+        if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+            raise LookupError("INSUFFICIENT_EVALUABLE_SIGNAL_DAYS")
         from hl_observer.backtesting.copy_vault_overshoot_train import (
             explore_overshoot_filtered_train,
         )
@@ -2936,7 +2931,7 @@ def run_local_campaign(
             f"/ {_ov_result.get('trial_count')} essais · {len(_asset_ctx_safe):,} points asset_ctx"
         )
     except Exception as _exc:  # noqa: BLE001 - exploratoire, jamais autoritaire
-        overshoot_exploration = {"status": "FAILED", "reason": f"{type(_exc).__name__}: {_exc}"}
+        overshoot_exploration = {"status": "SKIPPED" if isinstance(_exc, LookupError) else "FAILED", "reason": f"{type(_exc).__name__}: {_exc}"}
 
     base = {
         "paper_read_only": True, "real_execution": False,
@@ -3010,6 +3005,11 @@ def run_local_campaign(
             "candidates_tested": 0,
             "freeze_created": False,
             "economically_proven": False,
+        }
+    if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
+        return {
+            **base, "status": "MORE_DATA", "reason": "INSUFFICIENT_EVALUABLE_SIGNAL_DAYS",
+            "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
     if bounds is None:
         return {

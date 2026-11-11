@@ -50,8 +50,8 @@ certification. Copy‑Vault est l'unique famille économique active; Lead‑Lag,
 Cross‑Venue et les autres familles restent désactivées, avec leurs preuves
 historiques préservées.
 
-La cible économique finale est de démontrer **au moins 5.00 USD nets/jour pour
-Copy‑Vault sur 200 USD paper**, uniquement après les réparations techniques,
+Le repère économique actuel est de démontrer **au moins 5.00 USD nets/jour pour
+Copy‑Vault sur 350 USD paper**, uniquement après les réparations techniques,
 les données SAFE et les preuves replay/OOS/forward. C'est un objectif à
 mesurer, jamais une preuve acquise ni une raison d'affaiblir un gate.
 `COMPLETED_SUITES` reste fail‑closed et lié au SHA. MAX DATA sait escalader les

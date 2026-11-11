@@ -45,6 +45,7 @@ from hl_observer.datasets.coffre_socle import (  # noqa: F401
     FAMILLE_SNAPSHOT,
     FAMILLE_TRADES,
     FAMILLE_VAULT_LEDGER,
+    FAMILLE_VAULT_PORTFOLIO,
     FAMILLE_VENUE,
     MAX_TARGET_LAG_MS,
     PASS,
@@ -72,6 +73,7 @@ from hl_observer.datasets.coffre_familles_collecte import (  # noqa: F401
     certifier_micro_bbo,
     certifier_micro_l2,
     certifier_micro_trade,
+    certifier_portfolio_history,
     certifier_snapshot_vault,
     certifier_vault_ledger,
 )
@@ -98,10 +100,12 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "vault_fills.jsonl": (FAMILLE_FILLS_BACKFILL, "REST_BACKFILL"),
     "node_fills_tape.jsonl": (FAMILLE_FILLS_BACKFILL, "NODE_FILLS"),
     "copy_vault_l2_tape.jsonl": (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS"),
+    "copy_vault_l2_lane.jsonl": (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS"),
     "bbo_tape.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
     "copy_vault_bbo_tape.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
     "copy_vault_bbo_lane.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
     "vault_snapshots.jsonl": (FAMILLE_SNAPSHOT, "SNAPSHOT"),
+    "copy_vault_snapshots_lane.jsonl": (FAMILLE_SNAPSHOT, "CLEARINGHOUSE_WS"),
     "copy_vault_positions_lane.jsonl": (FAMILLE_POSITION, "CLEARINGHOUSE_WS"),
     "copy_vault_trades_lane.jsonl": (FAMILLE_TRADES, "HYPERLIQUID_TRADES_WS"),
     "copy_vault_candle_lane.jsonl": (FAMILLE_CANDLE, "HYPERLIQUID_CANDLE_WS"),
@@ -113,6 +117,7 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "dispersion_venues.jsonl": (FAMILLE_DISPERSION, "CROSS_VENUE_DISPERSION"),
     "explorer_tx_tape.jsonl": (FAMILLE_EXPLORER_TX, "EXPLORER_TX"),
     "vault_ledger.jsonl": (FAMILLE_VAULT_LEDGER, "VAULT_LEDGER"),
+    "vault_portfolio_history.jsonl": (FAMILLE_VAULT_PORTFOLIO, "VAULT_DETAILS_PORTFOLIO"),
     "micro_bbo.jsonl": (FAMILLE_MICRO_BBO, "HL_WS_PUBLIC"),
     "micro_l2book.jsonl": (FAMILLE_MICRO_L2, "HL_WS_PUBLIC"),
     "micro_trades.jsonl": (FAMILLE_MICRO_TRADES, "HL_WS_PUBLIC"),
@@ -511,7 +516,9 @@ def certifier_position(record: Any, *, source: str, now_ms: int,
 def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
     """Clé d'identité d'un enregistrement certifié (pour déduplication)."""
     if famille == FAMILLE_SNAPSHOT:
-        return ("vault_snapshot", record.get("vault"), record.get("ts_ms"))
+        # un compte a un portefeuille par dex : deux états du même instant ne sont pas des doublons
+        dex = record.get("dex")
+        return ("vault_snapshot", record.get("vault"), record.get("ts_ms"), *((dex,) if dex else ()))
     if famille == FAMILLE_EXPLORER_TX:
         return ("explorer_tx", record.get("hash"), record.get("user"), record.get("action_type"),
                 record.get("time"))
@@ -524,6 +531,10 @@ def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
     if famille == FAMILLE_VAULT_LEDGER:
         return ("vault_ledger", record.get("vault"), record.get("hash"), record.get("ts_ms"),
                 record.get("type"), record.get("delta_usd"))
+    if famille == FAMILLE_VAULT_PORTFOLIO:
+        # une même tranche réémise après une coupure a les mêmes bornes et le même nombre de points
+        return ("vault_portfolio", record.get("vault"), record.get("fenetre"),
+                record.get("first_ts_ms"), record.get("ts_ms"), record.get("n_points"))
     if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL):
         return (
             "fill", record.get("vault"), record.get("coin"), record.get("ts_ms"),
@@ -579,6 +590,8 @@ def certifier_record(
         return certifier_micro_trade(record, source=source, now_ms=now_ms)
     if famille == FAMILLE_VAULT_LEDGER:
         return certifier_vault_ledger(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_VAULT_PORTFOLIO:
+        return certifier_portfolio_history(record, source=source, now_ms=now_ms)
     if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL):
         return certifier_fill(record, source=source, famille=famille, now_ms=now_ms)
     if famille == FAMILLE_BOOK_L2:
@@ -669,6 +682,7 @@ __all__ = [
     "certifier_overshoot", "certifier_venue", "certifier_dispersion",
     "certifier_snapshot_vault", "SCHEMA_SNAPSHOT_VAULT", "VERSIONS_CERTIFICATEUR", "version_certificateur",
     "FAMILLE_EXPLORER_TX", "FAMILLE_VAULT_LEDGER", "certifier_explorer_tx", "certifier_vault_ledger",
+    "FAMILLE_VAULT_PORTFOLIO", "certifier_portfolio_history",
     "FICHIERS_NON_CERTIFIES", "motif_non_certifie", "nouvellement_accepte",
     "FAMILLE_MICRO_BBO", "FAMILLE_MICRO_L2", "FAMILLE_MICRO_TRADES",
     "certifier_micro_bbo", "certifier_micro_l2", "certifier_micro_trade",

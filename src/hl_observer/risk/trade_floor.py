@@ -1,7 +1,8 @@
 """Trade floor + fee/gas accounting (S7 — V9, MrFadiAi A4).
 
 Two protections:
-  1. Minimum trade size ($1.50) — tiny tickets are noise and never clear costs.
+  1. Minimum trade size = the venue minimum order value (10 USD on Hyperliquid) — smaller
+     tickets are rejected by the venue and never clear costs.
   2. Cost-aware profit threshold — the required edge is raised so expected
      profit covers round-trip fees and any fixed gas/cost.
 
@@ -12,13 +13,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-MIN_TRADE_USDC = 1.50
+from hl_observer.fees.hyperliquid_fees import MIN_ORDER_VALUE_USD, TAKER_PERP_BPS
+
+# Plancher = valeur minimale d'ordre de la plateforme. L'ancien plancher de 1,50 USD laissait
+# passer des ordres que la plateforme refuse.
+MIN_TRADE_USDC = MIN_ORDER_VALUE_USD
 
 
 @dataclass(frozen=True, slots=True)
 class TradeFloorConfig:
     min_trade_usdc: float = MIN_TRADE_USDC
-    taker_fee_bps: float = 4.5
+    taker_fee_bps: float = TAKER_PERP_BPS   # source unique des frais, jamais recopiée
     round_trips: int = 2
     fixed_cost_usdc: float = 0.0
 
@@ -31,7 +36,7 @@ class TradeFloorDecision:
 
 
 def meets_floor(notional_usdc: float, *, min_trade_usdc: float = MIN_TRADE_USDC) -> bool:
-    return notional_usdc >= min_trade_usdc
+    return notional_usdc >= max(MIN_ORDER_VALUE_USD, min_trade_usdc)
 
 
 def required_edge_bps(notional_usdc: float, config: TradeFloorConfig | None = None) -> float:

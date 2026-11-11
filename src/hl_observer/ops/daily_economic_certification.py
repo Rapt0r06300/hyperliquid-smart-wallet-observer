@@ -226,10 +226,16 @@ def apply_daily_gate(
             reasons.append("FORWARD_DAILY_PROOF_WINDOW_TOO_SHORT")
         if net is not None:
             rate = float(net) / (verified_seconds / 86_400.0)
+    # Politique canonique : le repère journalier est une mesure rapportée, jamais une porte.
+    # Seuls bloquent : un net forward non mesuré ou non strictement positif, et toute raison
+    # structurelle (fenêtre, couverture, horloge, nombre de trades, post-gel).
+    reference_reasons: list[str] = []
     if rate is None:
         reasons.append("FORWARD_DAILY_NET_UNMEASURED")
+    elif rate <= 0.0:
+        reasons.append("FORWARD_DAILY_NET_NOT_POSITIVE")
     elif rate < float(target_net_usd_per_day):
-        reasons.append("TARGET_NET_USD_PER_DAY_NOT_REACHED")
+        reference_reasons.append("TARGET_NET_USD_PER_DAY_NOT_REACHED")
 
     daily_target_reached = bool(
         verified_seconds is not None
@@ -256,10 +262,11 @@ def apply_daily_gate(
         and structural_daily_gate_reached
         and positive_forward_net
     )
-    certified = bool(result.get("certified") is True and daily_target_reached)
+    blocking_reasons = list(dict.fromkeys(reasons))
+    certified = bool(quality_certified and not blocking_reasons)
     if not certified:
         # A positive pooled OOS+forward total is diagnostic only when the
-        # independent forward daily-rate gate has not passed.
+        # independent forward quality gate has not passed.
         result["eligible_net_pnl_usd"] = None
     result.update(
         {
@@ -288,7 +295,9 @@ def apply_daily_gate(
             "structural_daily_gate_reached": structural_daily_gate_reached,
             "temporal_quality_gate": temporal_gate,
             "daily_target_reached": daily_target_reached,
-            "reasons": list(dict.fromkeys(reasons)),
+            "reference_target_is_gate": False,
+            "reference_reasons": reference_reasons,
+            "reasons": blocking_reasons,
         }
     )
     return result

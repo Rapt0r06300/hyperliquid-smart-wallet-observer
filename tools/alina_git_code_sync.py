@@ -782,6 +782,10 @@ def _can_defer_staged_protected(path: str) -> bool:
     }
 
 
+#: nombre de chemins par appel ``git diff`` de l'apercu a blanc (ligne de commande Windows bornee)
+_DRY_RUN_DIFF_LOT = 150
+
+
 def _git_operation_label(args: list[str]) -> str:
     """Return a safe, user-facing description without echoing raw arguments."""
     verb = args[0] if args else ""
@@ -2511,17 +2515,19 @@ class Synchronizer:
         for path in eligible:
             self._check_file_payload(path, self.root / path)
         if self.dry_run and eligible:
-            pathspec_bytes = (
-                b"\0".join(p.encode("utf-8") for p in eligible) + b"\0"
-            )
-            proposed_diff = self.command(
-                "diff", "HEAD", "--no-ext-diff", "--unified=0",
-                "--pathspec-from-file=-", "--pathspec-file-nul",
-                input_bytes=pathspec_bytes, check=False,
-            )
+            # ``git diff`` n'accepte pas ``--pathspec-from-file`` (code 129, seulement add/commit/
+            # reset...) : l'apercu echouait toujours et le message propose retombait sur un libelle
+            # generique. Les chemins sont passes en arguments, par lots (limite de ligne de commande).
+            morceaux: list[bytes] = []
+            for debut in range(0, len(eligible), _DRY_RUN_DIFF_LOT):
+                apercu = self.command(
+                    "diff", "HEAD", "--no-ext-diff", "--unified=0", "--",
+                    *eligible[debut:debut + _DRY_RUN_DIFF_LOT], check=False,
+                )
+                morceaux.append(apercu.stdout or b"")
             proposed_message = _commit_subject(
                 eligible,
-                proposed_diff.stdout.decode("utf-8", errors="replace"),
+                b"".join(morceaux).decode("utf-8", errors="replace"),
             )
             self.report["proposed_commit_message"] = proposed_message
             self.say(f"[DRY-RUN] Commit propose: {proposed_message}")

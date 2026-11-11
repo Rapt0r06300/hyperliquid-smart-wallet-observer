@@ -1,17 +1,26 @@
 # GitHub Data Vault — architecture Alina SmartFlow
 
-## Objectif
+Dernière mise à jour : **2026-11-11**.
 
-GitHub doit conserver le maximum d'information utile à la recherche Alina afin que le code, les récoltes, les replays, les résultats et leur provenance puissent être retrouvés sans dépendre d'un seul PC.
+> **Contrat actuel :** le repository `Rapt0r06300/hyperliquid-smart-wallet-observer`
+> est l'unique dépôt actif pour le code, les catalogues, les manifests et les
+> preuves. L'ancien dépôt privé `hypersmart-datasets` est retiré de l'architecture
+> active et ne doit être ni requis ni interrogé. Les paragraphes historiques
+> ci-dessous sont conservés pour provenance ; la synchronisation SAFE actuelle
+> passe par `ALINA_SYNC_COMPLETE.cmd` et les GitHub Releases du dépôt unique.
 
-Le stockage est séparé en deux dépôts :
+## Objectif historique conservé
+
+GitHub doit conserver le maximum d'information utile à la recherche Alina afin que le code, les récoltes, les replays, les résultats et leur provenance puissent être retrouvés sans dépendre d'un seul PC. Cette section décrit l'ancien modèle de séparation pour audit ; elle n'autorise plus un second dépôt actif.
+
+Le stockage était historiquement séparé en deux dépôts :
 
 - `Rapt0r06300/hyperliquid-smart-wallet-observer` : code et moteur du Vault ;
 - `Rapt0r06300/hypersmart-datasets` : dépôt privé de données lourdes, catalogues et Releases.
 
 Le dépôt de code est public. Les données lourdes restent privées.
 
-## Couches de données
+## Couches de données historiques
 
 L'architecture conserve les couches existantes au lieu de les remplacer :
 
@@ -20,9 +29,9 @@ L'architecture conserve les couches existantes au lieu de les remplacer :
 3. snapshots incrémentaux futurs du dossier projet ;
 4. snapshots incrémentaux futurs de `ALINA_RESEARCH_HOME`.
 
-Les fichiers déjà archivés puis supprimés localement restent référencés dans l'index cumulatif. Une suppression locale ne devient donc pas une suppression de sauvegarde.
+Les fichiers déjà archivés puis supprimés localement restent référencés dans l'index cumulatif. Une suppression locale ne devient donc pas une suppression de sauvegarde. Les nouveaux assets SAFE doivent toutefois suivre le contrat courant du dépôt unique et ses manifests/hash vérifiés.
 
-## Moteur incrémental
+## Moteur incrémental historique
 
 Les outils canoniques sont :
 
@@ -50,7 +59,7 @@ Le publieur refuse un asset sans SHA-256 GitHub et ne publie la Release qu'aprè
 
 Le Vault supporte un `source_label` afin de ne jamais mélanger plusieurs racines.
 
-### alina-project
+### alina-project (ancienne source locale)
 
 Source prévue sur le portable :
 
@@ -64,7 +73,7 @@ Zones de données principales :
 - `logs/**`
 - `Rapports en continu/**`
 
-### alina-research-home
+### alina-research-home (ancienne source externe)
 
 Source : variable machine `ALINA_RESEARCH_HOME`.
 

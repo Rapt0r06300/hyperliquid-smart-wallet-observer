@@ -24,6 +24,8 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402
+from hl_observer.instrument_identity import preserve_native_instrument_symbol  # noqa: E402
+from hl_observer.collection.univers_perps import charger_univers, filtrer_abonnables  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 TRADES_OUT = Path("runtime") / "data" / "copy_vault_trades_lane.jsonl"
@@ -171,9 +173,11 @@ def _charger_coins(root: Path, chemin: str) -> list[str]:
     coins = data.get("coins") if isinstance(data, dict) else data
     if not isinstance(coins, list):
         return []
+    # Identité NATIVE du symbole (kPEPE, kSHIB, préfixes de dex HIP-3) : jamais de mise en
+    # majuscules, sinon l'abonnement vise un coin que l'exchange ne connaît pas (aucune donnée).
     vus: dict[str, None] = {}
     for c in coins:
-        s = str(c).strip().upper()
+        s = preserve_native_instrument_symbol(c)
         if s:
             vus.setdefault(s, None)
     return list(vus)
@@ -183,6 +187,12 @@ async def _boucle(args: argparse.Namespace) -> int:
     root = Path(args.root)
     tous = _charger_coins(root, args.coins_file)
     lane_coins = shard_leaders(tous, args.shard_count, args.shard_index)
+    # Un abonnement à un marché inconnu fait fermer toute la connexion : seuls les marchés
+    # confirmés par l'univers officiel sont abonnés (découpage d'abord, filtrage ensuite).
+    lane_coins, inconnus = filtrer_abonnables(lane_coins, charger_univers(root))
+    if inconnus:
+        print(f"[market] {len(inconnus)} marche(s) inconnu(s) de l'exchange, NON abonnes : "
+              f"{', '.join(inconnus[:12])}", flush=True)
     if not lane_coins:
         print("[market] aucun coin pour cette lane.", flush=True)
         return 0

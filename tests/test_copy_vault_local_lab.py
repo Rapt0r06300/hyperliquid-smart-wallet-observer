@@ -208,6 +208,9 @@ def test_campaign_checkpoint_reconciles_durable_trials_and_invalidates_changed_c
 def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candidate_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Fixture volontairement minuscule (un signal par jour) : ce test porte sur la reprise de
+    # campagne, pas sur la densité des données, vérifiée dans test_copy_vault_signal_alignment.
+    monkeypatch.setattr("hl_observer.backtesting.copy_vault_signal_alignment.MIN_SIGNALS_PER_DAY", 1)
     repository_root = tmp_path / "repo"
     workspace = tmp_path / "workspace"
     data_dir = workspace / "runtime" / "data"
@@ -801,6 +804,9 @@ def test_safe_catalog_audit_discloses_copy_vault_snapshots_outside_replay_inputs
 def test_campagne_e2e_materialisee_separe_snapshot_historique_du_flux_live(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Fixture volontairement minuscule (un signal par jour) : ce test porte sur la matérialisation
+    # de bout en bout, pas sur la densité des données (voir test_copy_vault_signal_alignment).
+    monkeypatch.setattr("hl_observer.backtesting.copy_vault_signal_alignment.MIN_SIGNALS_PER_DAY", 1)
     recovery = tmp_path / "runtime" / "recovery" / "full"
     recovery.mkdir(parents=True)
     tag = "copy-vault-e2e-fixture"

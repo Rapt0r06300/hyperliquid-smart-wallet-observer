@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from hl_observer.config.settings import Settings
 from hl_observer.edge.edge_remaining import compute_edge_remaining
+from hl_observer.fees.hyperliquid_fees import TAKER_PERP_BPS
 from hl_observer.hyperliquid.schemas import EdgeRemainingInputs, SignalCandidate, SignalDecision, SignalScore
 from hl_observer.risk.gates import RiskContext
 from hl_observer.risk.risk_engine import RiskEngine
@@ -39,7 +40,9 @@ class CopySignalTuning(BaseModel):
     cluster_confirmation_bps: float = 0.0
     orderbook_confirmation_bps: float = 0.0
     regime_bonus_bps: float = 0.0
-    taker_fee_bps: float = 4.0
+    # Frais taker LUS à la source unique (4,5 bps au palier de base). La valeur 4,0 recopiée ici
+    # sous-estimait le coût de 0,5 bps par jambe et rendait l'avantage restant trop favorable.
+    taker_fee_bps: float = TAKER_PERP_BPS
     spread_cost_bps: float = 3.0
     estimated_slippage_bps: float = 5.0
     latency_decay_bps: float = 2.0

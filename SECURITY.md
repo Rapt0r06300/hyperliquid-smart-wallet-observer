@@ -1,6 +1,6 @@
 # Politique de sécurité — Alina Smart Flow
 
-Dernière mise à jour : **2026-09-27**.
+Dernière mise à jour : **2026-11-11**.
 
 Alina Smart Flow (anciennement HyperSmart) est un moteur de recherche quantitative et de simulation **strictement paper/read-only**. La sécurité du projet ne consiste pas seulement à protéger des secrets : elle protège aussi l'intégrité des données, la causalité des replays et l'impossibilité d'atteindre une exécution réelle.
 
@@ -135,9 +135,13 @@ Interdit notamment :
 - compenser l'échec d'une famille par le profit d'une autre ;
 - transformer `MORE_DATA` ou `UNMEASURABLE` en `PROVEN` sans preuve.
 
-La cible terminale de recherche est **>= +5 USD NET/jour pour Copy-Vault** sur
-200 USD paper, après les réparations techniques et la preuve OOS/forward
-requise. Elle n'a jamais priorité sur l'intégrité de la preuve.
+Le capital paper opérationnel de référence est **350 USD**. Le repère quantitatif
+de recherche est **>= +5 USD NET/jour pour Copy-Vault sur 350 USD de capital
+paper**, après les réparations techniques et les preuves OOS/forward requises.
+Ce repère n'est ni une gate automatique ni une promesse de rendement : chaque
+amélioration doit rester traçable, reproductible et soumise aux gates de coûts,
+causalité, OOS et forward. Toute ancienne référence à 200 USD de capital paper
+est historique et inactive.
 
 ## 8. Scope économique effectif
 

@@ -109,6 +109,12 @@ TAKER_PERP_BPS = 4.5
 MAKER_SPOT_BPS = 4.0            # 🔴 le spot coute 2,7x plus cher en maker que le perp
 TAKER_SPOT_BPS = 7.0
 
+# 🔒 Valeur minimale d'un ordre sur Hyperliquid : en dessous, la plateforme REFUSE l'ordre
+# (« Order must have minimum value of $10 »). Une simulation qui accepte un ordre plus petit
+# simule un trade impossible : avec un petit capital réparti sur plusieurs positions, c'est une
+# source directe d'optimisme. Déclarée une seule fois ; tout dimensionneur doit la LIRE.
+MIN_ORDER_VALUE_USD = 10.0
+
 MOTIF_TIER_INCONNU = "TIER_DE_FRAIS_INCONNU"
 
 
@@ -198,7 +204,8 @@ def nos_frais(marche: str = "perp") -> Frais:
 
 __all__ = [
     "DATE_LECTURE", "FACTEUR_GROWTH_MODE", "GRILLE_PERPS", "GRILLE_SPOT",
-    "MAKER_PERP_BPS", "MAKER_SPOT_BPS", "MOTIF_TIER_INCONNU", "NOTRE_HYPE_STAKE", "NOTRE_TIER",
+    "MAKER_PERP_BPS", "MAKER_SPOT_BPS", "MIN_ORDER_VALUE_USD", "MOTIF_TIER_INCONNU", "NOTRE_HYPE_STAKE",
+    "NOTRE_TIER",
     "REMISES_STAKING", "SOURCE_DOC", "TAKER_PERP_BPS", "TAKER_SPOT_BPS",
     "Frais", "frais", "nos_frais", "remise_staking", "tier_pour_volume",
 ]

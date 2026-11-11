@@ -11,15 +11,17 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from hl_observer.fees.hyperliquid_fees import MAKER_PERP_BPS, TAKER_PERP_BPS
 from hl_observer.paper_trading.execution_truth import ExecutionTruth, normalize_execution_side
 
 
 @dataclass(frozen=True, slots=True)
 class ExecModelConfig:
-    # Hyperliquid base-tier defaults. Runtime fee provenance is audited
-    # separately; callers may replace these only with a measured fee tier.
-    taker_fee_bps: float = 4.5
-    maker_fee_bps: float = 1.5
+    # Hyperliquid base-tier defaults, READ from the single fee source of truth
+    # (never re-typed here). Runtime fee provenance is audited separately;
+    # callers may replace these only with a measured fee tier.
+    taker_fee_bps: float = TAKER_PERP_BPS
+    maker_fee_bps: float = MAKER_PERP_BPS
     maker_rebate_bps: float = 0.0
     half_spread_bps: float = 1.0
     impact_coef_bps: float = 10.0

@@ -37,10 +37,32 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+from hl_observer.collection import vault_portfolio_history as VPH  # noqa: E402
+from hl_observer.collection.portefeuille_compte import construire_portefeuille  # noqa: E402
 
 URL_INFO = "https://api.hyperliquid.xyz/info"
 URL_VAULTS = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
 SORTIE = Path("runtime") / "data" / "vault_snapshots.jsonl"
+#: courbes valeur / PnL / volume publiées par vaultDetails (points nouveaux à chaque passe)
+SORTIE_HISTORIQUE = Path("runtime") / "data" / "vault_portfolio_history.jsonl"
+ETAT_HISTORIQUE = Path("runtime") / "data" / "vault_portfolio_etat.json"
+#: Balayage lent de l'univers ÉLARGI (vaults fermés compris) pour l'historique de portefeuille.
+#: Mesuré le 2026-11-11 : 6 421 vaults fermés sur 9 478 créés. Ne garder que les 69 vaults ouverts
+#: et gros d'aujourd'hui, c'est n'observer que les survivants : toute mesure de compétence en est
+#: biaisée. Le balayage relit donc aussi les vaults qui ont compté puis disparu.
+ETAT_BALAYAGE = Path("runtime") / "data" / "vault_portfolio_balayage.json"
+BALAYAGE_MIN_TVL_USD = 1_000.0          # vault ouvert : au moins 1 000 USD aujourd'hui
+BALAYAGE_MIN_PNL_ABS_USD = 1_000.0      # vault fermé : son PnL cumulé a dépassé 1 000 USD en valeur absolue
+BALAYAGE_PAR_PASSE = 12                 # 12 lectures par passe de 5 min : environ 4 % du budget d'API par IP
+BALAYAGE_LISTE_MAX_AGE_S = 24 * 3600.0  # la liste publique est relue une fois par jour
+#: Portefeuilles complets des LEADERS lents (traders suivis, pas seulement les vaults). Le labo les
+#: réclame (besoin POSITIONS_COMPLETES) : sans eux, la position d'un leader n'est connue que sur les
+#: coins qu'il a tradés pendant la fenêtre, et le portefeuille répliqué est partiel.
+SORTIE_PORTEFEUILLES = Path("runtime") / "data" / "copy_vault_snapshots_lane.jsonl"
+BESOINS_LABO = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
+ARCHETYPES_LENTS = frozenset({"DIRECTIONAL_SLOW", "SWING"})
+DEXS_PORTEFEUILLES = ("", "xyz")        # dex principal + dex HIP-3 portant la majorité du notionnel
+MAX_LEADERS_PORTEFEUILLES = 150
 CONFIG = Path("runtime") / "data" / "vaults_suivis.json"
 ETAT = Path("runtime") / "data" / "vaults_etat.json"           # NAV pic + dernière expo (drawdown/delta)
 #: vaults de MARKET-MAKING à ne JAMAIS suivre (copier un MM taker = perte structurelle).
@@ -315,29 +337,202 @@ def _sauver_etat(root: Path, etat: dict) -> None:
     CF.ecrire_atomique(root / ETAT, json.dumps(etat, ensure_ascii=False))
 
 
+def _charger_etat_historique(root: Path) -> dict[str, dict]:
+    """Dernier point déjà émis par vault et par fenêtre. Illisible ou absent -> rattrapage complet."""
+    try:
+        brut = json.loads((root / ETAT_HISTORIQUE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    # Un état écrit avec un autre schéma de ligne est ignoré : tout est réémis dans le schéma
+    # courant (les lignes déjà au coffre restent, elles sont dédupliquées ou distinguées par schéma).
+    if not isinstance(brut, dict) or brut.get("_schema") != VPH.SCHEMA_PORTFOLIO_HISTORY:
+        return {}
+    return {str(k): v for k, v in brut.items() if isinstance(v, dict)}
+
+
+def _sauver_etat_historique(root: Path, etat_historique: dict[str, dict]) -> None:
+    CF.ecrire_atomique(root / ETAT_HISTORIQUE, json.dumps(
+        {"_schema": VPH.SCHEMA_PORTFOLIO_HISTORY, **etat_historique}, ensure_ascii=False))
+
+
 def une_passe(root: Path, vaults: list[str], *, now: float | None = None,
               cache: "CF.CacheDedup | None" = None) -> int:
     """Un cycle : pour chaque vault, clearinghouse + vaultDetails -> snapshot complet écrit. Un vault
     illisible ou un réseau coupé n'arrête pas les autres (deny-by-default, jamais d'invention)."""
     t = now if now is not None else time.time()
     etat = _charger_etat(root)
+    etat_historique = _charger_etat_historique(root)
     snaps: list[dict] = []
+    historique: list[dict] = []
     for v in vaults:
         try:
             cs = parser_clearinghouse(_post_info({"type": "clearinghouseState", "user": v}))
-            vd = parser_vault_details(_post_info({"type": "vaultDetails", "vaultAddress": v}))
+            vd_brut = _post_info({"type": "vaultDetails", "vaultAddress": v})
         except (urllib.error.URLError, OSError, ValueError, TimeoutError):
             continue
+        # La réponse vaultDetails porte des mois de courbe valeur/PnL/volume : on la conserve
+        # (points nouveaux seulement), datée de NOTRE réception. Sans effet sur le snapshot.
+        recu_ms = int((now if now is not None else time.time()) * 1000)
+        lignes, haute_eau = VPH.construire_lignes(
+            v, vd_brut, observed_at_ms=recu_ms, etat_vault=etat_historique.get(v))
+        if lignes:
+            historique.extend(lignes)
+            etat_historique[v] = haute_eau
         if cs is None:
             continue
+        vd = parser_vault_details(vd_brut)
         snap = construire_snapshot(v, cs, vd, now=t, etat_prec=etat.get(v))
         snaps.append(snap)
         etat[v] = {"expo_nette_usd": cs["expo_nette_usd"], "nav_usd": cs["nav_usd"]}
     _sauver_etat(root, etat)
+    if historique:
+        # Lignes d'abord, haute eau ensuite : une coupure entre les deux réémet des points déjà
+        # écrits (dédupliqués à la certification), elle n'en perd jamais.
+        CF.append_jsonl(root / SORTIE_HISTORIQUE, historique)
+        _sauver_etat_historique(root, etat_historique)
     if not snaps:
         return 0
     propres = CF.collecter_proprement(snaps, source="vault_hl", champs_cle=("vault", "ts_ms"), cache=cache)
     return CF.append_jsonl(root / SORTIE, propres)
+
+
+def univers_historique(payload: Any, *, min_tvl_usd: float = BALAYAGE_MIN_TVL_USD,
+                       min_pnl_abs_usd: float = BALAYAGE_MIN_PNL_ABS_USD) -> list[str]:
+    """Adresses dont l'historique mérite d'être relu : vaults ouverts non négligeables ET vaults
+    fermés qui ont compté. PUR. Ce n'est pas une sélection de trading : un univers d'observation,
+    choisi sur la taille, jamais sur le signe du résultat (un vault ruiné y entre comme un gagnant)."""
+    if not isinstance(payload, list):
+        return []
+    retenus: dict[str, None] = {}
+    for row in payload:
+        summary = row.get("summary") if isinstance(row, dict) else None
+        if not isinstance(summary, dict):
+            continue
+        relation = summary.get("relationship") or {}
+        if not isinstance(relation, dict) or str(relation.get("type") or "").lower() != "normal":
+            continue
+        adresse = str(summary.get("vaultAddress") or "").strip().lower()
+        if not _ADRESSE_COMPLETE.fullmatch(adresse) or adresse in VAULTS_EXCLUS:
+            continue
+        if summary.get("isClosed") is False:
+            tvl = _f(summary.get("tvl"))
+            if tvl is not None and tvl >= float(min_tvl_usd):
+                retenus.setdefault(adresse, None)
+            continue
+        cumul: list[float] = []
+        for fenetre in row.get("pnls") or ():
+            if isinstance(fenetre, (list, tuple)) and len(fenetre) > 1 and fenetre[0] == "allTime":
+                cumul = [v for v in (_f(x) for x in fenetre[1] or ()) if v is not None]
+        if cumul and max(abs(v) for v in cumul) >= float(min_pnl_abs_usd):
+            retenus.setdefault(adresse, None)
+    return sorted(retenus)
+
+
+def balayer_historique(root: Path, *, max_vaults: int = BALAYAGE_PAR_PASSE, now: float | None = None,
+                       pause_s: float = 0.0) -> dict[str, Any]:
+    """Relit l'historique de portefeuille des ``max_vaults`` vaults suivants de l'univers élargi.
+
+    Reprise exacte : un curseur persistant avance vault après vault ; la liste publique est
+    relue au plus une fois par jour ; une lecture en échec n'arrête rien (le vault sera relu au
+    tour suivant). Seuls les points nouveaux sont écrits (même haute eau que les vaults suivis).
+    """
+    t = now if now is not None else time.time()
+    try:
+        etat = json.loads((root / ETAT_BALAYAGE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        etat = {}
+    adresses = etat.get("adresses") if isinstance(etat, dict) else None
+    liste_ms = etat.get("liste_ms") if isinstance(etat, dict) else None
+    perimee = not isinstance(liste_ms, (int, float)) or t * 1000 - liste_ms > BALAYAGE_LISTE_MAX_AGE_S * 1000
+    if not isinstance(adresses, list) or not adresses or perimee:
+        try:
+            nouvelles = univers_historique(_get_vaults_public())
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+            nouvelles = []
+        if nouvelles:                       # une liste vide ou illisible ne remplace jamais l'ancienne
+            adresses, liste_ms = nouvelles, int(t * 1000)
+    if not isinstance(adresses, list) or not adresses:
+        return {"univers": 0, "lus": 0, "lignes": 0, "echecs": 0, "tour": 0}
+    curseur = int(etat.get("curseur") or 0) % len(adresses) if isinstance(etat, dict) else 0
+    tour = int(etat.get("tour") or 0) if isinstance(etat, dict) else 0
+    etat_historique = _charger_etat_historique(root)
+    lignes: list[dict] = []
+    lus = echecs = 0
+    for _ in range(min(max(0, int(max_vaults)), len(adresses))):
+        vault = str(adresses[curseur])
+        curseur += 1
+        if curseur >= len(adresses):
+            curseur, tour = 0, tour + 1
+        try:
+            brut = _post_info({"type": "vaultDetails", "vaultAddress": vault})
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+            echecs += 1
+            continue
+        lus += 1
+        recu_ms = int((now if now is not None else time.time()) * 1000)
+        nouvelles_lignes, haute_eau = VPH.construire_lignes(
+            vault, brut, observed_at_ms=recu_ms, etat_vault=etat_historique.get(vault))
+        if nouvelles_lignes:
+            lignes.extend(nouvelles_lignes)
+            etat_historique[vault] = haute_eau
+        if pause_s > 0:
+            time.sleep(pause_s)
+    if lignes:
+        CF.append_jsonl(root / SORTIE_HISTORIQUE, lignes)
+        _sauver_etat_historique(root, etat_historique)
+    CF.ecrire_atomique(root / ETAT_BALAYAGE, json.dumps(
+        {"liste_ms": liste_ms, "adresses": adresses, "curseur": curseur, "tour": tour,
+         "maj_ms": int(t * 1000), "read_only": True}, ensure_ascii=False))
+    return {"univers": len(adresses), "lus": lus, "lignes": len(lignes), "echecs": echecs,
+            "tour": tour, "curseur": curseur}
+
+
+def leaders_lents(root: Path) -> list[str]:
+    """Adresses des leaders que le labo classe lents ou swing (plan publié par l'étude de copiabilité).
+    Les robots HFT et les grappes de clones n'y figurent pas : leur portefeuille change trop vite pour
+    une réplication lente. Plan absent ou illisible -> liste vide (jamais d'univers inventé)."""
+    try:
+        plan = json.loads((root / BESOINS_LABO).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    retenus: dict[str, None] = {}
+    for leader in plan.get("leaders") or () if isinstance(plan, dict) else ():
+        if not isinstance(leader, dict) or leader.get("archetype") not in ARCHETYPES_LENTS:
+            continue
+        for adresse in leader.get("addresses") or ():
+            adresse = str(adresse).strip().lower()
+            if _ADRESSE_COMPLETE.fullmatch(adresse):
+                retenus.setdefault(adresse, None)
+    return list(retenus)[:MAX_LEADERS_PORTEFEUILLES]
+
+
+def passe_portefeuilles_leaders(root: Path, *, now: float | None = None,
+                                dexs: tuple[str, ...] = DEXS_PORTEFEUILLES) -> dict[str, int]:
+    """Un instantané complet de portefeuille par leader lent et par dex (``clearinghouseState``,
+    lecture seule, requête légère). Un leader illisible n'arrête pas les autres ; rien n'est inventé."""
+    leaders = leaders_lents(root)
+    lignes: list[dict] = []
+    echecs = 0
+    for adresse in leaders:
+        for dex in dexs:
+            charge = {"type": "clearinghouseState", "user": adresse}
+            if dex:
+                charge["dex"] = dex
+            try:
+                etat = _post_info(charge)
+            except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+                echecs += 1
+                continue
+            recu_ms = int((now if now is not None else time.time()) * 1000)
+            snap = construire_portefeuille(etat, user=adresse, recv_ms=recu_ms, dex=dex,
+                                           source="CLEARINGHOUSE_REST")
+            if snap is None:
+                echecs += 1
+                continue
+            lignes.append(snap)
+    if lignes:
+        CF.append_jsonl(root / SORTIE_PORTEFEUILLES, lignes)
+    return {"leaders": len(leaders), "portefeuilles": len(lignes), "echecs": echecs}
 
 
 def resume(root: str | Path = ".") -> dict[str, Any]:
@@ -412,8 +607,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--poll", type=float, default=POLL_S_DEFAUT)
     p.add_argument("--une-fois", action="store_true")
     p.add_argument("--rafraichir-univers", action="store_true")
+    p.add_argument("--sans-balayage", action="store_true",
+                   help="ne relit pas l'historique de l'univers élargi (vaults fermés compris) à cette passe")
+    p.add_argument("--sans-leaders", action="store_true",
+                   help="ne relève pas les portefeuilles complets des leaders lents à cette passe")
+    p.add_argument("--balayage-complet", action="store_true",
+                   help="un tour complet de l'univers élargi maintenant (lecture seule, cadence bornée), puis sort")
     a = p.parse_args(argv)
     root = Path(a.root)
+    if a.balayage_complet:
+        fait, premier = 0, None
+        while True:
+            bilan = balayer_historique(root, max_vaults=60, pause_s=1.2)
+            fait += bilan["lus"] + bilan["echecs"]
+            premier = bilan["tour"] if premier is None else premier
+            print("[vaults] balayage complet : %d / %d vaults (lignes +%d, echecs %d)"
+                  % (fait, bilan["univers"], bilan["lignes"], bilan["echecs"]), flush=True)
+            if not bilan["univers"] or fait >= bilan["univers"] or bilan["tour"] > premier + 1:
+                return 0 if bilan["univers"] else 2
     if a.rafraichir_univers:
         try:
             univers = rafraichir_univers_public(root)
@@ -434,6 +645,16 @@ def main(argv: list[str] | None = None) -> int:
                 echecs = 0
                 print("[vaults] %s  ecrits=%d  cumul=%d  (%d vaults)"
                       % (time.strftime("%H:%M:%S"), n, total, len(vaults)), flush=True)
+            if not a.sans_leaders:
+                # Portefeuilles complets des leaders lents désignés par le labo (boucle labo -> collecte).
+                bilan_leaders = passe_portefeuilles_leaders(root)
+                print("[vaults] portefeuilles leaders lents : %d ecrits pour %d leaders (echecs %d)"
+                      % (bilan_leaders["portefeuilles"], bilan_leaders["leaders"], bilan_leaders["echecs"]), flush=True)
+            if not a.sans_balayage:
+                # Historique de l'univers élargi : quelques vaults par passe, jamais de rafale.
+                bilan = balayer_historique(root, pause_s=0.5)
+                print("[vaults] historique univers elargi : %d lus sur %d (tour %d), +%d lignes"
+                      % (bilan["lus"], bilan["univers"], bilan["tour"], bilan["lignes"]), flush=True)
         except Exception as exc:  # noqa: BLE001 — on ne meurt jamais, on recule
             echecs += 1
             d = CF.backoff_jitter(echecs)

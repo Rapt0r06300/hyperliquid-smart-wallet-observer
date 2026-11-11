@@ -1,6 +1,6 @@
 # AGENTS.md — Alina Smart Flow
 
-Dernière mise à jour : **2026-10-27**.
+Dernière mise à jour : **2026-11-11**.
 
 Contrat compact pour tout agent intervenant dans ce dépôt. Les exigences détaillées ne sont pas dupliquées ici : elles vivent dans les documents d’autorité ci-dessous.
 
@@ -40,7 +40,7 @@ Famille active unique : **Copy-Vault**.
 
 Lead-Lag, Cross-Venue Dislocation, arbitrage, Carry/Funding Carry, shadow/research-only et toute famille économique non attribuée : **DISABLED_BY_SCOPE**. Ce verrou couvre simulation UI/moteur principal, labo, replays/backtests, OOS/forward, preuve PnL, certification et scoreboard. Conserver leur code et leurs preuves historiques sans les exécuter ni les promouvoir; aucune variable d'environnement ne peut élargir le scope.
 
-Cible de recherche : au moins +5 USD net/jour pour Copy-Vault, avec 200 USD de capital paper. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
+Capital paper opérationnel : **350 USD** ; repère de recherche : au moins **+5 USD net/jour** pour Copy-Vault après preuves OOS/forward. Ce repère n'est ni une gate ni une promesse ; les mentions de **200 USD de capital paper** sont historiques et inactives. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé.
 
 ## Repères opérateur permanents
 

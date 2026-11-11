@@ -116,10 +116,12 @@ def test_copy_signal_detector_uses_v9_simulation_defaults_without_env(monkeypatc
         tuning=CopySignalTuning(leader_expected_move_bps=31.0),
     )
 
-    assert round(accepted_with_v9_defaults.signals[0].edge_remaining_bps, 6) == 15.0
+    # Frais taker lus à la source unique (4,5 bps, et non plus 4,0 recopiés) :
+    # 31 − 4,5 − 3 − 5 − 2 − 2 = 14,5 bps (15,0 avec l'ancienne valeur optimiste).
+    assert round(accepted_with_v9_defaults.signals[0].edge_remaining_bps, 6) == 14.5
     # Durcissement délibéré (snapshot 5e49646): DEFAULT_SIMULATION_MIN_EDGE_BPS
     # relevé à 28 (plancher effectif = min(settings=25, 28) = 25 bps sans env).
-    # Un edge net de 15 bps est donc désormais CORRECTEMENT refusé.
+    # Un edge net de 14,5 bps est donc CORRECTEMENT refusé.
     assert (
         accepted_with_v9_defaults.signals[0].decision
         == SignalDecision.REJECT_EDGE_TOO_SMALL

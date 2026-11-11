@@ -184,6 +184,83 @@ def certifier_micro_trade(record: Any, *, source: str, now_ms: int,
     return out, PASS, ""
 
 
+FENETRES_PORTFOLIO = ("day", "week", "month", "allTime")
+
+
+def certifier_portfolio_history(record: Any, *, source: str, now_ms: int,
+                                ) -> tuple[dict[str, Any] | None, str, str]:
+    """Tranche de courbe valeur / PnL d'un vault (``vaultDetails.portfolio``), relue après coup.
+
+    Une ligne = les points NOUVEAUX d'une fenêtre, observés à ``observed_at_ms``. Règles :
+    horodatages strictement croissants et jamais postérieurs à l'observation (un point du futur
+    est impossible) ; chaque point porte au moins une grandeur finie ; une grandeur absente reste
+    ``None`` (inconnue), jamais 0. Un seul point illisible invalide TOUTE la tranche : une courbe
+    amputée fausserait en silence les rendements calculés dessus. Historique non causal : il
+    sert à mesurer une persistance, jamais à dater un signal en direct."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    vault = _adresse(record.get("vault"))
+    if vault is None:
+        return None, QUARANTAINE, "vault_absent_ou_invalide"
+    fenetre = record.get("fenetre")
+    if fenetre not in FENETRES_PORTFOLIO:
+        return None, QUARANTAINE, "fenetre_inconnue"
+    obs = _entier_positif(record.get("observed_at_ms"))
+    if obs is None:
+        return None, QUARANTAINE, "observation_absente"
+    if obs > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    points = record.get("points")
+    if not isinstance(points, list) or not points:
+        return None, QUARANTAINE, "points_absents"
+    # Seule la fenêtre « vie entière » porte un PnL cumulé par nature ; pour les autres, la ligne
+    # doit déclarer que le collecteur l'a recalé sur la base cumulée (schéma v2).
+    pnl_cumule = fenetre == "allTime" or record.get("pnl_base") == "CUMUL_DEPUIS_CREATION"
+    normalises: list[list[Any]] = []
+    precedent = 0
+    for point in points:
+        if not isinstance(point, (list, tuple)) or len(point) != 3:
+            return None, QUARANTAINE, "point_invalide"
+        brut_ts = point[0]
+        if isinstance(brut_ts, bool) or not isinstance(brut_ts, int) or brut_ts <= 0:
+            return None, QUARANTAINE, "point_timestamp_invalide"
+        if brut_ts <= precedent:
+            return None, QUARANTAINE, "points_desordonnes"
+        if brut_ts > obs:
+            return None, QUARANTAINE, "point_posterieur_a_l_observation"
+        grandeurs: list[float | None] = []
+        for brut in point[1:]:
+            if brut is None:
+                grandeurs.append(None)
+                continue
+            valeur = _nombre_fini(brut)
+            if valeur is None:
+                return None, QUARANTAINE, "point_grandeur_invalide"
+            grandeurs.append(valeur)
+        if grandeurs[0] is None and grandeurs[1] is None:
+            return None, QUARANTAINE, "point_sans_grandeur"
+        if grandeurs[1] is not None and not pnl_cumule:
+            # PnL relatif au début d'une fenêtre glissante : non comparable d'une fenêtre à l'autre
+            return None, QUARANTAINE, "pnl_base_non_cumulee"
+        normalises.append([brut_ts, grandeurs[0], grandeurs[1]])
+        precedent = brut_ts
+    volume = record.get("vlm_fenetre_usd")
+    if volume is not None:
+        volume = _nombre_fini(volume)
+        if volume is None or volume < 0:
+            return None, QUARANTAINE, "volume_invalide"
+    out: dict[str, Any] = dict(record)
+    out.update({
+        "vault": vault, "fenetre": fenetre, "observed_at_ms": obs, "points": normalises,
+        "first_ts_ms": normalises[0][0], "ts_ms": normalises[-1][0], "n_points": len(normalises),
+        "vlm_fenetre_usd": volume, "causal_forward_eligible": False,
+        "source": str(record.get("source") or source),
+    })
+    repare = (record.get("vault") != vault or record.get("points") != normalises
+              or record.get("ts_ms") != normalises[-1][0] or record.get("n_points") != len(normalises))
+    return out, (REPARE if repare else PASS), ""
+
+
 SCHEMA_SNAPSHOT_VAULT = "hypersmart.copy_vault_portfolio_snapshot.v1"
 
 

@@ -65,15 +65,30 @@ def test_daily_gate_refuses_short_window_even_if_annualized_rate_looks_large() -
     assert "FORWARD_DAILY_PROOF_WINDOW_TOO_SHORT" in result["reasons"]
 
 
-def test_daily_gate_refuses_below_five_dollars_per_day() -> None:
+def test_daily_reference_below_five_dollars_is_reported_not_a_gate() -> None:
+    """Spec canonique (objectif économique courant) : « no terminal profit threshold » ; le repère
+    +5 USD/jour est « a reference metric only, not a pass/fail gate for economic proof ». Ce test
+    figeait auparavant le refus sous 5 USD/jour ; un net forward prouvé de 4 USD/jour, toutes
+    portes de qualité passées, est désormais certifié et le repère non atteint est rapporté à part."""
     result = apply_daily_gate(_base_certified(), _payload(net=120.0, seconds=30 * 86_400.0))
     assert result["forward_net_pnl_usd_per_day"] == 4.0
-    assert result["certified"] is False
-    assert result["eligible_net_pnl_usd"] is None
-    assert "TARGET_NET_USD_PER_DAY_NOT_REACHED" in result["reasons"]
+    assert result["certified"] is True and result["status"] == "CERTIFIED"
+    assert result["reasons"] == []
+    assert result["reference_reasons"] == ["TARGET_NET_USD_PER_DAY_NOT_REACHED"]
+    assert result["reference_target_is_gate"] is False
     assert result["quality_certified"] is True
     assert result["positive_forward_net"] is True
     assert result["historical_target_reached"] is False
+
+
+def test_daily_gate_refuses_zero_or_negative_forward_net() -> None:
+    """Retirer le seuil chiffré ne retire pas l'exigence de preuve : un net forward nul ou négatif reste refusé."""
+    for net in (0.0, -30.0):
+        result = apply_daily_gate(_base_certified(), _payload(net=net, seconds=30 * 86_400.0))
+        assert result["certified"] is False and result["status"] == "NO_GO"
+        assert result["eligible_net_pnl_usd"] is None
+        assert "FORWARD_DAILY_NET_NOT_POSITIVE" in result["reasons"]
+        assert result["positive_forward_net"] is False
 
 
 def test_daily_gate_fails_closed_when_forward_duration_is_missing() -> None:

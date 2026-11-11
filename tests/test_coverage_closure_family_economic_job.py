@@ -115,9 +115,13 @@ def test_record_family_memory_fail_closed_branches(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": False, "reasons": []})
     assert family.record_family_economic_memory(lab_root=tmp_path, workspace=workspace, suite="copy-vault-full", project_sha=SHA) is None
 
-    monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 3.99})
-    with pytest.raises(RuntimeError, match=">=5 USD"):
-        family.record_family_economic_memory(lab_root=tmp_path, workspace=workspace, suite="copy-vault-full", project_sha=SHA)
+    # Spec canonique : le repère +5 USD n'est pas une porte ; ce qui reste refusé, c'est une
+    # campagne dite « certifiée » sans net réconcilié strictement positif.
+    for sans_preuve in (0.0, -1.0, None):
+        monkeypatch.setattr(family, "certify_campaign",
+                            lambda *args, net=sans_preuve: {"certified": True, "eligible_net_pnl_usd": net})
+        with pytest.raises(RuntimeError, match="strictly positive"):
+            family.record_family_economic_memory(lab_root=tmp_path, workspace=workspace, suite="copy-vault-full", project_sha=SHA)
 
     workspace, _ = _campaign_workspace(tmp_path, coverage={"families": {}})
     monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 5.1})

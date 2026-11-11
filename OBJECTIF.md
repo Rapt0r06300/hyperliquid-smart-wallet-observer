@@ -1,10 +1,18 @@
 # OBJECTIF — Copy-Vault Alina Smart Flow
 
+Dernière mise à jour : **2026-11-11**.
+
 Ce fichier est un rappel opérateur compact. En cas de divergence, l'ordre d'autorité est `SECURITY.md`, la constitution, la spec canonique, le HEAD réel, `AGENTS.md`, puis `CLAUDE.md` et ce résumé.
 
 ## Mission active
 
 Faire progresser **Copy-Vault uniquement** au moyen de données publiques et de shards SAFE vérifiés. Tout reste `PAPER / READ-ONLY / FAIL-CLOSED` : aucun ordre réel ou testnet, aucune signature, aucune clé, aucun transfert de fonds. 3x4, arbitrage, Lead-Lag, Cross-Venue, Carry et toute autre famille économique sont hors scope.
+
+Le capital paper opérationnel de référence est **350 USD**. Le repère de
+recherche est **+5 USD nets/jour pour Copy-Vault**, sans garantie et sans
+certification automatique : une amélioration mesurée reste une preuve de
+recherche tant qu'elle n'a pas franchi les gates indépendantes OOS/forward et la
+preuve comptable canonique.
 
 ## Rôles des lanceurs retenus
 
@@ -22,7 +30,7 @@ Ce sont les rôles attendus. Le nom d'un lanceur ne prouve pas à lui seul que s
 
 Le labo conserve chaque mesure et variante avec paramètres, identité des données, fenêtre, seed, coûts, rapport et statut ; une meilleure variante ne supprime pas les précédentes. Ne jamais inventer un prix, fill, frais, timestamp, zéro ou PnL. Les statuts restent `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE` ou `REJECTED`.
 
-Le parcours canonique est `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Aucun montant de bénéfice quotidien n'est une cible terminale : geler chaque amélioration nette mesurée puis continuer la recherche. Un gel exploratoire n'est pas une certification; seul un champion validé après OOS/forward post-freeze et coûts complets est promouvable. Les anciennes cibles à +4/+5 USD sont historiques. Un backtest positif, un candidat gelé ou un workflow vert ne prouve pas la rentabilité.
+Le parcours canonique est `IDLE → COLLECT → ANALYZE`, puis `DRAIN → QUALITY → REPLAY → BACKTEST → OOS → FORWARD_PAPER → PNL_PROOF → SCOREBOARD → DONE`. Le repère **+5 USD nets/jour sur 350 USD paper** est un objectif de recherche, pas une cible terminale, une gate ou une promesse : geler chaque amélioration nette mesurée puis continuer la recherche. Un gel exploratoire n'est pas une certification ; seul un champion validé après OOS/forward post-freeze et coûts complets est promouvable. Les anciennes références +4 USD et +5 USD sur 200 USD paper sont historiques. Un backtest positif, un candidat gelé ou un workflow vert ne prouve pas la rentabilité.
 
 ## Travail local
 

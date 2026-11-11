@@ -3,6 +3,8 @@
 > Autorité active pour la roadmap technique cumulative V5/776+.
 > Cette constitution ne remplace jamais `SECURITY.md` et ne peut pas assouplir un gate machine du HEAD exact.
 
+Dernière mise à jour : **2026-11-11**.
+
 ## 1. Précédence documentaire
 
 En cas de contradiction, appliquer cet ordre strict :
@@ -39,7 +41,13 @@ La seule famille économique active est **Copy-Vault**. Lead-Lag, Cross-Venue/Di
 
 Le marqueur de compatibilité documentaire « Carry est historique et non actif » demeure strictement vrai.
 
-La roadmap technique cumulative V5/776+ est distincte de la mission économique : son Done dépend de l'implémentation, du câblage, des tests et des preuves techniques de ses exigences. Atteindre la cible terminale Copy-Vault de +5 USD nets/jour sur 200 USD paper, ou obtenir un PnL positif, n'est pas un critère de clôture de cette roadmap technique.
+Le capital paper opérationnel de référence est **350 USD**. Le repère quantitatif
+de recherche est **+5 USD nets/jour pour Copy-Vault sur 350 USD paper**, après
+réparations techniques et preuves OOS/forward. Ce repère n'est ni une gate
+automatique ni une promesse de rentabilité : les améliorations mesurées restent
+des preuves de recherche jusqu'à leur certification comptable. La roadmap
+technique cumulative V5/776+ dépend de l'implémentation, du câblage, des tests
+et des preuves techniques de ses exigences, pas d'un PnL positif.
 
 ## 4. Contrat agents et parallélisme
 

@@ -36,6 +36,10 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_copiability as cop  # noqa: E402
+from hl_observer.backtesting import copy_vault_leader_model as leader_model  # noqa: E402
+from hl_observer.backtesting import copy_vault_persistence as persistence  # noqa: E402
+from hl_observer.backtesting import copy_vault_replication_paper as replication  # noqa: E402
+from hl_observer.collection.vault_portfolio_history import fusionner_points  # noqa: E402
 
 PARSER_VERSION = "fills-v1"
 REPORT_DIR = Path("runtime/reports/copy_vault_quant_lab/copiabilite")
@@ -690,7 +694,266 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
     return result
 
 
+EVIDENCE_TIER_REPLICATION = "LOCAL_OBSERVED_PORTFOLIOS_PAPER_350_EXPLORATORY"
+
+
+def run_replication_350(root: Path, *, price: str, write: bool = True, min_snapshots: int = 50) -> dict[str, Any]:
+    """Un compte PAPER de 350 USD qui tient le portefeuille observé d'un leader : frais, écart, funding,
+    ordre minimal de 10 USD, délai — et ce que chaque friction coûte."""
+
+    started = time.time()
+    config = replication.ReplicationConfig()
+    shards, excluded = select_shards(root, {"snapshot": "", "book_l2": "", "allmids": "", "bbo": "",
+                                            "micro_bbo": "", "asset_ctx": "", "candle": "candles_5m"})
+    if not shards["snapshot"]:
+        return {"status": "UNMEASURABLE", "reason": "aucun instantané de portefeuille au coffre : lancez le Certificateur"}
+    identity = experiment_identity(root, {k: shards[k] for k in ("snapshot", "book_l2")}, config,
+                                   f"replication350|{price}")
+    identity["source_sha256"]["copy_vault_replication_paper.py"] = _sha256_file(Path(replication.__file__))
+    identity["corpus_tier"] = EVIDENCE_TIER_REPLICATION
+    portefeuilles, rejets = replication.portefeuilles_depuis_instantanes(load_snapshots(shards["snapshot"]))
+    if price == "mids":
+        panel = load_mid_panel(shards["allmids"], 120_000)
+        tier_prix = "prix observés en temps réel (allMids)"
+    else:
+        candles, identity["candles_source"] = bougies(root, shards)
+        if candles is None:
+            return {"status": "UNMEASURABLE", "reason": f"bougies absentes : {CANDLES_PATH.as_posix()}"}
+        panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVAL_MS)
+        tier_prix = "prix reconstruits (bougies 5 min récupérées après coup)"
+    half_spreads = load_half_spreads(spread_shards(shards))
+    funding = cop.build_funding_rates(load_funding(shards["asset_ctx"]), panel)
+    par_leader: dict[str, Any] = {}
+    for compte, portefeuille in portefeuilles.items():
+        if len(portefeuille) < min_snapshots:
+            continue
+        par_leader[compte] = replication.decomposer_les_pertes(portefeuille, panel, half_spreads, config,
+                                                               funding_rates=funding)
+    synthese = _jsonable(replication.synthese_replication(par_leader, config))
+    print(f"[replication-350] {len(portefeuilles)} comptes · {len(par_leader)} simulés · "
+          f"{synthese['leader_days']} journées-leader sur {synthese['distinct_days']} jour(s) · {tier_prix}", flush=True)
+    lignes_leaders = sorted(
+        ({"compte": compte, **{k: r["full"].get(k) for k in (
+            "complete_days", "net_usd_per_day", "net_total_usd", "orders", "orders_refused_by_venue_minimum",
+            "turnover_per_day", "mean_gross_exposure", "funding_coverage", "steps_target_unknown", "steps")},
+          "untradable": len(r["full"].get("untradable_coins") or {}),
+          "cost_usd_per_day": r["cost_usd_per_day"]} for compte, r in par_leader.items()),
+        key=lambda ligne: (ligne["net_usd_per_day"] is None, -(ligne["net_usd_per_day"] or 0.0)))
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-replication350"
+    report = {"config": config.as_dict(), "summary": synthese, "leaders": _jsonable(lignes_leaders),
+              "inputs": {"comptes": len(portefeuilles), "comptes_simules": len(par_leader), "rejets": rejets,
+                         "coins_avec_ecart": len(half_spreads), "coins_avec_funding": len(funding),
+                         "prix": tier_prix, "panel_points": int(len(panel.ts))},
+              "verdicts": [{"hypothesis": synthese["hypothesis"], "status": synthese["status"],
+                            "reason": synthese["reason"]}],
+              "caveats": [
+                  "Chaque leader est répliqué SEUL avec tout le capital ; une combinaison de leaders diviserait "
+                  "les lignes et heurterait plus souvent l'ordre minimal.",
+                  "Instantanés du dex principal seulement ; les positions HIP-3 d'un compte ne sont pas répliquées.",
+                  "L'arrondi de lot n'est pas modélisé ; la fermeture complète d'une ligne est supposée toujours permise.",
+                  "Tier LOCAL, exploratoire : aucune rentabilité n'est prouvée par une simulation.",
+              ], "paper_read_only": True, "real_execution": False, "economically_proven": False}
+    result = {"run_id": run_id, "identity": identity, "integrity_excluded_shards": excluded,
+              "elapsed_seconds": round(time.time() - started, 1), "evidence_tier": EVIDENCE_TIER_REPLICATION,
+              "report": report}
+    if write:
+        out_dir = root / REPORT_DIR / run_id
+        _atomic_write_json(out_dir / "resultat.json", result)
+        (out_dir / "RAPPORT.md").write_text(render_replication_report(report, identity), encoding="utf-8")
+        ledger = {"run_id": run_id, **identity, "evidence_tier": EVIDENCE_TIER_REPLICATION, "hypotheses_tested": 1,
+                  "verdicts": report["verdicts"], "config": report["config"], "inputs": report["inputs"],
+                  "summary": report["summary"], "caveats": report["caveats"],
+                  "result_path": str((REPORT_DIR / run_id / "resultat.json").as_posix()),
+                  "paper_read_only": True, "real_execution": False, "economically_proven": False}
+        result["ledger_record_sha256"] = append_ledger(root / REPORT_DIR / "EXPERIENCES.ndjson", ledger)
+        print(f"[replication-350] rapport : {out_dir / 'RAPPORT.md'}", flush=True)
+    return result
+
+
+def render_replication_report(report: dict[str, Any], identity: dict[str, Any]) -> str:
+    def num(value: Any, digits: int = 3) -> str:
+        return "n/d" if value is None else f"{float(value):+.{digits}f}"
+
+    s, entrees, config = report["summary"], report["inputs"], report["config"]
+    intervalle = s.get("interval_95")
+    lignes = [
+        "# Réplication PAPER de portefeuille — compte de 350 USD, contraintes réelles", "",
+        f"- Statut des preuves : **{EVIDENCE_TIER_REPLICATION}** — exploratoire.",
+        f"- Expérience `{identity['experiment_id']}` · corpus `{identity['corpus_sha256'][:16]}` · "
+        f"code `{(identity.get('code_head') or 'inconnu')[:12]}`.",
+        f"- Entrées : {entrees['comptes']} comptes observés · {entrees['comptes_simules']} simulés · {entrees['prix']} · "
+        f"{entrees['coins_avec_ecart']} coins avec écart mesuré · {entrees['coins_avec_funding']} avec funding.",
+        f"- Règles : capital {config['capital_usd']:.0f} USD sans levier · réalignement toutes les "
+        f"{config['rebalance_ms'] // 60000} min · délai {config['reaction_ms'] // 1000} s · ordre minimal "
+        f"{config['min_order_usd']:.0f} USD · frais taker {config['taker_fee_bps']} bps.", "",
+        "## Résultat d'ensemble", "",
+        f"- Journées mesurées : {s['leader_days']} journées-leader sur {s['distinct_days']} jour(s) distinct(s), "
+        f"{s['leaders_measured']} leader(s).",
+        f"- Net moyen : {num(s.get('net_usd_per_day'))} USD/jour"
+        + (f" [{num(intervalle[0])} ; {num(intervalle[1])}]" if intervalle else "")
+        + f" → {num(s.get('net_bps_per_day_on_capital'), 1)} bps/jour du capital · "
+          f"jours positifs : {num((s.get('share_positive_days') or 0) * 100, 0)} %.",
+        f"- Couverture du funding : {num((s.get('funding_coverage') or 0) * 100, 0)} %.",
+        "- Ce que coûte chaque friction (USD/jour, moyenne des leaders) : "
+        + " · ".join(f"{nom} {num(valeur)}" for nom, valeur in (s.get("mean_cost_usd_per_day") or {}).items()) + ".",
+        "", "## Verdict", "",
+    ]
+    lignes += [f"- `{v['hypothesis']}` : **{v['status']}** — {v['reason']}" for v in report["verdicts"]]
+    lignes += ["", "## Par leader (trié par net/jour)", "",
+               "| compte | jours | net USD/j | ordres | refus ordre min. | rotation/j | exposition | coins non négociables |",
+               "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for ligne in report["leaders"][:40]:
+        lignes.append(
+            f"| `{ligne['compte'][:10]}…` | {ligne['complete_days']} | {num(ligne['net_usd_per_day'])} | {ligne['orders']} | "
+            f"{ligne['orders_refused_by_venue_minimum']} | {num(ligne['turnover_per_day'], 2)} | "
+            f"{num(ligne['mean_gross_exposure'], 2)} | {ligne['untradable']} |")
+    lignes += ["", "## Limites", ""] + [f"- {texte}" for texte in report["caveats"]]
+    lignes += ["", "Aucune rentabilité n'est prouvée par ce rapport.", ""]
+    return "\n".join(lignes)
+
+
+def render_persistence_report(report: dict[str, Any], identity: dict[str, Any]) -> str:
+    def num(value: Any, digits: int = 2) -> str:
+        return "n/d" if value is None else f"{float(value):+.{digits}f}"
+
+    def bornes(value: Any, digits: int = 2) -> str:
+        return "n/d" if not value else f"[{float(value[0]):+.{digits}f} ; {float(value[1]):+.{digits}f}]"
+
+    primaire, lent, entrees = report["primary"], report["slow_leaders_segment"], report["inputs"]
+    lignes = [
+        "# Persistance de la compétence des vaults — courbes valeur / PnL publiées",
+        "",
+        f"- Statut des preuves : **{persistence.EVIDENCE_TIER}** — historique relu après coup, exploratoire.",
+        f"- Expérience `{identity['experiment_id']}` · corpus `{identity['corpus_sha256'][:16]}` · "
+        f"code `{(identity.get('code_head') or 'inconnu')[:12]}`.",
+        f"- Entrées : {entrees.get('vaults_avec_courbe', 0)} vaults avec courbe · "
+        f"{entrees.get('vaults_rotation_connue', 0)} avec rotation connue "
+        f"(médiane {num(entrees.get('rotation_mediane_par_jour'))} fois le capital par jour).",
+        f"- {report['hypotheses_tested']} configurations essayées ; intervalles élargis en conséquence "
+        f"(niveau {report['confidence_after_multiplicity']:.4f}).",
+        "",
+        "## Analyse primaire (déclarée avant la mesure)",
+        "",
+        f"- Dates mesurables : {primaire.get('dates', 0)} · vaults par date (médiane) : "
+        f"{primaire.get('vaults_median_par_date', 'n/d')} · attrition moyenne : {num(primaire.get('attrition_moyenne'))}.",
+        f"- Corrélation de rang note → rendement suivant : {num(primaire.get('ic_moyen'), 3)} "
+        f"{bornes(primaire.get('ic_intervalle'), 3)}.",
+        f"- Meilleur quantile moins « copier tout le monde » : {num(primaire.get('exces_tete_bps_jour'))} bps/jour "
+        f"{bornes(primaire.get('exces_tete_intervalle_bps_jour'))} · placebo p = {num(primaire.get('p_placebo_exces_tete'), 3)}.",
+        f"- Meilleur quantile, net de la borne haute du coût de réplication : "
+        f"{num(primaire.get('tete_nette_bps_jour'))} bps/jour {bornes(primaire.get('tete_nette_intervalle_bps_jour'))} "
+        f"→ {num(primaire.get('tete_nette_usd_jour_sur_capital'), 3)} USD/jour sur {report['config']['capital_usd']:.0f} USD sans levier.",
+        f"- Références : copier tous les vaults {num(primaire.get('univers_bps_jour'))} bps/jour · ne pas trader 0.",
+        "",
+        "## Leaders lents seulement (rotation faible, les seuls réplicables lentement)",
+        "",
+        f"- {lent.get('vaults', 0)} vaults · {lent.get('dates', 0)} dates · IC {num(lent.get('ic_moyen'), 3)} "
+        f"{bornes(lent.get('ic_intervalle'), 3)} · net {num(lent.get('tete_nette_bps_jour'))} bps/jour "
+        f"{bornes(lent.get('tete_nette_intervalle_bps_jour'))}.",
+        "",
+        "## Verdict",
+        "",
+    ]
+    lignes += [f"- `{v['hypothesis']}` : **{v['status']}** — {v['reason']}" for v in report["verdicts"]]
+    modele = report.get("leader_model") or {}
+    resume = modele.get("summary") or {}
+    lignes += [
+        "", "## Modèle de sélection appris en marche avant", "",
+        f"- {modele.get('vaults', 0)} vaults · {resume.get('dates', 0)} dates notées hors apprentissage · "
+        f"vaults par date (médiane) : {resume.get('vaults_median_par_date', 'n/d')}.",
+        f"- Corrélation de rang note → rendement suivant : {num(resume.get('ic_moyen'), 3)} "
+        f"{bornes(resume.get('ic_intervalle'), 3)}.",
+        f"- Meilleur quantile moins « copier tout le monde » : {num(resume.get('exces_tete_bps_jour'))} bps/jour "
+        f"{bornes(resume.get('exces_tete_intervalle_bps_jour'))} · placebo p = {num(resume.get('p_placebo_exces_tete'), 3)}.",
+        f"- Net de la borne haute du coût de réplication : {num(resume.get('tete_nette_bps_jour'))} bps/jour "
+        f"{bornes(resume.get('tete_nette_intervalle_bps_jour'))}.",
+        "- Effet appris de chaque caractéristique (signe positif = plus élevé, meilleur rendement ensuite ; "
+        "entre parenthèses, part des dates où le signe est le même) :",
+    ]
+    stabilite = modele.get("stabilite_du_signe") or {}
+    lignes += [f"  - `{nom}` : {num(valeur, 3)} ({(stabilite.get(nom) or 0) * 100:.0f} %)"
+               for nom, valeur in (modele.get("coefficients_moyens") or {}).items()]
+    lignes += ["", "## Limites", ""] + [f"- {texte}" for texte in report["caveats"]]
+    lignes += ["", "## Toutes les configurations", "",
+               "| période (j) | formation | note | dates | IC | excès tête (bps/j) | net (bps/j) | placebo p |",
+               "|---:|---:|---|---:|---:|---:|---:|---:|"]
+    for c in report["configurations"]:
+        lignes.append(
+            f"| {c['period_days']} | {c['formation_periods']} | {c['score']}{' *' if c['primaire'] else ''} | "
+            f"{c.get('dates', 0)} | {num(c.get('ic_moyen'), 3)} | {num(c.get('exces_tete_bps_jour'))} | "
+            f"{num(c.get('tete_nette_bps_jour'))} | {num(c.get('p_placebo_exces_tete'), 3)} |")
+    lignes += ["", "`*` analyse primaire. Aucune rentabilité n'est prouvée par ce rapport.", ""]
+    return "\n".join(lignes)
+
+
+def run_persistance(root: Path, *, write: bool = True) -> dict[str, Any]:
+    """Le classement passé d'un vault prédit-il son rendement suivant ? (courbes ``vault_portfolio``)."""
+
+    started = time.time()
+    config = persistence.PersistenceConfig()
+    shards, excluded = select_shards(root, {"vault_portfolio": ""})
+    if not shards["vault_portfolio"]:
+        return {"status": "UNMEASURABLE",
+                "reason": "aucune courbe de portefeuille au coffre : une passe des collecteurs (collecter_vaults) "
+                          "puis le Certificateur suffisent, l'historique publié par vaultDetails est rattrapé d'un coup"}
+    identity = experiment_identity(root, shards, config, "persistance|vault_portfolio")
+    identity["source_sha256"]["copy_vault_persistence.py"] = _sha256_file(Path(persistence.__file__))
+    identity["corpus_tier"] = persistence.EVIDENCE_TIER
+    lignes = list(load_snapshots(shards["vault_portfolio"]))
+    curves = fusionner_points(lignes)
+    rotation = persistence.turnover_per_day(lignes, curves)
+    print(f"[persistance] {len(lignes):,} tranches · {len(curves)} vaults · "
+          f"{sum(len(c) for c in curves.values()):,} points", flush=True)
+    fermes = len({str(ligne.get("vault") or "").lower() for ligne in lignes if ligne.get("is_closed") is True})
+    report = _jsonable(persistence.run_persistence_study(curves, turnover_per_day=rotation, config=config,
+                                                         closed_vaults=fermes,
+                                                         extra_configurations=1))
+    # Seconde règle, jugée par la même mesure : un modèle appris en marche avant sur plusieurs
+    # caractéristiques du vault (rendement récent, régularité, repli, taille, ancienneté, flux).
+    modele = _jsonable(leader_model.run_leader_model_study(curves, turnover_per_day=rotation, persistence=config))
+    report["leader_model"] = modele
+    report["verdicts"].append(modele["verdict"])
+    identity["source_sha256"]["copy_vault_leader_model.py"] = _sha256_file(Path(leader_model.__file__))
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-persistance"
+    result = {
+        "run_id": run_id, "identity": identity, "integrity_excluded_shards": excluded,
+        "elapsed_seconds": round(time.time() - started, 1), "evidence_tier": persistence.EVIDENCE_TIER,
+        "donnees_consommees": donnees_consommees(shards, {
+            "vault_portfolio": "courbes valeur / PnL / volume des vaults : persistance de la compétence"}),
+        "report": report,
+    }
+    if write:
+        out_dir = root / REPORT_DIR / run_id
+        _atomic_write_json(out_dir / "resultat.json", result)
+        (out_dir / "RAPPORT.md").write_text(render_persistence_report(report, identity), encoding="utf-8")
+        ledger = {
+            "run_id": run_id, **identity, "evidence_tier": persistence.EVIDENCE_TIER,
+            "hypotheses_tested": report["hypotheses_tested"],
+            "verdicts": [{"hypothesis": v["hypothesis"], "status": v["status"], "reason": v.get("reason")}
+                         for v in report["verdicts"]],
+            "config": report["config"], "inputs": report["inputs"], "primary": report["primary"],
+            "leader_model": {k: report["leader_model"].get(k) for k in (
+                "config", "summary", "coefficients_moyens", "stabilite_du_signe", "vaults", "periodes")},
+            "baselines": report["baselines"], "caveats": report["caveats"],
+            "result_path": str((REPORT_DIR / run_id / "resultat.json").as_posix()),
+            "paper_read_only": True, "real_execution": False, "economically_proven": False,
+        }
+        result["ledger_record_sha256"] = append_ledger(root / REPORT_DIR / "EXPERIENCES.ndjson", ledger)
+        print(f"[persistance] rapport : {out_dir / 'RAPPORT.md'}", flush=True)
+    return result
+
+
+def _sortie_utf8() -> None:
+    """Affichage robuste : jamais de plantage sur une console ou un journal non UTF-8."""
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _sortie_utf8()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--retrospectif", action="store_true",
@@ -698,6 +961,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--positions", action="store_true",
                         help="réplication lente des portefeuilles OBSERVÉS des vaults (instantanés du coffre) ; "
                              "prix : bougies 5 min, ou allMids observés avec --prix mids")
+    parser.add_argument("--replication-350", action="store_true", dest="replication_350",
+                        help="compte PAPER de 350 USD qui tient le portefeuille observé d'un leader "
+                             "(frais, écart, funding, ordre minimal de 10 USD) ; prix : bougies, ou --prix mids")
+    parser.add_argument("--persistance", action="store_true",
+                        help="le classement passé d'un vault prédit-il son rendement suivant ? "
+                             "(courbes valeur / PnL publiées par vaultDetails, famille vault_portfolio)")
     parser.add_argument("--retard-s", type=float, default=120.0,
                         help="avec --retrospectif : retard d'observation SUPPOSÉ après chaque fill (s)")
     parser.add_argument("--prix", choices=("mids", "prints"), default="mids",
@@ -714,6 +983,26 @@ def main(argv: list[str] | None = None) -> int:
     if not (root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").is_file():
         print("[NO_GO] coffre LOCAL absent : lancez d'abord « Certificateur Coffre Fort.cmd ».")
         return 2
+    if args.replication_350:
+        result = run_replication_350(
+            root, price="mids" if "--prix" in (argv or sys.argv) and args.prix == "mids" else "bougies",
+            write=not args.sans_ecriture)
+        if "report" not in result:
+            print(f"[{result['status']}] {result['reason']}")
+            return 2
+        for verdict in result["report"]["verdicts"]:
+            print(f"[verdict réplication 350 USD] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
+        print("[FIN] simulation PAPER exploratoire ; aucune rentabilité n'est prouvée.")
+        return 0
+    if args.persistance:
+        result = run_persistance(root, write=not args.sans_ecriture)
+        if "report" not in result:
+            print(f"[{result['status']}] {result['reason']}")
+            return 2
+        for verdict in result["report"]["verdicts"]:
+            print(f"[verdict persistance] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
+        print("[FIN] étude de persistance (historique relu, exploratoire) ; aucune rentabilité n'est prouvée.")
+        return 0
     if args.positions:
         result = run_positions(root, price="mids" if "--prix" in (argv or sys.argv) and args.prix == "mids" else "bougies",
                                write=not args.sans_ecriture)

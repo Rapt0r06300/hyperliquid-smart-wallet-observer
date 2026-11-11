@@ -24,9 +24,16 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection.forward_poll_fills import shard_leaders  # noqa: E402
+from hl_observer.collection.portefeuille_compte import construire_portefeuille, etat_du_compte  # noqa: E402
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 POS_OUT = Path("runtime") / "data" / "copy_vault_positions_lane.jsonl"
+#: portefeuilles complets (une ligne = toutes les positions + valeur du compte), même format que
+#: les instantanés de vault : cible directe de l'étude de réplication lente
+SNAP_OUT = Path("runtime") / "data" / "copy_vault_snapshots_lane.jsonl"
+CHANGEMENT_MIN_MS = 10_000              # au plus un instantané toutes les 10 s par compte et par dex
+BATTEMENT_PORTEFEUILLE_MS = 300_000     # portefeuille inchangé : un battement toutes les 5 min
+DEXS_DEFAUT = "xyz"                     # dex HIP-3 portant la majorité du notionnel des leaders
 TWAP_OUT = Path("runtime") / "data" / "copy_vault_twap_lane.jsonl"
 DEFAULT_LEADERS_FILE = "config/copy_vault_leaders.json"
 USERS_PAR_CONNEXION = 5
@@ -42,11 +49,12 @@ def _nb(v):
 
 def parser_positions(data: Any, *, user: str, recv_ms: int) -> list[dict[str, Any]]:
     """Positions ouvertes depuis un message clearinghouseState."""
-    if not isinstance(data, dict):
+    etat = etat_du_compte(data)
+    if etat is None:
         return []
     user = str(user or "").strip().lower()
     out: list[dict[str, Any]] = []
-    for item in data.get("assetPositions") or []:
+    for item in etat.get("assetPositions") or []:
         pos = item.get("position") if isinstance(item, dict) else None
         if not isinstance(pos, dict) or not pos.get("coin"):
             continue
@@ -93,15 +101,38 @@ def parser_twap_fills(data: Any, *, user: str, recv_ms: int) -> list[dict[str, A
 
 
 class LaneContexte:
-    def __init__(self, pos_out: Path, twap_out: Path) -> None:
+    def __init__(self, pos_out: Path, twap_out: Path, snap_out: Path | None = None) -> None:
         self.pos_out = pos_out
         self.twap_out = twap_out
+        self.snap_out = snap_out if snap_out is not None else pos_out.with_name(SNAP_OUT.name)
         pos_out.parent.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
         self._vus_twap: set = set()
+        self._dernier_portefeuille: dict[tuple[str, str], tuple[int, tuple]] = {}
         self.positions = 0
+        self.portefeuilles = 0
         self.twap = 0
         self.reconnects = 0
+
+    async def ecrire_portefeuille(self, snap: dict[str, Any] | None) -> bool:
+        """Écrit l'instantané s'il CHANGE le portefeuille connu (10 s au moins entre deux), ou
+        comme battement toutes les ``BATTEMENT_PORTEFEUILLE_MS`` : la continuité est prouvée sans
+        recopier le même portefeuille à chaque message poussé par le serveur."""
+        if snap is None:
+            return False
+        cle = (snap["vault"], snap["dex"])
+        tailles = tuple(sorted((p["coin"], p["szi"]) for p in snap["positions"]))
+        precedent = self._dernier_portefeuille.get(cle)
+        if precedent is not None:
+            age = snap["ts_ms"] - precedent[0]
+            if age < CHANGEMENT_MIN_MS or (tailles == precedent[1] and age < BATTEMENT_PORTEFEUILLE_MS):
+                return False
+        self._dernier_portefeuille[cle] = (snap["ts_ms"], tailles)
+        async with self._lock:
+            with self.snap_out.open("a", encoding="utf-8") as h:
+                h.write(json.dumps(snap, ensure_ascii=False) + "\n")
+            self.portefeuilles += 1
+        return True
 
     async def ecrire_positions(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -129,7 +160,8 @@ class LaneContexte:
             self.twap += len(nouveaux)
 
 
-async def _connexion(lane: LaneContexte, users: list[str], socket_id: str, deadline: float) -> None:
+async def _connexion(lane: LaneContexte, users: list[str], socket_id: str, deadline: float,
+                     lane_dexs: tuple[str, ...] = ()) -> None:
     import websockets
 
     connus = {v.lower(): v for v in users}
@@ -141,6 +173,12 @@ async def _connexion(lane: LaneContexte, users: list[str], socket_id: str, deadl
                     for t in ("clearinghouseState", "userTwapSliceFills"):
                         await ws.send(json.dumps({"method": "subscribe",
                                                   "subscription": {"type": t, "user": v}}))
+                        await asyncio.sleep(0.2)
+                    # un compte a un état par dex : sans cet abonnement, les positions prises sur
+                    # un dex HIP-3 (la majorité du notionnel des leaders) restent invisibles
+                    for dex in lane_dexs:
+                        await ws.send(json.dumps({"method": "subscribe", "subscription":
+                                                  {"type": "clearinghouseState", "user": v, "dex": dex}}))
                         await asyncio.sleep(0.2)
                 print(f"[contexte] socket {socket_id} : {len(users)} leaders (positions+TWAP)", flush=True)
                 while time.monotonic() < deadline:
@@ -166,7 +204,11 @@ async def _connexion(lane: LaneContexte, users: list[str], socket_id: str, deadl
                     if user and user.lower() not in connus:
                         continue
                     if canal == "clearinghouseState":
-                        await lane.ecrire_positions(parser_positions(data, user=user, recv_ms=recv_ms))
+                        # Le serveur repousse l'état complet en continu : positions par coin et
+                        # portefeuille ne sont écrits que sur changement, ou comme battement.
+                        if await lane.ecrire_portefeuille(
+                                construire_portefeuille(data, user=user, recv_ms=recv_ms)):
+                            await lane.ecrire_positions(parser_positions(data, user=user, recv_ms=recv_ms))
                     elif canal == "userTwapSliceFills":
                         await lane.ecrire_twap(parser_twap_fills(data, user=user, recv_ms=recv_ms))
         except Exception as exc:  # noqa: BLE001
@@ -202,17 +244,20 @@ async def _boucle(args: argparse.Namespace) -> int:
     twap_out = (root / TWAP_OUT) if not args.twap_out else Path(args.twap_out)
     pos_out = pos_out if pos_out.is_absolute() else root / pos_out
     twap_out = twap_out if twap_out.is_absolute() else root / twap_out
-    lane = LaneContexte(pos_out, twap_out)
+    snap_out = (root / SNAP_OUT) if not args.snap_out else Path(args.snap_out)
+    snap_out = snap_out if snap_out.is_absolute() else root / snap_out
+    lane = LaneContexte(pos_out, twap_out, snap_out)
+    lane_dexs = tuple(d.strip() for d in str(args.dexs or "").split(",") if d.strip())
     pas = max(1, int(args.users_par_connexion))
     groupes = [lane_leaders[i:i + pas] for i in range(0, len(lane_leaders), pas)]
     deadline = time.monotonic() + max(10.0, float(args.duree_s))
     print(f"[contexte] lane {args.shard_index}/{args.shard_count} : {len(lane_leaders)} leaders, "
           f"{int(args.duree_s)}s.", flush=True)
-    taches = [asyncio.create_task(_connexion(lane, g, chr(65 + i), deadline))
+    taches = [asyncio.create_task(_connexion(lane, g, chr(65 + i), deadline, lane_dexs))
               for i, g in enumerate(groupes)]
     await asyncio.gather(*taches, return_exceptions=True)
-    print(f"[contexte] fini : {lane.positions} snapshots positions + {lane.twap} TWAP fills, "
-          f"{lane.reconnects} reconnexions.", flush=True)
+    print(f"[contexte] fini : {lane.positions} positions + {lane.portefeuilles} portefeuilles complets + "
+          f"{lane.twap} TWAP fills, {lane.reconnects} reconnexions.", flush=True)
     return 0
 
 
@@ -227,6 +272,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--duree-s", type=float, default=1500.0)
     p.add_argument("--pos-out", default="")
     p.add_argument("--twap-out", default="")
+    p.add_argument("--snap-out", default="", help="instantanés complets de portefeuille (positions + valeur du compte)")
+    p.add_argument("--dexs", default=DEXS_DEFAUT,
+                   help="dex HIP-3 dont l'état du compte est aussi suivi (séparés par des virgules ; vide = aucun)")
     args = p.parse_args(argv)
     try:
         return asyncio.run(_boucle(args))

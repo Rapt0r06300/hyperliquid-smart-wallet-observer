@@ -55,5 +55,8 @@ rem AlinaSync : rapatrie aussi les carnets L2 des lanes L2 (fail-soft).
 python "%ALINA_ROOT%tools/telecharger_l2_lanes_github.py" --root "%ALINA_ROOT%." 2>nul
 rem AlinaSync : rapatrie aussi le feed explorer (activite + decouverte leaders, fail-soft).
 python "%ALINA_ROOT%tools/telecharger_explorer_github.py" --root "%ALINA_ROOT%." 2>nul
+rem AlinaSync : rapatrie aussi les lanes marche (transactions, bougies) et contexte (positions des
+rem leaders relevees 24h/24, tranches TWAP), validees ligne a ligne par le certificateur (fail-soft).
+python "%ALINA_ROOT%tools/telecharger_lanes_certifiees_github.py" --root "%ALINA_ROOT%." 2>nul
 for /f "delims=" %%R in ("!RC!") do set "RC=%%R"
 endlocal & exit /b %RC%

@@ -82,6 +82,11 @@ if /I "%ALINA_LAB_MODE%"=="tests" (
   rem Portefeuilles OBSERVES des vaults [instantanes certifies] puis historique reconstruit [backfill].
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --positions
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --retrospectif
+  rem Persistance des leaders : le classement passe d'un vault predit-il son rendement suivant ?
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --persistance
+  rem Compte PAPER de 350 USD tenant le portefeuille observe d'un leader : frais, ecart, funding,
+  rem ordre minimal de 10 USD, delai - et ce que coute chaque friction.
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --replication-350
 ) else if /I "%ALINA_LAB_MODE%"=="safe" (
   rem Etape consultative, sans effet sur le code de sortie : ALINA_LAB_COPIABILITE=0 la desactive.
   if /I not "%ALINA_LAB_COPIABILITE%"=="0" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py"

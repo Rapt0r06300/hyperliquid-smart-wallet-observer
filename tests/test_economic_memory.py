@@ -129,12 +129,27 @@ def test_memory_refuses_incomplete_stale_or_silent_overwrite(tmp_path):
         )
 
 
-def test_memory_refuses_below_target_even_with_certified_true(tmp_path):
-    with pytest.raises(EconomicMemoryError, match="canonical target"):
+def test_memory_keeps_a_small_certified_positive_improvement_and_reports_the_reference(tmp_path):
+    """Spec canonique : « preserve every measured positive after-cost improvement, however small » ;
+    le repère +5 USD n'est pas une porte. Ce test figeait auparavant le refus sous 5 USD."""
+    record = record_certified_proof(
+        tmp_path,
+        family="copy_vault",
+        **{**_common(), "net_pnl_usd": 3.999999},
+    )
+    assert record["net_pnl_usd"] == 3.999999
+    assert record["certification_policy"] == "NET_STRICTLY_POSITIVE_ALL_QUALITY_GATES_V2"
+    assert record["reference_target_reached"] is False
+    assert len(load_memory(tmp_path)["proofs"]) == 1
+
+
+@pytest.mark.parametrize("net", [0.0, -0.01, -5.0])
+def test_memory_refuses_zero_or_negative_net_even_with_certified_true(tmp_path, net):
+    with pytest.raises(EconomicMemoryError, match="strictly positive"):
         record_certified_proof(
             tmp_path,
             family="copy_vault",
-            **{**_common(), "net_pnl_usd": 3.999999},
+            **{**_common(), "net_pnl_usd": net},
         )
     assert load_memory(tmp_path)["proofs"] == {}
 

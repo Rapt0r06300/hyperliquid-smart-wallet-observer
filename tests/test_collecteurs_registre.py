@@ -15,7 +15,9 @@ from hl_observer.ops import superviseur_collecteurs as SC
 
 
 def test_registre_canonique_coherent():
-    assert len(SC.REGISTRE) == 21            # registre canonique actuel, dont dydx-live read-only
+    # registre canonique actuel, dont dydx-live read-only ; 22 depuis l'ajout de l2-leaders
+    # (carnets L2 + BBO continus des coins tradés par les leaders, dex HIP-3 compris).
+    assert len(SC.REGISTRE) == 22
     noms = [c["nom"] for c in SC.REGISTRE]
     assert len(set(noms)) == len(noms), "noms uniques"
     for c in SC.REGISTRE:                       # limite > 1,5x cadence (règle anti-relance d'un vivant)

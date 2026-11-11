@@ -214,8 +214,8 @@ def test_write_decision_and_main_ready_and_no_go(monkeypatch, tmp_path, capsys) 
         "reason": "unit", "suite_ladder": ["economic-full"],
     }
     json_path, md_path = policy.write_decision(tmp_path / "out", decision)
-    assert json.loads(json_path.read_text())["status"] == "READY"
-    markdown = md_path.read_text()
+    assert json.loads(json_path.read_text(encoding="utf-8"))["status"] == "READY"
+    markdown = md_path.read_text(encoding="utf-8")   # écrit en UTF-8 : le relire avec l'encodage du poste (cp1252) le déformait
     assert "Compensation entre familles" in markdown
     assert f"{int(policy.STARTING_CAPITAL_USD)} $ de capital paper" in markdown
     assert "pas de cible chiffrée fixe" in markdown

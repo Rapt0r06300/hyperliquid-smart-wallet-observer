@@ -250,6 +250,8 @@ def collection_needs(
             "impact": f"{float(no_spread.sum()) / total:.1%} du notionnel sur des coins sans carnet/BBO : coût de copie non mesurable",
             "notional_share": float(no_spread.sum()) / total,
             "top_coins": [str(c) for c in no_spread.index[:25]],
+            # classement complet (part du notionnel leader) : alimente la liste de coins des collecteurs L2
+            "coins_by_notional": [[str(c), float(v) / total] for c, v in no_spread.iloc[:200].items()],
             "action": "ajouter ces coins à la collecte L2/BBO (priorité au notionnel leader)",
         })
     gaps = panel.gaps()
@@ -382,6 +384,11 @@ def position_events_from_snapshots(
         vault = str(snap.get("vault") or "").lower()
         ts = snap.get("ts_ms")
         positions = snap.get("positions")
+        if snap.get("dex"):
+            # Portefeuille d'un dex HIP-3 : il ne contient PAS les positions du dex principal. Le lire
+            # comme un portefeuille complet ferait croire que tout le reste vient d'être fermé.
+            rejects["portefeuille_autre_dex_non_fusionne"] = rejects.get("portefeuille_autre_dex_non_fusionne", 0) + 1
+            continue
         if not vault or type(ts) is not int or ts <= 0 or not isinstance(positions, list):
             rejects["instantane_invalide"] = rejects.get("instantane_invalide", 0) + 1
             continue

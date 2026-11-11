@@ -737,6 +737,7 @@ REASON_LABELS = {
     "NO_TRAIN_CANDIDATE_PASSED_GATES": "aucun candidat TRAIN n'a passé les contrôles économiques",
     "INSUFFICIENT_TEMPORAL_REPLAY_INPUTS": "pas assez de données temporelles pour séparer TRAIN, validation, OOS et forward",
     "INSUFFICIENT_DISTINCT_SIGNAL_DAYS": "les signaux leader ne couvrent pas assez de jours distincts pour séparer TRAIN, validation et OOS",
+    "INSUFFICIENT_EVALUABLE_SIGNAL_DAYS": "trop peu de jours où un signal leader dispose d'un carnet L2 causal : aucun essai n'est lancé à vide, il faut accumuler des jours de fills ET de carnets",
     "INSUFFICIENT_REPLAY_INPUTS": "les cycles leader ou les carnets L2 exécutables manquent",
     "TEMPORAL_SPLIT_INVALID_AFTER_PURGE": "la séparation TRAIN/validation/OOS reste vide après la purge temporelle anti-fuite",
     "SAFE_PAYLOAD_ROWS_REJECTED": "des enregistrements SAFE ont été écartés car leur contenu est invalide ou non causal",

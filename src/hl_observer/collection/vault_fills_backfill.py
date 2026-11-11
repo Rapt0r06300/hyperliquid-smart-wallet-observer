@@ -19,6 +19,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from hl_observer.collection.forward_poll_fills import is_causal_live_source
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.wallets.position_delta_engine import fill_direction_validation, fill_side_sign
 
@@ -365,12 +366,12 @@ def canonical_fill_id(fill: Mapping[str, Any]) -> str:
 def _preuve_fill_score(fill: dict) -> tuple[int, int, int]:
     """Préférence déterministe pour conserver la meilleure preuve d'un doublon.
 
-    Hiérarchie fail-closed : WS causal certifié > source non-live/REST > ancien
-    WS sans horloge de réception valide. Un label ``LIVE_WS`` seul ne suffit
-    jamais à remplacer une preuve historique certifiable.
+    Hiérarchie fail-closed : live causal certifié (WS ou poll forward discipliné)
+    > source non-live/REST > ancien live sans horloge de réception valide. Un
+    label live seul ne suffit jamais à remplacer une preuve historique certifiable.
     """
     source = str(fill.get("source") or "").upper()
-    live = source == "LIVE_WS"
+    live = is_causal_live_source(source)
     causal_live = False
     try:
         ts_ms = _strict_identity_timestamp(fill, "ts_ms")
@@ -451,8 +452,15 @@ def reconstruire_episodes(fills: list[dict]) -> list[dict]:
         fs.sort(key=lambda x: (int(x["ts_ms"]), repr(fill_identity(x))))
         pos: float | None = None
         for f in fs:
+            # Les fills du poll/WS conservent le champ natif ``startPosition`` : sans lui, le
+            # premier fill observé d'une position déjà ouverte serait pris pour une ouverture.
+            raw_start = f.get("start_position")
+            if raw_start is None:
+                raw_start = f.get("startPosition")
             try:
-                start_position = float(f["start_position"]) if f.get("start_position") is not None else None
+                start_position = float(raw_start) if raw_start is not None else None
+                if start_position is not None and not math.isfinite(start_position):
+                    start_position = None
             except (TypeError, ValueError, OverflowError):
                 start_position = None
             calcule = 0.0 if pos is None else float(pos)

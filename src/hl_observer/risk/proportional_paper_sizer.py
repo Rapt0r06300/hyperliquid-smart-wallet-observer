@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from hl_observer.fees.hyperliquid_fees import MIN_ORDER_VALUE_USD
+
 
 @dataclass(frozen=True, slots=True)
 class ProportionalSizingConfig:
     copy_ratio: float = 0.05
     max_mirror_notional_usdt: float = 50.0
     max_equity_pct: float = 5.0
-    min_notional_usdt: float = 5.0
+    # jamais sous la valeur minimale d'ordre de la plateforme (5 USD était accepté ici, refusé là-bas)
+    min_notional_usdt: float = MIN_ORDER_VALUE_USD
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +51,8 @@ def size_proportional_paper_notional(
     capped_equity = after_absolute > equity_cap if equity_cap > 0 else True
     notional = min(after_absolute, equity_cap) if equity_cap > 0 else 0.0
 
-    if notional < max(0.0, float(cfg.min_notional_usdt)):
+    # Un réglage plus bas que le minimum de la plateforme ne peut pas l'abaisser : l'ordre serait refusé.
+    if notional < max(MIN_ORDER_VALUE_USD, float(cfg.min_notional_usdt)):
         return ProportionalSizingDecision(
             False,
             round(notional, 8),

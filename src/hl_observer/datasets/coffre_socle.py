@@ -43,6 +43,7 @@ FAMILLE_VAULT_LEDGER = "vault_ledger"     # dépôts / retraits des vaults (flux
 FAMILLE_MICRO_BBO = "micro_bbo"           # BBO Hyperliquid dense (WS public, séquence + checksum)
 FAMILLE_MICRO_L2 = "micro_l2"             # carnets L2 Hyperliquid pleine profondeur (WS public)
 FAMILLE_MICRO_TRADES = "micro_trades"     # transactions Hyperliquid (WS public)
+FAMILLE_VAULT_PORTFOLIO = "vault_portfolio"  # courbes valeur / PnL / volume des vaults (vaultDetails)
 
 #: Sources JAMAIS certifiables : données ESTIMÉES/inférées (non observées directement).
 #: Elles ne doivent JAMAIS entrer dans le coffre comme du SAFE — intégrité du labo.

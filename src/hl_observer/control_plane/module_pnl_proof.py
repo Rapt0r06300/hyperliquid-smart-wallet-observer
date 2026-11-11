@@ -111,9 +111,14 @@ def independent_module_verdict(
         except ValueError as exc:
             verdict = {"module": canonical_module, "status": "UNMEASURABLE", "reason": f"PNL_EVIDENCE_INVALID:{exc}", "proof_of_pnl": False, "sample_size": len(evidence)}
         else:
+            # Politique canonique : aucun seuil chiffré n'est une porte de preuve. Le verdict dépend
+            # du signe du net APRÈS tous les coûts ; l'atteinte du repère historique est rapportée à part.
             verdict = dict(result)
-            verdict["status"] = "PROVEN" if result["threshold_met"] else "REJECTED"
-            verdict["reason"] = "NET_DAILY_THRESHOLD_MET" if result["threshold_met"] else "NET_DAILY_THRESHOLD_NOT_MET"
+            net_positive = result["net_pnl"] > 0.0
+            verdict["status"] = "PROVEN" if net_positive else "REJECTED"
+            verdict["reason"] = "NET_POSITIVE_AFTER_COSTS" if net_positive else "NET_NOT_POSITIVE_AFTER_COSTS"
+            verdict["reference_threshold_met"] = result["threshold_met"]
+            verdict["threshold_is_evaluation_only"] = True
     verdict["certificate_digest"] = hashlib.sha256(json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return verdict
 

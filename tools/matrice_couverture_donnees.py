@@ -215,7 +215,17 @@ def rendre(matrice: dict[str, Any]) -> str:
     return "\n".join(lignes)
 
 
+def _sortie_utf8() -> None:
+    """Affichage robuste : jamais de plantage sur une console ou un journal non UTF-8."""
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _sortie_utf8()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--safe", action="store_true",
