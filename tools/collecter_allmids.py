@@ -54,9 +54,9 @@ def _env_f(nom: str, defaut: float) -> float:
 
 
 # Plus de points historiques = plus de matière backtest (écritures locales, gratuit).
-TAPE_INTERVALLE_S = _env_f("ALLMIDS_TAPE_S", 30.0)          # 1 point / 30 s (était 60 s)
-INTERVALLE_S_DEFAUT = _env_f("ALLMIDS_INTERVALLE_S", 8.0)   # cache mids plus frais (était 15 s)
-_PLANCHER_S = _env_f("ALLMIDS_PLANCHER_S", 6.0)             # garde-fou mini entre 2 passes
+TAPE_INTERVALLE_S = _env_f("ALLMIDS_TAPE_S", 3.0)           # archive à CHAQUE passe en mode persistant (densité max ; était 30 s)
+INTERVALLE_S_DEFAUT = _env_f("ALLMIDS_INTERVALLE_S", 4.0)   # PERSISTANT : 1 snapshot prix / 4 s (~15/min vs 2/min ; 1 POST léger ; était 15 s en respawn)
+_PLANCHER_S = _env_f("ALLMIDS_PLANCHER_S", 3.0)             # garde-fou mini entre 2 passes
 # En-têtes polis : User-Agent identifie le client (évite certains blocages), connexion réutilisable.
 _HEADERS = {"Content-Type": "application/json", "User-Agent": "alina-smart-flow/allmids (read-only)"}
 

@@ -29,8 +29,13 @@ SOURCE_STATUS_UNCLASSIFIED = "UNCLASSIFIED"
 REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "marks-collector", "script": "tools/ecrire_marks_tous_coins.py",
      "intervalle_s": 60, "args": ("--une-fois",), "limite_minutes": 5.0},
+    # PERSISTANT (2026-11-10) : boucle interne 4 s au lieu d'un respawn Python /15 s.
+    # Capture ~7× plus de prix ET réduit le churn mémoire (1 process long-vécu). Vie =
+    # HEARTBEAT (écrit à chaque passe via HB.battre), plus le log. intervalle_s = délai de
+    # relance après CRASH seulement.
     {"nom": "allmids-collector", "script": "tools/collecter_allmids.py",
-     "intervalle_s": 15, "args": ("--une-fois",), "limite_minutes": 5.0},
+     "intervalle_s": 10, "args": (), "limite_minutes": 5.0,
+     "heartbeat": "runtime/research_lab/heartbeats/allmids-collector.json"},
     {"nom": "liq-collector", "script": "tools/collecter_liquidations.py",
      "intervalle_s": 300, "args": ("--une-fois",), "limite_minutes": 20.0},
     {"nom": "venues-collector", "script": "tools/collecter_dispersion_venues.py",
