@@ -409,8 +409,13 @@ def verify_partition(
     output.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
     inventory_cache = work_root / "inventory-cache"
+    # The SHA-verified published restore inventory avoids scanning thousands
+    # of 100-Release API pages (some >40 MB and prone to IncompleteRead).
+    # Live Release identities are still reconciled; missing required tags
+    # are fetched individually and checked against exact expected digests.
     releases = list(iter_releases(
         REPOSITORY, token=token, inventory_cache_root=inventory_cache,
+        prefer_published_inventory=True,
     ))
     required = {
         (str(spec["release_tag"]), str(spec["asset_name"])):
