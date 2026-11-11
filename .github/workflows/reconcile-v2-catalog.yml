@@ -616,13 +616,19 @@ jobs:
           fi
           job_json="$RUNNER_TEMP/historical-job.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$failed_job_id" > "$job_json"
-          # When GitHub sends SIGTERM, no individual step may be marked failed,
-          # so --log-failed is EMPTY. Fetch the full job log for positive proof.
-          failure_log="$(gh run view "$GITHUB_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --job "$failed_job_id" \
-            --log 2>&1 || true)"
-          printf '%s\n' "$failure_log" > "$RUNNER_TEMP/historical-failure.log"
+          # GitHub can omit stopped-job logs from gh run view --log even
+          # though the raw Actions job-log endpoint retains the shutdown marker.
+          # Never infer an infrastructure stop from an unavailable log.
+          if ! curl --fail-with-body --silent --show-error --location \
+            --retry 3 --retry-all-errors --max-time 120 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${failed_job_id}/logs" \
+            -o "$RUNNER_TEMP/historical-failure.log"; then
+            echo "::error::GitHub job log unavailable; refusing unproven infrastructure retry"
+            exit 1
+          fi
           termination_class="$(python - "$job_json" \
             "$RUNNER_TEMP/historical-failure.log" <<'PY'
           import json
