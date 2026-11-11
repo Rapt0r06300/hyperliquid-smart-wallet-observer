@@ -1556,10 +1556,11 @@ def test_modified_historical_jsonl_relocation_stays_protected(repos):
 
     rc, receipt = run_sync(local)
 
-    # Donnee protegee modifiee localement + GitHub aligne : plus de faux NO_GO.
-    # Le resultat correct est SYNCHRONIZED « rien a publier » -- l'INVARIANT reste
-    # la PROTECTION : rien n'est committe, rien n'est pousse, rien n'est ecrase.
-    assert rc == 0 and receipt["status"] == "SYNCHRONIZED"
+    # This is NOT a verified relocation: the destination bytes no longer
+    # match HEAD. Refuse it fail-closed instead of reporting a false sync.
+    # Both the original upstream blob and altered local bytes stay intact.
+    assert rc == 2 and receipt["status"] == "NO_GO"
+    assert "Archive differente du blob HEAD" in receipt["error"]
     assert receipt["local_commit_created"] is False
     assert receipt["push_attempts"] == 0
     assert archived.read_text(encoding="utf-8") == payload + '{"task":"changed"}\n'
