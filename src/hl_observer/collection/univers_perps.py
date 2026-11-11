@@ -16,6 +16,7 @@ jamais abonnés). Lecture seule : endpoint public ``/info``, aucun ordre, aucune
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
@@ -107,8 +108,8 @@ def charger_univers(
                  "source": "hyperliquid:/info:meta+perpDexs", "read_only": True},
                 ensure_ascii=False), encoding="utf-8")
             temporaire.replace(chemin)
-        except OSError:
-            pass
+        except OSError as exc:
+            logging.getLogger(__name__).warning("HL_UNIVERSE_CACHE_WRITE_FAILED: %s", exc)
         return {nom for noms in par_dex.values() for nom in noms}
     if ancien is not None:
         return {nom for noms in ancien["par_dex"].values() for nom in noms}
