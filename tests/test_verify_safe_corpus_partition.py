@@ -245,3 +245,38 @@ def test_complete_inventory_makes_no_historical_request(monkeypatch):
     assert verifier._resolve_missing_historical_assets(
         rows, {("old", "safe.gz"): (4, "a" * 64)}, token=None,
     ) == rows
+
+
+
+def test_partition_uses_published_verified_restore_inventory(tmp_path, monkeypatch):
+    """Never let one SAFE worker traverse thousands of 40 MB Release pages."""
+    proof = {"source_index_sha256": "c" * 64}
+    monkeypatch.setattr(
+        verifier, "_load_specs", lambda *_args: (proof, _specs())
+    )
+    calls = []
+
+    def inventory(repository, *, token=None, inventory_cache_root=None,
+                  prefer_published_inventory=False):
+        calls.append((repository, token, inventory_cache_root,
+                      prefer_published_inventory))
+        raise RestoreError("SIMULATED_INVENTORY_UNAVAILABLE")
+
+    monkeypatch.setattr(verifier, "iter_releases", inventory)
+    receipt = tmp_path / "receipt.json"
+    with pytest.raises(RestoreError, match="SIMULATED_INVENTORY_UNAVAILABLE"):
+        verifier.verify_partition(
+            index=tmp_path / "DATA_INDEX.json",
+            metrics=tmp_path / "DATA_METRICS.json",
+            partitions=1, partition=0, output=receipt, token="test-token",
+            work_root=tmp_path / "work", git_sha="d" * 40,
+            reserve_bytes=1024,
+        )
+    assert calls == [
+        (verifier.REPOSITORY, "test-token",
+         tmp_path / "work" / "inventory-cache", True),
+    ]
+    # Failure stays visibly uncertified rather than fabricating SAFE proof.
+    assert json.loads(receipt.read_text())["status"] != (
+        "PARTITION_FULLY_BYTE_VERIFIED"
+    )
