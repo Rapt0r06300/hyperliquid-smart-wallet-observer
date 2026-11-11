@@ -29,6 +29,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -42,10 +43,17 @@ from hl_observer.datasets.coffre_certifie import (  # noqa: E402
     FAMILLE_BBO, FAMILLE_BOOK_L2, FAMILLE_FILLS_BACKFILL, FAMILLE_FILLS_FORWARD,
     FAMILLE_VENUE,
     PASS, QUARANTAINE, REPARE, StatsCertif, certifier_record, detecter_famille,
-    identite, sniffer_famille,
+    identite, motif_non_certifie, nouvellement_accepte, sniffer_famille, version_certificateur,
 )
 
 COFFRE_RELDIR = Path("runtime") / "coffre_certifie"
+#: Dossiers où les collecteurs écrivent leurs rubans. Le second (microstructure Hyperliquid :
+#: BBO dense, carnets L2, transactions) n'était jamais visité : 1,4 Go restaient hors coffre.
+DOSSIERS_COLLECTE = (
+    Path("runtime") / "data",
+    Path("runtime") / "research_lab" / "data",   # microstructure Hyperliquid
+    Path("runtime") / "history",                 # bougies de backfill
+)
 LOG_RELDIR = Path("runtime") / "logs" / "coffre_certifie"
 
 # Flux de sortie « vivants » remis à zéro après scellage (option --reset-affichage).
@@ -55,7 +63,7 @@ FLUX_VIVANTS = (
     "copy_vault_trades_lane.jsonl", "copy_vault_candle_lane.jsonl",
     "hl_allmids_tape.jsonl", "asset_ctx_tape.jsonl",
     "liquidations_confirmees.jsonl", "overshoots_liquidation.jsonl",
-    "carnet_venues.jsonl", "dispersion_venues.jsonl",
+    "carnet_venues.jsonl", "dispersion_venues.jsonl", "explorer_tx_tape.jsonl",
 )
 # Dossiers jamais descendus par --tout. On exclut : le VCS/éditeurs/caches, les
 # stores canoniques déjà SAFE ou volumineux (gérés par référence), et tout le
@@ -117,6 +125,8 @@ def _jour_utc(ts_ms: int | None) -> str:
 
 
 def _ts_primaire(record: dict[str, Any], famille: str) -> int | None:
+    if famille == "candle":
+        return record.get("open_ts_ms")
     if famille == FAMILLE_BOOK_L2:
         return record.get("exchange_ts_ms")
     if famille == FAMILLE_BBO:
@@ -134,11 +144,107 @@ def _sha256_fichier(path: Path) -> str:
     return h.hexdigest()
 
 
-def _lire_lignes(path: Path) -> Iterator[str]:
-    ouvre = gzip.open if path.suffix == ".gz" else open
-    with ouvre(path, "rt", encoding="utf-8", errors="replace") as handle:  # type: ignore[operator]
-        for ligne in handle:
-            yield ligne
+def _lire_lignes(path: Path, *, debut: int = 0, fin: int | None = None) -> Iterator[str]:
+    """Lignes du fichier ; pour un ruban texte, uniquement les octets ``[debut, fin)``.
+
+    ``fin`` est une frontière de ligne figée au début du scellage : une ligne encore en cours
+    d'écriture par un collecteur n'est ni lue ni mise en quarantaine, elle sera scellée au
+    passage suivant."""
+    if path.suffix == ".gz":
+        # archive tournante : flux décompressé, complet (aucune ligne en cours d'écriture)
+        with gzip.open(path, "rb") as handle:
+            if debut > 0:
+                handle.seek(debut)
+            for brut in handle:
+                yield brut.decode("utf-8", errors="replace")
+        return
+    with path.open("rb") as handle:
+        handle.seek(max(0, debut))
+        restant = None if fin is None else max(0, fin - max(0, debut))
+        for brut in handle:
+            if restant is not None:
+                if len(brut) > restant:
+                    break
+                restant -= len(brut)
+            yield brut.decode("utf-8", errors="replace")
+
+
+def _sha256_prefixe(path: Path, octets: int) -> str:
+    """SHA-256 des ``octets`` premiers octets (identité d'un préfixe déjà scellé)."""
+    h = hashlib.sha256()
+    restant = max(0, int(octets))
+    ouvrir = gzip.open if path.suffix == ".gz" else open   # .gz : préfixe du flux décompressé
+    with ouvrir(path, "rb") as handle:
+        while restant > 0:
+            bloc = handle.read(min(4 * 1024 * 1024, restant))
+            if not bloc:
+                break
+            h.update(bloc)
+            restant -= len(bloc)
+    return h.hexdigest()
+
+
+def _fin_derniere_ligne(path: Path, taille: int) -> int:
+    """Plus grand offset ``<= taille`` situé juste après un saut de ligne (0 si aucun)."""
+    with path.open("rb") as handle:
+        pos = max(0, int(taille))
+        while pos > 0:
+            pas = min(1 << 16, pos)
+            handle.seek(pos - pas)
+            k = handle.read(pas).rfind(b"\n")
+            if k >= 0:
+                return pos - pas + k + 1
+            pos -= pas
+    return 0
+
+
+_ROTATION = re.compile(r"_\d{10,}$")
+
+
+def _tronc(nom: str) -> str:
+    """Nom logique d'un ruban : sans ``.gz``, sans ``.jsonl``, sans suffixe de rotation horodaté.
+
+    ``micro_bbo_1794306635046325200.jsonl.gz`` et ``micro_bbo.jsonl`` sont le même ruban :
+    le second devient le premier quand le collecteur le fait tourner."""
+    base = str(nom).replace(chr(92), "/").rsplit("/", 1)[-1]
+    if base.endswith(".gz"):
+        base = base[:-3]
+    if base.endswith(".jsonl"):
+        base = base[:-6]
+    return _ROTATION.sub("", base)
+
+
+def _prefixes_connus(source: Path, etat: dict[str, Any], version: int) -> list[tuple[int, str]]:
+    """Préfixes déjà scellés (règle courante) pour ce ruban, du plus long au plus court."""
+    tronc = _tronc(source.name)
+    connus: set[tuple[int, str]] = set()
+    for cle, e in etat.items():
+        if not isinstance(e, dict) or _tronc(str(cle)) != tronc:
+            continue
+        if int(e.get("certif_version", 1)) < version:
+            continue   # préfixe scellé avec une règle périmée : à relire entièrement
+        if e.get("prefixe_octets") and e.get("prefixe_sha256"):
+            connus.add((int(e["prefixe_octets"]), str(e["prefixe_sha256"])))
+        for ancien in e.get("prefixes_precedents") or []:
+            if isinstance(ancien, list) and len(ancien) == 2 and ancien[0] and ancien[1]:
+                connus.add((int(ancien[0]), str(ancien[1])))
+    return sorted(connus, reverse=True)
+
+
+def _reprise_append_only(source: Path, fin: int | None, etat: dict[str, Any], *, essais: int = 5,
+                         version: int = 1) -> int:
+    """Offset à partir duquel sceller : fin du plus long préfixe DÉJÀ scellé de ce ruban.
+
+    Un ruban de collecte ne fait que grossir : si ses N premiers octets ont le SHA-256 d'un
+    préfixe déjà scellé (même ruban, y compris après déplacement en archive ou rotation en
+    ``.jsonl.gz`` — on compare alors le flux décompressé), seuls les octets suivants sont
+    nouveaux. Sans préfixe reconnu (fichier réécrit, nouvelle session) on rescelle tout :
+    jamais de donnée sautée sur une simple supposition."""
+    candidats = [c for c in _prefixes_connus(source, etat, version) if fin is None or c[0] <= fin]
+    for octets, sha in candidats[:essais]:
+        if _sha256_prefixe(source, octets) == sha:
+            return octets
+    return 0
 
 
 def _lire_json(path: Path) -> Any:
@@ -163,20 +269,28 @@ def _etat_source(path: Path) -> dict[str, Any]:
 def sceller_fichier(
     source: Path, coffre: Path, batch_id: str, *, source_tag: str, famille: str,
     now_ms: int, deja_vus: set, log, prefixe: str = "",
+    debut_octets: int = 0, fin_octets: int | None = None, rattrapage: bool = False,
 ) -> dict[str, Any] | None:
     """Certifie un fichier source, écrit le shard scellé + la quarantaine.
 
     Renvoie une entrée de manifeste (ou None si 0 enregistrement déposé).
     Streaming strict : une seule passe, un seul handle de sortie.
+    ``debut_octets``/``fin_octets`` : tranche du ruban à sceller (reprise incrémentale).
+    Le shard est écrit sous un nom temporaire puis renommé : une interruption ne laisse
+    jamais un shard tronqué à son chemin définitif.
     """
     stats = StatsCertif()
     rel_src = source.relative_to(coffre.parents[1]) if coffre.parents[1] in source.parents else source.name
-    base = source.name.replace(".gz", "").replace(".jsonl", "")
+    base = _base_shard(source, coffre.parents[1])
     shard_rel = COFFRE_RELDIR / "local" / "shards" / famille / f"{batch_id}__{base}.jsonl.gz"
     quar_rel = COFFRE_RELDIR / "quarantine" / batch_id / f"{famille}__{base}.jsonl"
     shard_abs = coffre.parents[1] / shard_rel
     quar_abs = coffre.parents[1] / quar_rel
     shard_abs.parent.mkdir(parents=True, exist_ok=True)
+    if shard_abs.exists():
+        # Un shard déposé est immuable : on ne l'écrase JAMAIS (l'index pointerait alors vers un
+        # contenu qui n'est plus celui certifié). Mieux vaut refuser que perdre un dépôt.
+        raise FileExistsError(f"shard deja present, ecrasement refuse : {shard_rel}")
 
     coins: dict[str, int] = {}
     jours: dict[str, int] = {}
@@ -184,9 +298,11 @@ def sceller_fichier(
     ts_max: int | None = None
     quar_handle = None
     ecrits = 0
+    shard_final = shard_abs
+    shard_abs = shard_final.with_name(f".{shard_final.name}.partial")
     try:
         with gzip.open(shard_abs, "wt", encoding="utf-8") as sortie:
-            for brut in _lire_lignes(source):
+            for brut in _lire_lignes(source, debut=debut_octets, fin=fin_octets):
                 brut = brut.strip()
                 if not brut:
                     continue
@@ -210,6 +326,11 @@ def sceller_fichier(
                     quar_handle = quar_handle or _ouvrir_quar(quar_abs)
                     quar_handle.write(json.dumps({"raison": raison, "record": record}, ensure_ascii=False) + "\n")
                     continue
+                if rattrapage and not nouvellement_accepte(source.name, norm):
+                    # ruban archivé déjà scellé avec l'ancienne règle : cette ligne y est déjà
+                    stats.doublons += 1
+                    stats._ajouter_raison("deja_couvert_regle_precedente")
+                    continue
                 cle = identite(norm, famille)
                 if cle in deja_vus:
                     stats.doublons += 1
@@ -232,10 +353,19 @@ def sceller_fichier(
                 if tsp:
                     ts_min = tsp if ts_min is None else min(ts_min, tsp)
                     ts_max = tsp if ts_max is None else max(ts_max, tsp)
+    except BaseException:
+        try:
+            shard_abs.unlink()   # interruption : aucun fichier partiel ne survit
+        except OSError:
+            pass
+        raise
     finally:
         if quar_handle is not None:
             quar_handle.close()
 
+    if ecrits:
+        os.replace(shard_abs, shard_final)   # publication atomique du shard complet
+        shard_abs = shard_final
     if ecrits == 0:
         # rien de déposable : retire le shard vide, garde la quarantaine + stats.
         try:
@@ -258,6 +388,7 @@ def sceller_fichier(
         "jours": dict(sorted(jours.items())),
         "ts_min_ms": ts_min, "ts_max_ms": ts_max,
         "stats": stats.resume(),
+        "source_octets": [int(debut_octets), None if fin_octets is None else int(fin_octets)],
     }
 
 
@@ -284,13 +415,16 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
         # Scan EXHAUSTIF de runtime/data : on ne se limite plus a une liste figee.
         # Chaque .jsonl est classe par NOM (familles connues) puis, si inconnu, par
         # CONTENU (reniflage) -> le coffre trouve TOUT, y compris de nouveaux flux.
-        data = root / "runtime" / "data"
-        if not data.is_dir():
-            return trouves
-        try:
-            entrees = sorted(data.iterdir(), key=lambda e: e.name)
-        except OSError:
-            return trouves
+        entrees: list[Path] = []
+        for data in DOSSIERS_COLLECTE:
+            try:
+                # une archive tournante passe AVANT le ruban actif homonyme : elle contient ce
+                # que le ruban actif avait déjà fait sceller, la reprise par préfixe doit la
+                # reconnaître avant que l'état du ruban actif ne soit remplacé.
+                entrees += sorted((root / data).iterdir(),
+                                  key=lambda e: (_tronc(e.name), not e.name.endswith(".gz"), e.name))
+            except OSError:
+                continue
         for p in entrees:
             try:
                 nom = p.name
@@ -358,6 +492,189 @@ def collecter_fichiers(root: Path, *, tout: bool, log=None) -> list[tuple[Path, 
     return trouves
 
 
+def _classer(path: Path) -> tuple[str, str] | None:
+    """(famille, source) d'un fichier de collecte : par son nom, sinon par son contenu."""
+    return detecter_famille(path.name) or _sniffer_fichier(path)
+
+
+def _est_ruban(path: Path) -> bool:
+    return path.name.endswith(".jsonl") or path.name.endswith(".jsonl.gz")
+
+
+def collecter_archives(root: Path) -> list[tuple[Path, str, str]]:
+    """Rubans des sessions archivées (``runtime/archive/<session>/``), classés comme les autres.
+
+    Les archives sont exclues du scan ``--tout`` (déjà scellées à l'arrêt). ``--archives`` les
+    réintègre : indispensable quand une règle de certification corrigée doit rattraper des
+    rubans rejetés à tort par l'ancienne règle."""
+    trouves: list[tuple[Path, str, str]] = []
+    base = root / "runtime" / "archive"
+    if not base.is_dir():
+        return trouves
+    for session in sorted(d for d in base.iterdir() if d.is_dir()):
+        for fichier in sorted(session.iterdir(), key=lambda e: e.name):
+            try:
+                if not fichier.is_file() or not _est_ruban(fichier) or fichier.stat().st_size == 0:
+                    continue
+                info = _classer(fichier)
+            except OSError:
+                continue
+            if info is not None:
+                trouves.append((fichier, info[0], info[1]))
+    return trouves
+
+
+def recenser_non_certifies(root: Path, *, archives: bool = False) -> list[dict[str, Any]]:
+    """Fichiers de collecte présents mais NON certifiés, chacun avec sa raison.
+
+    ``categorie`` : motif par conception (INFERENCE, DERIVE, REDONDANT, HORS_PERIMETRE,
+    DIAGNOSTIC) ou ``INCONNU`` — un flux que le certificateur ne sait pas traiter et qu'il
+    faut lui apprendre. Rien n'est ignoré en silence : la liste entre au manifeste et au
+    fichier ``COUVERTURE.json``."""
+    dossiers = [root / d for d in DOSSIERS_COLLECTE]
+    if archives and (root / "runtime" / "archive").is_dir():
+        dossiers += sorted(d for d in (root / "runtime" / "archive").iterdir() if d.is_dir())
+    vus: dict[str, dict[str, Any]] = {}
+    for dossier in dossiers:
+        if not dossier.is_dir():
+            continue
+        for fichier in sorted(dossier.iterdir(), key=lambda e: e.name):
+            try:
+                if not fichier.is_file() or not _est_ruban(fichier) or fichier.stat().st_size == 0:
+                    continue
+                if _classer(fichier) is not None:
+                    continue
+                taille = fichier.stat().st_size
+            except OSError:
+                continue
+            motif = motif_non_certifie(fichier.name)
+            ligne = vus.setdefault(fichier.name, {
+                "fichier": fichier.name, "octets": 0, "exemplaires": 0,
+                "categorie": motif[0] if motif else "INCONNU",
+                "motif": motif[1] if motif else "aucune règle de certification : flux à apprendre au certificateur",
+            })
+            ligne["octets"] += taille
+            ligne["exemplaires"] += 1
+    return sorted(vus.values(), key=lambda l: (l["categorie"] != "INCONNU", -l["octets"], l["fichier"]))
+
+
+def _base_shard(source: Path, racine: Path) -> str:
+    """Nom de base du shard d'une source, UNIQUE dans un lot.
+
+    Un ruban des dossiers de collecte garde son nom nu (``bbo_tape``). Une source située
+    ailleurs — session archivée, scan ``--tout`` — reçoit une empreinte de son chemin : dix
+    sessions archivées contiennent chacune un ``bbo_tape.jsonl``, et sans cette empreinte
+    leurs shards porteraient le même nom dans un même lot et s'écraseraient l'un l'autre."""
+    base = source.name.replace(".gz", "").replace(".jsonl", "")
+    if source.parent in [racine / d for d in DOSSIERS_COLLECTE]:
+        return base
+    try:
+        relatif = source.relative_to(racine).as_posix()
+    except ValueError:
+        relatif = source.as_posix()
+    return f"{base}__{hashlib.sha256(relatif.encode('utf-8')).hexdigest()[:10]}"
+
+
+def verifier_lot(racine: Path, fichiers: list[dict[str, Any]]) -> list[str]:
+    """Relit chaque shard du lot : présent, et de SHA-256 égal à celui du manifeste.
+
+    Renvoie la liste des anomalies (vide = lot intègre). Appelée en fin de scellage : un
+    dépôt dont le contenu ne correspond pas à son empreinte ne passe jamais inaperçu."""
+    anomalies: list[str] = []
+    vus: set[str] = set()
+    for entree in fichiers:
+        relatif = entree.get("shard")
+        if not relatif:
+            continue
+        if relatif in vus:
+            anomalies.append(f"deux sources pointent vers le meme shard : {relatif}")
+            continue
+        vus.add(relatif)
+        chemin = racine / relatif
+        if not chemin.is_file():
+            anomalies.append(f"shard absent : {relatif}")
+        elif _sha256_fichier(chemin) != entree.get("shard_sha256"):
+            anomalies.append(f"empreinte differente du manifeste : {relatif}")
+    return anomalies
+
+
+def _precharger_identites(coffre: Path, lots: list[str], source: Path, famille: str, deja_vus: set) -> int:
+    """Identités déjà déposées pour ce ruban dans ``lots`` -> ``deja_vus`` (aucun doublon à la reprise)."""
+    nu = source.name.replace(".gz", "").replace(".jsonl", "")
+    noms = {nu, _base_shard(source, coffre.parents[1])}
+    charges = 0
+    for lot in lots:
+        for base in sorted(noms):
+            shard = coffre / "local" / "shards" / famille / f"{lot}__{base}.jsonl.gz"
+            if shard.is_file():
+                break
+        else:
+            continue
+        with gzip.open(shard, "rt", encoding="utf-8") as handle:
+            for ligne in handle:
+                try:
+                    deja_vus.add(identite(json.loads(ligne), famille))
+                    charges += 1
+                except (ValueError, TypeError):
+                    continue
+    return charges
+
+
+def _lots_ayant_scelle(source: Path, sha_src: str, frontiere: int, etat: dict[str, Any]) -> list[str]:
+    """Lots qui ont déjà scellé ce contenu : même SHA, ou préfixe reconnu d'un ruban homonyme."""
+    lots: set[str] = set()
+    for cle, e in etat.items():
+        if not isinstance(e, dict) or not e.get("batch"):
+            continue
+        if e.get("sha256") == sha_src:
+            lots.add(str(e["batch"]))
+        elif (Path(str(cle).replace(chr(92), "/")).name == source.name and e.get("prefixe_octets")
+              and e.get("prefixe_sha256") and int(e["prefixe_octets"]) <= frontiere
+              and _sha256_prefixe(source, int(e["prefixe_octets"])) == e["prefixe_sha256"]):
+            lots.add(str(e["batch"]))
+    return sorted(lots)
+
+
+def _verifier_magasin_ticks(root: Path, coffre: Path, budget_s: float, log) -> dict[str, Any] | None:
+    """Vérifie et référence EN PLACE le magasin de ticks natifs (``runtime/data/market_ticks``).
+
+    Ce magasin (des dizaines de Go, déjà auto-manifesté) n'est pas recopié : chaque shard
+    immuable est relu et comparé à son manifeste, puis référencé. Passage borné et repris au
+    suivant : la fermeture des collecteurs n'attend jamais. Ne fait jamais échouer le scellage
+    des rubans ; une anomalie est écrite en clair dans le journal et dans les index.
+    """
+    try:
+        import verifier_store_ticks
+
+        resume = verifier_store_ticks.verifier_store(root, budget_s=budget_s)
+    except Exception as exc:  # noqa: BLE001 - le coffre LOCAL ne doit pas dépendre de ce contrôle
+        _log(log, f"   [ticks] verification du magasin de ticks impossible : {type(exc).__name__}: {exc}")
+        return None
+    if not resume.get("present"):
+        return resume
+    etat = "complet" if resume["complet"] else f"partiel, {resume['dossiers_restants']} dossier(s) au prochain passage"
+    _log(log, f"   [ticks] magasin de ticks natifs : {resume['shards_verifies']:,} shard(s) verifie(s) et "
+              f"reference(s) en place ({resume['octets_verifies'] / 1e9:.2f} Go), +{resume['verifies_ce_passage']:,} "
+              f"a ce passage ; {etat}.")
+    _log(log, f"   [ticks] rubans encore en cours d'ecriture (non immuables) : {resume['rubans_en_cours']:,} "
+              f"({resume['octets_en_cours'] / 1e9:.2f} Go) - verifiables a leur rotation.")
+    if resume["anomalies"]:
+        _log(log, f"   [INTEGRITE-TICKS] {resume['anomalies']} shard(s) du magasin ne correspondent pas a leur "
+                  f"manifeste (liste dans MARKET_TICKS_INDEX.json).")
+    index_path = coffre / "COFFRE_INDEX.json"
+    index = _lire_json(index_path)
+    if isinstance(index, dict) and isinstance(index.get("tiers"), dict):
+        index["tiers"]["MARKET_TICKS_STORE"] = {
+            "index": "runtime/coffre_certifie/MARKET_TICKS_INDEX.json",
+            "note": "magasin de ticks natifs : verifie par SHA-256 contre ses manifestes et reference en place",
+            "shards_verifies": resume["shards_verifies"], "octets_verifies": resume["octets_verifies"],
+            "anomalies": resume["anomalies"], "complet": resume["complet"],
+            "rubans_en_cours": resume["rubans_en_cours"],
+        }
+        _ecrire_json_atomique(index_path, index)
+    return resume
+
+
 def _sniffer_fichier(path: Path) -> tuple[str, str] | None:
     """Reconnaît la famille d'un fichier de données par son contenu (1re ligne)."""
     try:
@@ -399,6 +716,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reset-affichage", action="store_true",
                    help="après scellage vérifié, remet à zéro les flux vivants de runtime/data")
     p.add_argument("--now-ms", type=int, default=0, help="horloge injectable (tests)")
+    p.add_argument("--famille", default="",
+                   help="ne certifie que cette famille (ex. snapshot) ; vide = toutes")
+    p.add_argument("--budget-ticks-s", type=float, default=45.0,
+                   help="duree maximale (s) consacree a verifier le magasin de ticks natifs a ce passage")
+    p.add_argument("--nom", default="",
+                   help="ne certifie que les fichiers de ce nom (ex. vault_fills_live.jsonl)")
+    p.add_argument("--archives", action="store_true",
+                   help="inclut les rubans des sessions archivées (rattrapage après correction d'une règle)")
     args = p.parse_args(argv)
     root = Path(args.root).resolve()
     coffre = root / COFFRE_RELDIR
@@ -433,6 +758,45 @@ def main(argv: list[str] | None = None) -> int:
         portee = "TOUT le projet" if args.tout else "la collecte en cours (runtime/data)"
         _log(log, f"ETAPE 1/3 - Je cherche les donnees dans : {portee}")
         fichiers = collecter_fichiers(root, tout=args.tout, log=log)
+        if args.tout:
+            # Le scan récursif saute ``research_lab`` (où vit la microstructure) : sans ce retour
+            # explicite aux dossiers de collecte, le mode par défaut du lanceur ne la verrait jamais.
+            deja = {str(f[0]) for f in fichiers}
+            fichiers += [f for f in collecter_fichiers(root, tout=False) if str(f[0]) not in deja]
+        if args.archives:
+            deja = {str(f[0]) for f in fichiers}
+            laisses = 0
+            for f in collecter_archives(root):
+                if str(f[0]) in deja:
+                    continue
+                if not args.nom and version_certificateur(f[0].name) <= 1:
+                    # Session archivée, règle inchangée : ce ruban a été scellé à l'arrêt de sa
+                    # session. Le relire en entier ne créerait que des doublons d'un lot à l'autre.
+                    laisses += 1
+                    continue
+                fichiers.append(f)
+            if laisses:
+                _log(log, f"   -> {laisses} ruban(s) d'archive a regle inchangee laisses (deja scelles a "
+                          f"l'arret de leur session ; --nom <fichier> pour en forcer un).")
+        if args.famille:
+            fichiers = [f for f in fichiers if f[1] == args.famille]
+        if args.nom:
+            fichiers = [f for f in fichiers if f[0].name == args.nom]
+        # COUVERTURE : ce que je vois mais ne certifie pas, et pourquoi (jamais en silence).
+        non_certifies = recenser_non_certifies(root, archives=args.archives)
+        inconnus = [l for l in non_certifies if l["categorie"] == "INCONNU"]
+        _ecrire_json_atomique(coffre / "COUVERTURE.json", {
+            "schema": "hypersmart.coffre_certifie.couverture.v1", "genere_ms": now_ms,
+            "certifiables": sorted({f"{f[0].name} -> {f[1]}" for f in fichiers}),
+            "non_certifies": non_certifies, "inconnus": len(inconnus),
+        })
+        if non_certifies:
+            _log(log, f"   -> {len(non_certifies)} type(s) de fichier de collecte NON certifie(s) :")
+            for ligne in non_certifies:
+                _log(log, f"      [{ligne['categorie']}] {ligne['fichier']} "
+                          f"({ligne['octets'] / 1048576:.1f} Mo) - {ligne['motif']}")
+        if inconnus:
+            _log(log, f"   [!] {len(inconnus)} flux INCONNU(S) : le certificateur doit apprendre a les traiter.")
         total_octets = 0
         for f, _, _ in fichiers:
             try:
@@ -467,13 +831,57 @@ def main(argv: list[str] | None = None) -> int:
             cle_src = str(source.relative_to(root)) if root in source.parents else str(source)
             sha_src = _sha256_fichier(source)
             ancien = etat.get(cle_src)
-            if ancien and ancien.get("sha256") == sha_src:
+            version = version_certificateur(source.name)
+            if ancien and ancien.get("sha256") == sha_src and int(ancien.get("certif_version", 1)) >= version:
                 _log(log, "        deja certifie (inchange depuis la derniere fois) - je passe.")
                 faits_octets += taille
                 continue
+            debut, fin = 0, None
+            frontiere = None
+            if True:
+                # Même contenu déjà scellé sous un autre chemin (ruban déplacé en archive) :
+                # le resceller ne créerait que des doublons d'un lot à l'autre.
+                jumeau = next((c for c, e in etat.items() if isinstance(e, dict)
+                               and e.get("sha256") == sha_src and c != cle_src
+                               and int(e.get("certif_version", 1)) >= version), None)
+                if jumeau is not None:
+                    _log(log, f"        meme contenu deja certifie ({Path(jumeau).name}) - je passe.")
+                    etat[cle_src] = {"sha256": sha_src, **src_etat, "batch": etat[jumeau].get("batch"),
+                                     "meme_contenu_que": jumeau, "certif_version": version,
+                                     "prefixe_octets": etat[jumeau].get("prefixe_octets"),
+                                     "prefixe_sha256": etat[jumeau].get("prefixe_sha256")}
+                    faits_octets += taille
+                    continue
+                # ``fin`` fige la lecture à la taille observée maintenant ; ``frontiere`` (dernier
+                # saut de ligne) borne le préfixe réputé scellé : une ligne finale encore en
+                # cours d'écriture sera relue complète au prochain passage.
+                if source.suffix != ".gz":
+                    fin = taille
+                    frontiere = _fin_derniere_ligne(source, taille)
+                debut = _reprise_append_only(source, frontiere, etat, version=version)
+                rattrapage = False
+                if version > 1 and not debut and frontiere is not None:
+                    # Règle de certification corrigée : je relis TOUT le ruban, mais les lignes
+                    # déjà déposées par un lot précédent ne doivent pas l'être une seconde fois.
+                    lots = _lots_ayant_scelle(source, sha_src, frontiere, etat)
+                    if lots:
+                        connues = _precharger_identites(coffre, lots, source, famille, deja_vus)
+                        _log(log, f"        regle de certification mise a jour (v{version}) : je reprends ce "
+                                  f"fichier ; {connues:,} ligne(s) deja au coffre ne seront pas dupliquees.")
+                    elif "archive" in source.parts:
+                        # Session archivée (donc scellée à son arrêt avec l'ancienne règle) dont le
+                        # lot exact n'est plus identifiable : je ne dépose que ce que cette règle
+                        # rejetait à tort ; le reste est déjà au coffre.
+                        rattrapage = True
+                        _log(log, f"        rattrapage (regle v{version}) : seules les lignes rejetees "
+                                  f"a tort par l'ancienne regle sont deposees.")
+                if debut:
+                    _log(log, f"        ruban deja certifie jusqu'a {debut / 1048576:.1f} Mo : "
+                              f"je ne scelle que la suite.")
             entree = sceller_fichier(
                 source, coffre, batch_id, source_tag=source_tag, famille=famille,
                 now_ms=now_ms, deja_vus=deja_vus, log=log, prefixe=tete,
+                debut_octets=debut, fin_octets=fin, rattrapage=rattrapage,
             )
             faits_octets += taille
             if entree is not None:
@@ -486,13 +894,43 @@ def main(argv: list[str] | None = None) -> int:
                 total.doublons += st.get("doublons", 0)
                 if entree.get("deposes") and source.name in FLUX_VIVANTS and source.parent.name == "data":
                     scelles_pour_reset.append(source)
-            etat[cle_src] = {"sha256": sha_src, **src_etat, "batch": batch_id}
+            etat[cle_src] = {"sha256": sha_src, **src_etat, "batch": batch_id, "certif_version": version}
+            # Historique des préfixes scellés sous ce chemin : quand le ruban actif repart de zéro
+            # (rotation), l'ancienne identité reste connue pour reconnaître l'archive tournante.
+            historique = list((ancien or {}).get("prefixes_precedents") or [])
+            if ancien and ancien.get("prefixe_octets") and ancien.get("prefixe_sha256"):
+                historique.insert(0, [int(ancien["prefixe_octets"]), str(ancien["prefixe_sha256"])])
+            if historique:
+                etat[cle_src]["prefixes_precedents"] = historique[:8]
+            if fin is not None:
+                # identité du préfixe scellé : base de la reprise incrémentale au prochain passage
+                etat[cle_src]["prefixe_octets"] = frontiere
+                etat[cle_src]["prefixe_sha256"] = _sha256_prefixe(source, frontiere)
+            if entrees_manifeste:
+                # POINT DE REPRISE après chaque fichier : manifeste, index et état sont écrits
+                # (atomiquement) au fur et à mesure. Une interruption — Ctrl+C, coupure, arrêt du
+                # PC — ne laisse donc jamais un shard déposé hors index, ni un fichier déjà
+                # scellé à refaire (ce qui créerait des doublons d'un lot à l'autre).
+                manifeste_partiel = {
+                    "schema": "hypersmart.coffre_certifie.local.v1",
+                    "batch_id": batch_id, "tier": "LOCAL",
+                    "reconciliation_status": "LOCAL_UNRECONCILED",
+                    "genere_ms": now_ms, "git_head": None,
+                    "mode": "tout" if args.tout else "runtime_data",
+                    "fichiers": entrees_manifeste, "total": total.resume(),
+                    "non_certifies": non_certifies, "en_cours": True,
+                }
+                _ecrire_json_atomique(coffre / "local" / "manifests" / f"{batch_id}.json", manifeste_partiel)
+                _maj_local_index(coffre, manifeste_partiel)
+                _ecrire_json_atomique(etat_path, etat)
 
         if not entrees_manifeste:
             # Rien de nouveau (tout sauté/inchangé) : ne touche PAS aux index existants.
             _ecrire_json_atomique(etat_path, etat)
             _log(log, "")
             _log(log, "Rien de nouveau : toutes les donnees etaient deja dans le coffre. Rien a faire.")
+            if not (args.nom or args.famille):
+                _verifier_magasin_ticks(root, coffre, args.budget_ticks_s, log)
             _ecrire_statut(root, active=False, termine=True, code=0, pct=100.0,
                            stage="RIEN DE NOUVEAU", eta_s=0.0, resume=total.resume())
             return 0
@@ -505,12 +943,22 @@ def main(argv: list[str] | None = None) -> int:
             "genere_ms": now_ms, "git_head": _git_head(root),
             "mode": "tout" if args.tout else "runtime_data",
             "fichiers": entrees_manifeste, "total": total.resume(),
+            "non_certifies": non_certifies,
         }
+        anomalies = verifier_lot(root, entrees_manifeste)
+        manifeste["integrite"] = {"verifie": True, "anomalies": anomalies}
         _ecrire_json_atomique(coffre / "local" / "manifests" / f"{batch_id}.json", manifeste)
         _maj_local_index(coffre, manifeste)
+        if anomalies:
+            _log(log, "")
+            _log(log, f"[INTEGRITE] {len(anomalies)} anomalie(s) dans ce lot - a corriger avant usage :")
+            for anomalie in anomalies[:20]:
+                _log(log, f"   - {anomalie}")
         _log(log, "")
         _log(log, "ETAPE 3/3 - Je range le coffre et je recense les donnees GitHub deja certifiees...")
         _maj_coffre_index(root, coffre)
+        if not (args.nom or args.famille):
+            _verifier_magasin_ticks(root, coffre, args.budget_ticks_s, log)
         _journaliser(coffre, manifeste)
         _ecrire_json_atomique(etat_path, etat)
 
@@ -546,9 +994,11 @@ def main(argv: list[str] | None = None) -> int:
         _log(log, "     runtime\\coffre_certifie\\quarantine\\")
         _log(log, "  Le labo pourra puiser dans ce coffre pour ses backtests et replays.")
         _log(log, f"  Coffre : {coffre}")
-        _ecrire_statut(root, active=False, termine=True, code=0, pct=100.0,
-                       stage="TERMINE", eta_s=0.0, fichier="", resume=total.resume())
-    return 0
+        code_final = 4 if anomalies else 0   # 4 = lot déposé mais intégrité à corriger
+        _ecrire_statut(root, active=False, termine=True, code=code_final, pct=100.0,
+                       stage="TERMINE" if not anomalies else "INTEGRITE A CORRIGER",
+                       eta_s=0.0, fichier="", resume=total.resume())
+    return code_final
 
 
 def _git_head(root: Path) -> str | None:

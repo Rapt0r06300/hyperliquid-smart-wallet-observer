@@ -200,3 +200,171 @@ def test_reset_affichage_vide_le_brut(tmp_path):
     src.write_text(json.dumps(_fill(tid=9)), encoding="utf-8")
     assert scl.main(["--root", str(root), "--now-ms", str(NOW), "--reset-affichage"]) == 0
     assert src.read_text(encoding="utf-8") == ""  # remis à zéro après scellage vérifié
+
+
+# ───────────── reprise incrémentale, déplacement en archive, écriture atomique ─────────────
+
+def _shards_fills(root):
+    idx = json.loads((root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").read_text(encoding="utf-8"))
+    out = []
+    for shard in idx["shards"]:
+        with gzip.open(root / shard["shard"], "rt", encoding="utf-8") as h:
+            out.append([json.loads(l)["tid"] for l in h if l.strip()])
+    return out
+
+
+def test_ruban_qui_grossit_seule_la_suite_est_scellee_sans_doublon_entre_lots(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    tape = data / "vault_fills_poll.jsonl"
+    tape.write_text("".join(json.dumps(_fill(tid=i)) + "\n" for i in (1, 2, 3)), encoding="utf-8")
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    with tape.open("a", encoding="utf-8") as h:                       # le collecteur continue d'écrire
+        h.write("".join(json.dumps(_fill(tid=i)) + "\n" for i in (4, 5)))
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    lots = _shards_fills(tmp_path)
+    assert sorted(lots, key=len) == [[4, 5], [1, 2, 3]]               # aucun fill re-scellé
+    assert sorted(t for lot in lots for t in lot) == [1, 2, 3, 4, 5]  # aucun fill perdu
+
+
+def test_ligne_en_cours_d_ecriture_est_relue_complete_au_passage_suivant(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    tape = data / "vault_fills_poll.jsonl"
+    complet = json.dumps(_fill(tid=2))
+    tape.write_text(json.dumps(_fill(tid=1)) + "\n" + complet[:40], encoding="utf-8")   # ligne coupée
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    tape.write_text(json.dumps(_fill(tid=1)) + "\n" + complet + "\n", encoding="utf-8")  # écriture terminée
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    assert sorted(t for lot in _shards_fills(tmp_path) for t in lot) == [1, 2]
+
+
+def test_ruban_reecrit_est_rescelle_en_entier_jamais_saute(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    tape = data / "vault_fills_poll.jsonl"
+    tape.write_text("".join(json.dumps(_fill(tid=i)) + "\n" for i in (1, 2)), encoding="utf-8")
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    # nouvelle session : même nom, contenu différent et plus long -> aucun préfixe reconnu
+    tape.write_text("".join(json.dumps(_fill(tid=i)) + "\n" for i in (7, 8, 9)), encoding="utf-8")
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    assert sorted(t for lot in _shards_fills(tmp_path) for t in lot) == [1, 2, 7, 8, 9]
+
+
+def test_ruban_deplace_en_archive_n_est_pas_rescelle(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    tape = data / "vault_fills_poll.jsonl"
+    tape.write_text("".join(json.dumps(_fill(tid=i)) + "\n" for i in (1, 2)), encoding="utf-8")
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    archive = tmp_path / "runtime" / "archive" / "session-1"
+    archive.mkdir(parents=True)
+    tape.rename(archive / "vault_fills_poll.jsonl")
+    assert scl.main(["--root", str(tmp_path), "--tout", "--now-ms", str(NOW)]) == 0
+    assert _shards_fills(tmp_path) == [[1, 2]]                       # un seul lot, pas de doublon
+
+
+def test_interruption_ne_laisse_aucun_shard_tronque(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "vault_fills_poll.jsonl").write_text(
+        "".join(json.dumps(_fill(tid=i)) + "\n" for i in range(1, 6)), encoding="utf-8")
+    vrai = scl.certifier_record
+    appels = {"n": 0}
+
+    def coupe(*a, **k):
+        appels["n"] += 1
+        if appels["n"] == 3:
+            raise KeyboardInterrupt()                                  # Ctrl+C en plein scellage
+        return vrai(*a, **k)
+
+    monkeypatch.setattr(scl, "certifier_record", coupe)
+    try:
+        scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)])
+    except KeyboardInterrupt:
+        pass
+    shards = tmp_path / "runtime" / "coffre_certifie" / "local" / "shards"
+    assert [p for p in shards.rglob("*") if p.is_file()] == []        # ni shard partiel ni .partial
+    monkeypatch.setattr(scl, "certifier_record", vrai)
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0   # reprise complète
+    assert _shards_fills(tmp_path) == [[1, 2, 3, 4, 5]]
+
+
+# ───────────── instantanés de portefeuille de vault (cible de la réplication d'inventaire) ─────────────
+
+def _snap(**kw):
+    base = {"vault": "0x1E37A337ED460039D1B15BD3BC489DE789768D5E", "ts_ms": NOW - 1000, "nav_usd": 1000.5,
+            "positions": [{"coin": "BTC", "szi": 2.5, "entryPx": 79404.5}, {"coin": "kPEPE", "szi": "-100", "entryPx": 0.003}],
+            "source": "clearinghouseState", "read_only": True}
+    base.update(kw)
+    return base
+
+
+def test_snapshot_vault_portefeuille_complet_est_certifie():
+    from hl_observer.datasets.coffre_certifie import FAMILLE_SNAPSHOT, SCHEMA_SNAPSHOT_VAULT
+
+    norm, decision, raison = certifier_record(_snap(), famille=FAMILLE_SNAPSHOT, source="SNAPSHOT", now_ms=NOW)
+    assert decision == REPARE and raison == ""                    # szi "-100" (texte) normalisé en nombre
+    assert norm["vault"] == "0x1e37a337ed460039d1b15bd3bc489de789768d5e"
+    assert norm["schema_version"] == SCHEMA_SNAPSHOT_VAULT and norm["n_positions"] == 2
+    assert [(p["coin"], p["szi"]) for p in norm["positions"]] == [("BTC", 2.5), ("kPEPE", -100.0)]  # casse native
+    a_plat, decision, _ = certifier_record(_snap(positions=[], nav_usd=None), famille=FAMILLE_SNAPSHOT,
+                                           source="SNAPSHOT", now_ms=NOW)
+    assert decision == PASS and a_plat["positions"] == [] and a_plat["nav_usd"] is None   # NAV inconnue : jamais 0
+    assert identite(norm, FAMILLE_SNAPSHOT) == ("vault_snapshot", norm["vault"], NOW - 1000)
+
+
+def test_snapshot_vault_ampute_ou_incoherent_est_quarantaine_en_entier():
+    from hl_observer.datasets.coffre_certifie import FAMILLE_SNAPSHOT
+
+    cas = {
+        "vault_absent_ou_invalide": _snap(vault="pas-une-adresse"),
+        "timestamp_absent": _snap(ts_ms=None),
+        "timestamp_futur": _snap(ts_ms=NOW + 60_000),
+        "positions_absentes": _snap(positions=None),
+        "position_invalide": _snap(positions=["BTC"]),
+        "position_coin_absent": _snap(positions=[{"szi": 1.0}]),
+        "position_szi_invalide": _snap(positions=[{"coin": "BTC", "szi": 1.0}, {"coin": "ETH", "szi": "nan"}]),
+        "position_coin_duplique": _snap(positions=[{"coin": "BTC", "szi": 1.0}, {"coin": "BTC", "szi": 2.0}]),
+        "nav_invalide": _snap(nav_usd="beaucoup"),
+    }
+    for raison_attendue, record in cas.items():
+        norm, decision, raison = certifier_record(record, famille=FAMILLE_SNAPSHOT, source="SNAPSHOT", now_ms=NOW)
+        assert (norm, decision, raison) == (None, QUARANTAINE, raison_attendue)
+
+
+def test_snapshots_deja_rejetes_par_l_ancienne_regle_sont_recertifies(tmp_path):
+    """Un fichier « déjà traité » avec une version plus ancienne du certificateur est repris."""
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    snaps = data / "vault_snapshots.jsonl"
+    snaps.write_text("".join(json.dumps(_snap(ts_ms=NOW - 1000 * i)) + "\n" for i in (3, 2, 1)), encoding="utf-8")
+    fills = data / "vault_fills_poll.jsonl"
+    fills.write_text(json.dumps(_fill(tid=1)) + "\n", encoding="utf-8")
+    coffre = tmp_path / "runtime" / "coffre_certifie"
+    coffre.mkdir(parents=True)
+    # état hérité : les deux fichiers marqués traités, sans version (= version 1)
+    (coffre / "SOURCES_TRAITEES.json").write_text(json.dumps({
+        str(snaps.relative_to(tmp_path)): {"sha256": scl._sha256_fichier(snaps), "batch": "ancien"},
+        str(fills.relative_to(tmp_path)): {"sha256": scl._sha256_fichier(fills), "batch": "ancien"},
+    }), encoding="utf-8")
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
+    index = json.loads((coffre / "LOCAL_INDEX.json").read_text(encoding="utf-8"))
+    assert [(s["famille"], s["deposes"]) for s in index["shards"]] == [("snapshot", 3)]   # fills non repris
+    etat = json.loads((coffre / "SOURCES_TRAITEES.json").read_text(encoding="utf-8"))
+    assert etat[str(snaps.relative_to(tmp_path))]["certif_version"] == 2
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0               # idempotent ensuite
+    assert len(json.loads((coffre / "LOCAL_INDEX.json").read_text(encoding="utf-8"))["shards"]) == 1
+
+
+def test_option_famille_ne_certifie_que_la_famille_demandee(tmp_path):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    (data / "vault_snapshots.jsonl").write_text(json.dumps(_snap()) + "\n", encoding="utf-8")
+    (data / "vault_fills_poll.jsonl").write_text(json.dumps(_fill(tid=1)) + "\n", encoding="utf-8")
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW), "--famille", "snapshot"]) == 0
+    index = json.loads((tmp_path / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").read_text(encoding="utf-8"))
+    assert [s["famille"] for s in index["shards"]] == ["snapshot"]
+    assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0               # le reste passe ensuite
+    index = json.loads((tmp_path / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").read_text(encoding="utf-8"))
+    assert sorted(s["famille"] for s in index["shards"]) == ["fills_forward", "snapshot"]

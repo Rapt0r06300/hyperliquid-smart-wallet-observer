@@ -32,7 +32,10 @@ from hl_observer.collection.forward_poll_fills import (
     LeaderCooldown,
     LeaderWatermark,
     TokenBucket,
-    adaptive_interval_s,
+    CADENCE_ARCHIVE,
+    cadence_plan,
+    class_interval_s,
+    staggered_first_due_ms,
     collector_stream_health,
     partition_forward_fills,
     prioritize_leaders,
@@ -47,6 +50,49 @@ STATE_PATH = Path("runtime") / "data" / "userfills_poll_watermarks.json"
 # Fenêtre d'amorçage à la 1re observation : assez pour fixer un high-water récent
 # sans jamais émettre ces fills comme causaux.
 BOOTSTRAP_LOOKBACK_MS = 3_600_000  # 1 h
+BESOINS_COLLECTE = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
+CADENCE_AUDIT = Path("runtime") / "data" / "poll_cadence_plan.ndjson"  # pas « .jsonl » : ce n est pas un flux de collecte
+ARCHIVE_SAMPLE_MS = 120_000  # fenêtre relue pour un leader en cadence d'archive
+
+
+def charger_plan_cadence(root: Path, leaders: list[str]) -> tuple[dict[str, str], dict[str, Any]]:
+    """Plan de cadence du labo pour les leaders suivis + trace d'audit.
+
+    ``ALINA_POLL_CADENCE_LABO=0`` désactive le plan (cadence adaptative historique). Le plan
+    est une préférence de budget : absent, illisible ou désactivé, rien n'est bloqué. Chaque
+    application est journalisée (``poll_cadence_plan.ndjson``) pour que tout écart de densité
+    d'observation entre leaders reste traçable par le labo (aucun biais de sélection caché).
+    """
+    audit: dict[str, Any] = {"applique": False, "raison": "plan_absent"}
+    if os.environ.get("ALINA_POLL_CADENCE_LABO", "1").strip() == "0":
+        audit["raison"] = "desactive_par_operateur"
+        return {}, audit
+    try:
+        besoins = json.loads((root / BESOINS_COLLECTE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}, audit
+    plan_complet = cadence_plan(besoins)
+    plan = {v: plan_complet[v.lower()] for v in leaders if v.lower() in plan_complet}
+    par_classe: dict[str, int] = {}
+    for classe in plan.values():
+        par_classe[classe] = par_classe.get(classe, 0) + 1
+    audit = {
+        "applique": bool(plan), "raison": "plan_labo" if plan else "aucun_leader_classe",
+        "experiment_id": besoins.get("experiment_id") if isinstance(besoins, dict) else None,
+        "leaders": len(leaders), "classes": dict(sorted(par_classe.items())),
+        "non_classes": len(leaders) - len(plan),
+    }
+    return plan, audit
+
+
+def _journaliser_cadence(root: Path, audit: dict[str, Any]) -> None:
+    try:
+        chemin = root / CADENCE_AUDIT
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        with chemin.open("a", encoding="utf-8") as flux:
+            flux.write(json.dumps({"ts_ms": int(time.time() * 1000), **audit}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # l'audit ne doit jamais arrêter la collecte
 
 
 # Le débit est désormais régulé par ``TokenBucket`` (global, maximise les
@@ -136,11 +182,18 @@ def poll_once(
     now_ms: int | None = None,
     bucket=None,
     cooldown=None,
+    echantillon_ms: dict[str, int] | None = None,
 ) -> int:
     """Une passe de poll sur tous les leaders. Renvoie le nombre de fills causaux
     émis. Pur vis-à-vis de l'horloge/HTTP via ``poster``/``now_ms`` (testable).
     ``bucket`` (TokenBucket) régule le débit global ; ``cooldown`` (LeaderCooldown)
-    met en pause un leader fautif (429) sans pénaliser les autres."""
+    met en pause un leader fautif (429) sans pénaliser les autres.
+
+    ``echantillon_ms`` (leader -> fenêtre en ms) : pour un leader en cadence d'archive, on ne
+    relit qu'une fenêtre RÉCENTE et bornée (2 pages max) au lieu de rattraper tout
+    l'intervalle : c'est un échantillon assumé de son activité, pas un flux complet. Les fills
+    émis restent causaux (observés dans la fenêtre) ; ceux d'entre deux relevés ne sont pas
+    collectés — jamais reconstitués après coup."""
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     emitted = 0
     n_429 = 0           # throttles serveur (comportement adaptatif, PAS une erreur)
@@ -154,11 +207,14 @@ def poll_once(
         # Plancher dur : jamais démarrer plus de BOOTSTRAP_LOOKBACK avant maintenant.
         # Sinon un high_water périmé (ex. 0) ferait tirer des MOIS d'historique et
         # l'émettrait comme « causal » — la pollution que l'on élimine ici.
-        floor_start = max(1, now_ms - BOOTSTRAP_LOOKBACK_MS)
+        fenetre = (echantillon_ms or {}).get(vault)
+        lookback = BOOTSTRAP_LOOKBACK_MS if not fenetre else max(1_000, min(int(fenetre), BOOTSTRAP_LOOKBACK_MS))
+        floor_start = max(1, now_ms - lookback)
         start_ms = max(wm.high_water_ms, floor_start) if wm.initialised else floor_start
         # Amorçage : une seule page suffit à fixer le high-water (fills exclus).
-        # Forward : pagination complète pour ne perdre aucun nouveau fill.
-        max_pages = 1 if not wm.initialised else 8
+        # Forward : pagination complète pour ne perdre aucun nouveau fill
+        # (échantillon d'archive : 2 pages au plus, coût borné).
+        max_pages = 1 if not wm.initialised else (2 if fenetre else 8)
         try:
             fills = _fetch_all_fills(poster, vault, start_ms, now_ms, max_pages=max_pages, bucket=bucket)
         except Exception as exc:  # noqa: BLE001 (collecteur résilient, fail-soft)
@@ -277,6 +333,35 @@ def _lire_fichier_leaders(chemin: Path) -> list[str]:
         return _extract_vaults(json.loads(chemin.read_text(encoding="utf-8")))
     except (OSError, ValueError, TypeError):
         return []
+
+
+def _lire_archives(args: argparse.Namespace, root: Path) -> list[str]:
+    """Adresses que la fusion a rangées en cadence d'archive (clé ``vaults_archive``)."""
+    if args.leaders:
+        return []
+    sources = [args.leaders_file] if args.leaders_file else list(_DEFAULT_LEADER_SOURCES)
+    vus: dict[str, None] = {}
+    for src in sources:
+        try:
+            data = json.loads((root / src).read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("vaults_archive"), list):
+            for v in data["vaults_archive"]:
+                if isinstance(v, str) and v.strip().lower().startswith("0x") and len(v.strip()) >= 10:
+                    vus.setdefault(v.strip(), None)
+    return list(vus)
+
+
+def archives_a_suivre(root: Path, suivis: list[str], archives: list[str]) -> list[str]:
+    """Archives réellement suivies : seulement celles que le plan du labo, présent ICI, classe
+    ``ARCHIVE``. Sans plan (lane cloud, plan désactivé ou illisible) : aucune — interrogées à
+    pleine cadence, elles prendraient le budget des leaders utiles."""
+    if not archives:
+        return []
+    plan, _audit = charger_plan_cadence(root, archives)
+    deja = {v.lower() for v in suivis}
+    return [v for v in archives if plan.get(v) == CADENCE_ARCHIVE and v.lower() not in deja]
 
 
 def _lire_retenus(root: Path) -> list[str]:
@@ -421,7 +506,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     root = Path(args.root)
     # S3 : cette lane ne suit qu'une tranche disjointe des leaders.
-    leaders = shard_leaders(_lire_leaders(args, root), args.shard_count, args.shard_index)
+    suivis = _lire_leaders(args, root)
+    suivis += archives_a_suivre(root, suivis, _lire_archives(args, root))   # jamais sans plan labo
+    leaders = shard_leaders(suivis, args.shard_count, args.shard_index)
     # #2 priorisation : les leaders retenus (forte valeur) sont pollés en premier.
     leaders = prioritize_leaders(leaders, _lire_retenus(root))
     if args.max_leaders and args.max_leaders > 0:
@@ -436,6 +523,13 @@ def main(argv: list[str] | None = None) -> int:
     bucket = TokenBucket(rate_per_s=rpm / 60.0, burst=min(10.0, max(1.0, rpm / 6.0)))
     cooldown = LeaderCooldown()  # #3 backoff 429 par leader
     due_ms: dict[str, float] = {v: 0.0 for v in leaders}
+    # Budget piloté par le labo : les robots HFT (non copiables) et les clones d'un même
+    # opérateur passent en cadence d'archive ; le budget libéré profite aux opérateurs lents.
+    plan, audit_cadence = charger_plan_cadence(root, leaders)
+    _journaliser_cadence(root, audit_cadence)
+    print(f"[poll] cadence labo: {audit_cadence}", flush=True)
+    echantillon_ms = {v: ARCHIVE_SAMPLE_MS for v, classe in plan.items() if classe == CADENCE_ARCHIVE}
+    due_ms = staggered_first_due_ms(leaders, plan, time.time() * 1000.0)   # archives étalées sur 30 min
     # Pidfile : le lanceur tue CE PID au nettoyage (le poll tourne sans fenêtre).
     pid_path = root / "runtime" / "data" / "poll_leaders.pid"
     try:
@@ -453,9 +547,10 @@ def main(argv: list[str] | None = None) -> int:
         now = time.time() * 1000.0
         # S2 : ne poll que les leaders « dus » ; cadence adaptative à l'activité.
         a_poller = [v for v in leaders if due_ms.get(v, 0.0) <= now]
-        emitted = poll_once(root, a_poller, state, now_ms=int(now), bucket=bucket, cooldown=cooldown) if a_poller else 0
+        emitted = poll_once(root, a_poller, state, now_ms=int(now), bucket=bucket, cooldown=cooldown,
+                            echantillon_ms=echantillon_ms) if a_poller else 0
         for v in a_poller:
-            interval = adaptive_interval_s(base, _LAST_FILL_COUNT.get(v, 0))
+            interval = class_interval_s(base, _LAST_FILL_COUNT.get(v, 0), plan.get(v))
             due_ms[v] = now + interval * 1000.0
         _save_state(root / STATE_PATH, state)  # #9 flush de l'état à chaque passe
         en_backoff = sum(1 for v in leaders if not cooldown.due(v, now))

@@ -27,6 +27,14 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "LANCER_HYPERSMART.cmd": EntrypointRole.OFFICIAL_RUNTIME,
     "LANCER_LAB_QUANT_COPY_VAULT.cmd": EntrypointRole.OFFICIAL_ANALYSIS,
     "POUSSER-GITHUB-FORCE.cmd": EntrypointRole.OFFICIAL_GIT_SYNC,
+    # Root support launchers the operator actually double-clicks. The certificateur is the
+    # operator's sixth module; the collectors' shutdown opens SUIVI_COFFRE.cmd from the root
+    # (tools/affichage_temps_reel.py). Explicitly registered: never an unclassified root .cmd.
+    "Certificateur Coffre Fort.cmd": EntrypointRole.MAINTENANCE,
+    "SUIVI_COFFRE.cmd": EntrypointRole.MAINTENANCE,
+    "RAPPORT-COLLECTEURS.cmd": EntrypointRole.MAINTENANCE,
+    "Noeud-HL.cmd": EntrypointRole.MAINTENANCE,
+    "Installer Noeud HL.cmd": EntrypointRole.MAINTENANCE,
     # AlinaSync is also a supported root entrypoint, separate from the four main CMD roles.
     # Remaining commands are support/compatibility tools kept under tools/launchers/.
     "tools/launchers/Alina-restore.cmd": EntrypointRole.COMPAT,
@@ -78,6 +86,15 @@ ROOT_ENTRYPOINTS = {
     "POUSSER-GITHUB-FORCE.cmd",
 }
 
+#: Registered root support launchers (maintenance role). Any OTHER root .cmd stays forbidden.
+ROOT_SUPPORT_ENTRYPOINTS = {
+    "Certificateur Coffre Fort.cmd",
+    "SUIVI_COFFRE.cmd",
+    "RAPPORT-COLLECTEURS.cmd",
+    "Noeud-HL.cmd",
+    "Installer Noeud HL.cmd",
+}
+
 OFFICIAL_ENTRYPOINTS = {
     EntrypointRole.OFFICIAL_RUNTIME: "LANCER_HYPERSMART.cmd",
     EntrypointRole.OFFICIAL_ANALYSIS: "LANCER_LAB_QUANT_COPY_VAULT.cmd",
@@ -108,7 +125,7 @@ def audit_entrypoint_topology(repo_root: str | Path) -> list[EntrypointTopologyI
     root = Path(repo_root)
     issues: list[EntrypointTopologyIssue] = []
     discovered = {path.name for path in root.glob("*.cmd") if path.is_file()}
-    for path in sorted(discovered - ROOT_ENTRYPOINTS):
+    for path in sorted(discovered - ROOT_ENTRYPOINTS - ROOT_SUPPORT_ENTRYPOINTS):
         issues.append(EntrypointTopologyIssue("UNEXPECTED_ROOT_ENTRYPOINT", path, "support .cmd must live under tools/launchers/"))
     for path in sorted(ROOT_ENTRYPOINTS - discovered):
         issues.append(EntrypointTopologyIssue("MISSING_ROOT_ENTRYPOINT", path, "required root launcher is missing"))

@@ -20,48 +20,75 @@ flux entier en mémoire.
 """
 from __future__ import annotations
 
-import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
-try:  # réutilise la normalisation canonique du symbole (déjà éprouvée)
-    from hl_observer.normalization.instrument_identity import (
-        preserve_native_instrument_symbol as _canonical_coin,
-    )
-except Exception:  # pragma: no cover - repli robuste (ne jamais planter l'import)
-    def _canonical_coin(value: Any) -> str:
-        return str(value or "").strip()
+# Interface historique conservee : tout ce qui a ete deplace dans les modules ``coffre_*``
+# reste importable depuis ``coffre_certifie``.
+from hl_observer.datasets.coffre_socle import (  # noqa: F401
+    FAMILLE_ALLMIDS,
+    FAMILLE_ASSET_CTX,
+    FAMILLE_BBO,
+    FAMILLE_BOOK_L2,
+    FAMILLE_CANDLE,
+    FAMILLE_DISPERSION,
+    FAMILLE_EXPLORER_TX,
+    FAMILLE_FILLS_BACKFILL,
+    FAMILLE_FILLS_FORWARD,
+    FAMILLE_LIQUIDATION,
+    FAMILLE_MICRO_BBO,
+    FAMILLE_MICRO_L2,
+    FAMILLE_MICRO_TRADES,
+    FAMILLE_OVERSHOOT,
+    FAMILLE_POSITION,
+    FAMILLE_SNAPSHOT,
+    FAMILLE_TRADES,
+    FAMILLE_VAULT_LEDGER,
+    FAMILLE_VENUE,
+    MAX_TARGET_LAG_MS,
+    PASS,
+    QUARANTAINE,
+    REPARE,
+    SOURCES_NON_CERTIFIABLES,
+    _FUTUR_TOLERANCE_MS,
+    _canonical_coin,
+    _entier_positif,
+    _niveaux,
+    _nombre_fini,
+    _signe_depuis_side,
+    _source_certifiable,
+)
+from hl_observer.datasets.coffre_registre_fichiers import (  # noqa: F401
+    FICHIERS_NON_CERTIFIES,
+    VERSIONS_CERTIFICATEUR,
+    motif_non_certifie,
+    nouvellement_accepte,
+    version_certificateur,
+)
+from hl_observer.datasets.coffre_familles_collecte import (  # noqa: F401
+    SCHEMA_SNAPSHOT_VAULT,
+    certifier_explorer_tx,
+    certifier_micro_bbo,
+    certifier_micro_l2,
+    certifier_micro_trade,
+    certifier_snapshot_vault,
+    certifier_vault_ledger,
+)
+from hl_observer.datasets.coffre_familles_contexte import (  # noqa: F401
+    certifier_allmids,
+    certifier_asset_ctx,
+    certifier_dispersion,
+    certifier_liquidation,
+    certifier_overshoot,
+    certifier_venue,
+)
 
-# Fraîcheur causale carnet<->réception (même borne que le book_loader SAFE).
-try:
-    from hl_observer.backtesting.copy_vault_book_loader import MAX_TARGET_LAG_MS
-except Exception:  # pragma: no cover
-    MAX_TARGET_LAG_MS = 60_000
 
 # --------------------------------------------------------------------------- #
 # Familles de données et décisions
 # --------------------------------------------------------------------------- #
 
-#: Familles reconnues. La valeur est le préfixe de nom de fichier caractéristique.
-FAMILLE_FILLS_FORWARD = "fills_forward"   # LIVE_POLL + LIVE_WS + LIVE_TWAP (causaux)
-FAMILLE_FILLS_BACKFILL = "fills_backfill"  # REST backfill + NODE_FILLS (mesure, non causal)
-FAMILLE_BOOK_L2 = "book_l2"                # carnets L2 copy-vault
-FAMILLE_BBO = "bbo"                        # BBO / trades venues (repli)
-FAMILLE_SNAPSHOT = "snapshot"             # snapshots vault
-FAMILLE_TRADES = "trades_marche"          # trades marché publics (exécution réaliste)
-FAMILLE_CANDLE = "candle"                 # bougies OHLCV (volatilité)
-FAMILLE_POSITION = "position"             # positions leaders (clearinghouseState)
-FAMILLE_ALLMIDS = "allmids"               # prix allMids tous-coins (contexte d'exécution)
-FAMILLE_ASSET_CTX = "asset_ctx"           # OI / funding / mark / oracle / premium par coin
-FAMILLE_LIQUIDATION = "liquidation"       # liquidations confirmées (événements réels)
-FAMILLE_OVERSHOOT = "overshoot"           # overshoots oracle↔mid + réversion mesurée
-FAMILLE_VENUE = "venue_book"              # carnet cross-venue (HL vs Binance, top-of-book)
-FAMILLE_DISPERSION = "venue_dispersion"   # dispersion de prix cross-venue (bps)
-
-#: Sources JAMAIS certifiables : données ESTIMÉES/inférées (non observées directement).
-#: Elles ne doivent JAMAIS entrer dans le coffre comme du SAFE — intégrité du labo.
-#: Reconnues par la sous-chaîne (comparaison en majuscules).
-SOURCES_NON_CERTIFIABLES = ("INFERRED", "ESTIM", "SHADOW", "RECONSTRUIT")
 
 #: association nom de fichier -> (famille, étiquette de flux source)
 _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
@@ -70,7 +97,6 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "copy_vault_twap_lane.jsonl": (FAMILLE_FILLS_FORWARD, "LIVE_TWAP"),
     "vault_fills.jsonl": (FAMILLE_FILLS_BACKFILL, "REST_BACKFILL"),
     "node_fills_tape.jsonl": (FAMILLE_FILLS_BACKFILL, "NODE_FILLS"),
-    "leader_fills_bruts.jsonl": (FAMILLE_FILLS_BACKFILL, "LEADER_FILLS_BRUTS"),
     "copy_vault_l2_tape.jsonl": (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS"),
     "bbo_tape.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
     "copy_vault_bbo_tape.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
@@ -85,26 +111,13 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "overshoots_liquidation.jsonl": (FAMILLE_OVERSHOOT, "OVERSHOOT_MESURE"),
     "carnet_venues.jsonl": (FAMILLE_VENUE, "CROSS_VENUE_BOOK"),
     "dispersion_venues.jsonl": (FAMILLE_DISPERSION, "CROSS_VENUE_DISPERSION"),
+    "explorer_tx_tape.jsonl": (FAMILLE_EXPLORER_TX, "EXPLORER_TX"),
+    "vault_ledger.jsonl": (FAMILLE_VAULT_LEDGER, "VAULT_LEDGER"),
+    "micro_bbo.jsonl": (FAMILLE_MICRO_BBO, "HL_WS_PUBLIC"),
+    "micro_l2book.jsonl": (FAMILLE_MICRO_L2, "HL_WS_PUBLIC"),
+    "micro_trades.jsonl": (FAMILLE_MICRO_TRADES, "HL_WS_PUBLIC"),
+    "candles_5m.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_5M"),   # runtime/history (backfill_candles_vaults)
 }
-
-
-def _source_certifiable(record: Any) -> bool:
-    """False si l'enregistrement est une estimation/inférence (jamais SAFE)."""
-    if isinstance(record, dict):
-        if record.get("certifie") is False or record.get("inferred") is True:
-            return False
-        src = str(record.get("source") or "").upper()
-        if any(marqueur in src for marqueur in SOURCES_NON_CERTIFIABLES):
-            return False
-    return True
-
-# Décisions de certification (ordre = gravité croissante côté « non déposé »).
-PASS = "PASS"              # valide tel quel -> déposé
-REPARE = "REPARE"          # réparé (champ dérivé/normalisé) -> déposé
-QUARANTAINE = "QUARANTAINE"  # irréparable -> NON déposé, mis de côté avec raison
-
-#: tolérance de « futur » d'horloge (ms) : un léger dépassement n'est pas causal-faux.
-_FUTUR_TOLERANCE_MS = 5_000
 
 
 @dataclass
@@ -150,43 +163,8 @@ class StatsCertif:
 # Helpers de réparation / validation (purs, testables)
 # --------------------------------------------------------------------------- #
 
-def _nombre_fini(value: Any) -> float | None:
-    """Convertit en float fini > rien ; accepte str/num. None si impossible."""
-    if isinstance(value, bool):
-        return None
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
-
-def _entier_positif(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    try:
-        i = int(value)
-    except (TypeError, ValueError):
-        return None
-    return i if i > 0 else None
-
-
-_SIDE_ACHAT = {"b", "buy", "bid", "long", "a_buy"}
-_SIDE_VENTE = {"a", "s", "sell", "ask", "short"}
-
-
-def _signe_depuis_side(value: Any) -> int | None:
-    """+1 (achat) / -1 (vente) depuis un champ ``side``/``fill_side``/``dir`` libre."""
-    if value is None:
-        return None
-    s = str(value).strip().lower()
-    if not s:
-        return None
-    if s in _SIDE_ACHAT or s.startswith(("open long", "close short", "buy")):
-        return 1
-    if s in _SIDE_VENTE or s.startswith(("open short", "close long", "sell")):
-        return -1
-    return None
+_ROTATION_HORODATEE = re.compile(r"^_\d{10,}\.jsonl(\.gz)?$")
 
 
 def detecter_famille(nom_fichier: str) -> tuple[str, str] | None:
@@ -196,6 +174,8 @@ def detecter_famille(nom_fichier: str) -> tuple[str, str] | None:
     for connu, info in _FICHIERS_CONNUS.items():
         tronc = connu[:-6]  # sans « .jsonl »
         if base == connu or base.startswith(tronc + ".") or base.startswith(connu + "."):
+            return info
+        if base.startswith(tronc + "_") and _ROTATION_HORODATEE.match(base[len(tronc):]):
             return info
     return None
 
@@ -303,7 +283,15 @@ def certifier_fill(
         # un fill forward causal DOIT porter la preuve d'observation.
         obs = _entier_positif(record.get("observed_at_ms"))
         if obs is None:
-            return None, QUARANTAINE, "forward_sans_observed_at_ms"
+            # Les fills WebSocket portent ``received_at_ms`` : l'instant RÉEL de réception du
+            # message, mesuré par le collecteur. C'est exactement l'instant d'observation (le
+            # labo l'accepte déjà ainsi). On le reporte, sans rien inventer ; l'absence des deux
+            # champs reste un rejet.
+            obs = _entier_positif(record.get("received_at_ms"))
+            if obs is None:
+                return None, QUARANTAINE, "forward_sans_observed_at_ms"
+            out["observation_field"] = "received_at_ms"
+            repare = True
         if obs > now_ms + _FUTUR_TOLERANCE_MS:
             return None, QUARANTAINE, "observed_at_ms_futur"
         out["observed_at_ms"] = obs
@@ -365,26 +353,6 @@ def certifier_book(
     return out, (REPARE if repare else PASS), ""
 
 
-def _niveaux(side: Any, *, descendant: bool) -> list[list[float]] | None:
-    if not isinstance(side, list) or not side:
-        return None
-    sortie: list[list[float]] = []
-    precedent: float | None = None
-    for entree in side[:5]:
-        px = sz = None
-        if isinstance(entree, dict):
-            px, sz = _nombre_fini(entree.get("px")), _nombre_fini(entree.get("sz"))
-        elif isinstance(entree, (list, tuple)) and len(entree) >= 2:
-            px, sz = _nombre_fini(entree[0]), _nombre_fini(entree[1])
-        if px is None or sz is None or px <= 0 or sz <= 0:
-            return None
-        if precedent is not None and ((px >= precedent) if descendant else (px <= precedent)):
-            return None
-        sortie.append([px, sz])
-        precedent = px
-    return sortie or None
-
-
 def certifier_bbo(
     record: Any, *, source: str, now_ms: int,
 ) -> tuple[dict[str, Any] | None, str, str]:
@@ -397,13 +365,40 @@ def certifier_bbo(
         return None, QUARANTAINE, "coin_absent"
     repare = coin != record.get("coin")
     out["coin"] = coin
-    px = _nombre_fini(record.get("px"))
-    if px is None or px <= 0:
-        return None, QUARANTAINE, "px_invalide"
-    sz = _nombre_fini(record.get("sz"))
-    if sz is None or sz <= 0:
-        return None, QUARANTAINE, "sz_invalide"
-    out["px"], out["sz"] = px, sz
+    if record.get("px") is None and "bid" not in record and ("bid_px" in record or "ask_px" in record):
+        # schéma des lanes GitHub (``hypersmart.copy_vault_bbo.v1``) : mêmes grandeurs, autres noms.
+        # Les noms d'origine sont conservés (le labo les lit) ; on ajoute les noms communs.
+        record = {**record, "bid": record.get("bid_px"), "ask": record.get("ask_px")}
+        if record.get("recv_wall_ts_ms") is None and record.get("received_at_ms") is not None:
+            record["recv_wall_ts_ms"] = record.get("received_at_ms")
+            out["recv_wall_ts_ms"] = record["recv_wall_ts_ms"]
+        if record.get("exchange_ts_ms") is not None:
+            out.setdefault("ts_ex", record.get("exchange_ts_ms"))
+        out.setdefault("venue", "HL")
+    if record.get("px") is None and ("bid" in record or "ask" in record):
+        # COTATION (meilleur bid / meilleur ask) : c'est le BBO proprement dit, la donnée qui
+        # donne le spread réel. Elle était rejetée « px_invalide » car seule la forme
+        # « transaction » (px/sz) était reconnue. Carnet croisé ou taille illisible : rejet.
+        bid, ask = _nombre_fini(record.get("bid")), _nombre_fini(record.get("ask"))
+        if bid is None or ask is None or bid <= 0 or ask <= 0:
+            return None, QUARANTAINE, "bbo_cotation_invalide"
+        if ask < bid:
+            return None, QUARANTAINE, "bbo_croise"
+        for champ in ("bid_sz", "ask_sz"):
+            if record.get(champ) is not None:
+                taille = _nombre_fini(record.get(champ))
+                if taille is None or taille < 0:
+                    return None, QUARANTAINE, "bbo_taille_invalide"
+                out[champ] = taille
+        out["bid"], out["ask"], out["type_ligne"] = bid, ask, "QUOTE"
+    else:
+        px = _nombre_fini(record.get("px"))
+        if px is None or px <= 0:
+            return None, QUARANTAINE, "px_invalide"
+        sz = _nombre_fini(record.get("sz"))
+        if sz is None or sz <= 0:
+            return None, QUARANTAINE, "sz_invalide"
+        out["px"], out["sz"], out["type_ligne"] = px, sz, "TRADE"
     ts = _entier_positif(record.get("recv_wall_ts_ms")) or _entier_positif(record.get("ts_wall_ms"))
     if ts is None:
         return None, QUARANTAINE, "timestamp_absent"
@@ -451,6 +446,16 @@ def certifier_candle(record: Any, *, source: str, now_ms: int,
     if not coin:
         return None, QUARANTAINE, "coin_absent"
     out["coin"] = coin
+    repare = False
+    if "open" not in record and "o" in record:
+        # Format compact du backfill REST ({t_ms, o, h, l, c, v}) : mêmes valeurs, noms normalisés.
+        # Ces bougies sont récupérées après coup : factuelles, mais jamais « observées en direct ».
+        record = {**record, "open": record.get("o"), "high": record.get("h"), "low": record.get("l"),
+                  "close": record.get("c"), "volume": record.get("v"), "open_ts_ms": record.get("t_ms")}
+        out.update({"volume": _nombre_fini(record.get("volume")), "causal_forward_eligible": False})
+        if not out.get("interval") and str(source).upper().endswith("_5M"):
+            out["interval"] = "5m"
+        repare = True
     o = _nombre_fini(record.get("open"))
     h = _nombre_fini(record.get("high"))
     l = _nombre_fini(record.get("low"))
@@ -467,7 +472,7 @@ def certifier_candle(record: Any, *, source: str, now_ms: int,
     out["open"], out["high"], out["low"], out["close"] = o, h, l, c
     out["open_ts_ms"] = ts
     out["source"] = str(record.get("source") or source)
-    return out, PASS, ""
+    return out, (REPARE if repare else PASS), ""
 
 
 def certifier_position(record: Any, *, source: str, now_ms: int,
@@ -502,9 +507,24 @@ def certifier_position(record: Any, *, source: str, now_ms: int,
 # Identité (déduplication inter-lots / inter-tiers)
 # --------------------------------------------------------------------------- #
 
+
 def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
     """Clé d'identité d'un enregistrement certifié (pour déduplication)."""
-    if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL, FAMILLE_SNAPSHOT):
+    if famille == FAMILLE_SNAPSHOT:
+        return ("vault_snapshot", record.get("vault"), record.get("ts_ms"))
+    if famille == FAMILLE_EXPLORER_TX:
+        return ("explorer_tx", record.get("hash"), record.get("user"), record.get("action_type"),
+                record.get("time"))
+    if famille in (FAMILLE_MICRO_BBO, FAMILLE_MICRO_L2):
+        # la somme de contrôle couvre toute la ligne : deux mises à jour du même instant restent distinctes
+        return (famille, record.get("coin"), record.get("ts_ex"), record.get("checksum"))
+    if famille == FAMILLE_MICRO_TRADES:
+        return ("micro_trade", record.get("coin"), record.get("tid"), record.get("ts_ex"),
+                record.get("px"), record.get("sz"), record.get("side"))
+    if famille == FAMILLE_VAULT_LEDGER:
+        return ("vault_ledger", record.get("vault"), record.get("hash"), record.get("ts_ms"),
+                record.get("type"), record.get("delta_usd"))
+    if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL):
         return (
             "fill", record.get("vault"), record.get("coin"), record.get("ts_ms"),
             record.get("tid"), record.get("hash"), record.get("oid"),
@@ -540,168 +560,6 @@ def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
         record.get("venue"), record.get("coin"), record.get("ts_ex"), record.get("sequence")))
 
 
-def certifier_allmids(record: Any, *, source: str, now_ms: int,
-                      ) -> tuple[dict[str, Any] | None, str, str]:
-    """Snapshot de prix allMids {ts_ms, mids:{coin:px}}. Replayable si ts causal et au
-    moins un mid fini > 0. On garde les mids valides (répare en écartant les non finis)."""
-    if not isinstance(record, dict):
-        return None, QUARANTAINE, "non_objet"
-    ts = _entier_positif(record.get("ts_ms"))
-    if ts is None:
-        return None, QUARANTAINE, "timestamp_absent"
-    if ts > now_ms + _FUTUR_TOLERANCE_MS:
-        return None, QUARANTAINE, "timestamp_futur"
-    brut = record.get("mids")
-    if not isinstance(brut, dict) or not brut:
-        return None, QUARANTAINE, "mids_absent"
-    mids: dict[str, float] = {}
-    for c, v in brut.items():
-        px = _nombre_fini(v)
-        if px is not None and px > 0:
-            mids[str(c)] = px
-    if not mids:
-        return None, QUARANTAINE, "aucun_mid_valide"
-    repare = len(mids) != len(brut)
-    out = {"ts_ms": ts, "n": len(mids), "mids": mids,
-           "source": str(record.get("source") or source)}
-    return out, (REPARE if repare else PASS), ""
-
-
-def certifier_asset_ctx(record: Any, *, source: str, now_ms: int,
-                        ) -> tuple[dict[str, Any] | None, str, str]:
-    """Contexte marché (OI/funding/mark/oracle/premium). Replayable si coin, ts causal,
-    et au moins mark OU oracle > 0."""
-    if not isinstance(record, dict):
-        return None, QUARANTAINE, "non_objet"
-    out = dict(record)
-    coin = _canonical_coin(record.get("coin"))
-    if not coin:
-        return None, QUARANTAINE, "coin_absent"
-    out["coin"] = coin
-    ts = _entier_positif(record.get("ts_ms"))
-    if ts is None:
-        return None, QUARANTAINE, "timestamp_absent"
-    if ts > now_ms + _FUTUR_TOLERANCE_MS:
-        return None, QUARANTAINE, "timestamp_futur"
-    mark = _nombre_fini(record.get("mark"))
-    oracle = _nombre_fini(record.get("oracle"))
-    if (mark is None or mark <= 0) and (oracle is None or oracle <= 0):
-        return None, QUARANTAINE, "ni_mark_ni_oracle"
-    out["ts_ms"] = ts
-    out["source"] = str(record.get("source") or source)
-    return out, PASS, ""
-
-
-def certifier_liquidation(record: Any, *, source: str, now_ms: int,
-                          ) -> tuple[dict[str, Any] | None, str, str]:
-    """Liquidation confirmée (événement réel). Replayable si coin, px>0, sz>0, ts causal."""
-    if not isinstance(record, dict):
-        return None, QUARANTAINE, "non_objet"
-    out = dict(record)
-    coin = _canonical_coin(record.get("coin"))
-    if not coin:
-        return None, QUARANTAINE, "coin_absent"
-    out["coin"] = coin
-    px = _nombre_fini(record.get("px"))
-    if px is None or px <= 0:
-        return None, QUARANTAINE, "px_invalide"
-    sz = _nombre_fini(record.get("sz"))
-    if sz is None or sz <= 0:
-        return None, QUARANTAINE, "sz_invalide"
-    out["px"], out["sz"] = px, sz
-    ts = _entier_positif(record.get("ts_ms")) or _entier_positif(record.get("observed_at_ms"))
-    if ts is None:
-        return None, QUARANTAINE, "timestamp_absent"
-    if ts > now_ms + _FUTUR_TOLERANCE_MS:
-        return None, QUARANTAINE, "timestamp_futur"
-    out["ts_ms"] = ts
-    out["source"] = str(record.get("source") or source)
-    return out, PASS, ""
-
-
-def certifier_overshoot(record: Any, *, source: str, now_ms: int,
-                        ) -> tuple[dict[str, Any] | None, str, str]:
-    """Overshoot de liquidation (mesure oracle↔mid + réversion). Replayable si coin,
-    overshoot_bps fini, ts causal. ``ts0`` est en SECONDES -> normalisé en ms."""
-    if not isinstance(record, dict):
-        return None, QUARANTAINE, "non_objet"
-    out = dict(record)
-    coin = _canonical_coin(record.get("coin"))
-    if not coin:
-        return None, QUARANTAINE, "coin_absent"
-    out["coin"] = coin
-    ov = _nombre_fini(record.get("overshoot_bps"))
-    if ov is None:
-        return None, QUARANTAINE, "overshoot_bps_absent"
-    ts = _entier_positif(record.get("ts_ms"))
-    if ts is None:
-        ts0 = _nombre_fini(record.get("ts0"))
-        ts = int(ts0 * 1000) if (ts0 and ts0 > 0) else None
-    if ts is None:
-        return None, QUARANTAINE, "timestamp_absent"
-    if ts > now_ms + _FUTUR_TOLERANCE_MS:
-        return None, QUARANTAINE, "timestamp_futur"
-    out["ts_ms"] = ts
-    out["overshoot_bps"] = ov
-    out["source"] = str(record.get("source") or source)
-    return out, PASS, ""
-
-
-def certifier_venue(record: Any, *, source: str, now_ms: int,
-                    ) -> tuple[dict[str, Any] | None, str, str]:
-    """Carnet cross-venue (HL vs Binance, top-of-book). Replayable si coin, ts causal,
-    et un top-of-book positif d'au moins une venue."""
-    if not isinstance(record, dict):
-        return None, QUARANTAINE, "non_objet"
-    out = dict(record)
-    coin = _canonical_coin(record.get("coin"))
-    if not coin:
-        return None, QUARANTAINE, "coin_absent"
-    out["coin"] = coin
-    hl = (_nombre_fini(record.get("hl_bid")), _nombre_fini(record.get("hl_ask")))
-    bn = (_nombre_fini(record.get("bin_bid")), _nombre_fini(record.get("bin_ask")))
-    ok_hl = all(x is not None and x > 0 for x in hl)
-    ok_bn = all(x is not None and x > 0 for x in bn)
-    if not (ok_hl or ok_bn):
-        return None, QUARANTAINE, "aucun_top_of_book_valide"
-    ts = _entier_positif(record.get("snapshot_ts_ms")) or _entier_positif(record.get("hl_received_at_ms"))
-    if ts is None:
-        return None, QUARANTAINE, "timestamp_absent"
-    if ts > now_ms + _FUTUR_TOLERANCE_MS:
-        return None, QUARANTAINE, "timestamp_futur"
-    out["snapshot_ts_ms"] = ts
-    out["source"] = str(record.get("source") or source)
-    return out, PASS, ""
-
-
-def certifier_dispersion(record: Any, *, source: str, now_ms: int,
-                         ) -> tuple[dict[str, Any] | None, str, str]:
-    """Dispersion cross-venue (bps). Replayable si coin, dispersion_bps_h fini, ts causal.
-    ``ts`` est en SECONDES -> normalisé en ms."""
-    if not isinstance(record, dict):
-        return None, QUARANTAINE, "non_objet"
-    out = dict(record)
-    coin = _canonical_coin(record.get("coin"))
-    if not coin:
-        return None, QUARANTAINE, "coin_absent"
-    out["coin"] = coin
-    disp = _nombre_fini(record.get("dispersion_bps_h"))
-    if disp is None:
-        return None, QUARANTAINE, "dispersion_absente"
-    out["dispersion_bps_h"] = disp
-    ts = _entier_positif(record.get("ts_ms"))
-    if ts is None:
-        tss = _nombre_fini(record.get("ts"))
-        ts = int(tss * 1000) if (tss and tss > 0) else None
-    if ts is None:
-        return None, QUARANTAINE, "timestamp_absent"
-    if ts > now_ms + _FUTUR_TOLERANCE_MS:
-        return None, QUARANTAINE, "timestamp_futur"
-    out["ts_ms"] = ts
-    out["source"] = str(record.get("source") or source)
-    return out, PASS, ""
-
-
 def certifier_record(
     record: Any, *, famille: str, source: str, now_ms: int,
 ) -> tuple[dict[str, Any] | None, str, str]:
@@ -709,7 +567,19 @@ def certifier_record(
     # INTÉGRITÉ (défense en profondeur) : une estimation/inférence n'entre jamais SAFE.
     if not _source_certifiable(record):
         return None, QUARANTAINE, "source_non_certifiable_inference"
-    if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL, FAMILLE_SNAPSHOT):
+    if famille == FAMILLE_SNAPSHOT:
+        return certifier_snapshot_vault(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_EXPLORER_TX:
+        return certifier_explorer_tx(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_MICRO_BBO:
+        return certifier_micro_bbo(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_MICRO_L2:
+        return certifier_micro_l2(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_MICRO_TRADES:
+        return certifier_micro_trade(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_VAULT_LEDGER:
+        return certifier_vault_ledger(record, source=source, now_ms=now_ms)
+    if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL):
         return certifier_fill(record, source=source, famille=famille, now_ms=now_ms)
     if famille == FAMILLE_BOOK_L2:
         return certifier_book(record, source=source, now_ms=now_ms)
@@ -797,5 +667,10 @@ __all__ = [
     "certifier_bbo", "certifier_trade", "certifier_candle", "certifier_position",
     "certifier_allmids", "certifier_asset_ctx", "certifier_liquidation",
     "certifier_overshoot", "certifier_venue", "certifier_dispersion",
+    "certifier_snapshot_vault", "SCHEMA_SNAPSHOT_VAULT", "VERSIONS_CERTIFICATEUR", "version_certificateur",
+    "FAMILLE_EXPLORER_TX", "FAMILLE_VAULT_LEDGER", "certifier_explorer_tx", "certifier_vault_ledger",
+    "FICHIERS_NON_CERTIFIES", "motif_non_certifie", "nouvellement_accepte",
+    "FAMILLE_MICRO_BBO", "FAMILLE_MICRO_L2", "FAMILLE_MICRO_TRADES",
+    "certifier_micro_bbo", "certifier_micro_l2", "certifier_micro_trade",
     "certifier_record", "certifier_lignes", "identite", "MAX_TARGET_LAG_MS",
 ]

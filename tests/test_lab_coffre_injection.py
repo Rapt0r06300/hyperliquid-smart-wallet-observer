@@ -88,3 +88,33 @@ def test_snapshot_non_compte_comme_causal(tmp_path):
     _index(root, [{"famille": "fills_forward", "shard": rel, "sha256": _sha(root, rel)}])
     res = _charger_tier_local(root)
     assert res["fills_causaux"] == 0 and len(res["_fills"]) == 1  # present mais non causal
+
+
+def test_cotations_du_collecteur_bbo_adaptees_a_la_forme_du_labo(tmp_path):
+    """Le BBO Hyperliquid du collecteur (bid/ask/ts_ex) sert au labo : memes grandeurs, autres noms."""
+    root = tmp_path
+    base = {"venue": "HL", "type_ligne": "QUOTE", "coin": "BTC", "bid": 100.0, "ask": 100.5,
+            "bid_sz": 2.0, "ask_sz": 3.0, "recv_wall_ts_ms": 5_000, "ts_ex": 4_900.0}
+    rows = [
+        base,
+        {**base, "recv_wall_ts_ms": 5_400, "ts_ex": 5_300.0},             # meme seconde : non retenue
+        {**base, "recv_wall_ts_ms": 6_000, "ts_ex": 5_950.0, "bid": 101.0, "ask": 101.5},
+        {**base, "recv_wall_ts_ms": 7_000, "ts_ex": 6_900.0, "bid": 102.0, "ask": 101.0},   # croise
+        {**base, "recv_wall_ts_ms": 8_000, "ts_ex": 9_000.0},             # bourse apres reception
+        {**base, "recv_wall_ts_ms": 9_000, "ts_ex": 8_900.0, "bid_sz": None},               # sans taille
+        {**base, "venue": "BIN_TRADE", "type_ligne": "TRADE", "recv_wall_ts_ms": 10_000},   # autre venue
+        {"venue": "HL", "type_ligne": "QUOTE", "coin": "ETH", "bid": True, "ask": 2.0,
+         "bid_sz": 1.0, "ask_sz": 1.0, "recv_wall_ts_ms": 11_000, "ts_ex": 10_900.0},       # booleen
+    ]
+    rel = _ecrire_shard(root, "bbo", rows)
+    _index(root, [{"famille": "bbo", "shard": rel, "sha256": _sha(root, rel)}])
+    res = _charger_tier_local(root)
+    assert res["bbo"] == 2 and res["bbo_adaptees"] == 2 and res["bbo_denses_non_retenues"] == 1
+    premiere, seconde = res["_bbo"]
+    assert premiere == {
+        "schema_version": "hypersmart.copy_vault_bbo.v1", "coin": "BTC", "received_at_ms": 5_000,
+        "exchange_ts_ms": 4_900, "bid_px": 100.0, "bid_sz": 2.0, "ask_px": 100.5, "ask_sz": 3.0,
+        "source": "HYPERLIQUID_BBO_WS", "data_origin": "REAL_OBSERVED", "causal_observation": True,
+        "provenance_tier": "LOCAL", "adapte_depuis": "bbo_tape"}
+    assert (seconde["received_at_ms"], seconde["bid_px"]) == (6_000, 101.0)
+    assert all(r.get("quality") != "SAFE" for r in res["_bbo"])          # jamais "prouvable"

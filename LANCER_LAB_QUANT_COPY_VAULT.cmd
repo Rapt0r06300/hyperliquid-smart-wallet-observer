@@ -23,7 +23,8 @@ echo ================================================================
 echo   ALINA SMART FLOW - COPY-VAULT LAB
 echo   Double clic : shards SAFE locaux, replays/backtests en continu
 echo   Arret propre : CTRL+C dans cette fenetre
-echo   Modes : safe (continu) / once (un passage) / tests / preflight / research / legacy
+echo   Modes : safe (continu) / once (un passage) / copiabilite / tests / preflight / research / legacy
+echo   copiabilite : que reste-t-il au copieur apres observation et couts ? [coffre LOCAL, exploratoire]
 echo   PAPER / READ-ONLY - aucun ordre, aucune collecte
 echo ================================================================
 echo.
@@ -75,12 +76,21 @@ if /I "%ALINA_LAB_MODE%"=="tests" (
     goto :done
   )
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --research --dataset-root "%~2"
+) else if /I "%ALINA_LAB_MODE%"=="copiabilite" (
+  rem Etude hors ligne sur le coffre LOCAL : verdicts exploratoires + besoins transmis aux collecteurs.
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py"
+  rem Portefeuilles OBSERVES des vaults [instantanes certifies] puis historique reconstruit [backfill].
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --positions
+  "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py" --retrospectif
 ) else if /I "%ALINA_LAB_MODE%"=="safe" (
+  rem Etape consultative, sans effet sur le code de sortie : ALINA_LAB_COPIABILITE=0 la desactive.
+  if /I not "%ALINA_LAB_COPIABILITE%"=="0" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py"
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --safe-research
 ) else if /I "%ALINA_LAB_MODE%"=="once" (
+  if /I not "%ALINA_LAB_COPIABILITE%"=="0" "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\etude_copiabilite.py"
   "%ALINA_LAB_PYTHON%" %ALINA_LAB_PY_ARGS% "%~dp0tools\alina_quant_lab_console.py" --safe-research --once
 ) else (
-  echo [ERREUR] Mode inconnu: %ALINA_LAB_MODE% [safe, once, tests, preflight, research, legacy]
+  echo [ERREUR] Mode inconnu: %ALINA_LAB_MODE% [safe, once, copiabilite, tests, preflight, research, legacy]
   set "RC=2"
   goto :done
 )

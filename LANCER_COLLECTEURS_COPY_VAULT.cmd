@@ -175,6 +175,9 @@ rem     tapes) pour repartir a ZERO sans rien perdre. La certification -> coffre
 rem     a l'arret (touche q), sur la session courante. ---
 if exist "%CV_ROOT%tools\archiver_tapes.py" (
   if not exist "%CV_ROOT%runtime\logs\coffre_certifie" mkdir "%CV_ROOT%runtime\logs\coffre_certifie" >nul 2>nul
+  rem Reste d une session interrompue : il passe D ABORD par le certificateur ; sinon l archiveur
+  rem le laisse en place. Rapide quand il n y a rien de nouveau. Rien n echappe au coffre.
+  if exist "%CV_ROOT%tools\sceller_coffre_local.py" "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\sceller_coffre_local.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
   echo [RESET] Session a zero : archivage rapide du reste eventuel ^(rien n'est perdu^)...
   "%CV_PYTHON%" %CV_PY_ARGS% "%CV_ROOT%tools\archiver_tapes.py" --root "%CV_ROOT%." >> "%CV_ROOT%runtime\logs\coffre_session.log" 2>&1
 )

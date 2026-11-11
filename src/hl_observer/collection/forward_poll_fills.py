@@ -216,6 +216,81 @@ def adaptive_interval_s(
     return base
 
 
+#: Classes de cadence publiées par le labo (étude de copiabilité). Elles répartissent le
+#: BUDGET de requêtes ; elles ne retirent jamais une adresse de l'univers suivi.
+CADENCE_PRIORITAIRE = "PRIORITAIRE"   # opérateur lent : son inventaire est répliquable
+CADENCE_STANDARD = "STANDARD"         # opérateur « swing »
+CADENCE_DECOUVERTE = "DECOUVERTE"     # pas encore classé : cadence adaptative historique
+CADENCE_ARCHIVE = "ARCHIVE"           # HFT non copiable, ou clone d'un opérateur déjà suivi
+CADENCE_CLASSES = (CADENCE_PRIORITAIRE, CADENCE_STANDARD, CADENCE_DECOUVERTE, CADENCE_ARCHIVE)
+ARCHIVE_INTERVAL_S = 1_800.0
+PRIORITY_INTERVAL_S = 30.0
+STANDARD_INTERVAL_S = 45.0
+
+
+def cadence_plan(needs: Mapping[str, Any] | None) -> dict[str, str]:
+    """``adresse -> classe`` depuis le plan de collecte du labo ; vide si plan absent/illisible.
+
+    Dans une grappe d'adresses d'un même opérateur, seul le représentant garde la classe de
+    l'opérateur ; ses clones passent en ``ARCHIVE`` (le signal est le même, pas le budget).
+    Toute classe inconnue est ignorée : l'adresse retombe sur la cadence adaptative historique.
+    """
+
+    plan: dict[str, str] = {}
+    leaders = needs.get("leaders") if isinstance(needs, Mapping) else None
+    if not isinstance(leaders, Sequence) or isinstance(leaders, (str, bytes)):
+        return plan
+    for row in leaders:
+        if not isinstance(row, Mapping):
+            continue
+        cadence = str(row.get("cadence") or "")
+        unit = str(row.get("unit") or "").lower()
+        if cadence not in CADENCE_CLASSES or not unit.startswith("0x"):
+            continue
+        plan[unit] = cadence
+        addresses = row.get("addresses")
+        if isinstance(addresses, Sequence) and not isinstance(addresses, (str, bytes)):
+            for address in addresses:
+                key = str(address or "").lower()
+                if key.startswith("0x") and key != unit:
+                    plan[key] = CADENCE_ARCHIVE
+    return plan
+
+
+def staggered_first_due_ms(
+    leaders: Sequence[str], plan: Mapping[str, str], now_ms: float
+) -> dict[str, float]:
+    """Première échéance de chaque leader : immédiate, sauf les leaders d'archive, étalés.
+
+    Interroger d'un coup des dizaines de leaders d'archive au démarrage consomme le budget de
+    requêtes au moment où les leaders utiles en ont le plus besoin. Leur premier relevé est
+    réparti régulièrement sur un intervalle d'archive (ordre de la liste : déterministe)."""
+    due = {leader: float(now_ms) for leader in leaders}
+    archived = [leader for leader in leaders if plan.get(leader) == CADENCE_ARCHIVE]
+    for rank, leader in enumerate(archived):
+        due[leader] = float(now_ms) + (rank / len(archived)) * ARCHIVE_INTERVAL_S * 1000.0
+    return due
+
+
+def class_interval_s(base_s: float, recent_fill_count: int, cadence: str | None) -> float:
+    """Intervalle de poll d'un leader selon sa classe mesurée.
+
+    Constat du labo : l'information d'un fill taker est consommée en ~15 s, bien avant toute
+    observation par poll ; interroger plus souvent un robot HFT n'achète donc aucun avantage
+    et consomme le budget. À l'inverse, une réplication lente d'inventaire est insensible à
+    une minute de retard. Le budget libéré sert à suivre PLUS d'opérateurs lents (largeur).
+    Sans classe connue, le comportement historique (cadence adaptative) est conservé.
+    """
+
+    if cadence == CADENCE_ARCHIVE:
+        return ARCHIVE_INTERVAL_S
+    if cadence == CADENCE_PRIORITAIRE:
+        return max(float(base_s), PRIORITY_INTERVAL_S)
+    if cadence == CADENCE_STANDARD:
+        return max(float(base_s), STANDARD_INTERVAL_S)
+    return adaptive_interval_s(base_s, recent_fill_count)
+
+
 def is_causal_live_source(source: object) -> bool:
     """Un fill est causal « live » s'il vient du WS ou du poll forward discipliné.
 

@@ -148,7 +148,9 @@ def test_le_lanceur_unique_n_est_pas_archive():
 # ------------------------------------------------------------------ 4. racine nettoyee
 
 def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
-    """La racine expose quatre rôles principaux et AlinaSync; les utilitaires sont rangés."""
+    """La racine expose quatre rôles principaux et AlinaSync, plus cinq lanceurs d'appoint
+    ENREGISTRÉS (certificateur = sixième module de l'opérateur, suivi du coffre ouvert par la
+    fermeture des collecteurs, rapport, nœud). Tout autre .cmd à la racine reste interdit."""
     cmd_racine = {p.name for p in RACINE.glob("*.cmd")}
     assert cmd_racine == {
         "ALINA_SYNC_COMPLETE.cmd",
@@ -156,7 +158,13 @@ def test_la_racine_contient_uniquement_les_lanceurs_principaux_et_alinasync():
         "LANCER_HYPERSMART.cmd",
         "LANCER_LAB_QUANT_COPY_VAULT.cmd",
         "POUSSER-GITHUB-FORCE.cmd",
+        "Certificateur Coffre Fort.cmd",
+        "SUIVI_COFFRE.cmd",
+        "RAPPORT-COLLECTEURS.cmd",
+        "Noeud-HL.cmd",
+        "Installer Noeud HL.cmd",
     }
+    assert {name for name in cmd_racine if name in ENTRYPOINT_ROLES} == cmd_racine   # tous classés
     assert (RACINE / "ALINA_SYNC_COMPLETE.sh").is_file()
     support_scripts = {
         path.relative_to(RACINE).as_posix()

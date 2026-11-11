@@ -204,3 +204,62 @@ def test_e2e_rien_ne_change_pas_de_commit_vide(tmp_path):
     assert code == 0
     assert _git(work, "rev-parse", "HEAD") == head_avant       # HEAD inchange
     assert _git(work, "rev-list", "--count", "HEAD") == n_commits_avant  # aucun commit ajoute
+
+
+# --------------------------------------------------------------------------- #
+# Churn runtime SOUS un dossier de code (classements de leaders réécrits par la collecte)
+# --------------------------------------------------------------------------- #
+
+CHURN = "config/copy_vault_leaders_candidats.json"
+
+
+def _repo_avec_churn_suivi(tmp_path: Path) -> tuple[Path, Path]:
+    work, remote = _repo_avec_remote(tmp_path)
+    (work / "config").mkdir()
+    (work / CHURN).write_text('{"candidats": 1}\n', encoding="utf-8")
+    _git(work, "add", CHURN)
+    _git(work, "commit", "-q", "-m", "suivi du classement")
+    _git(work, "push", "-q", "origin", "main")
+    return work, remote
+
+
+def test_e2e_churn_runtime_sous_config_ne_bloque_pas_la_poussee_du_code(tmp_path):
+    """Après une récolte, les classements de leaders sont réécrits : le code doit partir quand même,
+    le classement local rester intact et ne JAMAIS être publié."""
+    assert CHURN in S.RUNTIME_CHURN_FILES
+    work, remote = _repo_avec_churn_suivi(tmp_path)
+    (work / CHURN).write_text('{"candidats": 2}\n', encoding="utf-8")        # réécrit par la collecte
+    (work / "tools" / "x.py").write_text("print('v2 apres recolte')\n", encoding="utf-8")
+    code, report = _run_sync(work)
+    assert code == 0 and report["status"] in ("SYNCHRONIZED", "PUSHED"), report.get("status")
+    assert _git(remote, "show", "main:tools/x.py") == "print('v2 apres recolte')"      # code publié
+    assert _git(remote, "show", f"main:{CHURN}") == '{"candidats": 1}'                 # donnée non publiée
+    assert (work / CHURN).read_text(encoding="utf-8") == '{"candidats": 2}\n'          # donnée locale intacte
+    assert CHURN in _git(work, "status", "--porcelain", "--", CHURN)                   # toujours hors commit
+
+
+def test_e2e_churn_runtime_seul_ne_renvoie_pas_un_echec(tmp_path):
+    work, remote = _repo_avec_churn_suivi(tmp_path)
+    avant = _git(remote, "rev-parse", "main")
+    (work / CHURN).write_text('{"candidats": 3}\n', encoding="utf-8")
+    code, report = _run_sync(work)
+    assert code == 0 and report["status"] in ("SYNCHRONIZED", "NOTHING_TO_SYNC", "CLEAN"), report.get("status")
+    assert _git(remote, "rev-parse", "main") == avant                                  # rien publié
+    assert (work / CHURN).read_text(encoding="utf-8") == '{"candidats": 3}\n'
+
+
+def test_e2e_fichier_sensible_suivi_et_modifie_reste_bloquant(tmp_path):
+    """Négatif : l'assouplissement ne vaut QUE pour le churn runtime déclaré, jamais pour un secret."""
+    work, remote = _repo_avec_remote(tmp_path)
+    (work / "config" / "secrets").mkdir(parents=True)
+    sensible = "config/secrets/cles.json"
+    (work / sensible).write_text('{"k": 1}\n', encoding="utf-8")
+    _git(work, "add", "-f", sensible)
+    _git(work, "commit", "-q", "-m", "suivi par erreur")
+    _git(work, "push", "-q", "origin", "main")
+    avant = _git(remote, "rev-parse", "main")
+    (work / sensible).write_text('{"k": 2}\n', encoding="utf-8")
+    (work / "tools" / "x.py").write_text("print('v3')\n", encoding="utf-8")
+    code, report = _run_sync(work)
+    assert code != 0 and report["status"] not in ("SYNCHRONIZED", "PUSHED"), report.get("status")
+    assert _git(remote, "rev-parse", "main") == avant                                  # rien n'est parti

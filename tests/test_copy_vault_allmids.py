@@ -53,8 +53,56 @@ def _carnet(coin="HYPE", bid=19.99, ask=20.01, taille=5000.0, now=1_000_000_000_
 
 def test_parser_allmids_tolerant():
     assert CA.parser_allmids({"HYPE": "20.5", "BTC": "60000"}) == {"HYPE": 20.5, "BTC": 60000.0}
-    assert CA.parser_allmids({"mids": {"sol": "150"}}) == {"SOL": 150.0}
+    assert CA.parser_allmids({"mids": {"SOL": "150"}}) == {"SOL": 150.0}
     assert CA.parser_allmids({"X": "nan?", "Y": "-3", "Z": "0"}) == {}
+
+
+def test_parser_allmids_preserve_identite_native():
+    """Les symboles HL sont sensibles à la casse : ``kPEPE`` doit rester ``kPEPE`` (sinon le prix
+    devient introuvable pour les fills du même coin). Un dex HIP-3 porte son préfixe ``dex:``."""
+    assert CA.parser_allmids({"kPEPE": "0.0031", " BTC ": "60000"}) == {"kPEPE": 0.0031, "BTC": 60000.0}
+    assert CA.parser_allmids({"SOXL": "25", "xyz:NVDA": "140"}, "xyz") == {"xyz:SOXL": 25.0, "xyz:NVDA": 140.0}
+
+
+def test_dexs_a_collecter_valide_les_noms_et_suit_les_besoins_du_labo(tmp_path, monkeypatch):
+    monkeypatch.delenv("ALLMIDS_DEXS", raising=False)
+    assert CA.dexs_a_collecter(tmp_path) == []                      # aucune source -> aucun dex
+    besoins = tmp_path / CA.BESOINS_COLLECTE
+    besoins.parent.mkdir(parents=True)
+    # ordre alphabétique dans le fichier (écriture triée) : la priorité vient de la part mesurée
+    besoins.write_text(json.dumps({"needs": [{"need": "PRIX_MANQUANT", "by_dex_prefix": {
+        "(dex principal)": 0.02, "../../etc": 0.01, "XYZ": 0.3, "io": 0.01, "mkts": 0.0000005,
+        "para": "beaucoup", "xyz": 0.5}}]}), encoding="utf-8")
+    # noms invalides, part non numérique et part négligeable écartés ; tri par notionnel décroissant
+    assert CA.dexs_a_collecter(tmp_path) == ["xyz", "io"]
+    monkeypatch.setenv("ALLMIDS_DEXS", "para, xyz ,para")
+    assert CA.dexs_a_collecter(tmp_path) == ["para", "xyz"]          # réglage opérateur prioritaire
+    monkeypatch.setenv("ALLMIDS_DEXS", "")
+    assert CA.dexs_a_collecter(tmp_path) == []
+
+
+def test_une_passe_collecte_les_dex_hip3_sans_inventer_de_fraicheur(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALLMIDS_DEXS", "xyz,io")
+    monkeypatch.setattr(CA, "_DEX_ETAT", {})
+    appels = []
+
+    def post(dex=""):
+        appels.append(dex)
+        if dex == "io":
+            raise OSError("dex indisponible")                        # un dex KO n'annule pas les autres
+        return {"SOXL": "25"} if dex == "xyz" else {"BTC": "60000", "kPEPE": "0.0031"}
+
+    assert CA.une_passe(tmp_path, post_allmids=post, archiver_tape=True) == 3
+    assert appels == ["", "xyz", "io"]
+    ligne = json.loads((tmp_path / CA.TAPE).read_text().splitlines()[-1])
+    assert ligne["mids"] == {"BTC": 60000.0, "kPEPE": 0.0031, "xyz:SOXL": 25.0}
+    # passe suivante immédiate : le dex xyz n'est pas redemandé (cadence bornée) ; la tape ne
+    # reçoit donc PAS son ancien prix redaté, alors que le cache courant le garde (encore frais).
+    assert CA.une_passe(tmp_path, post_allmids=post, archiver_tape=True) == 3
+    assert appels == ["", "xyz", "io", "", "io"]
+    ligne = json.loads((tmp_path / CA.TAPE).read_text().splitlines()[-1])
+    assert ligne["mids"] == {"BTC": 60000.0, "kPEPE": 0.0031}
+    assert json.loads((tmp_path / CA.SORTIE).read_text())["mids"]["xyz:SOXL"] == 25.0
 
 
 def test_une_passe_ecrit_cache_et_tape(tmp_path):

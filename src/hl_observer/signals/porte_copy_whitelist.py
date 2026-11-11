@@ -42,6 +42,38 @@ MOTIF_PERIMEE = "COPY_WHITELIST_PERIMEE"
 MOTIF_SANS_ADRESSE = "COPY_SIGNAL_SANS_ADRESSE"
 MOTIF_HORS_LISTE = "COPY_LEADERS_HORS_WHITELIST"
 MOTIF_CERTIFICATION_VNEXT_INVALIDE = "COPY_CERTIFICATION_VNEXT_ABSENTE_OU_INVALIDE"
+MOTIF_NON_COPIABLE_LABO = "COPY_LEADER_NON_COPIABLE_MESURE_LABO"
+MOTIF_CONSENSUS_CLONES = "COPY_CONSENSUS_CLONES_MEME_OPERATEUR"
+
+#: plan publié par l'étude de copiabilité du labo (classes d'opérateurs + grappes d'adresses)
+CHEMIN_PLAN_LABO = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
+
+
+def charger_classes_labo(root: str | Path = ".") -> dict[str, tuple[str, str]]:
+    """``adresse -> (opérateur, archétype)`` depuis l'étude de copiabilité ; vide si indisponible.
+
+    Ces faits ne peuvent que RESTREINDRE : ils n'ouvrent jamais un signal, et leur absence
+    laisse intacts tous les autres verrous (whitelist + certification vNext).
+    """
+    try:
+        plan = json.loads((Path(root) / CHEMIN_PLAN_LABO).read_text(encoding="utf-8"))
+        lignes = plan.get("leaders") or []
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+    classes: dict[str, tuple[str, str]] = {}
+    for ligne in lignes:
+        if not isinstance(ligne, Mapping):
+            continue
+        operateur = str(ligne.get("unit") or "").lower()
+        archetype = str(ligne.get("archetype") or "")
+        if not operateur or not archetype:
+            continue
+        adresses = ligne.get("addresses") if isinstance(ligne.get("addresses"), list) else []
+        for adresse in [operateur, *adresses]:
+            cle = str(adresse or "").lower()
+            if cle:
+                classes[cle] = (operateur, archetype)
+    return classes
 
 
 def charger_whitelist(root: str | Path = ".", *, now: float | None = None) -> dict:
@@ -108,6 +140,18 @@ def signal_copy_autorise(adresses_votantes, root: str | Path = ".", *,
     hors = [a for a in votants if a not in wl["adresses"]]
     if hors:
         return False, MOTIF_HORS_LISTE
+    # Verrous issus des MESURES du labo (restrictifs uniquement).
+    # 1) La whitelist juge un markout mesuré depuis l'instant du fill ; or pour un opérateur
+    #    à haute fréquence l'information est consommée avant que nous puissions l'observer :
+    #    son markout « au fill » n'est pas un prix d'entrée accessible au copieur.
+    # 2) Plusieurs adresses d'un même opérateur ne forment pas un consensus : c'est un seul
+    #    signal répété (diversification apparente).
+    classes = charger_classes_labo(root)
+    if any(classes.get(a, ("", ""))[1] == "HFT" for a in votants):
+        return False, MOTIF_NON_COPIABLE_LABO
+    distincts = set(votants)
+    if len(distincts) > 1 and len({classes.get(a, (a, ""))[0] for a in distincts}) == 1:
+        return False, MOTIF_CONSENSUS_CLONES
     if not _certification_vnext_copy_valide(root):
         return False, MOTIF_CERTIFICATION_VNEXT_INVALIDE
     return True, None
@@ -118,4 +162,5 @@ __all__ = [
     "CHEMIN_WHITELIST", "CHEMIN_CERTIFICATION_VNEXT", "MOTIF_ABSENTE",
     "MOTIF_ILLISIBLE", "MOTIF_VIDE", "MOTIF_PERIMEE", "MOTIF_SANS_ADRESSE",
     "MOTIF_HORS_LISTE", "MOTIF_CERTIFICATION_VNEXT_INVALIDE",
+    "MOTIF_NON_COPIABLE_LABO", "MOTIF_CONSENSUS_CLONES", "CHEMIN_PLAN_LABO", "charger_classes_labo",
 ]

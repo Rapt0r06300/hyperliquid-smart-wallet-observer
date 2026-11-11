@@ -98,6 +98,9 @@ def _charger_allmids_tape(
                     continue
                 for coin in coins:
                     prix = _f(mids.get(coin))
+                    if prix is None:
+                        # anciens rubans : symboles écrits en majuscules (kPEPE -> KPEPE)
+                        prix = _f(mids.get(coin.upper()))
                     if prix is not None and math.isfinite(prix) and prix > 0:
                         points[coin].append((ts_s, prix))
     except OSError:

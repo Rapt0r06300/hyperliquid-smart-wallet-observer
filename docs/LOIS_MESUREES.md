@@ -6,7 +6,7 @@
 > Les verdicts de mesure sont historiques; l'autorité `active_scope` décide de l'exécution.
 > Carry et les autres familles désactivées restent `DISABLED_BY_SCOPE` ici.
 
-## 🔴 Réfuté par la mesure (14)
+## 🔴 Réfuté par la mesure (16)
 
 ### Lead-lag cross-venue Binance→HL en TAKER scalp : aucun edge (le choc ne précède pas HL) — `cross_venue_leadlag_taker_no_edge`
 
@@ -49,6 +49,20 @@
 - **mesuré le** : 2026-07-11
 - **pour rouvrir** : une courbe edge/horizon en PENTE sur des données neuves
 - **où vérifier** : `mémoire projet : courbe edge/horizon`
+
+### Suivre vite les fills agressifs (taker) des leaders — `copy_suivi_rapide_taker`
+
+- **le chiffre** : 4 858 773 fills observés (218 adresses = 192 opérateurs, 24,9 h de mids, coffre LOCAL, exploratoire) : un fill taker d'ouverture est suivi de **+5,9 bps en 15 s**, mais **6,3 bps sont déjà pris avant notre observation** (retard médian 98 s). Depuis l'observation, la dérive reste sous **3,1 bps (borne haute IC 95 %)** à tout horizon ≤ 300 s, contre **9,0 bps de frais taker aller-retour** — spread supposé nul. Contre-épreuve directe : sur **33 745 ouvertures vues par WebSocket en moins de 2 s** (26 opérateurs), la dérive après observation plafonne à **+0,2 bps (borne haute IC 95 %)** : même une observation quasi instantanée ne laisse rien au copieur
+- **mesuré le** : 2026-11-11
+- **pour rouvrir** : une dérive APRÈS observation dont la borne basse d'IC dépasse frais + spread sur un corpus SAFE ; réduire la latence seule ne suffit pas (5,9 bps < 9,0 bps même observé à l'instant du fill)
+- **où vérifier** : `backtesting/copy_vault_copiability.py + tools/etude_copiabilite.py (registre runtime/reports/copy_vault_quant_lab/copiabilite/EXPERIENCES.ndjson)`
+
+### Copier en miroir chaque épisode d'un leader (entrée à l'ouverture, sortie à la clôture) — `copy_miroir_episodes`
+
+- **le chiffre** : 205 601 épisodes reconstruits : **47,2 % étaient déjà clos quand leur ouverture est devenue observable** (rien à copier). Sur les 29 620 copiables et mesurables : brut +0,05 bps, coûts 12,3 bps, **net −12,2 bps**, 38,3 % gagnants ; net moyen par opérateur −8,0 bps, IC 95 % [−11,7 ; −3,8] sur 53 opérateurs. 61,8 % des fills collectés venaient d'opérateurs à haute fréquence, non copiables
+- **mesuré le** : 2026-11-11
+- **pour rouvrir** : un univers d'opérateurs LENTS (rotation ≤ 3× l'exposition par jour) dont la réplication d'inventaire gagne en marche avant sur ≥ 20 jours indépendants (aujourd'hui : MORE_DATA, 1 jour exploitable)
+- **où vérifier** : `backtesting/copy_vault_copiability.py (mirror_copy_episodes, slow_replication_persistence)`
 
 ### Faire le marché à l'intérieur du spread (T1/T1b) — `market_making_spread`
 

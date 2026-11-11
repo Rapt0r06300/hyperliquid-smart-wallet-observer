@@ -44,7 +44,7 @@ Les scripts ci-dessous sont conservés pour les workflows, les diagnostics, la r
 - `VERIFIER_REPARER_L2_LOCAL.cmd`
 - `RESTORE_ALINA.sh`
 
-- `Certificateur Coffre Fort.cmd` (utilitaire historique, relocalisé depuis la racine)
+- `Certificateur Coffre Fort.cmd` (utilitaire historique, relocalisé depuis la racine ; la copie de la racine, enregistrée dans `entrypoint_topology.ROOT_SUPPORT_ENTRYPOINTS`, reste le lanceur utilisé par l'opérateur, comme `SUIVI_COFFRE.cmd`, `RAPPORT-COLLECTEURS.cmd`, `Noeud-HL.cmd` et `Installer Noeud HL.cmd`)
 - `Installer Noeud HL.cmd` (utilitaire historique, relocalisé depuis la racine)
 - `LANCER_COLLECTEURS.cmd` (utilitaire historique, relocalisé depuis la racine)
 - `Noeud-HL.cmd` (utilitaire historique, relocalisé depuis la racine)

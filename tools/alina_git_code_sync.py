@@ -2252,9 +2252,13 @@ class Synchronizer:
         tracked_protected = [
             p for p in tracked if _protected(p) and p not in safe_moves
         ]
+        # Runtime churn under a code directory (leader rankings rewritten by every
+        # collection run) is DATA: kept out of the code commit and preserved locally,
+        # exactly like the data roots. It must never block a code push after a harvest.
         deferable_tracked = {
             path for path in tracked_protected
             if _can_defer_staged_protected(path)
+            or path.replace("\\", "/").casefold() in RUNTIME_CHURN_FILES
         }
         blocking_tracked = [
             path for path in tracked_protected if path not in deferable_tracked
