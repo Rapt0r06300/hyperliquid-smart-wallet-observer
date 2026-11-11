@@ -435,7 +435,11 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'resume_attempt:' in text
     assert 'default: "0"' in text
     assert "historical-retry:" in text
-    assert "needs.historical.result == 'failure' || needs.historical.result == 'cancelled'" in text
+    assert "needs: [reconcile, historical]" in retry
+    assert "needs.reconcile.result == 'failure'" in retry
+    assert "needs.reconcile.result == 'cancelled'" in retry
+    assert "needs.historical.result == 'failure'" in retry
+    assert "needs.historical.result == 'cancelled'" in retry
     assert "fromJSON(inputs.resume_attempt || '0') < 2" in text
     assert "gh workflow run reconcile-v2-catalog.yml" in text
     assert 'next=$((current + 1))' in text
@@ -444,8 +448,11 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'RESUME_ATTEMPT: ${{ inputs.resume_attempt || \'0\' }}' in retry
     assert 'RESUME_ATTEMPT: ${{ inputs.resume_attempt || \'0\' }}' not in before_retry
     assert 'gh run view "$GITHUB_RUN_ID"' in retry
-    assert 'historical_job_id' in retry
-    assert '--log-failed' in retry
+    assert 'source_job_name="reconcile"' in retry
+    assert 'source_job_name="Continue historical backlog on a fresh hosted runner"' in retry
+    assert "failed_job_id" in retry
+    assert 'gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$failed_job_id"' in retry
+    assert '--log 2>&1 || true' in retry
     assert "classify_hosted_termination" in retry
     assert 'termination_class" != "INFRASTRUCTURE_STOP"' in retry
     assert "No explicit hosted-runner interruption evidence" not in retry
