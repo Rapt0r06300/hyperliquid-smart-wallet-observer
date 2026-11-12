@@ -15,14 +15,16 @@ from hl_observer.risk.risk_gate import RiskGateConfig, RiskGateState, evaluate_r
 
 FLAG = "HYPERSMART_RISK_GATE_ENABLED"
 _STATE = RiskGateState()
+_STATE_CONFIGURED = False
 _ENTRY_ACTIONS = frozenset({"OPEN", "ADD", "ENTER", "BUY", "SELL"})
 _CLOSE_ACTIONS = frozenset({"REDUCE", "CLOSE", "EXIT"})
 
 
 def set_risk_state(state: RiskGateState) -> None:
     """Le runtime met à jour l'état portefeuille (perte jour, drawdown, streak…)."""
-    global _STATE
+    global _STATE, _STATE_CONFIGURED
     _STATE = state
+    _STATE_CONFIGURED = True
 
 
 def risk_gate_enabled(env: dict | None = None) -> bool:
@@ -38,13 +40,20 @@ def _config_from_env(env: dict | None = None) -> RiskGateConfig:
         try:
             return float(v) if v not in (None, "") else default
         except (TypeError, ValueError):
-            return default
+            return float("nan")
+
+    def _i(name: str, default: int) -> int:
+        v = e.get(name)
+        try:
+            return int(float(v)) if v not in (None, "") else default
+        except (TypeError, ValueError, OverflowError):
+            return -1
 
     return RiskGateConfig(
         max_daily_loss_pct=_f("HYPERSMART_RISK_MAX_DAILY_LOSS_PCT", 5.0),
         max_monthly_loss_pct=_f("HYPERSMART_RISK_MAX_MONTHLY_LOSS_PCT", 15.0),
         max_drawdown_pct=_f("HYPERSMART_RISK_MAX_DRAWDOWN_PCT", 20.0),
-        max_loss_streak=int(_f("HYPERSMART_RISK_MAX_LOSS_STREAK", 5)),
+        max_loss_streak=_i("HYPERSMART_RISK_MAX_LOSS_STREAK", 5),
     )
 
 
@@ -52,7 +61,12 @@ def risk_gate_check(env: dict | None = None) -> tuple[bool, tuple[str, ...]]:
     """(ok, reasons) du risk gate. Flag OFF -> (True, ())."""
     if not risk_gate_enabled(env):
         return True, ()
-    v = evaluate_risk_gate(_STATE, _config_from_env(env))
+    if not _STATE_CONFIGURED or not isinstance(_STATE, RiskGateState):
+        return False, ("RISK_STATE_UNAVAILABLE",)
+    try:
+        v = evaluate_risk_gate(_STATE, _config_from_env(env))
+    except Exception:
+        return False, ("RISK_GATE_EVALUATION_UNAVAILABLE",)
     return v.ok, v.reasons
 
 

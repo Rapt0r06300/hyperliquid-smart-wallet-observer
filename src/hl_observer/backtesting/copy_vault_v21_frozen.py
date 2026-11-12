@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any
 
 from hl_observer.backtesting import copy_vault_executable as cv
+from hl_observer.backtesting.copy_vault_book_index import index_des_carnets, liste_des_carnets
 from hl_observer.backtesting.copy_vault_execution_math import (
     _book_side,
     _walk_base_quantity,
@@ -86,12 +87,9 @@ def _reference_depth_features(
 ) -> tuple[float, float] | None:
     if not rows:
         return None
-    timestamps = [_strict_positive_int(row.get("ts_ms")) for row in rows]
+    timestamps = index_des_carnets(rows).horodatages_de_reference()   # entiers > 0 et triés, sinon None
     signal_ms = _strict_positive_int(metaorder.get("signal_ts_ms"))
-    if any(timestamp is None for timestamp in timestamps) or signal_ms is None:
-        return None
-    timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
-    if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
+    if timestamps is None or signal_ms is None:
         return None
     index = bisect.bisect_right(timestamps, signal_ms) - 1
     # #5 — fenêtre causale (lag L2) cherchable. Reste STRICTEMENT causale (dernier
@@ -892,7 +890,7 @@ def _settle(
         )
         _coin_name = str(metaorder["coin"])
         _coin_books = books_by_coin.get(_coin_name, [])
-        books = list(_coin_books)
+        books = liste_des_carnets(_coin_books)     # la liste elle-même : son index sert à tous les candidats
         _coin_ts = ts_by_coin.get(_coin_name)
         if _coin_ts is None:
             _coin_ts = [int(row["ts_ms"]) for row in _coin_books]

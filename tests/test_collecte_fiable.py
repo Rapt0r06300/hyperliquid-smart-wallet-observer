@@ -127,3 +127,80 @@ def test_collecter_proprement_estampille_filtre_et_dedoublonne():
                                      champs_prix=("px",), ecart_bps_max=500.0)
     assert len(propres) == 1 and propres[0]["coin"] == "BTC"
     assert propres[0]["source"] == "hl" and propres[0]["real_execution"] is False
+
+
+def test_budget_partage_inactif_sans_variable(tmp_path, monkeypatch):
+    monkeypatch.delenv(C.BUDGET_DEBIT_ENV, raising=False)
+    assert C.reserver_poids(500.0, dormir=lambda s: 1 / 0) == 0.0          # jamais d'attente si inactif
+
+
+def test_budget_partage_attend_borne_et_enregistre_la_consommation(tmp_path, monkeypatch):
+    fichier = tmp_path / "budget.json"
+    monkeypatch.setenv(C.BUDGET_DEBIT_ENV, str(fichier))
+    t = [1000.0]
+    siestes: list[float] = []
+
+    def dormir(s):
+        siestes.append(s)
+        t[0] += s
+
+    # sous le seuil : aucune attente, mais la consommation est enregistrée
+    assert C.reserver_poids(300.0, maintenant=lambda: t[0], dormir=dormir) == 0.0
+    assert siestes == [] and C._lire_fenetre_budget(fichier, t[0]) == [(1000.0, 300.0)]
+
+    # on remplit presque le seuil (1000/min), puis une requête qui dépasse → attente bornée
+    C.reserver_poids(650.0, maintenant=lambda: t[0], dormir=dormir)        # total 950
+    siestes.clear()
+    attente = C.reserver_poids(120.0, maintenant=lambda: t[0], dormir=dormir)   # 950+120 = 1070 > 1000
+    assert 0 < attente <= C.ATTENTE_MAX_BUDGET_S and siestes == [attente]
+    assert attente == pytest.approx(C.pause_pour_poids(70.0, budget_par_minute=C.SEUIL_POIDS_PARTAGE_PAR_MINUTE))
+    # la consommation finale est bien enregistrée
+    assert sum(w for _, w in C._lire_fenetre_budget(fichier, t[0])) == pytest.approx(1070.0)
+
+
+def test_budget_partage_purge_la_fenetre_glissante(tmp_path, monkeypatch):
+    fichier = tmp_path / "budget.json"
+    monkeypatch.setenv(C.BUDGET_DEBIT_ENV, str(fichier))
+    fichier.write_text(json.dumps([[100.0, 900.0]]), encoding="utf-8")       # vieil événement
+    # 120 s plus tard : l'événement est hors fenêtre (60 s), donc aucune attente malgré 900
+    assert C.reserver_poids(800.0, maintenant=lambda: 220.0, dormir=lambda s: 1 / 0) == 0.0
+
+
+def test_budget_partage_deux_collecteurs_partagent_le_meme_fichier(tmp_path, monkeypatch):
+    fichier = tmp_path / "budget.json"
+    monkeypatch.setenv(C.BUDGET_DEBIT_ENV, str(fichier))
+    now = 5000.0
+    # deux « collecteurs » réservent tour à tour sur le MÊME fichier → le second voit la conso du premier
+    C.reserver_poids(600.0, maintenant=lambda: now, dormir=lambda s: None)
+    siestes: list[float] = []
+    C.reserver_poids(600.0, maintenant=lambda: now, dormir=siestes.append)   # 600+600 = 1200 > 1000
+    assert siestes and siestes[0] > 0                                        # le second attend à cause du premier
+
+
+def test_budget_partage_fail_open_sur_fichier_corrompu(tmp_path, monkeypatch):
+    fichier = tmp_path / "budget.json"
+    monkeypatch.setenv(C.BUDGET_DEBIT_ENV, str(fichier))
+    fichier.write_text("pas du json {", encoding="utf-8")
+    # fichier illisible : on ne plante pas, on n'attend pas, et on réécrit une fenêtre saine
+    assert C.reserver_poids(300.0, maintenant=lambda: 10.0, dormir=lambda s: None) == 0.0
+    assert C._lire_fenetre_budget(fichier, 10.0) == [(10.0, 300.0)]
+
+
+def test_budget_partage_vole_un_verrou_perime(tmp_path, monkeypatch):
+    import os
+    fichier = tmp_path / "budget.json"
+    verrou = tmp_path / "budget.json.lock"
+    verrou.write_text("mort", encoding="utf-8")
+    os.utime(verrou, (0, 0))                                                 # verrou très vieux (périmé)
+    monkeypatch.setenv(C.BUDGET_DEBIT_ENV, str(fichier))
+    # le verrou périmé est volé : la réservation aboutit et le verrou est nettoyé
+    assert C.reserver_poids(100.0, maintenant=lambda: 1.0, dormir=lambda s: None) == 0.0
+    assert not verrou.exists() and C._lire_fenetre_budget(fichier, 1.0) == [(1.0, 100.0)]
+
+
+def test_budget_partage_attente_jamais_au_dela_du_plafond(tmp_path, monkeypatch):
+    fichier = tmp_path / "budget.json"
+    monkeypatch.setenv(C.BUDGET_DEBIT_ENV, str(fichier))
+    fichier.write_text(json.dumps([[1000.0, 999999.0]]), encoding="utf-8")   # fenêtre saturée à l'extrême
+    attente = C.reserver_poids(500.0, maintenant=lambda: 1000.0, dormir=lambda s: None)
+    assert attente == C.ATTENTE_MAX_BUDGET_S                                 # plafonnée, jamais infinie

@@ -784,8 +784,16 @@ def _append_copy_vault_book(
     checkpoint_id: str | None = None,
     metaorder_id: str | None = None,
     collector_protocol: str | None = None,
+    connection_id: str | None = None,
+    l2_gap_epoch: int | None = None,
 ) -> bool:
-    """Persist one causal observed L2 sample for executable forward replay."""
+    """Persist one causal observed L2 sample for executable forward replay.
+
+    ``connection_id`` / ``l2_gap_epoch`` : identité de la connexion WebSocket et époque de trou du
+    marché. Le moteur de replay n'exécute un trade sur des carnets continus que si référence, entrée
+    et sortie partagent les deux ; un carnet écrit sans eux est refusé
+    (``L2_CONNECTION_IDENTITY_INCOMPLETE`` — mesuré le 2026-11-12 : aucun trade exécutable au labo).
+    """
 
     symbol = canonical_copy_vault_coin(coin)
     if not symbol or source not in {
@@ -900,6 +908,9 @@ def _append_copy_vault_book(
         row["checkpoint_id"] = str(checkpoint_id)
         row["metaorder_id"] = str(metaorder_id)
         row["collector_protocol"] = str(collector_protocol)
+    if isinstance(connection_id, str) and connection_id:
+        row["connection_id"] = connection_id
+        row["l2_gap_epoch"] = max(0, int(l2_gap_epoch or 0))
     path = Path(root) / COPY_VAULT_L2_TAPE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -2101,9 +2112,16 @@ _TAPE_L2_CANONICAL: dict[str, str] = {}        # identité native exacte -> symb
 _TAPE_BUFFER: dict = {}                      # coin -> list[{recv_mono, resume}] (snapshots successifs)
 _COPY_VAULT_LAST_SAMPLE_MS: dict[str, int] = {}
 TAPE_BUFFER_MAX = 400
-TAPE_COIN_TTL_MS = float(                    # shortest executable episode + allowed observation lag
+#: Durée pendant laquelle un coin reste abonné au carnet L2 après le dernier fill d'un leader.
+#: DOIT couvrir le PLUS LONG horizon testé par le labo (1 h). Avant le 2026-11-12 c'était le plus
+#: COURT (30 s) : toute position tenue plus de ~2 minutes n'avait aucun carnet de SORTIE, et le
+#: labo la refusait (STALE_OR_MISSING_EXIT_BOOK — 235 signaux sur 504 au blocage mesuré ce jour).
+#: Délai de copie + horizon le plus long + tolérance de fraîcheur = référence, entrée ET sortie
+#: tombent dans la fenêtre d'abonnement. Le carnet L2 est un flux public (non plafonné par
+#: utilisateur) : garder plus de coins abonnés plus longtemps ne coûte aucun débit.
+TAPE_COIN_TTL_MS = float(
     COPY_VAULT_DELAY_MS
-    + min(COPY_VAULT_HORIZONS_MS)
+    + max(COPY_VAULT_HORIZONS_MS)
     + COPY_VAULT_MAX_TARGET_LAG_MS
 )
 TAPE_PREWARM_MAX_COINS = 24                  # borne de collecte, tres inferieure au plafond WS Hyperliquid
@@ -2569,19 +2587,27 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
     """Abonne au l2Book WS les coins à métaordre ACTIF (dès le 1er fill = FIRST_SLICE) et BUFFERISE des
     snapshots HORODATÉS (réception MONOTONE) → base du VRAI OFI (variations successives). 1 connexion WS
     (total 4 < 10). Résilient. Lecture seule ; aucune position, RAW intact."""
+    import uuid
+
     import websockets
     from hl_observer.experimental import metaorder_l2_tape as T
     abonnes: set = set()
+    # Époque de trou par marché : +1 à chaque interruption OBSERVÉE de son flux (nouvel abonnement,
+    # trame rejetée, déconnexion), comme le collecteur de référence. Jamais sur un simple silence.
+    epoques: dict[str, int] = {}
     while True:
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
                 abonnes.clear()
+                connexion_id = "userfills-l2-" + uuid.uuid4().hex      # une identité par connexion WebSocket
                 while True:
                     now = time.time() * 1000
                     cibles = _tape_l2_targets(now)
                     for c in cibles - abonnes:
                         await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "l2Book", "coin": c}}))
                         abonnes.add(c)
+                        cle = str(canonical_copy_vault_coin(c) or c)
+                        epoques[cle] = epoques.get(cle, -1) + 1        # (ré)abonnement : le flux reprend après un trou
                     for c in abonnes - cibles:
                         await ws.send(json.dumps({"method": "unsubscribe", "subscription": {"type": "l2Book", "coin": c}}))
                         abonnes.discard(c)
@@ -2605,6 +2631,8 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                             _record_l2_validation_rejection(
                                 reject_reason or "L2_BOOK_INVALID"
                             )
+                            if coin:
+                                epoques[coin] = epoques.get(coin, 0) + 1   # trame rejetée : trou pour ce marché
                             continue
                         if not coin:
                             _record_l2_validation_rejection("L2_COIN_IDENTITY_INVALID")
@@ -2624,6 +2652,8 @@ async def _tape_l2_buffer(root: Path, *, sync_s: float = 0.5) -> None:
                                 coin,
                                 r,
                                 received_at_ms=recv_wall_ms,
+                                connection_id=connexion_id,
+                                l2_gap_epoch=epoques.get(coin, 0),
                             )
         except Exception as exc:  # noqa: BLE001
             print("[userfills] tape_l2 reconnect (%s)" % str(exc)[:50], flush=True)

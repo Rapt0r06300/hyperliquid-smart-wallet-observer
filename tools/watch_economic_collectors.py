@@ -44,6 +44,14 @@ DEFAULT_NAMES = (
     "native-venues",
     "lab-microstructure",
     "l2-leaders",
+    # 12/11 — AJOUTS K1 / S1.3. ATTENTION : cette liste est la SEULE qui compte pour le lanceur de
+    # 6 jours. `CV_PROFILE=copy-vault` du .cmd n'est qu'un libelle d'affichage : il n'existe aucun
+    # profil « copy-vault » dans le registre (all/core/harvest/maintenance/research), et le profil
+    # n'est jamais transmis au superviseur. Ajouter un collecteur au REGISTRE et au profil harvest
+    # ne suffit donc PAS a le faire tourner ici — il faut aussi l'ajouter ci-dessous, sinon il reste
+    # silencieusement a l'arret pendant toute la campagne.
+    "userfills-poll",      # fills REST : passe de 8 a ~120 leaders (casse le cap WS de 10/IP)
+    "contexte-leaders",    # ordres en attente des leaders : l'INTENTION, pas seulement le resultat
 )
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3

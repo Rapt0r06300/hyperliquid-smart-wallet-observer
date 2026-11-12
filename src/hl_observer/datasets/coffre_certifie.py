@@ -45,6 +45,8 @@ from hl_observer.datasets.coffre_socle import (  # noqa: F401
     FAMILLE_SNAPSHOT,
     FAMILLE_TRADES,
     FAMILLE_VAULT_LEDGER,
+    FAMILLE_FUNDING_HISTORY,
+    FAMILLE_LEADER_ORDERS,
     FAMILLE_VAULT_PORTFOLIO,
     FAMILLE_VENUE,
     MAX_TARGET_LAG_MS,
@@ -70,6 +72,8 @@ from hl_observer.datasets.coffre_registre_fichiers import (  # noqa: F401
 from hl_observer.datasets.coffre_familles_collecte import (  # noqa: F401
     SCHEMA_SNAPSHOT_VAULT,
     certifier_explorer_tx,
+    certifier_funding_history,
+    certifier_leader_orders,
     certifier_micro_bbo,
     certifier_micro_l2,
     certifier_micro_trade,
@@ -98,6 +102,7 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "vault_fills_live.jsonl": (FAMILLE_FILLS_FORWARD, "LIVE_WS"),
     "copy_vault_twap_lane.jsonl": (FAMILLE_FILLS_FORWARD, "LIVE_TWAP"),
     "vault_fills.jsonl": (FAMILLE_FILLS_BACKFILL, "REST_BACKFILL"),
+    "leader_fills_backfill.jsonl": (FAMILLE_FILLS_BACKFILL, "REST_BACKFILL"),   # leaders lents, incrémental
     "node_fills_tape.jsonl": (FAMILLE_FILLS_BACKFILL, "NODE_FILLS"),
     "copy_vault_l2_tape.jsonl": (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS"),
     "copy_vault_l2_lane.jsonl": (FAMILLE_BOOK_L2, "HYPERLIQUID_L2_WS"),
@@ -106,6 +111,7 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "copy_vault_bbo_lane.jsonl": (FAMILLE_BBO, "BBO_TAPE"),
     "vault_snapshots.jsonl": (FAMILLE_SNAPSHOT, "SNAPSHOT"),
     "copy_vault_snapshots_lane.jsonl": (FAMILLE_SNAPSHOT, "CLEARINGHOUSE_WS"),
+    "copy_vault_orders_lane.jsonl": (FAMILLE_LEADER_ORDERS, "OPEN_ORDERS_WS"),   # intentions des leaders
     "copy_vault_positions_lane.jsonl": (FAMILLE_POSITION, "CLEARINGHOUSE_WS"),
     "copy_vault_trades_lane.jsonl": (FAMILLE_TRADES, "HYPERLIQUID_TRADES_WS"),
     "copy_vault_candle_lane.jsonl": (FAMILLE_CANDLE, "HYPERLIQUID_CANDLE_WS"),
@@ -122,6 +128,8 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "micro_l2book.jsonl": (FAMILLE_MICRO_L2, "HL_WS_PUBLIC"),
     "micro_trades.jsonl": (FAMILLE_MICRO_TRADES, "HL_WS_PUBLIC"),
     "candles_5m.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_5M"),   # runtime/history (backfill_candles_vaults)
+    "candles_1h.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_1H"),   # 208 jours de prix horaires (même collecteur)
+    "funding_1h.jsonl": (FAMILLE_FUNDING_HISTORY, "REST_FUNDING_HISTORY"),   # funding horaire, même profondeur
 }
 
 
@@ -458,8 +466,13 @@ def certifier_candle(record: Any, *, source: str, now_ms: int,
         record = {**record, "open": record.get("o"), "high": record.get("h"), "low": record.get("l"),
                   "close": record.get("c"), "volume": record.get("v"), "open_ts_ms": record.get("t_ms")}
         out.update({"volume": _nombre_fini(record.get("volume")), "causal_forward_eligible": False})
-        if not out.get("interval") and str(source).upper().endswith("_5M"):
-            out["interval"] = "5m"
+        if not out.get("interval"):
+            # anciens rubans sans intervalle : il se lit du nom de la source, jamais deviné
+            deduit = {"_5M": "5m", "_1H": "1h"}.get(str(source).upper()[-3:])
+            if deduit is None:
+                # sans intervalle, une bougie 1 h et une bougie 5 min de même ouverture auraient la même identité
+                return None, QUARANTAINE, "intervalle_absent"
+            out["interval"] = deduit
         repare = True
     o = _nombre_fini(record.get("open"))
     h = _nombre_fini(record.get("high"))
@@ -531,6 +544,10 @@ def identite(record: dict[str, Any], famille: str) -> tuple[Any, ...]:
     if famille == FAMILLE_VAULT_LEDGER:
         return ("vault_ledger", record.get("vault"), record.get("hash"), record.get("ts_ms"),
                 record.get("type"), record.get("delta_usd"))
+    if famille == FAMILLE_LEADER_ORDERS:
+        return ("leader_orders", record.get("vault"), record.get("dex") or "", record.get("ts_ms"))
+    if famille == FAMILLE_FUNDING_HISTORY:
+        return ("funding_history", record.get("coin"), record.get("ts_ms"))
     if famille == FAMILLE_VAULT_PORTFOLIO:
         # une même tranche réémise après une coupure a les mêmes bornes et le même nombre de points
         return ("vault_portfolio", record.get("vault"), record.get("fenetre"),
@@ -592,6 +609,10 @@ def certifier_record(
         return certifier_vault_ledger(record, source=source, now_ms=now_ms)
     if famille == FAMILLE_VAULT_PORTFOLIO:
         return certifier_portfolio_history(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_LEADER_ORDERS:
+        return certifier_leader_orders(record, source=source, now_ms=now_ms)
+    if famille == FAMILLE_FUNDING_HISTORY:
+        return certifier_funding_history(record, source=source, now_ms=now_ms)
     if famille in (FAMILLE_FILLS_FORWARD, FAMILLE_FILLS_BACKFILL):
         return certifier_fill(record, source=source, famille=famille, now_ms=now_ms)
     if famille == FAMILLE_BOOK_L2:
@@ -683,6 +704,8 @@ __all__ = [
     "certifier_snapshot_vault", "SCHEMA_SNAPSHOT_VAULT", "VERSIONS_CERTIFICATEUR", "version_certificateur",
     "FAMILLE_EXPLORER_TX", "FAMILLE_VAULT_LEDGER", "certifier_explorer_tx", "certifier_vault_ledger",
     "FAMILLE_VAULT_PORTFOLIO", "certifier_portfolio_history",
+    "FAMILLE_LEADER_ORDERS", "certifier_leader_orders",
+    "FAMILLE_FUNDING_HISTORY", "certifier_funding_history",
     "FICHIERS_NON_CERTIFIES", "motif_non_certifie", "nouvellement_accepte",
     "FAMILLE_MICRO_BBO", "FAMILLE_MICRO_L2", "FAMILLE_MICRO_TRADES",
     "certifier_micro_bbo", "certifier_micro_l2", "certifier_micro_trade",

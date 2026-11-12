@@ -281,25 +281,30 @@ def decomposer_les_pertes(
                  for nom, cfg in etapes}
     nets = {nom: resultat.get("net_usd_per_day") for nom, resultat in resultats.items()}
     couts: dict[str, float | None] = {}
-    for (precedent, _), (nom, _) in zip(etapes, etapes[1:]):
+    for (precedent, _), (nom, _) in zip(etapes, etapes[1:], strict=False):
         connu = nets[precedent] is not None and nets[nom] is not None
         couts[nom] = float(nets[precedent] - nets[nom]) if connu else None
     return {"net_usd_per_day": nets, "cost_usd_per_day": couts, "full": resultats[etapes[-1][0]]}
 
 
+#: un état de compte est réécrit sur changement, sinon toutes les 5 min : au-delà de deux battements
+#: sans nouvelles d'un dex, son portefeuille n'est plus supposé inchangé
+FRAICHEUR_ETAT_DEX_MS = 660_000
+
+
 def portefeuilles_depuis_instantanes(snapshots: Any) -> tuple[dict[str, list], dict[str, int]]:
     """``{compte: [(ts, valeur, {coin: taille}), ...]}`` depuis des instantanés certifiés.
 
-    Seuls les portefeuilles COMPLETS du dex principal sont gardés : celui d'un dex HIP-3 ne contient
-    pas les autres positions du compte et ne peut pas être lu comme le portefeuille entier.
+    Un compte a un état PAR DEX (le dex principal et chaque dex HIP-3) : son portefeuille entier est
+    leur réunion. À chaque instant observé, l'état le plus récent de chaque dex est repris s'il est
+    encore frais ; un dex déjà observé mais devenu muet rend le portefeuille INCOMPLET, donc inconnu
+    (jamais complété par un état périmé). Tant qu'un dex n'a encore jamais été observé pour un compte,
+    seul le dex principal est connu : c'est le régime des instantanés d'avant le suivi multi-dex.
     """
-    par_compte: dict[str, dict[int, tuple[float | None, dict[str, float]]]] = {}
+    etats: dict[str, dict[str, dict[int, tuple[float | None, dict[str, float]]]]] = {}
     rejets: dict[str, int] = {}
     for snap in snapshots:
         compte, ts, positions = str(snap.get("vault") or "").lower(), snap.get("ts_ms"), snap.get("positions")
-        if snap.get("dex"):
-            rejets["portefeuille_autre_dex"] = rejets.get("portefeuille_autre_dex", 0) + 1
-            continue
         if not compte or type(ts) is not int or ts <= 0 or not isinstance(positions, list):
             rejets["instantane_invalide"] = rejets.get("instantane_invalide", 0) + 1
             continue
@@ -315,9 +320,65 @@ def portefeuilles_depuis_instantanes(snapshots: Any) -> tuple[dict[str, list], d
             continue
         nav = snap.get("nav_usd")
         nav = float(nav) if isinstance(nav, (int, float)) and not isinstance(nav, bool) and np.isfinite(nav) else None
-        par_compte.setdefault(compte, {}).setdefault(ts, (nav, tailles))
-    return ({compte: [(ts, *par_compte[compte][ts]) for ts in sorted(par_compte[compte])]
-             for compte in sorted(par_compte)}, rejets)
+        etats.setdefault(compte, {}).setdefault(str(snap.get("dex") or ""), {}).setdefault(ts, (nav, tailles))
+    sortie: dict[str, list] = {}
+    for compte in sorted(etats):
+        principal = etats[compte].get("")
+        if not principal:
+            rejets["compte_sans_dex_principal"] = rejets.get("compte_sans_dex_principal", 0) + 1
+            continue
+        series = {dex: np.array(sorted(etat), dtype=np.int64) for dex, etat in etats[compte].items()}
+        instants = sorted({int(t) for serie in series.values() for t in serie})
+        portefeuille: list[tuple[int, float | None, dict[str, float]]] = []
+        for t in instants:
+            valeur: float | None = 0.0
+            total: dict[str, float] = {}
+            complet = True
+            for dex, serie in series.items():
+                index = int(np.searchsorted(serie, t, side="right")) - 1
+                if index < 0:
+                    if dex == "":
+                        complet = False                      # dex principal pas encore observé : rien à répliquer
+                        break
+                    continue                                  # dex jamais encore observé : régime dex principal seul
+                dernier = int(serie[index])
+                if t - dernier > FRAICHEUR_ETAT_DEX_MS:
+                    complet = False
+                    rejets["portefeuille_incomplet_dex_muet"] = rejets.get("portefeuille_incomplet_dex_muet", 0) + 1
+                    break
+                nav, tailles = etats[compte][dex][dernier]
+                valeur = None if valeur is None or nav is None else valeur + nav
+                for coin, taille in tailles.items():
+                    total[coin] = total.get(coin, 0.0) + taille
+            if complet:
+                portefeuille.append((t, valeur, total))
+        if portefeuille:
+            sortie[compte] = portefeuille
+    return sortie, rejets
+
+
+def instantanes_complets(snapshots: Any) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Instantanés de portefeuille ENTIER (dex réunis), au format des instantanés de vault.
+
+    Le premier instantané où un dex HIP-3 d'un compte entre dans le suivi porte ``perimetre_change`` :
+    ses positions existaient déjà ; les lire comme des ouvertures fabriquerait un faux signal."""
+    lignes = list(snapshots)
+    premiere_vue: dict[str, dict[str, int]] = {}
+    for snap in lignes:
+        compte, ts, dex = str(snap.get("vault") or "").lower(), snap.get("ts_ms"), str(snap.get("dex") or "")
+        if compte and dex and type(ts) is int and ts > 0:
+            connus = premiere_vue.setdefault(compte, {})
+            connus[dex] = min(ts, connus.get(dex, ts))
+    portefeuilles, rejets = portefeuilles_depuis_instantanes(lignes)
+    sortie: list[dict[str, Any]] = []
+    for compte, serie in portefeuilles.items():
+        en_attente = sorted(premiere_vue.get(compte, {}).values())   # instants où un dex entre dans le suivi
+        for rang, (ts, nav, tailles) in enumerate(serie):
+            change = rang > 0 and any(entree <= ts for entree in en_attente)
+            en_attente = [entree for entree in en_attente if entree > ts]   # ces dex sont désormais dans le périmètre
+            sortie.append({"vault": compte, "ts_ms": ts, "nav_usd": nav, "perimetre_change": bool(change),
+                           "positions": [{"coin": coin, "szi": taille} for coin, taille in sorted(tailles.items())]})
+    return sortie, rejets
 
 
 def synthese_replication(par_leader: Mapping[str, Mapping[str, Any]], config: ReplicationConfig | None = None, *,
@@ -333,7 +394,7 @@ def synthese_replication(par_leader: Mapping[str, Mapping[str, Any]], config: Re
     par_jour: dict[int, list[float]] = {}
     for resultat in par_leader.values():
         complet = resultat["full"]
-        for jour, net in zip(complet.get("days_utc") or (), complet.get("daily_net_usd") or ()):
+        for jour, net in zip(complet.get("days_utc") or (), complet.get("daily_net_usd") or (), strict=True):
             par_jour.setdefault(int(jour), []).append(float(net))
     base = {"hypothesis": H_REPLICATION_350, "economically_proven": False, "leaders": len(par_leader),
             "leaders_measured": sum(1 for r in par_leader.values() if r["full"].get("complete_days")),
@@ -369,5 +430,6 @@ def synthese_replication(par_leader: Mapping[str, Mapping[str, Any]], config: Re
             "reason": "intervalle à cheval sur zéro, ou funding insuffisamment couvert pour conclure"}
 
 
-__all__ = ["H_REPLICATION_350", "ReplicationConfig", "decomposer_les_pertes", "portefeuilles_depuis_instantanes",
+__all__ = ["FRAICHEUR_ETAT_DEX_MS", "H_REPLICATION_350", "ReplicationConfig", "decomposer_les_pertes",
+           "instantanes_complets", "portefeuilles_depuis_instantanes",
            "run_replication", "synthese_replication"]

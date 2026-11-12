@@ -19,10 +19,13 @@ from hl_observer.signals.no_trade_taxonomy import NoTradeReason, reason
 
 @dataclass(frozen=True, slots=True)
 class CopyInputs:
-    source_usable: bool = True
+    # Keep legacy pure-evaluator defaults for callers that intentionally exercise
+    # later gates. Production routes pass explicit observed evidence (including
+    # None when unavailable), so this does not make the runtime evidence gate lax.
+    source_usable: bool | None = True
     lifecycle_action: str | None = None      # PositionAction value, optional
     has_known_position: bool = True
-    quotes_agree: bool = True
+    quotes_agree: bool | None = True
     mid_available: bool = True
     signal_age_ms: int | None = None
     max_signal_age_ms: int = 30_000
@@ -56,6 +59,8 @@ def evaluate_copy_candidate(inp: CopyInputs) -> CopyDecision:
         return CopyDecision(accepted=False, reason=reason(code, **kw), checks_passed=tuple(passed))
 
     # 1) source usable (deny-by-default upstream feeds this)
+    if inp.source_usable is None:
+        return block("INSUFFICIENT_DATA", missing_data=("usable_source",))
     if not inp.source_usable:
         return block("INSUFFICIENT_DATA", missing_data=("usable_source",))
     passed.append("source_usable")
@@ -67,7 +72,9 @@ def evaluate_copy_candidate(inp: CopyInputs) -> CopyDecision:
             return block(lc)
         passed.append("lifecycle")
 
-    # 3) REST/WS quote agreement
+    # 3) Observed mark/book agreement (unknown is missing evidence, not agreement)
+    if inp.quotes_agree is None:
+        return block("INSUFFICIENT_DATA", missing_data=("quote_reconciliation",))
     if not inp.quotes_agree:
         return block("SOURCE_CONFLICT")
     passed.append("quotes_agree")

@@ -991,7 +991,7 @@ def _portfolio_open_refusal(
 
     positions = getattr(state, "simulation_virtual_positions", {}) or {}
     if not isinstance(positions, dict):
-        return ""
+        return "PORTFOLIO_STATE_UNAVAILABLE"
 
     # GH-01 (2026-07-13) -- LES GARDE-FOUS QU'ON CROIT AVOIR.
     #
@@ -1060,6 +1060,7 @@ def _portfolio_open_refusal(
             return _dir
     except Exception:
         _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:958")
+        return "DIRECTIONAL_RISK_GUARD_UNAVAILABLE"
 
     # BUDGET DE RISQUE **PAR MOTEUR** (2026-07-11). Le garde-fou de session existant raisonne sur
     # UN SEUL PnL : si le Sniper perd 40 $, le Grinder est puni aussi -- alors que son mecanisme
@@ -1080,6 +1081,7 @@ def _portfolio_open_refusal(
                 return _budget
     except Exception:
         _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:978")
+        return "ENGINE_RISK_BUDGET_UNAVAILABLE"
 
     # T3b (2026-07-12) — CORRELATION DE GROUPE. Le garde-fou directionnel ci-dessus plafonne le
     # NET total et la concentration PAR COIN. Il traite donc BTC-long et ETH-long comme DEUX paris
@@ -1123,6 +1125,7 @@ def _portfolio_open_refusal(
                     return _corr
     except Exception:
         _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:1021")
+        return "CORRELATION_RISK_GUARD_UNAVAILABLE"
 
     # T3b (2026-07-12) — ANTI-SURTRADING. `max_positions` (plus haut) plafonne les positions
     # SIMULTANEES ; rien ne plafonnait le nombre de trades PAR JOUR. Le firehose V27 est concu
@@ -1155,6 +1158,7 @@ def _portfolio_open_refusal(
                 return f"TRADE_BUDGET_{_why}"
     except Exception:
         _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:1053")
+        return "TRADE_BUDGET_GUARD_UNAVAILABLE"
 
     # T3c (2026-07-12) — LE GARDE-FOU QUI AURAIT EMPECHE LE BUG DES -64 $.
     #
@@ -1191,6 +1195,7 @@ def _portfolio_open_refusal(
                     )
     except Exception:
         _noter_echec("hl_observer/ui/fusion_persistent_adapter.py:1089")
+        return "BREAKEVEN_CALIBRATION_UNAVAILABLE"
 
     return ""
 

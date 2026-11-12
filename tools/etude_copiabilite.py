@@ -36,9 +36,12 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from hl_observer.backtesting import copy_vault_copiability as cop  # noqa: E402
+from hl_observer.backtesting import copy_vault_event_study as evenements  # noqa: E402
 from hl_observer.backtesting import copy_vault_leader_model as leader_model  # noqa: E402
+from hl_observer.backtesting import copy_vault_order_intent as intentions  # noqa: E402
 from hl_observer.backtesting import copy_vault_persistence as persistence  # noqa: E402
 from hl_observer.backtesting import copy_vault_replication_paper as replication  # noqa: E402
+from hl_observer.backtesting import copy_vault_research_planner as planificateur  # noqa: E402
 from hl_observer.collection.vault_portfolio_history import fusionner_points  # noqa: E402
 
 PARSER_VERSION = "fills-v1"
@@ -215,8 +218,13 @@ def load_half_spreads(shards: list[dict[str, Any]], *, sample_every: int = 5, mi
     return {coin: float(np.median(v)) for coin, v in sorted(observed.items()) if len(v) >= min_obs}
 
 
+def funding_shards(shards: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Funding observé en direct (``asset_ctx``) et funding horaire publié (``funding_history``)."""
+    return [*shards.get("asset_ctx", []), *shards.get("funding_history", [])]
+
+
 def load_funding(shards: list[dict[str, Any]]):
-    """``(coin, ts_ms, taux horaire)`` depuis le contexte d'actif certifié (flux ``asset_ctx``)."""
+    """``(coin, ts_ms, taux horaire)`` depuis le coffre : contexte d'actif observé ou historique publié."""
 
     for item in shards:
         with gzip.open(item["path"], "rt", encoding="utf-8") as handle:
@@ -425,7 +433,7 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
     for reason, count in prepared_rejects.items():
         rejects[reason] = rejects.get(reason, 0) + count
     print(f"[copiabilite] {len(fills):,} fills retenus · panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
-    funding = cop.build_funding_rates(load_funding(shards["asset_ctx"]), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     report = _jsonable(cop.run_copiability_study(fills, panel, half_spreads, config, funding_rates=funding))
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     result = {
@@ -457,16 +465,19 @@ def run(root: Path, *, price: str, workers: int, config: cop.CopiabilityConfig, 
     return result
 
 
-CANDLES_PATH = Path("runtime/history/candles_5m.jsonl")
-CANDLE_INTERVAL_MS = 300_000
+CANDLES_PATHS = {"5m": Path("runtime/history/candles_5m.jsonl"), "1h": Path("runtime/history/candles_1h.jsonl")}
+CANDLE_INTERVALS_MS = {"5m": 300_000, "1h": 3_600_000}
+CANDLES_PATH = CANDLES_PATHS["5m"]
+CANDLE_INTERVAL_MS = CANDLE_INTERVALS_MS["5m"]
 EVIDENCE_TIER_RETROSPECTIVE = "LOCAL_RETROSPECTIVE_RECONSTRUCTED"
 
 
-def bougies(root: Path, shards: dict[str, list[dict[str, Any]]]):
-    """Bougies 5 min : celles du coffre (certifiées) si elles y sont, sinon le fichier brut — signalé.
+def bougies(root: Path, shards: dict[str, list[dict[str, Any]]], intervalle: str = "5m"):
+    """Bougies d'un intervalle (5 min ou 1 h) : celles du coffre (certifiées) si elles y sont, sinon le
+    fichier brut — signalé.
 
     Renvoie ``(itérable, provenance)`` ; ``(None, ...)`` si aucune source n'existe."""
-    certifiees = shards.get("candle") or []
+    certifiees = [item for item in shards.get("candle") or [] if f"candles_{intervalle}" in item["shard"]]
     if certifiees:
         def lire():
             for item in certifiees:
@@ -476,15 +487,15 @@ def bougies(root: Path, shards: dict[str, list[dict[str, Any]]]):
                             row = json.loads(line)
                         except ValueError:
                             continue
-                        if isinstance(row, dict) and row.get("interval") == "5m":
+                        if isinstance(row, dict) and row.get("interval") == intervalle:
                             yield str(row.get("coin") or ""), row.get("open_ts_ms"), row.get("close")
         empreinte = hashlib.sha256("".join(sorted(i["sha256"] for i in certifiees)).encode()).hexdigest()
         return lire(), {"origine": "COFFRE_CERTIFIE", "shards": len(certifiees), "sha256": empreinte}
-    chemin = root / CANDLES_PATH
+    chemin = root / CANDLES_PATHS[intervalle]
     if not chemin.is_file():
         return None, {"origine": "ABSENT", "sha256": None}
-    return load_candles(chemin), {"origine": "FICHIER_BRUT_NON_CERTIFIE", "chemin": CANDLES_PATH.as_posix(),
-                                  "sha256": _sha256_file(chemin)}
+    return load_candles(chemin), {"origine": "FICHIER_BRUT_NON_CERTIFIE",
+                                  "chemin": CANDLES_PATHS[intervalle].as_posix(), "sha256": _sha256_file(chemin)}
 
 
 def load_candles(path: Path):
@@ -562,32 +573,37 @@ def render_retrospective_report(report: dict[str, Any], identity: dict[str, Any]
     return "\n".join(lines)
 
 
-def run_retrospective(root: Path, *, lag_s: float, workers: int, write: bool = True) -> dict[str, Any]:
-    """Persistance de la réplication lente sur fills de backfill + bougies (historique reconstruit)."""
+def run_retrospective(root: Path, *, lag_s: float, workers: int, write: bool = True,
+                      intervalle: str = "5m") -> dict[str, Any]:
+    """Persistance de la réplication lente sur fills de backfill + bougies (historique reconstruit).
+
+    ``intervalle`` : ``5m`` (17 jours, exécution fine) ou ``1h`` (208 jours, douze fois plus d'histoire)."""
 
     started = time.time()
     lag_ms = int(lag_s * 1000)
+    pas_ms = CANDLE_INTERVALS_MS[intervalle]
     config = cop.CopiabilityConfig(rebalance_minutes=(60, 240))
     shards, excluded = select_shards(root, {"fills_backfill": "", "book_l2": "", "bbo": "", "micro_bbo": "",
-                                            "asset_ctx": "", "candle": "candles_5m"})
-    identity = experiment_identity(root, shards, config, f"candles_5m|lag={lag_ms}")
-    candles, identity["candles_source"] = bougies(root, shards)
+                                            "asset_ctx": "", "funding_history": "", "candle": f"candles_{intervalle}"})
+    identity = experiment_identity(root, shards, config, f"candles_{intervalle}|lag={lag_ms}")
+    candles, identity["candles_source"] = bougies(root, shards, intervalle)
     if candles is None:
-        return {"status": "UNMEASURABLE", "reason": f"bougies absentes : {CANDLES_PATH.as_posix()}", "identity": identity}
+        return {"status": "UNMEASURABLE", "reason": f"bougies absentes : {CANDLES_PATHS[intervalle].as_posix()}",
+                "identity": identity}
     identity["candles_sha256"] = identity["candles_source"]["sha256"]
     identity["corpus_tier"] = EVIDENCE_TIER_RETROSPECTIVE
     identity["experiment_id"] = hashlib.sha256(
         (identity["experiment_id"] + identity["candles_sha256"]).encode()
     ).hexdigest()[:24]
     raw, rejects = load_fills(shards["fills_backfill"], root / CACHE_DIR, workers, assumed_lag_ms=lag_ms)
-    panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVAL_MS)
+    panel = cop.build_candle_panel(candles, interval_ms=pas_ms)
     if len(panel.ts):
-        raw = raw[(raw["time"] >= int(panel.ts[0]) - CANDLE_INTERVAL_MS) & (raw["time"] <= int(panel.ts[-1]))]
+        raw = raw[(raw["time"] >= int(panel.ts[0]) - pas_ms) & (raw["time"] <= int(panel.ts[-1]))]
     fills, prepared_rejects = cop.prepare_fills(raw, config)
     for reason, count in prepared_rejects.items():
         rejects[reason] = rejects.get(reason, 0) + count
     half_spreads = load_half_spreads(spread_shards(shards))
-    funding = cop.build_funding_rates(load_funding(shards["asset_ctx"]), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     print(f"[retrospectif] {len(fills):,} fills · {fills['vault'].nunique() if len(fills) else 0} vaults · "
           f"panel {panel.px.shape} · {len(half_spreads)} demi-spreads", flush=True)
     report = _jsonable(cop.run_retrospective_study(fills, panel, half_spreads, config, assumed_lag_ms=lag_ms,
@@ -639,11 +655,15 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
     started = time.time()
     config = cop.CopiabilityConfig(rebalance_minutes=(60, 240))
     shards, excluded = select_shards(root, {"snapshot": "", "book_l2": "", "allmids": "", "bbo": "",
-                                            "micro_bbo": "", "asset_ctx": "", "candle": "candles_5m"})
+                                            "micro_bbo": "", "asset_ctx": "", "funding_history": "", "candle": "candles_5m"})
     if not shards["snapshot"]:
         return {"status": "UNMEASURABLE", "reason": "aucun instantané de vault au coffre : lancez le Certificateur"}
     identity = experiment_identity(root, {k: shards[k] for k in ("snapshot", "book_l2")}, config, f"positions|{price}")
-    events, seen, rejects = cop.position_events_from_snapshots(load_snapshots(shards["snapshot"]))
+    # portefeuille ENTIER de chaque compte : dex principal et dex HIP-3 réunis quand ils sont suivis ensemble
+    complets, rejets_fusion = replication.instantanes_complets(load_snapshots(shards["snapshot"]))
+    events, seen, rejects = cop.position_events_from_snapshots(complets)
+    for reason, count in rejets_fusion.items():
+        rejects[reason] = rejects.get(reason, 0) + count
     if price == "mids":
         panel = load_mid_panel(shards["allmids"], config.stale_price_ms)
         panel, _ = cop.alias_legacy_symbols(panel, events["coin"].unique())
@@ -656,7 +676,7 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
         tier_prix = "prix reconstruits (bougies 5 min récupérées après coup)"
     identity["corpus_tier"] = EVIDENCE_TIER_POSITIONS
     half_spreads = load_half_spreads(spread_shards(shards))
-    funding = cop.build_funding_rates(load_funding(shards["asset_ctx"]), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     print(f"[positions] {len(events):,} changements de position · {len(seen)} vaults · "
           f"{sum(len(v) for v in seen.values()):,} instantanés · panel {panel.px.shape}", flush=True)
     report = _jsonable(cop.run_position_replication_study(events, seen, panel, half_spreads, config,
@@ -695,6 +715,288 @@ def run_positions(root: Path, *, price: str, write: bool = True) -> dict[str, An
 
 
 EVIDENCE_TIER_REPLICATION = "LOCAL_OBSERVED_PORTFOLIOS_PAPER_350_EXPLORATORY"
+EVIDENCE_TIER_EVENEMENTS = "LOCAL_EVENT_STUDY_RETROSPECTIVE_PRICES_EXPLORATORY"
+
+
+def run_ouvertures(root: Path, *, lag_s: float, workers: int, write: bool = True) -> dict[str, Any]:
+    """Les ouvertures AGRESSIVES des leaders gardent-elles une valeur après observation ? (étude d'événements)
+
+    Fills observés (instant d'observation RÉEL) et fills reconstruits (instant supposé) ; prix = bougies
+    5 min (17 jours, analyse primaire) et 1 h (208 jours). Le verdict ne lit que les décisions OBSERVÉES
+    EN DIRECT (délai réel d'au plus 5 minutes) : les autres sont reconstruites et flatteuses."""
+
+    started = time.time()
+    lag_ms = int(lag_s * 1000)
+    config = evenements.EventStudyConfig()
+    shards, excluded = select_shards(root, {"fills_forward": "vault_fills", "fills_backfill": "", "book_l2": "",
+                                            "bbo": "", "micro_bbo": "", "candle": "candles_"})
+    identity = experiment_identity(root, {k: shards[k] for k in ("fills_forward", "fills_backfill", "candle")},
+                                   cop.CopiabilityConfig(), f"ouvertures|lag={lag_ms}")
+    identity["source_sha256"]["copy_vault_event_study.py"] = _sha256_file(Path(evenements.__file__))
+    identity["corpus_tier"] = EVIDENCE_TIER_EVENEMENTS
+    panels: dict[str, tuple[Any, int]] = {}
+    identity["candles_source"] = {}
+    for intervalle in ("5m", "1h"):
+        candles, provenance = bougies(root, shards, intervalle)
+        identity["candles_source"][intervalle] = provenance
+        if candles is not None:
+            panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVALS_MS[intervalle])
+            if len(panel.ts) > 1:
+                panels[f"bougies_{intervalle}"] = (panel, CANDLE_INTERVALS_MS[intervalle])
+    if not panels:
+        return {"status": "UNMEASURABLE", "reason": "aucune bougie au coffre ni en fichier : lancez le collecteur "
+                                                    "backfill-candles-vaults puis le Certificateur", "identity": identity}
+    debut_prix = min(int(panel.ts[0]) for panel, _ in panels.values())
+    fin_prix = max(int(panel.ts[-1]) for panel, _ in panels.values())
+    rejects: dict[str, int] = {}
+    prepares = []
+    for famille, retard in (("fills_forward", None), ("fills_backfill", lag_ms)):
+        raw, rejets_famille = load_fills(shards[famille], root / CACHE_DIR, workers, assumed_lag_ms=retard)
+        raw = raw[(raw["time"] >= debut_prix) & (raw["time"] <= fin_prix)]
+        prepare, rejets_preparation = cop.prepare_fills(raw, cop.CopiabilityConfig())
+        del raw
+        prepares.append(prepare)
+        for reason, count in (*rejets_famille.items(), *rejets_preparation.items()):
+            rejects[reason] = rejects.get(reason, 0) + count
+    # observé en direct (délai réel <= 5 min) ou reconstruit (instant d'observation supposé : fill + retard)
+    fills = evenements.assembler_fills(prepares[0], prepares[1], assumed_lag_ms=lag_ms)
+    del prepares
+    units = cop.detect_sybil_clusters(fills, cop.CopiabilityConfig())
+    half_spreads = load_half_spreads(spread_shards(shards))
+    print(f"[ouvertures] {len(fills):,} fills · {fills['vault'].nunique()} leaders · "
+          f"{int(fills['post'].sum()):,} observés en direct · prix : {', '.join(panels)} · "
+          f"{len(half_spreads)} demi-écarts", flush=True)
+    report = _jsonable(evenements.run_event_study(fills, units, panels, half_spreads, config))
+    report["inputs"]["leaders"] = int(fills["vault"].nunique())
+    report["inputs"]["assumed_observation_lag_ms_reconstruits"] = lag_ms
+    report["inputs"]["heures_de_prix"] = {nom: panel.market_hours() for nom, (panel, _) in panels.items()}
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-ouvertures"
+    result = {"run_id": run_id, "identity": identity, "rejects": dict(sorted(rejects.items())),
+              "integrity_excluded_shards": excluded, "elapsed_seconds": round(time.time() - started, 1),
+              "evidence_tier": EVIDENCE_TIER_EVENEMENTS, "report": report,
+              "donnees_consommees": donnees_consommees(shards, {
+                  "fills_forward": "décisions observées (instant d'observation réel)",
+                  "fills_backfill": "décisions d'avant le suivi (instant d'observation supposé)",
+                  "candle": "prix d'entrée, de sortie et témoins (bougies 5 min et 1 h)",
+                  "book_l2": "demi-écart", "bbo": "demi-écart", "micro_bbo": "demi-écart"})}
+    if write:
+        out_dir = root / REPORT_DIR / run_id
+        _atomic_write_json(out_dir / "resultat.json", result)
+        (out_dir / "RAPPORT.md").write_text(render_ouvertures_report(report, identity), encoding="utf-8")
+        ledger = {"run_id": run_id, **identity, "evidence_tier": EVIDENCE_TIER_EVENEMENTS,
+                  "hypotheses_tested": report["hypotheses_tested"], "verdicts": report["verdicts"],
+                  "config": report["config"], "inputs": report["inputs"], "primary": report["primary"],
+                  "capital_350": report["capital_350"], "caveats": report["caveats"],
+                  "selection": report["selection"],
+                  "result_path": str((REPORT_DIR / run_id / "resultat.json").as_posix()),
+                  "paper_read_only": True, "real_execution": False, "economically_proven": False}
+        result["ledger_record_sha256"] = append_ledger(root / REPORT_DIR / "EXPERIENCES.ndjson", ledger)
+        print(f"[ouvertures] rapport : {out_dir / 'RAPPORT.md'}", flush=True)
+    return result
+
+
+EVIDENCE_TIER_ORDRES = "LOCAL_OBSERVED_LEADER_ORDERS_EXPLORATORY"
+BESOIN_ORDRES = {
+    "donnee": "ordres en attente des leaders (entrées limites, prises de profit, stops)",
+    "pourquoi": "copier un fill, c'est arriver après ; un ordre en attente annonce l'entrée ou la sortie AVANT "
+                "son exécution, au même prix, avec des frais maker au lieu de taker",
+    "source": "WebSocket officiel `openOrders` (public, sans signature) ; REST `frontendOpenOrders`",
+    "collecteur": "tools/collecter_contexte_lane.py (lanes cloud contexte) -> runtime/data/copy_vault_orders_lane.jsonl",
+    "cadence": "sur changement, au plus un carnet par 30 s et par compte ; battement toutes les 5 min",
+    "horodatages": "ts_ms = instant de RÉCEPTION du carnet ; chaque ordre garde son instant de dépôt",
+    "certification": "famille leader_orders : un instantané est un tout (un ordre illisible l'invalide)",
+    "mesure_de_valeur": "part du notionnel exécuté visible >= 60 s à l'avance, puis rejeu d'ordres jumeaux",
+    "echantillon_requis": "au moins 5 jours, 200 fills et 5 leaders pendant le suivi des carnets",
+}
+
+
+def run_ordres(root: Path, *, workers: int, write: bool = True) -> dict[str, Any]:
+    """Quelle part des exécutions des leaders était visible à l'avance dans leurs ordres en attente ?"""
+
+    started = time.time()
+    config = intentions.OrderIntentConfig()
+    shards, excluded = select_shards(root, {"leader_orders": "", "fills_forward": "vault_fills", "book_l2": "",
+                                            "bbo": "", "micro_bbo": "", "candle": "candles_"})
+    identity = experiment_identity(root, {k: shards[k] for k in ("leader_orders", "fills_forward")},
+                                   cop.CopiabilityConfig(), "ordres")
+    identity["source_sha256"]["copy_vault_order_intent.py"] = _sha256_file(Path(intentions.__file__))
+    identity["corpus_tier"] = EVIDENCE_TIER_ORDRES
+    carnets = list(load_snapshots(shards["leader_orders"]))
+    fills = pd.DataFrame(columns=list(cop.FILL_COLUMNS) + ["notional", "is_open"])
+    rejects: dict[str, int] = {}
+    panel, half_spreads = None, {}
+    if carnets:
+        debut = min(int(c["ts_ms"]) for c in carnets)
+        raw, rejects = load_fills(shards["fills_forward"], root / CACHE_DIR, workers)
+        raw = raw[raw["time"] >= debut - 60_000]
+        fills, prepared_rejects = cop.prepare_fills(raw, cop.CopiabilityConfig())
+        for reason, count in prepared_rejects.items():
+            rejects[reason] = rejects.get(reason, 0) + count
+        candles, identity["candles_source"] = bougies(root, shards, "5m")
+        if candles is not None:
+            panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVALS_MS["5m"])
+            half_spreads = load_half_spreads(spread_shards(shards))
+    report = _jsonable(intentions.run_order_intent_study(carnets, fills, config, panel=panel,
+                                                         half_spread_bps=half_spreads))
+    report["collection_need"] = BESOIN_ORDRES
+    print(f"[ordres] {len(carnets):,} carnets · {report['inputs'].get('leaders_suivis', 0)} leaders suivis · "
+          f"{report['inputs'].get('fills_pendant_le_suivi', 0):,} fills pendant le suivi", flush=True)
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-ordres"
+    result = {"run_id": run_id, "identity": identity, "rejects": dict(sorted(rejects.items())),
+              "integrity_excluded_shards": excluded, "elapsed_seconds": round(time.time() - started, 1),
+              "evidence_tier": EVIDENCE_TIER_ORDRES, "report": report,
+              "donnees_consommees": donnees_consommees(shards, {
+                  "leader_orders": "ordres en attente des leaders (intentions)",
+                  "fills_forward": "exécutions observées, rapprochées des ordres par identifiant",
+                  "candle": "prix pour la borne haute d'un ordre jumeau",
+                  "book_l2": "demi-écart", "bbo": "demi-écart", "micro_bbo": "demi-écart"})}
+    if write:
+        out_dir = root / REPORT_DIR / run_id
+        _atomic_write_json(out_dir / "resultat.json", result)
+        (out_dir / "RAPPORT.md").write_text(render_ordres_report(report, identity), encoding="utf-8")
+        ledger = {"run_id": run_id, **identity, "evidence_tier": EVIDENCE_TIER_ORDRES, "hypotheses_tested": 1,
+                  "verdicts": report["verdicts"], "config": report["config"], "inputs": report["inputs"],
+                  "anticipability": {k: v for k, v in (report.get("anticipability") or {}).items() if k != "par_leader"},
+                  "caveats": report["caveats"], "collection_need": BESOIN_ORDRES,
+                  "result_path": str((REPORT_DIR / run_id / "resultat.json").as_posix()),
+                  "paper_read_only": True, "real_execution": False, "economically_proven": False}
+        result["ledger_record_sha256"] = append_ledger(root / REPORT_DIR / "EXPERIENCES.ndjson", ledger)
+        print(f"[ordres] rapport : {out_dir / 'RAPPORT.md'}", flush=True)
+    return result
+
+
+def render_ordres_report(report: dict[str, Any], identity: dict[str, Any]) -> str:
+    def pct(value: Any) -> str:
+        return "n/d" if value is None else f"{float(value) * 100:.0f} %"
+
+    def num(value: Any, digits: int = 2) -> str:
+        return "n/d" if value is None else f"{float(value):+.{digits}f}"
+
+    entrees, mesures = report["inputs"], report.get("anticipability") or {}
+    lignes = [
+        "# Intentions des leaders — ordres en attente observés", "",
+        f"- Statut des preuves : **{EVIDENCE_TIER_ORDRES}** — exploratoire.",
+        f"- Expérience `{identity['experiment_id']}` · corpus `{identity['corpus_sha256'][:16]}` · "
+        f"code `{(identity.get('code_head') or 'inconnu')[:12]}`.",
+        f"- Entrées : {entrees.get('carnets', 0):,} carnets d'ordres · {entrees.get('leaders_suivis', 0)} leaders suivis "
+        f"(dont {entrees.get('leaders_au_carnet_resume', 0)} au carnet résumé, écartés) · "
+        f"{entrees.get('ordres_distincts', 0):,} ordres distincts · {entrees.get('fills_pendant_le_suivi', 0):,} fills "
+        f"pendant le suivi · {entrees.get('jours', 0)} jour(s).", "",
+        "## Ce qui était visible à l'avance", "",
+        f"- Notionnel exécuté dont l'ordre avait été vu : {pct(mesures.get('part_notionnel_ordre_vu'))}.",
+        f"- Notionnel exécuté ANTICIPABLE (ordre vu au moins {report['config']['min_lead_ms'] // 1000} s avant) : "
+        f"{pct(mesures.get('part_notionnel_anticipable'))} — fills passifs {pct(mesures.get('part_notionnel_passif_anticipable'))}, "
+        f"fills agressifs {pct(mesures.get('part_notionnel_agressif_anticipable'))}.",
+        f"- Avance médiane : {num(mesures.get('avance_mediane_s'), 0)} s.",
+    ]
+    valeur = report.get("twin_order_upper_bound") or {}
+    if valeur:
+        lignes += ["", "## Borne haute de la valeur d'un ordre jumeau (entrées anticipables)", ""]
+        for horizon in report["config"]["horizons_h"]:
+            net = valeur.get(f"net_{horizon}h") or {}
+            brut = valeur.get(f"brut_{horizon}h") or {}
+            intervalle = net.get("intervalle_bps")
+            lignes.append(f"- {horizon} h : brut {num(brut.get('moyenne_bps'))} bps · net {num(net.get('moyenne_bps'))} bps "
+                          + (f"[{num(intervalle[0])} ; {num(intervalle[1])}] " if intervalle else "")
+                          + f"· {net.get('jours', 0)} jour(s).")
+    rejeu = report.get("twin_order_replay") or {}
+    if rejeu.get("ordres_d_entree"):
+        lignes += ["", "## Rejeu prudent d'un ordre jumeau (exécuté seulement si le prix traverse le niveau)", "",
+                   f"- {rejeu['ordres_d_entree']} ordres d'entrée observés · {rejeu['jumeaux_executes']} jumeaux exécutés "
+                   f"(taux {pct(rejeu.get('taux_d_execution'))}) · {rejeu.get('sans_prix', 0)} sans prix."]
+        for horizon in report["config"]["horizons_h"]:
+            net = rejeu.get(f"net_{horizon}h") or {}
+            brut = rejeu.get(f"brut_{horizon}h") or {}
+            intervalle = net.get("intervalle_bps")
+            if net:
+                lignes.append(f"- {horizon} h après l'exécution : brut {num(brut.get('moyenne_bps'))} bps · net "
+                              f"{num(net.get('moyenne_bps'))} bps "
+                              + (f"[{num(intervalle[0])} ; {num(intervalle[1])}] " if intervalle else "")
+                              + f"· {net.get('jours', 0)} jour(s).")
+    lignes += ["", "## Verdict", ""]
+    lignes += [f"- `{v['hypothesis']}` : **{v['status']}** — {v['reason']}" for v in report["verdicts"]]
+    lignes += ["", "## Besoin de collecte associé", ""]
+    lignes += [f"- {cle} : {valeur_}" for cle, valeur_ in report["collection_need"].items()]
+    lignes += ["", "## Limites", ""] + [f"- {texte}" for texte in report["caveats"]]
+    lignes += ["", "Aucune rentabilité n'est prouvée par ce rapport.", ""]
+    return "\n".join(lignes)
+
+
+def render_ouvertures_report(report: dict[str, Any], identity: dict[str, Any]) -> str:
+    def num(value: Any, digits: int = 2) -> str:
+        return "n/d" if value is None else f"{float(value):+.{digits}f}"
+
+    def bornes(intervalle: Any) -> str:
+        return "" if not intervalle else f"[{num(intervalle[0])} ; {num(intervalle[1])}]"
+
+    entrees, primaire, capital, config = report["inputs"], report["primary"], report["capital_350"], report["config"]
+    lignes = [
+        "# Ouvertures agressives des leaders — étude d'événements", "",
+        f"- Statut des preuves : **{EVIDENCE_TIER_EVENEMENTS}** — exploratoire.",
+        f"- Expérience `{identity['experiment_id']}` · corpus `{identity['corpus_sha256'][:16]}` · "
+        f"code `{(identity.get('code_head') or 'inconnu')[:12]}`.",
+        f"- Entrées : {entrees['fills']:,} fills · {entrees['leaders']} leaders · {entrees['decisions']:,} décisions "
+        f"(dont {entrees['decisions_observees_en_direct']:,} observées en direct) · prix : "
+        + ", ".join(f"{nom} ({heures:,.0f} h)" for nom, heures in entrees["heures_de_prix"].items()) + ".",
+        f"- Règles : une décision = fills du même leader, coin, sens et type à moins de "
+        f"{config['cluster_gap_ms'] // 60000} min, au moins {config['min_event_usd']:,.0f} USD · entrée à la première "
+        f"clôture publiée après observation + {config['reaction_ms'] // 1000} s · coût = 2 × (frais taker "
+        f"{config['taker_fee_bps']} bps + demi-écart mesuré).",
+        f"- {report['hypotheses_tested']} cellules essayées ; intervalles élargis en conséquence "
+        f"(niveau {report['confidence_after_multiplicity']:.4f}).", "",
+        "## Analyse primaire (déclarée avant la mesure)", "",
+        "Ouvertures agressives, horizon 4 h, bougies 5 min, décisions OBSERVÉES EN DIRECT (délai réel ≤ 5 min).", "",
+        f"- {primaire.get('evenements', 0)} décisions · {primaire.get('leaders', 0)} leaders · "
+        f"{primaire.get('jours', 0)} jours.",
+    ]
+    for nom, titre in (("brut", "Brut"), ("net", "Net de frais et d'écart"), ("timing", "Excès sur les témoins")):
+        bloc = primaire.get(nom) or {}
+        lignes.append(f"- {titre} : {num(bloc.get('moyenne_bps'))} bps par décision {bornes(bloc.get('intervalle_bps'))} · "
+                      f"jours positifs {num((bloc.get('part_jours_positifs') or 0) * 100, 0)} % · "
+                      f"médiane {num(bloc.get('mediane_par_evenement_bps'))} bps.")
+    if capital.get("status") == "OK":
+        lignes.append(f"- Compte PAPER de {capital['capital_usd']:.0f} USD ({capital['lignes']} lignes de "
+                      f"{capital['taille_ligne_usd']:.0f} USD) : espérance {num(capital['esperance_usd_par_jour'], 3)} "
+                      f"USD/jour ({capital['trades_par_jour']:.1f} trades/jour × net moyen de toutes les décisions "
+                      f"{num(capital['net_moyen_toutes_decisions_bps'])} bps) · parcours réalisé sur {capital['trades']} "
+                      f"trades : {num(capital['net_usd_par_jour'], 3)} USD/jour, repli maximal "
+                      f"{num(capital['repli_max_usd'], 2)} USD · {capital['refus_sans_place']} décisions sans place libre.")
+    else:
+        lignes.append(f"- Compte PAPER de 350 USD : non mesurable — {capital.get('reason')}.")
+    regle = report["selection"]["regle"]
+    lignes += ["", "## Sélection des leaders en marche avant", "",
+               f"Un leader n'est suivi qu'après {regle['historique_minimal']} décisions dénouées, et seulement si leur "
+               "net moyen (ramené vers zéro) est positif. La note ne lit jamais une issue future.", "",
+               "| prix | population | retenues : décisions · leaders · jours | net retenues (bps) | net éligibles (bps) | "
+               "net écartées (bps) | retenues − éligibles (bps) | espérance 350 USD (USD/j) |",
+               "|---|---|---|---:|---:|---:|---:|---:|"]
+    for c in report["selection"]["cellules"]:
+        retenus, eligibles, ecartes = c["retenus"], c["eligibles"], c["ecartes"]
+        ecart, capital_choix = c["ecart_retenus_moins_eligibles"], c["capital_350"]
+        lignes.append(
+            f"| {c['prix']}{' *' if c['primaire'] else ''} | "
+            f"{'en direct' if c['periode'] == evenements.PERIODES[0] else 'reconstruite (flatteuse)'} | "
+            f"{retenus['evenements']} · {retenus['leaders']} · {retenus['jours']} | "
+            f"{num(retenus['net']['moyenne_bps'])} {bornes(retenus['net']['intervalle_bps'])} | "
+            f"{num(eligibles['net']['moyenne_bps'])} | {num(ecartes['net']['moyenne_bps'])} | "
+            f"{num(ecart['moyenne_bps'])} {bornes(ecart['intervalle_bps'])} | "
+            f"{num(capital_choix.get('esperance_usd_par_jour'), 3)} |")
+    lignes += ["", "## Verdict", ""]
+    lignes += [f"- `{v['hypothesis']}` : **{v['status']}** — {v['reason']}" for v in report["verdicts"]]
+    lignes += ["", "## Toutes les cellules", "",
+               "| prix | type | horizon | période | décisions | leaders | jours | brut (bps) | net (bps) | excès témoins (bps) |",
+               "|---|---|---:|---|---:|---:|---:|---:|---:|---:|"]
+    for c in report["cells"]:
+        net, timing = c.get("net") or {}, c.get("timing") or {}
+        lignes.append(
+            f"| {c['prix']} | {c['segment']}{' *' if c['primaire'] else ''} | {c['horizon_h']} h | "
+            f"{'en direct' if c['periode'] == evenements.PERIODES[0] else 'reconstruite (flatteuse)'} | {c['evenements']} | "
+            f"{c['leaders']} | {c['jours']} | {num((c.get('brut') or {}).get('moyenne_bps'))} | "
+            f"{num(net.get('moyenne_bps'))} {bornes(net.get('intervalle_bps'))} | "
+            f"{num(timing.get('moyenne_bps'))} {bornes(timing.get('intervalle_bps'))} |")
+    lignes += ["", "`*` analyse primaire.", "", "## Limites", ""] + [f"- {texte}" for texte in report["caveats"]]
+    lignes += ["", "Aucune rentabilité n'est prouvée par ce rapport.", ""]
+    return "\n".join(lignes)
 
 
 def run_replication_350(root: Path, *, price: str, write: bool = True, min_snapshots: int = 50) -> dict[str, Any]:
@@ -704,7 +1006,7 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
     started = time.time()
     config = replication.ReplicationConfig()
     shards, excluded = select_shards(root, {"snapshot": "", "book_l2": "", "allmids": "", "bbo": "",
-                                            "micro_bbo": "", "asset_ctx": "", "candle": "candles_5m"})
+                                            "micro_bbo": "", "asset_ctx": "", "funding_history": "", "candle": "candles_5m"})
     if not shards["snapshot"]:
         return {"status": "UNMEASURABLE", "reason": "aucun instantané de portefeuille au coffre : lancez le Certificateur"}
     identity = experiment_identity(root, {k: shards[k] for k in ("snapshot", "book_l2")}, config,
@@ -722,7 +1024,7 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
         panel = cop.build_candle_panel(candles, interval_ms=CANDLE_INTERVAL_MS)
         tier_prix = "prix reconstruits (bougies 5 min récupérées après coup)"
     half_spreads = load_half_spreads(spread_shards(shards))
-    funding = cop.build_funding_rates(load_funding(shards["asset_ctx"]), panel)
+    funding = cop.build_funding_rates(load_funding(funding_shards(shards)), panel)
     par_leader: dict[str, Any] = {}
     for compte, portefeuille in portefeuilles.items():
         if len(portefeuille) < min_snapshots:
@@ -749,7 +1051,8 @@ def run_replication_350(root: Path, *, price: str, write: bool = True, min_snaps
               "caveats": [
                   "Chaque leader est répliqué SEUL avec tout le capital ; une combinaison de leaders diviserait "
                   "les lignes et heurterait plus souvent l'ordre minimal.",
-                  "Instantanés du dex principal seulement ; les positions HIP-3 d'un compte ne sont pas répliquées.",
+                  "Portefeuille entier = dex principal + dex HIP-3 quand ils sont observés ensemble ; avant le suivi "
+                  "multi-dex, seul le dex principal est connu.",
                   "L'arrondi de lot n'est pas modélisé ; la fermeture complète d'une ligne est supposée toujours permise.",
                   "Tier LOCAL, exploratoire : aucune rentabilité n'est prouvée par une simulation.",
               ], "paper_read_only": True, "real_execution": False, "economically_proven": False}
@@ -836,6 +1139,8 @@ def render_persistence_report(report: dict[str, Any], identity: dict[str, Any]) 
         "",
         f"- Dates mesurables : {primaire.get('dates', 0)} · vaults par date (médiane) : "
         f"{primaire.get('vaults_median_par_date', 'n/d')} · attrition moyenne : {num(primaire.get('attrition_moyenne'))}.",
+        f"- Dates où la note ne départage personne : {primaire.get('dates_note_degeneree', 'n/d')} · "
+        f"dates sans corrélation calculable : {primaire.get('dates_ic_indefini', 'n/d')}.",
         f"- Corrélation de rang note → rendement suivant : {num(primaire.get('ic_moyen'), 3)} "
         f"{bornes(primaire.get('ic_intervalle'), 3)}.",
         f"- Meilleur quantile moins « copier tout le monde » : {num(primaire.get('exces_tete_bps_jour'))} bps/jour "
@@ -943,6 +1248,24 @@ def run_persistance(root: Path, *, write: bool = True) -> dict[str, Any]:
     return result
 
 
+def run_plan(root: Path, *, write: bool = True) -> dict[str, Any]:
+    """Plan de recherche tiré du registre des expériences (dernier enregistrement de chaque hypothèse)."""
+
+    registre = root / REPORT_DIR / "EXPERIENCES.ndjson"
+    etat = verify_ledger(registre)
+    if etat["status"] != "VERIFIED":
+        # un plan tiré d'un registre vide ou altéré orienterait le travail sur des résultats non garantis
+        return {"status": "REGISTRE_VIDE" if etat["status"] == "EMPTY" else "REGISTRE_NON_VERIFIE", "registre": etat}
+    enregistrements = [json.loads(ligne) for ligne in registre.read_text(encoding="utf-8").splitlines() if ligne.strip()]
+    plan = _jsonable(planificateur.build_plan(enregistrements))
+    plan["status"] = "OK"
+    plan["registre"] = {"enregistrements": len(enregistrements), "sha256": _sha256_file(registre)}
+    if write:
+        _atomic_write_json(root / REPORT_DIR / "PLAN_DE_RECHERCHE.json", plan)
+        (root / REPORT_DIR / "PLAN_DE_RECHERCHE.md").write_text(planificateur.render_plan(plan), encoding="utf-8")
+    return plan
+
+
 def _sortie_utf8() -> None:
     """Affichage robuste : jamais de plantage sur une console ou un journal non UTF-8."""
     for flux in (sys.stdout, sys.stderr):
@@ -964,6 +1287,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replication-350", action="store_true", dest="replication_350",
                         help="compte PAPER de 350 USD qui tient le portefeuille observé d'un leader "
                              "(frais, écart, funding, ordre minimal de 10 USD) ; prix : bougies, ou --prix mids")
+    parser.add_argument("--ouvertures", action="store_true",
+                        help="étude d'événements : les ouvertures agressives des leaders gardent-elles une valeur "
+                             "après observation ? (fills observés et de backfill, bougies 5 min et 1 h)")
+    parser.add_argument("--plan", action="store_true",
+                        help="plan de recherche : classe les hypothèses du registre par valeur attendue et par "
+                             "jours de données encore nécessaires")
+    parser.add_argument("--ordres", action="store_true",
+                        help="ordres en attente des leaders : quelle part de leurs exécutions était visible à "
+                             "l'avance, et que valait un ordre jumeau ? (famille leader_orders)")
+    parser.add_argument("--bougies", choices=tuple(CANDLE_INTERVALS_MS), default="5m",
+                        help="avec --retrospectif : 5m (17 jours) ou 1h (208 jours d'histoire)")
     parser.add_argument("--persistance", action="store_true",
                         help="le classement passé d'un vault prédit-il son rendement suivant ? "
                              "(courbes valeur / PnL publiées par vaultDetails, famille vault_portfolio)")
@@ -994,6 +1328,32 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[verdict réplication 350 USD] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
         print("[FIN] simulation PAPER exploratoire ; aucune rentabilité n'est prouvée.")
         return 0
+    if args.plan:
+        plan = run_plan(root, write=not args.sans_ecriture)
+        if plan["status"] != "OK":
+            print(f"[plan] {plan['status']} : aucun plan n'est tiré de ce registre.")
+            return 3 if plan["status"] == "REGISTRE_NON_VERIFIE" else 0
+        for rang, h in enumerate(plan["hypotheses"], 1):
+            print(f"[plan] {rang}. {h['hypothesis']} : {h['status']} — {h['action']}")
+        print(f"[plan] priorité actuelle : {plan['prochaine_action'] or 'la collecte (aucune valeur attendue positive)'}")
+        if not args.sans_ecriture:
+            print(f"[plan] écrit : {root / REPORT_DIR / 'PLAN_DE_RECHERCHE.md'}")
+        return 0
+    if args.ordres:
+        result = run_ordres(root, workers=args.workers, write=not args.sans_ecriture)
+        for verdict in result["report"]["verdicts"]:
+            print(f"[verdict ordres en attente] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
+        print("[FIN] étude exploratoire des intentions ; aucune rentabilité n'est prouvée.")
+        return 0
+    if args.ouvertures:
+        result = run_ouvertures(root, lag_s=args.retard_s, workers=args.workers, write=not args.sans_ecriture)
+        if "report" not in result:
+            print(f"[{result['status']}] {result['reason']}")
+            return 2
+        for verdict in result["report"]["verdicts"]:
+            print(f"[verdict ouvertures agressives] {verdict['hypothesis']}: {verdict['status']} — {verdict.get('reason')}")
+        print("[FIN] étude d'événements exploratoire ; aucune rentabilité n'est prouvée.")
+        return 0
     if args.persistance:
         result = run_persistance(root, write=not args.sans_ecriture)
         if "report" not in result:
@@ -1014,7 +1374,8 @@ def main(argv: list[str] | None = None) -> int:
         print("[FIN] étude sur portefeuilles observés (exploratoire) ; aucune rentabilité n'est prouvée.")
         return 0
     if args.retrospectif:
-        result = run_retrospective(root, lag_s=args.retard_s, workers=args.workers, write=not args.sans_ecriture)
+        result = run_retrospective(root, lag_s=args.retard_s, workers=args.workers, write=not args.sans_ecriture,
+                                   intervalle=args.bougies)
         if "report" not in result:
             print(f"[{result['status']}] {result['reason']}")
             return 2

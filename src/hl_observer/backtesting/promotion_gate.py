@@ -26,6 +26,10 @@ class CriteresPromotion:
     min_profit_factor: float = 1.3
     exige_survie: bool = True          # H1 : OOS + régime + liquidité /2 + coûts réalistes
     exige_parite: bool = True          # F28 : live == backtest (~3%)
+    # L2 : exiger la PREUVE que chaque segment contenait au moins un trade executable. A passer a
+    # True des que le labo transmet cette preuve ; a False, l'absence de preuve ne bloque pas (mais
+    # une preuve FOURNIE et negative bloque toujours, voir `decision_promotion`).
+    exige_segments_mesurables: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,9 +95,19 @@ def decision_promotion(
     forward_pipeline_hash: str | None = None,
     retuning: bool = False,
     oos_retuning_audit: dict[str, Any] | None = None,
+    executabilite_des_segments: dict[str, Any] | None = None,
     criteres: CriteresPromotion = CriteresPromotion(),
 ) -> VerdictPromotion:
-    """Compose les critères. Tout critère non satisfait OU manquant -> RESTE_PAPER (deny-by-default)."""
+    """Compose les critères. Tout critère non satisfait OU manquant -> RESTE_PAPER (deny-by-default).
+
+    [L2, 2026-11-12] ``executabilite_des_segments`` est le resultat de
+    ``copy_vault_train_executability.sonder_les_segments`` : il dit si CHAQUE segment (train /
+    validation / oos) contenait au moins un trade EXECUTABLE. Un segment ou rien n'est executable
+    produit zero trade, donc zero perte, donc un resultat qui FRANCHIT les portes sans avoir rien
+    mesure — un faux PROVEN. « Non mesure » n'est pas « valide » : une preuve FOURNIE et negative
+    refuse donc toujours la promotion, et `criteres.exige_segments_mesurables` permet d'exiger en
+    plus que la preuve soit presente.
+    """
     motifs: list[str] = []
     try:
         trades_value = int(n_trades) if n_trades is not None and not isinstance(n_trades, bool) else None
@@ -140,6 +154,11 @@ def decision_promotion(
         or oos_retuning_audit.get("retuning_isolated") is not True
     ):
         motifs.append("OOS_REUTILISEE_OU_NOUVEAU_FREEZE_MANQUANT")
+    if isinstance(executabilite_des_segments, dict):
+        if executabilite_des_segments.get("tous_mesurables") is not True:
+            motifs.append("SEGMENT_NON_MESURABLE_AUCUN_TRADE_EXECUTABLE")
+    elif criteres.exige_segments_mesurables:
+        motifs.append("PREUVE_D_EXECUTABILITE_DES_SEGMENTS_MANQUANTE")
     decision = PROMOUVOIR_TESTNET if not motifs else RESTE_PAPER
     return VerdictPromotion(decision=decision, motifs=tuple(motifs), real_execution=False)
 

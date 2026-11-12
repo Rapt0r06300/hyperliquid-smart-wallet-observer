@@ -31,6 +31,7 @@ from scipy.stats import rankdata
 
 from hl_observer.backtesting.copy_vault_persistence import (
     EVIDENCE_TIER,
+    SEUIL_ACTIVITE,
     PersistenceConfig,
     evaluer_notes,
     period_returns,
@@ -101,6 +102,9 @@ def features_at(panel: Mapping[str, Any], t: int, *, min_history: int = 4) -> tu
     passe = ret[:, :t]
     recents = passe[:, t - min_history:t]
     notables = ~np.isnan(recents).any(axis=1) & ~np.isnan(valeur[:, t]) & (valeur[:, t] > 0)
+    # même univers que l'étude de persistance : un vault sans aucune variation récente n'a rien à copier
+    with np.errstate(invalid="ignore"):
+        notables &= np.where(notables, recents.std(axis=1, ddof=1), 0.0) > SEUIL_ACTIVITE
     douze = passe[:, max(0, t - 12):t]
     connus_12 = (~np.isnan(douze)).sum(axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -166,7 +170,7 @@ def walk_forward_model(
         notes = np.full(ret.shape[0], np.nan)
         notes[notables_t] = _rangs(X_t[notables_t]) @ beta
         notes_par_date[t] = notes
-        coefficients.append({"t": t, "dates_apprises": appris, **dict(zip(FEATURES, (float(b) for b in beta)))})
+        coefficients.append({"t": t, "dates_apprises": appris, **dict(zip(FEATURES, (float(b) for b in beta), strict=True))})
     return notes_par_date, coefficients
 
 

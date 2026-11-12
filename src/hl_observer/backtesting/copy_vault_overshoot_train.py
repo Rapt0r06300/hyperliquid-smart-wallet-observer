@@ -138,7 +138,25 @@ def explore_overshoot_filtered_train(
     }
 
 
+def explorer_si_le_contexte_existe(
+    metaorders: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    asset_ctx_rows: Sequence[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    """L'exploration, sauf si elle ne peut rien filtrer : alors elle est refusée, pas jouée à vide.
+
+    Sans aucun point mark/oracle, le filtre ne bloque jamais rien : chaque variante filtrée est la
+    copie exacte de la variante sans filtre. Mesuré le 2026-11-11 sur le corpus réel (ruban de contexte
+    vide) : 256 replays complets pour rien à chaque passage du labo, et 96 essais comptés dans la
+    multiplicité sans qu'aucun ne teste quoi que ce soit. ``LookupError`` : l'appelant note
+    l'exploration comme sautée, avec sa raison.
+    """
+    if not build_overshoot_index(asset_ctx_rows):
+        raise LookupError("NO_ASSET_CTX_POINTS")
+    return explore_overshoot_filtered_train(metaorders, books_by_coin, asset_ctx_rows)
+
+
 __all__ = [
     "SEUILS_OVERSHOOT_BPS", "MECHANISM_OVERSHOOT",
-    "filtrer_continuations", "explore_overshoot_filtered_train",
+    "filtrer_continuations", "explore_overshoot_filtered_train", "explorer_si_le_contexte_existe",
 ]

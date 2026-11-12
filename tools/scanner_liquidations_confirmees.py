@@ -84,7 +84,7 @@ def scanner(root: Path, *, lookback_j: int = LOOKBACK_J_DEFAUT, poster=None, lim
             if reqs >= max_req:
                 stop = True
                 break
-            lim.attente()
+            CF.prendre_la_pause(lim)
             reqs += 1
             try:
                 rep = poster(u, a, b)

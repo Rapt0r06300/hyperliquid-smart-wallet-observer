@@ -428,3 +428,37 @@ def test_backfill_invalide_le_receipt_si_un_fill_reste_hors_admission(monkeypatc
     assert audit["partial_reasons"] == ["INVALID_FILL_ROWS"]
     assert audit["complete"] is False
     assert audit["status"] == "PARTIAL"
+
+
+def test_le_cote_agressif_les_frais_et_le_pnl_realise_ne_sont_plus_perdus():
+    """Défaut réel du 2026-11-11 : ``crossed`` était jeté à l'écriture ; trois mois d'historique ne
+    permettaient plus de distinguer une décision agressive d'une cotation passive."""
+    base = {"time": 1_790_000_000_000, "coin": "kPEPE", "px": "0.011", "sz": "1000", "side": "B",
+            "dir": "Open Long", "startPosition": "0.0", "tid": 7, "oid": 9, "hash": "0xabc"}
+    agressif, passif, sans = (
+        {**base, "crossed": True, "fee": "0.05", "feeToken": "USDC", "closedPnl": "0.0"},
+        {**base, "tid": 8, "crossed": False, "fee": "-0.01", "feeToken": "USDC", "closedPnl": "1.5"},
+        {**base, "tid": 9},
+    )
+    fills = VB.parser_fills([agressif, passif, sans], vault="0xA")
+    assert [f["crossed"] for f in fills] == [True, False, None]          # absent reste inconnu, jamais deviné
+    assert fills[0]["fee"] == "0.05" and fills[1]["closedPnl"] == "1.5" and fills[0]["fee_token"] == "USDC"
+    assert fills[0]["coin"] == "kPEPE"
+
+
+def test_a_instant_egal_le_releve_qui_connait_le_cote_agressif_l_emporte():
+    import pandas as pd
+
+    from hl_observer.backtesting import copy_vault_copiability_entrees as CE
+
+    def ligne(crossed, obs):
+        return {"vault": "0xa", "coin": "BTC", "time": 1_000, "obs": obs, "px": 100.0, "sz": 1.0, "signe": 1,
+                "dir": "Open Long", "start_pos": 0.0, "closed_pnl": 0.0, "crossed": crossed, "fee": 0.0,
+                "tid": 1, "oid": 1, "snap": False}
+
+    nan = float("nan")
+    garde, rejets = CE.prepare_fills(pd.DataFrame([ligne(nan, 121_000), ligne(1.0, 121_000)]))
+    assert len(garde) == 1 and garde["crossed"].iloc[0] == 1.0 and rejets == {"doublon_identite": 1}
+    # mais une observation réellement antérieure reste la première disponible : elle est gardée
+    garde, _ = CE.prepare_fills(pd.DataFrame([ligne(1.0, 121_000), ligne(nan, 5_000)]))
+    assert len(garde) == 1 and garde["obs"].iloc[0] == 5_000

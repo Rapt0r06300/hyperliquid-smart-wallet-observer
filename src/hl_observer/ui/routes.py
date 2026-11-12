@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+from datetime import timezone
 from hashlib import sha256
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -183,6 +185,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    def pnl_row_is_non_strict(row: dict[str, Any]) -> bool:
+        status = str(row.get("pnl_accounting_status") or "").upper()
+        return row.get("pnl_strict") is False or "UNMEASURABLE" in status
 
     def safe_int_env(name: str) -> int | None:
         try:
@@ -551,29 +557,47 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 continue
         return mids
 
-    def latest_mark_prices_from_snapshots(snapshots: list[MarketSnapshot]) -> tuple[dict[str, float], dict[str, str]]:
-        """Merge recent market snapshots, keeping the newest usable mark per coin.
+    def latest_mark_prices_from_snapshots(
+        snapshots: list[MarketSnapshot], *, now_ms: int, max_age_ms: int
+    ) -> tuple[dict[str, float], dict[str, str], dict[str, int]]:
+        """Merge only fresh market observations, using each WS coin's own event time.
 
         `publicTradesWS` snapshots are usually fresher but sparse. `allMids`
-        snapshots are broader but may be older. Merging them avoids freezing an
-        open paper position just because the latest snapshot only contains one
-        traded coin.
+        snapshots are broader but may be older. A stale/missing/future-dated mark
+        is not carried forward as if it were current.
         """
 
         prices: dict[str, float] = {}
         sources: dict[str, str] = {}
+        timestamps: dict[str, int] = {}
         ordered = sorted(
             snapshots,
             key=lambda row: (row.exchange_ts or 0, row.id or 0),
             reverse=True,
         )
         for snapshot in ordered:
-            for coin, price in latest_mid_prices_from_snapshot(snapshot.raw_json).items():
+            raw = snapshot.raw_json if isinstance(snapshot.raw_json, dict) else {}
+            trade_times = raw.get("trade_times_ms") if isinstance(raw.get("trade_times_ms"), dict) else {}
+            for coin, price in latest_mid_prices_from_snapshot(raw).items():
                 if coin in prices or price <= 0:
+                    continue
+                if str(snapshot.source or "").lower() == "publictradesws":
+                    raw_timestamp = trade_times.get(coin) if trade_times else None
+                else:
+                    raw_timestamp = snapshot.exchange_ts
+                try:
+                    timestamp = int(float(raw_timestamp)) if raw_timestamp is not None else 0
+                except (TypeError, ValueError, OverflowError):
+                    timestamp = 0
+                if timestamp <= 0:
+                    continue
+                age_ms = int(now_ms) - timestamp
+                if age_ms < -1_000 or age_ms > max(1, int(max_age_ms)):
                     continue
                 prices[coin] = price
                 sources[coin] = snapshot.source or "market_snapshot"
-        return prices, sources
+                timestamps[coin] = timestamp
+        return prices, sources, timestamps
 
     def _book_level_tuple(level: Any) -> tuple[float, float] | None:
         if isinstance(level, dict):
@@ -614,6 +638,15 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             asks, bids = orderbook_levels_from_raw(snapshot.raw_json)
             if not asks and not bids:
                 continue
+            received_at_ms = None
+            created_at = snapshot.created_at
+            if created_at is not None:
+                try:
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    received_at_ms = int(created_at.timestamp() * 1000)
+                except (AttributeError, OSError, OverflowError, ValueError):
+                    received_at_ms = None
             books[coin] = {
                 "asks": asks,
                 "bids": bids,
@@ -621,6 +654,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "exchange_ts": snapshot.exchange_ts,
                 "depth_usdc": snapshot.depth_usdc,
                 "spread_bps": snapshot.spread_bps,
+                "received_at_ms": received_at_ms,
             }
         return books
 
@@ -725,6 +759,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         deltas: list[PositionDeltaModel],
         *,
         mid_prices: dict[str, float] | None = None,
+        mid_price_sources: dict[str, str] | None = None,
+        mid_price_timestamps_ms: dict[str, int] | None = None,
         orderbooks_by_coin: dict[str, dict[str, Any]] | None = None,
         starting_equity_usdt: float = 350.0,
         max_position_notional_usdt: float = 50.0,
@@ -747,7 +783,21 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         an order or a recommendation.
         """
 
+        mid_prices = mid_prices or {}
+        mid_price_sources = mid_price_sources or {}
+        mid_price_timestamps_ms = mid_price_timestamps_ms or {}
         orderbooks_by_coin = orderbooks_by_coin or {}
+        funding_position_fields = (
+            "funding_settlements",
+            "user_funding_events",
+            "userFunding",
+            "funding_settlement_source",
+            "net_funding_settled",
+            "funding_settled_usdt",
+            "funding_settlement_evidence_count",
+            "funding_settlement_evidence_complete",
+            "funding_allocation_invalid",
+        )
 
         def encode_position_key(wallet: str, coin: str, direction: str) -> str:
             return f"{wallet.lower()}|{coin.upper()}|{direction.upper()}"
@@ -899,6 +949,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "increase_count": int(raw_position.get("increase_count") or 0),
                 "reduce_count": int(raw_position.get("reduce_count") or 0),
             }
+            for field in funding_position_fields:
+                if field in raw_position:
+                    positions[decoded][field] = raw_position[field]
         ledger_events: list[dict[str, Any]] = [
             dict(row)
             for row in (existing_events or [])
@@ -1022,7 +1075,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             return sum(
                 float(row.get("estimated_net_pnl_usdc") or 0.0)
                 for row in ledger_events[initial_ledger_length:]
-                if row.get("status") == "LOCAL_REPLAY"
+                if row.get("status") == "LOCAL_REPLAY" and not pnl_row_is_non_strict(row)
             )
 
         def simulated_equity_so_far() -> float:
@@ -1033,6 +1086,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             denominator = max(1.0, float(starting_equity_usdt or 350.0))
             for item in ledger_events[-limit:]:
                 if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
+                    continue
+                if pnl_row_is_non_strict(item):
                     continue
                 pnl_value = item.get("estimated_net_pnl_usdc")
                 if pnl_value is None:
@@ -1047,6 +1102,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             samples: list[tuple[float, bool]] = []
             for item in ledger_events[-limit:]:
                 if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
+                    continue
+                if pnl_row_is_non_strict(item):
                     continue
                 pnl_value = item.get("estimated_net_pnl_usdc")
                 if pnl_value is None:
@@ -1093,6 +1150,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             for item in ledger_events:
                 if item.get("status") != "LOCAL_REPLAY":
                     continue
+                if pnl_row_is_non_strict(item):
+                    continue
                 if coin_upper and str(item.get("coin") or "").upper() != coin_upper:
                     continue
                 if wallet_lower and str(item.get("wallet_address") or "").lower() != wallet_lower:
@@ -1107,6 +1166,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             buckets: dict[str, float] = defaultdict(float)
             for item in ledger_events:
                 if item.get("status") != "LOCAL_REPLAY":
+                    continue
+                if pnl_row_is_non_strict(item):
                     continue
                 key_value = item.get(field_name)
                 if not key_value:
@@ -1137,11 +1198,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             edge_sentinel_count = 0
             orphan_count = 0
             for item in local_events:
-                try:
-                    pnl = float(item.get("estimated_net_pnl_usdc") or 0.0)
-                except (TypeError, ValueError):
-                    pnl = 0.0
-                pnl_values.append(pnl)
+                is_close = item.get("bot_replay_action") in exit_replay_actions
+                pnl_value = item.get("round_trip_net_pnl_usdc")
+                if pnl_value is None:
+                    pnl_value = item.get("estimated_net_pnl_usdc")
+                if is_close and not pnl_row_is_non_strict(item) and pnl_value is not None:
+                    try:
+                        pnl = float(pnl_value)
+                    except (TypeError, ValueError):
+                        pnl = float("nan")
+                    if math.isfinite(pnl):
+                        pnl_values.append(pnl)
                 reason_text = str(item.get("reason") or "").upper()
                 if "STALE" in reason_text or "TOO_OLD" in reason_text:
                     stale_count += 1
@@ -1345,7 +1412,49 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 cluster_notional_usdc=cluster_notional,
                 consensus_wallets=consensus_count,
             )
-            current_mid = (mid_prices or {}).get(str(row.coin).upper())
+            coin_key = str(row.coin or "").upper()
+            current_mid = mid_prices.get(coin_key)
+            current_mid_source = mid_price_sources.get(coin_key)
+            current_mid_ts = mid_price_timestamps_ms.get(coin_key)
+            quote_agreement: bool | None = None
+            quote_deviation_bps: float | None = None
+            quote_spread_bps: float | None = None
+            quote_book_age_ms: int | None = None
+            quote_mark_age_ms: int | None = None
+            quote_max_age_ms = max(
+                1,
+                int(calibrated_float_env("HYPERSMART_V12_MARKET_MAX_AGE_MS", 30_000.0)),
+            )
+            quote_book = orderbooks_by_coin.get(coin_key)
+            if current_mid is not None and current_mid_ts is not None and quote_book is not None:
+                try:
+                    bid = float(quote_book["bids"][0][0])
+                    ask = float(quote_book["asks"][0][0])
+                    book_ts = int(quote_book.get("received_at_ms") or 0)
+                    mid_ts = int(current_mid_ts)
+                    mid_age = int(now_timestamp_ms or 0) - mid_ts
+                    book_age = int(now_timestamp_ms or 0) - book_ts
+                    quote_mark_age_ms = mid_age
+                    quote_book_age_ms = book_age
+                    if (
+                        bid > 0.0
+                        and ask > bid
+                        and book_ts > 0
+                        and -1_000 <= mid_age <= quote_max_age_ms
+                        and -1_000 <= book_age <= quote_max_age_ms
+                    ):
+                        book_mid = (bid + ask) / 2.0
+                        midpoint = (float(current_mid) + book_mid) / 2.0
+                        deviation_bps = abs(float(current_mid) - book_mid) / midpoint * 10_000.0
+                        spread_bps = (ask - bid) / book_mid * 10_000.0
+                        if math.isfinite(deviation_bps) and math.isfinite(spread_bps):
+                            quote_deviation_bps = round(deviation_bps, 6)
+                            quote_spread_bps = round(spread_bps, 6)
+                            quote_agreement = deviation_bps <= calibrated_float_env(
+                                "HYPERSMART_V12_MARK_BOOK_MAX_DEVIATION_BPS", 5.0
+                            )
+                except (KeyError, IndexError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+                    quote_agreement = None
             leader_reference_price = safe_float(consensus.get("median_reference_price"), float(row.price or 0.0))
             score = score_realtime_copy_candidate(
                 RealtimeCopyScoreInput(
@@ -1376,21 +1485,26 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 if score.accepted
                 else "|".join(score.refusal_reasons or ["REJECT_NO_TRADE"])
             )
-            # V12 unified gate (SHADOW only — never changes the real decision above).
+            # V12 unified gate: shadow when non-authoritative, otherwise an intersection
+            # requiring fresh mark/book evidence; it can only reject the primary score.
             try:
                 from hl_observer.signals.copy_decision import (
                     CopyInputs as _V12In,
                     evaluate_copy_candidate as _v12_eval,
                 )
                 _v12 = _v12_eval(_V12In(
-                    source_usable=True,
-                    quotes_agree=True,
+                    source_usable=(
+                        current_mid is not None
+                        and current_mid_ts is not None
+                        and current_mid_source in {"allMids", "publicTradesWS"}
+                    ),
+                    quotes_agree=quote_agreement,
                     mid_available=current_mid is not None,
                     signal_age_ms=int(age_ms) if age_ms is not None else None,
                     max_signal_age_ms=int(getattr(realtime_score_config, "max_signal_age_ms", 30000) or 30000),
                     liquidity_score=float(liquidity_score) if liquidity_score is not None else None,
                     min_liquidity_score=float(getattr(realtime_score_config, "min_liquidity_score", 0.0) or 0.0),
-                    spread_bps=float(getattr(realtime_score_config, "spread_bps", 0.0) or 0.0),
+                    spread_bps=quote_spread_bps,
                     max_spread_bps=20.0,
                     net_edge_bps=float(score.edge_remaining_bps) if score.edge_remaining_bps is not None else None,
                     min_edge_bps=float(getattr(realtime_score_config, "min_edge_required_bps", 0.0) or 0.0),
@@ -1398,6 +1512,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 _v12_accepted, _v12_reason = _v12.accepted, _v12.reason_code
             except Exception:
                 _v12_accepted, _v12_reason = None, None
+                if calibrated_bool_env("HYPERSMART_V12_GATE_AUTHORITATIVE", False):
+                    decision_reason = "REJECT_V12_GATE_UNAVAILABLE"
             # V12 promotion (opt-in): when HYPERSMART_V12_GATE_AUTHORITATIVE=1, the unified
             # gate becomes BINDING as a stricter intersection — a candidate survives only if
             # BOTH the realtime score AND the unified gate accept. This can only *reduce*
@@ -1413,6 +1529,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 )
             except Exception:
                 _noter_echec("hl_observer/ui/routes.py:1415")
+                if calibrated_bool_env("HYPERSMART_V12_GATE_AUTHORITATIVE", False):
+                    decision_reason = "REJECT_V12_GATE_UNAVAILABLE"
             # V13 shadow wiring: dormant quant modules (whale-fill / vol-regime / ranker /
             # streak-sizing / multi-TF bias) computed in SHADOW — exposed for the dashboard
             # and ledger, NEVER decides alone (context_only). Guarded: any failure -> {} so
@@ -1496,17 +1614,31 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             # notional, leader score). All flags OFF by default => shadow. Gates only reduce trades.
             _v14b: dict = {}
             try:
-                from hl_observer.copy_fidelity.exec_cost_model import model_exec_costs, net_edge_after_costs
+                from hl_observer.copy_fidelity.exec_cost_model import model_exec_costs
                 from hl_observer.copy_fidelity.slippage_model import slippage_bps as _v14_slip
                 from hl_observer.copy_fidelity.exec_cost_promotion import apply_exec_cost_promotion as _v14_exec_promote
-                _gross_edge = float(getattr(score, "edge_remaining_bps", 0.0) or 0.0)
+                _raw_base_net_edge = getattr(score, "edge_remaining_bps", None)
+                _base_net_edge = (
+                    None if _raw_base_net_edge is None else float(_raw_base_net_edge)
+                )
+                _base_exec_cost = max(0.0, float(getattr(score, "modeled_execution_cost_bps", 0.0) or 0.0))
                 _notional = float(getattr(score, "simulated_notional_usdt", 0.0) or 0.0)
                 # slippage from REAL notional + REAL liquidity; fee = HL taker base; half-spread =
                 # conservative constant (per-coin L2 spread not in this closure yet).
                 _slip = _v14_slip(notional_usd=_notional, liquidity_score=float(liquidity_score))
                 _costs = model_exec_costs(fee_bps=4.5, half_spread_bps=1.5, slippage_bps=_slip, latency_bps=0.0, is_maker=False)
-                _net_after_exec = net_edge_after_costs(gross_edge_bps=_gross_edge, costs=_costs)
+                # The primary scorer already subtracts fee/spread/slippage/latency.
+                # Apply only any excess from this secondary model; subtracting its full
+                # cost here charged the same execution components twice.
+                _incremental_exec_cost = max(0.0, _costs.total_cost_bps - _base_exec_cost)
+                _net_after_exec = (
+                    round(_base_net_edge - _incremental_exec_cost, 4)
+                    if _base_net_edge is not None
+                    else None
+                )
                 _v14b["shadow_exec_cost_bps"] = _costs.total_cost_bps
+                _v14b["base_exec_cost_bps"] = round(_base_exec_cost, 4)
+                _v14b["incremental_exec_cost_bps"] = round(_incremental_exec_cost, 4)
                 _v14b["shadow_net_edge_after_exec_bps"] = _net_after_exec
                 decision_reason = _v14_exec_promote(
                     score_reason=decision_reason,
@@ -1516,6 +1648,12 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 )
             except Exception:
                 _noter_echec("hl_observer/ui/routes.py:1518")
+                # When the execution-cost gate is authoritative, a failed cost
+                # calculation is not permission to keep the prior accepting score.
+                # Preserve the failure in event evidence and fail closed.
+                _v14b["exec_cost_evidence_status"] = "UNAVAILABLE"
+                if calibrated_bool_env("HYPERSMART_V14_EXEC_COST_AUTHORITATIVE", False):
+                    decision_reason = "REJECT_EXEC_COST_EVIDENCE_UNAVAILABLE"
             try:
                 from hl_observer.signals.entry_quality_gate import apply_entry_quality_promotion as _v14_eq_promote
                 _min_liq = float(getattr(realtime_score_config, "min_liquidity_score", 0.0) or 0.0)
@@ -1542,6 +1680,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 "signal_age_ms": age_ms,
                 "v12_gate_accepted": _v12_accepted,
                 "v12_gate_reason": _v12_reason,
+                "v12_market_mark_source": current_mid_source,
+                "v12_market_mark_age_ms": quote_mark_age_ms,
+                "v12_orderbook_age_ms": quote_book_age_ms,
+                "v12_orderbook_spread_bps": quote_spread_bps,
+                "v12_mark_book_deviation_bps": quote_deviation_bps,
                 "leader_exchange_ts": exchange_at or None,
                 "leader_detected_ts": detected_at or None,
                 "leader_signal_ts": leader_event_at or None,
@@ -1953,9 +2096,39 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 # leveraged notional. Exposure/cash stay in margin terms (caps still protect 100$).
                 margin_usdt = desired_notional
                 notional = desired_notional * simulation_leverage
-                if calibrated_bool_env("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", True):
-                    coin_key_for_book = str(row.coin or "").upper()
-                    book = orderbooks_by_coin.get(coin_key_for_book)
+                coin_key_for_book = str(row.coin or "").upper()
+                book = orderbooks_by_coin.get(coin_key_for_book)
+                depth_guard_enabled = calibrated_bool_env("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", True)
+                micro_guard_authoritative = calibrated_bool_env(
+                    "HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", True
+                )
+                if depth_guard_enabled or (
+                    calibrated_bool_env("HYPERSMART_RUNTIME_MICROSTRUCTURE_GUARD", True)
+                    and micro_guard_authoritative
+                ):
+                    max_book_age_ms = max(
+                        1,
+                        int(calibrated_float_env("HYPERSMART_RUNTIME_L2_MAX_AGE_MS", 30_000.0)),
+                    )
+                    book_ts = int((book or {}).get("received_at_ms") or 0)
+                    book_age_ms = int(now_timestamp_ms or 0) - book_ts
+                    book_fresh = (
+                        book is not None
+                        and book_ts > 0
+                        and -1_000 <= book_age_ms <= max_book_age_ms
+                    )
+                    if not book_fresh:
+                        event["depth_fill_guard_checked"] = False
+                        event["depth_snapshot_received_at_ms"] = book_ts or None
+                        event["depth_snapshot_age_ms"] = book_age_ms if book_ts else None
+                        event["reason"] = (
+                            "DEPTH_FILL_GUARD_L2_BOOK_STALE"
+                            if book is not None and book_ts > 0
+                            else "DEPTH_FILL_GUARD_NO_RECENT_L2BOOK"
+                        )
+                        ledger_events.append(event)
+                        continue
+                if depth_guard_enabled:
                     if book is not None:
                         try:
                             from hl_observer.signals.depth_guard import depth_fill_guard
@@ -1992,12 +2165,16 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                                 continue
                         except Exception as exc:
                             event["depth_fill_guard_error"] = f"{exc.__class__.__name__}: {exc}"
+                            event["reason"] = "DEPTH_FILL_GUARD_UNAVAILABLE"
+                            ledger_events.append(event)
+                            continue
                     else:
                         event["depth_fill_guard_checked"] = False
                         event["depth_guard_reason"] = "NO_RECENT_L2BOOK_FOR_COIN"
+                        event["reason"] = "DEPTH_FILL_GUARD_NO_RECENT_L2BOOK"
+                        ledger_events.append(event)
+                        continue
                 if calibrated_bool_env("HYPERSMART_RUNTIME_MICROSTRUCTURE_GUARD", True):
-                    coin_key_for_book = str(row.coin or "").upper()
-                    book = orderbooks_by_coin.get(coin_key_for_book)
                     try:
                         from hl_observer.risk.microstructure_guard import (
                             MicrostructureGuardConfig,
@@ -2030,7 +2207,14 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         event["microstructure_snapshot_id"] = (book or {}).get("snapshot_id")
                         event["microstructure_snapshot_exchange_ts"] = (book or {}).get("exchange_ts")
                         if (
-                            calibrated_bool_env("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", True)
+                            book is None
+                            and micro_guard_authoritative
+                        ):
+                            event["reason"] = "MICROSTRUCTURE_BOOK_UNAVAILABLE"
+                            ledger_events.append(event)
+                            continue
+                        if (
+                            micro_guard_authoritative
                             and not micro_decision.authoritative_ok
                         ):
                             event["reason"] = "MICROSTRUCTURE_GUARD:" + "|".join(micro_decision.authoritative_reasons)
@@ -2038,6 +2222,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                             continue
                     except Exception as exc:
                         event["microstructure_guard_error"] = f"{exc.__class__.__name__}: {exc}"
+                        if micro_guard_authoritative:
+                            event["reason"] = "MICROSTRUCTURE_GUARD_UNAVAILABLE"
+                            ledger_events.append(event)
+                            continue
                 size = notional / float(row.price)
                 cost = notional * cost_bps / 10_000.0
                 expected_net_edge_usdt = notional * safe_float(metrics.get("edge_remaining_bps"), 0.0) / 10_000.0
@@ -2151,6 +2339,9 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     "increase_count": int(previous.get("increase_count") or 0) + (1 if was_existing_position else 0),
                     "reduce_count": int(previous.get("reduce_count") or 0),
                 }
+                for field in funding_position_fields:
+                    if field in previous:
+                        positions[key][field] = previous[field]
                 if row.source == "fresh_opportunity_cluster_local_simulation":
                     raw_json = row.raw_json if isinstance(row.raw_json, dict) else {}
                     source_delta_keys = raw_json.get("cluster_source_delta_keys")
@@ -2184,6 +2375,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "bot_replay_action": replay_action,
                         "status": "LOCAL_REPLAY",
                         "estimated_net_pnl_usdc": round(-cost, 6),
+                        "pnl_strict": True,
+                        "pnl_accounting_status": "ENTRY_FEE_REALIZED",
                         "fee_cost_usdc": round(cost, 6),
                         "bot_position_size_after": round(new_size, 10),
                         "copied_notional_usdt": round(notional, 6),
@@ -2309,10 +2502,53 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     gross_pnl = (previous["avg_price"] - float(row.price)) * close_size
                 exit_cost = close_size * float(row.price) * cost_bps / 10_000.0
                 allocated_entry_cost = previous["entry_costs"] * (close_size / previous["size"])
-                # Entry costs are carried by the open position and allocated
-                # exactly once to each reduce/close. They are not part of
-                # realized PnL before the matching exit.
-                net_pnl = gross_pnl - allocated_entry_cost - exit_cost
+                # Entry fees were already booked as realized cash cost at OPEN/ADD.
+                # Do not subtract them again from the close delta or open MTM. Keep
+                # round-trip PnL separately for per-position win/loss statistics.
+                funding_cost = None
+                funding_status = "FUNDING_SETTLEMENT_EVIDENCE_UNMEASURABLE"
+                funding_evidence_count = 0
+                try:
+                    from hl_observer.paper_trading.funding_settlement import decouper
+
+                    opened_ms = int(float(previous.get("opened_at_ms") or 0))
+                    settlement_position = dict(previous)
+                    settlement_position.setdefault("entry_ts_ms", opened_ms)
+                    funding_evidence = decouper(
+                        settlement_position,
+                        now_ms=int(delta_event_time_ms(row) or current_ms),
+                    )
+                    funding_evidence_count = int(funding_evidence.get("settlement_evidence_count") or 0)
+                    if opened_ms > 0 and funding_evidence.get("funding_certified") is True:
+                        # The settlement module reports net funding PnL (+ received,
+                        # - charged); accounting_truth expects a signed cost to subtract.
+                        candidate_cost = -float(funding_evidence.get("net_funding_settled"))
+                        if math.isfinite(candidate_cost):
+                            funding_cost = candidate_cost
+                            funding_status = "FUNDING_SETTLEMENTS_CERTIFIED"
+                except Exception:
+                    funding_cost = None
+                partial_close_with_settlements = (
+                    previous.get("funding_allocation_invalid") is True
+                    or (close_size < previous["size"] - 1e-12 and funding_evidence_count > 0)
+                )
+                if partial_close_with_settlements:
+                    # The current position model has no per-settlement quantity
+                    # timeline, so it cannot allocate past settlements exactly
+                    # across a partial close. Keep the close visible, but refuse
+                    # to certify either partial or future aggregate PnL from it.
+                    funding_cost = None
+                    funding_status = "PARTIAL_CLOSE_FUNDING_ALLOCATION_UNMEASURABLE"
+                close_delta_pnl = (
+                    gross_pnl - exit_cost - funding_cost
+                    if funding_cost is not None
+                    else None
+                )
+                round_trip_net_pnl = (
+                    gross_pnl - allocated_entry_cost - exit_cost - funding_cost
+                    if funding_cost is not None
+                    else None
+                )
                 notional_to_close = close_size * float(row.price)
                 if action == "REDUCE":
                     refusal_reason = ""
@@ -2374,6 +2610,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                         "increase_count": int(previous.get("increase_count") or 0),
                         "reduce_count": int(previous.get("reduce_count") or 0) + 1,
                     }
+                    for field in funding_position_fields:
+                        if field in previous:
+                            positions[key][field] = previous[field]
+                    if partial_close_with_settlements:
+                        positions[key]["funding_allocation_invalid"] = True
                 replay_action = (
                     "PAPER_CONSENSUS_CLOSE_REPLAYED"
                     if action.startswith("CLOSE") and position_mode == "CONSENSUS_CLUSTER"
@@ -2387,7 +2628,17 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     {
                         "bot_replay_action": replay_action,
                         "status": "LOCAL_REPLAY",
-                        "estimated_net_pnl_usdc": round(net_pnl, 6),
+                        "estimated_net_pnl_usdc": round(close_delta_pnl, 6) if close_delta_pnl is not None else None,
+                        "known_cost_net_pnl_usdc": round(gross_pnl - allocated_entry_cost - exit_cost, 6),
+                        "round_trip_net_pnl_usdc": round(round_trip_net_pnl, 6) if round_trip_net_pnl is not None else None,
+                        "pnl_strict": close_delta_pnl is not None and round_trip_net_pnl is not None,
+                        "pnl_accounting_status": (
+                            "STRICT_ALL_COSTS_KNOWN"
+                            if close_delta_pnl is not None and round_trip_net_pnl is not None
+                            else funding_status
+                        ),
+                        "funding_cost_usdc": funding_cost,
+                        "funding_settlement_evidence_count": funding_evidence_count,
                         "gross_pnl_usdc": round(gross_pnl, 6),
                         "fee_cost_usdc": round(exit_cost, 6),
                         "entry_cost_carried_usdc": round(allocated_entry_cost, 6),
@@ -2460,7 +2711,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             else:
                 gross_unrealized = (position["avg_price"] - mark_price) * position["size"]
             exit_cost_estimate = abs(position["size"] * mark_price) * cost_bps / 10_000.0
-            net_unrealized = gross_unrealized - float(position["entry_costs"]) - exit_cost_estimate
+            # Entry fees are already booked in realized cash at OPEN/ADD.
+            net_unrealized = gross_unrealized - exit_cost_estimate
             unrealized_pnl += net_unrealized
             open_positions.append(
                 {
@@ -2535,7 +2787,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         new_realized_delta = sum(
             float(row.get("estimated_net_pnl_usdc") or 0.0)
             for row in new_ledger_events
-            if row.get("status") == "LOCAL_REPLAY"
+            if row.get("status") == "LOCAL_REPLAY" and not pnl_row_is_non_strict(row)
         )
         realized_net_pnl = float(existing_realized_pnl_usdc or 0.0) + new_realized_delta
         new_entry_costs_paid = sum(
@@ -2575,8 +2827,14 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         for row in ledger_events:
             if row.get("status") != "LOCAL_REPLAY" or row.get("bot_replay_action") not in exit_replay_actions:
                 continue
+            if pnl_row_is_non_strict(row):
+                continue
             _k = str(row.get("matched_position_key") or row.get("coin") or "")
-            _pos_pnls[_k] = _pos_pnls.get(_k, 0.0) + float(row.get("estimated_net_pnl_usdc") or 0.0)
+            _round_trip_value = row.get("round_trip_net_pnl_usdc")
+            if _round_trip_value is None:
+                _round_trip_value = row.get("estimated_net_pnl_usdc")
+            if _round_trip_value is not None:
+                _pos_pnls[_k] = _pos_pnls.get(_k, 0.0) + float(_round_trip_value)
         _round_trip = list(_pos_pnls.values())
         winning_trades = sum(1 for _p in _round_trip if _p > 0)
         losing_trades = sum(1 for _p in _round_trip if _p < 0)
@@ -3148,6 +3406,8 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             signal_age = row.get("signal_age_ms")
             if signal_age is not None:
                 priced_events += 1
+            if pnl_row_is_non_strict(row):
+                continue
             pnl = row.get("estimated_net_pnl_usdc")
             if pnl is None:
                 continue
@@ -4018,7 +4278,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             seen_leader_addresses.add(wallet_address)
             if len(leader_cards) >= settings.copy_trading.top_leaders:
                 break
-        mid_prices, mid_price_sources = latest_mark_prices_from_snapshots(list(latest_market_snapshots))
+        mid_prices, mid_price_sources, mid_price_timestamps_ms = latest_mark_prices_from_snapshots(
+            list(latest_market_snapshots),
+            now_ms=current_time_ms,
+            max_age_ms=max_signal_age_ms,
+        )
         latest_orderbooks_by_coin = latest_orderbook_levels_from_snapshots(list(latest_orderbook_snapshots))
         public_trade_activity: list[dict[str, Any]] = []
         if latest_public_trade_event is not None:
@@ -4190,9 +4454,34 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             processed_delta_keys=state.simulation_processed_delta_keys,
         )
         simulation_replay_deltas = [*accepted_opportunity_deltas, *live_simulation_deltas]
+        # The persisted scalar can predate strict cost accounting. Rebuild its
+        # trusted realized component from the ledger, excluding rows explicitly
+        # marked non-strict, so a restart cannot resurrect partial-cost PnL.
+        existing_strict_pnl_rows = [
+            item
+            for item in state.simulation_ledger_events
+            if isinstance(item, dict)
+            and item.get("status") == "LOCAL_REPLAY"
+            and not pnl_row_is_non_strict(item)
+        ]
+        existing_ledger_realized_pnl_usdc = sum(
+            safe_float(item.get("estimated_net_pnl_usdc"), 0.0) for item in existing_strict_pnl_rows
+        )
+        if not existing_strict_pnl_rows:
+            # Le ledger ci-dessus est aussi le ledger d'AFFICHAGE : il est purge (limite d'affichage,
+            # fenetre de rafraichissement, flot d'evenements refuses). Quand il ne contient plus
+            # aucune ligne strictement chiffree, la reconstruction vaut 0 et EFFACERAIT une
+            # comptabilite bien reelle. Une limite d'AFFICHAGE ne doit jamais changer la COMPTABILITE :
+            # on retombe donc sur le scalaire persiste. La protection voulue ci-dessus reste entiere
+            # des qu'une seule ligne stricte subsiste (c'est alors elle qui fait foi).
+            existing_ledger_realized_pnl_usdc = safe_float(
+                getattr(state, "simulation_realized_pnl_usdc", 0.0), 0.0
+            )
         bot_simulation = build_bot_simulation(
             simulation_replay_deltas,
             mid_prices=mid_prices,
+            mid_price_sources=mid_price_sources,
+            mid_price_timestamps_ms=mid_price_timestamps_ms,
             orderbooks_by_coin=latest_orderbooks_by_coin,
             max_events=limit,
             now_timestamp_ms=current_time_ms,
@@ -4205,7 +4494,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
             existing_positions=state.simulation_virtual_positions,
             existing_events=state.simulation_ledger_events,
             processed_delta_keys=state.simulation_processed_delta_keys,
-            existing_realized_pnl_usdc=state.simulation_realized_pnl_usdc,
+            existing_realized_pnl_usdc=existing_ledger_realized_pnl_usdc,
             existing_entry_costs_paid_usdc=state.simulation_entry_costs_paid_usdc,
             existing_exit_costs_paid_usdc=state.simulation_exit_costs_paid_usdc,
             existing_reproduced_entries_total=state.simulation_reproduced_entries_total,

@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping
 from decimal import ROUND_FLOOR, Decimal, localcontext
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_book_index import index_des_carnets, liste_des_carnets
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
 from hl_observer.backtesting.copy_vault_causal_selection import (
     cluster_metaorders,
@@ -120,14 +121,13 @@ def _valid_observed_book_top(row: Mapping[str, Any]) -> bool:
 
 
 def _first_at_or_after(
-    rows: list[dict[str, Any]], target_ms: int, max_lag_ms: int
+    rows: list[dict[str, Any]], target_ms: int, max_lag_ms: int, book_index: Any = None,
 ) -> tuple[dict[str, Any] | None, int | None]:
     target = _strict_positive_timestamp(target_ms)
     max_lag = _strict_nonnegative_int(max_lag_ms)
-    timestamps = [_strict_positive_timestamp(row.get("ts_ms")) for row in rows]
-    if target is None or max_lag is None or any(ts is None for ts in timestamps):
+    exact_timestamps = (book_index or index_des_carnets(rows)).horodatages_exacts()
+    if target is None or max_lag is None or exact_timestamps is None:
         return None, None
-    exact_timestamps = [ts for ts in timestamps if ts is not None]
     index = bisect.bisect_left(exact_timestamps, target)
     if index >= len(rows):
         return None, None
@@ -136,14 +136,13 @@ def _first_at_or_after(
 
 
 def _last_at_or_before(
-    rows: list[dict[str, Any]], target_ms: int, max_age_ms: int
+    rows: list[dict[str, Any]], target_ms: int, max_age_ms: int, book_index: Any = None,
 ) -> tuple[dict[str, Any] | None, int | None]:
     target = _strict_positive_timestamp(target_ms)
     max_age = _strict_nonnegative_int(max_age_ms)
-    timestamps = [_strict_positive_timestamp(row.get("ts_ms")) for row in rows]
-    if target is None or max_age is None or any(ts is None for ts in timestamps):
+    exact_timestamps = (book_index or index_des_carnets(rows)).horodatages_exacts()
+    if target is None or max_age is None or exact_timestamps is None:
         return None, None
-    exact_timestamps = [ts for ts in timestamps if ts is not None]
     index = bisect.bisect_right(exact_timestamps, target) - 1
     if index < 0:
         return None, None
@@ -193,12 +192,7 @@ def _exact_checkpoint_triplet(
 ]:
     """Select only checkpoints cryptographically bound to this metaorder."""
     metaorder_id = str(metaorder.get("metaorder_id") or "")
-    matching = [
-        row for row in books
-        if str(row.get("metaorder_id") or "") == metaorder_id
-        and str(row.get("collector_protocol") or "") == CHECKPOINT_COLLECTOR_PROTOCOL
-        and row.get("checkpoint_id")
-    ]
+    matching = index_des_carnets(books).points_de_controle(metaorder_id)   # indexé une fois par liste
     if not matching:
         return None, None
     expected_stages = ("REFERENCE", "ENTRY", f"EXIT_{int(horizon_ms)}")
@@ -333,29 +327,24 @@ def execute_metaorder(
         # non-causal rows here could silently jump to a later book and make a
         # forward episode look causal.  The explicit guard below must diagnose
         # and reject the selected triplet instead.
-        continuous_books = [row for row in books if not row.get("checkpoint_id")]
-        if not continuous_books:
-            return None, "MISSING_EXACT_METAORDER_CHECKPOINT"
-        try:
-            timestamps = [int(row["ts_ms"]) for row in continuous_books]
-        except (KeyError, TypeError, ValueError, OverflowError):
-            return None, "INVALID_OBSERVED_BOOK"
-        if any(right < left for left, right in zip(timestamps, timestamps[1:], strict=False)):
-            return None, "UNSORTED_BOOK_TIMESTAMPS"
+        continuous_books, continuous_refusal = index_des_carnets(books).continus()
+        if continuous_refusal is not None:   # mêmes refus, dans le même ordre, qu'un parcours complet
+            return None, continuous_refusal
+        continuous_index = index_des_carnets(continuous_books)
         reference, reference_lag = _last_at_or_before(
-            continuous_books, signal_ms, max_reference_lag_ms
+            continuous_books, signal_ms, max_reference_lag_ms, continuous_index
         )
         if reference is None:
             return None, "STALE_OR_MISSING_REFERENCE_BOOK"
         entry_target_ms = signal_ms + int(copy_delay_ms)
         entry, entry_lag = _first_at_or_after(
-            continuous_books, entry_target_ms, max_target_lag_ms
+            continuous_books, entry_target_ms, max_target_lag_ms, continuous_index
         )
         if entry is None:
             return None, "STALE_OR_MISSING_ENTRY_BOOK"
         exit_target_ms = int(entry["ts_ms"]) + int(horizon_ms)
         exit_book, exit_lag = _first_at_or_after(
-            continuous_books, exit_target_ms, max_target_lag_ms
+            continuous_books, exit_target_ms, max_target_lag_ms, continuous_index
         )
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
@@ -804,7 +793,7 @@ def replay_metaorders(
             counters["NON_CAUSAL_FORWARD_SIGNAL"] = counters.get("NON_CAUSAL_FORWARD_SIGNAL", 0) + 1
             continue
         trade, reason = execute_metaorder(
-            metaorder, list(books_by_coin.get(str(metaorder["coin"]), [])),
+            metaorder, liste_des_carnets(books_by_coin.get(str(metaorder["coin"]), [])),
             horizon_ms=int(horizon_ms), direction_multiplier=direction_multiplier,
             require_causal_books=require_causal_observation,
             economic_mode=economic_mode,

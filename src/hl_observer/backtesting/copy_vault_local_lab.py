@@ -1,6 +1,7 @@
 """Local PAPER Copy-Vault laboratory fed only by verified restored shards."""
 from __future__ import annotations
 
+import functools
 import gzip
 import hashlib
 import importlib.util
@@ -40,6 +41,7 @@ from hl_observer.backtesting.train_statistics import (
 )
 from hl_observer.collection.forward_poll_fills import is_causal_live_source
 from hl_observer.collection.userfills_live import userfill_required_fields_reason
+from hl_observer.backtesting.copy_vault_train_executability import resume_lisible, sonder_train
 from hl_observer.datasets.v2_pipeline import copy_vault_heartbeat_reason
 from hl_observer.economics.numeric import (
     USD_RECONCILIATION_ABS_TOLERANCE,
@@ -1583,7 +1585,7 @@ def materialize_safe_workspace(
     # rangees sont etiquetees provenance_tier=LOCAL et N'ONT PAS quality=SAFE -> elles
     # nourrissent la recherche mais NE PEUVENT JAMAIS etre « prouvees » (la preuve exige
     # SAFE). L'audit SAFE ci-dessus (fail-closed) n'est pas touche.
-    coffre_local_resume = _charger_tier_local(repository_root, progress=progress)
+    coffre_local_resume = _charger_tier_local(repository_root, progress=progress, garder_signaux=False)
     for _row in coffre_local_resume.pop("_fills", ()):
         _id = (_row.get("vault"), _row.get("coin"), _row.get("ts_ms"), _row.get("tid"),
                _row.get("hash"), _row.get("oid"), _row.get("px"), _row.get("sz"), _row.get("signe"))
@@ -1687,10 +1689,8 @@ def materialize_safe_workspace(
         temporary = target.with_suffix(target.suffix + ".partial")
         if target.is_symlink() or temporary.is_symlink():
             raise OSError("refusing symlinked Copy-Vault replay tape")
-        temporary.write_text(
-            "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
-            encoding="utf-8",
-        )
+        with temporary.open("w", encoding="utf-8") as tape:   # en flux : mêmes octets, sans ruban entier en mémoire
+            tape.writelines(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows)
         os.replace(temporary, target)
         materialized_tapes[name] = {
             "bytes": target.stat().st_size,
@@ -1941,6 +1941,7 @@ def _source_asset_inventory_error(manifest: Mapping[str, Any]) -> str | None:
     return None
 
 
+@functools.cache            # UNE instance par processus : son cache d'épisodes sert aux étapes 2 ET 3
 def _load_pipeline():
     root = Path(__file__).resolve().parents[3]
     path = root / "tools" / "pipeline_copie_reel.py"
@@ -2817,6 +2818,7 @@ def run_local_campaign(
     say("Reconstruction des cycles leader OPEN/ADD/REDUCE/CLOSE")
     entries, entries_audit = pipeline.charger_entrees_alpha_notional_fixe_avec_audit(workspace)
     metaorders, meta_audit = cv.cluster_metaorders(entries)
+    entries = len(entries)            # seul le décompte sert encore : la liste (1,2 Go) est libérée
     books, books_audit = cv.load_observed_books(workspace, coins={str(row["coin"]) for row in metaorders})
     leader_review_persistence: dict[str, Any] = {"status": "NOT_REQUESTED"}
     leader_quality_train: dict[str, Any] = {}
@@ -2895,25 +2897,22 @@ def run_local_campaign(
                 "can_prove_pnl": False,
             }
             say("Revues leaders V9 TRAIN : échec de persistance explicite — " + leader_review_persistence["reason"])
+    getattr(pipeline, "oublier_les_cycles", lambda: None)()   # épisodes mémorisés : plus relus (2,3 Go)
     timestamps = [int(row["signal_ts_ms"]) for row in metaorders]
-    # Découpe TRAIN/VALIDATION/OOS sur les jours ÉVALUABLES (signal + carnet causal) : un jour
-    # sans carnet ne produit aucun trade et rendait TRAIN structurellement vide (essais à vide).
+    # Découpe sur les jours ÉVALUABLES (signal + carnet causal) : sans carnet, TRAIN restait vide.
     alignment = evaluable_signals(metaorders, books)
     aligned_adds = alignment["aligned_adds"]
     bounds = _bounds(alignment["timestamps"])
     signal_coverage = {**_signal_coverage(timestamps), "evaluable": alignment["summary"]}
-    # --- Exploration AUTOMATIQUE de la variante overshoot (consultative, additive) : rapporte si
-    # un filtre anti-débordement (mark vs oracle) bat la baseline, sans toucher au verdict officiel.
-    # Sautée s'il n'y a pas assez de jours évaluables : aucun essai à vide.
+    # --- Exploration AUTOMATIQUE de la variante overshoot (consultative) : un filtre anti-débordement
+    # (mark vs oracle) bat-il la baseline ? Sautée sans jours évaluables ou sans contexte : jamais à vide.
     overshoot_exploration: dict[str, Any] = {"status": "NOT_RUN"}
     try:
         if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
             raise LookupError("INSUFFICIENT_EVALUABLE_SIGNAL_DAYS")
-        from hl_observer.backtesting.copy_vault_overshoot_train import (
-            explore_overshoot_filtered_train,
-        )
+        from hl_observer.backtesting.copy_vault_overshoot_train import explorer_si_le_contexte_existe
         _asset_ctx_safe = _charger_asset_ctx_safe(workspace)
-        _ov_result = explore_overshoot_filtered_train(metaorders, books, _asset_ctx_safe)
+        _ov_result = explorer_si_le_contexte_existe(metaorders, books, _asset_ctx_safe)   # jamais à vide
         _ov_eligibles = [v for v in _ov_result.get("variants", []) if v.get("eligible")]
         overshoot_exploration = {
             "status": "OK",
@@ -2964,7 +2963,7 @@ def run_local_campaign(
         ),
         "verified_safe_shards": input_manifest.get("verified_assets"),
         "missing_safe_shards": input_manifest.get("missing_shards"),
-        "entries": len(entries), "metaorders": len(metaorders),
+        "entries": entries, "metaorders": len(metaorders),
         "live_fill_rows": entries_audit.get("live_fill_rows"),
         "causal_live_fill_rows": entries_audit.get("causal_live_fill_rows"),
         "historical_fill_rows": entries_audit.get("historical_fill_rows"),
@@ -2999,12 +2998,8 @@ def run_local_campaign(
         }
     if signal_coverage["distinct_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
         return {
-            **base,
-            "status": "MORE_DATA",
-            "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS",
-            "candidates_tested": 0,
-            "freeze_created": False,
-            "economically_proven": False,
+            **base, "status": "MORE_DATA", "reason": "INSUFFICIENT_DISTINCT_SIGNAL_DAYS",
+            "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
     if alignment["summary"]["evaluable_utc_days"] < _MINIMUM_SIGNAL_UTC_DAYS:
         return {
@@ -3013,12 +3008,15 @@ def run_local_campaign(
         }
     if bounds is None:
         return {
-            **base,
-            "status": "MORE_DATA",
-            "reason": "TEMPORAL_SPLIT_INVALID_AFTER_PURGE",
-            "candidates_tested": 0,
-            "freeze_created": False,
-            "economically_proven": False,
+            **base, "status": "MORE_DATA", "reason": "TEMPORAL_SPLIT_INVALID_AFTER_PURGE",
+            "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
+        }
+    sonde = sonder_train(metaorders, books, bounds)   # un seul trade exécutable en TRAIN ? sinon : à vide
+    if not sonde["executable"]:
+        say("Recherche non lancée : " + resume_lisible(sonde))
+        return {
+            **base, "status": "MORE_DATA", "reason": sonde["raison"], "train_executability": sonde,
+            "candidates_tested": 0, "freeze_created": False, "economically_proven": False,
         }
     repository_root = (
         Path(repository_root).resolve()

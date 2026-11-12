@@ -744,3 +744,99 @@ def test_live_report_bundle_includes_safe_coverage_and_payload_rejections(tmp_pa
     dashboard = html_path.read_text(encoding="utf-8")
     assert "Hausses mesurées du PnL moyen TRAIN gelées :</b> 2" in dashboard
     assert "exploratoires; le champion reste inchangé sans preuve indépendante" in dashboard
+
+
+def test_l_etape_1_tourne_dans_un_processus_fils_et_rend_le_meme_resultat(tmp_path, monkeypatch):
+    """Mémoire : l'étape qui charge tout le corpus doit rendre sa mémoire avant la recherche."""
+    import pytest
+
+    from hl_observer.backtesting import copy_vault_local_lab as local_lab
+
+    # une doublure (tests) reste exécutée sur place, avec les mêmes arguments
+    appels = []
+
+    def doublure(recovery, workspace, *, progress=None):
+        appels.append((recovery, workspace, progress))
+        return {"doublure": True}
+
+    assert lab._materialiser_safe(doublure, tmp_path / "r", tmp_path / "w", progress=None) == {"doublure": True}
+    assert appels == [(tmp_path / "r", tmp_path / "w", None)]
+
+    # la vraie fonction part dans un fils : progression relayée, résultat aux types intacts, fichier nettoyé
+    outil = tmp_path / "outil_fils.py"
+    outil.write_text(
+        "import pickle, sys\n"
+        "from pathlib import Path\n"
+        "print('PROGRES\tétape · 1/2', flush=True)\n"
+        "print('ligne ordinaire', flush=True)\n"
+        "print('PROGRES\tétape · 2/2', flush=True)\n"
+        "if 'echec' in sys.argv[2]:\n"
+        "    sys.exit(3)\n"
+        "Path(sys.argv[3]).write_bytes(pickle.dumps({'recovery': sys.argv[1], 'jours': {20727: 5}, 'paire': (1, 2)}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(lab, "_OUTIL_MATERIALISER", outil)
+    monkeypatch.delenv("ALINA_QUANT_MATERIALISER_ICI", raising=False)
+    messages: list[str] = []
+    resultat = lab._materialiser_safe(
+        local_lab.materialize_safe_workspace, tmp_path / "recovery", tmp_path / "rapport" / "workspace",
+        progress=messages.append,
+    )
+    assert resultat == {"recovery": str(tmp_path / "recovery"), "jours": {20727: 5}, "paire": (1, 2)}
+    assert messages == ["étape · 1/2", "étape · 2/2"]
+    assert not list((tmp_path / "rapport").glob("*.pickle")) if (tmp_path / "rapport").exists() else True
+
+    # un fils qui échoue n'est jamais pris pour un résultat
+    with pytest.raises(RuntimeError, match="MATERIALISATION_SAFE_ECHOUEE"):
+        lab._materialiser_safe(local_lab.materialize_safe_workspace, tmp_path / "recovery", tmp_path / "echec" / "w")
+
+    # repli explicite : la vraie fonction sur place
+    monkeypatch.setenv("ALINA_QUANT_MATERIALISER_ICI", "1")
+    monkeypatch.setattr(local_lab, "materialize_safe_workspace", doublure)
+    assert lab._materialiser_safe(local_lab.materialize_safe_workspace, tmp_path / "r", tmp_path / "w") == {"doublure": True}
+
+
+def test_le_rapport_dit_pourquoi_rien_n_est_mesurable_et_ne_pretend_rien_de_prouve(tmp_path):
+    """Cas réel du 2026-11-12 : « non mesurable » partout, « meilleure stratégie prouvée +3,30 USD/jour »
+    affiché pour une vieille estimation d'entraînement, « En attente du premier essai » après 128 essais."""
+    sonde = {
+        "executable": False, "raison": "TRAIN_NOT_EXECUTABLE", "signaux_train": 2607,
+        "refus_par_motif": {"L2_CONNECTION_IDENTITY_INCOMPLETE": 259, "STALE_OR_MISSING_EXIT_BOOK": 235},
+        "explications": {
+            "L2_CONNECTION_IDENTITY_INCOMPLETE": "carnets collectés sans identité de connexion",
+            "STALE_OR_MISSING_EXIT_BOOK": "aucun carnet au moment de la sortie",
+        },
+        "coins_a_collecter": [
+            {"coin": "xyz:XYZ100", "non_executables": 812, "motif_principal": "STALE_OR_MISSING_EXIT_BOOK"},
+            {"coin": "BTC", "non_executables": 140, "motif_principal": "L2_CONNECTION_IDENTITY_INCOMPLETE"},
+        ],
+    }
+    summary = {
+        "run_id": "essai", "status": "MORE_DATA", "head": "abc",
+        "economic_result": {"status": "MORE_DATA", "reason": "TRAIN_NOT_EXECUTABLE", "train_executability": sonde,
+                            "candidates_tested": 0},
+        "current_copy_vault": {"status": "APPROXIMATE_TRAIN_PROXY", "approximation": {"daily_net_usd": 3.3038}},
+        "improvement_history": [{"trial_number": 1}, {"trial_number": 2}],
+    }
+    page = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
+    assert "Aucun trade exécutable : la recherche n'a pas été lancée" in page
+    assert "<b>2,607</b> signaux" in page and "<b>259</b> × carnets collectés sans identité de connexion" in page
+    assert "<b>235</b> × aucun carnet au moment de la sortie" in page
+    assert "aucun trade exécutable sur la période d" in page                         # raison en clair
+    # la carte de collecte par coin est affichée (ce que les collecteurs doivent cibler)
+    assert "Coins à collecter en priorité" in page
+    assert "xyz:XYZ100" in page and "<b>812</b>" in page
+    assert "generer_coins_lanes.py" in page
+    assert "Aucun essai lancé" in page and "En attente du premier essai" not in page
+    # la vieille estimation n'est plus présentée comme une stratégie prouvée
+    assert "ancienne estimation d" in page and "NON prouvée" in page
+    assert "ce que la meilleure stratégie prouvée rapporte" not in page
+    assert "chaque palier est un gain prouvé" not in page and "n'est plus mesurable sur les données actuelles" in page
+
+    # un passage qui a réellement tourné sans rien mesurer le dit aussi
+    summary["economic_result"] = {"status": "SEARCH_RUNNING", "reason": "BOUNDED_TRAIN_SEARCH_BATCH_COMPLETE",
+                                  "trials_this_run": 128}
+    page = lab._write_economic_html_report(tmp_path, summary).read_text(encoding="utf-8")
+    assert "128 essais terminés pendant ce passage" in page and "En attente du premier essai" not in page
+    assert "essais terminé ; aucune amélioration prouvée" in page
+    assert "Aucun trade exécutable" not in page

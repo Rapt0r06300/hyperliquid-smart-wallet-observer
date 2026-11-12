@@ -26,6 +26,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from hl_observer.collection import collecte_fiable as CF
 from hl_observer.collection.forward_poll_fills import (
     LIVE_POLL_SOURCE,
     RESPONSE_PAGE_CAP,
@@ -118,7 +119,15 @@ def _post_userfills(vault: str, start_ms: int, end_ms: int, *, timeout_s: float 
                     tentatives: int = 2) -> Any:
     """userFillsByTime avec retry des blips RÉSEAU transitoires (timeout/URLError).
     Les HTTPError (dont 429) remontent telles quelles : l'AIMD global DOIT les voir
-    pour ralentir. Aucun ordre, aucune clé, aucune signature."""
+    pour ralentir. Aucun ordre, aucune clé, aucune signature.
+
+    [12/11] RÉSERVE son poids dans le budget de débit PARTAGÉ avant d'émettre. Sans cela, ce
+    collecteur consommait le quota de l'IP à l'insu des autres (vaults, liquidations, carnet,
+    overshoot) : son limiteur AIMD local ignore leur trafic, et c'est précisément ce cloisonnement
+    qui produisait les rafales de 429 (218 au lancement, ramenées à 16 par le budget partagé).
+    `reserver_poids` est FAIL-OPEN et son attente est bornée : il ne peut jamais bloquer la collecte.
+    """
+    CF.reserver_poids(CF.POIDS_REQUETE_INFO)
     corps = json.dumps(
         {"type": "userFillsByTime", "user": vault,
          "startTime": int(start_ms), "endTime": int(end_ms)}
@@ -222,6 +231,7 @@ def poll_once(
                 cooldown.penalize(vault, now_ms)  # 429/erreur -> backoff ce leader
             if getattr(exc, "code", None) == 429:
                 n_429 += 1
+                CF.signaler_refus_de_debit()               # les rattrapages cèdent la place
                 if bucket is not None:
                     bucket.penalize()  # 429 = limite IP globale -> pause TOUT le poll
                 ra = _retry_after_s(exc)
@@ -273,6 +283,8 @@ def _fetch_all_fills(poster, vault: str, start_ms: int, now_ms: int, *, max_page
         page = poster(vault, cursor, now_ms)
         if not isinstance(page, list) or not page:
             break
+        if bucket is not None and hasattr(bucket, "charge"):
+            bucket.charge(len(page))          # poids réel : 1 unité par 20 fills, en plus de la requête
         collected.extend(f for f in page if isinstance(f, dict))
         if len(page) < RESPONSE_PAGE_CAP:
             break  # page non pleine -> tout est capturé

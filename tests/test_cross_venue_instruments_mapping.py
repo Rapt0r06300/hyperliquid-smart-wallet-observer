@@ -38,3 +38,16 @@ def test_mapping_record_certifies_contract_units_and_currency():
     assert pepe["settlement_currency"] == "USDT"
     assert pepe["unit_equivalent"] is False
     assert pepe["exact"] is False
+
+
+def test_un_marche_qui_commence_par_k_n_est_pas_un_k_token():
+    """Cas réel du 2026-11-11 : KAS devenait « 1000ASUSDT », refusé par Binance à chaque passe."""
+    from hl_observer.config.cross_venue_instruments import HL_KILO_COINS, hl_native_symbol
+
+    assert binance_perp_symbol("KAS") == "KASUSDT" and binance_perp_symbol("KAITO") == "KAITOUSDT"
+    for coin in ("kPEPE", "KPEPE", "kSHIB", "kBONK", "kFLOKI", "kLUNC", "kNEIRO"):
+        assert binance_perp_symbol(coin) == "1000" + coin[1:].upper() + "USDT"
+        assert hl_native_symbol(coin) == "k" + coin[1:].upper()                 # Hyperliquid refuse « KPEPE »
+    assert hl_native_symbol("KAS") == "KAS" and hl_native_symbol("btc") == "BTC" and hl_native_symbol("") is None
+    assert all(coin.startswith("K") and coin.isupper() for coin in HL_KILO_COINS)
+    assert mapping_record("KAS", "KASUSDT")["exact"] is True and mapping_record("kPEPE", "1000PEPEUSDT")["exact"] is False

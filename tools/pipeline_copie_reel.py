@@ -247,6 +247,12 @@ def _signature_entrees(root: Path) -> tuple:
     return tuple(signature)
 
 
+def oublier_les_cycles() -> None:
+    """Libère les épisodes mémorisés (3 millions de lignes sur le corpus réel du 2026-11-12, 2,3 Go) :
+    à appeler quand plus aucune étape ne les relira dans ce processus."""
+    _CYCLES_MEMORISES.clear()
+
+
 def _episodes_canoniques(root: Path) -> tuple[list[dict], dict[str, Any]]:
     signature = _signature_entrees(root)
     memorise = _CYCLES_MEMORISES.get(signature)

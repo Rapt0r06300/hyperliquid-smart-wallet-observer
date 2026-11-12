@@ -101,6 +101,46 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "execution_capability": EXECUTION_CAPABILITY_NONE,
      "source_status": SOURCE_STATUS_ACTIVE_OBSERVATION,
      "paper_read_only": True, "real_execution": False},
+    # ORDRES EN ATTENTE des leaders (leur INTENTION, avant le fill) + positions/TWAP/portefeuille.
+    # Mesure du 2026-11-12 : l'etude maker (copy_vault_order_intent) voyait « 0 fill pendant le suivi
+    # des carnets d'ordres ». Ce n'etait PAS un manque d'ordres : cette lane n'existait qu'en CLOUD et
+    # suivait une AUTRE liste de leaders que le collecteur de fills LOCAL. D'ou `--leaders-source
+    # fills` : on suit EXACTEMENT les comptes dont on capte les fills, sinon le couple ordre -> fill
+    # n'existe jamais et l'etude reste vide quelle que soit la duree de collecte.
+    # Pas de cle `heartbeat` (la lane n'en ecrit pas) : la vie est jugee sur la FRAICHEUR DU LOG,
+    # garantie par la ligne de vie par minute de la lane — sans elle, un marche calme ferait relancer
+    # un processus VIVANT (double collecte).
+    {"nom": "contexte-leaders", "script": "tools/collecter_contexte_lane.py",
+     "intervalle_s": 5,
+     "args": ("--leaders-source", "fills", "--shard-count", "1", "--shard-index", "0",
+              "--max-users", "10", "--duree-s", "900"),
+     "limite_minutes": 5.0,
+     "execution_capability": EXECUTION_CAPABILITY_NONE,
+     "source_status": SOURCE_STATUS_ACTIVE_OBSERVATION,
+     "paper_read_only": True, "real_execution": False},
+    # K1 — FILLS DES LEADERS PAR REST, pour depasser le plafond WebSocket (~10 userFills/IP).
+    # Mesure du 2026-11-12 : seulement 8 leaders distincts dans le ruban, dont UN SEUL a 63 % des
+    # fills (439/693) : le labo mesurait un trader, pas une strategie. Cet outil existe precisement
+    # pour ca (`info/userFillsByTime`, non soumis au cap WS) et il n'etait PAS dans le registre.
+    # Il reserve desormais son poids dans le budget de debit PARTAGE (sinon il consommait le quota de
+    # l'IP a l'insu des autres et recreait les rafales de 429).
+    # Pas de cle `heartbeat` : il imprime une ligne d'etat A CHAQUE PASSE et sauvegarde son etat,
+    # donc la vie se juge sur la fraicheur du log (comme 13 autres entrees).
+    {"nom": "userfills-poll", "script": "tools/collecter_userfills_poll.py",
+     "intervalle_s": 5,
+     # CADENCE : 55 req/min etait prevu pour une IP DEDIEE (lane cloud). En local, une seule IP est
+     # partagee par ~12 collecteurs et `userFillsByTime` pese 20 : 55 req/min = 1100 poids/min, soit
+     # la quasi-totalite du budget de 1200 — il affamerait les autres (dont les fills causaux WS).
+     # On lui alloue ~20 % du budget : 12 req/min = 240 poids/min. Avec la cadence ADAPTATIVE du
+     # collecteur (un leader qui vient d'emettre est repolle plus vite), cela suffit a couvrir les
+     # leaders actifs tout en passant de 8 a ~120 leaders suivis.
+     "args": ("--leaders-file", "config/copy_vault_leaders.json",
+              "--intervalle", "5", "--max-requests-per-min", "12",
+              "--shard-count", "1", "--shard-index", "0"),
+     "limite_minutes": 5.0,
+     "execution_capability": EXECUTION_CAPABILITY_NONE,
+     "source_status": SOURCE_STATUS_ACTIVE_OBSERVATION,
+     "paper_read_only": True, "real_execution": False},
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
      "intervalle_s": 30, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/research_lab/micro_heartbeat.json"},
@@ -162,6 +202,8 @@ _HARVEST_SOUHAITE = frozenset({
     "overshoot-collector", "vault-collector", "scorer-vaults",
     "backfill-fills", "backfill-candles-vaults",
     "l2-leaders",                                                      # carnets des coins de leaders
+    "contexte-leaders",                                                # ordres en attente = intention
+    "userfills-poll",                                                  # fills REST : depasse le cap WS
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).

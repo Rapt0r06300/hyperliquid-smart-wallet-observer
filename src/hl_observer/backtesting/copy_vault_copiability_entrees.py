@@ -175,7 +175,10 @@ def prepare_fills(
     drop(~df["signe"].isin((-1, 1)), "sens_inconnu")
     drop(df["start_pos"].isna(), "position_depart_inconnue")
     drop(df["obs"] < df["time"] - cfg.clock_skew_tolerance_ms, "observation_avant_evenement")
-    df = df.sort_values("obs", kind="stable")
+    # Première observation d'abord ; à instant égal (deux relevés rétrospectifs du même fill), la version
+    # qui connaît le côté agressif l'emporte : un relevé plus pauvre ne doit pas masquer un plus complet.
+    df = df.assign(_cote_inconnu=df["crossed"].isna()).sort_values(["obs", "_cote_inconnu"], kind="stable")
+    df = df.drop(columns="_cote_inconnu")
     duplicated = df.duplicated(list(IDENTITY_COLUMNS), keep="first")
     drop(duplicated, "doublon_identite")
     df = df.sort_values(["vault", "coin", "time", "tid"], kind="stable").reset_index(drop=True)

@@ -48,6 +48,8 @@ from typing import Any
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 
+from hl_observer.collection import collecte_fiable as CF  # noqa: E402
+from hl_observer.collection.collecte_fiable import reprendre_apres_refus_de_debit  # noqa: E402
 from hl_observer.market.liquidation_map import construire_carte, parser_positions  # noqa: E402
 from hl_observer.market.liquidation_recorder import enregistrer_grappes, resume_historique  # noqa: E402
 
@@ -64,10 +66,15 @@ MIN_WALLETS_UTILE = 20
 
 def _post_info(charge: dict[str, Any], *, timeout_s: float = 10.0) -> Any:
     corps = json.dumps(charge).encode("utf-8")
-    req = urllib.request.Request(URL_INFO, data=corps,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+
+    def lire() -> Any:
+        CF.reserver_poids(CF.POIDS_REQUETE_INFO)     # budget de débit PARTAGÉ entre collecteurs (fail-open)
+        req = urllib.request.Request(URL_INFO, data=corps,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
+            return json.loads(rep.read().decode("utf-8"))
+
+    return reprendre_apres_refus_de_debit(lire)   # un « 429 » ne fait plus perdre le compte observé
 
 
 def lire_all_mids(*, timeout_s: float = 10.0) -> dict[str, float]:

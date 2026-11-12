@@ -15,17 +15,19 @@ collecteurs (dispersion, carnet, fills, liquidations). PAPER/READ-ONLY : collect
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import random
 import tempfile
 import time
+import urllib.error
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from hl_observer.ops.echec_silencieux import noter as _noter
-
 
 # ─────────────────────────────── déduplication ───────────────────────────────
 
@@ -158,6 +160,262 @@ class Limiteur:
             return 0.0
         self._dernier = t + reste
         return round(reste, 4)
+
+    def patienter(self, dormir=None, maintenant: float | None = None) -> float:
+        """Attend RÉELLEMENT le délai dû avant la prochaine action, puis le renvoie.
+
+        ``attente()`` ne fait que le CALCULER : l'appeler sans dormir ne limite rien. C'est ainsi que
+        quatre collecteurs envoyaient leurs requêtes sans aucune pause (cas réel du 2026-11-11 : 1 219
+        fenêtres de dépôts/retraits sur 2 250 refusées en HTTP 429 lors d'un seul passage)."""
+        reste = self.attente(maintenant)
+        if reste > 0:
+            (dormir or time.sleep)(reste)
+        return reste
+
+
+def prendre_la_pause(limiteur: Any, dormir=None) -> float:
+    """Prend la pause due par ``limiteur``, quel qu'il soit : un ``Limiteur`` (``patienter``) ou tout
+    objet qui ne sait que calculer un délai (``attente``). Renvoie le délai pris."""
+    patienter = getattr(limiteur, "patienter", None)
+    if callable(patienter):
+        return float(patienter(dormir) or 0.0)
+    reste = limiteur.attente()
+    if isinstance(reste, (int, float)) and reste > 0:
+        (dormir or time.sleep)(float(reste))
+        return float(reste)
+    return 0.0
+
+
+#: Budget de débit de l'API publique Hyperliquid : 1 200 unités par minute et par adresse IP ; une
+#: requête ``info`` coûte 20 unités, plus une part proportionnelle aux lignes renvoyées. Un collecteur
+#: de RATTRAPAGE n'en prend qu'un douzième : deux rattrapages tournent en même temps (bougies/funding et
+#: fills), et les collecteurs en direct partagent la même adresse. Mesuré le 2026-11-11 avec le vrai
+#: lanceur : à la moitié du budget chacun, ils prenaient tout, et vaults, liquidations, carnet et prix
+#: recevaient des « 429 ». Le suivi en direct des fills s'adapte au débit qui reste : tout ce qu'un
+#: rattrapage prend, il le lui retire. Un rattrapage est incrémental : il peut être lent, pas eux.
+POIDS_REQUETE_INFO = 20.0
+BUDGET_POIDS_RATTRAPAGE_PAR_MINUTE = 100.0
+
+
+def pause_pour_poids(poids: float, *, budget_par_minute: float = BUDGET_POIDS_RATTRAPAGE_PAR_MINUTE) -> float:
+    """Secondes à laisser passer pour qu'une requête de ce poids tienne dans le budget de débit."""
+    return max(0.0, float(poids)) / float(budget_par_minute) * 60.0
+
+
+class CadencePonderee:
+    """Tient une part du budget de débit : chaque requête attend que la précédente soit « payée ».
+
+    La durée de la requête elle-même est déduite de l'attente : la cadence réelle est celle du budget,
+    pas le budget plus la latence du réseau. La première requête part tout de suite.
+    """
+
+    def __init__(self, budget_par_minute: float, *, horloge: Callable[[], float] | None = None,
+                 dormir: Callable[[float], None] | None = None) -> None:
+        self.budget_par_minute = float(budget_par_minute)
+        self._horloge = horloge or time.monotonic
+        self._dormir = dormir
+        self._libre_a = 0.0
+
+    def attendre(self, poids: float) -> float:
+        """Attend son tour pour une requête de ce poids ; rend les secondes réellement attendues."""
+        maintenant = self._horloge()
+        attente = max(0.0, self._libre_a - maintenant)
+        if attente > 0:
+            (self._dormir or time.sleep)(attente)
+        self._libre_a = max(maintenant, self._libre_a) + pause_pour_poids(
+            poids, budget_par_minute=self.budget_par_minute)
+        return attente
+
+
+#: Signal de congestion entre processus. Tous les collecteurs locaux partagent UNE adresse IP : quand un
+#: collecteur EN DIRECT est refusé (429), il touche ce fichier-témoin ; les RATTRAPAGES (bougies, funding,
+#: historiques de fills) le lisent avant chaque requête et attendent. Un rattrapage peut toujours attendre ;
+#: une mesure en direct manquée est perdue. Inactif tant que la variable d'environnement n'est pas posée
+#: (elle l'est par ``LANCER_COLLECTEURS_COPY_VAULT.cmd``) : ni les tests, ni les lanes cloud, ni un outil
+#: lancé à la main ne sont concernés.
+SIGNAL_DEBIT_ENV = "ALINA_SIGNAL_DEBIT"
+DUREE_CONGESTION_S = 45.0
+
+
+def _fichier_signal_debit() -> Path | None:
+    chemin = os.environ.get(SIGNAL_DEBIT_ENV, "").strip()
+    return Path(chemin) if chemin else None
+
+
+def signaler_refus_de_debit() -> None:
+    """Un collecteur en direct vient d'être refusé : le faire savoir aux rattrapages. Ne lève jamais."""
+    chemin = _fichier_signal_debit()
+    if chemin is None:
+        return
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text(f"{time.time():.3f}\n", encoding="utf-8")
+    except OSError as exc:
+        _noter("collecte_fiable.signal_debit", exc)
+
+
+def congestion_restante_s(maintenant: float | None = None) -> float:
+    """Secondes pendant lesquelles un rattrapage doit encore céder la place (0 si aucun refus récent)."""
+    chemin = _fichier_signal_debit()
+    if chemin is None:
+        return 0.0
+    try:
+        dernier = chemin.stat().st_mtime
+    except OSError:
+        return 0.0
+    reste = dernier + DUREE_CONGESTION_S - (time.time() if maintenant is None else float(maintenant))
+    return max(0.0, min(DUREE_CONGESTION_S, reste))        # borné : une horloge décalée ne bloque jamais
+
+
+def ceder_au_direct(dormir: Callable[[float], None] | None = None, maintenant: float | None = None) -> float:
+    """À appeler par un RATTRAPAGE avant chaque requête : attend la fin d'une congestion signalée.
+
+    L'attente est bornée à ``DUREE_CONGESTION_S`` par appel : même sous refus continus, un rattrapage
+    avance d'une requête à chaque période, il n'est jamais bloqué indéfiniment."""
+    attente = congestion_restante_s(maintenant)
+    if attente > 0:
+        (dormir or time.sleep)(attente)
+    return attente
+
+
+#: Budget de débit PARTAGÉ entre tous les collecteurs de la même adresse IP (la limite publique
+#: Hyperliquid est de 1 200 unités/minute et par IP ; tous les collecteurs locaux la partagent).
+#: Fenêtre glissante (horodatage, poids) dans un fichier protégé par un verrou. Posé par le lanceur
+#: via cette variable ; absent → MÉCANISME INACTIF (tests, lanes cloud chacune sur sa propre IP,
+#: outil lancé à la main : chacun garde sa cadence). FAIL-OPEN total : toute erreur (verrou tenu,
+#: fichier corrompu, I/O) → on passe SANS attendre. L'attente est bornée à ``ATTENTE_MAX_BUDGET_S``
+#: par appel : un collecteur avance toujours, jamais de blocage ni d'interblocage.
+BUDGET_DEBIT_ENV = "ALINA_BUDGET_DEBIT"
+SEUIL_POIDS_PARTAGE_PAR_MINUTE = 1000.0   # marge sous la limite 1 200/min/IP
+FENETRE_BUDGET_S = 60.0
+ATTENTE_MAX_BUDGET_S = 8.0
+_STALE_VERROU_S = 3.0
+_MAX_EVENEMENTS_BUDGET = 1000
+
+
+def _fichier_budget() -> Path | None:
+    chemin = os.environ.get(BUDGET_DEBIT_ENV, "").strip()
+    return Path(chemin) if chemin else None
+
+
+@contextlib.contextmanager
+def _verrou_fichier(cible: Path, *, timeout_s: float = 1.0, dormir: Callable[[float], None] | None = None):
+    """Verrou inter-process par création exclusive ; vole un verrou périmé ; fail-open (ne lève jamais).
+
+    Rend ``True`` si le verrou est tenu, ``False`` sinon (l'appelant décide quand même : fail-open).
+    """
+    sieste = dormir or time.sleep
+    verrou = cible.with_name(cible.name + ".lock")
+    tenu = False
+    fin = time.monotonic() + max(0.0, float(timeout_s))
+    while True:
+        try:
+            descripteur = os.open(str(verrou), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(descripteur)
+            tenu = True
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - verrou.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if age > _STALE_VERROU_S:                      # verrou d'un process mort : on le vole
+                with contextlib.suppress(OSError):
+                    verrou.unlink()
+                continue
+            if time.monotonic() >= fin:
+                break                                      # fail-open : on n'a pas pu verrouiller
+            sieste(0.01)
+        except OSError:
+            break                                          # fail-open
+    try:
+        yield tenu
+    finally:
+        if tenu:
+            with contextlib.suppress(OSError):
+                verrou.unlink()
+
+
+def _lire_fenetre_budget(chemin: Path, maintenant: float) -> list[tuple[float, float]]:
+    try:
+        brut = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    evts: list[tuple[float, float]] = []
+    for ligne in brut if isinstance(brut, list) else ():
+        try:
+            ts, poids = float(ligne[0]), float(ligne[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if 0.0 <= maintenant - ts < FENETRE_BUDGET_S:
+            evts.append((ts, poids))
+    return evts
+
+
+def reserver_poids(poids: float, *, maintenant: Callable[[], float] | None = None,
+                   dormir: Callable[[float], None] | None = None) -> float:
+    """Réserve ``poids`` unités de débit dans le budget partagé ; attend (borné) si l'IP serait saturée.
+
+    Rend les secondes réellement attendues (0 si le mécanisme est inactif ou sur toute erreur). À
+    appeler par un collecteur AVANT chaque requête. Deux phases, verrou tenu brièvement à chaque fois
+    (jamais pendant le sommeil) : (1) lire la fenêtre, décider de l'attente ; (2) après l'attente,
+    enregistrer la consommation. Fail-open partout.
+    """
+    chemin = _fichier_budget()
+    poids = max(0.0, float(poids))
+    if chemin is None or poids <= 0.0:
+        return 0.0
+    horloge = maintenant or time.time
+    sieste = dormir or time.sleep
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return 0.0
+    attente = 0.0
+    try:
+        with _verrou_fichier(chemin, dormir=sieste):
+            t = horloge()
+            somme = sum(w for _, w in _lire_fenetre_budget(chemin, t))
+            exces = somme + poids - SEUIL_POIDS_PARTAGE_PAR_MINUTE
+            if exces > 0.0:
+                attente = min(ATTENTE_MAX_BUDGET_S,
+                              pause_pour_poids(exces, budget_par_minute=SEUIL_POIDS_PARTAGE_PAR_MINUTE))
+        if attente > 0.0:
+            sieste(attente)                                # verrou relâché : on ne bloque personne
+        with _verrou_fichier(chemin, dormir=sieste):
+            t2 = horloge()
+            fenetre = _lire_fenetre_budget(chemin, t2)
+            fenetre.append((t2, poids))
+            ecrire_atomique(chemin, json.dumps(fenetre[-_MAX_EVENEMENTS_BUDGET:], ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001 - fail-open : le débit ne doit jamais bloquer la collecte
+        _noter("collecte_fiable.budget_partage", exc)
+        return 0.0
+    return attente
+
+
+def reprendre_apres_refus_de_debit(appel: Callable[[], Any], *, essais: int = 4, attente_s: float = 3.0,
+                                   dormir: Callable[[float], None] | None = None) -> Any:
+    """Rend ``appel()`` ; sur un refus de débit (HTTP 429), attend puis réessaie (``essais`` au total).
+
+    Sans cela un seul « 429 » faisait perdre le relevé (cas réel du 2026-11-11 : 6 vaults sur 69 absents
+    d'une passe). L'attente suit ``Retry-After`` quand le serveur le donne (borné à 30 s), sinon elle
+    double à chaque essai. Toute autre erreur, et le dernier refus, remontent tels quels.
+    """
+    total = max(1, int(essais))
+    for essai in range(1, total + 1):
+        try:
+            return appel()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                signaler_refus_de_debit()                  # les rattrapages cèdent la place
+            if exc.code != 429 or essai >= total:
+                raise
+            try:
+                indique = float(exc.headers.get("Retry-After") or 0) if exc.headers else 0.0
+            except (ValueError, TypeError, AttributeError):
+                indique = 0.0
+            (dormir or time.sleep)(indique if 0 < indique <= 30 else float(attente_s) * 2 ** (essai - 1))
+    raise RuntimeError("reprise après refus de débit : aucun essai effectué")   # inatteignable
 
 
 # ─────────────────────────────── provenance & qualité ───────────────────────────────

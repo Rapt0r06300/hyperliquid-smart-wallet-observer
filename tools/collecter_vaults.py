@@ -76,9 +76,14 @@ _ADRESSE_COMPLETE = re.compile(r"^0x[0-9a-f]{40}$")
 
 def _post_info(charge: dict[str, Any], *, timeout_s: float = 12.0) -> Any:
     corps = json.dumps(charge).encode("utf-8")
-    req = urllib.request.Request(URL_INFO, data=corps, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
-        return json.loads(rep.read().decode("utf-8"))
+
+    def lire() -> Any:
+        CF.reserver_poids(CF.POIDS_REQUETE_INFO)     # budget de débit PARTAGÉ entre collecteurs (fail-open)
+        req = urllib.request.Request(URL_INFO, data=corps, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as rep:      # noqa: S310 (URL constante)
+            return json.loads(rep.read().decode("utf-8"))
+
+    return CF.reprendre_apres_refus_de_debit(lire)   # un « 429 » ne fait plus perdre le relevé
 
 
 def _get_vaults_public(*, timeout_s: float = 20.0) -> Any:
@@ -355,16 +360,36 @@ def _sauver_etat_historique(root: Path, etat_historique: dict[str, dict]) -> Non
         {"_schema": VPH.SCHEMA_PORTFOLIO_HISTORY, **etat_historique}, ensure_ascii=False))
 
 
+#: Part du budget de débit de l'API (1 200 unités par minute et par adresse IP) laissée à ce collecteur.
+#: Sans pause, une passe envoyait 69 vaults (22 unités chacun) puis 182 portefeuilles d'un seul trait :
+#: plus de 2 000 unités par minute pendant la passe, donc des « 429 » pour lui et pour tous les autres
+#: collecteurs (mesuré le 2026-11-11 avec le vrai lanceur).
+BUDGET_VAULTS_PAR_MINUTE = 300.0
+POIDS_VAULT = 22.0          # clearinghouseState (2) + vaultDetails (20)
+POIDS_PORTEFEUILLE = 2.0    # clearinghouseState seul
+
+
+_CADENCE = CF.CadencePonderee(BUDGET_VAULTS_PAR_MINUTE)
+
+
+def respirer(poids: float) -> None:
+    """Attend que la requête précédente soit « payée » dans la part de débit du collecteur."""
+    _CADENCE.attendre(poids)
+
+
 def une_passe(root: Path, vaults: list[str], *, now: float | None = None,
-              cache: "CF.CacheDedup | None" = None) -> int:
+              cache: "CF.CacheDedup | None" = None, pause: Any = None) -> int:
     """Un cycle : pour chaque vault, clearinghouse + vaultDetails -> snapshot complet écrit. Un vault
-    illisible ou un réseau coupé n'arrête pas les autres (deny-by-default, jamais d'invention)."""
+    illisible ou un réseau coupé n'arrête pas les autres (deny-by-default, jamais d'invention).
+    ``pause(poids)`` : appelée avant chaque vault pour tenir la part de débit (aucune pause si absente)."""
     t = now if now is not None else time.time()
     etat = _charger_etat(root)
     etat_historique = _charger_etat_historique(root)
     snaps: list[dict] = []
     historique: list[dict] = []
     for v in vaults:
+        if pause is not None:
+            pause(POIDS_VAULT)
         try:
             cs = parser_clearinghouse(_post_info({"type": "clearinghouseState", "user": v}))
             vd_brut = _post_info({"type": "vaultDetails", "vaultAddress": v})
@@ -507,14 +532,17 @@ def leaders_lents(root: Path) -> list[str]:
 
 
 def passe_portefeuilles_leaders(root: Path, *, now: float | None = None,
-                                dexs: tuple[str, ...] = DEXS_PORTEFEUILLES) -> dict[str, int]:
+                                dexs: tuple[str, ...] = DEXS_PORTEFEUILLES, pause: Any = None) -> dict[str, int]:
     """Un instantané complet de portefeuille par leader lent et par dex (``clearinghouseState``,
-    lecture seule, requête légère). Un leader illisible n'arrête pas les autres ; rien n'est inventé."""
+    lecture seule, requête légère). Un leader illisible n'arrête pas les autres ; rien n'est inventé.
+    ``pause(poids)`` : appelée avant chaque requête pour tenir la part de débit."""
     leaders = leaders_lents(root)
     lignes: list[dict] = []
     echecs = 0
     for adresse in leaders:
         for dex in dexs:
+            if pause is not None:
+                pause(POIDS_PORTEFEUILLE)
             charge = {"type": "clearinghouseState", "user": adresse}
             if dex:
                 charge["dex"] = dex
@@ -637,22 +665,29 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         try:
             vaults = charger_vaults_suivis(root)
-            if not vaults:
-                print("[vaults] aucun vault dans runtime/data/vaults_suivis.json — idle", flush=True)
-            else:
-                n = une_passe(root, vaults, cache=cache)
+            # Portefeuilles complets des leaders lents désignés par le labo (boucle labo -> collecte) :
+            # relevés EN TÊTE puis EN FIN de passe. L'étude de réplication écarte un portefeuille de plus
+            # de 15 minutes ; relevés une seule fois après les vaults, ils revenaient toutes les 13 minutes.
+            for moment in ("debut", "fin"):
+                if not a.sans_leaders:
+                    bilan_leaders = passe_portefeuilles_leaders(root, pause=respirer)
+                    print("[vaults] portefeuilles leaders lents (%s de passe) : %d ecrits pour %d leaders (echecs %d)"
+                          % (moment, bilan_leaders["portefeuilles"], bilan_leaders["leaders"],
+                             bilan_leaders["echecs"]), flush=True)
+                if moment == "fin":
+                    break
+                if not vaults:
+                    print("[vaults] aucun vault dans runtime/data/vaults_suivis.json — idle", flush=True)
+                    break
+                n = une_passe(root, vaults, cache=cache, pause=respirer)
                 total += n
                 echecs = 0
                 print("[vaults] %s  ecrits=%d  cumul=%d  (%d vaults)"
                       % (time.strftime("%H:%M:%S"), n, total, len(vaults)), flush=True)
-            if not a.sans_leaders:
-                # Portefeuilles complets des leaders lents désignés par le labo (boucle labo -> collecte).
-                bilan_leaders = passe_portefeuilles_leaders(root)
-                print("[vaults] portefeuilles leaders lents : %d ecrits pour %d leaders (echecs %d)"
-                      % (bilan_leaders["portefeuilles"], bilan_leaders["leaders"], bilan_leaders["echecs"]), flush=True)
             if not a.sans_balayage:
                 # Historique de l'univers élargi : quelques vaults par passe, jamais de rafale.
-                bilan = balayer_historique(root, pause_s=0.5)
+                bilan = balayer_historique(
+                    root, pause_s=CF.pause_pour_poids(20.0, budget_par_minute=BUDGET_VAULTS_PAR_MINUTE))
                 print("[vaults] historique univers elargi : %d lus sur %d (tour %d), +%d lignes"
                       % (bilan["lus"], bilan["univers"], bilan["tour"], bilan["lignes"]), flush=True)
         except Exception as exc:  # noqa: BLE001 — on ne meurt jamais, on recule

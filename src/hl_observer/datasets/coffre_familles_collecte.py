@@ -261,6 +261,83 @@ def certifier_portfolio_history(record: Any, *, source: str, now_ms: int,
     return out, (REPARE if repare else PASS), ""
 
 
+def certifier_funding_history(record: Any, *, source: str, now_ms: int,
+                              ) -> tuple[dict[str, Any] | None, str, str]:
+    """Point de funding HORAIRE publié pour un coin (``fundingHistory``), récupéré après coup.
+
+    Sert à compter ce qu'une position tenue a payé ou reçu ; jamais un signal daté en direct. Un
+    taux non fini, un taux horaire absurde (au-delà de 100 %) ou un point du futur est refusé."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    coin = _canonical_coin(record.get("coin"))
+    if not coin:
+        return None, QUARANTAINE, "coin_absent"
+    ts = _entier_positif(record.get("ts_ms"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    taux = _nombre_fini(record.get("funding"))
+    if taux is None or abs(taux) >= 1.0:
+        return None, QUARANTAINE, "taux_invalide"
+    out: dict[str, Any] = dict(record)
+    out.update({"coin": coin, "ts_ms": ts, "funding": taux, "interval": "1h", "causal_forward_eligible": False,
+                "source": str(record.get("source") or source)})
+    return out, PASS, ""
+
+
+def certifier_leader_orders(record: Any, *, source: str, now_ms: int,
+                            ) -> tuple[dict[str, Any] | None, str, str]:
+    """Carnet d'ordres en attente d'un leader, observé à ``ts_ms`` (``openOrders``).
+
+    Un instantané est un TOUT : un ordre absent du carnet suivant se lit comme une annulation ou
+    une exécution. Un seul ordre illisible invalide donc l'instantané entier, et le nombre d'ordres
+    annoncé doit être celui des ordres présents (sauf carnet résumé, déclaré ``tronque``). Un ordre
+    daté d'après l'observation est impossible."""
+    if not isinstance(record, dict):
+        return None, QUARANTAINE, "non_objet"
+    vault = _adresse(record.get("vault"))
+    if vault is None:
+        return None, QUARANTAINE, "vault_absent_ou_invalide"
+    ts = _entier_positif(record.get("ts_ms"))
+    if ts is None:
+        return None, QUARANTAINE, "timestamp_absent"
+    if ts > now_ms + _FUTUR_TOLERANCE_MS:
+        return None, QUARANTAINE, "timestamp_futur"
+    ordres = record.get("orders")
+    annonce = record.get("n_orders")
+    if not isinstance(ordres, list) or type(annonce) is not int or annonce < 0:
+        return None, QUARANTAINE, "ordres_absents"
+    tronque = record.get("tronque") is True
+    if tronque and ordres:
+        return None, QUARANTAINE, "carnet_resume_avec_detail"
+    if not tronque and len(ordres) != annonce:
+        return None, QUARANTAINE, "compte_d_ordres_incoherent"
+    normalises: list[dict[str, Any]] = []
+    vus: set[int] = set()
+    for ordre in ordres:
+        if not isinstance(ordre, dict):
+            return None, QUARANTAINE, "ordre_invalide"
+        coin = _canonical_coin(ordre.get("coin"))
+        prix, taille = _nombre_fini(ordre.get("px")), _nombre_fini(ordre.get("sz"))
+        oid = ordre.get("oid")
+        if not coin or ordre.get("side") not in ("B", "A") or type(oid) is not int or oid <= 0:
+            return None, QUARANTAINE, "ordre_invalide"
+        if prix is None or prix <= 0 or taille is None or taille < 0:
+            return None, QUARANTAINE, "ordre_prix_ou_taille_invalide"
+        if oid in vus:
+            return None, QUARANTAINE, "ordre_en_double"
+        vus.add(oid)
+        pose = ordre.get("ts_ms")
+        if pose is not None and (type(pose) is not int or pose <= 0 or pose > ts + _FUTUR_TOLERANCE_MS):
+            return None, QUARANTAINE, "ordre_posterieur_a_l_observation"
+        normalises.append({**ordre, "coin": coin, "px": prix, "sz": taille})
+    out: dict[str, Any] = dict(record)
+    out.update({"vault": vault, "ts_ms": ts, "dex": str(record.get("dex") or ""), "orders": normalises,
+                "n_orders": annonce, "tronque": tronque, "source": str(record.get("source") or source)})
+    return out, PASS, ""
+
+
 SCHEMA_SNAPSHOT_VAULT = "hypersmart.copy_vault_portfolio_snapshot.v1"
 
 

@@ -16,6 +16,15 @@ def _pos(size=1.0, avg=100.0, hi=None, lo=None):
 
 CFG = SLTPConfig(take_profit_bps=30.0, stop_loss_bps=40.0, trailing_stop_bps=None)
 
+# 2026-11-12 — NOUVEAU CONTRAT DE PnL (durcissement du jour).
+# `estimated_net_pnl_usdc` n'est plus publie tant que TOUS les couts ne sont pas connus : sans preuve
+# de reglement de funding certifiee, il vaut None et `pnl_accounting_status` dit pourquoi
+# (`FUNDING_SETTLEMENT_EVIDENCE_UNMEASURABLE`). C'est la regle d'honnetete du projet : on ne publie
+# jamais une estimation partielle comme un net realise.
+# Le montant calcule avec les couts CONNUS reste expose dans `known_cost_net_pnl_usdc` : ces tests
+# verifient donc la meme arithmetique qu'avant, sur le champ qui la porte desormais — et verifient
+# EN PLUS que le net strict est bien refuse. La couverture est donc plus forte, pas plus faible.
+
 
 def test_long_take_profit_closes_and_realizes():
     positions = {("w", "ETH", "LONG"): _pos(size=1.0, avg=100.0)}
@@ -27,7 +36,9 @@ def test_long_take_profit_closes_and_realizes():
     ev = ledger[0]
     assert ev["status"] == "LOCAL_REPLAY"
     assert ev["bot_replay_action"] == "PAPER_CLOSE_REPLAYED"
-    assert ev["estimated_net_pnl_usdc"] == 0.5        # 1 * (100.5-100)
+    assert ev["known_cost_net_pnl_usdc"] == 0.5       # 1 * (100.5-100)
+    assert ev["estimated_net_pnl_usdc"] is None    # net strict refuse : funding non certifie
+    assert ev["pnl_accounting_status"] == "FUNDING_SETTLEMENT_EVIDENCE_UNMEASURABLE"
     assert "TAKE_PROFIT" in ev["exit_method"]
     assert ev["sltp_take_profit_bps"] == 30.0
     assert ev["sltp_stop_loss_bps"] == 40.0
@@ -39,7 +50,7 @@ def test_long_stop_loss_closes_negative():
     ledger = []
     closed = apply_sltp_exits(positions, ledger, {"ETH": 99.5}, cost_bps=0.0, config=CFG)  # -0.5% < -0.40% SL
     assert len(closed) == 1
-    assert ledger[0]["estimated_net_pnl_usdc"] == -1.0  # 2*(99.5-100)
+    assert ledger[0]["known_cost_net_pnl_usdc"] == -1.0  # 2*(99.5-100)
     assert "STOP_LOSS" in ledger[0]["exit_method"]
 
 
@@ -48,7 +59,7 @@ def test_short_take_profit_on_drop():
     ledger = []
     closed = apply_sltp_exits(positions, ledger, {"SOL": 99.5}, cost_bps=0.0, config=CFG)  # short profits on drop
     assert len(closed) == 1
-    assert ledger[0]["estimated_net_pnl_usdc"] == 0.5
+    assert ledger[0]["known_cost_net_pnl_usdc"] == 0.5
 
 
 def test_short_string_key_negative_size_closes_like_live_simulation():
@@ -62,7 +73,7 @@ def test_short_string_key_negative_size_closes_like_live_simulation():
     assert ledger[0]["matched_position_key"] == "w|SOL|SHORT"
     assert ledger[0]["source_delta_key"] == "fusion-runtime-order:copy-sol-short"
     assert closed[0]["source_delta_key"] == "fusion-runtime-order:copy-sol-short"
-    assert ledger[0]["estimated_net_pnl_usdc"] == 1.0
+    assert ledger[0]["known_cost_net_pnl_usdc"] == 1.0
 
 
 def test_duplicate_sltp_close_is_removed_without_second_pnl():
@@ -76,7 +87,7 @@ def test_duplicate_sltp_close_is_removed_without_second_pnl():
     assert len(closed) == 1
     assert len(ledger) == 1
     assert ledger[0]["paper_position_instance_id"] == "w|ETH|LONG|src:open-eth-long-1"
-    assert ledger[0]["estimated_net_pnl_usdc"] == 0.5
+    assert ledger[0]["known_cost_net_pnl_usdc"] == 0.5
 
     stale_reloaded_position = _pos(size=1.0, avg=100.0)
     stale_reloaded_position["source_delta_key"] = "open-eth-long-1"
@@ -130,7 +141,7 @@ def test_costs_reduce_realized_pnl():
     ledger = []
     apply_sltp_exits(positions, ledger, {"ETH": 100.5}, cost_bps=12.0, config=CFG)
     # gross 0.5 - exit_cost (100.5 * 12/10000 = 0.1206) = 0.3794
-    assert abs(ledger[0]["estimated_net_pnl_usdc"] - 0.3794) < 1e-6
+    assert abs(ledger[0]["known_cost_net_pnl_usdc"] - 0.3794) < 1e-6
 
 
 def test_no_mark_skips():

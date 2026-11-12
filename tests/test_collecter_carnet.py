@@ -111,3 +111,19 @@ def test_un_coin_non_mappable_ou_illisible_ne_casse_pas_la_passe(tmp_path):
     def bin_casse(c, **k): raise OSError("reseau")
     assert K.une_passe(tmp_path, ["HYPE"], post_hl=hl_ok, get_binance=bin_casse) == 0
     assert K.une_passe(tmp_path, ["BTC"], post_hl=hl_ok, get_binance=bin_casse) == 0
+
+
+def test_la_requete_hyperliquid_porte_le_nom_natif_du_marche(monkeypatch):
+    """« KPEPE » est refusé par Hyperliquid (400) : le carnet se demande sous « kPEPE »."""
+    import io
+
+    corps: list[dict] = []
+
+    def faux_urlopen(request, timeout=None):
+        corps.append(json.loads(request.data.decode("utf-8")))
+        return io.BytesIO(b'{"levels": [[], []]}')
+
+    monkeypatch.setattr(K.urllib.request, "urlopen", faux_urlopen)
+    for coin in ("KPEPE", "KAS", "BTC"):
+        K._post_hl(coin)
+    assert [c["coin"] for c in corps] == ["kPEPE", "KAS", "BTC"]

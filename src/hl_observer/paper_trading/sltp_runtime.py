@@ -11,8 +11,9 @@ real TP/SL order would have captured. It mirrors the engine's own unrealised-PnL
 formula so the books stay consistent.
 
 The caller passes the live `positions` dict and `ledger_events` list; this pass
-pops closed positions and appends LOCAL_REPLAY exit events (which the engine's
-realised-PnL sum and the winning-trades counter then pick up automatically).
+pops closed positions and appends LOCAL_REPLAY exit events. Only events with
+complete entry, exit, and funding settlement costs carry realized net PnL; an
+incomplete close remains visible as a diagnostic but is excluded from PnL stats.
 SAFETY: read-only / paper-only. No order, no signature, nothing sent anywhere.
 """
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 from hl_observer.strategies.strategy_mode import mode_of_position
 
 import os
+import math
 from typing import Any
 
 from hl_observer.paper_trading.sl_tp import SLTPConfig, evaluate_sl_tp, SLTPDecision, signed_pnl_bps
@@ -173,41 +175,45 @@ def apply_sltp_exits(
         gross = (mark_price - avg) * size if side == "LONG" else (avg - mark_price) * size
         exit_cost = position_notional * cost_bps / 10_000.0
 
-        # COUT MANQUANT (autopsie PnL 2026-07-11) — LE FUNDING N'ETAIT JAMAIS FACTURE.
-        # Sur Hyperliquid le financement se paie CHAQUE HEURE. Le run a cumule 42,6 heures de
-        # positions ouvertes (une seule tenue 8,4 h) sans qu'un seul centime de funding ne soit
-        # deduit du PnL. Un LONG paie quand le funding est positif ; un SHORT recoit.
-        # Sans donnee de funding fraiche pour ce coin -> on ne facture RIEN (jamais de chiffre
-        # invente), et on le DIT dans l'evenement (`funding_cost_usdc: None`).
+        # The in-memory rolling-rate cache is not a settlement ledger. Certify only
+        # observed user-funding rows through the canonical settlement contract; never
+        # trust a bare position scalar or infer cash from elapsed time.
         funding_cost = None
         try:
-            from hl_observer.funding.funding_runtime_cache import recent_rates as _recent
+            from hl_observer.paper_trading.funding_settlement import decouper
 
-            _rates = _recent(coin, window_s=6 * 3600.0)      # taux HORAIRES signes, recents
-            if _rates:
-                _rate = sum(_rates) / len(_rates)            # taux moyen sur la vie de la position
-                _hours = max(0.0, age_ms / 3_600_000.0)
-                _sign = 1.0 if side == "LONG" else -1.0      # le LONG paie un funding positif
-                funding_cost = position_notional * float(_rate) * _hours * _sign
+            opened_ms = int(float(position.get("opened_at_ms") or 0))
+            settlement_position = dict(position)
+            settlement_position.setdefault("entry_ts_ms", opened_ms)
+            funding_evidence = decouper(settlement_position, now_ms=int(now_ms or 0))
+            if opened_ms > 0 and funding_evidence.get("funding_certified") is True:
+                # Settlement returns signed funding PnL; the accounting helper
+                # accepts signed cost (positive paid, negative received).
+                candidate_funding = -float(funding_evidence.get("net_funding_settled"))
+                if math.isfinite(candidate_funding):
+                    funding_cost = candidate_funding
         except Exception:
             funding_cost = None
 
         entry_cost = separate_entry_cost_usdc(position)
-        net = round_trip_net_pnl_usdc(
+        known_cost_net = round_trip_net_pnl_usdc(
             gross_pnl_usdc=gross,
             entry_cost_usdc=entry_cost,
             exit_cost_usdc=exit_cost,
-            # Funding is reported separately when it is unavailable. The
-            # strict entry/exit accounting remains measurable, while the
-            # completeness flag below prevents calling it fully cost-complete.
             funding_cost_usdc=funding_cost if funding_cost is not None else 0.0,
         )
-        if net is None:
-            # The protective exit still removes paper exposure, but an
-            # unmeasurable round trip is never inserted into realized PnL.
+        # Do not publish a partial-cost estimate as realized net PnL. This value
+        # is diagnostic only and must not feed win-rate, equity, or PnL totals.
+        net = (
+            round(gross - exit_cost - funding_cost, 8)
+            if funding_cost is not None and entry_cost is not None
+            else None
+        )
+        if entry_cost is None:
+            net = None
             net_status = "ENTRY_COST_UNMEASURABLE"
         elif funding_cost is None:
-            net_status = "ENTRY_EXIT_COSTS_KNOWN_FUNDING_UNMEASURABLE"
+            net_status = "FUNDING_SETTLEMENT_EVIDENCE_UNMEASURABLE"
         else:
             net_status = "STRICT_ALL_COSTS_KNOWN"
         matched_position_key = f"{wallet}|{coin}|{side}"
@@ -255,6 +261,14 @@ def apply_sltp_exits(
                 "exit_method": "SLTP_" + decision.reason,
                 "reason": "SLTP_" + decision.reason + "_LOCAL_REPLAY_NOT_AN_ORDER",
                 "estimated_net_pnl_usdc": round(net, 6) if net is not None else None,
+                "known_cost_net_pnl_usdc": (
+                    round(known_cost_net, 6) if known_cost_net is not None else None
+                ),
+                "round_trip_net_pnl_usdc": (
+                    round(known_cost_net, 6)
+                    if net_status == "STRICT_ALL_COSTS_KNOWN" and known_cost_net is not None
+                    else None
+                ),
                 "gross_pnl_usdc": round(gross, 6),
                 "fee_cost_usdc": round(exit_cost, 6),
                 "entry_cost_carried_usdc": round(entry_cost, 8) if entry_cost is not None else None,
@@ -267,7 +281,7 @@ def apply_sltp_exits(
                     position.get("fee_already_embedded_in_entry_price") is True
                 ),
                 "fee_already_embedded_in_exit_price": False,
-                # None = pas de donnee de funding pour ce coin (on n'invente pas un chiffre)
+                # None = aucun total de règlements horodatés vérifiable pour cette position.
                 "funding_cost_usdc": (round(funding_cost, 8) if funding_cost is not None else None),
                 "funding_hours": round(age_ms / 3_600_000.0, 4),
                 "average_entry_price": round(avg, 8),

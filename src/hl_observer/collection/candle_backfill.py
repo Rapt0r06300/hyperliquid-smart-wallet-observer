@@ -58,6 +58,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
+from hl_observer.instrument_identity import preserve_native_instrument_symbol
+
 # Hyperliquid borne la reponse. On reste EN DESSOUS : une reponse tronquee sans le dire serait
 # un trou silencieux dans l'historique -- exactement le genre de bug qu'on traque.
 MAX_BOUGIES_PAR_REQUETE = 4_000
@@ -152,7 +154,8 @@ def parser_bougies(coin: str, payload: Any) -> list[Bougie]:
             continue                                  # un prix <= 0 n'existe pas
         if h < lo:
             continue                                  # bougie incoherente : on l'ecarte
-        out.append(Bougie(coin=str(row.get("s") or coin).upper(),
+        # identité NATIVE : mettre en majuscules transformerait kPEPE ou xyz:XYZ100 en marchés inexistants
+        out.append(Bougie(coin=preserve_native_instrument_symbol(row.get("s") or coin),
                           t_ms=t, open=o, high=h, low=lo, close=c, volume=v))
     return out
 

@@ -53,3 +53,19 @@ def test_explore_smoke_structure_et_trial_count():
     # chaque variante porte bien la dimension overshoot
     assert all("overshoot_seuil_bps" in v for v in res["variants"])
     assert {v["overshoot_seuil_bps"] for v in res["variants"]} == set(SEUILS_OVERSHOOT_BPS)
+
+
+def test_sans_aucun_point_de_contexte_l_exploration_est_refusee_pas_jouee_a_vide(monkeypatch):
+    """Cas réel du 2026-11-11 : ruban de contexte vide, 256 replays complets pour rien à chaque passage."""
+    import pytest
+
+    from hl_observer.backtesting import copy_vault_overshoot_train as module
+
+    appels = []
+    monkeypatch.setattr(module, "explore_overshoot_filtered_train", lambda *a, **k: appels.append(a) or {"ok": True})
+    for vide in (None, [], [{"coin": "BTC", "ts_ms": None, "mark": 1.0, "oracle": 1.0}]):
+        with pytest.raises(LookupError, match="NO_ASSET_CTX_POINTS"):
+            module.explorer_si_le_contexte_existe([], {}, vide)
+    assert appels == []
+    points = [{"coin": "BTC", "ts_ms": 1_000, "mark": 101.0, "oracle": 100.0}]
+    assert module.explorer_si_le_contexte_existe([], {}, points) == {"ok": True} and len(appels) == 1

@@ -648,7 +648,11 @@ def _verifier_magasin_ticks(root: Path, coffre: Path, budget_s: float, log) -> d
 
         resume = verifier_store_ticks.verifier_store(root, budget_s=budget_s)
     except Exception as exc:  # noqa: BLE001 - le coffre LOCAL ne doit pas dépendre de ce contrôle
-        _log(log, f"   [ticks] verification du magasin de ticks impossible : {type(exc).__name__}: {exc}")
+        if type(exc).__name__ == "VerificationEnCours":
+            _log(log, "   [ticks] une autre verification du magasin de ticks est deja en cours : "
+                      "rien n'est modifie, son index fera foi.")
+        else:
+            _log(log, f"   [ticks] verification du magasin de ticks impossible : {type(exc).__name__}: {exc}")
         return None
     if not resume.get("present"):
         return resume

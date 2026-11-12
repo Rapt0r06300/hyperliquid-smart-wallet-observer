@@ -55,7 +55,7 @@ def test_le_gain_suit_le_leader_moins_les_couts_et_les_frictions_ne_rapportent_j
     nets = decomposition["net_usd_per_day"]
     assert nets["sans_friction"] > 0
     ordre = ["sans_friction", "avec_delai", "avec_frais_et_ecart", "avec_funding", "complet_ordre_minimal_et_bande"]
-    assert all(nets[a] >= nets[b] - 1e-9 for a, b in zip(ordre, ordre[1:]))        # chaque friction coûte ou ne change rien
+    assert all(nets[a] >= nets[b] - 1e-9 for a, b in zip(ordre, ordre[1:], strict=False))        # chaque friction coûte ou ne change rien
     assert decomposition["cost_usd_per_day"]["avec_frais_et_ecart"] > 0
     assert decomposition["full"]["mean_gross_exposure"] < 0.6                       # même levier que le leader, pas plus
     # doubler les frais ne peut jamais augmenter le résultat
@@ -150,3 +150,67 @@ def test_entrees_vides_non_mesurable_et_deterministe():
     portefeuille = _portefeuille({"BTC": 10.0}, 1_000.0, 30)
     assert R.run_replication(portefeuille, panel, ECARTS) == R.run_replication(portefeuille, panel, ECARTS)
     assert R.ReplicationConfig().capital_usd == 350.0 and R.ReplicationConfig().taker_fee_bps == TAKER_PERP_BPS
+
+
+# ------------------------------------------------------------------ portefeuille entier : un état par dex
+
+def _snap(compte, t, positions, nav, dex=None):
+    ligne = {"vault": compte, "ts_ms": int(t), "nav_usd": nav,
+             "positions": [{"coin": c, "szi": s} for c, s in positions.items()]}
+    if dex:
+        ligne["dex"] = dex
+    return ligne
+
+
+def test_le_portefeuille_entier_reunit_le_dex_principal_et_les_dex_hip3():
+    minute = 60_000
+    snaps = [
+        _snap("0xA", T0, {"BTC": 1.0}, 1_000.0),                              # avant tout suivi du dex xyz
+        _snap("0xA", T0 + 5 * minute, {"BTC": 1.0}, 1_000.0),
+        _snap("0xA", T0 + 6 * minute, {"xyz:XYZ100": -3.0}, 400.0, dex="xyz"),
+        _snap("0xA", T0 + 10 * minute, {"BTC": 2.0}, 1_100.0),
+        _snap("0xA", T0 + 11 * minute, {"xyz:XYZ100": -3.0}, 410.0, dex="xyz"),
+        _snap("0xA", T0 + 40 * minute, {"BTC": 2.0}, 1_100.0),                # le dex xyz est muet depuis 29 min
+        _snap("0xB", T0, {"ETH": 5.0}, 500.0),                                # compte suivi sur le seul dex principal
+        _snap("0xC", T0, {"xyz:NVDA": 1.0}, 50.0, dex="xyz"),                 # dex principal jamais observé
+        {"vault": "0xA", "ts_ms": T0 + 12 * minute, "positions": [{"coin": "BTC", "szi": "abc"}]},
+    ]
+    portefeuilles, rejets = R.portefeuilles_depuis_instantanes(snaps)
+    assert set(portefeuilles) == {"0xa", "0xb"}
+    a = {t - T0: (nav, tailles) for t, nav, tailles in portefeuilles["0xa"]}
+    assert a[0] == (1_000.0, {"BTC": 1.0}) and a[5 * minute] == (1_000.0, {"BTC": 1.0})        # ancien régime
+    assert a[6 * minute] == (1_400.0, {"BTC": 1.0, "xyz:XYZ100": -3.0})                       # réunion, valeurs sommées
+    assert a[10 * minute] == (1_500.0, {"BTC": 2.0, "xyz:XYZ100": -3.0})
+    assert a[11 * minute] == (1_510.0, {"BTC": 2.0, "xyz:XYZ100": -3.0})
+    assert 40 * minute not in a                                  # incomplet : jamais complété par un état périmé
+    assert rejets == {"position_illisible": 1, "portefeuille_incomplet_dex_muet": 1, "compte_sans_dex_principal": 1}
+    assert portefeuilles["0xb"] == [(T0, 500.0, {"ETH": 5.0})]
+    # l'ordre d'arrivée des instantanés ne change rien
+    assert R.portefeuilles_depuis_instantanes(list(reversed(snaps)))[0] == portefeuilles
+
+
+def test_un_dex_qui_entre_dans_le_suivi_ne_fabrique_aucune_ouverture():
+    """Les positions HIP-3 révélées au premier relevé du dex existaient déjà : aucun événement n'en sort."""
+    from hl_observer.backtesting import copy_vault_copiability as cop
+
+    minute = 60_000
+    snaps = [
+        _snap("0xA", T0, {"BTC": 1.0}, 1_000.0),
+        _snap("0xA", T0 + 5 * minute, {"BTC": 2.0}, 1_000.0),                     # vraie décision : +1 BTC
+        _snap("0xA", T0 + 6 * minute, {"xyz:XYZ100": -3.0}, 400.0, dex="xyz"),    # le dex xyz entre dans le suivi
+        _snap("0xA", T0 + 10 * minute, {"BTC": 2.0}, 1_000.0),
+        _snap("0xA", T0 + 11 * minute, {"xyz:XYZ100": -5.0}, 400.0, dex="xyz"),   # vraie décision : -2 XYZ100
+    ]
+    complets, _ = R.instantanes_complets(snaps)
+    assert [(x["ts_ms"] - T0) // minute for x in complets] == [0, 5, 6, 10, 11]
+    assert [x["perimetre_change"] for x in complets] == [False, False, True, False, False]
+    evenements, _vus, rejets = cop.position_events_from_snapshots(complets)
+    decisions = [(row.coin, int((row.time - T0) // minute), row.start_pos, row.after) for row in evenements.itertuples()]
+    assert decisions == [("BTC", 0, 0.0, 1.0), ("BTC", 5, 1.0, 2.0), ("xyz:XYZ100", 11, -3.0, -5.0)]
+    assert rejets["perimetre_change_sans_evenement"] == 1
+    # sans la marque (ancien comportement), la position révélée aurait été prise pour une ouverture
+    naifs = [{**x, "perimetre_change": False} for x in complets]
+    assert len(cop.position_events_from_snapshots(naifs)[0]) == 4
+    # un compte suivi sur le seul dex principal n'a aucun changement de périmètre
+    seuls, _ = R.instantanes_complets([_snap("0xB", T0, {"ETH": 1.0}, 10.0), _snap("0xB", T0 + minute, {}, 10.0)])
+    assert [x["perimetre_change"] for x in seuls] == [False, False]

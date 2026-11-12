@@ -131,3 +131,98 @@ def test_fusionner_bbo_dedup(tmp_path):
     assert rap["total_final"] == 2  # 2 instants distincts
     cible = root / "runtime" / "data" / "copy_vault_bbo_tape.jsonl"
     assert cible.exists() and len(cible.read_text().splitlines()) == 2
+
+
+def test_chaque_carnet_porte_l_identite_de_sa_connexion_et_l_epoque_de_son_marche(tmp_path):
+    """Cas réel du 2026-11-12 : 1,2 million de carnets collectés sans identité, aucun trade exécutable."""
+    import asyncio
+
+    lane = L.LaneL2(tmp_path / "l2.jsonl", tmp_path / "bbo.jsonl")
+
+    async def scenario():
+        for i in range(2):
+            frame = _frame("kPEPE", exch=NOW - 1_000 + i)
+            await lane.ecrire_bbo(L.construire_bbo(frame, recv_ms=NOW)[0], "cx-1")
+            await lane.ecrire(L.construire_carnet(frame, recv_ms=NOW)[0], "cx-1")
+        lane.incident(["kPEPE"])                                   # trame rejetée pour ce marché
+        await lane.ecrire(L.construire_carnet(_frame("kPEPE", exch=NOW - 500), recv_ms=NOW)[0], "cx-1")
+        lane.incident(["kPEPE", "ETH"])                            # déconnexion : tous les marchés du socket
+        await lane.ecrire(L.construire_carnet(_frame("kPEPE", exch=NOW - 400), recv_ms=NOW)[0], "cx-2")
+        await lane.ecrire(L.construire_carnet(_frame("ETH", exch=NOW - 400), recv_ms=NOW)[0], "cx-2")
+        await lane.ecrire(L.construire_carnet(_frame("SOL", exch=NOW - 400), recv_ms=NOW)[0])   # ancien appel
+
+    asyncio.run(scenario())
+    l2 = [json.loads(x) for x in (tmp_path / "l2.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(r["coin"], r.get("connection_id"), r.get("l2_gap_epoch")) for r in l2] == [
+        ("kPEPE", "cx-1", 0), ("kPEPE", "cx-1", 0), ("kPEPE", "cx-1", 1), ("kPEPE", "cx-2", 2), ("ETH", "cx-2", 1),
+        ("SOL", None, None)]
+    bbo = [json.loads(x) for x in (tmp_path / "bbo.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(r["connection_id"], r["l2_gap_epoch"]) for r in bbo] == [("cx-1", 0), ("cx-1", 0)]
+    # un marché calme (aucune trame pendant plus de GAP_L2_MS) reste un diagnostic, pas un changement d'époque
+    assert lane.epoque == {"KPEPE": 2, "ETH": 1}
+
+
+def test_un_trade_n_est_executable_que_sur_des_carnets_de_la_meme_connexion(tmp_path):
+    """Bout en bout : collecteur -> certificateur -> ruban -> chargeur du labo -> moteur d'exécution."""
+    import asyncio
+
+    from hl_observer.backtesting import copy_vault_executable as cv
+    from hl_observer.datasets.coffre_certifie import certifier_book
+
+    t0 = NOW + 600_000                                             # dix minutes après l'heure pile (funding)
+    instants = (t0, t0 + 62_000, t0 + 363_000)                     # référence, entrée (+60 s), sortie (+300 s)
+    entree = {"event_id": "e1", "ts_ms": t0 + 1_000, "coin": "ETH", "direction": 1, "action": "ADD",
+              "dir": "Open Long", "vault": "0xA", "taille_usd": 100.0, "move_frac": 0.01, "source": "LIVE_WS",
+              "is_snapshot": False, "observed_at_ms": t0 + 1_025, "received_at_ms": t0 + 1_025}
+    metaordre = cv.cluster_metaorders([entree])[0][0]
+
+    def rejouer(identites):
+        racine = tmp_path / ("cas_%d" % len(list(tmp_path.iterdir())))
+        ruban = racine / "runtime" / "data" / "copy_vault_l2_tape.jsonl"
+        lane = L.LaneL2(ruban, racine / "bbo.jsonl")
+
+        async def ecrire():
+            for instant, (connexion, epoque) in zip(instants, identites, strict=True):
+                lane.epoque["ETH"] = epoque
+                row, raison = L.construire_carnet(_frame("ETH", exch=instant), recv_ms=instant + 50)
+                assert raison == ""
+                certifie, _decision, _motif = certifier_book(row, source="HYPERLIQUID_L2_WS", now_ms=instant + 50)
+                await lane.ecrire(certifie, connexion)
+
+        asyncio.run(ecrire())
+        carnets, _audit = cv.load_observed_books(racine, coins={"ETH"})
+        return cv.execute_metaorder(metaordre, carnets.get("ETH", []), horizon_ms=300_000, require_causal_books=True)
+
+    trade, raison = rejouer([("cx", 0)] * 3)
+    assert raison == "LIQUIDATABLE_NET" and trade is not None and trade["book_binding_method"] == "CONTINUOUS_CAUSAL_BOOK"
+    assert rejouer([(None, 0)] * 3) == (None, "L2_CONNECTION_IDENTITY_INCOMPLETE")       # l'ancien collecteur
+    assert rejouer([("cx", 0), ("cx", 0), ("autre", 0)]) == (None, "L2_CONNECTION_GAP_CROSSED")
+    assert rejouer([("cx", 0), ("cx", 0), ("cx", 1)]) == (None, "L2_GAP_EPOCH_CROSSED")
+
+
+def test_un_carnet_bbo_de_lane_garde_son_identite_jusqu_au_moteur(tmp_path):
+    """Le repli BBO du labo perdait l'identité de connexion : aucun trade ne pouvait s'exécuter dessus."""
+    import asyncio
+
+    from hl_observer.backtesting import copy_vault_executable as cv
+    from hl_observer.datasets.coffre_certifie import certifier_bbo
+
+    t0 = NOW + 600_000
+    lane = L.LaneL2(tmp_path / "l2.jsonl", tmp_path / "runtime" / "data" / "copy_vault_bbo_tape.jsonl")
+
+    async def ecrire():
+        for instant in (t0, t0 + 62_000, t0 + 363_000):
+            bbo, raison = L.construire_bbo(_frame("ETH", exch=instant), recv_ms=instant + 50)
+            assert raison == ""
+            certifie, _decision, _motif = certifier_bbo(bbo, source="HYPERLIQUID_BBO_WS", now_ms=instant + 50)
+            await lane.ecrire_bbo(certifie, "cx-bbo")
+
+    asyncio.run(ecrire())
+    carnets, _audit = cv.load_observed_books(tmp_path, coins={"ETH"})
+    assert [(r["connection_id"], r["l2_gap_epoch"]) for r in carnets["ETH"]] == [("cx-bbo", 0)] * 3
+    entree = {"event_id": "e1", "ts_ms": t0 + 1_000, "coin": "ETH", "direction": 1, "action": "ADD",
+              "dir": "Open Long", "vault": "0xA", "taille_usd": 100.0, "move_frac": 0.01, "source": "LIVE_WS",
+              "is_snapshot": False, "observed_at_ms": t0 + 1_025, "received_at_ms": t0 + 1_025}
+    metaordre = cv.cluster_metaorders([entree])[0][0]
+    _trade, raison = cv.execute_metaorder(metaordre, carnets["ETH"], horizon_ms=300_000, require_causal_books=True)
+    assert raison not in {"L2_CONNECTION_IDENTITY_INCOMPLETE", "L2_GAP_EPOCH_IDENTITY_INCOMPLETE"}

@@ -69,6 +69,13 @@ def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
         ("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000"),
         ("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000"),
         ("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000"),
+        # 2026-11-12 : le bloc exigeant un carnet FRAIS s'execute si la garde de profondeur OU la
+        # garde de microstructure AUTORITAIRE est active. Les fixtures ne seminent pas toujours de
+        # carnet L2 : la simulation refusait donc toutes les entrees (le code avait RAISON). Ces
+        # gardes ont leurs tests dedies ; on les neutralise ici pour que le sujet du test soit
+        # reellement exerce.
+        ("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", "0"),
+        ("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", "0"),
     ):
         monkeypatch.setenv(var, val)
 
@@ -958,6 +965,13 @@ def test_status_marks_existing_paper_position_with_latest_hyperliquid_snapshot(t
     assert payload["mark_diagnostics"]["graph_should_move"] is True
     assert payload["mark_diagnostics"]["marks_used"] == 1
     assert payload["mark_diagnostics"]["positions"][0]["reason"] == "OK_REAL_MARK"
+    # 2026-11-12 : CE TEST A RAISON, NE PAS L'ADAPTER (j'avais d'abord remonte la valeur a 0.7588 :
+    # c'etait une erreur, ca masquait le defaut). Mesure : gross 1.0 - sortie 0.2412 = 0.7588, donc
+    # le cout d'ENTREE (0.02) n'est soustrait NULLE PART -- ni en cash realise (realized_pnl = 0.0),
+    # ni dans le MTM. En supprimant la DOUBLE soustraction des frais d'entree, le durcissement du
+    # jour a supprime la SEULE soustraction de ce chemin, et `pnl_accounting_status` annonce pourtant
+    # STRICT_ROUND_TRIP_COSTS_KNOWN. Un PnL paper surevalue des frais d'entree est le mensonge que ce
+    # projet interdit : a corriger dans le code, pas ici. Valeur juste = 1.0 - 0.2412 - 0.02.
     assert payload["positions"][0]["unrealized_pnl_usdc"] == 0.7388
     assert payload["equity_usdt"] == 1000.7388
     assert payload["net_pnl_usdt"] == 0.7388

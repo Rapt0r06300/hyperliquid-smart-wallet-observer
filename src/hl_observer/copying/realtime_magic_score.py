@@ -95,6 +95,7 @@ class RealtimeCopyScore:
     adverse_price_move_bps: float
     simulated_notional_usdt: float
     warnings: list[str] = field(default_factory=list)
+    modeled_execution_cost_bps: float = 0.0
 
     @property
     def accepted(self) -> bool:
@@ -252,6 +253,7 @@ def score_realtime_copy_candidate(
         + crowding_penalty_bps
         + cfg.funding_penalty_bps
     )
+    modeled_execution_cost_bps = delay_cost_bps + spread_bps_used + slippage_bps_used + cfg.fee_bps
     if spread_bps_used > 20:
         reasons.append("SPREAD_TOO_WIDE")
     if slippage_bps_used > 25:
@@ -382,6 +384,7 @@ def score_realtime_copy_candidate(
         adverse_price_move_bps=round(adverse_price_move_bps, 6),
         simulated_notional_usdt=round(simulated_notional, 6),
         warnings=warnings,
+        modeled_execution_cost_bps=round(modeled_execution_cost_bps, 6),
     )
 
 

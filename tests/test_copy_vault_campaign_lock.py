@@ -69,11 +69,13 @@ def _campaign_inputs(workspace: Path, repository_root: Path) -> None:
 def _install_campaign_stubs(
     monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> None:
-    # Replay split requires >=10 causally aligned signals on each eligible day.
-    # Exercise the campaign lock only after representative preflight succeeds.
+    # Ten signals per day: the lab only splits TRAIN/VALIDATION/OOS over days that carry at least
+    # MIN_SIGNALS_PER_DAY evaluable signals (dense-day rule), so a sparser fixture exits before
+    # the campaign work these lock tests need to reach.
     signal_times = [
-        (10 + day) * 86_400_000 + 60_000 + slot * 1_000
-        for day in range(12) for slot in range(10)
+        (10 + day) * 86_400_000 + 60_000 * (slot + 1)
+        for day in range(12)
+        for slot in range(10)
     ]
     metaorders = [
         {"signal_ts_ms": timestamp, "action": "ADD", "coin": "BTC"}
@@ -95,6 +97,9 @@ def _install_campaign_stubs(
     set_attr(lab, "_campaign_engine_source_sha256", lambda _pipeline: "d" * 64)
     set_attr(lab.cv, "cluster_metaorders", lambda _entries: (metaorders, {}))
     set_attr(lab.cv, "load_observed_books", lambda *_args, **_kwargs: (books, {}))
+    # Ces carnets factices ne sont pas exécutables : la sonde d'exécutabilité (testée dans
+    # test_copy_vault_train_executability) arrêterait la campagne avant le verrou étudié ici.
+    set_attr(lab, "sonder_train", lambda *_args, **_kwargs: {"executable": True, "raison": None})
     set_attr(lab, "evaluate_frozen_v21_segment", lambda *_args, **_kwargs: {
         "eligible": False,
         "reasons": ["temporary lock fixture"],

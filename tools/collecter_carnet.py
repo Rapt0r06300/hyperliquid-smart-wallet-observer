@@ -24,6 +24,7 @@ from hl_observer.collection import collecte_fiable as CF  # noqa: E402
 from hl_observer.config.cross_venue_instruments import (  # noqa: E402
     MAPPING_SCHEMA_VERSION,
     binance_perp_symbol,
+    hl_native_symbol,
     mapping_record,
 )
 from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
@@ -177,15 +178,18 @@ _HEADERS_HL = {"Content-Type": "application/json", "User-Agent": "alina-smart-fl
 
 def _post_hl(coin: str, *, timeout_s: float = 8.0, tentatives: int = 3) -> Any:
     """l2Book HL avec retry des blips réseau + respect de Retry-After sur 429. UA poli."""
-    body = json.dumps({"type": "l2Book", "coin": coin}).encode("utf-8")
+    body = json.dumps({"type": "l2Book", "coin": hl_native_symbol(coin) or coin}).encode("utf-8")   # casse native
     derniere: Exception | None = None
     for essai in range(1, max(1, tentatives) + 1):
+        CF.reserver_poids(CF.POIDS_REQUETE_INFO)     # budget de débit PARTAGÉ entre collecteurs (fail-open)
         request = urllib.request.Request(URL_HL, data=body, headers=_HEADERS_HL)
         try:
             with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             derniere = exc
+            if exc.code == 429:
+                CF.signaler_refus_de_debit()               # les rattrapages cèdent la place
             if exc.code == 429 and essai < tentatives:
                 try:
                     ra = float(exc.headers.get("Retry-After") or 0) if exc.headers else 0.0
@@ -226,7 +230,7 @@ def une_passe(root: Path, coins: list[str], *, limiteur: CF.Limiteur | None = No
     limiteur = limiteur if limiteur is not None else CF.Limiteur(0.15); raw_rows: list[dict] = []
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="cross-venue-readonly") as pool:
         for coin in coins:
-            limiteur.attente(); symbol = binance_perp_symbol(coin)
+            CF.prendre_la_pause(limiteur); symbol = binance_perp_symbol(coin)
             if symbol is None:
                 continue
             hl_future = pool.submit(_fetch_with_receive_timestamp, post_hl, coin)

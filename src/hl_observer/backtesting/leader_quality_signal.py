@@ -105,9 +105,60 @@ def copie_leader_faible(
     return prior < float(seuil_usd)
 
 
+
+# ----------------------------------------------------------------------------------------------------
+# C86 — AGRESSIVITE DU LEADER : un fill PASSIF ne porte presque pas d'information
+# ----------------------------------------------------------------------------------------------------
+# La part de notionnel execute en TAKER (`taker_notional_share`) etait deja CALCULEE par
+# `copy_vault_copiability_mesures` et simplement recopiee plus loin — jamais utilisee pour DECIDER.
+# C'est le travers que ce projet traque (« MENTION != PORTE »). Voici le filtre qui en fait un critere.
+
+#: Filtre inactif par defaut : -1 est sous toute part possible, donc aucun leader n'est ecarte.
+SEUIL_PART_AGRESSIVE_OFF = -1.0
+
+
+def part_agressive_par_leader(lignes: Any) -> dict[str, float | None]:
+    """``{leader: part du notionnel execute en TAKER}`` depuis les lignes de mesure de copiabilite.
+
+    Lit `taker_notional_share` (notionnel `crossed == 1` / notionnel total), deja produit par
+    `copy_vault_copiability_mesures`. ``None`` signifie part INCONNUE — jamais 0, car « on ne sait
+    pas » et « il n'etait jamais agressif » sont deux choses tres differentes.
+    """
+    parts: dict[str, float | None] = {}
+    for ligne in lignes or ():
+        if not isinstance(ligne, Mapping):
+            continue
+        nom = ligne.get("unit") or ligne.get("vault")
+        if not nom:
+            continue
+        parts[str(nom)] = _fini(ligne.get("taker_notional_share"))
+    return parts
+
+
+def copie_leader_trop_passif(parts: Mapping[str, float | None], vault: Any, *, seuil: float) -> bool:
+    """``True`` si la part AGRESSIVE du leader est ``< seuil`` -> NE PAS copier.
+
+    POURQUOI. Un fill PASSIF du leader n'exprime aucune urgence : il a ete rempli parce que le marche
+    est venu le chercher, pas parce que le leader voulait entrer MAINTENANT. Il ne porte donc presque
+    pas d'information directionnelle, et le copier paye le spread et les frais sans acheter de derive
+    (mesure du projet : 67 % des fills sont passifs et valent ~0 avant frais). Ce filtre ecarte les
+    leaders dont le flux est majoritairement passif.
+
+    ``False`` quand la part est inconnue (fail-open, exactement comme ``copie_leader_faible`` : on ne
+    bloque jamais sur une absence d'information).
+    """
+    part = parts.get(str(vault)) if vault is not None else None
+    if part is None:
+        return False
+    return part < float(seuil)
+
+
 __all__ = [
     "SEUIL_LEADER_OFF_USD",
     "build_leader_quality_index",
     "leader_prior_pnl_at",
     "copie_leader_faible",
+    "SEUIL_PART_AGRESSIVE_OFF",
+    "part_agressive_par_leader",
+    "copie_leader_trop_passif",
 ]

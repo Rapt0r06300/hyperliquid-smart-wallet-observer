@@ -268,3 +268,28 @@ def test_poll_causal_fill_keeps_dedup_identity_fields() -> None:
     row = causal[0]
     for field in ("time", "tid", "coin", "px", "sz"):
         assert field in row
+
+
+def test_token_bucket_charge_le_poids_reel_des_grosses_reponses() -> None:
+    """Une page pleine coûte six requêtes à l'API : le rattrapage d'un retard doit ralentir d'autant."""
+    import pytest
+
+    clock = {"t": 0.0}
+    sleeps: list[float] = []
+
+    def now() -> float:
+        return clock["t"]
+
+    def sleep(s: float) -> None:
+        sleeps.append(s)
+        clock["t"] += s
+
+    tb = TokenBucket(rate_per_s=0.5, burst=1.0, now=now, sleep=sleep)       # 30 requêtes par minute
+    assert tb.take() == 0.0
+    tb.charge(0)
+    tb.charge(15)                                                            # petite réponse : coût négligeable
+    assert tb.take() == pytest.approx(2.0 + 15 / 400 / 0.5)                  # une requête + 15 lignes
+    tb.charge(2_000)                                                         # page pleine : 100 unités = 5 requêtes
+    assert tb.take() == pytest.approx((1.0 + 5.0) / 0.5)                     # 12 s au lieu de 2 s
+    tb.charge(-7)                                                            # jamais de crédit
+    assert tb.take() == pytest.approx(2.0)

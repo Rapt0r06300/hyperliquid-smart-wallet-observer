@@ -8,11 +8,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from hl_observer.collection.forward_poll_fills import is_causal_live_source
+from hl_observer.collection.forward_poll_fills import CADENCE_ARCHIVE, cadence_plan, is_causal_live_source
+
+#: plan publié par l'étude de copiabilité : classe de chaque adresse suivie (voir ``cadence_plan``)
+PLAN_DE_COLLECTE = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
 
 
 #: familles du coffre LOCAL qui alimentent les fills de replay.
@@ -23,6 +28,14 @@ _COFFRE_FAMILLES_FILLS = {"fills_forward", "fills_backfill", "snapshot"}
 _COFFRE_FAMILLES_SIGNAUX = {
     "liquidation", "overshoot", "asset_ctx", "allmids",
     "venue_book", "venue_dispersion", "trades_marche", "candle", "position",
+    # 2026-11-12 : flux AUPARAVANT collectés + certifiés mais JAMAIS chargés par le labo (gâchés).
+    # Branchés comme signaux de contexte : disponibles à la recherche exploratoire (comptés sans coût
+    # mémoire dans le labo principal via garder_signaux=False). Chacun a une valeur propre :
+    "leader_orders",       # ordres EN ATTENTE des leaders -> intention, anticipation (copy_vault_order_intent)
+    "funding_history",     # funding horaire LOCAL (plus de coins que le SAFE) -> coût de portage
+    "vault_ledger",        # dépôts/retraits LOCAUX -> NAV as-of, détection de retrait
+    "vault_portfolio",     # portefeuille complet des leaders (dex réunis) -> réplication par position
+    "micro_bbo", "micro_l2", "micro_trades",   # microstructure fine -> OFI, lead-lag, horloges séparées
 }
 
 
@@ -56,8 +69,53 @@ def _cotation_collecteur_vers_labo(row: Mapping[str, Any]) -> dict[str, Any] | N
     }
 
 
+#: Champs d'un fill dont la valeur se répète d'une ligne à l'autre (adresse du leader, marché, source,
+#: sens...). ``json`` crée une chaîne NEUVE à chaque ligne : sur des millions de fills, les mêmes
+#: quelques centaines de valeurs occupaient des gigaoctets. On les partage ; les valeurs sont inchangées.
+_CHAMPS_REPETES = (
+    "vault", "coin", "source", "source_id", "observation_transport", "reconciliation_status", "dir", "dir_raw",
+    "side", "side_raw", "fill_side", "tier", "feeToken", "fee_token", "groupe", "quality_status", "data_origin",
+    "schema_version", "source_dataset_id", "source_shard_sha256", "position_direction_before",
+    "position_direction_after",
+)
+
+
+#: Adresse du leader lue dans la ligne BRUTE : un fill écarté ne doit même pas être décodé. Décodé puis
+#: jeté, il laisse sa mémoire entremêlée à celle des lignes gardées, et le système ne la récupère jamais
+#: (mesuré : 5 millions de fills écartés, mémoire inchangée à 20 Go).
+_VAULT_DANS_LA_LIGNE = re.compile(r'"vault":\s*"(0x[0-9a-fA-F]{40})"')
+_HORODATAGE_DANS_LA_LIGNE = re.compile(r'"(?:snapshot_)?ts_ms":\s*(?!null|\s)')   # horodatage présent et non nul
+
+
+def _partager_les_chaines(row: dict[str, Any]) -> None:
+    for champ in _CHAMPS_REPETES:
+        valeur = row.get(champ)
+        if type(valeur) is str:
+            row[champ] = sys.intern(valeur)
+
+
+def adresses_archivees(repository_root: Path) -> set[str] | None:
+    """Adresses que le plan du labo classe ``ARCHIVE`` : robots à haute fréquence non copiables et
+    clones d'un opérateur déjà suivi. ``None`` si le plan est absent ou illisible (rien n'est écarté
+    sur la foi d'un classement qui n'existe pas).
+
+    C'est la MÊME classe que celle qui ralentit leur collecte : leurs fills restent au coffre et
+    nourrissent l'étude de copiabilité (c'est elle qui les classe), mais ils ne sont pas rejoués par
+    la recherche principale. Un robot produit des millions de fills par jour ; les rejouer ne
+    mesurait rien de copiable et saturait la mémoire (cas réel du 2026-11-11 : 8,5 millions de
+    fills, 21 Go, passage jamais terminé)."""
+    try:
+        plan = json.loads((repository_root / PLAN_DE_COLLECTE).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    classes = cadence_plan(plan)
+    if not classes:
+        return None
+    return {adresse for adresse, classe in classes.items() if classe == CADENCE_ARCHIVE}
+
+
 def _charger_tier_local(
-    repository_root: Path, *, progress: Callable[[str], None] | None = None,
+    repository_root: Path, *, progress: Callable[[str], None] | None = None, garder_signaux: bool = True,
 ) -> dict[str, Any]:
     """Charge le tier LOCAL du coffre-fort (certifie) EN MEMOIRE pour la recherche.
 
@@ -66,6 +124,10 @@ def _charger_tier_local(
     (``_fills`` / ``_books`` / ``_bbo``), chacune etiquetee ``provenance_tier=LOCAL`` et
     SANS ``quality=SAFE`` : elles nourrissent la recherche EXPLORATOIRE (signaux causaux)
     mais NE PEUVENT JAMAIS etre « prouvees » economiquement (la preuve exige SAFE).
+
+    ``garder_signaux=False`` : les signaux de contexte (prix, OI, cross-venue...) sont COMPTES par
+    famille sans etre gardes en memoire. Le labo principal ne lit que leur decompte ; les garder
+    occupait plusieurs gigaoctets pour rien.
     """
     import gzip as _gzip
 
@@ -73,7 +135,8 @@ def _charger_tier_local(
             "fills_causaux": 0, "fills_backfill": 0, "carnets": 0, "bbo": 0,
             "bbo_adaptees": 0, "bbo_denses_non_retenues": 0,
             "signaux_par_famille": {}, "signaux_total": 0,
-            "shards_injectes": 0, "shards_rejetes": 0}
+            "shards_injectes": 0, "shards_rejetes": 0,
+            "fills_archive_non_rejoues": 0, "adresses_archive": None}
     index_path = repository_root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
     if index_path.is_symlink() or not index_path.is_file():
         return vide
@@ -94,6 +157,9 @@ def _charger_tier_local(
     _bbo_secondes: set[tuple[str, int]] = set()
     bbo_adaptees = 0
     bbo_denses_non_retenues = 0
+    archivees = adresses_archivees(repository_root)
+    fills_archive = 0
+    signaux_comptes: dict[str, int] = {}
     shards_ok = 0
     shards_rejetes = 0
     for entree in shards:
@@ -131,6 +197,15 @@ def _charger_tier_local(
                     ligne = ligne.strip()
                     if not ligne:
                         continue
+                    if archivees and famille in _COFFRE_FAMILLES_FILLS:
+                        trouve = _VAULT_DANS_LA_LIGNE.search(ligne)
+                        if trouve is not None and trouve.group(1).lower() in archivees:
+                            fills_archive += 1          # robot HFT ou clone : compté, jamais décodé
+                            continue
+                    if est_signal and not garder_signaux:
+                        if _HORODATAGE_DANS_LA_LIGNE.search(ligne) is not None:
+                            signaux_comptes[famille] = signaux_comptes.get(famille, 0) + 1
+                        continue
                     try:
                         row = json.loads(ligne)
                     except (ValueError, TypeError):
@@ -140,7 +215,11 @@ def _charger_tier_local(
                     row["provenance_tier"] = "LOCAL"
                     if famille in _COFFRE_FAMILLES_FILLS:
                         if isinstance(row.get("ts_ms"), int) and row.get("vault") and row.get("coin"):
-                            _fills.append(row)
+                            if archivees and str(row["vault"]).lower() in archivees:
+                                fills_archive += 1      # (écriture inhabituelle de l'adresse dans la ligne)
+                            else:
+                                _partager_les_chaines(row)
+                                _fills.append(row)
                     elif famille == "book_l2":
                         if (isinstance(row.get("received_at_ms"), int)
                                 and isinstance(row.get("exchange_ts_ms"), int)
@@ -167,6 +246,7 @@ def _charger_tier_local(
                         # un horodatage (ts_ms ou snapshot_ts_ms) est mis à disposition.
                         if row.get("ts_ms") is not None or row.get("snapshot_ts_ms") is not None:
                             _signaux.setdefault(famille, []).append(row)
+                            signaux_comptes[famille] = signaux_comptes.get(famille, 0) + 1
         except OSError:
             shards_rejetes += 1
             continue
@@ -180,10 +260,15 @@ def _charger_tier_local(
     )
     return {
         "statut": "OK", "shards_injectes": shards_ok, "shards_rejetes": shards_rejetes,
-        "_fills": _fills, "_books": _books, "_bbo": _bbo, "_signaux": _signaux,
+        "_fills": _fills, "_books": _books, "_bbo": _bbo,
+        # familles présentes même quand les lignes ne sont pas gardées (le labo en publie la liste)
+        "_signaux": {famille: _signaux.get(famille, []) for famille in signaux_comptes},
         "fills_causaux": fills_causaux, "fills_backfill": len(_fills) - fills_causaux,
         "carnets": len(_books), "bbo": len(_bbo),
         "bbo_adaptees": bbo_adaptees, "bbo_denses_non_retenues": bbo_denses_non_retenues,
-        "signaux_par_famille": {f: len(r) for f, r in sorted(_signaux.items())},
-        "signaux_total": sum(len(r) for r in _signaux.values()),
+        "signaux_par_famille": dict(sorted(signaux_comptes.items())),
+        "signaux_total": sum(signaux_comptes.values()),
+        # fills des adresses classées ARCHIVE par le plan du labo : au coffre, mais non rejoués
+        "fills_archive_non_rejoues": fills_archive,
+        "adresses_archive": None if archivees is None else len(archivees),
     }

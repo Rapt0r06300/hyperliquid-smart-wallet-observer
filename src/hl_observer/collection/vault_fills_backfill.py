@@ -305,6 +305,13 @@ def parser_fills_with_audit(
             "tid": f.get("tid"),
             "oid": f.get("oid"),
             "hash": f.get("hash"),
+            # Ce que l'API dit du fill et qu'on ne peut pas reconstituer : agressif (il paie l'écart) ou
+            # passif, frais payés, PnL réalisé. Sans ``crossed``, des mois d'historique ne permettaient pas
+            # de séparer une décision agressive d'une cotation passive (cas réel : 208 000 fills).
+            "crossed": f.get("crossed") if isinstance(f.get("crossed"), bool) else None,
+            "fee": f.get("fee"),
+            "fee_token": f.get("feeToken"),
+            "closedPnl": f.get("closedPnl"),
         }
         if include_raw:
             parsed["raw_fill"] = dict(f)

@@ -12,15 +12,17 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
+import sceller_coffre_local as scl  # noqa: E402
+
 from hl_observer.backtesting import copy_vault_persistence as P  # noqa: E402
 from hl_observer.collection import vault_portfolio_history as H  # noqa: E402
 from hl_observer.datasets import coffre_certifie as C  # noqa: E402
-import sceller_coffre_local as scl  # noqa: E402
 
 DAY = 86_400_000
 T0 = 1_780_000_000_000 // DAY * DAY          # minuit UTC
@@ -103,12 +105,12 @@ def test_reponse_reelle_le_pnl_de_chaque_fenetre_est_recale_sur_la_base_cumulee(
         assert [p[0] for p in bloc["points"]] == [p[0] for p in brut[nom]["accountValueHistory"]]
         assert [p[1] for p in bloc["points"]] == [float(p[1]) for p in brut[nom]["accountValueHistory"]]
     lignes, _ = H.construire_lignes(reel["vaultAddress"], reel, observed_at_ms=fenetres["allTime"]["points"][-1][0])
-    assert {l["fenetre"] for l in lignes} == {"day", "week", "month", "allTime"}
-    assert all(l["is_closed"] is False and l["leader_commission"] == 0.1 for l in lignes)
+    assert {ligne["fenetre"] for ligne in lignes} == {"day", "week", "month", "allTime"}
+    assert all(ligne["is_closed"] is False and ligne["leader_commission"] == 0.1 for ligne in lignes)
     courbe = H.fusionner_points(lignes)[reel["vaultAddress"]]
     pnls = [p for _, _, p in courbe if p is not None]
     # courbe fusionnée cohérente : plus aucun saut de la taille du PnL cumulé entre deux points voisins
-    sauts = [abs(b - a) for a, b in zip(pnls, pnls[1:])]
+    sauts = [abs(b - a) for a, b in zip(pnls, pnls[1:], strict=False)]
     assert max(sauts[-100:]) < 0.5 * abs(cumul_final)
 
 
@@ -387,3 +389,104 @@ def test_la_limite_d_univers_dit_ce_que_les_donnees_contiennent():
     assert "survivants" in P._limite_univers(69, None) and "survivants" in P._limite_univers(69, 0)
     texte = P._limite_univers(2333, 1859)
     assert "2333" in texte and "1859 fermés" in texte and "survivants" not in texte
+
+
+# ------------------------------------------------------------------ note robuste, égalités, ordre du tableau
+
+def _fenetre(moyennes, ecarts, colonnes=8):
+    """Fenêtre de formation dont chaque ligne a EXACTEMENT la moyenne et l'écart-type demandés."""
+    z = np.linspace(-1.0, 1.0, colonnes)
+    z = (z - z.mean()) / z.std(ddof=1)
+    return np.asarray(moyennes)[:, None] + np.asarray(ecarts)[:, None] * z[None, :]
+
+
+def test_la_note_bayesienne_ne_degenere_plus_quand_quelques_vaults_tres_volatils_dominent_le_bruit():
+    """Défaut réel du 2026-11-11 : variance entre vaults < bruit moyen -> toutes les notes égales
+    (57 dates sur 86), donc un « meilleur quantile » choisi par l'ordre des adresses."""
+    rng = np.random.default_rng(3)
+    moyennes = rng.normal(0.002, 0.004, 40)
+    ecarts = np.full(40, 0.01)
+    ecarts[:3] = 5.0                                              # trois vaults au bruit énorme
+    fenetre = _fenetre(moyennes, ecarts)
+    bruit = ecarts ** 2 / 8
+    assert np.var(moyennes, ddof=1) < bruit.mean()               # l'ancien estimateur valait 0 ici
+    notes = P.score_formation(fenetre, "moyenne_bayes")
+    assert not np.isnan(notes).any() and np.unique(notes).size == 40      # un vrai classement
+    # les vaults précis gardent leur ordre ; les trois vaults bruités sont ramenés vers le centre
+    precis = np.arange(3, 40)
+    assert (np.argsort(notes[precis]) == np.argsort(moyennes[precis])).all()
+    assert np.abs(notes[:3] - np.median(notes)).max() < np.abs(moyennes[precis] - np.median(notes)).max()
+
+
+def test_sans_dispersion_detectable_la_note_est_la_limite_de_la_formule_pas_une_egalite_generale():
+    moyennes = np.array([0.0010, 0.0011, 0.0009, 0.0012, 0.0008, 0.0010, 0.00105, 0.00095, 0.00115, 0.0009])
+    ecarts = np.array([0.02, 0.05, 0.03, 0.08, 0.02, 0.04, 0.06, 0.03, 0.05, 0.07])
+    notes = P.score_formation(_fenetre(moyennes, ecarts), "moyenne_bayes")
+    bruit = ecarts ** 2 / 8
+    centre = float((moyennes / bruit).sum() / (1.0 / bruit).sum())
+    attendu = (moyennes - centre) / bruit                        # écart au centre pondéré par la précision
+    assert np.unique(notes).size == notes.size
+    assert (np.argsort(notes) == np.argsort(attendu)).all()
+
+
+def test_un_vault_inactif_n_est_pas_note_quelle_que_soit_la_note():
+    fenetre = _fenetre([0.001, 0.0, 0.002, -0.001], [0.01, 0.0, 0.02, 0.015])
+    for score in P.SCORES:
+        notes = P.score_formation(fenetre, score)
+        assert np.isnan(notes[1]) and not np.isnan(notes[[0, 2, 3]]).any(), score
+    with pytest.raises(ValueError):
+        P.score_formation(fenetre, "inconnue")
+
+
+def test_des_notes_egales_ne_sont_jamais_departagees_par_l_ordre_du_tableau():
+    config = P.PersistenceConfig(min_vaults_per_date=5, top_fraction=0.4)
+    rendements = np.array([[0.05], [-0.01], [0.02], [0.00], [-0.03]])
+    # notes toutes égales : le « meilleur quantile » vaut l'univers, la date est signalée dégénérée
+    plates = P.evaluer_notes(rendements, {0: np.full(5, 1.0)}, config=config)[0]
+    assert plates["note_degeneree"] and np.isnan(plates["ic"])
+    assert plates["tete"] == pytest.approx(plates["univers"]) == pytest.approx(plates["queue"])
+    resume = P.summarize([plates], period_days=7, niveau=0.95, config=config)
+    assert resume["dates_note_degeneree"] == 1 and resume["dates_ic_indefini"] == 1
+    assert resume["exces_tete_bps_jour"] == pytest.approx(0.0)
+    # égalité au seuil : 2 places, 1 vault strictement devant, 3 ex æquo se partagent la place restante
+    notes = np.array([3.0, 2.0, 2.0, 2.0, 1.0])
+    partiel = P.evaluer_notes(rendements, {0: notes}, config=config)[0]
+    assert partiel["tete"] == pytest.approx((0.05 + np.mean([-0.01, 0.02, 0.00])) / 2)
+    assert partiel["queue"] == pytest.approx((-0.03 + np.mean([-0.01, 0.02, 0.00])) / 2)
+    assert not partiel["note_degeneree"]
+    # métamorphique : permuter les vaults ne change rien
+    ordre = np.array([4, 2, 0, 3, 1])
+    permute = P.evaluer_notes(rendements[ordre], {0: notes[ordre]}, config=config)[0]
+    for cle in ("tete", "queue", "univers", "ic"):
+        assert permute[cle] == pytest.approx(partiel[cle]), cle
+    # coût : même pondération, et un coût inconnu chez un retenu rend le net inconnu
+    couts = np.array([0.001, 0.002, 0.002, 0.002, 0.0])
+    net = P.evaluer_notes(rendements, {0: notes}, config=config, cout_par_periode=couts)[0]
+    assert net["tete_nette"] == pytest.approx(partiel["tete"] - (0.001 + 0.002) / 2)
+    couts[2] = np.nan
+    assert P.evaluer_notes(rendements, {0: notes}, config=config, cout_par_periode=couts)[0]["tete_nette"] is None
+
+
+def test_renommer_les_vaults_ne_change_aucun_resultat():
+    """Métamorphique : l'ordre des adresses n'est pas une information. Avec la note v1, renommer les
+    vaults changeait le « meilleur quantile » des dates dégénérées."""
+    courbes, _ = _courbes(n_vaults=40, jours=300, competence_bps=5.0, seed=5)
+    # quelques vaults au bruit énorme (cas réel) et un vault inactif
+    rng = np.random.default_rng(9)
+    for i, vault in enumerate(sorted(courbes)[:4]):
+        valeur, pnl, points = 100_000.0, 0.0, []
+        for j in range(301):
+            points.append((T0 + j * DAY, valeur, pnl))
+            gain = 0.0 if i == 3 else valeur * rng.normal(0.0, 0.25)
+            valeur, pnl = max(20_000.0, valeur + gain), pnl + gain
+        courbes[vault] = points
+    renommees = {f"0x{(2 ** 80 - int(vault, 16)):040x}": points for vault, points in courbes.items()}
+    assert sorted(renommees) != sorted(courbes)
+    for score in P.SCORES:
+        config = P.PersistenceConfig(bootstrap_samples=50, permutation_samples=50, period_days=(7,),
+                                     formation_periods=(8,), scores=(score,))
+        a = P.run_persistence_study(courbes, config=config)["primary"]
+        b = P.run_persistence_study(renommees, config=config)["primary"]
+        assert a["dates"] == b["dates"] > 20 and a["dates_note_degeneree"] == 0, score
+        for cle in ("ic_moyen", "exces_tete_bps_jour", "tete_bps_jour", "univers_bps_jour", "ecart_tete_queue_bps_jour"):
+            assert a[cle] == pytest.approx(b[cle], abs=1e-9), (score, cle)

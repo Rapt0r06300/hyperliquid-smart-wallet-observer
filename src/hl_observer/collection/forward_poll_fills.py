@@ -373,6 +373,18 @@ class TokenBucket:
         self._tokens = max(0.0, self._tokens - 1.0)
         return waited
 
+    def charge(self, lignes_recues: int) -> None:
+        """Débite le poids RÉEL d'une réponse : l'API facture 20 unités par requête PLUS 1 par 20 lignes.
+
+        Une page pleine (2 000 fills) coûte donc 120 unités, six fois une requête ordinaire. Sans ce
+        débit, le rattrapage d'un retard (redémarrage après un arrêt) dépassait la limite de l'adresse
+        IP à nombre de requêtes égal, et tous les collecteurs recevaient des refus (mesuré le
+        2026-11-11 : 19 412 fills rattrapés en une passe). Le solde peut devenir négatif : les
+        requêtes suivantes attendent d'autant.
+        """
+        self._refill()
+        self._tokens -= max(0, int(lignes_recues)) / 20.0 / 20.0       # 20 lignes = 1 unité ; 20 unités = 1 requête
+
 
 def prioritize_leaders(
     leaders: Sequence[str], retained: Sequence[str] | None,

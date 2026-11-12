@@ -16,7 +16,6 @@ jamais abonnés). Lecture seule : endpoint public ``/info``, aucun ordre, aucune
 from __future__ import annotations
 
 import json
-import logging
 import time
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 URL_INFO = "https://api.hyperliquid.xyz/info"
 CACHE_DEFAUT = Path("runtime") / "data" / "hl_univers_perps.json"
@@ -109,7 +109,8 @@ def charger_univers(
                 ensure_ascii=False), encoding="utf-8")
             temporaire.replace(chemin)
         except OSError as exc:
-            logging.getLogger(__name__).warning("HL_UNIVERSE_CACHE_WRITE_FAILED: %s", exc)
+            # cache non écrit : l'univers vient d'être lu, il reste utilisable ; la panne est comptée
+            _noter_echec("collection/univers_perps.py:ecriture_du_cache", exc)
         return {nom for noms in par_dex.values() for nom in noms}
     if ancien is not None:
         return {nom for noms in ancien["par_dex"].values() for nom in noms}

@@ -21,6 +21,13 @@ BINANCE_PERP_EXCEPTIONS: dict[str, str | None] = {
     "HYPE": None,
 }
 
+#: Marchés Hyperliquid cotés par milliers d'unités (« kPEPE ») : leur contrat Binance est le « 1000… ».
+#: Liste EXPLICITE, lue dans l'univers Hyperliquid le 2026-11-11. L'ancienne règle « commence par K »
+#: prenait KAS et KAITO pour des « k-tokens » et fabriquait un contrat Binance qui n'existe pas
+#: (« 1000ASUSDT »), refusé à chaque passe du collecteur de carnets. Un marché absent d'ici n'est
+#: jamais multiplié : au pire il n'est pas apparié (refus), jamais apparié de travers.
+HL_KILO_COINS: frozenset[str] = frozenset({"KBONK", "KFLOKI", "KLUNC", "KNEIRO", "KPEPE", "KSHIB"})
+
 MAPPING_SCHEMA_VERSION = "cross_venue_instrument_mapping_v2"
 ATOMIC_BBO_SOURCE_MODE = "CERTIFIED_ATOMIC_FOUR_SIDE_BBO_V1"
 
@@ -38,9 +45,17 @@ def binance_perp_symbol(coin_hl: object) -> str | None:
         return None
     if coin in BINANCE_PERP_EXCEPTIONS:
         return BINANCE_PERP_EXCEPTIONS[coin]
-    if coin.startswith("K") and len(coin) > 1 and coin[1:].isalpha():
+    if coin in HL_KILO_COINS:
         return "1000" + coin[1:] + "USDT"
     return coin + "USDT"
+
+
+def hl_native_symbol(coin_hl: object) -> str | None:
+    """Nom à envoyer à Hyperliquid, sensible à la casse : « kPEPE », jamais « KPEPE » (requête refusée)."""
+    coin = normalize_hl_coin(coin_hl)
+    if coin is None:
+        return None
+    return "k" + coin[1:] if coin in HL_KILO_COINS else coin
 
 
 def mapping_record(coin_hl: object, binance_symbol: object | None = None) -> dict[str, object]:
@@ -73,8 +88,10 @@ def mapping_is_exact(row: Mapping[str, object]) -> bool:
 __all__ = [
     "ATOMIC_BBO_SOURCE_MODE",
     "BINANCE_PERP_EXCEPTIONS",
+    "HL_KILO_COINS",
     "MAPPING_SCHEMA_VERSION",
     "binance_perp_symbol",
+    "hl_native_symbol",
     "mapping_is_exact",
     "mapping_record",
     "normalize_hl_coin",

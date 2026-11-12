@@ -376,9 +376,13 @@ def position_events_from_snapshots(
     un coin, observée à l'instant de l'instantané), les instants d'observation par vault, et le
     décompte des instantanés écartés. Un coin absent d'un instantané est une position nulle
     (le portefeuille est complet) ; avant le premier instantané d'un vault rien n'est connu.
+
+    Un instantané marqué ``perimetre_change`` (un dex du compte vient d'entrer dans le suivi) sert de
+    nouveau point de départ : les positions qu'il révèle existaient déjà, AUCUN changement n'en est déduit.
     """
 
     per_vault: dict[str, dict[int, dict[str, float]]] = {}
+    amorces: dict[str, set[int]] = {}
     rejects: dict[str, int] = {}
     for snap in snapshots:
         vault = str(snap.get("vault") or "").lower()
@@ -408,6 +412,8 @@ def position_events_from_snapshots(
             rejects["doublon_instant"] = rejects.get("doublon_instant", 0) + 1
             continue
         per_vault[vault][ts] = book
+        if snap.get("perimetre_change"):
+            amorces.setdefault(vault, set()).add(ts)
     rows: list[tuple[Any, ...]] = []
     seen: dict[str, np.ndarray] = {}
     for vault in sorted(per_vault):
@@ -416,6 +422,10 @@ def position_events_from_snapshots(
         previous: dict[str, float] = {}
         for ts in times:
             book = per_vault[vault][ts]
+            if ts in amorces.get(vault, ()):
+                rejects["perimetre_change_sans_evenement"] = rejects.get("perimetre_change_sans_evenement", 0) + 1
+                previous = book
+                continue
             for coin in sorted(set(previous) | set(book)):
                 before, after = previous.get(coin, 0.0), book.get(coin, 0.0)
                 if after != before:

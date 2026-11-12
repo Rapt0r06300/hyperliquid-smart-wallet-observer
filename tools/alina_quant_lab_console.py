@@ -9,6 +9,7 @@ import importlib.util
 import json
 import math
 import os
+import pickle
 import re
 import shutil
 import sqlite3
@@ -304,6 +305,63 @@ def _pytest_counts(output: str) -> dict[str, int]:
         if match:
             counts[key] = int(match.group(1))
     return counts
+
+
+#: Outil de l'étape 1, à côté de cette console (indépendant de ``ROOT``, que les tests déplacent).
+_OUTIL_MATERIALISER = Path(__file__).resolve().with_name("labo_materialiser_safe.py")
+
+
+def _materialiser_safe(
+    materialiser: Any, recovery: Path, workspace: Path, *, progress: Any = None,
+) -> dict[str, Any]:
+    """Étape 1 (vérification SAFE + espace de travail) dans un PROCESSUS FILS, mémoire rendue ensuite.
+
+    Faite ici même, cette étape laissait 10 Go de tas fragmenté que le système ne récupérait jamais :
+    la recherche occupait 16 Go au lieu de 5 et la reconstruction des cycles prenait quatre fois plus
+    longtemps que dans un processus neuf (mesuré le 2026-11-12). Le fils
+    (``tools/labo_materialiser_safe.py``) rend exactement le même dictionnaire et relaie sa progression.
+
+    Repli dans le processus courant : fonction remplacée par une doublure (tests) ou
+    ``ALINA_QUANT_MATERIALISER_ICI=1``.
+    """
+    if (
+        os.environ.get("ALINA_QUANT_MATERIALISER_ICI") == "1"
+        or getattr(materialiser, "__module__", "") != "hl_observer.backtesting.copy_vault_local_lab"
+        or getattr(materialiser, "__name__", "") != "materialize_safe_workspace"
+    ):
+        return materialiser(recovery, workspace, progress=progress)
+    from tools.labo_materialiser_safe import PREFIXE_PROGRES
+
+    workspace = Path(workspace)
+    sortie = workspace.parent / (workspace.name + ".safe_inputs.pickle")
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    with suppress(OSError):
+        sortie.unlink()
+    fils = subprocess.Popen(  # noqa: S603 - outil local du dépôt, arguments construits ici
+        [sys.executable, "-B", str(_OUTIL_MATERIALISER), str(recovery), str(workspace), str(sortie)],
+        cwd=str(_OUTIL_MATERIALISER.parents[1]), stdout=subprocess.PIPE, text=True, encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"},
+    )
+    try:
+        assert fils.stdout is not None
+        for ligne in fils.stdout:
+            ligne = ligne.rstrip("\r\n")
+            if ligne.startswith(PREFIXE_PROGRES):
+                if progress is not None:
+                    progress(ligne[len(PREFIXE_PROGRES):])
+            elif ligne:
+                print(ligne, flush=True)
+        code = fils.wait()
+    finally:
+        _terminate_test_process_tree(fils)          # Ctrl+C ou erreur : le fils ne survit jamais au labo
+    try:
+        if code != 0 or not sortie.is_file():
+            raise RuntimeError(f"MATERIALISATION_SAFE_ECHOUEE: code de sortie {code}")
+        return pickle.loads(sortie.read_bytes())  # noqa: S301 - fichier écrit à l'instant par notre propre fils
+    finally:
+        with suppress(OSError):
+            sortie.unlink()
 
 
 def _pytest_parallel_args(test_file_count: int) -> list[str]:
@@ -728,6 +786,13 @@ def run_lab(*, preflight_only: bool = False) -> int:
 OBJECTIVE_USD_PER_DAY = 5.0  # dashboard placeholder; replaced from optional module on execution
 PAPER_CAPITAL_USD = 1000.0   # never a trading instruction
 REASON_LABELS = {
+    "TRAIN_NOT_EXECUTABLE": (
+        "aucun trade exécutable sur la période d'entraînement : la recherche n'a pas été lancée "
+        "(détail des carnets refusés ci-dessous)"
+    ),
+    "BOUNDED_TRAIN_SEARCH_BATCH_COMPLETE": (
+        "lot d'essais terminé ; aucune amélioration prouvée n'a été gelée"
+    ),
     "NO_SAFE_LIVE_FORWARD_FILLS": (
         "aucun fill live causal n'est présent dans les shards SAFE; les snapshots historiques ne prouvent pas le forward"
     ),
@@ -1181,10 +1246,19 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
                 f"<li><b>{display(_baro_nb(_hd))} / jour</b> "
                 f"<span class='muted'>· {html.escape(str(_hw if _hw is not None else '—'))}</span></li>"
             )
+        _hist_lisible = any(
+            isinstance(_h, Mapping) and _baro_nb(
+                _h.get("daily_net_pnl_usd") or _h.get("daily_mean_usd_per_active_day")
+                or _h.get("improvement_usd_per_day")) is not None
+            for _h in history[-8:]
+        )
         _baro_hist = (
             "<p class='sub'><b>Historique des améliorations gelées</b> — chaque palier est un gain "
             "prouvé qui a remplacé l'ancien sur le moteur :</p><ul class='hist'>"
             + "".join(_hist_li) + "</ul>"
+        ) if _hist_li and _hist_lisible else (
+            f"<p class='sub'><b>Historique :</b> {len(_hist_li)} palier(s) anciens enregistrés, dont le gain "
+            "n'est plus mesurable sur les données actuelles (réglages d'entraînement d'avant, jamais prouvés).</p>"
         ) if _hist_li else ""
     else:
         _baro_hist = ("<p class='sub'>Aucune amélioration gelée pour l'instant — ce sera le "
@@ -1192,6 +1266,54 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
     target = report_dir / "RAPPORT.html"
     live_active = live.get("active") is True
     verdict_oui = bool(proven)
+    # --- Pourquoi rien n'est mesurable : la sonde d'exécutabilité du segment TRAIN (jamais « à vide »).
+    _sonde = economic.get("train_executability")
+    _diagnostic_html = ""
+    if isinstance(_sonde, Mapping) and _sonde.get("executable") is False:
+        _explications = _sonde.get("explications") if isinstance(_sonde.get("explications"), Mapping) else {}
+        _refus = _sonde.get("refus_par_motif") if isinstance(_sonde.get("refus_par_motif"), Mapping) else {}
+        _lignes_refus = "".join(
+            f"<li><b>{int(_nombre):,}</b> × {html.escape(str(_explications.get(_motif, _motif)))}</li>"
+            for _motif, _nombre in _refus.items()
+            if isinstance(_nombre, int) and not isinstance(_nombre, bool)
+        )
+        # Carte de collecte : les coins avec le plus de signaux non exécutables = ce qu'il faut collecter.
+        _cibles = _sonde.get("coins_a_collecter") if isinstance(_sonde.get("coins_a_collecter"), list) else []
+        _lignes_cibles = "".join(
+            f"<li><code>{html.escape(str(_c.get('coin')))}</code> — <b>{int(_c.get('non_executables') or 0):,}</b> "
+            f"signaux sans carnet exploitable "
+            f"<span class='muted'>({html.escape(str((_explications.get(_c.get('motif_principal')) or _c.get('motif_principal')) or '—'))})</span></li>"
+            for _c in _cibles[:15] if isinstance(_c, Mapping) and _c.get("coin")
+        )
+        _html_cibles = (
+            "<p class='sub'><b>Coins à collecter en priorité</b> (le plus de signaux bloqués d'abord) — "
+            "c'est la carte que suit <code>tools/generer_coins_lanes.py</code> :</p>"
+            f"<ul>{_lignes_cibles}</ul>"
+        ) if _lignes_cibles else ""
+        _diagnostic_html = (
+            "<section class='verdict bad'>"
+            "<p class='big'>🚫 Aucun trade exécutable : la recherche n'a pas été lancée</p>"
+            f"<p>Sur les <b>{int(_sonde.get('signaux_train') or 0):,}</b> signaux de la période d'entraînement, "
+            "<b>aucun</b> ne peut être rejoué avec les règles d'exécution du moteur. Lancer des essais "
+            "n'aurait rien mesuré : ils auraient tous affiché « non mesurable ».</p>"
+            + (f"<p class='sub'><b>Carnets refusés, par motif :</b></p><ul>{_lignes_refus}</ul>" if _lignes_refus else "")
+            + _html_cibles
+            + "<p class='sub'><b>Ce qu'il faut :</b> laisser tourner les collecteurs corrigés le 12/11/2026 — "
+            "ils enregistrent maintenant l'identité de connexion et la capacité de chaque carnet. Les carnets "
+            "collectés avant cette date ne pourront jamais servir à exécuter un trade. Le labo redeviendra "
+            "mesurable après plusieurs jours de collecte continue.</p></section>"
+        )
+    # Le chiffre du réglage actuel n'est « prouvé » que s'il a été rejoué et validé ; sinon on le dit.
+    if current_daily is None and approximate_daily is not None:
+        _libelle_actuel = ("ancienne estimation d'entraînement, NON prouvée : le réglage gelé n'a pas pu "
+                           "être rejoué sur les données et le capital actuels")
+    elif current.get("economically_proven") is True:
+        _libelle_actuel = "ce que la meilleure stratégie prouvée rapporte aujourd'hui"
+    elif current_daily is not None:
+        _libelle_actuel = "mesuré sur les données actuelles, pas encore prouvé"
+    else:
+        _libelle_actuel = "non mesurable sur les données actuelles"
+    _essais_de_ce_passage = economic.get("trials_this_run")
     # --- Decomposition du LCB (pourquoi il est la ou il est, et la cible de donnees).
     def _num_or_none(value: Any) -> float | None:
         return (
@@ -1268,7 +1390,17 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         "<th style='text-align:right'>PnL/jour</th></tr></thead>"
         f"<tbody>{''.join(feed_rows)}</tbody></table>"
         if feed_rows else
-        "<h2>Activité en direct</h2><p class='sub'>En attente du premier essai…</p>"
+        "<h2>Activité en direct</h2><p class='sub'>"
+        + (
+            "Aucun essai lancé : aucun trade n'est exécutable sur la période d'entraînement (voir plus haut)."
+            if _diagnostic_html
+            else f"{int(_essais_de_ce_passage):,} essais terminés pendant ce passage ; aucun n'a produit de "
+                 "résultat mesurable."
+            if isinstance(_essais_de_ce_passage, int) and not isinstance(_essais_de_ce_passage, bool)
+            and _essais_de_ce_passage > 0 and not live_active
+            else "En attente du premier essai…"
+        )
+        + "</p>"
     )
 
     html_content = (
@@ -1376,6 +1508,7 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         "<p class='sub'><b>But :</b> gagner un peu plus à chaque jour, chaque backtest et chaque replay. "
         "Pas de cible figée — la barre monte à chaque amélioration réellement prouvée.</p>"
         f"<p class='sub'><b>Pourquoi ce verdict :</b> {html.escape(reason_display)}</p></section>"
+        + _diagnostic_html +
         # -- Baromètre d'amélioration (simple + détaillé) --
         "<section class='barometre'>"
         "<h2>📈 Est-ce qu'on va gagner plus ? (le baromètre)</h2>"
@@ -1384,7 +1517,7 @@ def _write_economic_html_report(report_dir: Path, summary: dict[str, Any]) -> Pa
         "<div class='baro-grid'>"
         "<div class='baro-box'><span class='baro-l'>💼 Copy-Vault ACTUEL (sur le moteur)</span>"
         f"<span class='baro-v'>{display(current_display_daily)}<small> $/jour</small></span>"
-        "<span class='muted'>ce que la meilleure stratégie prouvée rapporte aujourd'hui</span></div>"
+        f"<span class='muted'>{html.escape(_libelle_actuel)}</span></div>"
         "<div class='baro-box'><span class='baro-l'>🧪 MEILLEUR candidat (à l'essai)</span>"
         f"<span class='baro-v'>{display(candidate_daily)}<small> $/jour</small></span>"
         "<span class='muted'>la meilleure idée trouvée par le labo, pas encore prouvée</span></div>"
@@ -1695,8 +1828,8 @@ def _run_continuous_safe_lab(
         while True:
             update_summary(live={"stage": "VÉRIFICATION SAFE LOCALE", "message": "contrôle SHA-256 des shards CopyVault présents"})
             persist()
-            safe_inputs = materialize_safe_workspace(
-                recovery, workspace, progress=on_scan_progress,
+            safe_inputs = _materialiser_safe(
+                materialize_safe_workspace, recovery, workspace, progress=on_scan_progress,
             )
             update_summary(fields={
                 "safe_inputs": safe_inputs,
@@ -2005,8 +2138,8 @@ def run_economic_lab(
                 print(f"[SAFE] {message}", flush=True)
                 last_safe_progress = now_monotonic
 
-        safe_inputs = materialize_safe_workspace(
-            recovery, workspace,
+        safe_inputs = _materialiser_safe(
+            materialize_safe_workspace, recovery, workspace,
             progress=show_safe_progress if safe_research_mode else None,
         )
         print(

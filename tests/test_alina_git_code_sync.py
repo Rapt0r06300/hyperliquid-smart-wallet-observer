@@ -55,6 +55,7 @@ def test_terminate_process_tree_kills_descendant_process(tmp_path: Path) -> None
             ["tasklist", "/FI", f"PID eq {child_pid}"],
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
         ).stdout.find(str(child_pid)) == -1
         assert sync_module._remaining_process_ids(tmp_path, parent.pid) == []
@@ -673,7 +674,7 @@ def test_write_report_keeps_last_receipt_and_bounded_history(
 
 def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -> None:
     launcher = Path("POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13" in launcher
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-targeted-tree-progress-v14" in launcher
     assert r"tools\alina_git_code_sync.py" in launcher
     assert r"tools\sync_complete_clone.py" in launcher
     assert "ast.parse(" in launcher
@@ -805,8 +806,35 @@ def test_single_byte_source_change_is_committed_and_published(repos):
     assert receipt["local_commit_created"] is True
     assert receipt["publishable_paths_seen"] == 1
     assert receipt["commit_message"] == "chore(runtime): update base"
+    assert receipt["commit_backend"] == "COMMIT_TREE_TARGETED_OVERLAY_V1"
+    assert receipt["targeted_tree_paths"] == 1
+    assert not any(
+        command["operation"] == "Construire l'arbre Git depuis l'index courant"
+        for command in receipt["git_commands"]
+    )
     assert git(local, "show", "HEAD:src/base.py") == "base = 2"
     assert git(origin, "show", "main:src/base.py") == "base = 2"
+
+
+def test_targeted_tree_handles_nested_addition_and_deletion(repos):
+    local, _, origin = repos
+    (local / "src" / "base.py").unlink()
+    nested = local / "docs" / "guide" / "usage.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("usage\n", encoding="utf-8")
+    (local / "README.md").write_text("readme\n", encoding="utf-8")
+
+    rc, receipt = run_sync(local)
+
+    assert rc == 0
+    assert receipt["commit_backend"] == "COMMIT_TREE_TARGETED_OVERLAY_V1"
+    assert receipt["targeted_tree_paths"] == 3
+    assert git(origin, "show", "main:docs/guide/usage.md") == "usage"
+    assert git(origin, "show", "main:README.md") == "readme"
+    assert subprocess.run(
+        ["git", "cat-file", "-e", "main:src/base.py"], cwd=origin,
+        capture_output=True, check=False,
+    ).returncode != 0
 
 
 def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
@@ -1668,7 +1696,7 @@ def test_windows_launcher_uses_repository_tools_without_external_bootstrap() -> 
     assert "ALINA_LOCAL_ENGINE_SHA256=" not in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-01-safe-main-promotion-v13" in source
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-targeted-tree-progress-v14" in source
     assert "ast.parse(" in source
     assert ":missing_engine" in source and ":invalid_engine" in source
     assert "--shards-only" in source and "--all-safe" in source
@@ -1788,3 +1816,25 @@ def test_repeated_external_edits_are_ignored_and_stable_code_is_published(repos)
     assert task.report.get("ignored_live_edit_count", 0) >= 1
     assert git(origin, "rev-parse", "main") != before  # le code stable a ete pousse
     assert (local / "src/concurrent_4.py").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree contract")
+def test_terminate_process_tree_reports_success_in_utf8_mode() -> None:
+    """Regression (2026-11-11): with ``PYTHONUTF8=1`` the localized ``tasklist`` message could not be
+    decoded, the probe crashed, and a correctly killed process was reported as still alive."""
+    script = (
+        "import subprocess, sys; "
+        f"sys.path.insert(0, {str(Path(sync_module.__file__).resolve().parent)!r}); "
+        "import alina_git_code_sync as m; "
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "print(m._terminate_process_tree(p))"
+    )
+    done = subprocess.run(
+        [sys.executable, "-B", "-c", script],
+        capture_output=True,
+        env={**os.environ, "PYTHONUTF8": "1"},
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr.decode("utf-8", errors="replace")
+    assert done.stdout.decode("ascii", errors="replace").strip() == "(True, [])"

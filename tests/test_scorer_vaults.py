@@ -54,3 +54,39 @@ def test_construire_retient_le_bon_rejette_le_drawdown(tmp_path):
     piege_row = next(c for c in p["classement"] if c["vault"] == "0xPIEGE")
     assert piege_row["raison"] == "DRAWDOWN_EXCESSIF"
     assert SV.ecrire(tmp_path, p) == p["n_retenus"] and (tmp_path / SV.SORTIE).exists()
+
+
+def test_l_historique_survit_a_l_archivage_des_sessions(tmp_path):
+    """Cas réel du 2026-11-11 : après certification + archivage, le score voyait 0 vault et ne retenait rien."""
+    import datetime
+
+    maintenant = datetime.datetime(2026, 11, 12, 2, 0, 0)
+    now = maintenant.timestamp()
+
+    def session(quand, snaps, carnet=None):
+        dossier = tmp_path / "runtime" / "archive" / ("session_" + quand.strftime("%Y%m%d_%H%M%S"))
+        dossier.mkdir(parents=True, exist_ok=True)
+        (dossier / "vault_snapshots.jsonl").write_text("\n".join(json.dumps(x) for x in snaps), encoding="utf-8")
+        if carnet is not None:
+            (dossier / "carnet_venues.jsonl").write_text("\n".join(json.dumps(x) for x in carnet), encoding="utf-8")
+
+    def snap(i, nav):
+        return {"vault": "0xBON", "ts_ms": 1000 * i, "nav_usd": nav, "drawdown_pct": 5.0,
+                "positions": [{"coin": "HYPE", "szi": 1.0, "entryPx": 50.0}]}
+
+    session(maintenant - datetime.timedelta(days=40), [snap(0, 1)])                    # trop ancienne : ignorée
+    session(maintenant - datetime.timedelta(days=2), [snap(1, 100_000), snap(2, 101_000)], carnet=[{"coin": "OLD"}])
+    session(maintenant - datetime.timedelta(hours=3), [snap(2, 101_000), snap(3, 102_000)], carnet=[{"coin": "HYPE"}])
+    (tmp_path / "runtime" / "archive" / "session_illisible").mkdir()
+    _ecrire(tmp_path, [snap(4, 103_000)], provenance=[{"address": "0xBON", "age_j": 300, "tvl_usd": 3_000_000}],
+            carnet=[])
+    serie = SV._snaps_par_vault(tmp_path, now=now)["0xBON"]
+    assert [x["ts_ms"] for x in serie] == [1000, 2000, 3000, 4000]                      # ordre, sans doublon ni vieille session
+    assert SV._rubans(tmp_path, "vault_snapshots.jsonl", now=now)[-1] == tmp_path / SV.SNAP
+    assert "HYPE" in SV.coins_executables(tmp_path, now=now)                           # carnet vide en cours : celui d'avant sert
+    assert "OLD" in SV.coins_executables(tmp_path, now=now) and "OLD" not in SV.coins_executables(
+        tmp_path, now=now + 3 * 86_400)                                                # au-delà de 2 jours : oublié
+    # session en cours VIDE (juste après l'archivage) : le vault reste noté sur son historique
+    (tmp_path / SV.SNAP).write_text("", encoding="utf-8")
+    serie = SV._snaps_par_vault(tmp_path, now=now)["0xBON"]
+    assert [x["ts_ms"] for x in serie] == [1000, 2000, 3000]

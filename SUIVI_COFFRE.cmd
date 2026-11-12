@@ -18,7 +18,19 @@ if not defined SC_PYTHON (
     set "SC_PY_ARGS=-3"
   )
 )
-if not defined SC_PYTHON set "SC_PYTHON=python"
+if not defined SC_PYTHON (
+  where python >nul 2>nul
+  if not errorlevel 1 set "SC_PYTHON=python"
+)
+set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
+set "ALINA_LAUNCH_MODE=status-monitor"
+set "ALINA_LAUNCH_PYTHON=%SC_PYTHON% %SC_PY_ARGS%"
+if not defined SC_PYTHON (
+  set "ALINA_LAUNCH_PYTHON=unresolved"
+  call "%~dp0tools\launcher_log.cmd" "SUIVI_COFFRE" EXIT preflight "python-3-not-found" "30"
+  echo [NO_GO] Python 3 introuvable. Le suivi n'a pas ete lance.
+  endlocal & exit /b 30
+)
 
 echo.
 echo ================================================================
@@ -29,5 +41,9 @@ echo   q = quitter (lecture seule).
 echo ================================================================
 echo.
 
+call "%~dp0tools\launcher_log.cmd" "SUIVI_COFFRE" START monitor "read-only-status-loop" ""
 "%SC_PYTHON%" %SC_PY_ARGS% "%~dp0tools\suivi_coffre.py" --intervalle 1
-endlocal & exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "SUIVI_COFFRE" RESULT monitor "read-only-status-loop" "%RC%"
+call "%~dp0tools\launcher_log.cmd" "SUIVI_COFFRE" EXIT completion "monitor-stopped" "%RC%"
+endlocal & exit /b %RC%

@@ -62,9 +62,9 @@ OVERSIZE_HISTORICAL_CEILINGS = {
     "simulation/economic_proof_controls.py": 841,
     "simulation/economic_collection_plan.py": 805,
     "backtesting/train_statistics.py": 869,
-    "backtesting/copy_vault_executable.py": 1316,
-    "backtesting/copy_vault_v21_frozen.py": 1519,
-    "backtesting/copy_vault_local_lab.py": 5011,   # 2026-11-11 : chargeur LOCAL extrait (copy_vault_tier_local.py)
+    "backtesting/copy_vault_executable.py": 1304,   # 2026-11-11 : carnets indexés (copy_vault_book_index.py)
+    "backtesting/copy_vault_v21_frozen.py": 1516,
+    "backtesting/copy_vault_local_lab.py": 5009,   # 2026-11-11 : chargeur LOCAL extrait ; rubans écrits en flux
     "backtesting/lead_lag_multiasset_train.py": 929,
     "realtime/feed_quality.py": 886,
     "collection/native_venue_coordinator.py": 866,

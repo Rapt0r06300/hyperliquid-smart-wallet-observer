@@ -283,6 +283,9 @@ def test_ui_simulation_overview_detects_multi_wallet_consensus(tmp_path, monkeyp
     # This test targets consensus detection. Adaptive sizing and portfolio caps
     # have dedicated coverage and would otherwise reject the small UI fixture.
     monkeypatch.setenv("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0")
+    # Gardes profondeur/microstructure : testees ailleurs, neutralisees ici (voir 2026-11-12).
+    monkeypatch.setenv("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", "0")
+    monkeypatch.setenv("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", "0")
     monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000")
     monkeypatch.setenv("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000")
     monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000")

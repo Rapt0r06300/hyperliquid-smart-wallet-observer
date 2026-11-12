@@ -23,6 +23,11 @@ def test_simulation_overview_writes_logs_to_send_folder(tmp_path: Path, monkeypa
     monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000")
     monkeypatch.setenv("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000")
     monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000")
+    # 2026-11-12 : le sujet de ce test est l'ECRITURE DES LOGS, pas les gardes d'entree.
+    # Les gardes profondeur/microstructure (durcies ce jour) refusaient toutes les entrees,
+    # donc le resume ne contenait plus aucune ligne a verifier. Elles ont leurs tests dedies.
+    monkeypatch.setenv("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", "0")
+    monkeypatch.setenv("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", "0")
     monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000")
     monkeypatch.setenv("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0")
     settings = load_settings()

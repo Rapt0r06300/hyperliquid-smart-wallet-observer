@@ -33,7 +33,13 @@ from typing import Any
 import numpy as np
 from scipy.stats import rankdata
 
-SCHEMA_VERSION = "hypersmart.copy_vault_persistence.v1"
+# v2 (2026-11-11) : la note bayésienne v1 dégénérait (toutes les notes égales) dès que la variance
+# entre vaults passait sous le bruit moyen — 57 dates sur 86 dans l'analyse primaire réelle. Le
+# « meilleur quantile » était alors les premiers vaults du tableau (ordre des adresses) et l'IC de
+# la date disparaissait sans trace. v2 : estimateur à effets aléatoires pondéré par la précision,
+# égalités départagées en espérance, vaults inactifs hors univers, dates dégénérées comptées.
+SCHEMA_VERSION = "hypersmart.copy_vault_persistence.v2"
+SEUIL_ACTIVITE = 1e-12        # écart-type des rendements en deçà duquel un vault n'a rien fait
 H_PERSISTENCE = "copy_vault_leader_skill_persistence"
 EVIDENCE_TIER = "LOCAL_RETROSPECTIVE_PORTFOLIO_CURVES"
 DAY_MS = 86_400_000
@@ -176,23 +182,60 @@ def return_matrix(
 # --------------------------------------------------------------------------- notes (passé seulement)
 
 def score_formation(fenetre: np.ndarray, score: str) -> np.ndarray:
-    """Note de chaque vault sur sa fenêtre de formation (lignes = vaults, colonnes = périodes passées)."""
+    """Note de chaque vault sur sa fenêtre de formation (lignes = vaults, colonnes = périodes passées).
+
+    Un vault sans aucune variation sur toute la fenêtre (inactif) n'a rien à copier : il n'est pas
+    noté (``NaN``), quelle que soit la note. La règle n'utilise que le passé.
+    """
+    if score not in SCORES:
+        raise ValueError(f"score inconnu : {score}")
     moyenne = fenetre.mean(axis=1)
-    if score == "moyenne":
-        return moyenne
     ecart = fenetre.std(axis=1, ddof=1) if fenetre.shape[1] > 1 else np.full(fenetre.shape[0], np.nan)
+    actif = ecart > SEUIL_ACTIVITE
+    if score == "moyenne":
+        return np.where(actif, moyenne, np.nan)
     if score == "sharpe":
-        return np.where(ecart > 0, moyenne / np.where(ecart > 0, ecart, 1.0), np.nan)
-    if score == "moyenne_bayes":
-        # Bayes empirique : chaque moyenne est ramenée vers la moyenne de l'univers d'autant plus
-        # fortement que son estimation est bruitée (peu de périodes, forte volatilité).
-        bruit = ecart ** 2 / fenetre.shape[1]
-        centre = float(np.nanmean(moyenne))
-        signal = max(0.0, float(np.nanvar(moyenne, ddof=1)) - float(np.nanmean(bruit))) if moyenne.size > 1 else 0.0
-        total = signal + bruit
-        poids = np.divide(signal, total, out=np.zeros_like(total), where=total > 0)
-        return centre + poids * (moyenne - centre)
-    raise ValueError(f"score inconnu : {score}")
+        return np.where(actif, moyenne / np.where(actif, ecart, 1.0), np.nan)
+    return _moyenne_bayes(moyenne, ecart ** 2 / fenetre.shape[1], actif)
+
+
+def _moyenne_bayes(moyenne: np.ndarray, bruit: np.ndarray, actif: np.ndarray) -> np.ndarray:
+    """Bayes empirique à effets aléatoires (DerSimonian–Laird) : chaque moyenne est ramenée vers le
+    centre de l'univers d'autant plus fortement que son estimation est bruitée.
+
+    La dispersion vraie entre vaults est estimée avec des poids de précision : quelques vaults très
+    volatils ne peuvent plus l'annuler à eux seuls. Si elle reste indétectable, la note est la
+    LIMITE de la formule quand cette dispersion tend vers zéro (écart au centre pondéré par la
+    précision) : le classement reste défini, jamais une égalité générale.
+    """
+    notes = np.full(moyenne.shape, np.nan)
+    if int(actif.sum()) < 2:
+        return notes
+    m, b = moyenne[actif], bruit[actif]
+    w = 1.0 / b
+    centre_fixe = float((w * m).sum() / w.sum())
+    q = float((w * (m - centre_fixe) ** 2).sum())
+    denominateur = float(w.sum() - (w ** 2).sum() / w.sum())
+    dispersion = max(0.0, (q - (m.size - 1)) / denominateur) if denominateur > 0 else 0.0
+    if dispersion > 0:
+        w_etoile = 1.0 / (b + dispersion)
+        centre = float((w_etoile * m).sum() / w_etoile.sum())
+        poids = dispersion / (dispersion + b)
+    else:
+        centre, poids = centre_fixe, b.min() / b
+    notes[actif] = centre + poids * (m - centre)
+    return notes
+
+
+def _poids_quantile(notes: np.ndarray, taille: int) -> np.ndarray:
+    """Poids de sélection du meilleur quantile (somme = ``taille``). Des notes égales au seuil se
+    partagent les places restantes : c'est l'espérance d'un départage au hasard. L'ordre du tableau
+    (l'ordre des adresses) ne décide jamais de qui est retenu."""
+    seuil = np.sort(notes)[-taille]
+    dessus, egal = notes > seuil, notes == seuil
+    poids = dessus.astype(float)
+    poids[egal] = (taille - int(dessus.sum())) / int(egal.sum())
+    return poids
 
 
 def _spearman(a: np.ndarray, b: np.ndarray) -> float:
@@ -224,11 +267,12 @@ def evaluer_notes(
             continue
         n, r = notes[mesurables], suivants[mesurables]
         taille = max(1, int(round(config.top_fraction * n.size)))
-        ordre = np.argsort(-n, kind="stable")
-        tete, queue = ordre[:taille], ordre[-taille:]
+        tete, queue = _poids_quantile(n, taille), _poids_quantile(-n, taille)
         ligne: dict[str, Any] = {
             "t": t, "n": int(n.size), "ic": _spearman(n, r),
-            "tete": float(r[tete].mean()), "univers": float(r.mean()), "queue": float(r[queue].mean()),
+            "tete": float((tete * r).sum() / taille), "univers": float(r.mean()),
+            "queue": float((queue * r).sum() / taille),
+            "note_degeneree": bool(np.ptp(n) == 0),          # la note ne départage personne à cette date
             # vaults notés dont le rendement suivant est introuvable (arrêt, trou de données) :
             # une attrition élevée signale un biais de survie possible sur la période.
             "attrition": float(1.0 - mesurables.sum() / max(1, selectionnables.sum())),
@@ -236,8 +280,10 @@ def evaluer_notes(
         }
         if cout_par_periode is not None:
             couts = cout_par_periode[mesurables]
+            retenus = tete > 0
             ligne["tete_nette"] = (
-                float((r[tete] - couts[tete]).mean()) if not np.isnan(couts[tete]).any() else None
+                float((tete[retenus] * (r[retenus] - couts[retenus])).sum() / taille)
+                if not np.isnan(couts[retenus]).any() else None
             )
             connus = ~np.isnan(couts)
             ligne["univers_net"] = float((r[connus] - couts[connus]).mean()) if connus.any() else None
@@ -283,6 +329,7 @@ def summarize(lignes: list[dict[str, Any]], *, period_days: int, niveau: float,
     if not lignes:
         return {"dates": 0}
     ic = np.array([ligne["ic"] for ligne in lignes], dtype=float)
+    ic_indefinis = int(np.isnan(ic).sum())
     ic = ic[~np.isnan(ic)]
     exces = np.array([ligne["tete"] - ligne["univers"] for ligne in lignes], dtype=float)
     ecart = np.array([ligne["tete"] - ligne["queue"] for ligne in lignes], dtype=float)
@@ -300,6 +347,9 @@ def summarize(lignes: list[dict[str, Any]], *, period_days: int, niveau: float,
     bps_jour = 1e4 / period_days
     sortie: dict[str, Any] = {
         "dates": len(lignes),
+        # dates où l'IC n'existe pas (notes ou rendements tous égaux) : comptées, jamais passées sous silence
+        "dates_ic_indefini": ic_indefinis,
+        "dates_note_degeneree": int(sum(1 for ligne in lignes if ligne.get("note_degeneree"))),
         "vaults_median_par_date": float(np.median([ligne["n"] for ligne in lignes])),
         "attrition_moyenne": float(np.mean([ligne["attrition"] for ligne in lignes])),
         "ic_moyen": float(ic.mean()) if ic.size else None,
@@ -438,6 +488,8 @@ def run_persistence_study(
             "Coût = rotation observée du leader × coût par notionnel : borne haute pour un copieur lent ; "
             "la rotation est mesurée à l'observation, pas période par période.",
             "Historique relu après coup (tier LOCAL) : exploratoire, jamais une preuve économique.",
+            "Un vault sans aucune variation de PnL sur la fenêtre de formation est hors univers à cette date "
+            "(rien à copier) ; « copier tout le monde » désigne donc les vaults actifs.",
         ],
         "paper_read_only": True,
         "real_execution": False,

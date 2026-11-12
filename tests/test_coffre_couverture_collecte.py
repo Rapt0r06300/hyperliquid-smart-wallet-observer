@@ -257,10 +257,14 @@ def test_mode_tout_du_lanceur_couvre_aussi_la_microstructure(tmp_path):
 def test_bougies_de_backfill_certifiees_depuis_runtime_history(tmp_path):
     """``runtime/history/candles_5m.jsonl`` : format compact, dossier jamais visité auparavant."""
     bougie = {"coin": "ATOM", "t_ms": NOW - 600_000, "o": 1.6462, "h": 1.6472, "l": 1.6452, "c": 1.6456, "v": 184.55}
-    norm, decision, _ = _certifier(bougie, C.FAMILLE_CANDLE)
+    # la source est celle du ruban (REST_BACKFILL_5M) : c'est elle qui dit l'intervalle d'une bougie compacte
+    norm, decision, _ = C.certifier_record(bougie, famille=C.FAMILLE_CANDLE, source="REST_BACKFILL_5M", now_ms=NOW)
     assert decision == C.REPARE and (norm["open"], norm["close"], norm["open_ts_ms"]) == (1.6462, 1.6456, NOW - 600_000)
-    assert norm["causal_forward_eligible"] is False                 # récupérée après coup
-    assert _certifier({**bougie, "h": 1.0}, C.FAMILLE_CANDLE)[1:] == (C.QUARANTAINE, "ohlc_incoherent")
+    assert norm["causal_forward_eligible"] is False and norm["interval"] == "5m"      # récupérée après coup
+    # sans intervalle ni source qui le dise, une bougie 5 min et une bougie 1 h de même ouverture auraient la
+    # même identité au coffre : elle est refusée plutôt qu'admise sous une identité ambiguë
+    assert _certifier(bougie, C.FAMILLE_CANDLE)[1:] == (C.QUARANTAINE, "intervalle_absent")
+    assert _certifier({**bougie, "h": 1.0, "interval": "5m"}, C.FAMILLE_CANDLE)[1:] == (C.QUARANTAINE, "ohlc_incoherent")
     _ecrire(tmp_path / "runtime" / "history" / "candles_5m.jsonl", [bougie, {**bougie, "t_ms": NOW - 300_000}])
     assert scl.main(["--root", str(tmp_path), "--now-ms", str(NOW)]) == 0
     index = json.loads((tmp_path / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").read_text(encoding="utf-8"))

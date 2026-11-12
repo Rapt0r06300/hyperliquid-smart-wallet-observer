@@ -18,6 +18,7 @@ PAPER / lecture seule. FAIL-SOFT : sans ``gh``, sans run ou sans artefact, rien 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -31,15 +32,17 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE / "tools"))
 
-from hl_observer.datasets import coffre_certifie as C  # noqa: E402
 from telecharger_fills_lanes_github import _gh_reel, gh_disponible, telecharger_runs  # noqa: E402
+
+from hl_observer.datasets import coffre_certifie as C  # noqa: E402
 
 DATA = Path("runtime") / "data"
 #: lane -> (workflow, rubans produits). Chaque ruban doit être connu du certificateur.
 LANES: dict[str, tuple[str, tuple[str, ...]]] = {
     "market": ("copy-vault-market-lanes.yml", ("copy_vault_trades_lane.jsonl", "copy_vault_candle_lane.jsonl")),
     "contexte": ("copy-vault-contexte-lanes.yml", ("copy_vault_positions_lane.jsonl", "copy_vault_twap_lane.jsonl",
-                                                    "copy_vault_snapshots_lane.jsonl")),
+                                                    "copy_vault_snapshots_lane.jsonl",
+                                                    "copy_vault_orders_lane.jsonl")),
 }
 
 
@@ -95,10 +98,8 @@ def fusionner_ruban(root: Path, artefacts: Path, nom: str, *, now_ms: int | None
         with cible.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write("".join(ligne + "\n" for ligne in acceptees))
             handle.flush()
-            try:
+            with contextlib.suppress(OSError):
                 os.fsync(handle.fileno())
-            except OSError:
-                pass
     return {"ruban": nom, "statut": "OK", "famille": famille, "fichiers_artefact": len(fichiers),
             "lues": stats.entrees, "ajoutees": len(acceptees), "doublons": stats.doublons,
             "rejetees": stats.quarantaine, "raisons_rejet": dict(sorted(stats.raisons.items()))}

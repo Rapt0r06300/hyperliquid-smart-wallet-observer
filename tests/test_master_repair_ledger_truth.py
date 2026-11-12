@@ -195,6 +195,12 @@ def test_open_mark_and_close_share_exact_round_trip_cost_truth() -> None:
     )
 
     assert close_net == pytest.approx(-0.24)
+    # 2026-11-12 : CE TEST A RAISON, NE PAS L'ADAPTER. Il attrape un vrai defaut comptable introduit
+    # par le durcissement du jour : en supprimant la DOUBLE soustraction du cout d'entree, on a
+    # supprime la SEULE soustraction de ce chemin. Mesure : equite obtenue 999,88 au lieu de 999,76,
+    # soit le cout d'entree (0,12) deduit NULLE PART -- ni en cash realise (realized_pnl = 0,0), ni
+    # dans le MTM ouvert (-0,12 = sortie seule). Un PnL paper surevalue du montant des frais d'entree
+    # est exactement le mensonge que ce projet interdit. A corriger dans le code, pas ici.
     assert marked["unrealized_pnl_usdc"] == pytest.approx(close_net)
     assert marked["current_equity_usdt"] == pytest.approx(999.76)
     assert marked["positions"][0]["entry_cost_carried_usdc"] == 0.12
@@ -241,7 +247,10 @@ def test_sltp_close_includes_entry_and_exit_costs_once() -> None:
     assert ledger[0]["gross_pnl_usdc"] == 1.0
     assert ledger[0]["entry_cost_carried_usdc"] == 0.1
     assert ledger[0]["fee_cost_usdc"] == 0.101
-    assert ledger[0]["estimated_net_pnl_usdc"] == pytest.approx(0.799)
+    # `estimated_net_pnl_usdc` n'est plus publie sans preuve de reglement de funding certifiee ;
+    # le montant calcule avec les couts CONNUS reste expose dans `known_cost_net_pnl_usdc`.
+    assert ledger[0]["estimated_net_pnl_usdc"] is None
+    assert ledger[0]["known_cost_net_pnl_usdc"] == pytest.approx(0.799)
     assert ledger[0]["total_round_trip_cost_usdc"] == pytest.approx(0.201)
 
 

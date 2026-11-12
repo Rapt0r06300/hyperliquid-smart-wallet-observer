@@ -122,3 +122,30 @@ def test_le_certificateur_verifie_le_magasin_de_ticks_a_chaque_passage(tmp_path)
     assert scl.main(["--root", str(tmp_path), "--now-ms", str(now)]) == 0
     index = json.loads((tmp_path / V.INDEX).read_text(encoding="utf-8"))
     assert index["shards_verifies"] == 2 and index["anomalies"] == 1
+
+
+def test_deux_verifications_croisees_la_seconde_renonce_proprement(tmp_path, monkeypatch):
+    """Certificateur lancé pendant un passage long : pas de « database is locked » opaque, aucun dégât."""
+    import sqlite3
+
+    import pytest
+
+    assert V.ATTENTE_VERROU_S >= 30                       # on attend vraiment avant de renoncer
+    (tmp_path / V.STORE / "hyperliquid" / "trades" / "BTC" / "shards").mkdir(parents=True)
+    premier = V.verifier_store(tmp_path, budget_s=1e9)    # crée la base d'état et l'index
+    index_avant = (tmp_path / V.INDEX).read_bytes()
+    autre = sqlite3.connect(tmp_path / V.ETAT)            # une autre vérification écrit en ce moment
+    autre.execute("BEGIN IMMEDIATE")
+    autre.execute("INSERT OR REPLACE INTO dossiers VALUES ('x', 1, 1, 0)")
+    (tmp_path / V.STORE / "hyperliquid" / "trades" / "ETH" / "shards").mkdir(parents=True)
+    monkeypatch.setattr(V, "ATTENTE_VERROU_S", 0.2)
+    try:
+        with pytest.raises(V.VerificationEnCours):
+            V.verifier_store(tmp_path, budget_s=1e9)
+        assert (tmp_path / V.INDEX).read_bytes() == index_avant      # l'index n'a pas été touché
+        assert V.main(["--root", str(tmp_path)]) == 0                # pas un échec du lanceur
+    finally:
+        autre.rollback()
+        autre.close()
+    apres = V.verifier_store(tmp_path, budget_s=1e9)                 # verrou relâché : le passage reprend
+    assert apres["present"] and apres["complet"] and apres["anomalies"] == premier["anomalies"] == 0

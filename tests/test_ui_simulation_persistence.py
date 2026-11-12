@@ -58,6 +58,19 @@ def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
         # would reject the deliberately small $100 persistence fixtures before
         # the ledger behavior under test can run.
         ("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0"),
+        # 2026-11-12 : la garde de profondeur a ete DURCIE (avant elle notait seulement
+        # `depth_guard_reason` ; desormais elle BLOQUE avec `DEPTH_FILL_GUARD_NO_RECENT_L2BOOK`).
+        # Les fixtures de persistance ne seminent pas de carnet L2 : la simulation refusait donc
+        # toutes les entrees, et le code avait RAISON de refuser. Meme geste que pour les planchers
+        # d'edge ci-dessus : on neutralise la garde ICI pour que le sujet du test (la persistance)
+        # soit reellement exerce. La garde garde son test dedie dans ce meme fichier, qui la
+        # RE-ACTIVE explicitement.
+        ("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", "0"),
+        # Le bloc qui exige un carnet FRAIS s'execute si la garde de profondeur OU la garde de
+        # microstructure AUTORITAIRE est active : desactiver la seule profondeur ne suffisait pas
+        # (et le motif affiche, `DEPTH_FILL_GUARD_NO_RECENT_L2BOOK`, est trompeur dans ce cas).
+        # La garde de microstructure a son test dedie dans ce fichier, qui la REACTIVE.
+        ("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", "0"),
     ):
         monkeypatch.setenv(var, val)
 
@@ -298,7 +311,10 @@ def test_ui_simulation_groups_same_coin_side_leaders_into_one_consensus_position
     assert "CONSENSUS_DUPLICATE_IGNORED" not in actions
 
 
-def test_ui_simulation_depth_guard_blocks_unfillable_consensus_entry(tmp_path: Path):
+def test_ui_simulation_depth_guard_blocks_unfillable_consensus_entry(tmp_path: Path, monkeypatch):
+    # Ce test EST celui de la garde : on la reactive, puisque le fixture commun la neutralise
+    # pour les tests de persistance.
+    monkeypatch.setenv("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", "1")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_depth_guard.sqlite3'}"
     init_db(settings.database_url)
@@ -381,7 +397,10 @@ def test_ui_simulation_depth_guard_blocks_unfillable_consensus_entry(tmp_path: P
     assert refused[0]["depth_fill_ratio"] < 0.85
 
 
-def test_ui_simulation_microstructure_guard_blocks_obi_conflict(tmp_path: Path):
+def test_ui_simulation_microstructure_guard_blocks_obi_conflict(tmp_path: Path, monkeypatch):
+    # Ce test EST celui de la garde de microstructure : on la reactive (le fixture commun la rend
+    # non autoritaire pour que les tests de persistance puissent ouvrir des positions).
+    monkeypatch.setenv("HYPERSMART_RUNTIME_MICROSTRUCTURE_AUTHORITATIVE", "1")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui_micro_guard.sqlite3'}"
     init_db(settings.database_url)
@@ -2249,7 +2268,12 @@ def test_ui_simulation_marks_open_position_with_latest_public_trade_price(tmp_pa
             MarketSnapshot(
                 source="publicTradesWS",
                 exchange_ts=base_ms + 2_000,
-                raw_json={"prices": {"ETH": 2020.0}, "source": "hyperliquid_ws_public_trades"},
+                # 2026-11-12 : un mark `publicTradesWS` doit desormais porter l'heure d'evenement
+                # DE CHAQUE COIN (`trade_times_ms`). Sans elle, la fraicheur du trade est inconnue
+                # et le mark est ignore (on ne reporte pas un prix peut-etre perime comme courant).
+                # Valeur non future : un mark date dans l'avenir est rejete lui aussi.
+                raw_json={"prices": {"ETH": 2020.0}, "source": "hyperliquid_ws_public_trades",
+                          "trade_times_ms": {"ETH": base_ms}},
             )
         )
         session.commit()

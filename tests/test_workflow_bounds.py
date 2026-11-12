@@ -452,7 +452,9 @@ def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retrie
     assert 'source_job_name="Continue historical backlog on a fresh hosted runner"' in retry
     assert "failed_job_id" in retry
     assert 'gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$failed_job_id"' in retry
-    assert '--log 2>&1 || true' in retry
+    assert 'https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/jobs/${failed_job_id}/logs' in retry
+    assert '--retry 3 --retry-all-errors --max-time 120' in retry
+    assert 'GitHub job log unavailable; refusing unproven infrastructure retry' in retry
     assert "classify_hosted_termination" in retry
     assert 'termination_class" != "INFRASTRUCTURE_STOP"' in retry
     assert "No explicit hosted-runner interruption evidence" not in retry

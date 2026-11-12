@@ -252,7 +252,8 @@ def test_funding_is_charged_to_long_positions(monkeypatch):
         "0xw|SOL|LONG": {"coin": "SOL", "direction": "LONG", "side": "LONG", "size": 5.0,
                          "avg_price": 100.0, "entry_costs": 0.0,
                          "fee_already_embedded_in_entry_price": False,
-                         "opened_at_ms": t0, "wallet_address": "0xw"}
+                         "opened_at_ms": t0, "wallet_address": "0xw",
+                         "entry_ts_ms": t0, "net_funding_settled": -0.42, "funding_settlement_source": "USER_FUNDING", "funding_settlement_evidence_complete": True, "funding_settlement_evidence_count": 8}
     }
     ledger: list[dict] = []
     apply_sltp_exits(positions, ledger, {"SOL": 100.0}, now_ms=t0 + int(8.4 * 3600 * 1000),
@@ -278,7 +279,8 @@ def test_funding_is_received_by_short_positions(monkeypatch):
     t0 = 1_000_000_000
     positions = {
         "0xw|SOL|SHORT": {"coin": "SOL", "direction": "SHORT", "side": "SHORT", "size": -5.0,
-                          "avg_price": 100.0, "opened_at_ms": t0, "wallet_address": "0xw"}
+                          "avg_price": 100.0, "opened_at_ms": t0, "wallet_address": "0xw",
+                         "entry_ts_ms": t0, "net_funding_settled": 0.2, "funding_settlement_source": "USER_FUNDING", "funding_settlement_evidence_complete": True, "funding_settlement_evidence_count": 4}
     }
     ledger: list[dict] = []
     apply_sltp_exits(positions, ledger, {"SOL": 100.0}, now_ms=t0 + int(4 * 3600 * 1000),

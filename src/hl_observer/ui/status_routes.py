@@ -631,7 +631,11 @@ def _apply_fast_status_sltp(state: UiState, market_marks: dict[str, Any], *, cur
         return {"enabled": True, "closed_count": 0, "reason": "SLTP_FAST_STATUS_FAILED", "error": str(exc)}
 
     new_events = [row for row in ledger[before_len:] if isinstance(row, dict)]
-    realized_added = sum(float(row.get("estimated_net_pnl_usdc") or 0.0) for row in new_events)
+    realized_added = sum(
+        float(row.get("estimated_net_pnl_usdc") or 0.0)
+        for row in new_events
+        if not _pnl_row_is_non_strict(row)
+    )
     exit_costs_added = sum(float(row.get("fee_cost_usdc") or 0.0) for row in new_events)
     actual_closed = [
         row for row in closed
@@ -1073,7 +1077,9 @@ def _mark_to_market_positions(
             entry_cost = separate_entry_cost_usdc(normalized)
             net_unrealized = round_trip_net_pnl_usdc(
                 gross_pnl_usdc=gross_unrealized,
-                entry_cost_usdc=entry_cost,
+                # Entry fees are already realized in the ledger at OPEN/ADD.
+                # Charging them again in open MTM would double-count the same fee.
+                entry_cost_usdc=0.0 if entry_cost is not None else None,
                 exit_cost_usdc=exit_cost_estimate,
             )
             if net_unrealized is not None:
@@ -1341,7 +1347,13 @@ def _ledger_closed_trade_stats(ledger_events: list[dict[str, Any]]) -> dict[str,
         combined = f"{paper_action} {replay_action}"
         if not any(token in combined for token in ("CLOSE", "REDUCE", "EXIT", "TRAILING_STOP", "STOP_LOSS", "TAKE_PROFIT")):
             continue
-        pnl = _safe_float(row.get("estimated_net_pnl_usdc"))
+        if _pnl_row_is_non_strict(row):
+            continue
+        pnl = _safe_float(
+            row.get("round_trip_net_pnl_usdc")
+            if row.get("round_trip_net_pnl_usdc") is not None
+            else row.get("estimated_net_pnl_usdc")
+        )
         if pnl is None:
             continue
         identity = _closed_trade_identity(row)
@@ -2251,6 +2263,11 @@ def _safe_int(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _pnl_row_is_non_strict(row: dict[str, Any]) -> bool:
+    status = str(row.get("pnl_accounting_status") or "").upper()
+    return row.get("pnl_strict") is False or "UNMEASURABLE" in status
 
 
 def _safe_float(value: object) -> float | None:

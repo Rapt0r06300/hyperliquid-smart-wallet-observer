@@ -133,7 +133,7 @@ MIN_GIT_VERSION = (2, 30)
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
 RECEIPT_HISTORY_LIMIT = 20
-GIT_SYNC_ENGINE_BUILD = "2026-11-01-safe-main-promotion-v13"
+GIT_SYNC_ENGINE_BUILD = "2026-11-12-targeted-tree-progress-v14"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -157,7 +157,7 @@ FORBIDDEN_HOSTED_CI_MARKERS = (
 )
 MUTATING_GIT_COMMANDS = {
     "add", "commit", "commit-tree", "fetch", "merge", "rebase", "read-tree",
-    "write-tree", "switch", "checkout", "update-ref", "push",
+    "write-tree", "mktree", "switch", "checkout", "update-ref", "push",
 }
 
 
@@ -224,6 +224,35 @@ def _changed_diff_signal(diff_text: str) -> str:
         if line.startswith(("+", "-")):
             changed.append(line[1:])
     return "\n".join(changed) if changed else raw
+
+
+def _semantic_diff_sample(paths: list[str], limit: int = 32) -> list[str]:
+    """Select a bounded, deterministic sample used only for commit wording.
+
+    Safety and staging still cover every admissible path.  Reading the full
+    unified diff of hundreds of paths in a partial clone was costing roughly
+    twenty seconds solely to name a commit.  Source and workflow changes carry
+    the strongest semantic signal, followed by tooling, tests, root files and
+    documentation.
+    """
+    def rank(path: str) -> tuple[int, str]:
+        if path.startswith("src/"):
+            priority = 0
+        elif path.startswith(".github/workflows/"):
+            priority = 1
+        elif path.startswith("tools/") or path.endswith((".cmd", ".ps1")):
+            priority = 2
+        elif path.startswith("tests/"):
+            priority = 3
+        elif "/" not in path:
+            priority = 4
+        elif path.startswith("docs/"):
+            priority = 6
+        else:
+            priority = 5
+        return priority, path
+
+    return sorted(set(paths), key=rank)[:max(1, limit)]
 
 
 def _semantic_subject(prefix: str, scope: str, detail: str, count: int) -> str:
@@ -833,6 +862,10 @@ def _git_operation_label(args: list[str]) -> str:
         return "Creer le checkpoint local du travail"
     if verb == "write-tree":
         return "Construire l'arbre Git depuis l'index courant"
+    if verb == "mktree":
+        return "Reconstruire uniquement un sous-arbre Git modifie"
+    if verb == "ls-tree":
+        return "Lire un sous-arbre Git sans parcourir les donnees"
     if verb == "commit-tree":
         return "Creer le checkpoint Git sans re-scanner l'index"
     if verb == "symbolic-ref":
@@ -892,7 +925,10 @@ def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            # Seuls des chiffres sont lus : un octet non décodable (sortie d'un outil Windows dans la
+            # page de codes de la console, Python en mode UTF-8) ne doit jamais faire échouer la lecture.
             text=True,
+            errors="replace",
             timeout=3,
             check=False,
         )
@@ -925,6 +961,7 @@ def _remaining_process_ids(root: Path, parent_pid: int) -> list[int]:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                errors="replace",   # message localisé de tasklist : jamais une raison de croire un processus vivant
                 timeout=2,
                 check=False,
             )
@@ -1113,6 +1150,7 @@ class Synchronizer:
         self._deferred_local_paths: set[str] = set()
         self._deferred_staged_protected_paths: set[str] = set()
         self._command_count = 0
+        self._progress_percent = -1.0
         self.report: dict[str, object] = {
             "schema": "alina.git_code_reconciliation.v1",
             "engine_build": GIT_SYNC_ENGINE_BUILD,
@@ -1155,6 +1193,8 @@ class Synchronizer:
             "remote_snapshot_reused": False,
             "commit_timeout_recovered": False,
             "phases": {},
+            "progress_events": [],
+            "progress_percent": 0.0,
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -1323,6 +1363,38 @@ class Synchronizer:
     def say(message: str) -> None:
         stamp = datetime.now().astimezone().strftime("%H:%M:%S")
         print(f"[{stamp}] {message}", flush=True)
+
+    def progress(self, percent: float, label: str) -> None:
+        """Emit one monotonic, launcher-aware global progress milestone.
+
+        The CMD can reserve a prefix/suffix for its own preflight and final
+        summary through ``ALINA_PROGRESS_OFFSET`` and
+        ``ALINA_PROGRESS_SPAN``.  Direct Python invocations naturally use the
+        full 0..100 range.  Progress is stage based, never a fabricated time
+        estimate, and therefore cannot move backwards during a retry.
+        """
+        try:
+            offset = float(os.environ.get("ALINA_PROGRESS_OFFSET", "0"))
+            span = float(os.environ.get("ALINA_PROGRESS_SPAN", "100"))
+        except ValueError:
+            offset, span = 0.0, 100.0
+        internal = max(0.0, min(100.0, float(percent)))
+        displayed = max(0.0, min(100.0, offset + internal * span / 100.0))
+        if displayed <= self._progress_percent:
+            return
+        self._progress_percent = displayed
+        width = 24
+        filled = max(0, min(width, int(displayed * width / 100.0)))
+        bar = "#" * filled + "-" * (width - filled)
+        self.report["progress_percent"] = round(displayed, 1)
+        events = self.report.setdefault("progress_events", [])
+        if isinstance(events, list):
+            events.append({
+                "percent": round(displayed, 1),
+                "label": label,
+                "at_utc": datetime.now(UTC).isoformat(),
+            })
+        self.say(f"[PROGRESSION] [{bar}] {displayed:5.1f}% | {label}")
 
     def _verify_git_capabilities(self) -> None:
         """Check local Git/Python features before any repository mutation."""
@@ -2439,7 +2511,160 @@ class Synchronizer:
                 ) + b"\0",
             )
 
-    def _commit_staged_index(self, commit_message: str) -> str:
+    @staticmethod
+    def _tree_entry_type(mode: str) -> str:
+        if mode == "160000":
+            return "commit"
+        if mode == "040000":
+            return "tree"
+        return "blob"
+
+    @staticmethod
+    def _node_contains_only_deletions(node: dict[str, object]) -> bool:
+        explicit = node.get("")
+        if "" in node and explicit is not None:
+            return False
+        return all(
+            Synchronizer._node_contains_only_deletions(child)
+            for name, child in node.items()
+            if name and isinstance(child, dict)
+        )
+
+    def _targeted_tree_from_index(self, paths: list[str]) -> str:
+        """Overlay staged code paths on HEAD without walking the huge index.
+
+        ``git write-tree`` must inspect the repository's roughly 1.9 million
+        index entries after any root cache invalidation.  The code checkpoint
+        already knows its exact admissible paths, so rebuilding only their
+        ancestor trees is equivalent and reuses every untouched HEAD subtree
+        (including ``datasets``) by object id.  Deletions are represented by
+        an absent stage-0 entry.  Ambiguous unmerged entries fail closed.
+        """
+        ordered = sorted(set(paths))
+        staged: dict[str, tuple[str, str, str]] = {}
+        for start in range(0, len(ordered), 200):
+            batch = ordered[start:start + 200]
+            payload = self.command(
+                "ls-files", "-s", "-z", "--", *batch,
+            ).stdout
+            for raw in payload.split(b"\0"):
+                if not raw:
+                    continue
+                metadata, separator, raw_path = raw.partition(b"\t")
+                fields = metadata.decode("ascii", errors="strict").split()
+                if not separator or len(fields) != 3:
+                    raise SyncBlocked("Entree d'index cible illisible.")
+                mode, oid, stage = fields
+                if stage != "0" or not re.fullmatch(r"[0-9a-f]{40,64}", oid):
+                    raise SyncBlocked(
+                        "Index cible non resolu; construction d'arbre refusee."
+                    )
+                path = raw_path.decode("utf-8", errors="strict")
+                staged[path] = (mode, self._tree_entry_type(mode), oid)
+
+        trie: dict[str, object] = {}
+        for path in ordered:
+            parts = path.split("/")
+            if not parts or any(not part for part in parts):
+                raise SyncBlocked(f"Chemin Git cible invalide: {path!r}")
+            node = trie
+            for part in parts:
+                child = node.setdefault(part, {})
+                if not isinstance(child, dict):
+                    raise SyncBlocked(f"Chemins Git cibles incompatibles: {path}")
+                node = child
+            node[""] = staged.get(path)
+
+        base_root = self.text("rev-parse", "HEAD^{tree}")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", base_root):
+            raise SyncBlocked("Arbre HEAD invalide; checkpoint refuse.")
+        rebuilt_directories = 0
+
+        def read_entries(tree_oid: str | None) -> dict[str, tuple[str, str, str]]:
+            if tree_oid is None:
+                return {}
+            output = self.command("ls-tree", "-z", tree_oid).stdout
+            result: dict[str, tuple[str, str, str]] = {}
+            for raw in output.split(b"\0"):
+                if not raw:
+                    continue
+                metadata, separator, raw_name = raw.partition(b"\t")
+                fields = metadata.decode("ascii", errors="strict").split()
+                if not separator or len(fields) != 3:
+                    raise SyncBlocked("Sous-arbre Git HEAD illisible.")
+                mode, kind, oid = fields
+                name = raw_name.decode("utf-8", errors="strict")
+                if "/" in name or not re.fullmatch(r"[0-9a-f]{40,64}", oid):
+                    raise SyncBlocked("Nom ou objet de sous-arbre Git invalide.")
+                result[name] = (mode, kind, oid)
+            return result
+
+        def rebuild(
+            base_oid: str | None, node: dict[str, object], prefix: str,
+        ) -> tuple[str, int]:
+            nonlocal rebuilt_directories
+            entries = read_entries(base_oid)
+            for name, raw_child in node.items():
+                if not name:
+                    continue
+                if not isinstance(raw_child, dict):
+                    raise SyncBlocked("Plan d'arbre cible invalide.")
+                explicit_present = "" in raw_child
+                explicit = raw_child.get("")
+                nested = {k: v for k, v in raw_child.items() if k}
+                if nested and explicit is not None:
+                    if not self._node_contains_only_deletions(nested):
+                        raise SyncBlocked(
+                            "Remplacement fichier/dossier ambigu: "
+                            + f"{prefix}{name}"
+                        )
+                    entries[name] = explicit  # type: ignore[assignment]
+                    continue
+                if nested:
+                    existing = entries.get(name)
+                    child_base = (
+                        existing[2]
+                        if existing is not None and existing[1] == "tree"
+                        else None
+                    )
+                    child_oid, child_count = rebuild(
+                        child_base, raw_child, f"{prefix}{name}/",
+                    )
+                    if child_count:
+                        entries[name] = ("040000", "tree", child_oid)
+                    else:
+                        entries.pop(name, None)
+                    continue
+                if explicit_present and explicit is None:
+                    entries.pop(name, None)
+                elif explicit_present:
+                    entries[name] = explicit  # type: ignore[assignment]
+
+            tree_input = b"".join(
+                (
+                    f"{mode} {kind} {oid}\t".encode("ascii")
+                    + name.encode("utf-8") + b"\0"
+                )
+                for name, (mode, kind, oid) in sorted(
+                    entries.items(), key=lambda item: item[0].encode("utf-8")
+                )
+            )
+            tree_oid = self.command("mktree", "-z", input_bytes=tree_input).stdout.decode(
+                "ascii", errors="strict"
+            ).strip()
+            if not re.fullmatch(r"[0-9a-f]{40,64}", tree_oid):
+                raise SyncBlocked("Sous-arbre Git reconstruit invalide.")
+            rebuilt_directories += 1
+            return tree_oid, len(entries)
+
+        tree, _entry_count = rebuild(base_root, trie, "")
+        self.report["targeted_tree_rebuilt_directories"] = rebuilt_directories
+        self.report["targeted_tree_paths"] = len(ordered)
+        return tree
+
+    def _commit_staged_index(
+        self, commit_message: str, publishable_paths: list[str],
+    ) -> str:
         """Create one local checkpoint without Git's full-index commit refresh.
 
         ``git commit`` refreshes a large index and can then run post-commit
@@ -2458,9 +2683,7 @@ class Synchronizer:
         if not re.fullmatch(r"[0-9a-f]{40,64}", parent):
             raise SyncBlocked("HEAD local invalide; checkpoint refuse.")
 
-        tree = self.command(
-            "write-tree", timeout=COMMIT_TIMEOUT_SECONDS,
-        ).stdout.decode("utf-8", errors="replace").strip()
+        tree = self._targeted_tree_from_index(publishable_paths)
         if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
             raise SyncBlocked("Arbre Git invalide; checkpoint refuse.")
 
@@ -2481,7 +2704,7 @@ class Synchronizer:
             raise SyncBlocked(
                 "Le checkpoint Git n'est pas le HEAD observe; aucun push."
             )
-        self.report["commit_backend"] = "COMMIT_TREE_INDEX_FAST_PATH"
+        self.report["commit_backend"] = "COMMIT_TREE_TARGETED_OVERLAY_V1"
         return created
 
     def checkpoint(self) -> None:
@@ -2511,6 +2734,7 @@ class Synchronizer:
         self.say(
             f"[MOTEUR 3/5] Fichiers de code locaux admissibles: {len(eligible)}."
         )
+        self.progress(46, f"Inventaire termine: {len(eligible)} chemin(s) de code")
         # Detect high-confidence private-key material BEFORE writing Git blobs.
         for path in eligible:
             self._check_file_payload(path, self.root / path)
@@ -2519,10 +2743,12 @@ class Synchronizer:
             # reset...) : l'apercu echouait toujours et le message propose retombait sur un libelle
             # generique. Les chemins sont passes en arguments, par lots (limite de ligne de commande).
             morceaux: list[bytes] = []
-            for debut in range(0, len(eligible), _DRY_RUN_DIFF_LOT):
+            semantic_paths = _semantic_diff_sample(eligible)
+            self.report["commit_message_diff_sample_paths"] = semantic_paths
+            for debut in range(0, len(semantic_paths), _DRY_RUN_DIFF_LOT):
                 apercu = self.command(
                     "diff", "HEAD", "--no-ext-diff", "--unified=0", "--",
-                    *eligible[debut:debut + _DRY_RUN_DIFF_LOT], check=False,
+                    *semantic_paths[debut:debut + _DRY_RUN_DIFF_LOT], check=False,
                 )
                 morceaux.append(apercu.stdout or b"")
             proposed_message = _commit_subject(
@@ -2561,14 +2787,18 @@ class Synchronizer:
             if diff.returncode not in (0, 1):
                 raise SyncBlocked("Verification de l'index Git impossible.")
             if diff.returncode == 1:
+                semantic_paths = _semantic_diff_sample(eligible)
+                self.report["commit_message_diff_sample_paths"] = semantic_paths
                 staged_diff = self.command(
-                    "diff", "--cached", "--no-ext-diff", "--unified=0",
+                    "diff", "--cached", "--no-ext-diff", "--unified=0", "--",
+                    *semantic_paths,
                 ).stdout.decode("utf-8", errors="replace")
                 commit_message = _commit_subject(eligible, staged_diff)
                 self.report["commit_message"] = commit_message
                 self.say(f"Commit semantique du code admissible: {commit_message}")
+                self.progress(53, "Construction ciblee du checkpoint Git")
                 self.report["checkpoint_sha"] = self._commit_staged_index(
-                    commit_message
+                    commit_message, eligible,
                 )
                 _chunks = [
                     eligible[i:i + 200]
@@ -2581,6 +2811,7 @@ class Synchronizer:
                     for chunk in _chunks
                 )
                 self.report["local_commit_created"] = True
+                self.progress(60, "Checkpoint local cree et verifie")
         if self.report.get("local_commit_created"):
             self._align_operator_index(eligible, published_index_info)
             self.command(
@@ -3716,6 +3947,7 @@ class Synchronizer:
                 os.environ["GIT_MERGE_AUTOEDIT"] = previous_merge_autoedit
 
     def reconcile(self) -> None:
+        self.progress(72, "Comparaison de main local avec GitHub")
         self.say(
             "[MOTEUR 5/5] Recuperation de main depuis GitHub "
             "(objets Git seulement, aucun shard)."
@@ -3784,6 +4016,7 @@ class Synchronizer:
             f"{replay_count_value} commit(s) local(aux) sur GitHub main; "
             f"budget rebase={rebase_budget}s; aucun commit de fusion."
         )
+        self.progress(80, f"Rejeu lineaire de {replay_count_value} commit(s)")
         base = self.text("merge-base", local, remote)
         predicted = self._predict_merge_conflicts(remote, local)
         unsupported = [
@@ -3943,6 +4176,7 @@ class Synchronizer:
             self.say(
                 f"Push sans force vers main ({push_races + 1}/{MAX_RACE_RETRIES})..."
             )
+            self.progress(90, "Publication sans force vers GitHub main")
             self.report["push_attempts"] = int(self.report["push_attempts"]) + 1
             pushed = self.command(
                 SAFE_MAIN_PUSH_REFSPEC[0], "--porcelain",
@@ -3985,6 +4219,7 @@ class Synchronizer:
                         + (f" et {ignored} fichier(s) ignore(s)" if ignored else "")
                         + "."
                     )
+                    self.progress(98, "SHA local et GitHub identiques")
                     return
                 self.say("GitHub a de nouveau avance; fusion supplementaire.")
                 push_races += 1
@@ -4083,6 +4318,7 @@ class Synchronizer:
                "CHECKPOINT LOCAL" if wip_only else "SYNCHRONISATION")
             + " | aucun telechargement de shard | aucun push force."
         )
+        self.progress(0, "Demarrage securise du moteur Git")
         result_code = 0
         try:
             # A shallow clone is safe to inspect in every mode.  The real
@@ -4095,7 +4331,9 @@ class Synchronizer:
                     self.dry_run or wip_only or self.promote_current_to_main
                 ),
             )
+            self.progress(12, "Depot, branche et capacites Git valides")
             with _mutex(gitdir):
+                self.progress(16, "Verrou de synchronisation acquis")
                 active_branch = self.text("branch", "--show-current")
                 promotion_needed = (
                     self.promote_current_to_main
@@ -4103,16 +4341,20 @@ class Synchronizer:
                 )
                 fast_path = False
                 if not self.dry_run and not wip_only and not promotion_needed:
+                    self.progress(20, "Inventaire borne des changements locaux")
                     fast_path = self._fast_path_if_clean()
                 if fast_path:
                     pass
                 else:
                     if not self.dry_run and not wip_only:
+                        self.progress(28, "Verification de l'historique Git")
                         self._ensure_full_history()
+                    self.progress(36, "Capture du preflight local et distant")
                     self.capture_preflight(
                         fetch_remote=not self.dry_run and not wip_only,
                         allow_protected_local=True,
                     )
+                    self.progress(42, "Preparation du checkpoint de code")
                     self.checkpoint()
                     if promotion_needed:
                         self._promote_current_branch_to_main(active_branch)
@@ -4146,11 +4388,15 @@ class Synchronizer:
                         "aucun acces GitHub ni push."
                     )
                 elif not fast_path:
+                    self.progress(65, "Controle syntaxique des fichiers Python")
                     self._syntax_gate()
+                    self.progress(70, "Reconciliation prudente avec GitHub")
                     self.publish()
                     self._assert_no_new_code_changes(allow_deferred=True)
                     if self.text("rev-parse", "HEAD") != self.remote_sha():
                         raise SyncBlocked("GitHub a avance; relancer pour finaliser.")
+            if result_code == 0:
+                self.progress(100, "Synchronisation verifiee")
         except (SyncBlocked, subprocess.TimeoutExpired, OSError) as exc:
             self.report["status"] = "NO_GO"
             safe_error = _redact_sensitive_text(str(exc))

@@ -1088,15 +1088,15 @@ def test_scoring_shadow_live_utilise_une_tape_ciblee_et_bornee():
     assert "charger_prix_tape(root)" not in promotion
 
 
-def test_copy_vault_ttl_couvre_episode_executable_le_plus_court():
+def test_copy_vault_ttl_couvre_l_episode_executable_le_plus_long():
+    # 2026-11-12 : l'abonnement doit couvrir le PLUS LONG horizon (sinon aucun carnet de sortie pour
+    # les positions tenues plus longtemps que le plus court horizon). Avant, c'était min() : bug.
     assert C.TAPE_COIN_TTL_MS == (
         C.COPY_VAULT_DELAY_MS
-        + min(C.COPY_VAULT_HORIZONS_MS)
+        + max(C.COPY_VAULT_HORIZONS_MS)
         + C.COPY_VAULT_MAX_TARGET_LAG_MS
     )
-    # The protocol's shortest horizon is now 30s; verify the configured
-    # latency margin instead of an obsolete fixed six-minute threshold.
-    assert C.TAPE_COIN_TTL_MS > C.COPY_VAULT_DELAY_MS + min(C.COPY_VAULT_HORIZONS_MS)
+    assert C.TAPE_COIN_TTL_MS >= C.COPY_VAULT_DELAY_MS + max(C.COPY_VAULT_HORIZONS_MS)
 
 
 def test_checkpoints_nouveau_metaordre_et_sorties_sont_deterministes():
@@ -1511,3 +1511,61 @@ def test_shards_userfills_disjoints_de_5():
     assert set(a).isdisjoint(set(b)) and set(a) | set(b) == set(vaults)   # DISJOINTS + couvrent tout (pas de doublon)
     # 8 vaults -> A(5) + B(3)
     assert [len(g) for _, g in C._shards_userfills(vaults[:8], taille=5)] == [5, 3]
+
+
+def test_tape_copy_vault_porte_l_identite_de_connexion_exigee_par_le_replay(tmp_path, monkeypatch):
+    """Cas réel du 2026-11-12 : 1,2 million de carnets écrits sans identité, tous refusés par le moteur."""
+    from hl_observer.backtesting import copy_vault_executable as cv
+
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    t0 = 1_800_000_600_000                                     # dix minutes après l'heure pile (funding)
+
+    def carnet(instant, connexion, epoque):
+        resume = {"bid": 2000.0, "ask": 2001.0, "book_exchange_time": instant,
+                  "bids5": [[2000.0, 5.0, 1], [1999.0, 10.0, 1]], "asks5": [[2001.0, 4.0, 1], [2002.0, 8.0, 1]]}
+        assert C._append_copy_vault_book(tmp_path, "ETH", resume, received_at_ms=instant + 50,
+                                         connection_id=connexion, l2_gap_epoch=epoque) is True
+
+    carnet(t0, "userfills-l2-abc", 3)
+    carnet(t0 + 62_000, "userfills-l2-abc", 3)
+    carnet(t0 + 363_000, "userfills-l2-abc", 3)
+    lignes = [json.loads(x) for x in (tmp_path / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8").splitlines()]
+    assert [(r["connection_id"], r["l2_gap_epoch"]) for r in lignes] == [("userfills-l2-abc", 3)] * 3
+
+    entree = {"event_id": "e1", "ts_ms": t0 + 1_000, "coin": "ETH", "direction": 1, "action": "ADD",
+              "dir": "Open Long", "vault": "0xA", "taille_usd": 100.0, "move_frac": 0.01, "source": "LIVE_WS",
+              "is_snapshot": False, "observed_at_ms": t0 + 1_025, "received_at_ms": t0 + 1_025}
+    metaordre = cluster_metaorders([entree])[0][0]
+    carnets, _audit = cv.load_observed_books(tmp_path, coins={"ETH"})
+    trade, raison = cv.execute_metaorder(metaordre, carnets["ETH"], horizon_ms=300_000, require_causal_books=True)
+    assert raison == "LIQUIDATABLE_NET" and trade is not None
+
+    # sans identité (appel d'origine) : la ligne n'en invente pas, et le moteur refuse
+    monkeypatch.setattr(C, "_COPY_VAULT_LAST_SAMPLE_MS", {})
+    autre = tmp_path / "sans_identite"
+    resume = {"bid": 2000.0, "ask": 2001.0, "book_exchange_time": t0,
+              "bids5": [[2000.0, 5.0, 1]], "asks5": [[2001.0, 4.0, 1]]}
+    assert C._append_copy_vault_book(autre, "ETH", resume, received_at_ms=t0 + 50) is True
+    ligne = json.loads((autre / C.COPY_VAULT_L2_TAPE).read_text(encoding="utf-8"))
+    assert "connection_id" not in ligne and "l2_gap_epoch" not in ligne
+
+
+def test_un_coin_reste_abonne_assez_longtemps_pour_capturer_la_sortie_de_la_position():
+    """Cause du blocage du 2026-11-12 : l'abonnement expirait avant la sortie, aucun carnet à +horizon."""
+    from hl_observer.backtesting.copy_vault_protocol import HORIZONS_MS
+
+    # la fenêtre d'abonnement doit couvrir : délai de copie + le PLUS LONG horizon + la tolérance L2
+    assert C.TAPE_COIN_TTL_MS >= C.COPY_VAULT_DELAY_MS + max(HORIZONS_MS) + C.COPY_VAULT_MAX_TARGET_LAG_MS
+    assert C.TAPE_COIN_TTL_MS >= 3_600_000                                   # au moins une heure (horizon max)
+
+    # un coin dont le dernier fill date de 50 minutes reste une cible (la sortie à +1 h n'est pas encore passée)
+    now = 1_800_000_000_000
+    C._TAPE_COINS_ACTIFS.clear()
+    C._TAPE_ACTIVE_L2_SYMBOLS.clear()
+    C._TAPE_ACTIVE_L2_SYMBOLS.add("ETH")
+    C._TAPE_PREWARM_COINS.clear()
+    C._TAPE_COINS_ACTIFS["ETH"] = now - 50 * 60_000                          # dernier fill il y a 50 min
+    C._TAPE_COINS_ACTIFS["SOL"] = now - 2 * 60_000                           # dernier fill il y a 2 min
+    C._TAPE_ACTIVE_L2_SYMBOLS.add("SOL")
+    cibles = C._tape_l2_targets(now)
+    assert "ETH" in cibles and "SOL" in cibles                              # les deux encore abonnés (avant : ETH tombait)

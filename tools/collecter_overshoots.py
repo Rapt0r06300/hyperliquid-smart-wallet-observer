@@ -64,12 +64,15 @@ def _post_info(charge: dict[str, Any], *, timeout_s: float = 10.0, tentatives: i
     corps = json.dumps(charge).encode("utf-8")
     derniere: Exception | None = None
     for essai in range(1, max(1, tentatives) + 1):
+        CF.reserver_poids(CF.POIDS_REQUETE_INFO)     # budget de débit PARTAGÉ entre collecteurs (fail-open)
         req = urllib.request.Request(URL_INFO, data=corps, headers=_HEADERS)
         try:
             with urllib.request.urlopen(req, timeout=timeout_s) as rep:  # noqa: S310 (URL constante)
                 return json.loads(rep.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             derniere = exc
+            if exc.code == 429:
+                CF.signaler_refus_de_debit()               # les rattrapages cèdent la place
             if exc.code == 429 and essai < tentatives:
                 try:
                     ra = float(exc.headers.get("Retry-After") or 0) if exc.headers else 0.0

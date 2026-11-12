@@ -44,6 +44,8 @@ FAMILLE_MICRO_BBO = "micro_bbo"           # BBO Hyperliquid dense (WS public, s�
 FAMILLE_MICRO_L2 = "micro_l2"             # carnets L2 Hyperliquid pleine profondeur (WS public)
 FAMILLE_MICRO_TRADES = "micro_trades"     # transactions Hyperliquid (WS public)
 FAMILLE_VAULT_PORTFOLIO = "vault_portfolio"  # courbes valeur / PnL / volume des vaults (vaultDetails)
+FAMILLE_LEADER_ORDERS = "leader_orders"   # ordres en attente des leaders (entrées, prises de profit, stops)
+FAMILLE_FUNDING_HISTORY = "funding_history"  # funding horaire publié par coin (récupéré après coup)
 
 #: Sources JAMAIS certifiables : données ESTIMÉES/inférées (non observées directement).
 #: Elles ne doivent JAMAIS entrer dans le coffre comme du SAFE — intégrité du labo.

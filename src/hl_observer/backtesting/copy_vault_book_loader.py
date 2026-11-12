@@ -15,6 +15,7 @@ from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_book_index import oublier_les_index
 from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     CHECKPOINT_WRITER_STATE_SCHEMA,
@@ -104,6 +105,7 @@ def load_observed_books(
     """
     if as_of_ms is not None:
         as_of_ms = _required_epoch_ms(as_of_ms, "as_of_ms")
+    oublier_les_index()   # nouveau chargement : aucun index (ni carnet) du corpus précédent ne reste en mémoire
 
     resolved_root = Path(root).resolve()
     path = resolved_root / relative_path
@@ -640,6 +642,9 @@ def load_observed_books(
                         exchange_ts_ms=exchange_ts,
                         bids5=[[bid_px, bid_sz]],
                         asks5=[[ask_px, ask_sz]],
+                        # identité de connexion : sans elle, un carnet BBO n'est jamais exécutable
+                        connection_id=raw["connection_id"] if isinstance(raw.get("connection_id"), str) else None,
+                        l2_gap_epoch=raw["l2_gap_epoch"] if type(raw.get("l2_gap_epoch")) is int else None,
                         source_dataset_id=(
                             raw.get("source_dataset_id")
                             if isinstance(raw.get("source_dataset_id"), str) else None

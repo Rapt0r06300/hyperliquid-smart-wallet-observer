@@ -211,6 +211,8 @@ def test_local_campaign_resume_preserves_reserved_attempt_without_reusing_candid
     # Fixture volontairement minuscule (un signal par jour) : ce test porte sur la reprise de
     # campagne, pas sur la densité des données, vérifiée dans test_copy_vault_signal_alignment.
     monkeypatch.setattr("hl_observer.backtesting.copy_vault_signal_alignment.MIN_SIGNALS_PER_DAY", 1)
+    # ... ni sur l'exécutabilité des carnets factices (test_copy_vault_train_executability).
+    monkeypatch.setattr(local_lab, "sonder_train", lambda *_a, **_k: {"executable": True, "raison": None})
     repository_root = tmp_path / "repo"
     workspace = tmp_path / "workspace"
     data_dir = workspace / "runtime" / "data"
@@ -807,6 +809,8 @@ def test_campagne_e2e_materialisee_separe_snapshot_historique_du_flux_live(
     # Fixture volontairement minuscule (un signal par jour) : ce test porte sur la matérialisation
     # de bout en bout, pas sur la densité des données (voir test_copy_vault_signal_alignment).
     monkeypatch.setattr("hl_observer.backtesting.copy_vault_signal_alignment.MIN_SIGNALS_PER_DAY", 1)
+    # ... ni sur l'exécutabilité des carnets de la fixture (test_copy_vault_train_executability).
+    monkeypatch.setattr(local_lab, "sonder_train", lambda *_a, **_k: {"executable": True, "raison": None})
     recovery = tmp_path / "runtime" / "recovery" / "full"
     recovery.mkdir(parents=True)
     tag = "copy-vault-e2e-fixture"

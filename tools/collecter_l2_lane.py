@@ -17,8 +17,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +132,17 @@ def construire_carnet(data: Any, *, recv_ms: int) -> tuple[dict[str, Any] | None
     norm, decision, raison = certifier_book(row, source="HYPERLIQUID_L2_WS", now_ms=recv_ms)
     if decision == QUARANTAINE:
         return None, raison
+    # Capacité du carnet : même définition que le collecteur principal (``_append_copy_vault_book``),
+    # le plus petit des deux côtés sur les cinq premiers niveaux. Le chargeur du labo EXIGE ce champ :
+    # sans lui la ligne est écartée (mesuré le 2026-11-12 : 93 054 carnets de lane jamais lus).
+    capacite = min(math.fsum(px * taille for px, taille in norm["bids5"]),
+                   math.fsum(px * taille for px, taille in norm["asks5"]))
+    if not math.isfinite(capacite) or capacite <= 0:
+        return None, "capacite_invalide"
+    norm["capacity_usd"] = capacite
+    norm.setdefault("instrument_identity_schema", "hyperliquid_native_instrument_identity.v1")
+    norm.setdefault("paper_read_only", True)
+    norm.setdefault("real_execution", False)
     return norm, ""
 
 
@@ -148,8 +161,30 @@ class LaneL2:
         self.rejets = 0
         self.reconnects = 0
         self.gaps = 0        # B6 : trous L2 detectes (coin silencieux > seuil)
+        # Époque de trou par marché : nombre d'INCIDENTS d'intégrité observés sur son flux (déconnexion,
+        # trame rejetée), comme dans le collecteur de référence (``collect_cloud_copy_vault._open_l2_gap``).
+        # Un marché simplement calme n'est pas un incident.
+        self.epoque: dict[str, int] = {}
 
-    async def ecrire(self, row: dict[str, Any]) -> None:
+    def incident(self, coins: Any) -> None:
+        """Le flux de ces marchés vient d'être interrompu ou corrompu : nouvelle époque pour chacun."""
+        for coin in coins:
+            cle = str(coin).upper()
+            self.epoque[cle] = self.epoque.get(cle, 0) + 1
+
+    def identifier(self, row: dict[str, Any], connexion_id: str | None) -> None:
+        """Pose sur la ligne l'identité de sa connexion et l'époque de trou de son marché.
+
+        Le moteur de replay n'exécute un trade que si ses trois carnets (référence, entrée, sortie)
+        viennent de la MÊME connexion et de la MÊME époque : sans ces deux champs, tout carnet est
+        refusé (``L2_CONNECTION_IDENTITY_INCOMPLETE``). Mesuré le 2026-11-12 : 1,2 million de carnets
+        collectés sans eux, aucun trade exécutable dans le labo.
+        """
+        if connexion_id:
+            row["connection_id"] = connexion_id
+            row["l2_gap_epoch"] = self.epoque.get(str(row.get("coin")).upper(), 0)
+
+    async def ecrire(self, row: dict[str, Any], connexion_id: str | None = None) -> None:
         coin = str(row.get("coin"))
         exch = int(row.get("exchange_ts_ms") or 0)
         precedent = self.dernier_ts.get(coin, 0)
@@ -159,17 +194,19 @@ class LaneL2:
         if precedent and exch - precedent > GAP_L2_MS:
             self.gaps += 1
         self.dernier_ts[coin] = exch
+        self.identifier(row, connexion_id)
         async with self._lock:
             with self.out_path.open("a", encoding="utf-8") as h:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
             self.emis += 1
 
-    async def ecrire_bbo(self, row: dict[str, Any]) -> None:
+    async def ecrire_bbo(self, row: dict[str, Any], connexion_id: str | None = None) -> None:
         coin = str(row.get("coin"))
         exch = int(row.get("exchange_ts_ms") or 0)
         if exch <= self.dernier_ts_bbo.get(coin, 0):
             return
         self.dernier_ts_bbo[coin] = exch
+        self.identifier(row, connexion_id)
         async with self._lock_bbo:
             with self.bbo_out_path.open("a", encoding="utf-8") as h:
                 h.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -186,6 +223,9 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22,
                                           compression="deflate") as ws:  # A22 permessage-deflate
                 serie += 1
+                # Une identité PAR connexion WebSocket : deux carnets de connexions différentes ne
+                # prouvent pas la continuité du flux entre eux.
+                connexion_id = "l2-lane-" + uuid.uuid4().hex
                 for c in coins:
                     await ws.send(json.dumps({"method": "subscribe",
                                               "subscription": {"type": "l2Book", "coin": c}}))
@@ -213,14 +253,16 @@ async def _connexion(lane: LaneL2, coins: list[str], socket_id: str, deadline: f
                     # complet est rejete sur ce frame.
                     bbo, _rb = construire_bbo(data, recv_ms=recv_ms)
                     if bbo is not None:
-                        await lane.ecrire_bbo(bbo)
+                        await lane.ecrire_bbo(bbo, connexion_id)
                     row, _raison = construire_carnet(data, recv_ms=recv_ms)
                     if row is None:
                         lane.rejets += 1
+                        lane.incident([data.get("coin")])      # trame rejetée : le carnet de ce marché a un trou
                         continue
-                    await lane.ecrire(row)
+                    await lane.ecrire(row, connexion_id)
         except Exception as exc:  # noqa: BLE001 (reconnexion resiliente)
             lane.reconnects += 1
+            lane.incident(coins)                               # déconnexion : tous ses marchés changent d'époque
             print(f"[l2-lane] socket {socket_id} reconnexion ({type(exc).__name__})", flush=True)
             await asyncio.sleep(min(5.0, 1.0 + lane.reconnects * 0.5))
 

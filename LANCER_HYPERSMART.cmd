@@ -1,5 +1,11 @@
 @echo off
+chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
+set "ALINA_LAUNCH_RUN_ID=%DATE%_%TIME%_%RANDOM%_%RANDOM%"
+set "ALINA_LAUNCH_MODE=autopilot"
+set "ALINA_LAUNCH_PYTHON=unresolved"
+set "ALINA_LAUNCH_OUTPUT_LOG=runtime/logs/launchers/LANCER_HYPERSMART.log"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" START preflight "launcher-entry" ""
 cd /d "%~dp0"
 set "ALINA_PROJECT_ROOT=%~dp0."
 REM item 9/10 : code de sortie propage de bout en bout. Jamais un exit /b 0 systematique en cas d'echec.
@@ -11,6 +17,7 @@ if "%~1"=="" set "HYPERSMART_INTERACTIVE_LAUNCH=1"
 REM PORTABILITE : choisit en priorite le Python embarque relatif au dossier.
 REM Le PATH est modifie uniquement pour cette session du lanceur et ses enfants.
 call "%ALINA_PROJECT_ROOT%\tools\portable_env.cmd"
+if defined HYPERSMART_PYTHON set "ALINA_LAUNCH_PYTHON=%HYPERSMART_PYTHON%"
 if errorlevel 1 (
   echo   HyperSmart ne peut pas demarrer sans runtime Python valide.
   set "RC=30"
@@ -60,6 +67,7 @@ REM  docs\archive\legacy_cmd\). Le seul second lanceur officiel est
 REM  ANALYSER_BACKTESTS_REPLAYS.cmd, reserve aux analyses hors runtime.
 REM  Securite : lecture seule marche. 0 ordre reel, 0 argent, 0 cle, 0 signature.
 REM ============================================================================
+if not "%~1"=="" set "ALINA_LAUNCH_MODE=command"
 if not "%~1"=="" goto :dispatch
 
 :autopilot
@@ -79,9 +87,12 @@ if not exist "runtime\rapports\checkpoint_oos_shadow" mkdir "runtime\rapports\ch
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" start > "%TEMP%\alina_cmd_start.tmp" 2>nul
 set /p ALINA_CMD_START=<"%TEMP%\alina_cmd_start.tmp"
 REM ENG-032 : prevol joignabilite reseau HL avant lancement (evite de consommer un restart).
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "network-preflight" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "Prevol reseau HL" 1 7
 "%HYPERSMART_PYTHON%" -c "from hl_observer.ops.network_health import assert_hl_reachable; assert_hl_reachable()"
-if errorlevel 1 (
+set "NETWORK_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "network-preflight" "%NETWORK_RC%"
+if not "%NETWORK_RC%"=="0" (
   echo.
   echo   [ERREUR] API Hyperliquid NON JOIGNABLE. Verifiez la connexion Internet.
   echo   Le moteur ne demarre pas pour eviter un crash immediat.
@@ -89,9 +100,11 @@ if errorlevel 1 (
   set "RC=5"
   goto :fin
 )
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "port-owner-check" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "Verification port" 2 7
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.port_owner --root "%~dp0." --port %HYPERSMART_PORT%
 set "PORT_OWNER_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "port-owner-check" "%PORT_OWNER_RC%"
 REM ENG-062 : "deja lance" = code dedie 8 (pas 0) pour distinguer de "demarre OK".
 if "%PORT_OWNER_RC%"=="2" (
   echo.
@@ -113,9 +126,12 @@ REM === PORTABILITE INTRINSEQUE ===
 REM Ce prevol s'execute AVANT la creation du verrou/PID du lancement courant. Il ne purge
 REM l'etat machine qu'au tout premier demarrage ou apres un vrai changement de PC/chemin.
 REM Sur un demarrage ordinaire au meme endroit il est strictement non destructif.
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "portable-runtime-and-state-preparation" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "Premier lancement / portabilite" 3 7
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.premier_lancement --racine "%~dp0."
-if errorlevel 1 (
+set "PORTABLE_PREP_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "portable-runtime-and-state-preparation" "%PORTABLE_PREP_RC%"
+if not "%PORTABLE_PREP_RC%"=="0" (
   echo.
   echo   [PREVOL] Environnement NO_GO : droits, runtime ou securite a corriger.
   echo   Aucun verrou, PID ou collecteur du nouveau lancement n'a ete cree.
@@ -127,7 +143,9 @@ REM === ITEM 11 : VERROU d'instance ATOMIQUE (le seul controle du port ne suffit
 REM   avant que l'UI ne lie 8794). Deux double-clics simultanes ne lancent JAMAIS deux recoltes.
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.verrou_lanceur acquerir "%~dp0."
-if errorlevel 1 (
+set "LAUNCH_LOCK_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "exclusive-launch-lock" "%LAUNCH_LOCK_RC%"
+if not "%LAUNCH_LOCK_RC%"=="0" (
   echo.
   echo   HyperSmart demarre DEJA ^(warmup en cours, verrou d'instance present^). Un seul lancement a la fois.
   echo   Pour redemarrer proprement : LANCER_HYPERSMART.cmd restart
@@ -590,9 +608,12 @@ REM            DEPTH_FILL_GUARD, REQUIRE_EMPIRICAL_EDGE, WALLET_QUALITY_SCORING,
 REM            EVENT_DRIVEN_AUTHORITATIVE, SESSION_LOSS_GUARD, AUTO_UNSTUCK.
 REM === PREFLIGHT BLOQUANT (item 6) — env/deps/disque/dossiers/horloge/endpoints/quotas/schemas/paper.
 REM   NO-GO => le moteur NE demarre PAS. Paper strict, lecture publique HL info uniquement, 0 ordre.
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "blocking-preflight" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "Preflight bloquant" 4 7
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.preflight_lanceur "%~dp0."
-if errorlevel 1 (
+set "BLOCKING_PREFLIGHT_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "blocking-preflight" "%BLOCKING_PREFLIGHT_RC%"
+if not "%BLOCKING_PREFLIGHT_RC%"=="0" (
   echo.
   echo   [PREFLIGHT] NO-GO : environnement non pret. Le moteur ne demarre pas. Corrige les blocages ci-dessus.
   echo.
@@ -609,7 +630,9 @@ REM => le dataset replay s'accumule entre rallumages ; runtime\replay\ reste pro
 REM Le replay (merge_replay/include_archive) lit TOUT l'historique. Best-effort, jamais destructif.
 if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
 "%HYPERSMART_PYTHON%" -m hl_observer.runtime.replay_recorder --archive-run --base "%~dp0runtime\replay" 1>>"%~dp0runtime\logs\archive_replay.log" 2>&1
-if errorlevel 1 echo   [ATTENTION] Archivage replay: erreur signalee (non masquee) -- voir runtime\logs\archive_replay.log
+set "ARCHIVE_REPLAY_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "archive-previous-replay; details=runtime/logs/archive_replay.log" "%ARCHIVE_REPLAY_RC%"
+if not "%ARCHIVE_REPLAY_RC%"=="0" echo   [ATTENTION] Archivage replay: erreur signalee (non masquee) -- voir runtime\logs\archive_replay.log
 
 REM -MaxLeaders eleve = scan TRES large (pool de leaders) ; le gate de qualite (smart money) garde la copie etroite.
 REM === CARRY HISTORIQUE : DESACTIVE / SHADOW (decision Flo 2026-07-23) ===
@@ -649,10 +672,13 @@ REM d'une session precedente voient le marqueur changer et s'arretent d'elles-me
 REM plus jamais deux carry-feeders en parallele apres un Q, une croix ou un crash.
 if not exist "runtime\data" mkdir "runtime\data" >nul 2>&1
 echo %random%-%random%-%date%-%time% > "runtime\data\lanceur_session_marqueur.txt"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "collector-startup" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "Demarrage collecteurs" 5 7
 call :demarrer_collecteurs
+set "COLLECTOR_START_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "collector-startup-first-pass" "%COLLECTOR_START_RC%"
 REM === Item 8 : une source OBLIGATOIRE (CORE) non demarree BLOQUE le moteur (superviseur -> exit 3).
-if errorlevel 1 (
+if not "%COLLECTOR_START_RC%"=="0" (
   echo.
   echo   [COLLECTEURS] Une source obligatoire n'a pas demarre. Le moteur ne demarre pas. Voir ci-dessus.
   echo.
@@ -666,7 +692,9 @@ timeout /t 2 /nobreak >nul 2>&1
 REM Une ancienne boucle peut sortir juste apres le changement du marqueur de session.
 REM Ce second passage idempotent ne duplique rien et recree seulement les collecteurs disparus.
 call :demarrer_collecteurs
-if errorlevel 1 (
+set "COLLECTOR_RECONCILE_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "collector-startup-reconciliation" "%COLLECTOR_RECONCILE_RC%"
+if not "%COLLECTOR_RECONCILE_RC%"=="0" (
   echo   [COLLECTEURS] Echec de reconciliation apres changement de session.
   call :stop_impl
   set "RC=3"
@@ -683,10 +711,13 @@ REM ENG-038 : fenetre de warmup surchargable (defaut 90s). Augmenter pour un 1er
 REM   set HYPERSMART_WARMUP_CORE_SEC=180 pour un demarrage a froid sur une machine lente.
 set "HYPERSMART_WARMUP_CORE_SEC=%HYPERSMART_WARMUP_CORE_SEC%"
 if "%HYPERSMART_WARMUP_CORE_SEC%"=="" set "HYPERSMART_WARMUP_CORE_SEC=90"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "ready-core-warmup" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "READY_CORE warmup" 6 7
 echo   [READY_CORE] Attente bornee (%HYPERSMART_WARMUP_CORE_SEC% s) de la preuve de vie du socle CORE...
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau core --attendre %HYPERSMART_WARMUP_CORE_SEC% --intervalle 3
-if errorlevel 1 (
+set "READY_CORE_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "ready-core-warmup" "%READY_CORE_RC%"
+if not "%READY_CORE_RC%"=="0" (
   echo.
   echo   [READY_CORE] DATA_NOT_READY : allMids/BBO/userFills n'ont PAS prouve leur vie dans la fenetre.
   echo   Le moteur, l'UI et le poller NE demarrent PAS ^(paper strict, aucune donnee fabriquee^).
@@ -699,18 +730,21 @@ if errorlevel 1 (
 echo   [READY_CORE] OK : allMids + BBO + userFills prouves vivants. Demarrage moteur/UI/poller autorise.
 REM Item 4 : niveau HARVEST detaille (COMPLET / DEGRADE_DOCUMENTE) — INFORMATIF, va au catalogue de session.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.preuve_de_vie "%~dp0." --niveau harvest
+set "HARVEST_HEALTH_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "harvest-health-informational" "%HARVEST_HEALTH_RC%"
 
 REM === ITEM 7 (cablage) : ouverture de la SESSION canonique + declaration de TOUTES les sources ========
 REM   Ecrit runtime\data\sessions\<run_id>\DATA_CATALOG.json (ACTIVE) + le pointeur COURANTE.json que le
 REM   moniteur et ANALYSER retrouvent. Chaque source est DECLAREE (vivante avec compteurs reels, ou absente
 REM   avec sa raison). Aucune donnee fabriquee.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.session_harvest ouvrir "%~dp0."
-if errorlevel 1 (
+set "RC_SESSION=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "open-canonical-harvest-session" "%RC_SESSION%"
+if not "%RC_SESSION%"=="0" (
   echo.
   echo   [SESSION] Echec bloquant de creation du catalogue de session. Le moteur ne demarre pas.
   echo   Aucun run incomplet ne sera promu ; consulte les logs et corrige les droits/artefacts.
   echo.
-  set "RC_SESSION=%ERRORLEVEL%"
   call :stop_impl
   set "RC=5"
   goto :fin
@@ -729,17 +763,23 @@ if not exist "%~dp0runtime\logs" mkdir "%~dp0runtime\logs" >nul 2>&1
 REM item 9 : UN SEUL writer pour sante_journal.log = le module moniteur_sante (journal synthetique).
 REM La sortie CONSOLE redirigee va dans un fichier SEPARE (sante_console.log) -> plus d'ecritures
 REM concurrentes ni de doublons sur le journal.
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "health-monitor-launch; details=runtime/logs/sante_console.log" ""
 start "" /b "%HYPERSMART_PYTHON%" -m hl_observer.ops.moniteur_sante "%~dp0." --intervalle 3 1>>"%~dp0runtime\logs\sante_console.log" 2>&1
+set "HEALTH_MONITOR_START_RC=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "health-monitor-launch-request; details=runtime/logs/sante_console.log" "%HEALTH_MONITOR_START_RC%"
 
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP autopilot "interactive-simulation-engine" ""
 "%HYPERSMART_PYTHON%" "%~dp0tools\cmd_progress.py" phase "Moteur simulation" 7 7
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\start_hypersmart_simulation.ps1" -Port %HYPERSMART_PORT% -IntervalSeconds 15 -MaxLeaders 50 -Interactive
 
 REM item 4 : a la SORTIE du moteur interactif (Q / croix / fin), on arrete REELLEMENT les writers puis on
 REM CLOTURE la session (COMPLETE si tout verifie + zero orphelin + preuve d'arret ; sinon QUARANTINED).
 set "RC_MOTEUR=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "interactive-simulation-engine" "%RC_MOTEUR%"
 echo   [ARRET] Sortie du moteur : arret des collecteurs + cloture de session...
 call :stop_impl
 set "RC_STOP=%ERRORLEVEL%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" RESULT autopilot "stop-and-session-close" "%RC_STOP%"
 REM item 9 : propage le PREMIER code non nul (moteur PowerShell puis arret/cloture).
 if not "%RC_MOTEUR%"=="0" ( set "RC=%RC_MOTEUR%" ) else ( if not "%RC_STOP%"=="0" set "RC=%RC_STOP%" )
 goto :fin
@@ -769,6 +809,7 @@ echo.
 pause
 
 :fin_exit
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" EXIT completion "launcher-finished" "%RC%"
 endlocal & exit /b %RC%
 
 REM ############################################################################
@@ -833,6 +874,8 @@ set "HL_ENABLE_MAINNET_EXECUTION=0"
 set "HL_ENABLE_TESTNET_EXECUTION=0"
 set "HYPERSMART_MODE=SIMULATION_ONLY_UNTIL_MANUAL_REVIEW"
 set "SUB=%~1"
+set "ALINA_LAUNCH_MODE=%SUB%"
+call "%~dp0tools\launcher_log.cmd" "LANCER_HYPERSMART" STEP command-dispatch "subcommand-selected" ""
 REM ENG-031 : --help / -h affiche le menu d'aide.
 if /I "%SUB%"=="--help"            goto :cmd_menu
 if /I "%SUB%"=="-h"                goto :cmd_menu

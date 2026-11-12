@@ -35,6 +35,16 @@ ETAT = Path("runtime") / "coffre_certifie" / "ticks_verifies.sqlite3"
 INDEX = Path("runtime") / "coffre_certifie" / "MARKET_TICKS_INDEX.json"
 SCHEMA_INDEX = "hypersmart.coffre_certifie.market_ticks_index.v1"
 
+# Deux vérifications peuvent se croiser (Certificateur lancé pendant un passage long). La seconde
+# attend la fin de l'écriture en cours ; au-delà, elle renonce PROPREMENT : l'index reste celui du
+# passage en cours, rien n'est perdu, et le journal dit la vraie raison.
+ATTENTE_VERROU_S = 60.0
+
+
+class VerificationEnCours(RuntimeError):
+    """Une autre vérification du magasin tient la base d'état : ce passage n'a rien modifié."""
+
+
 OK = "OK"
 MANIFESTE_ABSENT = "MANIFESTE_ABSENT"
 MANIFESTE_ILLISIBLE = "MANIFESTE_ILLISIBLE"
@@ -44,7 +54,7 @@ SHA_DIFFERENT = "SHA_DIFFERENT"
 
 def _connexion(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    cnx = sqlite3.connect(path)
+    cnx = sqlite3.connect(path, timeout=ATTENTE_VERROU_S)
     cnx.execute("PRAGMA journal_mode=WAL")
     cnx.execute(
         "CREATE TABLE IF NOT EXISTS shards (chemin TEXT PRIMARY KEY, source TEXT, canal TEXT, "
@@ -109,11 +119,23 @@ def _dossiers_instrument(store: Path):
 
 
 def verifier_store(root: Path, *, budget_s: float = 45.0, horloge=time.monotonic) -> dict[str, Any]:
-    """Un passage borné de vérification ; renvoie (et écrit) l'état d'ensemble du magasin."""
+    """Un passage borné de vérification ; renvoie (et écrit) l'état d'ensemble du magasin.
+
+    Lève ``VerificationEnCours`` si une autre vérification tient la base d'état au-delà de
+    ``ATTENTE_VERROU_S`` : ce passage n'a alors rien écrit (ni base, ni index)."""
     root = Path(root).resolve()
     store = root / STORE
     if not store.is_dir():
         return {"present": False}
+    try:
+        return _verifier(root, store, budget_s, horloge)
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+            raise
+        raise VerificationEnCours("une autre vérification du magasin de ticks est en cours") from exc
+
+
+def _verifier(root: Path, store: Path, budget_s: float, horloge) -> dict[str, Any]:
     cnx = _connexion(root / ETAT)
     debut = horloge()
     verifies = anomalies = 0
@@ -220,7 +242,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", default=str(RACINE))
     p.add_argument("--budget-s", type=float, default=45.0, help="durée maximale de ce passage (s)")
     args = p.parse_args(argv)
-    resume = verifier_store(Path(args.root), budget_s=args.budget_s)
+    try:
+        resume = verifier_store(Path(args.root), budget_s=args.budget_s)
+    except VerificationEnCours as exc:
+        print(f"[ticks] {exc} : rien n'a été modifié, l'index existant reste valable.")
+        return 0
     if not resume.get("present"):
         print("[ticks] aucun magasin de ticks natifs.")
         return 0

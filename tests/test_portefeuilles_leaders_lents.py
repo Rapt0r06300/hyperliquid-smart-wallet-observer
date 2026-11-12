@@ -84,8 +84,55 @@ def test_un_instantane_par_leader_et_par_dex_certifiable_et_lisible_par_le_labo(
 
 def test_le_lanceur_releve_ces_portefeuilles_sans_option_particuliere():
     source = (RACINE / "tools" / "collecter_vaults.py").read_text(encoding="utf-8")
-    assert "passe_portefeuilles_leaders(root)" in source and "--sans-leaders" in source
+    assert "passe_portefeuilles_leaders(root, pause=respirer)" in source and "--sans-leaders" in source
     from hl_observer.ops import collecteur_registry as REG
 
     entree = next(c for c in REG.REGISTRE if c["nom"] == "vault-collector")
     assert entree["script"] == "tools/collecter_vaults.py" and "--sans-leaders" not in entree["args"]
+
+
+def test_le_collecteur_de_vaults_tient_sa_part_de_debit_au_lieu_d_envoyer_en_rafale(tmp_path, monkeypatch):
+    """Sans pause, une passe dépassait à elle seule la limite de l'API (cas réel du 2026-11-11)."""
+    from hl_observer.collection import collecte_fiable as CF
+
+    m = _outil()
+    _plan(tmp_path)
+    monkeypatch.setattr(m, "_post_info", lambda charge, **_: {
+        "assetPositions": [], "marginSummary": {"accountValue": "10.0"}, "time": int(NOW * 1000)})
+    poids: list[float] = []
+    bilan = m.passe_portefeuilles_leaders(tmp_path, now=NOW, pause=poids.append)
+    assert bilan["portefeuilles"] == 6 and poids == [m.POIDS_PORTEFEUILLE] * 6        # une pause par requête
+    # sans le paramètre (tests, appels directs) : aucune pause, comme avant
+    assert m.passe_portefeuilles_leaders(tmp_path, now=NOW)["portefeuilles"] == 6
+    poids.clear()
+    m.une_passe(tmp_path, [_adr(7), _adr(8), _adr(9)], now=NOW, pause=poids.append)
+    assert poids == [m.POIDS_VAULT] * 3                                               # une pause par vault
+    # la pause est proportionnelle au poids, dans une part déclarée du budget (bien sous la limite de 1 200)
+    siestes: list[float] = []
+    temps = [50.0]
+    monkeypatch.setattr(m, "_CADENCE", CF.CadencePonderee(
+        m.BUDGET_VAULTS_PAR_MINUTE, horloge=lambda: temps[0], dormir=siestes.append))
+    m.respirer(m.POIDS_VAULT)
+    m.respirer(m.POIDS_VAULT)
+    assert len(siestes) == 1                                                          # la première part tout de suite
+    assert abs(siestes[0] - CF.pause_pour_poids(m.POIDS_VAULT, budget_par_minute=m.BUDGET_VAULTS_PAR_MINUTE)) < 1e-9
+    assert 4.0 < siestes[0] < 5.0 and m.BUDGET_VAULTS_PAR_MINUTE <= 400.0
+
+
+def test_les_portefeuilles_sont_releves_en_tete_et_en_fin_de_passe(tmp_path, monkeypatch):
+    """L'étude de réplication écarte un portefeuille de plus de 15 minutes : deux relevés par passe."""
+    m = _outil()
+    _plan(tmp_path)
+    ordre: list[str] = []
+    monkeypatch.setattr(m, "charger_vaults_suivis", lambda root: [_adr(7)])
+    monkeypatch.setattr(m, "une_passe", lambda root, vaults, **_: ordre.append("vaults") or 1)
+    monkeypatch.setattr(m, "passe_portefeuilles_leaders", lambda root, **_: ordre.append("portefeuilles") or {
+        "leaders": 3, "portefeuilles": 6, "echecs": 0})
+    monkeypatch.setattr(m, "balayer_historique", lambda root, **_: ordre.append("balayage") or {
+        "lus": 0, "univers": 0, "tour": 0, "lignes": 0})
+    assert m.main(["--root", str(tmp_path), "--une-fois"]) == 0
+    assert ordre == ["portefeuilles", "vaults", "portefeuilles", "balayage"]
+    ordre.clear()
+    monkeypatch.setattr(m, "charger_vaults_suivis", lambda root: [])
+    assert m.main(["--root", str(tmp_path), "--une-fois"]) == 0
+    assert ordre == ["portefeuilles", "balayage"]                                      # sans vault : un seul relevé

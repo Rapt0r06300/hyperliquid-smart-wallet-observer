@@ -101,6 +101,35 @@ def test_generateur_ecrit_la_liste_locale_et_ne_publie_pas_sans_univers(tmp_path
     assert (tmp_path / "config" / "copy_vault_coins.json").read_text(encoding="utf-8") == avant
 
 
+def test_le_generateur_cible_d_abord_les_coins_que_le_labo_ne_peut_pas_executer(tmp_path, monkeypatch):
+    """Boucle labo → collecteurs : la carte d'exécutabilité du rapport prime sur le classement par notionnel."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "copy_vault_coins.json").write_text(json.dumps({"coins": ["BTC"]}), encoding="utf-8")
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    # le labo a mesuré que xyz:SP500 bloque le plus de signaux, puis xyz:NVDA
+    run = tmp_path / "runtime" / "reports" / "copy_vault_quant_lab" / "20261112T120000000000Z"
+    run.mkdir(parents=True)
+    (run / "resultat.json").write_text(json.dumps({"economic_result": {"train_executability": {
+        "coins_a_collecter": [
+            {"coin": "xyz:SP500", "non_executables": 800},
+            {"coin": "xyz:NVDA", "non_executables": 120},
+            {"coin": "INCONNU_DEX", "non_executables": 50},
+        ]}}}), encoding="utf-8")
+    # l'étude de copiabilité demande un autre coin, par notionnel (vient après)
+    (tmp_path / G.BESOINS).write_text(json.dumps({"needs": [
+        {"need": "SPREAD_MANQUANT", "coins_by_notional": [["kPEPE", 0.3], ["xyz:SP500", 0.2]]}]}), encoding="utf-8")
+    monkeypatch.setattr(G, "charger_univers", lambda root: {"BTC", "xyz:SP500", "xyz:NVDA", "kPEPE"})
+    assert G.coins_bloquant_la_mesure(tmp_path) == ["xyz:SP500", "xyz:NVDA", "INCONNU_DEX"]
+    assert G.main(["--root", str(tmp_path)]) == 0
+    locale = json.loads((tmp_path / G.LISTE_LOCALE).read_text(encoding="utf-8"))
+    # BTC gardé ; puis les coins bloquants du labo (exécutabilité) AVANT le besoin par notionnel ;
+    # INCONNU_DEX retiré (hors univers), xyz:SP500 pas dupliqué
+    assert locale["coins"] == ["BTC", "xyz:SP500", "xyz:NVDA", "kPEPE"]
+    # sans rapport lisible : retombe sur le classement par notionnel seul
+    (run / "resultat.json").write_text("pas du json", encoding="utf-8")
+    assert G.coins_bloquant_la_mesure(tmp_path) == []
+
+
 def test_les_lanes_ne_s_abonnent_jamais_a_un_marche_inconnu(tmp_path, monkeypatch):
     """Régression : un coin invalide dans la liste faisait fermer la connexion de toute la lane."""
     import asyncio
