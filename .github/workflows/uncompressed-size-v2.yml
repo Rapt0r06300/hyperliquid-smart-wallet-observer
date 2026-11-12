@@ -72,7 +72,9 @@ jobs:
               --measured-root "$RUNNER_TEMP/alina-size-measurements" \
               --repo-root "$GITHUB_WORKSPACE"
             python tools/build_catalog_metrics.py
-            git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json catalog/DATA_METRICS.json
+            git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json \
+              catalog/uncompressed-size-parts catalog/record-count-parts \
+              catalog/DATA_METRICS.json
             if git diff --cached --quiet; then
               echo "Verified size/record evidence already published."
               exit 0
