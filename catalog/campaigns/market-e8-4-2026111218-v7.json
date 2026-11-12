@@ -7,18 +7,119 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "d8abb542491aead4d2cfbde1fab4776a467bba9f",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "collection_metrics": {
+          "accepted_frames": 269680,
+          "basis": "published_bundle_manifests",
+          "bbo_frames": 69476,
+          "checkpoint_missing": false,
+          "compressed_bytes": 19002199,
+          "duration_s": 3528.425,
+          "ended_at_ms": 1794515555563,
+          "frame_counter_consistent": false,
+          "frame_metrics_complete": false,
+          "historical_fill_observation_coverage_complete": true,
+          "historical_fill_observations": 0,
+          "historical_snapshot_shards": 0,
+          "historical_snapshot_shards_exact": 0,
+          "l2_frames": 78006,
+          "l2_frames_manifest_records": 78006,
+          "l2_frames_observed": null,
+          "l2_frames_reconciled": true,
+          "manifest_inventory_complete": true,
+          "partial_count": 100,
+          "persisted_frames": 269680,
+          "queue_drops": 0,
+          "record_count_observed": 187267,
+          "reject_count": 0,
+          "safe_count": 0,
+          "shard_count": 100,
+          "started_at_ms": 1794512027138,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 5568,
+          "trade_shard_count": 10,
+          "trade_shards_exact": 10,
+          "uncompressed_bytes": 294102860,
+          "uncompressed_size_coverage_complete": true
+        },
+        "counts": {
+          "completed_count": null,
+          "published_count": null,
+          "safe_qualified_count": 0,
+          "selected_count": null
+        },
+        "failure_category": "QUALITY",
+        "last_durable_checkpoint": null,
+        "output_root": "/home/runner/work/_temp/campaign-output/market-e8-4-2026111218-v7/copy_vault/0",
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/market-e8-4-2026111218-v7/copy_vault/0"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "10,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"accepted_samples\": 57,\n    \"attempts\": 406,\n    \"clock_offset_ms\": -562.0,\n    \"clock_probe_receive_wall_ts_ms\": 1794515471338,\n    \"clock_probe_rtt_ms\": 0.0,\n    \"clock_probe_server_ts_ms\": 1794515470776,\n    \"clock_source\": \"webData3.userState.serverTime\",\n    \"failures\": 349,\n    \"last_error\": \"\",\n    \"status\": \"OK\"\n  },\n  \"hyperliquid_trade_reference\": {\n    \"base_weight_budget_per_min\": 480.0,\n    \"effective_interval_s\": 25.0,\n    \"estimated_base_weight_per_min\": 480.0,\n    \"poll_errors\": {\n      \"BLUR\": 0,\n      \"BOME\": 0,\n      \"FIL\": 0,\n      \"IMX\": 0,\n      \"POPCAT\": 0,\n      \"RSR\": 0,\n      \"SKR\": 0,\n      \"TRB\": 0,\n      \"TRUMP\": 0,\n      \"ZORA\": 0\n    },\n    \"polls\": 140,\n    \"reference_trade_ids\": {\n      \"BLUR\": 90,\n      \"BOME\": 24,\n      \"FIL\": 178,\n      \"IMX\": 70,\n      \"POPCAT\": 80,\n      \"RSR\": 117,\n      \"SKR\": 149,\n      \"TRB\": 90,\n      \"TRUMP\": 269,\n      \"ZORA\": 55\n    },\n    \"requested_interval_s\": 5.0,\n    \"successful_polls\": {\n      \"BLUR\": 140,\n      \"BOME\": 140,\n      \"FIL\": 140,\n      \"IMX\": 140,\n      \"POPCAT\": 140,\n      \"RSR\": 140,\n      \"SKR\": 140,\n      \"TRB\": 140,\n      \"TRUMP\": 140,\n      \"ZORA\": 140\n    }\n  },\n  \"instrument_metadata\": {\n    \"binance\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bitget\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"capacity_size_multiplier_by_symbol\": {\n        \"BLUR_USDT\": 1.0,\n        \"BOME_USDT\": 1000.0,\n        \"FIL_USDT\": 0.01,\n        \"IMX_USDT\": 1.0,\n        \"POPCAT_USDT\": 10.0,\n        \"RSR_USDT\": 100.0,\n        \"SKR_USDT\": 100.0,\n        \"TRB_USDT\": 0.1,\n        \"TRUMP_USDT\": 0.1,\n        \"ZORA_USDT\": 100.0\n      },\n      \"records\": 10,\n      \"status\": \"OK\"\n    },\n    \"hyperliquid\": {\n      \"capacity_size_multiplier_by_symbol\": {\n        \"BLUR\": 1.0,\n        \"BOME\": 1.0,\n        \"FIL\": 1.0,\n        \"IMX\": 1.0,\n        \"POPCAT\": 1.0,\n        \"RSR\": 1.0,\n        \"SKR\": 1.0,\n        \"TRB\": 1.0,\n        \"TRUMP\": 1.0,\n        \"ZORA\": 1.0\n      },\n      \"records\": 10,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"gate\": 74586,\n      \"hyperliquid\": 3420\n    },\n    \"expected_symbol_count\": 20,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 20,\n    \"required\": true,\n    \"required_venues\": [\n      \"gate\",\n      \"hyperliquid\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 269680,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"replay_grade_coverage\": {\n    \"complete\": false,\n    \"cross_venue_capacity_coins_observed\": [],\n    \"fail_closed\": true,\n    \"liquidation_families_observed\": [],\n    \"missing_cross_venue_capacity_coins\": [\n      \"BLUR\",\n      \"BOME\",\n      \"FIL\",\n      \"IMX\",\n      \"POPCAT\",\n      \"RSR\",\n      \"SKR\",\n      \"TRB\",\n      \"TRUMP\",\n      \"ZORA\"\n    ],\n    \"per_venue\": {\n      \"gate\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {\n          \"BLUR_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"BOME_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"FIL_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"IMX_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"POPCAT_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"RSR_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"SKR_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"TRB_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"TRUMP_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ],\n          \"ZORA_USDT\": [\n            \"capacity_tape\",\n            \"open_interest\",\n            \"ticker\"\n          ]\n        },\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"open_interest\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BLUR_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BOME_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"FIL_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"IMX_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"POPCAT_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"RSR_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SKR_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRB_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRUMP_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"ZORA_USDT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      },\n      \"hyperliquid\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": false,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {\n          \"BLUR\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"BOME\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"FIL\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"IMX\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"POPCAT\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"RSR\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"SKR\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"TRB\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"TRUMP\": [\n            \"capacity_tape\",\n            \"trades\"\n          ],\n          \"ZORA\": [\n            \"capacity_tape\",\n            \"trades\"\n          ]\n        },\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {}\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"source_admission\": {\n    \"blocking_reasons\": {\n      \"RECONCILIATION_MATCH_REQUIRED\": 10,\n      \"RECONCILIATION_NOT_VERIFIED\": 56\n    },\n    \"excluded_compressed_bytes\": 28720762,\n    \"excluded_shards\": 66,\n    \"mode\": \"replay_only\",\n    \"no_rejected_payload_published\": true\n  },\n  \"started_at_ms\": 1794512027138,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"unattributed_queue_drops\": {},\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [],\n    \"bybit\": [],\n    \"gate\": [\n      \"BLUR_USDT\",\n      \"BOME_USDT\",\n      \"FIL_USDT\",\n      \"IMX_USDT\",\n      \"POPCAT_USDT\",\n      \"RSR_USDT\",\n      \"SKR_USDT\",\n      \"TRB_USDT\",\n      \"TRUMP_USDT\",\n      \"ZORA_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"BLUR\",\n      \"BOME\",\n      \"FIL\",\n      \"IMX\",\n      \"POPCAT\",\n      \"RSR\",\n      \"SKR\",\n      \"TRB\",\n      \"TRUMP\",\n      \"ZORA\"\n    ],\n    \"okx\": []\n  }\n}\n"
+          }
+        ],
+        "publication_blockers": [
+          "frame_metrics_incomplete",
+          "not_all_shards_safe",
+          "partial_shards_present"
+        ],
+        "reason": "collection_publication_unproven",
+        "status": "PARTIAL",
+        "unit_diagnostic": {
+          "attempt": null,
+          "campaign_id": "market-e8-4-2026111218-v7",
+          "counts": {
+            "completed_count": null,
+            "published_count": null,
+            "safe_qualified_count": 0,
+            "selected_count": null
+          },
+          "deadline_epoch_ms": 1794530923311,
+          "deadline_exceeded": false,
+          "duration_ms": 3532337,
+          "ended_at_epoch_ms": 1794515555648,
+          "kind": "market_collection",
+          "last_durable_checkpoint": null,
+          "reason": "collection_publication_unproven",
+          "safe_publication_allowed": false,
+          "schema": "alina.copy_vault.adapter_unit_diagnostic.v1",
+          "started_at_epoch_ms": 1794512023311,
+          "state": "PARTIAL",
+          "status": "PARTIAL",
+          "unit_id": "0"
+        }
+      },
+      "sha256": "e6e024e53587d3ee81bdada1aba6d56863e7d4f50b369f22724d74368001096a"
+    }
+  },
   "config_sha256": "c7eba95a699596673f27c61f9874e68cfd57b90a627669b8c8cdaf593864ea40",
   "consecutive_failures": 0,
   "created_at": "2026-11-12T18:10:43.264317+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "e6e024e53587d3ee81bdada1aba6d56863e7d4f50b369f22724d74368001096a",
     "duration_s": 3500,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "43290542772",
     "market_shard_count": 16,
     "market_shard_index": 4,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026111218/shard-04.json",
     "plan_sha256": "5b34109ce9a874c60fd4b7b79966685b0e727c94d8ef6d9757eabef50ea8a323",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 10,
@@ -39,15 +140,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-11-12T20:32:59.927646Z",
+      "from": "RUNNING",
+      "reason": "collection_publication_unproven",
+      "to": "PARTIAL"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-11-12T19:32:16.239566Z",
-    "expires_at": "2026-11-13T01:17:16.239566Z",
-    "lease_token_sha256": "d91d519392518c4055433d669fb7938b04b665bcea56cf055ae8a2f74a98a344",
-    "owner_run_id": "43290542772"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -65,9 +167,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-11-12T19:32:16.239640Z",
+  "status": "PARTIAL",
+  "status_reason": "collection_publication_unproven",
+  "terminal_evidence_digest": "be83a8b86ee9b32b5249908aabec347a8225f50148ed10cd6d9d50d57e43a284",
+  "updated_at": "2026-11-12T20:32:59.927646Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
