@@ -1,11 +1,11 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "archives-binance-btc-e8-20261112-v4",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "4c62cf514d9985071e39af6d493a7381f0373abb",
+  "code_sha": "d8abb542491aead4d2cfbde1fab4776a467bba9f",
   "collection_cutoff_at_utc": null,
   "completed_units": {},
   "config_sha256": "738c6766d6d56b5ba00be5ec90b5d6542db9d5c54f9912f7c62515a3580657ca",
@@ -28,6 +28,15 @@
     {
       "event": "operator_request",
       "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/archives-binance-btc-e8-20261112-v4.pending.4c62cf514d99.b5ce9cdb31f146bc8700bc9decaae1d7a9d112154ad70efec360f05c87ab3bf5.json",
+      "archived_manifest_sha256": "b5ce9cdb31f146bc8700bc9decaae1d7a9d112154ad70efec360f05c87ab3bf5",
+      "at": "2026-11-12T18:10:46.319789Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "4c62cf514d9985071e39af6d493a7381f0373abb",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
     }
   ],
   "kind": "official_archive_collection",
@@ -50,8 +59,8 @@
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
   "status": "PENDING",
-  "status_reason": "created",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-11-12T09:55:29.370309Z",
+  "updated_at": "2026-11-12T18:10:46.319802Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
