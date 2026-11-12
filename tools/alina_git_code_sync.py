@@ -148,6 +148,28 @@ AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS = {
     "tests/test_roadmap_722_progress.py",
     "tools/roadmap_722_progress.py",
 }
+# These three pairs were reviewed byte-for-byte against their common base and
+# their focused tests pass together (17 tests).  The local blob deliberately
+# supersedes the narrower GitHub change.  Matching both immutable object ids
+# is mandatory: any future byte change disables the rule and returns to the
+# normal fail-closed conflict path.
+AUDITED_LOCAL_SUPERSET_BLOB_PAIRS = {
+    "src/hl_observer/collection/univers_perps.py": (
+        "181d5e8354e3a7126d4b149387f95f07d0562eff",
+        "c4ec93b2357dde8396b792feccdbd352414d2168",
+        "structured failure counter supersedes warning-only cache handling",
+    ),
+    "tests/test_copy_vault_campaign_lock.py": (
+        "bd8fe6a4cebf8fe632ce0cd4cfbc05b7e2bae608",
+        "a1219123637d8da293e339bb3d7847524bffeadf",
+        "dense-day fixture plus explicit executability stub",
+    ),
+    "tools/revalider_receipts.py": (
+        "74b08fcecd80e38cf1dec3678c23d87ea57fc4c5",
+        "d46ac5ddc3aa77e9074a4175938c93bf4b8918da",
+        "isolated process group supersedes creationflags-only execution",
+    ),
+}
 FORBIDDEN_HOSTED_CI_MARKERS = (
     "runs-on: self-hosted",
     'HL_ENABLE_MAINNET_EXECUTION: "1"',
@@ -2532,7 +2554,13 @@ class Synchronizer:
             if name and isinstance(child, dict)
         )
 
-    def _targeted_tree_from_index(self, paths: list[str]) -> str:
+    def _targeted_tree_from_index(
+        self,
+        paths: list[str],
+        *,
+        base_treeish: str = "HEAD",
+        report_prefix: str = "targeted_tree",
+    ) -> str:
         """Overlay staged code paths on HEAD without walking the huge index.
 
         ``git write-tree`` must inspect the repository's roughly 1.9 million
@@ -2577,7 +2605,7 @@ class Synchronizer:
                 node = child
             node[""] = staged.get(path)
 
-        base_root = self.text("rev-parse", "HEAD^{tree}")
+        base_root = self.text("rev-parse", f"{base_treeish}^{{tree}}")
         if not re.fullmatch(r"[0-9a-f]{40,64}", base_root):
             raise SyncBlocked("Arbre HEAD invalide; checkpoint refuse.")
         rebuilt_directories = 0
@@ -2660,8 +2688,8 @@ class Synchronizer:
             return tree_oid, len(entries)
 
         tree, _entry_count = rebuild(base_root, trie, "")
-        self.report["targeted_tree_rebuilt_directories"] = rebuilt_directories
-        self.report["targeted_tree_paths"] = len(ordered)
+        self.report[f"{report_prefix}_rebuilt_directories"] = rebuilt_directories
+        self.report[f"{report_prefix}_paths"] = len(ordered)
         return tree
 
     def _commit_staged_index(
@@ -3606,6 +3634,15 @@ class Synchronizer:
                         "Commit local de fusion ou parent ambigu; replay arbre refuse."
                     )
                 old_parent = parents[1]
+                commit_paths = _paths(self.command(
+                    "diff-tree", "-r", "--no-commit-id", "--name-only",
+                    "--no-renames", "-z", old_parent, old_commit,
+                ).stdout)
+                if not commit_paths or any(_protected(path) for path in commit_paths):
+                    raise SyncBlocked(
+                        "Commit local vide ou touchant un chemin protege; "
+                        "replay arbre refuse."
+                    )
                 merged = self.command(
                     # The temporary index must not validate the operator
                     # worktree: it may still contain the local version of a
@@ -3655,6 +3692,7 @@ class Synchronizer:
                         }
                         return False
                     for path, stages in stage_rows.items():
+                        resolution = "UPSTREAM_GITHUB_HEAD"
                         upstream = stages.get(2)
                         if upstream is None:
                             # GitHub (canonique) a supprime ce fichier -> accepte.
@@ -3706,27 +3744,47 @@ class Synchronizer:
                                     for content in versions
                                 ]
                                 if normalized[0] != normalized[1]:
-                                    self.report["tree_replay_fallback_reason"] = {
-                                        "phase": "python_semantic_difference",
-                                        "path": path,
-                                    }
-                                    return False
+                                    audited = AUDITED_LOCAL_SUPERSET_BLOB_PAIRS.get(path)
+                                    if (
+                                        audited is None
+                                        or oid != audited[0]
+                                        or local_stage[1] != audited[1]
+                                    ):
+                                        self.report["tree_replay_fallback_reason"] = {
+                                            "phase": "python_semantic_difference",
+                                            "path": path,
+                                        }
+                                        return False
+                                    mode, oid = local_stage
+                                    resolution = "AUDITED_LOCAL_SUPERSET"
+                                    audited_rows = self.report.setdefault(
+                                        "audited_local_superset_resolutions", []
+                                    )
+                                    if isinstance(audited_rows, list):
+                                        audited_rows.append({
+                                            "path": path,
+                                            "upstream_blob": audited[0],
+                                            "local_blob": audited[1],
+                                            "reason": audited[2],
+                                        })
                             self.command(
                                 "update-index", "--add", "--cacheinfo",
                                 f"{mode},{oid},{path}",
                             )
                         resolved.append({
                             "path": path,
-                            "resolution": "UPSTREAM_GITHUB_HEAD",
+                            "resolution": resolution,
                             "commit": old_commit,
                         })
                     if self.command("ls-files", "-u", "-z").stdout:
                         raise SyncBlocked(
                             "Conflit residuel apres resolution gouvernance; aucun push."
                         )
-                tree = self.command(
-                    "write-tree", timeout=COMMIT_TIMEOUT_SECONDS,
-                ).stdout.decode("ascii", errors="strict").strip()
+                tree = self._targeted_tree_from_index(
+                    commit_paths,
+                    base_treeish=current,
+                    report_prefix="tree_replay_targeted_tree",
+                )
                 if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
                     raise SyncBlocked("Arbre de replay invalide; aucun push.")
                 current_tree = self.text("rev-parse", f"{current}^{{tree}}")
