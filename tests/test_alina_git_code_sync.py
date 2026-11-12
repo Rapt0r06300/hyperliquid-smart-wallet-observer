@@ -928,6 +928,30 @@ def test_rebase_timeout_removes_only_its_proven_stale_index_lock(tmp_path):
     assert task.report["stale_index_lock_removed_after_timeout"] is True
 
 
+def test_rebase_timeout_accepts_already_stopped_git_state(tmp_path):
+    (tmp_path / ".git").mkdir()
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **_kwargs):
+        if args[:2] == ("rebase", "--abort"):
+            return subprocess.CompletedProcess(
+                args, 128, b"", b"fatal: no rebase in progress\n"
+            )
+        if args[:3] == ("rev-parse", "--absolute-git-dir"):
+            return subprocess.CompletedProcess(
+                args, 0, str(tmp_path / ".git").encode(), b""
+            )
+        raise AssertionError(f"unexpected command: {args!r}")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    timeout = subprocess.TimeoutExpired(["git", "rebase"], 60)
+
+    with pytest.raises(SyncBlocked, match="proprement arretes"):
+        task._abort_rebase_after_timeout(timeout)
+
+    assert task.report["rebase_already_stopped_after_timeout"] is True
+
+
 def test_protected_index_guard_uses_two_batched_commands(tmp_path):
     task = Synchronizer(tmp_path)
     task.report["protected_local_changes"] = [

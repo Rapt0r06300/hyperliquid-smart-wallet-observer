@@ -3332,14 +3332,27 @@ class Synchronizer:
         markers = tuple(
             gitdir / marker for marker in ("rebase-merge", "rebase-apply")
         )
-        if aborted.returncode or any(marker.exists() for marker in markers):
-            detail = (aborted.stderr or b"").decode(
-                "utf-8", errors="replace",
-            ).strip()
+        detail = (aborted.stderr or b"").decode(
+            "utf-8", errors="replace",
+        ).strip()
+        markers_active = any(marker.exists() for marker in markers)
+        no_rebase_active = "no rebase in progress" in detail.casefold()
+        if markers_active or (aborted.returncode and not no_rebase_active):
             raise SyncBlocked(
                 "Rebase depassee et abort Git non confirme; "
                 "intervention manuelle requise; "
                 + (detail[:600] if detail else "aucun detail Git")
+            ) from timeout
+        if no_rebase_active:
+            self.report["rebase_already_stopped_after_timeout"] = True
+            self.say(
+                "[REBASE TIMEOUT] Git confirme qu'aucun rebase ne reste "
+                "actif; recuperation propre, aucun push force."
+            )
+            raise SyncBlocked(
+                "Rebase depassee apres "
+                f"{budget}s, mais le processus et son etat Git sont "
+                "proprement arretes; aucun push force."
             ) from timeout
         self.say(
             "[REBASE TIMEOUT] Rebase arretee et abort Git confirme; "
@@ -3536,14 +3549,24 @@ class Synchronizer:
             index.unlink(missing_ok=True)
 
     def _tree_replay_approved(self, path: str) -> bool:
-        """Chemin résoluble par le fast path index-only : conflit de gouvernance
-        approuvé, OU workflow GitHub en conflit modify/delete (GitHub canonique).
-        Le fast path évite le rafraîchissement de l'index de 346 Mo du rebase."""
+        """Whether the index-only replay has a strict resolver for ``path``.
+
+        Ordinary Python conflicts are only accepted after both stage blobs
+        compile and match after blank-line normalization (the same contract as
+        the classic rebase resolver).  This declaration merely routes them to
+        that validation; it never approves an arbitrary upstream overwrite.
+        """
         if path in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS:
             return True
-        return (
+        if (
             path in getattr(self, "_predicted_modify_delete", set())
             and _is_ci_workflow_path(path)
+        ):
+            return True
+        return (
+            path.startswith(("src/", "tools/", "tests/"))
+            and path.endswith(".py")
+            and not _protected(path)
         )
 
     def _try_tree_plumbing_replay(
@@ -3651,6 +3674,41 @@ class Synchronizer:
                                 ):
                                     self.report["tree_replay_fallback_reason"] = {
                                         "phase": "workflow_marker_reject", "path": path,
+                                    }
+                                    return False
+                            elif path not in AUTO_RESOLVABLE_GOVERNANCE_CONFLICTS:
+                                local_stage = stages.get(3)
+                                if local_stage is None:
+                                    return False
+                                upstream_blob = self.command(
+                                    "cat-file", "-p", oid, check=False,
+                                )
+                                local_blob = self.command(
+                                    "cat-file", "-p", local_stage[1], check=False,
+                                )
+                                if upstream_blob.returncode or local_blob.returncode:
+                                    return False
+                                try:
+                                    versions = [
+                                        payload.stdout.decode("utf-8", errors="strict")
+                                        for payload in (upstream_blob, local_blob)
+                                    ]
+                                    for content in versions:
+                                        compile(content, path, "exec")
+                                except (UnicodeError, SyntaxError):
+                                    return False
+                                normalized = [
+                                    [
+                                        line.rstrip()
+                                        for line in content.splitlines()
+                                        if line.strip()
+                                    ]
+                                    for content in versions
+                                ]
+                                if normalized[0] != normalized[1]:
+                                    self.report["tree_replay_fallback_reason"] = {
+                                        "phase": "python_semantic_difference",
+                                        "path": path,
                                     }
                                     return False
                             self.command(
