@@ -865,7 +865,7 @@ def test_rebase_empty_commit_continuation_uses_initial_failure_result(tmp_path):
 
 @pytest.mark.parametrize(
     ("replay_count", "expected"),
-    [(0, 20), (2, 20), (6, 36), (20, 60)],
+    [(0, 60), (2, 60), (6, 72), (20, 120)],
 )
 def test_rebase_timeout_budget_is_short_and_bounded(
     replay_count: int, expected: int,
@@ -898,6 +898,56 @@ def test_rebase_timeout_is_aborted_and_reported(tmp_path):
 
     assert ("rebase", "--abort") in commands
     assert task.report["rebase_timeout_count"] == 1
+
+
+def test_rebase_timeout_removes_only_its_proven_stale_index_lock(tmp_path):
+    (tmp_path / ".git").mkdir()
+    lock = tmp_path / ".git" / "index.lock"
+    lock.write_bytes(b"")
+    task = Synchronizer(tmp_path)
+
+    def fake_command(*args: str, **_kwargs):
+        if args[:2] == ("rebase", "--abort"):
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if args[:3] == ("rev-parse", "--absolute-git-dir"):
+            return subprocess.CompletedProcess(
+                args, 0, str(tmp_path / ".git").encode(), b""
+            )
+        raise AssertionError(f"unexpected command: {args!r}")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    timeout = subprocess.TimeoutExpired(["git", "rebase"], 60)
+    timeout.killed_process_tree = True
+    timeout.residual_process_ids = []
+    timeout.git_index_lock_present = True
+
+    with pytest.raises(SyncBlocked, match="Rebase depassee"):
+        task._abort_rebase_after_timeout(timeout)
+
+    assert not lock.exists()
+    assert task.report["stale_index_lock_removed_after_timeout"] is True
+
+
+def test_protected_index_guard_uses_two_batched_commands(tmp_path):
+    task = Synchronizer(tmp_path)
+    task.report["protected_local_changes"] = [
+        f"catalog/part-{index:06d}.json" for index in range(500)
+    ]
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*args: str, **_kwargs):
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    task.command = fake_command  # type: ignore[method-assign]
+    with task._preserve_local_protected_index():
+        pass
+
+    assert commands == [
+        ("update-index", "--skip-worktree", "-z", "--stdin"),
+        ("update-index", "--no-skip-worktree", "-z", "--stdin"),
+    ]
+    assert task.report["protected_index_paths_guarded"] == 500
 
 
 def test_rebase_timeout_handler_cannot_leave_an_unbound_outcome(
@@ -1093,9 +1143,9 @@ def test_tree_plumbing_replay_keeps_github_governance_version(repos):
 def test_rebase_timeout_contract_stays_bounded_for_launcher_speed():
     assert 0 < sync_module.REBASE_ABORT_TIMEOUT_SECONDS <= 30
     assert 0 < sync_module.REBASE_TIMEOUT_SECONDS <= 120
-    assert sync_module._rebase_timeout_budget(1) == 20
-    assert sync_module._rebase_timeout_budget(6) == 36
-    assert sync_module._rebase_timeout_budget(100) == 60
+    assert sync_module._rebase_timeout_budget(1) == 60
+    assert sync_module._rebase_timeout_budget(6) == 72
+    assert sync_module._rebase_timeout_budget(100) == 120
 
 
 def test_rebase_operation_labels_explain_abort_and_continue() -> None:

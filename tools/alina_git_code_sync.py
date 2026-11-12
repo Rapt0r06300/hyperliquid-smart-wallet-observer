@@ -99,9 +99,9 @@ MERGE_TREE_TIMEOUT_SECONDS = 120
 # conflict, hook, or missing object.  The budget is deliberately capped: a
 # slow or ambiguous replay must return a receipt and require an explicit
 # retry, never keep the launcher blocked indefinitely.
-REBASE_TIMEOUT_SECONDS = 60
-REBASE_MIN_TIMEOUT_SECONDS = 20
-REBASE_SECONDS_PER_COMMIT = 4
+REBASE_TIMEOUT_SECONDS = 120
+REBASE_MIN_TIMEOUT_SECONDS = 60
+REBASE_SECONDS_PER_COMMIT = 10
 REBASE_ABORT_TIMEOUT_SECONDS = 8
 # Git 2.54+ exposes ``git replay``.  It reconstructs a linear history while
 # leaving the index and worktree untouched, so it avoids the per-commit
@@ -830,6 +830,8 @@ def _git_operation_label(args: list[str]) -> str:
         return "Inventaire Git cible (sans lire les shards)"
     if verb == "diff":
         return "Comparer les fichiers suivis par Git"
+    if verb == "diff-tree":
+        return "Comparer directement deux arbres Git"
     if verb == "fetch":
         return "Recevoir les objets Git de GitHub main"
     if verb == "merge-base":
@@ -2889,9 +2891,10 @@ class Synchronizer:
     def _protect_ignored_files(self, remote: str) -> None:
         # Git merge can overwrite ignored files. Check upstream paths only,
         # without traversing runtime/shards or hydrating any LFS assets.
-        changed = _paths(
-            self.command("diff", "--name-only", "-z", "HEAD", remote).stdout
-        )
+        changed = _paths(self.command(
+            "diff-tree", "-r", "--no-commit-id", "--name-only",
+            "--no-renames", "-z", "HEAD", remote,
+        ).stdout)
         protected_changes = [path for path in changed if _protected(path)]
         self.say(
             f"[GARDE DONNEES] Inspection en lot de {len(protected_changes)} "
@@ -2951,57 +2954,17 @@ class Synchronizer:
             yield
             return
 
-        # Refresh the existing index entries in bounded batches, then toggle
-        # skip-worktree for the complete set through NUL-delimited stdin.
-        # The former implementation launched three Git processes per path
-        # (ls-files, cacheinfo and skip-worktree).  With hundreds of SAFE
-        # shards that made an otherwise code-only replay hold index locks for
-        # minutes and prevented the operator from publishing concurrently.
-        index_info: list[bytes] = []
-        seen: set[str] = set()
-        for start in range(0, len(paths), PROTECTED_PATH_BATCH_SIZE):
-            batch = paths[start:start + PROTECTED_PATH_BATCH_SIZE]
-            entry_bytes = self.command(
-                "ls-files", "-s", "-z", "--", *batch,
-            ).stdout
-            for raw_entry in entry_bytes.split(b"\0"):
-                if not raw_entry:
-                    continue
-                header, separator, raw_path = raw_entry.partition(b"\t")
-                fields = header.split()
-                if not separator or len(fields) != 3 or fields[2] != b"0":
-                    raise SyncBlocked(
-                        "Entree d'index protegee ambigue ou en conflit."
-                    )
-                path = raw_path.decode("utf-8", errors="strict")
-                if path in seen:
-                    raise SyncBlocked(
-                        "Entree d'index protegee dupliquee: " + path
-                    )
-                seen.add(path)
-                index_info.append(raw_entry)
-
-        if seen != set(paths):
-            missing = sorted(set(paths) - seen)
-            raise SyncBlocked(
-                "Entree(s) d'index protegee(s) introuvable(s): "
-                + ", ".join(missing[:8])
-            )
-
-        index_payload = b"\0".join(index_info) + b"\0"
+        # ``protected_local_changes`` is produced exclusively from tracked
+        # stage/worktree records by _check_candidates.  Re-querying every path
+        # with 195 batched ``ls-files`` processes added roughly one minute to
+        # a normal replay without strengthening that proof.  Toggle the bit in
+        # one NUL-delimited update-index operation instead; Git validates every
+        # named tracked entry atomically and returns non-zero on ambiguity.
         path_payload = b"\0".join(
             path.encode("utf-8") for path in paths
         ) + b"\0"
         assumed: list[str] = []
         try:
-            # A generated file can be byte-identical to HEAD while its
-            # filesystem stat is stale.  Refresh only those exact index
-            # entries with their existing blobs; this never stages or rewrites
-            # the protected worktree files.
-            self.command(
-                "update-index", "-z", "--index-info",
-                input_bytes=index_payload,
-            )
             # `skip-worktree` is the index contract Git checkout/rebase honors
             # when the worktree intentionally contains a local protected file
             # that must not be replaced by code replay.  `assume-unchanged`
@@ -3010,6 +2973,8 @@ class Synchronizer:
                 "update-index", "--skip-worktree", "-z", "--stdin",
                 input_bytes=path_payload,
             )
+            self.report["protected_index_paths_guarded"] = len(paths)
+            self.report["protected_index_guard_commands"] = 2
             assumed = list(paths)
             yield
         finally:
@@ -3321,6 +3286,35 @@ class Synchronizer:
         self.report["rebase_timeout_count"] = (
             int(self.report.get("rebase_timeout_count", 0)) + 1
         )
+        index_lock = _index_lock_path(self.root)
+        timeout_tree_stopped = bool(
+            getattr(timeout, "killed_process_tree", False)
+        ) and not list(getattr(timeout, "residual_process_ids", []))
+        timeout_created_lock = bool(
+            getattr(timeout, "git_index_lock_present", False)
+        )
+        if (
+            index_lock is not None
+            and index_lock.exists()
+            and timeout_tree_stopped
+            and timeout_created_lock
+        ):
+            # Preflight refuses a pre-existing lock, so this exact lock was
+            # created by the rebase process whose complete process tree has
+            # just been proved absent.  Removing only that stale lock lets
+            # ``rebase --abort`` restore Git's own state machine.
+            try:
+                index_lock.unlink()
+            except OSError as exc:
+                raise SyncBlocked(
+                    "Verrou index.lock du rebase arrete impossible a retirer; "
+                    "aucun abort ni push tente."
+                ) from exc
+            self.report["stale_index_lock_removed_after_timeout"] = True
+            self.say(
+                "[REBASE TIMEOUT] Verrou index.lock du processus arrete "
+                "retire apres preuve d'absence de descendants."
+            )
         try:
             aborted = self.command(
                 "rebase", "--abort", check=False,
