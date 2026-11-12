@@ -2679,7 +2679,15 @@ class Synchronizer:
                     entries.items(), key=lambda item: item[0].encode("utf-8")
                 )
             )
-            tree_oid = self.command("mktree", "-z", input_bytes=tree_input).stdout.decode(
+            # Entries copied verbatim from ``base_treeish`` may be promised
+            # but not hydrated in this partial clone.  Their immutable OIDs
+            # are already authenticated by the base tree; ``--missing`` lets
+            # mktree reuse those references without downloading data blobs.
+            # Newly staged entries still have to exist locally because they
+            # come from update-index/cacheinfo and are validated above.
+            tree_oid = self.command(
+                "mktree", "--missing", "-z", input_bytes=tree_input,
+            ).stdout.decode(
                 "ascii", errors="strict"
             ).strip()
             if not re.fullmatch(r"[0-9a-f]{40,64}", tree_oid):
