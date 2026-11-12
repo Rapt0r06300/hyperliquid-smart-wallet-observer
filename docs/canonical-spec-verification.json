@@ -1,68 +1,68 @@
 {
-  "dataset_v2_head": "bb41b323af86bd870ec6460afbaa05498424bd34",
-  "generated_at_utc": "2026-11-11T16:46:21.097565Z",
+  "dataset_v2_head": "1724009b83c833e391f80aa00d7a2767f5b5f1b3",
+  "generated_at_utc": "2026-11-12T12:44:53.169620Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "8dc8818860e9f0f2d0abb4879764fef02742a6285b0fcbcacda2ce297671f00c",
-      "output_tail": ".......................................................................  [100%]\n71 passed in 3.50s\n",
-      "returncode": 0,
-      "status": "PASS"
+      "output_sha256": "572e66ff1c74ccb1f77bc0757d6da66a39f7cfb606873638a119046847e8cf3a",
+      "output_tail": "....................................................F..................  [100%]\n=================================== FAILURES ===================================\n_ test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retries _\n\n    def test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retries():\n        text = _workflow(\"reconcile-v2-catalog.yml\")\n        retry = text.split(\"  historical-retry:\", 1)[1]\n        before_retry = text.split(\"  historical-retry:\", 1)[0]\n        assert 'resume_attempt:' in text\n        assert 'default: \"0\"' in text\n        assert \"historical-retry:\" in text\n        assert \"needs: [reconcile, historical]\" in retry\n        assert \"needs.reconcile.result == 'failure'\" in retry\n        assert \"needs.reconcile.result == 'cancelled'\" in retry\n        assert \"needs.historical.result == 'failure'\" in retry\n        assert \"needs.historical.result == 'cancelled'\" in retry\n        assert \"fromJSON(inputs.resume_attempt || '0') < 2\" in text\n        assert \"gh workflow run reconcile-v2-catalog.yml\" in text\n        assert 'next=$((current + 1))' in text\n        assert \"runs-on: ubuntu-latest\" in text\n        assert \"self-hosted\" not in text\n        assert 'RESUME_ATTEMPT: ${{ inputs.resume_attempt || \\'0\\' }}' in retry\n        assert 'RESUME_ATTEMPT: ${{ inputs.resume_attempt || \\'0\\' }}' not in before_retry\n        assert 'gh run view \"$GITHUB_RUN_ID\"' in retry\n        assert 'source_job_name=\"reconcile\"' in retry\n        assert 'source_job_name=\"Continue historical backlog on a fresh hosted runner\"' in retry\n        assert \"failed_job_id\" in retry\n        assert 'gh api \"repos/$GITHUB_REPOSITORY/actions/jobs/$failed_job_id\"' in retry\n>       assert '--log 2>&1 || true' in retry\nE       assert '--log 2>&1 || true' in '\\n    name: Requeue interrupted reconciliation or historical backlog\\n    needs: [reconcile, historical]\\n    if: >-\\...t }}\"\\n            echo \"- Historical result: ${{ needs.historical.result }}\"\\n          } >> \"$GITHUB_STEP_SUMMARY\"\\n'\n\ntests/test_workflow_bounds.py:455: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_reconcile_requeues_historical_runner_failure_with_bounded_hosted_retries - assert '--log 2>&1 || true' in '\\n    name: Requeue interrupted reconciliation or historical backlog\\n    needs: [reconcile, historical]\\n    if: >-\\...t }}\"\\n            echo \"- Historical result: ${{ needs.historical.result }}\"\\n          } >> \"$GITHUB_STEP_SUMMARY\"\\n'\n1 failed, 70 passed in 5.29s\n",
+      "returncode": 1,
+      "status": "FAIL"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "42b5f601a1ef8c2bf03606c16516ad420f36517cb574376448a09038a5033c29",
-      "output_tail": "...................................................................      [100%]\n67 passed in 2.47s\n",
+      "output_sha256": "81c5585af963b759d763cb807e85c6f271aeaa1be7551d84eceb0510c87c488e",
+      "output_tail": "...................................................................      [100%]\n67 passed in 3.78s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_certification_and_replay_policy",
-      "output_sha256": "5747fc58ebfd2beaebb98c9024712d75c535c5cfdd5f53493dd7a5246b6dd3da",
-      "output_tail": "........................................................................ [ 66%]\n....................................                                     [100%]\n108 passed in 3.42s\n",
+      "output_sha256": "21e51ebad1cc18b025ca5a8ec350d45d8e956de8c0896f18dbe99e67ffd5a89b",
+      "output_tail": "........................................................................ [ 66%]\n....................................                                     [100%]\n108 passed in 5.38s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "8e3cfdd464e0b08d338dd022a2b3b095b28184f687a93623401528126cfef190",
-      "output_tail": ".......................                                                  [100%]\n23 passed in 1.05s\n",
+      "output_sha256": "b4c60dcbc562b01ed5b43d4a2009443dfa7ad60760dd06eab0d7e6140b73bf7c",
+      "output_tail": ".......................                                                  [100%]\n23 passed in 1.73s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "fb6a9f644a8371c479ccff48044cabd836d1ac8081cc667bacbc78547ce567b7",
-      "output_tail": "........................................................................ [ 76%]\n......................                                                   [100%]\n94 passed in 8.88s\n",
+      "output_sha256": "5a2f023c747f10a490d0829fb407356000ffdd2a935223d1a419c5f38569e97b",
+      "output_tail": "........................................................................ [ 76%]\n......................                                                   [100%]\n94 passed in 10.08s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "d1bdba93fa0cab600ff5d6afab1ea264d76692d32d763e66e321f80a097175fc",
-      "output_tail": "..........................................................               [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/applications.py:4723: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n58 passed, 5 warnings in 4.08s\n",
+      "output_sha256": "e3aa3b586fec157b05449b354ec19fd75cae1a0a03722e2251a5fbba0ff72ddc",
+      "output_tail": "..........................................................               [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.16/x64/lib/python3.12/site-packages/fastapi/applications.py:4723: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n58 passed, 5 warnings in 6.05s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_validators",
-      "output_sha256": "5c7496d6f803a8c48b643112c5254f00a34a2cdd89376ae808f3a659f3bc5439",
-      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"5f69b6db67bec19a0b336fffc0b91fd50899eb24cb859dfa4a5fa56aa28189c1\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=94\n",
+      "output_sha256": "97f1ddefee5540cbe33e3a11823bc519eb468dae030de2fca3b3b0db2dbb100d",
+      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"c216689999af3d404a8317a41924a8a778e4b551ed1e52b01ba404a6bc81cfd0\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=94\n",
       "returncode": 0,
       "status": "PASS"
     }
   ],
-  "main_alina_head": "bb41b323af86bd870ec6460afbaa05498424bd34",
+  "main_alina_head": "1724009b83c833e391f80aa00d7a2767f5b5f1b3",
   "paper_only": true,
   "python_version": "3.12.16",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "4d9a9fec18bde89ba6ebce7bdd5b4e7b3146f8d1a10298303eb2186937ddaeb5",
+  "receipt_digest": "f43f2fc121d906cf41499b6534e740cf25ffd850b76cf15cd249be87606de6ce",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-7.0.0-1019-azure-x86_64-with-glibc2.43",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
-  "status": "PASS",
+  "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "43059997814"
+  "workflow_run_id": "43219139075"
 }
