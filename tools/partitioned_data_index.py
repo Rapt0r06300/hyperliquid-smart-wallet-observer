@@ -457,6 +457,52 @@ def read_index(
 
 
 
+def _verify_staged_partition_bundle(
+    staged_root: Path,
+    expected_root: Mapping[str, Any],
+    expected_parts: Mapping[str, bytes],
+) -> None:
+    """Verify staged bytes without reconstructing the full logical catalogue.
+
+    partition_index() has already validated the logical rows and generated
+    the SHA/count-bound root and parts. This check binds those exact bytes to
+    the temporary staging directory before publication. The later read_index()
+    after atomic replacement remains the independent physical verification.
+    """
+    expected_root_bytes = _json_bytes(expected_root)
+    if staged_root.is_symlink() or not staged_root.is_file():
+        raise ValueError("PARTITION_PARITY_STAGED_ROOT_MISSING")
+    if staged_root.read_bytes() != expected_root_bytes:
+        raise ValueError("PARTITION_PARITY_STAGED_ROOT_MISMATCH")
+    try:
+        staged_root_object = json.loads(expected_root_bytes)
+    except json.JSONDecodeError as exc:
+        raise ValueError("PARTITION_PARITY_STAGED_ROOT_INVALID") from exc
+    if staged_root_object != dict(expected_root):
+        raise ValueError("PARTITION_PARITY_STAGED_ROOT_MISMATCH")
+
+    descriptors = {
+        item.get("path"): item
+        for item in expected_root.get("partitions", [])
+        if isinstance(item, Mapping) and isinstance(item.get("path"), str)
+    }
+    for relative, expected_bytes in expected_parts.items():
+        part_path = staged_root.parent / relative
+        if part_path.is_symlink() or not part_path.is_file():
+            raise ValueError("PARTITION_PARITY_STAGED_PART_MISSING")
+        observed = part_path.read_bytes()
+        if observed != expected_bytes:
+            raise ValueError("PARTITION_PARITY_STAGED_PART_MISMATCH")
+        descriptor = descriptors.get(relative)
+        if not isinstance(descriptor, Mapping):
+            raise ValueError("PARTITION_PARITY_STAGED_DESCRIPTOR_MISSING")
+        if (
+            descriptor.get("bytes") != len(observed)
+            or descriptor.get("sha256") != hashlib.sha256(observed).hexdigest()
+        ):
+            raise ValueError("PARTITION_PARITY_STAGED_DESCRIPTOR_MISMATCH")
+
+
 def save_index(
     index_path: Path,
     logical_index: Mapping[str, Any],
@@ -511,8 +557,12 @@ def save_index(
             file = stage / rel
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(content)
-        if load_partitioned_index(staged_root) != dict(logical_index):
-            raise ValueError("PARTITION_PARITY_STAGED_WRITE_MISMATCH")
+        # partition_index() has already validated every row, identity, count,
+        # partition digest, and global digest. Verify the staged bytes exactly,
+        # but do not deserialize 1.8M rows a second time before publication.
+        # The independent post-publish read_index() below remains mandatory and
+        # catches any write/replace corruption at the Git publication boundary.
+        _verify_staged_partition_bundle(staged_root, root, parts)
         # Git publication is the atomic boundary. No incomplete working-tree
         # state is ever committed; every single part is checked before root.
         for rel, content in parts.items():
