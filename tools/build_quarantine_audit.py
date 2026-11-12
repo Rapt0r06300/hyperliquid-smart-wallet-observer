@@ -16,8 +16,10 @@ except ModuleNotFoundError:
     from manifest_policy import classify_manifest, is_official_historical_archive
 
 try:
+    from tools.measured_catalog_patches import load_patch
     from tools.partitioned_data_index import read_index
 except ModuleNotFoundError:
+    from measured_catalog_patches import load_patch
     from partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -186,7 +188,10 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
             raise ValueError("QUARANTINE_DUPLICATE_IDENTITY") from exc
         raise ValueError(f"QUARANTINE_INVALID_INDEX:{exc}") from exc
     metrics = _load(metrics_path, {})
-    record_patch = _load(record_patch_path, {})
+    try:
+        record_patch = load_patch(record_patch_path, "records")
+    except (OSError, ValueError, TypeError):
+        record_patch = {}
     replay_patch = _load(base / "catalog" / "REPLAY_COMPAT_PATCH.json", {})
     replay_results = replay_patch.get("results") if isinstance(replay_patch, Mapping) else {}
     replay_failures = replay_patch.get("transient_failures") if isinstance(replay_patch, Mapping) else {}
