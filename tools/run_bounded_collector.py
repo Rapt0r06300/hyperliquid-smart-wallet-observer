@@ -154,7 +154,14 @@ def run(
                 "[pass] lease=%s expires_at_ms=%s\n"
                 % (payload.get("lease_id"), payload.get("expires_at_ms"))
             )
-            command = [sys.executable, str(script), *script_args]
+            # `-u` : sortie NON BUFFERISEE. Mesure du 13/11 pendant la campagne de 6 jours :
+            # 5 collecteurs PARFAITEMENT VIVANTS avaient un journal fige depuis 140 a 248 minutes,
+            # parce que Python bufferise par blocs des que stdout n'est pas un terminal. La
+            # FRAICHEUR DU JOURNAL, sur laquelle reposent la page de sante, le superviseur et les
+            # controles de qualite, etait donc un indicateur MENSONGER dans les deux sens : fausse
+            # alerte sur un collecteur sain, et surtout silence rassurant sur un collecteur mort.
+            # `-u` ne change que le tampon : aucun effet sur les arguments ni sur le comportement.
+            command = [sys.executable, "-u", str(script), *script_args]
             child_env = {**os.environ, "PYTHONPATH": str(root / "src")}
             child_env["PYTHONUNBUFFERED"] = "1"
             child_env.pop("HYPERSMART_COLLECTOR_LEASE_TOKEN", None)

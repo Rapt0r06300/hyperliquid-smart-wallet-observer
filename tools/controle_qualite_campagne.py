@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""Contrôle de qualité d'une campagne de collecte — il SIGNALE, il ne rassure pas.
+
+POURQUOI. Une campagne de six jours peut se dégrader en silence : un collecteur qui meurt, un
+marché qui n'arrive plus, une certification qui s'arrête, un disque qui se remplit. Rien n'explose,
+et on ne s'en aperçoit qu'à la fin — six jours perdus.
+
+RÈGLE DE CONCEPTION : **un contrôle qui affiche « OK » sans rien avoir mesuré est pire que pas de
+contrôle**, parce qu'il endort. Ici, chaque ligne dit CE QUI A ÉTÉ MESURÉ et sur quelle preuve ;
+quand une mesure est impossible, c'est dit, et c'est compté comme une anomalie, jamais comme un
+succès (deny-by-default, comme la porte de promotion du labo).
+
+CE QUI EST VÉRIFIÉ
+1. Fraîcheur du journal de CHAQUE collecteur attendu, comparée à SA cadence (pas un seuil unique).
+2. Les rubans vitaux grossissent-ils encore (fills des leaders, carnets L2) ?
+3. La certification a-t-elle tourné récemment, et le coffre grossit-il ?
+4. Espace disque, avec projection sur la fin de campagne.
+
+PAPER / lecture seule : aucune requête réseau, aucun ordre, aucune écriture hors de son journal.
+
+Code de sortie : 0 si aucune anomalie, 1 s'il y en a (exploitable par un superviseur).
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import importlib.util
+import json
+import shutil
+import sys
+import time
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RACINE))
+sys.path.insert(0, str(RACINE / "src"))
+sys.path.insert(0, str(RACINE / "tools"))
+
+#: Un journal est « frais » jusqu'à FACTEUR x sa cadence (jamais moins que le plancher).
+FACTEUR_FRAICHEUR = 4.0
+PLANCHER_FRAICHEUR_S = 600.0
+#: En dessous : on alerte sur le disque.
+DISQUE_MINIMAL_GO = 60.0
+#: Rubans dont l'arrêt condamne la campagne (ce sont EUX que le labo lit).
+RUBANS_VITAUX = ("vault_fills_live.jsonl", "copy_vault_l2_tape.jsonl")
+#: La certification tourne toutes les 30 min ; au-delà de 3 cadences, elle est en panne.
+CERTIFICATION_MAX_S = 5400.0
+
+
+def _collecteurs_attendus() -> list[tuple[str, float, str]]:
+    """(nom, cadence, script) pour chaque collecteur que la campagne est censée lancer."""
+    spec = importlib.util.spec_from_file_location(
+        "watch_eco", RACINE / "tools" / "watch_economic_collectors.py")
+    watch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(watch)
+    from hl_observer.ops import collecteur_registry as registre
+
+    par_nom = {c["nom"]: c for c in registre.REGISTRE}
+    sortie = []
+    for nom in watch.DEFAULT_NAMES:
+        config = par_nom.get(nom) or {}
+        sortie.append((nom, float(config.get("intervalle_s") or 0.0),
+                       str(config.get("script") or "")))
+    return sortie
+
+
+def _scripts_vivants() -> set[str] | None:
+    """Noms de scripts collecteurs actuellement en execution, ou None si on ne peut pas savoir.
+
+    DISTINCTION VITALE. « Journal fige » tout seul ne dit pas ce qui se passe :
+    * processus VIVANT  -> sortie bufferisee ou traitement long : genant, pas fatal ;
+    * processus ABSENT  -> le collecteur est MORT : la campagne perd ce flux.
+    Confondre les deux, c'est soit crier au loup (et se faire ignorer), soit dormir sur un flux
+    mort. On ne DEVINE pas : si psutil manque, on rend None et le controle le dit.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return None
+    vivants: set[str] = set()
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            morceaux = proc.info.get("cmdline") or []
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        for morceau in morceaux:
+            texte = str(morceau)
+            if "collecter_" in texte or "sceller_coffre_local" in texte:
+                vivants.add(Path(texte).name)
+    return vivants
+
+
+def _age_s(chemin: Path, maintenant: float) -> float | None:
+    try:
+        return maintenant - chemin.stat().st_mtime
+    except OSError:
+        return None
+
+
+def controler(root: Path, *, maintenant: float | None = None) -> dict:
+    maintenant = time.time() if maintenant is None else maintenant
+    anomalies: list[str] = []
+    mesures: list[str] = []
+
+    # 1) fraîcheur par collecteur, comparée à SA cadence
+    frais = figes = sans_journal = morts = 0
+    vivants = _scripts_vivants()
+    if vivants is None:
+        mesures.append("liveness des processus : NON MESURABLE (psutil absent) — "
+                       "un journal fige ne pourra pas etre distingue d'un collecteur mort")
+    for nom, cadence, script in _collecteurs_attendus():
+        journal = root / "runtime" / "logs" / f"economic-{nom}.log"
+        age = _age_s(journal, maintenant)
+        seuil = max(PLANCHER_FRAICHEUR_S, cadence * FACTEUR_FRAICHEUR)
+        if age is None:
+            sans_journal += 1
+            anomalies.append(f"collecteur {nom} : AUCUN JOURNAL (jamais lance ?)")
+        elif age > seuil:
+            vivant = None if vivants is None else (Path(script).name in vivants)
+            if vivant is False:
+                morts += 1
+                anomalies.append(f"collecteur {nom} : MORT — journal fige depuis {age / 60:.0f} min "
+                                 f"ET aucun processus. Ce flux est PERDU tant qu'il ne repart pas.")
+            else:
+                figes += 1
+                detail = "processus vivant" if vivant else "liveness inconnue"
+                anomalies.append(f"collecteur {nom} : journal fige depuis {age / 60:.0f} min "
+                                 f"({detail} ; cadence {cadence:.0f} s)")
+        else:
+            frais += 1
+    mesures.append(f"collecteurs frais : {frais} ; journal fige mais vivant : {figes} ; "
+                   f"MORTS : {morts} ; sans journal : {sans_journal}")
+
+    # 2) les rubans vitaux grossissent-ils ?
+    for nom in RUBANS_VITAUX:
+        ruban = root / "runtime" / "data" / nom
+        age = _age_s(ruban, maintenant)
+        if age is None:
+            anomalies.append(f"ruban vital {nom} : ABSENT")
+            continue
+        taille = ruban.stat().st_size
+        if age > PLANCHER_FRAICHEUR_S:
+            anomalies.append(f"ruban vital {nom} : plus ecrit depuis {age / 60:.0f} min")
+        else:
+            mesures.append(f"ruban {nom} : {taille / 1e6:.1f} Mo, ecrit il y a {age:.0f} s")
+
+    # 3) la certification tourne-t-elle ?
+    journaux = sorted((root / "runtime" / "logs" / "coffre_certifie").glob("certif_*.log"),
+                      key=lambda p: p.stat().st_mtime, reverse=True) \
+        if (root / "runtime" / "logs" / "coffre_certifie").is_dir() else []
+    supervise = root / "runtime" / "logs" / "economic-coffre-certificateur.log"
+    ages = [a for a in (_age_s(j, maintenant) for j in journaux[:1]) if a is not None]
+    age_sup = _age_s(supervise, maintenant)
+    if age_sup is not None:
+        ages.append(age_sup)
+    if not ages:
+        anomalies.append("certification : AUCUNE trace de passage (le labo ne verra rien)")
+    elif min(ages) > CERTIFICATION_MAX_S:
+        anomalies.append(f"certification : aucun passage depuis {min(ages) / 60:.0f} min "
+                         f"(cadence attendue 30 min)")
+    else:
+        mesures.append(f"certification : dernier passage il y a {min(ages) / 60:.0f} min")
+
+    coffre = root / "runtime" / "coffre_certifie"
+    if not coffre.is_dir():
+        anomalies.append("coffre certifie : dossier ABSENT (le labo n'a aucune source)")
+
+    # 4) disque, avec projection
+    try:
+        libre_go = shutil.disk_usage(str(root)).free / 1e9
+    except OSError:
+        libre_go = None
+    if libre_go is None:
+        anomalies.append("disque : espace libre NON MESURABLE")
+    elif libre_go < DISQUE_MINIMAL_GO:
+        anomalies.append(f"disque : {libre_go:.0f} Go libres (seuil {DISQUE_MINIMAL_GO:.0f})")
+    else:
+        mesures.append(f"disque : {libre_go:.0f} Go libres")
+
+    return {"anomalies": anomalies, "mesures": mesures,
+            "collecteurs_frais": frais, "collecteurs_figes": figes, "collecteurs_morts": morts,
+            "horodatage": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(maintenant))}
+
+
+def main(argv: list[str] | None = None) -> int:
+    for flux in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError):
+            flux.reconfigure(encoding="utf-8", errors="replace")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--root", default=str(RACINE))
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--une-fois", action="store_true",
+                   help="accepte et ignore : ce controle est deja ponctuel (compatibilite registre)")
+    args = p.parse_args(argv)
+
+    rapport = controler(Path(args.root))
+    if args.json:
+        print(json.dumps(rapport, ensure_ascii=False, indent=1))
+        return 1 if rapport["anomalies"] else 0
+
+    print(f"CONTROLE QUALITE DE LA CAMPAGNE — {rapport['horodatage']}")
+    print("=" * 66)
+    for ligne in rapport["mesures"]:
+        print(f"  mesure   {ligne}")
+    if rapport["anomalies"]:
+        print()
+        print(f"  {len(rapport['anomalies'])} ANOMALIE(S) :")
+        for ligne in rapport["anomalies"]:
+            print(f"    !! {ligne}")
+        print()
+        print("  Ces anomalies sont a traiter MAINTENANT : une campagne qui se degrade en silence")
+        print("  ne se rattrape pas apres coup.")
+        return 1
+    print()
+    print("  Aucune anomalie sur les points ci-dessus (tous mesures, aucun suppose).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

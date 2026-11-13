@@ -151,6 +151,14 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     # (garde-fou anti-relance d'un processus encore vivant), et 30 min divise par deux la fenetre
     # de donnees non certifiees en cas de fermeture brutale. Les passes suivantes sont rapides :
     # le scellage est INCREMENTAL (il reprend ou il s'etait arrete).
+    # 13/11 — CONTROLE QUALITE HORAIRE. Une campagne de 6 jours peut se degrader en silence
+    # (collecteur mort, marche qui n'arrive plus, certification arretee, disque plein) et on ne
+    # s'en apercevrait qu'a la fin. Ce controle SIGNALE : il distingue « journal fige mais
+    # processus vivant » de « collecteur MORT », et ne dit jamais OK sur ce qu'il n'a pas mesure.
+    {"nom": "controle-qualite", "script": "tools/controle_qualite_campagne.py",
+     "intervalle_s": 3600,
+     "args": (),
+     "limite_minutes": 100.0},
     {"nom": "coffre-certificateur", "script": "tools/sceller_coffre_local.py",
      "intervalle_s": 1800,
      "args": (),
@@ -219,6 +227,7 @@ _HARVEST_SOUHAITE = frozenset({
     "contexte-leaders",                                                # ordres en attente = intention
     "userfills-poll",                                                  # fills REST : depasse le cap WS
     "coffre-certificateur",                                            # certifie en continu
+    "controle-qualite",                                                # signale les derives
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).

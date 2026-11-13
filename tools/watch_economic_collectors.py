@@ -56,6 +56,7 @@ DEFAULT_NAMES = (
     # une fermeture brutale au jour 5 laisse 5 jours NON certifies, donc invisibles pour le
     # labo qui ne lit QUE le coffre certifie. Au pire on perd l'intervalle en cours.
     "coffre-certificateur",
+    "controle-qualite",    # signale les derives de la campagne (vivant/mort, fraicheur, disque)
 )
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3
