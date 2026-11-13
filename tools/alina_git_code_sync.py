@@ -3042,9 +3042,30 @@ class Synchronizer:
                     check=False,
                 )
                 if restored.returncode:
+                    detail = _redact_sensitive_text(
+                        (restored.stderr or b"").decode(
+                            "utf-8", errors="replace",
+                        ).strip()
+                    )
+                    failures = self.report.setdefault(
+                        "protected_index_restore_failures", []
+                    )
+                    if isinstance(failures, list):
+                        failures.append({
+                            "exit_code": restored.returncode,
+                            "stderr": detail[:1000],
+                            "paths": len(paths),
+                        })
+                    self.say(
+                        "[GARDE DONNEES] Restauration groupée de l’index "
+                        f"échouée (code={restored.returncode}): "
+                        f"{detail[:500] or 'Git sans détail'}"
+                    )
                     raise SyncBlocked(
                         "Restauration de la garde d'index impossible pour "
-                        "les fichiers proteges."
+                        f"{len(paths)} fichiers proteges (code "
+                        f"{restored.returncode}): "
+                        f"{detail[:500] or 'Git sans detail'}"
                     )
 
     def _capture_conflicts(self, conflicted: list[str], local: str,
