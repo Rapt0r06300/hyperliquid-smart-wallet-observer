@@ -712,6 +712,48 @@ def _ecrire_statut(root: Path, **champs: Any) -> None:
         pass
 
 
+def boucler(argv: list[str], intervalle_s: float, *, limite_passes: int = 0,
+            dormir=None, horloge=None) -> int:
+    """Certifie en continu : une passe, attente, recommence.
+
+    POURQUOI. La certification n'avait lieu qu'a l'ARRET PROPRE d'une campagne (touche q) ou au
+    DEMARRAGE suivant. Une campagne de six jours fermee brutalement au jour cinq laissait donc cinq
+    jours de donnees non certifiees — or le labo ne lit QUE le coffre certifie : ces jours lui
+    restaient invisibles tant que personne ne relancait. Ici, au pire on perd l'intervalle en cours.
+
+    C'est sans danger pendant que les collecteurs ECRIVENT : le scellage s'arrete au dernier saut de
+    ligne COMPLET (`_fin_derniere_ligne`) et reprend ou il s'etait arrete (`_reprise_append_only`).
+    Une ligne a moitie ecrite n'est donc jamais certifiee, et la passe suivante la reprendra entiere.
+
+    On n'arrete JAMAIS la boucle sur une passe en echec : une certification qui echoue a 3 h du matin
+    ne doit pas condamner les cinq jours suivants. On l'annonce et on reessaie au tour d'apres.
+    """
+    import time as _time
+    dormir = _time.sleep if dormir is None else dormir
+    horloge = _time.monotonic if horloge is None else horloge
+    passes, echecs, dernier = 0, 0, 0
+    while True:
+        debut = horloge()
+        try:
+            dernier = main(argv)
+        except KeyboardInterrupt:                      # Ctrl+C : on sort TOUT DE SUITE
+            raise
+        except Exception as exc:                       # noqa: BLE001 — une passe ratee n'arrete rien
+            dernier, echecs = 1, echecs + 1
+            print(f"[coffre] passe en echec ({type(exc).__name__}: {exc}) — on reessaie",
+                  flush=True)
+        else:
+            if dernier != 0:
+                echecs += 1
+        passes += 1
+        print(f"[coffre] passe {passes} terminee en {horloge() - debut:.0f}s "
+              f"(code {dernier}, {echecs} echec(s) depuis le debut) — "
+              f"prochaine dans {intervalle_s / 60:.0f} min", flush=True)
+        if limite_passes and passes >= limite_passes:
+            return dernier
+        dormir(intervalle_s)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Scelle les données locales certifiées dans le coffre-fort.")
     p.add_argument("--root", default=str(ROOT))
@@ -726,6 +768,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="duree maximale (s) consacree a verifier le magasin de ticks natifs a ce passage")
     p.add_argument("--nom", default="",
                    help="ne certifie que les fichiers de ce nom (ex. vault_fills_live.jsonl)")
+    p.add_argument("--boucle-s", type=float, default=0.0,
+                   help="certifie EN CONTINU : une passe, puis attente de N secondes, sans fin "
+                        "(0 = une seule passe, comportement d'origine). Sert a ne PAS perdre la "
+                        "certification si une campagne est fermee brutalement.")
     p.add_argument("--archives", action="store_true",
                    help="inclut les rubans des sessions archivées (rattrapage après correction d'une règle)")
     args = p.parse_args(argv)
@@ -1128,5 +1174,34 @@ def _journaliser(coffre: Path, manifeste: dict[str, Any]) -> None:
         h.write(json.dumps(ligne, ensure_ascii=False) + "\n")
 
 
+def _point_d_entree(argv: list[str] | None = None) -> int:
+    """Aiguille entre une passe unique et la boucle, en retirant `--boucle-s` de la ligne passee."""
+    import sys as _sys
+    args = list(_sys.argv[1:] if argv is None else argv)
+    intervalle = 0.0
+    nettoye: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--boucle-s" and i + 1 < len(args):
+            intervalle = float(args[i + 1])
+            i += 2
+            continue
+        if args[i].startswith("--boucle-s="):
+            intervalle = float(args[i].split("=", 1)[1])
+            i += 1
+            continue
+        nettoye.append(args[i])
+        i += 1
+    if intervalle <= 0:
+        return main(nettoye)
+    print(f"[coffre] certification EN CONTINU toutes les {intervalle / 60:.0f} min. "
+          "Ctrl+C pour arreter.", flush=True)
+    try:
+        return boucler(nettoye, intervalle)
+    except KeyboardInterrupt:
+        print("[coffre] arret demande — la derniere passe complete reste certifiee.", flush=True)
+        return 130
+
+
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(_point_d_entree())

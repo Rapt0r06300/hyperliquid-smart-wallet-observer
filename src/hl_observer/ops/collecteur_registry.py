@@ -141,6 +141,20 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "execution_capability": EXECUTION_CAPABILITY_NONE,
      "source_status": SOURCE_STATUS_ACTIVE_OBSERVATION,
      "paper_read_only": True, "real_execution": False},
+    # 12/11 — CERTIFICATION PERIODIQUE. La certification n'avait lieu qu'a l'arret propre (touche q)
+    # ou au demarrage suivant : une campagne de 6 jours fermee brutalement au jour 5 laissait 5 jours
+    # de donnees NON certifiees, donc invisibles pour le labo (qui ne lit QUE le coffre certifie),
+    # tant que personne ne relancait. Ici, au pire on perd l'heure en cours.
+    # Sans danger pendant que les collecteurs ecrivent : le scellage s'arrete au dernier saut de
+    # ligne COMPLET et reprend ou il s'etait arrete (`_fin_derniere_ligne`, `_reprise_append_only`).
+    # Cadence 30 min (et non 1 h) : la limite d'execution doit depasser 1,5x la cadence
+    # (garde-fou anti-relance d'un processus encore vivant), et 30 min divise par deux la fenetre
+    # de donnees non certifiees en cas de fermeture brutale. Les passes suivantes sont rapides :
+    # le scellage est INCREMENTAL (il reprend ou il s'etait arrete).
+    {"nom": "coffre-certificateur", "script": "tools/sceller_coffre_local.py",
+     "intervalle_s": 1800,
+     "args": (),
+     "limite_minutes": 50.0},
     {"nom": "lab-microstructure", "script": "tools/collecter_lab_microstructure.py",
      "intervalle_s": 30, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/research_lab/micro_heartbeat.json"},
@@ -204,6 +218,7 @@ _HARVEST_SOUHAITE = frozenset({
     "l2-leaders",                                                      # carnets des coins de leaders
     "contexte-leaders",                                                # ordres en attente = intention
     "userfills-poll",                                                  # fills REST : depasse le cap WS
+    "coffre-certificateur",                                            # certifie en continu
 })
 COLLECTEURS_HARVEST = frozenset(n for n in _HARVEST_SOUHAITE if n in _NOMS_REGISTRE)
 # Sources OBLIGATOIRES : leur échec doit empêcher le passage en READY (le CLI sort non-zero).

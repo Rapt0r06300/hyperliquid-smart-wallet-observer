@@ -2145,6 +2145,37 @@ Angles entièrement nouveaux par rapport aux sections C-septies (200 T) et C-nov
 - GIS199. Séparer ce qui est MÉCANIQUE de ce qui est INFORMATIONNEL (fait : l'impact en racine carrée semble essentiellement mécanique) — ça change l'interprétation et la durabilité de l'edge.
 - GIS200. Conclusion transversale de ces 20 recherches : la prédictibilité court terme EXISTE et est mesurable, mais presque tout l'edge brut est mangé par le spread et les frais. Les seules voies crédibles restantes pour nous : (1) devenir MAKER (gagner le spread au lieu de le payer), (2) exploiter des RÉGIMES où l'adverse selection chute (week-end HIP-3), (3) capter des primes STRUCTURELLES (carry cross-sectionnel, base), (4) anticiper via un MENEUR (Binance → HL, ordres en attente). Tout le reste est du bruit coûteux.
 
+### C-quindecies-bis. CERTIFIER MEME APRES UN ARRET BRUTAL (13/11)
+
+**Demande de Florent : « meme si il crash il faut quand meme certifier les donnees collectees ».**
+Defaut reel : la certification n'avait lieu qu'a l'ARRET PROPRE (touche `q`) ou au DEMARRAGE
+suivant. Une campagne de six jours fermee par accident au jour cinq laissait donc cinq jours de
+donnees NON certifiees — et **le labo ne lit QUE le coffre certifie**, donc ces jours lui restaient
+invisibles tant que personne ne relancait. (Cas reel : la fenetre a ete fermee par megarde.)
+
+**Pourquoi c'est sans danger en pleine ecriture** — la question qui decidait de tout : le scellage
+s'arrete au dernier saut de ligne COMPLET (`_fin_derniere_ligne`) et reprend ou il s'etait arrete
+(`_reprise_append_only`). Une ligne a moitie ecrite n'est JAMAIS certifiee ; la passe suivante la
+reprend entiere. Le certificateur etait donc deja concu pour des rubans qui grossissent.
+
+**Ce qui a ete fait** (on AMELIORE l'outil existant, on n'en cree pas un deuxieme) :
+* `--boucle-s N` ajoute a `tools/sceller_coffre_local.py` : une passe, attente, recommence.
+  La boucle APPELLE `main()` — elle ne duplique aucune logique de certification.
+  **Une passe en echec n'arrete JAMAIS la boucle** : une certification qui echoue a 3 h du matin ne
+  doit pas condamner les cinq jours suivants. Ctrl+C, lui, sort immediatement (regle du projet).
+* `CERTIFIER_EN_CONTINU.cmd` : lanceur visible, a laisser ouvert a cote d'une campagne.
+* Entree de registre `coffre-certificateur` (cadence **30 min**, limite 50 min) pour que les
+  campagnes FUTURES l'aient automatiquement. 30 min et non 1 h car la limite d'execution doit
+  depasser 1,5x la cadence (garde anti-relance d'un processus vivant) — et cela divise par deux la
+  fenetre de donnees non certifiees.
+* 9 tests (`tests/test_certification_en_continu.py`).
+
+**RESTE A FAIRE APRES LA CAMPAGNE** : ajouter `coffre-certificateur` a `DEFAULT_NAMES` de
+`watch_economic_collectors.py` et passer le decompte du `.cmd` de 17 a 18 — **impossible
+maintenant : on ne modifie JAMAIS un `.cmd` en cours d'execution** (Windows le lit au fur et a
+mesure ; l'offset se decale et la reprise tombe au milieu d'une ligne). D'ici la, le lanceur
+`CERTIFIER_EN_CONTINU.cmd` couvre le besoin a la main.
+
 ### C-quaterdecies. K1 — DE 8 A ~120 LEADERS : le collecteur REST enfin cable (12/11)
 
 **Le vrai goulot mesure** : 8 leaders distincts seulement dans le ruban, dont UN SEUL a 63 % des

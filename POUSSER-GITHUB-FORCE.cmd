@@ -89,7 +89,7 @@ set "ALINA_LAUNCH_OUTPUT_LOG=runtime/reports/git-sync/LAST_SYNC.json"
 "%HYPERSMART_PYTHON%" %PYARGS% -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
 if errorlevel 1 goto :missing_python
 
-set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-targeted-tree-progress-v14"
+set "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15"
 set "ALINA_ENGINE=%ALINA_ROOT%tools\alina_git_code_sync.py"
 set "ALINA_SHARDS_ENGINE=%ALINA_ROOT%tools\sync_complete_clone.py"
 if not exist "%ALINA_ENGINE%" goto :missing_engine

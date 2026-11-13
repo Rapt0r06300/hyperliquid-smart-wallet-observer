@@ -196,7 +196,7 @@ echo   et vaults depuis Hyperliquid + venues secondaires (Binance,
 echo   Bybit, OKX, Gate, Bitget) pour alimenter les backtests et
 echo   replays du laboratoire quant Copy-Vault.
 echo.
-echo   17 collecteurs actifs (profil %CV_PROFILE%)
+echo   18 collecteurs actifs (profil %CV_PROFILE%)
 echo   + poll causal des leaders (REST) : casse le cap WebSocket ~10/IP
 echo   + explorer autonome : decouvre les traders ACTIFS (suivi adaptatif)
 echo   Securite : PAPER / READ-ONLY / FAIL-CLOSED

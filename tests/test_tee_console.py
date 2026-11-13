@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 OUTIL = RACINE / "tools" / "tee_console.py"
 
@@ -96,6 +98,14 @@ def test_un_journal_impossible_n_empeche_PAS_l_affichage(tmp_path):
 
 # ------------------------------------------------------------------ le lanceur l'utilise vraiment
 
+@pytest.mark.xfail(strict=True, reason=(
+    "EN ATTENTE, PAS UN OUBLI : le cablage du lanceur a ete ANNULE le 12/11 au soir parce qu'il a "
+    "casse le demarrage (un `echo ... ^( ... ^)` et une commande tres longue DANS un bloc batch "
+    "`( ... )`), ET parce qu'on ne modifie JAMAIS un .cmd pendant qu'une campagne tourne : Windows "
+    "lit le fichier au fur et a mesure, l'offset se decale, la reprise tombe au milieu d'une ligne "
+    "— ce qui menacait l'etape de CERTIFICATION a l'arret. A refaire hors campagne. "
+    "`strict=True` : le jour ou le cablage est fait, ce test passe au vert et FAIT ECHOUER la suite, "
+    "ce qui force a retirer ce marqueur. Rien ne se perd en silence."))
 def test_le_lanceur_n_a_plus_AUCUNE_etape_muette():
     """Non-regression du defaut signale : plus une seule redirection silencieuse du coffre."""
     bs = chr(92)

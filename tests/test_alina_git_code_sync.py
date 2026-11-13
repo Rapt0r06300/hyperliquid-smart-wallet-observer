@@ -526,7 +526,7 @@ def test_git_command_prints_named_step_duration_and_exit_code(
         return subprocess.CompletedProcess([git, *args], 0, b"", b"")
 
     monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
-    task = Synchronizer(tmp_path)
+    task = Synchronizer(tmp_path, verbose_terminal=True)
     task.command("status", "--porcelain=v1", "-z", "--untracked-files=no")
 
     output = capsys.readouterr().out
@@ -536,6 +536,21 @@ def test_git_command_prints_named_step_duration_and_exit_code(
     assert "duree=" in output
     assert len(task.report["git_commands"]) == 1
     assert calls[0][1]["live_stderr"] is False
+
+
+def test_git_command_compact_mode_keeps_fast_details_in_receipt_only(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    def fake_run_git(root, git, args, **kwargs):
+        return subprocess.CompletedProcess([git, *args], 0, b"", b"")
+
+    monkeypatch.setattr(sync_module, "_run_git", fake_run_git)
+    task = Synchronizer(tmp_path, verbose_terminal=False)
+    task.command("status", "--porcelain=v1", "-z", "--untracked-files=no")
+
+    assert capsys.readouterr().out == ""
+    assert len(task.report["git_commands"]) == 1
+    assert task.report["terminal_mode"] == "COMPACT"
 
 
 def test_expected_git_return_code_is_logged_as_info_not_failure(
@@ -674,7 +689,7 @@ def test_write_report_keeps_last_receipt_and_bounded_history(
 
 def test_launcher_uses_tracked_canonical_engine_and_preserves_failure_status() -> None:
     launcher = Path("POUSSER-GITHUB-FORCE.cmd").read_text(encoding="utf-8")
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-targeted-tree-progress-v14" in launcher
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15" in launcher
     assert r"tools\alina_git_code_sync.py" in launcher
     assert r"tools\sync_complete_clone.py" in launcher
     assert "ast.parse(" in launcher
@@ -1770,7 +1785,7 @@ def test_windows_launcher_uses_repository_tools_without_external_bootstrap() -> 
     assert "ALINA_LOCAL_ENGINE_SHA256=" not in source
     assert 'if exist "%ProgramFiles%\\Git\\cmd\\git.exe"' in source
     assert 'if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd\\git.exe"' in source
-    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-targeted-tree-progress-v14" in source
+    assert "ALINA_ENGINE_REQUIRED_BUILD=2026-11-12-compact-fresh-index-v15" in source
     assert "ast.parse(" in source
     assert ":missing_engine" in source and ":invalid_engine" in source
     assert "--shards-only" in source and "--all-safe" in source

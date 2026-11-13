@@ -52,6 +52,10 @@ DEFAULT_NAMES = (
     # silencieusement a l'arret pendant toute la campagne.
     "userfills-poll",      # fills REST : passe de 8 a ~120 leaders (casse le cap WS de 10/IP)
     "contexte-leaders",    # ordres en attente des leaders : l'INTENTION, pas seulement le resultat
+    # 13/11 — certification PERIODIQUE (toutes les 30 min) pendant la campagne : sans elle,
+    # une fermeture brutale au jour 5 laisse 5 jours NON certifies, donc invisibles pour le
+    # labo qui ne lit QUE le coffre certifie. Au pire on perd l'intervalle en cours.
+    "coffre-certificateur",
 )
 _WATCHDOG_LOG_MAX_BYTES = 2 * 1024 * 1024
 _WATCHDOG_LOG_BACKUPS = 3

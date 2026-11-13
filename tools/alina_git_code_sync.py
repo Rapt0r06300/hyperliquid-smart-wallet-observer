@@ -133,7 +133,7 @@ MIN_GIT_VERSION = (2, 30)
 MUTEX_WAIT_SECONDS = 20.0
 MUTEX_POLL_SECONDS = 0.25
 RECEIPT_HISTORY_LIMIT = 20
-GIT_SYNC_ENGINE_BUILD = "2026-11-12-targeted-tree-progress-v14"
+GIT_SYNC_ENGINE_BUILD = "2026-11-12-compact-fresh-index-v15"
 # A single historical registry was moved out of the repository root. It is
 # publishable only when both paths clean to its exact current HEAD blob.
 SAFE_HISTORICAL_RELOCATIONS = {
@@ -1159,12 +1159,19 @@ def _mutex(git_dir: Path):
 class Synchronizer:
     def __init__(self, root: Path, git: str = "git", *, dry_run: bool = False,
                  allow_test_remote: bool = False,
-                 promote_current_to_main: bool = False):
+                 promote_current_to_main: bool = False,
+                 verbose_terminal: bool | None = None):
         self.root = root.resolve()
         self.git = git
         self.dry_run = dry_run
         self.allow_test_remote = allow_test_remote
         self.promote_current_to_main = promote_current_to_main
+        self.verbose_terminal = (
+            os.environ.get("ALINA_GIT_VERBOSE", "").strip().casefold()
+            in {"1", "true", "yes", "on"}
+            if verbose_terminal is None
+            else verbose_terminal
+        )
         self.changed_python_paths: list[str] = []
         self._inventory_cache: tuple[list[str], list[str], list[str]] | None = None
         self._pathspec_cache: dict[bool, tuple[str, ...]] = {}
@@ -1219,6 +1226,7 @@ class Synchronizer:
             "phases": {},
             "progress_events": [],
             "progress_percent": 0.0,
+            "terminal_mode": "VERBOSE" if self.verbose_terminal else "COMPACT",
             "verified_historical_relocations": [],
             "git_commands": [],
         }
@@ -1265,7 +1273,14 @@ class Synchronizer:
         # helper or remote URL can be redacted before they reach the console
         # and the receipt.  Git progress is replayed after completion below.
         live_stderr = False
-        self.say(f"[GIT {command_number:03d}] {label} ...")
+        major_terminal_step = bool(
+            git_args
+            and git_args[0] in {
+                "push", "fetch", "rebase", "commit-tree", "update-ref",
+            }
+        )
+        if self.verbose_terminal or major_terminal_step:
+            self.say(f"[GIT {command_number:03d}] {label} ...")
         started = time.monotonic()
 
         def progress(elapsed: float) -> None:
@@ -1336,10 +1351,16 @@ class Synchronizer:
             else "INFO" if completed.returncode in expected_returncodes
             else "ECHEC"
         )
-        self.say(
-            f"[{outcome}] {label} | code={completed.returncode} | "
-            f"duree={elapsed_ms / 1000:.2f} s"
-        )
+        if (
+            self.verbose_terminal
+            or major_terminal_step
+            or completed.returncode != 0
+            or elapsed_ms >= 5000
+        ):
+            self.say(
+                f"[{outcome}] {label} | code={completed.returncode} | "
+                f"duree={elapsed_ms / 1000:.2f} s"
+            )
         captured_stderr = _redact_sensitive_text(
             (completed.stderr or b"").decode("utf-8", errors="replace").strip()
         )
@@ -3632,8 +3653,16 @@ class Synchronizer:
         resolved: list[dict[str, str]] = []
         skipped_empty = 0
         replay_index_info = b""
-        with self._temporary_index():
+        with self._temporary_index() as replay_index:
             for old_commit in commits:
+                # A fresh sparse planning index for every commit avoids
+                # read-tree revalidating the previous commit's ~1.9M entries.
+                # The final iteration still remains available below for the
+                # selected code-entry hand-off to the operator index.
+                replay_index.unlink(missing_ok=True)
+                self.report["tree_replay_fresh_indexes"] = int(
+                    self.report.get("tree_replay_fresh_indexes", 0)
+                ) + 1
                 parents = self.text(
                     "rev-list", "--parents", "-n", "1", old_commit
                 ).split()
@@ -3954,9 +3983,15 @@ class Synchronizer:
         self.report["tree_replay_conflict_resolutions"] = resolved
         self.report["empty_replay_commits_skipped"] = skipped_empty
         self.report["local_rebased_onto"] = remote
+        audited_count = sum(
+            row.get("resolution") == "AUDITED_LOCAL_SUPERSET"
+            for row in resolved
+        )
+        upstream_count = len(resolved) - audited_count
         self.say(
             "[INTEGRATION RAPIDE] Replay arbre termine sans rebase classique; "
-            f"{len(resolved)} conflit(s) gouvernance conserve(nt) GitHub."
+            f"{audited_count} conflit(s) local(aux) audite(s), "
+            f"{upstream_count} decision(s) GitHub canonique(s)."
         )
         return True
 
