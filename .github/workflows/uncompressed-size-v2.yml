@@ -8,6 +8,7 @@ on:
       - "tools/backfill_exact_trade_counts.py"
       - "tools/build_catalog_metrics.py"
       - "tools/merge_measured_catalog_patches.py"
+      - "tools/measured_catalog_patches.py"
   workflow_dispatch:
     inputs:
       limit:
@@ -72,7 +73,14 @@ jobs:
               --measured-root "$RUNNER_TEMP/alina-size-measurements" \
               --repo-root "$GITHUB_WORKSPACE"
             python tools/build_catalog_metrics.py
-            git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json catalog/DATA_METRICS.json
+            git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json \
+              catalog/DATA_METRICS.json
+            if [ -d catalog/uncompressed-size-parts ]; then
+              git add catalog/uncompressed-size-parts
+            fi
+            if [ -d catalog/record-count-parts ]; then
+              git add catalog/record-count-parts
+            fi
             if git diff --cached --quiet; then
               echo "Verified size/record evidence already published."
               exit 0
