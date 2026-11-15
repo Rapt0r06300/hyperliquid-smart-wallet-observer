@@ -51,22 +51,55 @@ class SyncError(RuntimeError):
     """An update cannot be completed without risking locally owned files."""
 
 
+#: Sous-commandes qui ne MODIFIENT rien : inutile qu'elles prennent le verrou d'index.
+_GIT_LECTURE_SEULE = frozenset({
+    "rev-parse", "rev-list", "ls-files", "config", "remote", "cat-file", "show", "log",
+})
+#: Delais au-dela desquels on declare l'echec plutot que d'attendre indefiniment.
+#: Genereux : sur ce depot (1,9 M fichiers suivis, index de 332 Mo), une fusion legitime
+#: peut durer des dizaines de minutes. Reglables par ALINA_SYNC_TIMEOUT_S / _FETCH_S.
+_DELAI_DEFAUT_S = float(os.environ.get("ALINA_SYNC_TIMEOUT_S", "1800"))
+_DELAI_RESEAU_S = float(os.environ.get("ALINA_SYNC_FETCH_TIMEOUT_S", "3600"))
+
+
 def _git(root: Path, *args: str) -> str:
     try:
         # An existing multi-GB checkout can spend a long time fetching. Keep
         # Git's real stderr progress visible instead of silently buffering it.
         fetching = bool(args) and args[0] == "fetch"
         command = ["git", "-C", str(root), *args]
+        # `--no-optional-locks` : une commande de LECTURE ne doit pas prendre le verrou
+        # d'index. Mesure du 13/11 : plusieurs outils travaillent en parallele sur ce depot
+        # (automatisation interne, autres agents) et se bloquaient mutuellement sur
+        # `.git/index.lock`, parfois perime pendant un quart d'heure.
+        if args and args[0] in _GIT_LECTURE_SEULE:
+            command.insert(1, "--no-optional-locks")
         if fetching and "--progress" not in args:
-            command.insert(4, "--progress")
+            command.insert(command.index("fetch") + 1, "--progress")
             print("ALINA_SYNC_PHASE=FETCH_MAIN", file=sys.stderr, flush=True)
         done = subprocess.run(
             command, check=False, text=True,
             stdout=subprocess.PIPE,
             stderr=None if fetching else subprocess.PIPE,
+            # ENTREE FERMEE. Sans cela, git herite du stdin du parent ; si ce parent meurt
+            # (le systeme a tue le notre deux fois pour pression memoire), git reste bloque
+            # a lire une entree qui ne viendra JAMAIS. Mesure : deux `git merge` figes a
+            # 0 % CPU et 0 I/O apres 848 s de travail utile, 1,7 Go retenus, a tuer a la main.
+            stdin=subprocess.DEVNULL,
+            # Un outil qui attend sans fin n'est pas robuste : il prefere mourir en le disant.
+            timeout=_DELAI_RESEAU_S if fetching else _DELAI_DEFAUT_S,
         )
         if fetching and done.returncode == 0:
             print("ALINA_SYNC_PHASE=FETCH_MAIN_COMPLETE", file=sys.stderr, flush=True)
+    except subprocess.TimeoutExpired as exc:
+        limite = exc.timeout or 0
+        raise SyncError(
+            f"git {args[0]} depasse {limite:.0f} s et a ete interrompu : le depot suit "
+            "1 937 328 fichiers pour un index de 332 Mo, et toute commande qui touche "
+            "l'index le relit entierement. Pistes : activer le sparse-checkout "
+            "(git sparse-checkout init --cone --sparse-index), verifier qu'aucun fichier "
+            "ECRIT EN CONTINU n'est suivi, ou relever ALINA_SYNC_TIMEOUT_S."
+        ) from exc
     except OSError as exc:
         raise SyncError("Git is required to synchronize Alina") from exc
     if done.returncode:
@@ -172,9 +205,20 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
         )
     _git(root, "fetch", "--no-tags", "origin", "main")
     remote_sha = _git(root, "rev-parse", "refs/remotes/origin/main")
-    # Non-fast-forward local history is an error, never hidden by an auto-rebase.
-    _git(root, "merge", "--ff-only", "refs/remotes/origin/main")
     head = _git(root, "rev-parse", "HEAD")
+    # RACCOURCI MESURE (13/11/2026). `merge --ff-only` etait appele MEME quand HEAD valait
+    # deja origin/main — un non-evenement logique, mais tres couteux ici : ce depot suit
+    # 1 937 328 fichiers (97,8 % dans datasets/) pour un index de 332 Mo, que toute commande
+    # touchant l'index lit ET reecrit. Pire, le rafraichissement indexe les 164 fichiers
+    # SUIVIS de runtime/ que la campagne ecrit en direct, d'ou des erreurs
+    # « short read while indexing » et une concurrence disque avec les collecteurs.
+    # `rev-parse` ne touche PAS l'index : le test coute quelques millisecondes.
+    # Aucun invariant n'est relache : la verification d'identite ci-dessous reste la meme,
+    # et une divergence reelle passe toujours par `merge --ff-only`, qui echoue plutot que
+    # de rattraper l'historique par un rebase automatique.
+    if head != remote_sha:
+        _git(root, "merge", "--ff-only", "refs/remotes/origin/main")
+        head = _git(root, "rev-parse", "HEAD")
     if head != remote_sha:
         raise SyncError("main is not identical to the fetched origin/main")
     return head

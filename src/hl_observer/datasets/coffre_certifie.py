@@ -129,6 +129,11 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     "micro_trades.jsonl": (FAMILLE_MICRO_TRADES, "HL_WS_PUBLIC"),
     "candles_5m.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_5M"),   # runtime/history (backfill_candles_vaults)
     "candles_1h.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_1H"),   # 208 jours de prix horaires (même collecteur)
+    # 15/11/2026 — SANS CETTE LIGNE, LE JOURNALIER SERAIT COLLECTÉ ET JAMAIS RENDU. Le labo ne lit
+    # QUE le coffre : un fichier absent de ce tableau est produit, puis ignoré — le piège « donnée
+    # présente mais jamais rendue ». Le pas 1 j remonte à 1 101 jours (contre 208 en horaire), donc
+    # c'est LUI qui donne un prix aux 890 jours de funding rattrapés.
+    "candles_1d.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_1D"),
     "funding_1h.jsonl": (FAMILLE_FUNDING_HISTORY, "REST_FUNDING_HISTORY"),   # funding horaire, même profondeur
 }
 

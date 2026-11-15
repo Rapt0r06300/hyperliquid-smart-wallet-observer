@@ -117,6 +117,18 @@ FLUX: tuple[Flux, ...] = (
     Flux("candles_1h.jsonl", HISTORY, "tools/backfill_candles_vaults.py",
          "bougies 1 h récupérées après coup (208 jours, dex HIP-3 compris)", "candle", CONSOMME,
          f"{ETUDE} --retrospectif --bougies 1h / --ouvertures (prix sur des mois)"),
+    # 15/11/2026 — LE PAS JOURNALIER, et c'est le plus PROFOND des trois. Le plafond de
+    # `candleSnapshot` est de 5 000 BOUGIES, pas de 208 jours : il depend donc du pas. Sonde sur
+    # BTC : 1h -> 208 jours | 4h -> 833 | **1d -> 1 101 jours**, soit exactement la profondeur du
+    # funding. Comme la strategie tient 24 h, **une bougie journaliere = une detention entiere** :
+    # c'est ce pas qui donne un prix aux ~850 jours de funding rattrapes, que l'horaire laissait
+    # sans contrepartie. Sans cette ligne, le test de couverture echoue — et il a raison : un
+    # fichier connu du certificateur sans producteur declare est un fichier qu'on ne sait pas
+    # expliquer.
+    Flux("candles_1d.jsonl", HISTORY, "tools/backfill_candles_vaults.py",
+         "bougies 1 j récupérées après coup (1 101 jours, la seule profondeur qui couvre "
+         "le funding rattrapé)", "candle", CONSOMME,
+         f"{ETUDE} --retrospectif (fenêtre mesurable sur ~3 ans, détention 24 h)"),
     Flux("copy_vault_trades_lane.jsonl", DATA, "tools/collecter_market_lane.py",
          "transactions publiques Hyperliquid", "trades_marche", DISPONIBLE, f"{LABO_PRINCIPAL} (signal de contexte)"),
     # ------------------------------------------------------------------ microstructure dense

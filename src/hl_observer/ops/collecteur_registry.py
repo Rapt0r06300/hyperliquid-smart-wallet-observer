@@ -50,8 +50,36 @@ REGISTRE: tuple[dict[str, Any], ...] = (
      "intervalle_s": 600, "args": ("--une-fois",), "limite_minutes": 25.0},
     {"nom": "backfill-fills", "script": "tools/backfill_vault_fills.py",
      "intervalle_s": 14400, "args": ("--une-fois",), "limite_minutes": 480.0},
+    # 14/11/2026 — BUDGET FUNDING PORTE DE 1 500 A 7 200 s. La passe bougies consomme ses 3 000 s
+    # AVANT que le funding n'obtienne son budget, et le tout ne tourne que toutes les 4 h. Mesure :
+    # **90 coins avaient du funding sur 261 suivis, 171 n'en avaient JAMAIS eu** — alors que les
+    # bougies couvrent deja 263 coins. Or la largeur de la section transversale joue sur les DEUX
+    # termes du rapport `brut/repli` qui fixe le resultat : des queues plus extremes (signal plus
+    # fort) ET plus de diversification (repli plus bas).
+    # Au debit reserve au rattrapage (100 de poids/min, soit ~270 s par coin), les 171 manquants
+    # demandent ~12,8 h de passe : a 7 200 s par cycle de 4 h, ils sont couverts en ~7 cycles,
+    # donc en un peu plus d'une journee.
+    # BORNES RESPECTEES : 3 000 (bougies) + 7 200 (funding) = 10 200 s < 14 400 s d'intervalle, et
+    # la limite de 480 min (28 800 s) reste tres au-dessus. On NE lance PAS de passe concurrente :
+    # deux processus partageraient le meme fichier `.tmp` d'etat, et l'entrelacement peut corrompre.
+    # 15/11/2026 — EXECUTEUR PAPER DU LIVRE TRANSVERSAL INVERSE.
+    # Cadence 12 h = le pas de tranche du protocole gele (`docs/PREENREGISTREMENT_5USD_V2.md`).
+    # Il DECIDE au fil du temps, donc sa decision est ecrite AVANT que le resultat n'existe :
+    # c'est la difference entre « la strategie aurait gagne » et « la strategie a gagne ».
+    # Lecture seule (il ne lit que le coffre), idempotent (un instant deja decide est ignore),
+    # et son grand livre est ecrit de facon atomique.
+    # INVARIANT ANTI-RELANCE : limite_minutes x 60 = 72 000 > intervalle_s x 1,5 = 64 800.
+    # ATTENTION : la campagne en cours ne le prendra PAS — le lanceur lit `DEFAULT_NAMES` de
+    # `watch_economic_collectors.py` au demarrage, et on ne redemarre pas une collecte vivante.
+    # En attendant : `python tools/paper_carry_inverse.py --root . --capital 350`.
+    {"nom": "paper-carry-inverse", "script": "tools/paper_carry_inverse.py",
+     "intervalle_s": 43200, "args": ("--une-fois",), "limite_minutes": 1200.0},
     {"nom": "backfill-candles-vaults", "script": "tools/backfill_candles_vaults.py",
-     "intervalle_s": 14400, "args": ("--une-fois",), "limite_minutes": 480.0},
+     "intervalle_s": 14400,
+     # `--intervalles` inclut desormais **1d** : c'est le seul pas qui remonte a 1 101 jours, donc
+     # le seul qui donne un prix au funding rattrape (l'horaire plafonne a 208 jours).
+     "args": ("--une-fois", "--intervalles", "1h,5m,1d", "--budget-funding-s", "7200"),
+     "limite_minutes": 480.0},
     {"nom": "pipeline-reel", "script": "tools/pipeline_copie_reel.py",
      "intervalle_s": 1800, "args": ("--une-fois",), "limite_minutes": 60.0,
      "execution_capability": EXECUTION_CAPABILITY_NONE,

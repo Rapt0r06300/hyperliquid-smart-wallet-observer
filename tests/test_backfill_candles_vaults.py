@@ -243,3 +243,57 @@ def test_le_labo_lit_le_funding_historique_comme_le_funding_observe(tmp_path):
     shards = {"asset_ctx": [{"path": str(observe)}], "funding_history": [{"path": str(publie)}]}
     assert sorted(etude.load_funding(etude.funding_shards(shards))) == [("BTC", NOW - HEURE, 0.00001), ("BTC", NOW, 0.00002)]
     assert etude.funding_shards({"asset_ctx": [{"path": str(observe)}]}) == [{"path": str(observe)}]
+
+
+# --------------------------------------------------------- --seulement-funding (14/11/2026)
+
+def test_seulement_funding_ne_touche_PAS_aux_bougies(tmp_path, capsys):
+    """POURQUOI CETTE OPTION. La passe bougies consomme ses 3 000 s AVANT que le funding n'obtienne
+    ses 1 500 s, et le tout ne tourne que toutes les 4 h. Mesure du 14/11 : **90 coins ont du
+    funding sur 261 suivis, 171 n'en ont JAMAIS eu**. Or la largeur de la section transversale joue
+    sur les DEUX termes du rapport `brut/repli` qui fixe le resultat final.
+
+    Ce test verrouille le fait que l'option saute bien la passe bougies : si elle la refaisait, elle
+    ne servirait a rien, puisque c'est precisement le budget des bougies qui affame le funding.
+    """
+    m = _mod("backfill_candles_vaults")
+    appels = {"bougies": 0, "funding": 0}
+
+    def fausse_passe(*a, **k):
+        appels["bougies"] += 1
+        return {"coins": 1, "intervalles": {}, "arret": None, "coins_inconnus_non_demandes": []}
+
+    def fausse_passe_funding(*a, **k):
+        appels["funding"] += 1
+        return {"points": 7, "demandes": 1, "a_jour": 0, "echecs": [], "arret": None}
+
+    m.passe, m.passe_funding = fausse_passe, fausse_passe_funding
+    assert m.main(["--root", str(tmp_path), "--seulement-funding"]) == 0
+    assert appels == {"bougies": 0, "funding": 1}
+    assert "funding 1h SEUL" in capsys.readouterr().out
+
+
+def test_les_deux_options_contradictoires_sont_REFUSEES(tmp_path, capsys):
+    """`--seulement-funding --sans-funding` demande de ne faire QUE le funding et PAS le funding.
+    Executer silencieusement l'une des deux laisserait croire que la passe a fait son travail."""
+    m = _mod("backfill_candles_vaults")
+    m.passe = m.passe_funding = lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("aucune passe ne doit etre lancee"))
+    assert m.main(["--root", str(tmp_path), "--seulement-funding", "--sans-funding"]) == 2
+    assert "contradictoires" in capsys.readouterr().out
+
+
+def test_le_comportement_par_defaut_est_INCHANGE(tmp_path):
+    """L'option ne doit rien changer quand elle n'est pas demandee : la campagne reexecute ce
+    fichier toutes les 4 h."""
+    m = _mod("backfill_candles_vaults")
+    appels = {"bougies": 0, "funding": 0}
+    def fausse_passe(*a, **k):
+        appels["bougies"] += 1
+        return {"coins": 1, "intervalles": {}, "arret": None, "coins_inconnus_non_demandes": []}
+    def fausse_passe_funding(*a, **k):
+        appels["funding"] += 1
+        return {"points": 0, "demandes": 0, "a_jour": 1, "echecs": [], "arret": None}
+    m.passe, m.passe_funding = fausse_passe, fausse_passe_funding
+    assert m.main(["--root", str(tmp_path)]) == 0
+    assert appels == {"bougies": 1, "funding": 1}

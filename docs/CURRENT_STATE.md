@@ -462,301 +462,58 @@ corrigés ce jour.
 
 ---
 
-### A. COLLECTEURS & CERTIFICATEUR — ≈ 110 tâches
+### 0 quinquies. RITUEL DE FIN DE CAMPAGNE — les 7 questions, toujours les memes
 
-**A1. Débit API & partage de l'unique adresse IP locale (⚡ cause des 429)**
-- C1 ⚡ Budget de débit **partagé entre tous les processus** via un compteur + verrou fichier
-  (token-bucket inter-process) : chaque collecteur réserve le poids réel d'une requête avant de
-  l'émettre. Supprime les 429 de démarrage sans brider personne. (Aujourd'hui : seul un signal de
-  congestion existe ; il faut un vrai budget commun.)
-- C2 ⚡ Fenêtre glissante 60 s du **poids réellement consommé** (somme des `weight` observés), pas
-  d'estimations par collecteur.
-- C3 🔧 Respecter `Retry-After` **partout** (seuls vaults/liquidations/carnet le font).
-- C4 🔬 Sonde légère (allMids) qui estime le quota IP restant et redistribue le budget en direct.
-- C5 ⚡ Priorité de budget déclarée : fills causaux leaders > carnets des coins actifs > ordres en
-  attente > vaults > rattrapages.
-- C6 🔧 Mode dégradé automatique sous pression 429 : ralentir les collecteurs non critiques au lieu
-  de les laisser échouer.
-- C7 🔧 Jitter aléatoire au démarrage de chaque collecteur (évite la rafale synchronisée du lancement).
-- C8 🔬 Poids EXACT par type de requête (`candleSnapshot` 20+1/60, `userFillsByTime` 20+1/20,
-  `clearinghouseState` 2, `l2Book` WS 0) au lieu d'un forfait.
-- C9 📊 Journal du budget : poids demandé/accordé/429 par collecteur et par minute → lisible par le labo.
-- C10 🔬 Un « chef d'orchestre » de débit (process) qui alloue des jetons et arbitre les priorités.
+Idee reprise de `kepano/40-questions` (un jeu de questions FIXES qu'on se repose a date
+reguliere), adaptee a un laboratoire. Pourquoi des questions fixes : un bilan improvise raconte
+ce qui s'est bien passe. Des questions imposees d'avance forcent a regarder ce qu'on prefererait
+ne pas voir — et permettent de COMPARER deux campagnes entre elles.
 
-**A2. Fiabilité & résilience (🔧)**
-- C11 🔧 Reconnexion WS avec reprise au **watermark exact** (ni trou ni doublon) sur TOUS les flux.
-- C12 🔧 Heartbeat applicatif ping/pong par socket + détection de pong manquant → ouverture d'époque
-  de trou (déjà dans le collecteur de référence ; généraliser aux lanes et au collecteur principal).
-- C13 🔧 Détection de « marché silencieux » (aucun message > seuil) : marquer trou, pas seulement compter.
-- C14 🔧 Watchdog qui relance un collecteur mort en < 5 s **avec reprise d'état**.
-- C15 🔧 Écriture d'état atomique (watermark, curseur) **partout** : écrire-puis-renommer.
-- C16 📊 Journal structuré JSONL des incidents par collecteur (déconnexion, 429, rejet), exploitable par le labo.
-- C17 🔧 Nettoyage des `.pid` orphelins au démarrage + détection de double instance.
-- C18 🔧 Test de mort brutale (kill -9) : l'état reprend sans perte ni double-comptage.
-- C19 🔬 Timeout de requête adaptatif à la latence observée (p95 glissant).
-- C20 🔧 Déduplication inter-sources (REST/WS/poll) par identité de fill stable sur **tous** les flux.
+A remplir a la fin de CHAQUE campagne, avant toute nouvelle collecte, et a dater.
 
-**A3. Complétude de la couverture — ce qui rend les signaux EXÉCUTABLES (⚡ gros levier)**
-- C21 ⚡ **Carnets L2 des coins HIP-3 (`xyz:`)** tradés par les leaders : 61 % du notionnel sans
-  aucun carnet aujourd'hui. Vérifier le nom d'abonnement `l2Book` contre l'univers officiel d'abord.
-- C22 ⚡ Générateur automatique de `config/copy_vault_coins.json` depuis les coins réellement tradés
-  par les leaders des 7 derniers jours (fréquence pondérée par notionnel).
-- C23 ⚡ **Carnet de SORTIE garanti** : pour chaque position ouverte d'un leader suivi, s'assurer
-  qu'un carnet existe à +60 s, +300 s, +900 s, +1 h, +4 h (les horizons du labo). Sans ça : refus
-  `STALE_OR_MISSING_EXIT_BOOK` (235 des 504 signaux TRAIN du 12/11).
-- C24 ⚡ Carnet de RÉFÉRENCE garanti : un carnet dans les 30 s **avant** chaque signal leader.
-- C25 ⚡ Abonnement L2 **déclenché par l'activité du leader** : dès le premier fill sur un coin,
-  garder le carnet abonné jusqu'à la fermeture + horizon max (couvre entrée ET sortie).
-- C26 🔬 Garder les vaults FERMÉS de la liste publique (mesure du biais de survie).
-- C27 ⚡ Ordres en attente (`openOrders`) des leaders en continu, câblés aux lanes cloud.
-- C28 🔧 Funding horaire de TOUS les coins tradés (pas seulement 29).
-- C29 🔧 Bougies 1 h sur 208 j pour tous les coins actifs (incrémental).
-- C30 🔧 Historique complet des fills des leaders lents (pagination curseur, déjà posé) — étendre à
-  tous les leaders non-HFT.
-- C31 🔬 Collecter les trades publics (`trades` WS) des coins actifs : mesure de l'impact de marché réel.
-- C32 🔬 Collecter les variations d'`openInterest` et le premium mark/oracle par coin (déjà partiel).
-- C33 🔬 Collecter les liquidations confirmées en continu (déjà posé) et les relier aux carnets.
-- C34 🔬 Snapshots de portefeuille complet des leaders (dex réunis) en tête ET fin de passe (déjà posé).
-- C35 ⚡ Couvrir les marchés des leaders **avant** qu'ils tradent (pré-abonnement sur leurs coins
-  habituels) : capture la référence sans attendre le premier fill.
+1. **Qu'est-ce qui a ete MESURE ?** Un chiffre, une fenetre, une methode. Pas une impression.
+   Si la reponse ne contient aucun nombre, la campagne n'a rien mesure.
 
-**A4. Intégrité causale & provenance (⚡ la cause du blocage)**
-- C36 ⚡ `connection_id` + `l2_gap_epoch` sur CHAQUE carnet (fait ce jour pour lane + collecteur
-  principal ; vérifier qu'aucun autre écrivain de carnet n'en manque).
-- C37 ⚡ `capacity_usd` sur chaque carnet de lane (fait ce jour) + vérifier les carnets micro.
-- C38 🔧 Époque de trou cohérente : +1 à chaque déconnexion / trame rejetée / réabonnement, jamais
-  sur un simple silence (fait ce jour ; ajouter un test de non-régression sur données réelles).
-- C39 🔬 Horodatage de réception à l'instant EXACT de lecture du socket (pas après traitement).
-- C40 🔧 Refuser tout carnet `received < exchange` ou lag > 30 s (déjà fait ; auditer les rejets).
-- C41 🔬 `writer_run_id` + `clean_epoch_ms` sur les checkpoints exacts (déjà dans le protocole).
-- C42 🔬 Marquer `data_origin=REAL_OBSERVED` vs reconstruit partout ; interdire toute confusion.
-- C43 ⚡ Checkpoints exacts par métaordre (référence/entrée/sortie liés cryptographiquement) : le
-  collecteur principal sait les écrire pour les coins à métaordre actif — étendre la couverture.
-- C44 🔬 Vérifier que l'horloge de réception est monotone par socket (détecte un décalage d'horloge).
-- C45 🔧 Provenance tier (LOCAL vs SAFE) jamais perdue dans le pont du labo.
+2. **Qu'est-ce qui a ete REFUTE ?** Une campagne qui ne tue aucune hypothese n'a rien appris.
+   Nommer les hypotheses mortes et le chiffre qui les a tuees (ex. : fast_follow REJETE a tous
+   les horizons <= 300 s meme a spread nul ; DeepLOB -4 242 bps net).
 
-**A5. Certificateur — reconnaître et sceller tout flux (🔧)**
-- C46 🔧 Chaque nouveau flux a une règle de certification OU un motif explicite (jamais ignoré en silence).
-- C47 ⚡ Certifier les familles `book_l2`, `bbo`, `leader_orders`, `funding_history`, `candle` avec
-  leurs champs d'identité préservés (fait en partie ; auditer que `connection_id`/`l2_gap_epoch`
-  survivent au scellage ET au rechargement — prouvé ce jour, ajouter garde permanente).
-- C48 🔧 Rattrapage des archives sans dupliquer ce qui est déjà au coffre (déjà posé).
-- C49 🔧 Détecter l'altération d'un shard déjà scellé (SHA-256) et refuser l'écrasement.
-- C50 📊 Rapport de couverture : par famille, combien scellé / réparé / écarté / inconnu.
-- C51 🔬 Certifier les ordres en attente (snapshot = un tout ; rejeter compte incohérent, doublon,
-  ordre postérieur à l'observation).
-- C52 🔬 Certifier les bougies avec intervalle inféré de la source ; quarantaine si absent.
-- C53 🔧 `EQUIVALENT_SAFE` pour chaque famille locale (le labo sait ce qu'il peut « prouver »).
-- C54 🔧 Verrou de certification (évite deux scellages concurrents) + attente bornée.
-- C55 📊 Inventaire par famille des shards SAFE non utilisés pour le PnL (contexte vs preuve).
-- C56 🔬 Certifier les trades publics, l'OI, le premium, les liquidations (nouvelles familles).
-- C57 🔧 `LOCAL_INDEX.json` + `SOURCES_TRAITEES.json` toujours cohérents (test d'intégrité).
-- C58 🔧 Quarantaine horodatée avec motif lisible pour chaque ligne écartée.
-- C59 🔬 Revérifier le magasin de ticks natifs par rotation (immuable à la rotation).
-- C60 🔧 Ne jamais baisser les exigences de qualité pour gonfler le nombre de shards.
+3. **Qu'est-ce qui reste NON MESURABLE, et pourquoi ?** Distinguer « mesure et negatif » de
+   « pas mesurable ». Les confondre est la faute la plus couteuse de ce projet.
 
-**A6. Cadence intelligente pilotée par le labo (🔬)**
-- C61 🔬 Classes de cadence PRIORITAIRE / STANDARD / DÉCOUVERTE / ARCHIVE depuis le plan du labo
-  (`copy_vault_besoins_collecte.json`) — déjà posé ; raffiner par valeur-d'information.
-- C62 🔬 Un leader qui vient d'émettre est poll plus souvent ; un leader calme, espacé (budget libéré).
-- C63 🔬 ARCHIVE = HFT non copiable ou clone : échantillon borné, pas flux complet.
-- C64 🔬 Le labo publie « ce qu'il manque pour mesurer » (quels coins, quels horizons) → le collecteur
-  cible exactement ça. Boucle fermée labo → collecteurs.
-- C65 ⚡ Priorité de collecte des carnets sur les coins/horizons où le labo a des signaux SANS sortie.
-- C66 🔬 Sélection des leaders par valeur : notionnel copiable × fraîcheur × part exécutable.
-- C67 🔬 Retirer de l'univers les clones (mêmes fills, décalés) détectés par corrélation.
-- C68 🔬 Découvreur autonome de nouveaux leaders actifs (déjà posé) → filtrer sur copiabilité.
-- C69 🔬 Cadence adaptative des bougies : coins volatils plus souvent.
-- C70 🔬 Budget de rattrapage qui cède toujours la place au direct (fait ce jour, `ALINA_SIGNAL_DEBIT`).
+4. **Quelle part des donnees collectees a reellement servi ?** Un flux collecte et jamais lu est
+   du cout sans benefice : soit on le branche, soit on arrete de le collecter.
 
-**A7. Lanes cloud multi-IP (🔧)**
-- C71 ⚡ Les lanes prennent l'identité de connexion des carnets après push (le fix de ce jour est
-  local ; le cloud l'héritera du code poussé).
-- C72 🔧 Une IP par lane (runner GitHub) : vérifier que chaque lane a bien son budget propre (55/min).
-- C73 🔧 Tranches de coins disjointes par lane (shard-index) sans chevauchement.
-- C74 🔧 Rapatriement + fusion automatiques (dédup + fraîcheur) dans AlinaSync.
-- C75 🔬 Lanes dédiées HIP-3 (coins `xyz:`) séparées des lanes principales.
-- C76 🔧 Leaders/coins commitables (`config/copy_vault_leaders.json`, `copy_vault_coins.json`) +
-  garde-fou (zéro leader = refus).
-- C77 📊 Chaque lane publie un reçu de couverture (coins, fenêtre, reconnexions, trous).
-- C78 🔧 Détecter une lane morte et redistribuer ses coins.
-- C79 🔬 Lanes « sortie » dédiées : ne gardent abonnés que les coins à position ouverte, longtemps.
-- C80 🔧 Fréquence des lanes réglable sans redéploiement (variable de workflow).
+5. **Combien de JOURS ACTIFS par segment et par regime ?** C'est le levier dominant (√n au
+   denominateur). Un segment a 2 jours n'est pas « valide », il est non mesurable — le dire.
 
-**A8. Qualité, mesure & observabilité (📊)**
-- C81 📊 Tableau de bord temps réel : par flux, lignes/s, fraîcheur, trous, 429, reconnexions.
-- C82 📊 Mesure « exécutabilité » en direct : % de fills leaders qui auront référence+entrée+sortie.
-- C83 📊 Alerte si un coin actif n'a aucun carnet depuis N minutes.
-- C84 📊 Rapport quotidien de complétude (déjà posé) enrichi de l'exécutabilité par coin.
-- C85 🔬 Mesurer la latence réelle réception − bourse par flux (distribution, pas moyenne).
-- C86 ✅ Fills passifs vs agressifs par leader : **FAIT** (section C, point 21) — devenu un filtre decisionnel.
-- C87 📊 Score de « santé du carburant » : combien de signaux deviendront scoreables.
-- C88 🔧 Tester chaque `.cmd` en tâche de fond régulièrement (`tools/tester_cmds.py`) — déjà posé.
-- C89 📊 Historiser le nombre de refus 429 par essai du lanceur (218 → 32 mesuré ; viser ~0).
-- C90 🔬 Détecter les fills de même instant (tie) et les ordonner de façon déterministe.
+6. **Qu'est-ce que j'ARRETE ?** Au moins une chose : un flux, une piste, une section de ce
+   document. Sans cette question, la feuille de route redevient un grenier (lecon du 14/11).
 
-**A9. Stockage, archivage, rejouabilité (🔧)**
-- C91 🔧 Archivage sans perte (déplacer, jamais supprimer) + certification avant archivage.
-- C92 🔧 Rotation des rubans volumineux à la taille, pas à la session.
-- C93 🔧 Compression gz des shards certifiés (déjà fait) + vérification d'intégrité.
-- C94 🔧 `vault_snapshots.jsonl` : le scoreur relit l'historique archivé (fait ce jour) — étendre à
-  tous les flux qui repartent de zéro après certification.
-- C95 🔬 Index temporel des carnets par coin pour un chargement O(log n) côté labo (fait côté moteur).
-- C96 🔧 Interning des chaînes répétées dans les gros rubans (fait côté labo ; étendre).
-- C97 🔧 Ne jamais garder deux copies d'un carnet en mémoire pendant le scellage.
-- C98 📊 Taille du coffre par famille et par jour (tendance).
-- C99 🔧 Purge sûre des rubans de travail du labo après usage.
-- C100 🔧 Sauvegarde du registre de coffre avant toute réécriture (déjà posé pour les reçus).
+7. **Quelle est la SEULE prochaine mesure qui changerait une decision ?** Une seule. Si on n'en
+   trouve pas, le probleme n'est pas les donnees : c'est qu'aucune decision n'est en attente.
 
-**A10. Nouveaux flux à forte valeur (🔬)**
-- C101 🔬 Carnet L2 **profond** (plus de 5 niveaux) sur les coins où l'on veut mesurer l'impact.
-- C102 🔬 Flux des annulations d'ordres des leaders (anticipation : un ordre annulé n'est pas copiable).
-- C103 🔬 Flux des modifications d'ordres (prix/taille) pour reconstruire l'intention.
-- C104 🔬 Taux de financement prévisionnel (predicted funding) pour anticiper le coût de portage.
-- C105 🔬 Profondeur cross-venue (Binance/Bybit) alignée pour mesurer la dislocation réelle.
-- C106 🔬 Carnet au moment EXACT de chaque annonce de funding (coût de portage chiffré).
-- C107 🔬 Flux des positions agrégées du marché (skew long/short) par coin.
-- C108 🔬 Détection des « méta-ordres » leaders (tranches d'un même ordre) à la collecte, pas au labo.
-- C109 🔬 Flux des vaults entrants/sortants (dépôts/retraits) pour le NAV as-of (déjà posé, étendre).
-- C110 ✅ **FAIT** le 12/11 (section C, point 20) — réconciliation en direct : chaque fill leader a-t-il ses trois
-  carnets ; sinon, demander la collecte manquante immédiatement (boucle d'auto-réparation).
+**Regle de reponse** : chaque reponse porte sa date et sa source (fichier, commande, chiffre).
+Une reponse sans source est une opinion, et une opinion n'entre pas dans ce document.
 
----
+### 0 sexies. OU SONT PASSEES LES LISTES D'IDEES — `docs/ROADMAP_ARCHIVE.md`
 
-### B. LABORATOIRE — ≈ 110 tâches
+Le 14/11, environ **1 350 lignes** de listes d'idees ont quitte ce document pour
+`docs/ROADMAP_ARCHIVE.md` : les ~110 taches collecteurs, les ~110 taches labo, les programmes
+A-H, les 200 taches « bot parfait », les chantiers issus de la recherche web, les 300
+ameliorations parametrees, les 200 gisements d'edge (GIS1-GIS200) et les 100 ameliorations du
+collecteur (K1-K100).
 
-**B1. Exécutabilité & préparation des données (⚡ débloque la mesure)**
-- L1 ⚡ Sonde d'exécutabilité TRAIN avant la recherche (fait ce jour) : aucun trade exécutable →
-  `TRAIN_NOT_EXECUTABLE`, zéro essai compté, refus détaillés par motif.
-- L2 ✅ Même sonde sur VALIDATION / OOS : **FAIT** le 12/11 (section C, point 19) — refus porté par `promotion_gate`.
-- L3 ⚡ Parité d'univers labo ↔ moteur : le labo retire les HFT/clones de ses signaux (le moteur les
-  refuse déjà) — sinon pseudo-réplication.
-- L4 🔬 Diagnostic « pourquoi ce signal n'est pas exécutable » par motif, agrégé par coin/jour.
-- L5 ⚡ Carte de chaleur « signaux avec/sans carnet de sortie » par coin → pilote la collecte (C65).
-- L6 🔬 Distinguer OBSERVÉ EN DIRECT (délai ≤ 5 min) de RECONSTRUIT (délai supposé) — déjà posé.
-- L7 🔧 Jamais transformer une info récupérée après coup en info « disponible au moment de la décision ».
-- L8 🔬 Mesurer la fraction de signaux évaluables par jour (règle des jours denses, déjà posée).
-- L9 🔬 Compter précisément les signaux perdus à chaque filtre (déjà : `candidate_audit`).
-- L10 ⚡ Afficher dans le rapport le chemin complet d'un signal : collecté → certifié → aligné → exécuté.
+**Pourquoi.** Elles n'avaient jamais ete commencees. A 2 707 lignes pour ~920 taches dont une
+dizaine faites, ce document ne servait plus a decider : il cachait ce qui compte sous ce qui ne
+compte pas. **Rien n'est perdu** — tout est dans l'archive, consultable.
 
-**B2. Découverte d'avantage — nouvelles hypothèses (🔬 le cœur)**
-- L11 🔬 Réplication lente d'inventaire (déjà posée) : copier la POSITION du leader, pas ses fills.
-- L12 🔬 Ouvertures agressives sélectionnées (déjà posée) : suivre les leaders dont les ouvertures
-  passées et dénouées ont rapporté après coûts.
-- L13 🔬 Intention d'ordre (déjà posée) : ordre jumeau prudent exécuté seulement si une clôture
-  traverse strictement le prix limite.
-- L14 🔬 Persistance de compétence des leaders (déjà posée) : IC de rang, effets aléatoires bayésiens.
-- L15 🔬 Modèle de sélection de leaders (déjà posé) : walk-forward sur résultats dénoués.
-- L16 🔬 Momentum du carnet (OFI, order-flow imbalance) comme signal d'entrée.
-- L17 🔬 Déséquilibre de profondeur signé (déjà dans v21) comme filtre.
-- L18 🔬 Fade de liquidation : entrer contre un débordement mark/oracle (overshoot, déjà posé).
-- L19 🔬 Copie conditionnée à la taille du fill leader (gros fill = plus d'information).
-- L20 🔬 Copie conditionnée au type de leader (DIRECTIONAL_SLOW vs SWING vs HFT).
-- L21 🔬 Copie conditionnée à la fraîcheur du carnet (plus frais = moins de dérapage).
-- L22 🔬 Copie conditionnée à la volatilité réalisée récente (régime calme vs agité).
-- L23 🔬 Copie conditionnée au funding (éviter de porter contre un funding coûteux).
-- L24 🔬 Signal « cluster de leaders » : plusieurs leaders ouvrent le même coin dans la même minute.
-- L25 🔬 Signal « divergence cross-venue » : HL vs Binance/Bybit (dislocation réelle, déjà des briques).
-- L26 🔬 Signal « premium mark/oracle extrême » comme déclencheur de fade.
-- L27 🔬 Signal « OI qui monte vite » (positionnement du marché).
-- L28 🔬 Anti-signal : ne pas copier quand le leader est en train de se faire liquider.
-- L29 🔬 Signal « ordre en attente anticipé » : le leader a posé un ordre limite → se préparer.
-- L30 🔬 Signal « réduction du leader » : copier aussi les sorties (REDUCE/CLOSE), pas que les entrées.
-- L31 🔬 Horizon dynamique : tenir jusqu'à ce que le leader réduise, pas un horizon fixe (déjà en v5).
-- L32 🔬 Stop/take-profit en bps nets exécutables (déjà en v21) — chercher les seuils.
-- L33 🔬 Sizing ciblé-volatilité (déjà un domaine de recherche) : homogénéiser le PnL quotidien.
-- L34 🔬 Plafond de perte journalière + verrou de profit journalier (déjà des domaines).
-- L35 🔬 Limites par coin / par vault / positions ouvertes (déjà des domaines) — chercher.
+**Ce qui a ete fait parmi elles est reste ici**, dans les sections datees : K1 (collecteur REST,
+8 -> 220 leaders), la resilience memoire, la reconciliation des carnets, la sonde par segment,
+la certification en continu, le controle qualite.
 
-**B3. Réalisme d'exécution & coûts (⚡ sinon faux positifs)**
-- L36 ⚡ Frais taker canoniques Hyperliquid (autorité de frais, jamais locaux en mode certifiable).
-- L37 ⚡ Spread payé = demi-spread observé au carnet d'entrée (pas mid).
-- L38 ⚡ Coût de financement sur toute position chevauchant une frontière de funding horaire.
-- L39 🔬 Impact de marché : taille vs capacité du carnet (capacity_usd) — pénaliser les gros ordres.
-- L40 🔬 Délai de copie réaliste (60 s, déjà) : l'entrée se fait au premier carnet après signal+délai.
-- L41 🔬 Slippage = écart entre prix visé et prix exécutable au carnet réel.
-- L42 🔬 Latence de réaction (déjà modélisée) : 60 s entre observation et ordre.
-- L43 🔬 Non-exécution comptée : si aucune clôture ne traverse le prix limite, l'ordre jumeau n'est pas rempli.
-- L44 🔬 Capital paper fixe 350 USD, levier ≤ 1, exposition brute ≤ 350 (déjà).
-- L45 🔬 Décomposer le PnL : brut, frais, funding, spread, slippage, net (déjà une brique).
-- L46 🔬 Liquidabilité nette : prouver que la position est fermable au carnet réel (déjà `LIQUIDATABLE_NET`).
-- L47 🔬 Coût d'opportunité du capital bloqué (plusieurs positions simultanées).
-- L48 🔬 Modéliser le refus d'ordre (reduce-only, post-only) selon le type.
-- L49 🔬 Frontière de funding exactement égale à l'entrée = position non chiffrable (déjà refusée).
-- L50 🔬 Comparer systématiquement à une baseline « ne rien faire » et à « acheter-tenir ».
-
-**B4. Rigueur statistique & anti-surapprentissage (⚡ crédibilité)**
-- L51 ⚡ Verdict « prouvé » seulement si VALIDATION + OOS + FORWARD passent tous après coûts.
-- L52 ⚡ Borne basse de confiance (LCB) > 0 exigée, avec correction de multiplicité (Bonferroni).
-- L53 ⚡ Compter TOUS les essais dans la multiplicité (la sonde évite d'en compter à vide — gros gain).
-- L54 🔬 Bootstrap par blocs sur les jours (dépendance sérielle).
-- L55 🔬 Test placebo par permutation (inverser le sens ne doit pas gagner).
-- L56 🔬 Contrôles appariés (−7 / −14 jours) pour isoler l'effet du régime de marché.
-- L57 🔬 Effets aléatoires bayésiens (DerSimonian–Laird) pour la persistance.
-- L58 🔬 Poids de quantile sûrs aux égalités (une égalité ne fabrique pas un faux signal).
-- L59 ⚡ Échantillon minimum AVANT de lire l'intervalle (4 jours = un seul régime).
-- L60 🔬 Prior sceptique dans le planificateur (ne pas croire un effet sur peu de données).
-- L61 🔬 Walk-forward : sélectionner sur le passé dénoué, mesurer sur le futur.
-- L62 🔬 Purge temporelle entre segments (pas de fuite par l'horizon de détention).
-- L63 🔬 Profit factor > 1 ET net > 0 ET concentration faible (pas un seul trade qui porte tout).
-- L64 🔬 Détecter la concentration par coin / par vault / par trade (déjà des gardes).
-- L65 🔬 Nombre de jours actifs = levier dominant du LCB (√n) : le rapport l'explique déjà.
-
-**B5. Recherche intelligente — valeur d'information (🔬 vitesse)**
-- L66 🔬 Planificateur par valeur-d'information : tester d'abord l'hypothèse au plus fort gain espéré
-  par unité de calcul (déjà une brique `copy_vault_research_planner`).
-- L67 🔬 A priori par hypothèse (certaines sont plus prometteuses) + mise à jour bayésienne.
-- L68 🔬 Lectures : SIGNAL PROMETTEUR / SIGNAL FRAGILE / DONNÉES INSUFFISANTES / ABSENCE D'AVANTAGE.
-- L69 🔬 Arrêt précoce d'une hypothèse réfutée (ne plus y consacrer de calcul) — déjà dans le plan.
-- L70 🔬 Comparer chaque hypothèse à une approche plus simple (parcimonie).
-- L71 🔬 Échantillonnage de Halton / quasi-aléatoire de l'espace de paramètres (couverture).
-- L72 🔬 Cache de la partie invariante de l'appariement (features de profondeur) — déjà fait.
-- L73 🔬 Mémoïser les épisodes reconstruits entre étapes (fait ce jour) — zéro recalcul.
-- L74 🔬 Index des carnets calculé une fois par liste (fait ce jour) — zéro re-parcours.
-- L75 🔬 Reprise de campagne réconciliée (ne pas réutiliser un id de candidat).
-- L76 🔬 Détecter les variantes dégénérées (toutes identiques faute de données) et les sauter.
-- L77 🔬 Explorer la variante overshoot seulement si le contexte existe (fait ce jour).
-- L78 🔬 Quota de temps/mémoire par passage ; borne dure (le PC coupe à 30 min).
-- L79 🔬 Journal du nombre de configurations uniques testées (multiplicité honnête).
-- L80 🔬 Détecter un plateau (plus d'amélioration) et élargir l'espace de recherche automatiquement.
-
-**B6. Leaders — qualité & sélection (🔬)**
-- L81 🔬 Revue de qualité des leaders V9 en ligne (déjà une brique) : note consultative, jamais preuve.
-- L82 🔬 Biais de sélection : ne juger que les décisions POSTÉRIEURES au début du suivi.
-- L83 🔬 Détecter les clones (corrélation des fills) et les fusionner en un seul signal.
-- L84 🔬 Archétype par leader (DIRECTIONAL_SLOW / SWING / HFT / INSUFFICIENT) — déjà posé.
-- L85 🔬 Copiabilité par leader = part de son expo qu'on peut réellement pricer/exécuter.
-- L86 🔬 Persistance : un bon leader reste-t-il bon le mois suivant ?
-- L87 🔬 Pondérer un leader par la fraîcheur de ses fills (récents = plus informatifs).
-- L88 🔬 Retirer les leaders dont tous les fills sont passifs (gain ≈ 0 avant frais).
-- L89 🔬 Mesurer la latence observée par leader (certains sont observables, d'autres non).
-- L90 🔬 Portefeuille de leaders diversifié (corrélation faible entre eux).
-
-**B7. Capital, risque, portefeuille (🔬)**
-- L91 🔬 Allocation du capital 350 USD entre positions simultanées (Kelly fractionné prudent).
-- L92 🔬 Drawdown maximum mesuré et borné.
-- L93 🔬 Corrélation entre positions ouvertes (ne pas tout miser sur un régime).
-- L94 🔬 Verrou de profit / plafond de perte journaliers (déjà des domaines).
-- L95 🔬 Sizing ciblé-volatilité pour homogénéiser le PnL quotidien.
-- L96 🔬 Réserve de marge pour ne jamais être liquidé en paper.
-- L97 🔬 Mesurer le ratio de Sharpe / Sortino quotidien, pas juste le PnL moyen.
-- L98 🔬 Espérance par jour = débit du compte × net moyen de TOUTES les décisions (pas un chemin de capital chanceux).
-- L99 🔬 Stress-test : rejouer sur les pires jours (choc de volatilité).
-- L100 🔬 Capacité de la stratégie : à quel capital le PnL s'effondre (impact de marché).
-
-**B8. Reproductibilité, audit, rapport (📊)**
-- L101 📊 Registre d'expériences `EXPERIENCES.ndjson` vérifié (chaîne de hachage) — déjà posé.
-- L102 📊 SHA-256 du moteur et de la config dans chaque reçu (empreinte).
-- L103 📊 Rapport honnête : « non mesurable » expliqué par motif (fait ce jour).
-- L104 📊 Rapport : ne jamais présenter une estimation d'entraînement comme « prouvée » (fait ce jour).
-- L105 📊 Rapport : lister les refus d'exécution avec ce qu'il faut pour les lever (fait ce jour).
-- L106 📊 Plan de recherche `PLAN_DE_RECHERCHE.md` avec priorité par valeur-d'information.
-- L107 📊 Historique des améliorations gelées (paliers prouvés) — honnête sur les valeurs illisibles.
-- L108 🔧 Chaque outil qui lance pytest passe par `run_isole` (Ctrl+C propre).
-- L109 📊 `donnees_consommees` dans chaque run (quelles familles, combien de lignes).
-- L110 📊 Verdict final clair : PROVEN / PROMISING / MORE_DATA / UNMEASURABLE / REJECTED.
-
----
+**Comment une idee revient.** Une a la fois, quand les donnees permettent de la MESURER, avec
+sa date de sortie d'archive et son premier pas mesurable. Jamais en bloc.
 
 ### C. CE QUI A ÉTÉ FAIT LE 12/11 (déjà en place, non commité)
 
@@ -1006,7 +763,7 @@ lead-lag (micro). Garde-fou : `test_les_flux_autrefois_gaches_sont_maintenant_ch
 **Outils ajoutés (tous testés) :** `tools/auditer_donnees_collectees.py` (audit exhaustif, JSON ou
 texte) ; `tools/etat_executabilite.py` (jauge « mesurable ? » + coins à collecter).
 
-### C-ter. *(SUPERSÉDÉ par C-quater)* CHANTIERS VERS UN PnL POSITIF (12/11, demande de Florent — audit : tout est négatif)
+### C-ter. *(SUPERSÉDÉ — le programme qui la remplaçait est dans `docs/ROADMAP_ARCHIVE.md`)* CHANTIERS VERS UN PnL POSITIF (12/11, demande de Florent — audit : tout est négatif)
 
 **Audit de la recherche (chiffres réels, PLAN_DE_RECHERCHE) :** copie naïve + fast-follow = REJECTED ;
 ouvertures agressives −18,2 bps/décision ; sélectionnées −7,35 ; persistance −2,06 bps/j (P=0,33) ;
@@ -1026,102 +783,6 @@ exécutables fraîches (après la collecte corrigée + un passage du labo).
 - CONDITIONNEMENT : ne copier que si la dérive bat le coût — gros fill agressif + OFI favorable
   (`micro_l2`) + leader d'élite + régime. Les 7 familles rebranchées servent de filtres.
 - RÉPLICATION LENTE par position (`vault_portfolio`) : moins sensible au timing, coût/avantage plus bas.
-
-### C-quater. PROGRAMME COMPLET VERS UN PnL ULTRA-POSITIF (12/11 — « tous les chantiers »)
-
-**Cadre.** L'audit est sans appel : **toutes les hypothèses mesurées sont négatives** (copie naïve
-REJECTED, ouvertures −18 bps, sélectionnées −7, persistance ≈ 0). Un PnL positif ne viendra que si on
-attaque simultanément les trois causes — **coût**, **latence**, **sélection** — et qu'on explore des
-stratégies au-delà de la copie de fills. Ci-dessous, 8 PROGRAMMES, chacun avec ses chantiers concrets,
-priorité ⚡ (débloque la mesure) / 💰 (attaque le coût) / ⏱️ (attaque la latence) / 🎯 (sélection) /
-🧪 (nouvelle stratégie) / 🛡️ (risque) / 🔬 (rigueur) / 🏗️ (infra). Aucun gain promis : chaque chantier
-est une HYPOTHÈSE à mesurer puis prouver (VALIDATION → OOS → FORWARD).
-
-**PROGRAMME A — RENDRE LE LABO MESURABLE (prérequis absolu, rien ne compte avant) ⚡**
-- A1. Collecte continue corrigée pendant **≥ 6 jours denses** (identité + carnet de sortie + HIP-3).
-- A2. Garantir référence (−30 s) : pré-chauffer les coins habituels des leaders AVANT leurs fills.
-- A3. Garantir entrée (+60 s) et sortie (+horizon) : abonnement tenu jusqu'à fermeture + horizon max (fait).
-- A4. Collecter `leader_orders` EN LOCAL (aujourd'hui cloud-only) — débloque les programmes B/C/D.
-- A5. Collecter TOUS les coins HIP-3 tradés (61 % du notionnel) + régénérer la liste par exécutabilité (fait).
-- A6. Suivre le déblocage coin par coin (`tools/etat_executabilite.py`, `audit_complet.py`) jusqu'à « mesurable ».
-- A7. Parité d'univers labo ↔ moteur : retirer HFT/clones des signaux (le moteur les refuse déjà).
-
-**PROGRAMME B — ATTAQUER LE COÛT (frais + spread ≈ 5–9 bps aller-retour = tueur n°1) 💰**
-- B1. **MAKER** : exécuter aux ordres-limites du leader → gagner le ½ spread + frais maker (déjà codé,
-  `copy_vault_order_intent` ; bloqué par A4). Chantier phare.
-- B2. Entrée post-only / passive : modéliser la probabilité de remplissage (le marché traverse-t-il ?).
-- B3. Optimiser le rebate maker (Hyperliquid) ; mesurer net AVEC rebate.
-- B4. Moins d'allers-retours : copier moins souvent mais plus gros (amortir le coût fixe).
-- B5. Palier de frais par volume : estimer le frais taker effectif au volume paper visé.
-- B6. Meilleure exécution cross-venue : router vers la venue au spread le plus serré (carnet_venues).
-- B7. Timing du spread : n'entrer que quand le demi-spread observé est faible (filtre de coût).
-- B8. Sortie maker aussi quand possible (ordre-limite de sortie au lieu de taker).
-
-**PROGRAMME C — ATTAQUER LA LATENCE (7,6 bps partent AVANT l'observation) ⏱️**
-- C1. **Balayage de latence** 5/15/30/60/120 s sur carnets réels (codé, `chantier_latence.py`). À lancer
-  sur données fraîches. Si net positif à 5 s → copier vite est LA voie.
-- C2. Réaction sous la seconde via WS (supprimer le délai de 60 s modélisé quand l'observation est directe).
-- C3. Modéliser le flux le plus rapide (fills WS vs poll) ; prioriser les leaders observables en direct.
-- C4. **ANTICIPER** via `leader_orders` : agir sur l'ordre-limite AVANT le fill (intention, pas réaction).
-- C5. Signal « première tranche » : agir dès le 1er fill d'un méta-ordre sans attendre les suivants.
-- C6. Mesurer la latence réelle réception−bourse par leader et par flux (distribution, pas moyenne).
-
-**PROGRAMME D — SÉLECTION & CONDITIONNEMENT (transformer −7 bps en sous-ensemble positif) 🎯**
-- D1. Modèle de sélection de leaders : walk-forward, décisions DÉNOUÉES et POSTÉRIEURES au suivi, net>0.
-- D2. Conditionnement OFI (micro_l2) : ne copier que si le déséquilibre de flux va dans le sens du leader.
-- D3. Conditionnement overshoot/fade (asset_ctx mark vs oracle) : éviter / exploiter le débordement.
-- D4. Conditionnement de régime : volatilité réalisée (bougies), funding, heure/session.
-- D5. Conditionnement par taille de fill : un gros fill agressif porte plus d'information.
-- D6. Conditionnement par coin : certains marchés sont plus copiables (mesurer, pas supposer).
-- D7. Conditionnement dislocation cross-venue (dispersion_venues) : copier quand HL décroche.
-- D8. Consensus multi-leaders : plusieurs leaders ouvrent le même coin dans la minute → signal renforcé.
-- D9. Anti-signaux : ne pas copier un leader en liquidation, ni un clone, ni un fill passif (gain ≈ 0).
-- D10. Recherche automatique du MEILLEUR sous-ensemble de conditions (valeur d'information, anti-overfit).
-
-**PROGRAMME E — STRATÉGIES AU-DELÀ DE LA COPIE DE FILLS (diversifier les sources d'avantage) 🧪**
-- E1. **Réplication lente par position** (`vault_portfolio`, chargé) : copier la position, moins sensible au timing.
-- E2. Market-making autour des positions des leaders (poser des deux côtés, capter le spread).
-- E3. Arbitrage de funding (carry) : porter quand le funding paie, en couvrant la direction.
-- E4. Fade de liquidation (overshoot) : entrer CONTRE un débordement mark/oracle extrême.
-- E5. Arbitrage cross-venue : exploiter la dislocation HL vs Binance/Bybit (briques déjà présentes).
-- E6. Retour à la moyenne sur overshoot ; momentum sur OFI soutenu.
-- E7. Copie d'INTENTION (ordres en attente) plutôt que de fills (anticipation pure).
-- E8. Suivi des ouvertures agressives SÉLECTIONNÉES uniquement (la moins négative — l'approfondir).
-
-**PROGRAMME F — CAPITAL & RISQUE (maximiser le Sharpe, pas seulement le PnL) 🛡️**
-- F1. Dimensionnement Kelly fractionné prudent sur les 350 USD.
-- F2. Sizing ciblé-volatilité (homogénéiser le PnL quotidien, réduire σ).
-- F3. Diversification de portefeuille : leaders/coins à faible corrélation.
-- F4. Contrôle du drawdown ; verrou de profit / plafond de perte journaliers.
-- F5. Levier dynamique sous le plafond paper (≤ 1).
-- F6. Analyse de CAPACITÉ : à quel capital l'avantage s'effondre (impact de marché).
-- F7. Réserve de marge : ne jamais être liquidé en paper.
-- F8. Mesurer Sharpe/Sortino quotidiens, espérance = débit × net moyen de TOUTES les décisions.
-
-**PROGRAMME G — RIGUEUR & PREUVE (ne jamais se mentir) 🔬**
-- G1. Portes VALIDATION → OOS → FORWARD après coûts et liquidité (une stratégie n'est prouvée qu'ainsi).
-- G2. Correction de multiplicité (Bonferroni) : TOUS les essais comptent (la sonde évite les essais à vide).
-- G3. Bootstrap par blocs sur les jours + placebo par permutation (inverser le sens ne doit pas gagner).
-- G4. Walk-forward strict ; purge temporelle entre segments (pas de fuite par l'horizon).
-- G5. **FORWARD paper en direct** : le juge ultime — rejouer en temps réel sur données non vues.
-- G6. Robustesse de régime : prouver sur plusieurs conditions de marché, pas une fenêtre chanceuse.
-- G7. Minimum d'échantillon AVANT de lire l'intervalle ; prior sceptique dans le planificateur.
-
-**PROGRAMME H — INFRASTRUCTURE & DONNÉES (tout ce qui alimente) 🏗️**
-- H1. Toutes les familles de données utilisées (fait : 7 rebranchées ; reste `leader_orders` en local).
-- H2. Budget de débit partagé inter-process (fait) — éprouver en vrai sur un cycle complet.
-- H3. Collecte complète garantie (référence + entrée + sortie) — le vrai débloquage de la mesure.
-- H4. Mémoire : labo par morceaux, étape 1 isolée (fait) — ne jamais lancer labo + suite ensemble (OOM).
-- H5. Vitesse du labo : perf par essai, index des carnets (fait), épisodes mémoïsés (fait).
-- H6. Reproductibilité : reçus, SHA du moteur/config, registre d'expériences vérifié.
-- H7. Audit permanent : `audit_complet.py` à chaque cycle ; aucune donnée gâchée ne doit réapparaître.
-- H8. PAPER engine : simulation fidèle (frais canoniques, funding, spread, slippage, latence, drawdown).
-
-**ORDRE D'EXÉCUTION RECOMMANDÉ :** A (mesurable) → en parallèle B1(maker)+C1(latence) dès que des
-signaux sont exécutables → D (conditionnement) pour isoler un sous-ensemble positif → E (stratégies
-alternatives) si la copie reste négative → F/G (risque+preuve) sur toute piste prometteuse → FORWARD.
-**Sans A, rien ne se mesure. Le PnL positif, s'il existe, se trouve dans B×C×D (coût bas + réaction
-rapide + bonne sélection), ou dans E (autre source d'avantage).**
 
 ### C-quinquies. CHANTIERS DÉTECTÉS PAR LE RUN DU 12/11 (2 h données fraîches)
 
@@ -1193,634 +854,6 @@ prise (lot réduit / pause / flush). Un test qui simule une RAM basse et prouve 
 en mode dégradé SANS lever d'erreur mémoire (preuve, pas supposition).
 
 **Ordre :** M0 (gouverneur) d'abord → M1 (labo, le plus gourmand) → M2/M3 → M4 (filet) → M5 (preuve).
-
-### C-septies. 200 TÂCHES « MON BOT COPY-VAULT PARFAIT » vers un MÉGA PnL positif (12/11)
-
-**Posture.** Écrit comme si ce bot était le mien et que je dispose de TOUS nos outils à la racine. La plupart
-de ces modules EXISTENT déjà (`src/hl_observer/backtesting/*`, `tools/*`) mais ne sont ni branchés dans la
-décision, ni mesurés honnêtement : la plus grosse avancée est souvent de CÂBLER + MESURER l'existant, pas de
-réécrire. Chaque tâche référence un module/outil réel.
-
-**État de l'art (recherche web, à intégrer) :** (1) sur Hyperliquid, les takers paient un coût d'exécution,
-les makers gagnent le spread → l'exécution MAKER est le levier n°1 ; (2) adverse selection de latence : les
-rapides « pick off » les lents → la vitesse et l'anticipation comptent ; (3) crowding = piège : un gros acteur
-peut appâter les copieurs puis les liquider (≈ 4 M$ refilés au HLP) → modéliser le crowding, ne pas être
-prévisible ; (4) leaderboards de vaults biaisés par la survie → sélection causale, pas sur le PnL passé ;
-(5) juger un leader sur profit factor / drawdown / longueur d'historique, pas le win rate.
-
-**THÈME 1 — SIGNAL : lire l'intention du leader plus tôt et mieux**
-- T1. Détecteur d'ordre iceberg : plusieurs fills même niveau ⇒ gros méta-ordre (`copy_vault_order_intent`+`collecter_contexte_lane`).
-- T2. Détecteur de TWAP leader : cadence régulière des fills ⇒ prédire les tranches suivantes et se placer avant.
-- T3. Signal « premier fill du cluster » : agir dès la 1re tranche (`cluster_metaorders`) sans attendre le méta-ordre complet.
-- T4. Pression des ordres en attente du leader (`leader_orders`) comme signal directionnel AVANT l'exécution.
-- T5. Détection d'annulation massive ⇒ retrait d'intention ⇒ ne pas copier / sortir.
-- T6. Taille du fill vs historique du leader : fill anormalement gros = conviction ⇒ pondérer plus.
-- T7. Vitesse d'accumulation : dérivée de la position (`vault_portfolio`) comme signal d'urgence.
-- T8. Signal multi-compte : même acteur sur plusieurs vaults ⇒ dédupliquer et renforcer.
-- T9. Distinguer Open / Add / Close (`copy_vault_v7_exit_flow_train`) et traiter chacun différemment.
-- T10. Détecteur de retournement : leader qui passe long→short sur un coin = signal fort.
-- T11. Filtre d'agressivité : fill qui traverse le spread (taker) = info ; fill passif = bruit.
-- T12. Écarter spoof / wash / self-trades de l'univers (`copy_vault_universe_integrity`).
-- T13. Score de nouveauté : coin jamais tradé par le leader = alpha potentiel (moins crowdé).
-
-**THÈME 2 — ANTICIPATION & LEAD-LAG (brancher la famille `lead_lag_*`)**
-- T14. Câbler `lead_lag_multiasset_train` dans la décision : coins menants ⇒ anticiper les suiveurs.
-- T15. Lead-lag leader→marché : les fills d'un leader précèdent-ils le prix ? (`lead_lag_causal_diagnostic`).
-- T16. Résidu lead-lag (`lead_lag_reference_residual`) : isoler le mouvement propre du bêta marché.
-- T17. Confirmation par carnet (`lead_lag_book_confirmation`) : ne copier que si le carnet confirme.
-- T18. Timing file maker (`lead_lag_maker_queue_train`) : se placer dans la file au bon instant.
-- T19. Courbe du sniper (`sniper_horizon_curve`) : avantage par horizon ⇒ horizon optimal par coin.
-- T20. Lead-lag BBO repricing (`lead_lag_bbo_repricing_train`) : anticiper le repricing après un fill.
-- T21. Lead-lag cross-venue : HL suit-il Binance/Bybit ? anticiper via la venue menante.
-- T22. Demi-vie de la dérive (R1) par coin : fenêtre exploitable ou dérive déjà partie.
-- T23. Lead-lag multi-tape (`lead_lag_multitape`) : fusionner plusieurs flux pour un signal robuste.
-- T24. Scoring multiasset (`lead_lag_multiasset_scoring`) : classer les paires menant/suivant par force.
-- T25. Lead-lag conditionné au régime (`regime_wiring`) : la relation tient-elle selon la volatilité ?
-- T26. Autopsie causale (`lead_lag_causal_autopsy`) : purger toute fuite look-ahead du signal.
-
-**THÈME 3 — EXÉCUTION MAKER & COÛT (levier n°1 : makers gagnent le spread)**
-- T27. Brancher `maker_fill`+`maker_rebate_decision` : entrée passive par défaut, taker en repli seulement.
-- T28. Quoting inside spread (`quoting_inside_spread`) : ordre-limite à l'intérieur du spread du leader.
-- T29. Modèle post-only : proba de remplissage vs marché qui traverse (`missed_fill_model`,`partial_fill_model`).
-- T30. Décision maker/taker dynamique : coût taker vs risque de non-remplissage par coin/volatilité.
-- T31. Fractionnement d'ordre (`order_split_benefit`) pour réduire l'impact (`execution_sim`).
-- T32. Capturer le rebate maker et le mesurer NET (`fee_model`,`couts_verite`).
-- T33. Sortie maker : ordre-limite de sortie au lieu de taker quand l'horizon le permet.
-- T34. Modèle de file d'attente (`queue_model`,`lead_lag_queue_costs`) : position et coût d'attente.
-- T35. Passif-agressif (`execution_passive_agressive`) : passif d'abord, bascule agressive si non rempli après délai.
-- T36. Peg dynamique : ordre-limite re-pricé sur le mid (`quoting`) plutôt qu'un prix fixe.
-- T37. Impact réel (`audit_liquidity_consumption`) : combien notre taille mange le carnet.
-- T38. Moins d'allers-retours : regrouper les signaux d'un même coin en une position (amortir le coût fixe).
-- T39. Router vers la venue au spread le plus serré (`native_venues`,`routing`).
-- T40. Table de coûts calibrée (`construire_table_edge`,`construire_calibration_edge`) par coin/heure/taille.
-
-**THÈME 4 — LATENCE & VITESSE (adverse selection : ne pas se faire pick off)**
-- T41. Lancer le chantier latence (`chantier_latence`) dès données exécutables : net par délai 5/15/30/60/120 s.
-- T42. Mesurer la latence réception−bourse par leader et par flux (distribution, pas moyenne).
-- T43. Prioriser les leaders observables en WS direct (`collecter_userfills_ws_lane`) vs poll.
-- T44. Réaction sous la seconde : supprimer le délai 60 s modélisé quand l'observation est directe.
-- T45. Gain d'un flux plus rapide / RTT (`execution_delay_model`).
-- T46. Budget de latence par coin : les coins à dérive lente tolèrent plus de délai ⇒ prioriser.
-- T47. Pré-calcul : pré-charger carnet+features du coin AVANT le fill pour agir instantanément.
-- T48. Mesurer si on est « pick off » par des plus rapides (adverse selection de latence).
-- T49. Exécution asynchrone : ne jamais bloquer la décision d'un coin sur un autre.
-- T50. Horloge certifiée (`lead_lag_certified_clock`) pour mesurer la latence sans biais.
-- T51. Backpressure latence : si le flux retarde, dégrader proprement (lien résilience M).
-- T52. Coût marginal de chaque 100 ms en bps (`execution_delay_model`) ⇒ ROI de la vitesse.
-
-**THÈME 5 — SÉLECTION DE LEADERS (anti-survivorship)**
-- T53. Sélection causale (`copy_vault_causal_selection`) : décisions dénouées ET postérieures au suivi.
-- T54. Corriger la malédiction du vainqueur (`h181_malediction_du_vainqueur`) : pas de sélection sur le passé chanceux.
-- T55. Persistance de compétence (`copy_vault_persistence`) : la surperformance se maintient-elle ?
-- T56. Walk-forward de sélection (`copy_vault_leader_selection_comparison`) : re-sélectionner par segment.
-- T57. Signal de qualité leader (`leader_quality_signal`) : features prédictives de la compétence future.
-- T58. Décote de crowding : un leader très copié (grosse TVL) a un alpha dilué ⇒ pénaliser.
-- T59. Détecter les leaders toxiques (whale-slap) qui piègent les copieurs ⇒ liste noire.
-- T60. Diversité de leaders faiblement corrélés (`portfolio_risk`) : pas 10 leaders au même trade.
-- T61. Filtrer sur profit factor / drawdown / longueur d'historique, pas le win rate.
-- T62. Stabilité de style : un leader qui change radicalement ⇒ prudence.
-- T63. Capacité : notre petite taille (350 USD) copie ce qu'un gros ne peut pas ⇒ exploiter cet avantage.
-- T64. Sélection conditionnelle au coin : un leader bon seulement sur certains coins.
-- T65. Détecter les leaders informés : ouvertures qui précèdent systématiquement le mouvement (`lead_lag_causal`).
-- T66. Fenêtre de confiance : activer un leader après N décisions dénouées mesurées (G7).
-- T67. Rotation auto : retirer un leader dont l'edge OOS s'effondre (`survival_gate`,`promotion_gate`).
-
-**THÈME 6 — CONDITIONNEMENT & FEATURES**
-- T68. OFI (`microstructure`) : ne copier que si le flux va dans le sens du leader.
-- T69. Spread au signal (`mesurer_spread_carnet`) : n'entrer que si le coût est bas.
-- T70. Overshoot mark/oracle (`overshoot_signal`) : éviter un débordement qui va se corriger.
-- T71. Régime de volatilité (`regime_detection`) : adapter/couper en haute vol.
-- T72. Funding comme filtre (`measure_funding_gate`) : éviter un funding qui mange l'edge.
-- T73. Heure / session : créneaux plus copiables (features temporelles).
-- T74. Profondeur du carnet (`profondeur_spot`) : liquidité suffisante pour entrer+sortir.
-- T75. Dispersion cross-venue (`mesurer_dispersion_venues`) : copier quand HL décroche.
-- T76. Taille du fill leader comme feature de conviction.
-- T77. Consensus multi-leaders : même coin/sens dans la minute ⇒ signal renforcé.
-- T78. Momentum récent du coin (`market_signals`) : aligner la copie avec le momentum.
-- T79. Valeur d'information de chaque condition (`edge_predictor`) : quantifier l'apport de chaque filtre.
-- T80. Recherche du meilleur sous-ensemble de conditions (`scenario_search`, anti-overfit).
-- T81. Alpha résiduel (`residual_alpha`) après neutralisation du bêta marché.
-- T82. Interactions non linéaires (`ml_extras`) : fill agressif × OFI × régime.
-
-**THÈME 7 — CROWDING & ANTI-EXPLOITATION (leçon du whale-slap)**
-- T83. Modèle de crowding : estimer le nombre de copieurs (TVL, réaction du marché au leader).
-- T84. Détecter les trades piège : gros fill suivi d'un retournement rapide ⇒ fade, pas copie.
-- T85. Ne pas être prévisible : randomiser légèrement timing/taille pour ne pas se faire chasser.
-- T86. Mesurer notre propre impact de copie : à quelle taille devient-on détectable/exploitable.
-- T87. Éviter les niveaux de liquidation évidents (`liquidation_cascade`).
-- T88. Signal inverse en cascade (`fade_liquidation_backtest`) : profiter du débordement, pas le subir.
-- T89. Détecter le stop-hunt (mèches qui ramassent les stops) ⇒ pas de stop évident.
-- T90. Décote d'alpha post-publication : un vault qui monte en leaderboard attire les copieurs ⇒ edge ↓.
-- T91. Contrarian sur crowding extrême : quand tout le monde copie long, prudence.
-- T92. Mesurer la dégradation de l'edge avec la popularité du leader (TVL vs edge dans le temps).
-
-**THÈME 8 — STRATÉGIES ALTERNATIVES (diversifier l'avantage)**
-- T93. Fade de liquidation (`liquidation_edge_measure`) : entrer contre le débordement.
-- T94. Direction post-liquidation (`post_liquidation_direction`) : prédire le rebond après cascade.
-- T95. Carry funding (`recherche_carry`,`carry_backtest`) : porter quand le funding paie, direction couverte.
-- T96. Carry perp-perp cross-venue (`mesurer_funding_perp_perp`).
-- T97. Arbitrage de dislocation 2 jambes (`backtest_dislocation_2jambes`).
-- T98. MM autour des positions leaders (`grid_market_maker`,`market_making_flow`) : capter le spread.
-- T99. Mean reversion sur overshoot (`mean_reversion`).
-- T100. Cointégration de paires (`mesurer_cointegration`) : stat-arb relatif.
-- T101. Grid MM adaptatif à la volatilité (`grid_market_maker`).
-- T102. Quoting inside spread en continu là où le leader est actif.
-- T103. Spot-perp carry (`hl_spot_perp_carry_v1`) : base spot/perp.
-- T104. Falsifier carry/cash-and-carry (`falsifier_carry`,`falsifier_cashcat`) avant d'allouer.
-- T105. Sniper d'horizon (`sniper_horizon_curve`) : entrer/sortir à l'horizon optimal mesuré.
-- T106. Copie + MM combinés : copier la direction ET fournir de la liquidité autour.
-- T107. Rotation de stratégies par régime (`regime_models`).
-- T108. Portefeuille multi-stratégies sur le front de Pareto (`pareto_front`).
-
-**THÈME 9 — RÉPLICATION PAR POSITION & PORTEFEUILLE**
-- T109. Réplication par position (`vault_replication`,`copy_vault_replication_paper`) : copier la cible, pas les fills.
-- T110. Réplication 350 USD à l'échelle fidèle du notionnel.
-- T111. Portefeuille agrégé (`portefeuille_global`) : répliquer le mix de plusieurs leaders.
-- T112. Rééquilibrage paresseux : ne bouger que si l'écart dépasse un seuil (coûts ↓).
-- T113. Netting multi-leaders : long d'un + short d'un autre même coin ⇒ nettoyer.
-- T114. Taille pondérée par conviction dans le leader (T57).
-- T115. Réplication à risque égal entre coins (risk parity), pas notionnel égal.
-- T116. Comparer suivi retardé vs immédiat (retard ↓ bruit mais rate la dérive).
-- T117. Gérer les positions orphelines : fermer proprement si le leader disparaît.
-- T118. Répliquer la trajectoire d'entrée (DCA du leader), pas un point unique.
-
-**THÈME 10 — CAPITAL & RISQUE (350 USD)**
-- T119. Kelly fractionné (`risk_sizing`) selon l'edge mesuré et sa variance.
-- T120. Ciblage de volatilité (`portfolio_risk`) : risque quotidien homogène.
-- T121. Plafond de perte journalier + verrou de profit (`exits_risque`).
-- T122. Contrôle de drawdown (`stress_testing`) : réduire la taille en drawdown.
-- T123. Levier dynamique ≤ 1 sous le plafond paper.
-- T124. Diversification coins/leaders faiblement corrélés (`portfolio_risk`).
-- T125. Réserve de marge : jamais liquidé en paper (`liquidation_sizing`).
-- T126. Analyse de capacité : à quel capital l'edge s'effondre.
-- T127. Sizing conditionnel à la force du signal (dans la limite de risque).
-- T128. Sortie sur invalidation du signal, pas sur prix fixe (stop non évident, T89).
-- T129. Espérance = débit de décisions × net moyen de TOUTES les décisions (pas que les gagnantes).
-- T130. Objectif Sharpe/Sortino quotidiens (`perf_metrics`,`honest_metrics`), pas le PnL brut.
-
-**THÈME 11 — RIGUEUR & VALIDATION (ne jamais se mentir)**
-- T131. Portes VALIDATION → OOS → FORWARD (`validation_gates`,`promotion_gate`).
-- T132. CV purgée/embargo (`purged_split`,`cross_validation`) : pas de fuite via l'horizon.
-- T133. Correction de multiplicité (`anti_overfit_gate`) : tous les essais comptent.
-- T134. Bootstrap par blocs + placebo (`monte_carlo`,`copy_vault_scientific_controls`) : inverser le sens ne doit pas gagner.
-- T135. Walk-forward strict (`robustesse_selection`).
-- T136. Forward paper en direct (`forward_causal`,`forward_portefeuille`) : le juge ultime.
-- T137. Robustesse de régime (`robustness_protocol`).
-- T138. Minimum d'échantillon avant lecture d'intervalle (`garde_fous_recherche`).
-- T139. Anti-look-ahead systématique (`anti_lookahead_pipeline`,`lookahead_guard`).
-- T140. Détection du biais récursif (`recursive_bias_probe`,`mesurer_biais_recursif`).
-- T141. Contrôle de sélection par overfit (`overfit_selection`) : pénaliser le nombre d'hypothèses.
-- T142. Deflated Sharpe : corriger le Sharpe du nombre d'essais.
-- T143. Registre d'hypothèses horodaté (`copy_vault_hypothesis_registry`,`codex_hypothesis_ledger`) : figer avant de tester.
-
-**THÈME 12 — COÛTS & FILLS FINS (PnL net = après TOUT)**
-- T144. Slippage calibré (`slippage_model`) sur carnet réel par coin/taille.
-- T145. Missed fill (`missed_fill_model`) : proba qu'un ordre maker ne remplisse pas.
-- T146. Partial fill (`partial_fill_model`) : remplissage partiel et coût résiduel.
-- T147. File d'attente (`queue_model`) : position et temps d'attente maker.
-- T148. Intrabar (`intrabar`) : reconstruire le chemin de prix pour un fill réaliste.
-- T149. Frais exacts (`fee_model`,`couts_verite`) : maker/taker/rebate/paliers de volume.
-- T150. Impact non linéaire (`copy_vault_execution_math`) au-delà du spread.
-- T151. Vérité du PnL (`pnl_verite`) : net après frais+spread+slippage+funding+impact.
-- T152. PnL des refus (`pnl_des_refus`) : valeur de NE PAS copier (le filtre a un rendement).
-- T153. Marche dans le carnet exécutable (`audit_executable_book_walk`).
-- T154. Risque cross-venue non atomique (`audit_cross_venue_non_atomic`) sur les 2 jambes.
-- T155. Parité backtest/live (`backtest_live_parity`) : le backtest colle-t-il au paper réel ?
-
-**THÈME 13 — DONNÉES & COLLECTE (tout alimenter, rien gâcher)**
-- T156. Collecter `leader_orders` EN LOCAL aligné avec les fills (R2, A4) — débloque maker + anticipation.
-- T157. Garantir référence(−30 s)+entrée(+60 s)+sortie(+horizon) par coin (A2/A3).
-- T158. Collecter TOUS les coins HIP-3 tradés (A5 ; 61 % du notionnel).
-- T159. Brancher `explorer_tx` : dépôts/retraits = signal de flux de capital.
-- T160. Enrichir les fills (`enrichir_fills`) : contexte carnet/régime à chaque fill.
-- T161. Microstructure fine (`collecter_lab_microstructure`,`flux_microstructure`).
-- T162. Dispersion venues en continu (`collecter_dispersion_venues`).
-- T163. Snapshots de carnet plus profonds (plus de niveaux que bids5/asks5) pour l'impact.
-- T164. Qualité replay (`qualite_donnees_replay`,`check_dataset_quality`) : aucune donnée trouée.
-- T165. Déduplication durable (`dedup_durable`) : pas de double comptage.
-- T166. Backfill funding horaire + bougies 1 h (`backfill_funding`,`backfill_candles`) sur long historique.
-- T167. Collecte résiliente mémoire (M2) : tampons bornés, écritures atomiques.
-- T168. Index partitionné (`partitioned_data_index`) pour un labo rapide et par morceaux.
-
-**THÈME 14 — RÉGIMES & ADAPTATION**
-- T169. Détection de régime en ligne (`regime_detection`,`regime_label`) : vol/trend/range/funding.
-- T170. Câblage régime→décision (`regime_wiring`) : la bonne stratégie par régime.
-- T171. Edge par régime : mesurer la copie séparément par régime.
-- T172. Couper la copie en régime hostile (haute vol, cascade).
-- T173. Détection de cascade en temps réel (`liquidation_cascade`) ⇒ mode défensif.
-- T174. Délai de copie adapté au régime (rapide en range, prudent en vol).
-- T175. Taille adaptée au régime (réduire en incertitude).
-- T176. Rupture de régime ⇒ re-valider les leaders.
-- T177. Vote de modèles de régime (`regime_models`).
-- T178. Mémoire de régime : quel régime favorise quelle stratégie.
-
-**THÈME 15 — ML & PRÉDICTION D'EDGE**
-- T179. Prédicteur d'edge (`edge_predictor`) : prédire le net AVANT de copier, n'agir que si > seuil.
-- T180. Calibration des probabilités (`calibration`) : le prédicteur est-il fiable ?
-- T181. Diagnostics ML (`ml_diagnostics`) : importance des features, fuites, stabilité.
-- T182. Hyperopt local (`hyperopt_local`) sans surajuster (garde `anti_overfit_gate`).
-- T183. Modèle par coin vs global quand il y a assez de données.
-- T184. Feature store (`features/`) : features versionnées, sans fuite.
-- T185. Labeling triple-barrière (`labeling`) : TP/SL/horizon.
-- T186. Sélection robuste de features (`robust_selection`) stables en OOS.
-- T187. Drift du modèle (`mlops_tools`) : re-calibrer quand les données dérivent.
-- T188. Ensembles de modèles faibles plutôt qu'un seul surajusté.
-- T189. Incertitude de la prédiction (intervalle) ⇒ taille proportionnelle à la confiance.
-- T190. Backtest du prédicteur en walk-forward (pas d'illusion d'edge ML).
-
-**THÈME 16 — MOTEUR PAPER · AUTONOMIE · PREUVE**
-- T191. Moteur paper fidèle (`moteur_execution_prod`,`execution_realiste`) : frais+funding+spread+slippage+latence+drawdown.
-- T192. Comptabilité du capital (`audit_capital_accounting`,`ledger_verite`) : chaque USD tracé depuis 350.
-- T193. Reconciliation prod (`reconciliation_prod`) : le paper colle-t-il au réel potentiel ?
-- T194. Boucle de recherche autonome (`alina_autonomous_lab`,`copy_vault_research_planner`) : proposer→tester→trancher.
-- T195. Planificateur priorisé (`copy_vault_research_planner`) : attaquer d'abord ce qui débloque le plus d'edge.
-- T196. Auto-advance des hypothèses (`auto_advance_analysis`).
-- T197. Tableau de bord économique honnête (`export_economic_family_scoreboards`,`dashboard_truth`) : net par famille.
-- T198. Certification économique quotidienne (`run_daily_economic_certification`) : verdict daté, reproductible.
-- T199. Audit complet à chaque cycle (`audit_complet`) : données+mesure+économie+chantiers, rien gâché.
-- T200. LE VERDICT (`le_verdict`) : « méga PnL positif » = PROVEN en VALIDATION+OOS+FORWARD, après TOUS les coûts
-  ET le crowding — sinon ce n'est qu'une hypothèse. Aucun gain inventé, jamais.
-
-### C-octies. CHANTIERS ISSUS DE LA RECHERCHE WEB (12/11) — labo · collecteur · moteur en priorité
-
-Faits sourcés sur le web, traduits en chantiers concrets. Priorité aux trois piliers. Chaque fait reste à
-re-vérifier sur la source primaire avant d'y engager du capital (les poids d'API notamment).
-
-**COLLECTEUR — faits d'API Hyperliquid (budget partagé = 1200 poids/min/IP) :**
-- `clearinghouseState` (positions, marge, PnL latent d'un compte) = **poids 2** (TRÈS léger) ; `l2Book`=2 ; `allMids`=2.
-- `frontendOpenOrders` / `openOrders` (ordres en attente = INTENTION) = **poids 20** ; `userFills` = 20 + 1 par 20 fills ; `userRole`=60.
-- `userRateLimit` existe pour surveiller notre propre budget.
-- **W-C1 (majeur).** Collecter `clearinghouseState` pour TOUS les leaders en continu : à poids 2, les POSITIONS sont quasi gratuites → débloque la réplication par position (T109) à grande échelle sans saturer le budget.
-- **W-C2.** Collecter `frontendOpenOrders` (poids 20) = ordres en attente en local (T156, R2) : budgéter ~60 appels poids-20/min sous 1200 → prioriser les top leaders, cadence adaptative.
-- **W-C3.** Brancher `userRateLimit` dans le budget partagé (`collecte_fiable`) pour piloter la cadence en vrai, pas à l'estime.
-- **W-C4.** Multi-IP pour dépasser 1200/min (archi WS déjà notée) : répartir positions (léger) et ordres (lourd) sur des IP distinctes.
-
-**LABO — rigueur (Bailey & López de Prado) :**
-- **W-L1.** Implémenter la **CPCV** (combinatorial purged cross-validation) : prouvée supérieure au walk-forward pour éviter les fausses découvertes (`purged_split`,`cross_validation` à étendre).
-- **W-L2.** **Deflated Sharpe Ratio** : corriger le Sharpe du NOMBRE d'essais + non-normalité ; seuil indicatif DSR < 0,95 = probablement surajusté. Brancher dans `honest_metrics`/`anti_overfit_gate`.
-- **W-L3.** **PBO** (probability of backtest overfitting) via CSCV : fraction des chemins où l'optimal in-sample sous-performe la médiane OOS. Exige le registre essai-par-essai (`copy_vault_hypothesis_registry`).
-- **W-L4.** Fenêtre glissante **~90 jours** (les régimes crypto changent vite) plutôt que 252 ; **embargo ≥ 2× l'horizon de label** (anti-fuite par l'horizon) dans `purged_split`.
-- **W-L5.** Compter TOUS les essais pour la correction de multiplicité — la sonde d'exécutabilité (zéro essai à vide) + le registre horodaté rendent ce compte honnête.
-
-**MOTEUR — exécution (makers gagnent, mais adverse selection) :**
-- **W-M1 (majeur).** Modèle de fill **conscient de la file** (« Market Maker's Dilemma ») : l'adverse selection EMPIRE quand la file adverse grossit ET quand notre position dans la file est petite → brancher `queue_model`+`lead_lag_maker_queue_train` dans la décision maker.
-- **W-M2.** Mesurer l'adverse selection par le **markout à +1 s** post-fill (hors rebate) comme métrique standard (`honest_metrics`,`microstructure`).
-- **W-M3.** Exploiter le privilège Hyperliquid « **les market makers annulent en premier** » : re-pricer/annuler nos ordres maker AVANT d'être pick off (logique de cancel-first dans `quoting`/`execution_passive_agressive`).
-- **W-M4.** Post-only avec **repricing+resoumission** : un ordre qui croiserait est annulé/repricé → gérer ce cycle (`quoting_inside_spread`,`missed_fill_model`).
-- **W-M5.** Base théorique **Avellaneda–Stoikov** (quoting inventory-aware) pour `grid_market_maker`/`quoting` : écart optimal fonction de l'inventaire et de la volatilité.
-
-**SIGNAL & HORIZON — insight stratégique majeur :**
-- **W-S1 (décisif).** **ZONE MORTE D'HORIZON.** L'OFI prédit surtout à l'échelle **sub-seconde→secondes** (décroît très vite) ; notre copie à 30–300 s est TROP LENTE pour la microstructure et trop rapide pour l'effet long. Deux sorties, à tester explicitement : (a) descendre **sub-seconde** par l'anticipation des ordres en attente (T4/T14, W-C2) ; (b) viser l'**horizon 4–12 h** où l'OFI des perps a un impact réel QUAND les déviations initiales sont grandes (capacité d'arbitrage saturée) — rejoint R1 (tester les horizons longs > 300 s).
-- **W-S2.** **« Quarter-hour effect »** : prédictibilité périodique des rendements liée au trading algo aux ouvertures de quart d'heure → feature temporelle (T73) à tester.
-- **W-S3.** Impact des perps **accru quand la déviation initiale est grande** (arbitrage qui bind) → conditionner la copie sur l'AMPLEUR de la déviation prix/oracle (lien T70/T75).
-
-**PRIORISATION issue de ces faits :** W-C1 (positions quasi gratuites) + W-C2 (ordres = intention) d'abord — ils alimentent tout le reste pour un coût d'API minime. Puis W-S1 (choisir le bon horizon : sub-seconde OU 4–12 h, sortir de la zone morte 30–300 s). Puis W-M1/W-M2 (exécution maker mesurée au markout). Puis W-L1–L5 (ne valider qu'avec CPCV+DSR+PBO, sinon on se ment).
-
-### C-novies. 300 AMÉLIORATIONS CONCRÈTES & PARAMÉTRÉES (12/11) — ancrées sur la recherche web
-
-Complète les 200 tâches (C-septies) et les chantiers web (C-octies). Ici, du détail OPÉRATIONNEL : canaux
-WebSocket exacts, limites d'API, formules (Avellaneda-Stoikov), méthodes (triple-barrier, CPCV/DSR/PBO, RL).
-20 programmes × 15. À re-vérifier sur source primaire avant capital. Priorité labo · collecteur · moteur.
-
-**P1 — COLLECTEUR : canaux WebSocket Hyperliquid (wss://api.hyperliquid.xyz/ws)**
-- I1. `orderUpdates` (user) : cycle de vie AUTORITAIRE des ordres (placed→filled→canceled) = l'INTENTION du leader.
-- I2. `userFills` (user) : fills AUTORITAIRES (snapshot puis flux) ; gérer `isSnapshot:true` pour ne pas doubler.
-- I3. `activeAssetData` (user, coin) : **levier, maxTradeSzs, availableToTrade** du leader = conviction + capacité.
-- I4. `webData2`/`webData3` (user) : état agrégé frontend (vue d'ensemble d'un compte).
-- I5. `clearinghouseState`/`allDexsClearinghouseState` (user) : positions + marge (tous les dex).
-- I6. `userFundings` (user) : paiements de funding (snapshot + horaire).
-- I7. `userNonFundingLedgerUpdates` (user) : dépôts/retraits/transferts/liquidations = flux de capital.
-- I8. `userEvents` (channel « user ») : fills/funding/liquidation/nonUserCancel — MAIS non garanti complet → ne PAS s'en servir pour l'état.
-- I9. `bbo` (coin) : meilleur bid/ask, émis seulement si le BBO change sur un bloc (léger, précis).
-- I10. `l2Book` (coin) : carnet par niveaux ; augmenter la profondeur capturée au-delà de 5 niveaux.
-- I11. `trades` (coin) : flux des trades du marché (pour l'OFI).
-- I12. `activeAssetCtx` (coin) : mark, oracle, prix veille, volume 24 h, OI, funding.
-- I13. `candle` (coin, interval) : OHLCV multi-intervalle.
-- I14. `userTwapSliceFills` + `userTwapHistory` : détecter les TWAP des leaders (tranches régulières).
-- I15. `notification` + `spotState` + `twapStates` : compléter la vue (spot, TWAP en cours).
-
-**P2 — COLLECTEUR : limites d'API & montée en charge**
-- I16. Cap dur : **10 adresses user uniques par IP** (orderUpdates/userFills/clearinghouseState/spotState/activeAssetData) → c'est LE verrou.
-- I17. Multi-IP : répartir les leaders par shards d'IP (déjà noté archi WS) pour dépasser 10 leaders.
-- I18. 1000 abonnements par connexion, 10 connexions, 30 nouvelles connexions/min → planifier l'ouverture.
-- I19. 2000 messages/min et 100 posts en vol → borner le débit entrant et les requêtes.
-- I20. REST : budget partagé 1200 poids/min/IP (`clearinghouseState`=2, `l2Book`=2, `allMids`=2, `frontendOpenOrders`=20, `userFills`=20+1/20fills, `userRole`=60).
-- I21. Brancher `userRateLimit` pour piloter la cadence au réel (pas à l'estime) dans `collecte_fiable`.
-- I22. Positions quasi gratuites (poids 2) : poller `clearinghouseState` pour BEAUCOUP de leaders → réplication par position.
-- I23. Reconnexion + ré-abonnement automatique avec reprise au dernier snapshot (gap-free).
-- I24. Détection de trou : si un `oid` saute, resynchroniser via REST.
-- I25. Écritures atomiques (tmp+rename) pour chaque tape ; jamais de fichier corrompu (lien M2).
-- I26. Déduplication par `oid`/`tid` + horodatage canonique (pas de double comptage).
-- I27. Heartbeat par connexion + superviseur qui relance une connexion morte.
-- I28. Compression des tapes à froid, index partitionné à chaud.
-- I29. Horloge certifiée (`lead_lag_certified_clock`) pour dater réception vs bloc.
-- I30. Backpressure : sous pression mémoire/débit, réduire le nombre de coins/leaders suivis, jamais crasher.
-
-**P3 — COLLECTEUR : nouvelles données à exploiter**
-- I31. Levier du leader (activeAssetData) comme feature de conviction par trade.
-- I32. Capacité disponible (availableToTrade) : le leader peut-il encore ajouter → prédire la suite du méta-ordre.
-- I33. Flux de capital (ledger) : un gros dépôt avant une série de trades = signal d'intention.
-- I34. Détection TWAP (userTwapSliceFills) : anticiper les tranches suivantes.
-- I35. Liquidations (WsLiquidation) en direct → mode défensif + signal de fade.
-- I36. nonUserCancel : annulations forcées → retrait de liquidité.
-- I37. OI/mark/oracle (activeAssetCtx) en continu : overshoot et pression directionnelle.
-- I38. Positions cross-dex (allDexs) : vue complète d'un leader multi-marchés.
-- I39. Profondeur de carnet accrue (plus de niveaux) pour l'impact et la file.
-- I40. Trades du marché (trades) pour calculer l'OFI en temps réel.
-- I41. Dépôts Arbitrum on-chain (`collecter_depots_arbitrum`) : smart money entrante.
-- I42. Explorer tx (`collecter_explorer_lane`) : mouvements de capital on-chain.
-- I43. Dispersion venues (`collecter_dispersion_venues`) pour le signal cross-venue.
-- I44. Funding cross-venue (`comparer_funding_venues`) pour le carry.
-- I45. Snapshots de file d'attente (position dans la queue) pour l'adverse selection.
-
-**P4 — MOTEUR : exécution maker Avellaneda-Stoikov**
-- I46. Prix de réservation r = s − q·γ·σ²·(T−t) : décaler le quote selon l'inventaire.
-- I47. Demi-spread optimal δ = (1/γ)·ln(1+γ/κ) + ½·γ·σ²·(T−t).
-- I48. Calibrer γ (aversion au risque) sur notre capital 350 USD et le risque toléré.
-- I49. Calibrer κ sur l'intensité d'arrivée des ordres (fenêtre glissante du carnet).
-- I50. σ = volatilité réalisée récente par coin (bougies/microstructure).
-- I51. Skew d'inventaire : quoter plus bas si long, plus haut si short, pour revenir à plat.
-- I52. Exploiter « les MM annulent en premier » sur HL : re-pricer avant d'être pick off.
-- I53. Suivi de la position dans la file (queue_model) : adverse selection ↑ si file adverse grosse et notre rang petit.
-- I54. Markout +1 s post-fill (hors rebate) comme mesure d'adverse selection.
-- I55. Boucle post-only : si l'ordre croiserait → annulé/repricé → gérer la resoumission.
-- I56. Modèle de probabilité de remplissage (missed_fill_model) selon la distance au mid.
-- I57. Extensions crypto d'A-S (Hummingbot) : η de décroissance d'inventaire, spread max.
-- I58. Cible d'inventaire q* (pas forcément 0 si on veut suivre la direction du leader).
-- I59. Horizon T = horizon de la position copiée.
-- I60. Backtester A-S sur nos carnets réels (`grid_market_maker`,`quoting_inside_spread`).
-
-**P5 — MOTEUR : exécution RL & avancée**
-- I61. Agent DQN d'exécution (état = carnet+inventaire+temps restant).
-- I62. Double-dueling DQN pour stabilité (réf. Nagy et al.).
-- I63. Politique à action continue (taille/prix) plutôt que discrète.
-- I64. Simulateur de carnet rapide type JAX-LOB pour entraîner à grande échelle.
-- I65. Récompense = implementation shortfall négatif (minimiser le coût vs prix d'arrivée).
-- I66. Pénalité d'adverse selection dans la récompense (markout défavorable).
-- I67. Baselines TWAP/VWAP à battre absolument avant d'adopter le RL.
-- I68. Ordonnancement d'ordres enfants (child orders) sur la durée.
-- I69. Plafond de taux de participation (ne pas être > X % du volume).
-- I70. Impact-aware : pénaliser la consommation du carnet.
-- I71. Validation walk-forward du RL (pas d'illusion d'edge).
-- I72. Robustesse à la latence (le papier Guo et al. le teste explicitement).
-- I73. Politique multi-actifs partagée + spécialisation par coin.
-- I74. Comparaison RL vs A-S vs taker simple sur net réel.
-- I75. Garde-fou : le RL ne décide QUE l'exécution, pas la direction (séparer alpha et exécution).
-
-**P6 — MOTEUR : modélisation fine fills & coûts**
-- I76. Intensité d'arrivée des ordres dans queue_model (processus de Poisson).
-- I77. Remplissage partiel (partial_fill_model) et coût du résiduel.
-- I78. Probabilité de non-remplissage maker (missed_fill_model) par régime.
-- I79. Chemin intra-barre (intrabar) pour un fill réaliste.
-- I80. Slippage par taille (slippage_model) calibré sur carnet réel.
-- I81. Impact non linéaire (loi en racine carrée) au-delà du spread.
-- I82. Paliers de frais par volume (fee_model) : frais taker effectif au volume paper.
-- I83. Rebate maker capturé et mesuré net.
-- I84. Coût de funding par durée de détention (intégré au PnL).
-- I85. Risque cross-venue non atomique (audit_cross_venue_non_atomic) sur 2 jambes.
-- I86. TCA : implementation shortfall vs prix d'arrivée du leader.
-- I87. Courbes de markout (−5 s … +60 s) pour diagnostiquer entrée/sortie.
-- I88. Parité backtest/live (backtest_live_parity) à chaque cycle.
-- I89. Table de coûts calibrée par coin/heure/taille (construire_table_edge).
-- I90. Vérité du PnL (pnl_verite) : net après frais+spread+slippage+funding+impact.
-
-**P7 — LABO : labeling & features (López de Prado)**
-- I91. Triple-barrier : TP / SL / horizon max au lieu d'un rendement à horizon fixe.
-- I92. Meta-labeling : modèle primaire = sens, modèle secondaire = agir ou non.
-- I93. Poids d'échantillon par concurrence de labels (chevauchement des durées).
-- I94. Attribution de rendement par unicité (overlap → poids réduit).
-- I95. Décroissance temporelle des poids (récent > ancien).
-- I96. Équilibrage de classes dans l'apprentissage.
-- I97. Différenciation fractionnaire pour la stationnarité sans tuer la mémoire.
-- I98. Importance des features MDI/MDA/SHAP (ml_diagnostics).
-- I99. Feature store versionné, sans fuite (`features/`).
-- I100. OFI comme feature (microstructure) — prédictif à très court horizon.
-- I101. Microprice (pondéré par la taille) plutôt que le mid.
-- I102. Pente du carnet (book slope) et déséquilibre de profondeur.
-- I103. Déviation VWAP-mid (dominante dans la recherche SHAP).
-- I104. Pipeline anti-fuite (anti_lookahead_pipeline) sur toutes les features.
-- I105. Interactions non linéaires : fill agressif × OFI × régime.
-
-**P8 — LABO : validation rigoureuse (anti-overfit)**
-- I106. CPCV (combinatorial purged CV) : prouvée > walk-forward pour les fausses découvertes.
-- I107. Purged K-fold + embargo ≥ 2× l'horizon de label (anti-fuite par l'horizon).
-- I108. Deflated Sharpe Ratio : corriger du nombre d'essais + non-normalité (seuil ~0,95).
-- I109. PBO via CSCV : fraction des chemins où l'optimal IS sous-performe la médiane OOS.
-- I110. Fenêtre glissante ~90 jours (régimes crypto rapides) plutôt que 252.
-- I111. Bootstrap par blocs sur les jours (dépendance temporelle).
-- I112. Placebo par permutation : inverser le sens ne doit PAS gagner.
-- I113. Correction de multiplicité : compter TOUS les essais (registre horodaté).
-- I114. Minimum d'échantillon AVANT de lire l'intervalle (garde_fous_recherche).
-- I115. Porte FORWARD paper en direct (forward_causal) : juge ultime.
-- I116. Robustesse de régime (robustness_protocol) : plusieurs conditions.
-- I117. Métriques ajustées à la capacité (l'edge survit-il à la taille ?).
-- I118. Deflated metrics dans honest_metrics (pas de Sharpe brut).
-- I119. Reçus reproductibles (SHA moteur+config+données).
-- I120. Détection du biais récursif (recursive_bias_probe).
-
-**P9 — LABO : signal & horizon (sortir de la zone morte)**
-- I121. Tester explicitement sub-seconde (anticipation ordres) ET 4–12 h (OFI perp quand déviation grande).
-- I122. Mesurer la demi-vie de la dérive post-fill par coin.
-- I123. Conditionner sur l'AMPLEUR de la déviation prix/oracle (impact perp ↑ quand arbitrage bind).
-- I124. « Quarter-hour effect » : feature temporelle de prédictibilité périodique.
-- I125. Timing du cycle de funding (horaire) comme feature.
-- I126. Edge mesuré séparément par régime.
-- I127. Consensus multi-leaders (même coin/sens/minute).
-- I128. Score de nouveauté (coin peu tradé = moins crowdé).
-- I129. Valeur d'information par condition (edge_predictor).
-- I130. Recherche du meilleur sous-ensemble de conditions (scenario_search, anti-overfit).
-- I131. Alpha résiduel après neutralisation du bêta marché (residual_alpha).
-- I132. Lead-lag par coin (quels coins mènent) (lead_lag_multiasset).
-- I133. Signal « première tranche » d'un cluster (cluster_metaorders).
-- I134. Détection iceberg/TWAP comme signal d'un gros méta-ordre.
-- I135. Filtre d'agressivité (taker leader = info ; passif = bruit).
-
-**P10 — SÉLECTION DE LEADERS (anti-survivorship)**
-- I136. Sélection causale (copy_vault_causal_selection) : décisions dénouées ET postérieures.
-- I137. Correction de la malédiction du vainqueur (h181).
-- I138. Persistance de compétence (copy_vault_persistence).
-- I139. Re-sélection walk-forward par segment.
-- I140. Modèle de qualité leader (leader_quality_signal).
-- I141. Décote de crowding par TVL.
-- I142. Liste noire des leaders toxiques (whale-slap).
-- I143. Conviction via levier (activeAssetData) comme feature de qualité.
-- I144. Filtres profit factor / drawdown / longueur d'historique (pas le win rate).
-- I145. Stabilité de style (détecter un changement brusque).
-- I146. Sélection conditionnelle au coin (bon seulement sur certains coins).
-- I147. Détection des leaders informés (ouvertures précédant le mouvement).
-- I148. Fenêtre de confiance : activer après N décisions dénouées.
-- I149. Rotation automatique (survival_gate/promotion_gate) si edge OOS s'effondre.
-- I150. Diversification : leaders faiblement corrélés (portfolio_risk).
-
-**P11 — CROWDING & ANTI-EXPLOITATION**
-- I151. Modèle de crowding (nombre de copieurs estimé via TVL + réaction marché).
-- I152. Détection des trades piège (gros fill suivi d'un retournement).
-- I153. Non-prévisibilité : randomiser légèrement timing/taille.
-- I154. Mesure de notre propre impact de copie (seuil de détectabilité).
-- I155. Éviter les niveaux de liquidation évidents.
-- I156. Fade des cascades (fade_liquidation_backtest).
-- I157. Détection du stop-hunt (mèches qui ramassent les stops).
-- I158. Décote d'alpha post-publication (vault qui monte en leaderboard).
-- I159. Contrarian sur crowding extrême.
-- I160. Monitoring TVL-vs-edge dans le temps.
-- I161. Estimer et exploiter le délai des copieurs (front-run des copieurs lents).
-- I162. Détecter si NOUS sommes front-run (adverse selection sur nos ordres).
-- I163. Conscience des ordres cachés (RPI : affichés UI, cachés API).
-- I164. Plafond de capacité (taille au-delà de laquelle l'edge s'effondre).
-- I165. Éviter de suivre un leader en cours de liquidation.
-
-**P12 — STRATÉGIES ALTERNATIVES**
-- I166. Fade de liquidation (liquidation_edge_measure).
-- I167. Direction post-liquidation (post_liquidation_direction).
-- I168. Carry de funding (recherche_carry).
-- I169. Carry perp-perp cross-venue (mesurer_funding_perp_perp).
-- I170. Base spot-perp (hl_spot_perp_carry_v1).
-- I171. Dislocation 2 jambes (backtest_dislocation_2jambes).
-- I172. Grid MM adaptatif à la volatilité (grid_market_maker).
-- I173. Mean reversion sur overshoot (mean_reversion).
-- I174. Cointégration de paires (mesurer_cointegration).
-- I175. Market-making A-S inventory-aware.
-- I176. Copie + MM combinés (direction + liquidité).
-- I177. Rotation de stratégies par régime (regime_models).
-- I178. Allocation multi-stratégies sur le front de Pareto (pareto_front).
-- I179. Provision de liquidité type HLP (capter les liquidations).
-- I180. Falsifier chaque stratégie (falsifier_carry/cashcat) avant capital.
-
-**P13 — RÉPLICATION & PORTEFEUILLE**
-- I181. Réplication par position (vault_replication) plutôt que par fills.
-- I182. Mise à l'échelle fidèle à 350 USD (copy_vault_replication_paper).
-- I183. Portefeuille agrégé multi-leaders (portefeuille_global).
-- I184. Rééquilibrage paresseux (seuil d'écart) pour réduire les coûts.
-- I185. Netting multi-leaders (long+short même coin).
-- I186. Taille pondérée par conviction (levier du leader).
-- I187. Risk parity entre coins (pas notionnel égal).
-- I188. Suivi retardé vs immédiat (comparer bruit vs dérive).
-- I189. Gestion des positions orphelines (leader disparu).
-- I190. Réplication de la trajectoire d'entrée (DCA du leader).
-- I191. Miroir de levier (dans la limite paper ≤ 1).
-- I192. Plafonds d'exposition brute/nette.
-- I193. Réplication consciente de la corrélation (éviter la concentration).
-- I194. Minimisation du turnover (coûts).
-- I195. Agrégation cross-dex des positions.
-
-**P14 — CAPITAL & RISQUE (350 USD)**
-- I196. Kelly fractionné (risk_sizing) selon edge+variance.
-- I197. Ciblage de volatilité (portfolio_risk).
-- I198. Plafond de perte journalier + verrou de profit (exits_risque).
-- I199. Contrôle de drawdown (stress_testing).
-- I200. Levier dynamique ≤ 1.
-- I201. Diversification corrélation.
-- I202. Réserve de marge : jamais liquidé (liquidation_sizing).
-- I203. Analyse de capacité (impact à la taille).
-- I204. Sizing conditionné à la force du signal.
-- I205. Sorties sur invalidation du signal (stop non évident).
-- I206. Espérance = débit × net moyen de TOUTES les décisions.
-- I207. Objectif Sharpe/Sortino quotidiens (perf_metrics).
-- I208. Risque de queue (CVaR) borné.
-- I209. Limites de position par coin.
-- I210. Tests de stress par scénario (stress_testing).
-
-**P15 — RÉGIMES & ADAPTATION**
-- I211. Détection de régime en ligne (regime_detection).
-- I212. Régimes HMM (regime_models) + vote.
-- I213. États vol/trend/range/funding (regime_label).
-- I214. Câblage régime→stratégie (regime_wiring).
-- I215. Edge par régime.
-- I216. Couper la copie en régime hostile.
-- I217. Détection de cascade en temps réel (liquidation_cascade).
-- I218. Délai de copie adapté au régime.
-- I219. Taille adaptée au régime.
-- I220. Rupture de régime → re-valider les leaders.
-- I221. Régime de funding (carry on/off).
-- I222. Régime de liquidité (profondeur du carnet).
-- I223. Régime de dislocation cross-venue.
-- I224. Mémoire de régime (quelle stratégie a marché quand).
-- I225. Transition de régime comme signal (sortie/entrée).
-
-**P16 — ML & PRÉDICTION D'EDGE**
-- I226. Prédicteur d'edge (edge_predictor) : n'agir que si net prédit > seuil.
-- I227. Calibration des probabilités (fiabilité) (calibration).
-- I228. Diagnostics ML (fuites, stabilité, importance).
-- I229. Hyperopt local sans surajuster (anti_overfit_gate).
-- I230. Modèle par coin vs global.
-- I231. Feature store sans fuite.
-- I232. Labeling triple-barrière pour l'apprentissage.
-- I233. Sélection robuste de features (stables OOS).
-- I234. Détection de drift du modèle (mlops_tools).
-- I235. Ensembles de modèles faibles.
-- I236. Incertitude de prédiction → taille proportionnelle.
-- I237. Backtest walk-forward du prédicteur.
-- I238. Apprentissage en ligne (adaptation continue).
-- I239. Meta-labeling act/no-act au-dessus du signal de copie.
-- I240. Baseline gradient-boosting avant tout modèle complexe.
-
-**P17 — MOTEUR PAPER & FIDÉLITÉ DE SIMULATION**
-- I241. Moteur paper fidèle (moteur_execution_prod) : frais+funding+spread+slippage+latence+drawdown.
-- I242. Comptabilité du capital depuis 350 (audit_capital_accounting, ledger_verite).
-- I243. Reconciliation prod (reconciliation_prod).
-- I244. Parité backtest/live (backtest_live_parity).
-- I245. Modèle de frais canonique (fee_model).
-- I246. Accrual de funding horaire.
-- I247. PnL au mark-price.
-- I248. Simulation de liquidation (ne jamais être liquidé).
-- I249. Simulation de remplissage partiel.
-- I250. Simulation du cycle de vie des ordres.
-- I251. Injection de latence réaliste.
-- I252. Injection de slippage réaliste.
-- I253. Replay déterministe (même entrée → même sortie).
-- I254. Reçus horodatés par run.
-- I255. Pin SHA (moteur/config) pour reproductibilité.
-
-**P18 — AUTONOMIE & BOUCLE DE RECHERCHE**
-- I256. Boucle autonome (alina_autonomous_lab) : proposer→tester→trancher.
-- I257. Planificateur priorisé (copy_vault_research_planner) : d'abord ce qui débloque le plus d'edge.
-- I258. Auto-advance des hypothèses (auto_advance_analysis).
-- I259. Registre d'hypothèses horodaté (copy_vault_hypothesis_registry).
-- I260. Scoreboards économiques (export_economic_family_scoreboards).
-- I261. Certification économique quotidienne (run_daily_economic_certification).
-- I262. Audit complet à chaque cycle (audit_complet).
-- I263. Jauge d'exécutabilité (etat_executabilite).
-- I264. Feedback coins-à-collecter (generer_coins_lanes).
-- I265. Auto-pacing (ne pas tourner à vide).
-- I266. Ordonnancement conscient des ressources (resource_policy).
-- I267. Watchdog de campagne (campaign_watchdog).
-- I268. Campagnes reprenables (resumable_campaign).
-- I269. Gouverneur de mémoire (M0) qui pilote l'ampleur.
-- I270. Dégradation progressive (jamais de crash).
-
-**P19 — OBSERVABILITÉ & PREUVE ÉCONOMIQUE**
-- I271. Dashboard économique honnête (dashboard_truth).
-- I272. Net par famille de stratégie.
-- I273. pnl_verite (après tous les coûts).
-- I274. pnl_des_refus (valeur de NE PAS copier).
-- I275. Dashboards de markout.
-- I276. Carte d'exécutabilité par coin.
-- I277. Audit des données (rien de gâché).
-- I278. Motifs de refus (pourquoi un trade n'est pas exécutable).
-- I279. Décomposition des coûts.
-- I280. Sharpe/Sortino quotidiens.
-- I281. Courbes de capacité.
-- I282. Moniteur de crowding.
-- I283. Chronologie des régimes.
-- I284. Le Verdict (le_verdict) : PROVEN seulement après VALIDATION+OOS+FORWARD, tous coûts + crowding.
-- I285. Reproductibilité totale (reçus + SHA).
-
-**P20 — RÉSILIENCE, INFRA & PERFORMANCE**
-- I286. Gouverneur de mémoire VERT/ORANGE/ROUGE (psutil).
-- I287. Labo par morceaux (shard/jour/coin), libérer chaque lot.
-- I288. Cache de carnets LRU borné (pas illimité).
-- I289. Spill-to-disk pour les tables intermédiaires.
-- I290. Écritures atomiques partout.
-- I291. Checkpoint + reprise (travail jamais perdu).
-- I292. Capture de MemoryError (jamais d'exception mémoire non gérée).
-- I293. Preflight d'estimation mémoire (réduire l'ampleur si insuffisant).
-- I294. Index partitionné (partitioned_data_index) pour un labo rapide.
-- I295. Replay rapide (replay_profiler) et vectorisation (vectorized).
-- I296. Sûreté en parallèle (pas de corruption inter-process).
-- I297. Hygiène CRLF/encodage/PYTHONUTF8 (pièges Windows).
-- I298. Test sous RAM basse (preuve que ça termine en mode dégradé).
-- I299. Conscience du reaper (reprendre proprement si le système coupe).
-- I300. Tampons bornés côté collecteurs (jamais de croissance illimitée).
 
 ### C-decies. SYNTHÈSE DIRECTRICE — fil conducteur (miroir intégral de la mémoire `chantiers_pnl_positif`)
 
@@ -1908,243 +941,6 @@ données, lancer latence + maker + conditionnement ; durcir collecteurs (résili
 Le PnL « méga positif », s'il existe, est dans B×C×D (coût bas + réaction rapide + bonne sélection) ou dans E
 (autre source d'avantage) — et n'est RÉEL qu'une fois PROVEN en VALIDATION+OOS+FORWARD après tous les coûts et le crowding.
 
-### C-undecies. 200 NOUVEAUX GISEMENTS D'EDGE (GIS1–GIS200) — issus de ~20 recherches web approfondies (12/11)
-
-Chaque idée est ancrée sur un FAIT sourcé (à re-vérifier en source primaire avant capital) et un module réel.
-Angles entièrement nouveaux par rapport aux sections C-septies (200 T) et C-novies (300 I).
-
-**TA — CROSS-VENUE : Binance mène Hyperliquid (fait : ~700 ms, 29/29 actifs, Hayashi-Yoshida ; = 2 blocs HyperBFT)**
-- GIS1. Collecter le flux Binance (perp BTC/ETH/SOL/HYPE…) comme SIGNAL AVANCÉ de HL : 700 ms d'avance, soit >> notre horizon.
-- GIS2. Estimer notre propre décalage par coin avec l'estimateur Hayashi-Yoshida (séries asynchrones), pas une corrélation naïve.
-- GIS3. Balayer le décalage de −2000 ms à +2000 ms par pas de 100 ms et prendre l'argmax de corrélation (méthode sourcée).
-- GIS4. Séparer trades acheteur-initié / vendeur-initié dans l'estimation (filtre le bruit de bid-ask).
-- GIS5. Éliminer d'abord TOUT artefact d'horodatage (dérive d'horloge, données périmées, alignement de barres) — un faux lead de 700 ms est trivial à fabriquer.
-- GIS6. Tester Lighter comme second meneur (fait : mène HL sur 27/29 ; Binance mène Lighter de ~100 ms).
-- GIS7. Exploiter l'asymétrie : HL contient AUSSI de l'information propre (corr 0,22 HL→Binance) via flux à levier, liquidations, sentiment crypto-natif → ne pas traiter HL comme pur suiveur.
-- GIS8. Signal « HL décroche » : base perp-spot HL (fait : escompte ~3,8 bps) comme mesure de pression locale.
-- GIS9. Prédire le FUNDING de HL depuis Binance (fait : causalité Granger CEX→DEX, 7/9 symboles, ZÉRO causalité inverse).
-- GIS10. Intégration CEX 61 % plus forte que DEX → les écarts CEX-DEX persistent : les cartographier par coin.
-- GIS11. Conditionner la copie : ne copier un leader que si le meneur (Binance) confirme la direction dans la fenêtre.
-- GIS12. Détecter les fills de leader qui ne sont QUE de la réaction au meneur (zéro information propre) → ne pas les copier.
-- GIS13. Mesurer le décalage par RÉGIME (calme vs stress) : les 700 ms ne sont pas constants.
-
-**TB — OPTIONS DERIBIT : GEX / skew comme détecteur de régime (BTC/ETH, nos plus gros coins)**
-- GIS14. Calculer le GEX agrégé (gamma de tout l'open interest) : combien les dealers doivent acheter/vendre par mouvement de 1 $.
-- GIS15. Régime GEX POSITIF : dealers longs gamma → achètent les baisses, vendent les hausses → MEAN-REVERSION + pin sur les strikes à gros OI.
-- GIS16. Régime GEX NÉGATIF : dealers courts gamma → vendent les baisses, achètent les hausses → TENDANCE + expansion de volatilité.
-- GIS17. Niveau de « gamma flip » (GEX = 0) : au-dessus = régime de retour à la moyenne, en dessous = régime de tendance.
-- GIS18. « Murs de gamma » (strikes à gamma max) : aimants/résistances en GEX positif, zones d'expansion une fois franchis.
-- GIS19. Pente du gamma autour du spot : pente raide = flux de couverture très sensible aux petits mouvements.
-- GIS20. Skew RR25 (IV 25Δ calls − 25Δ puts) : négatif = puts chers (couverture baissière), positif = calls chers (FOMO).
-- GIS21. Combinaison GEX+ & RR25+ = configuration de squeeze haussier ; GEX− & RR25− = configuration de chute rapide.
-- GIS22. Flux de « charm » : à l'approche de l'expiry (vendredi 08:00 UTC Deribit), les dealers dénouent → pin sur le strike à plus gros OI.
-- GIS23. Effet « vanna » : quand l'IV s'effondre post-événement, les dealers achètent du spot → dérive haussière mécanique.
-- GIS24. Renversement de rendement autour des expirations quotidiennes (fait : concentré quand l'OI ATM est élevé ET le GEX négatif).
-- GIS25. Utiliser DVOL (IV 30 jours constante) comme indicateur de régime de volatilité, et la prime de risque de variance (VRP).
-- GIS26. GARDE-FOU : le GEX est un détecteur de RÉGIME et un prédicteur de FLUX de couverture, jamais une cible de prix ; recalibrer pour Deribit (CLOB, pas de dealer unique).
-
-**TC — TOXICITÉ DU FLUX & IMPACT (faits : « le classifieur EST la métrique » ; loi en racine carrée)**
-- GIS27. VPIN en TICK-RULE ou vrais signes d'agresseur (HL les publie), JAMAIS en BVC (fait : BVC garde +0,12 de signal de toxicité, corrèle +0,73 à la volatilité = proxy de vol déguisé).
-- GIS28. VPIN vrais signes = +0,99 de corrélation à la toxicité réelle ; tick-rule +0,83 → notre flux HL signé nous donne le quasi-plafond.
-- GIS29. Bucketing à volume égal (pas temporel), trades coupés aux frontières de bucket, fenêtre glissante de 50 buckets.
-- GIS30. Kyle's λ (impact prix par unité de flux, fenêtre 30 min) : +0,67 de signal avec presque zéro charge de volatilité = mesure VRAIMENT différente de la variance.
-- GIS31. Corriger le biais à la hausse du λ trade-par-trade (rebond bid-ask) : préférer les régressions par intervalle agrégé.
-- GIS32. Exiger la significativité de λ (≥30 fenêtres, |t|≥2) + intervalle par bootstrap par blocs, sinon ne pas l'utiliser.
-- GIS33. Ratio d'illiquidité d'Amihud (réponse du prix au volume) comme troisième mesure de liquidité.
-- GIS34. Spread réalisé : ce que le fournisseur de liquidité garde après que l'information a atteint le prix ; NÉGATIF = flux informé (même constat que VPIN, mesuré autrement).
-- GIS35. Détecteur de toxicité façon « TailScore » : gradient boosting sur signaux carnet+flux à la seconde, SANS volatilité contemporaine (fait : perte évitée statistiquement ≠ 0, répliqué BTC/ETH).
-- GIS36. Protocole strict : prédicteurs construits uniquement avec l'information de la seconde PRÉCÉDENTE, walk-forward.
-- GIS37. Loi en RACINE CARRÉE de l'impact des méta-ordres : I(Q) ∝ √Q → modéliser NOTRE impact ainsi (pas linéaire).
-- GIS38. Impact permanent ≈ 2/3 de l'impact de pointe (fait sourcé) → la relaxation n'est que partielle.
-- GIS39. Mémoire longue des signes de trades (Lillo-Mike-Farmer) : le fractionnement d'ordres crée une autocorrélation en loi de puissance → DÉTECTER les méta-ordres des leaders par persistance de signe.
-
-**TD — HAWKES & PROCESSUS PONCTUELS (auto/cross-excitation du carnet)**
-- GIS40. Intensité λ(t) = μ + Σ α·e^(−β(t−tk)) : ajuster μ, α, β par maximum de vraisemblance sur fenêtre glissante.
-- GIS41. Prédire le TIMING du prochain événement de carnet (tirage exponentiel de moyenne 1/λ) → savoir QUAND agir.
-- GIS42. Hawkes MULTIVARIÉ (MHP) : self + cross-excitation entre types d'événements (market orders, limites, annulations, jumps de prix).
-- GIS43. Pipeline MHP + COE (continuous output error) : prédit timing ET signe du prochain rendement (fait : surpasse le Hawkes pur en précision et en profit simulé).
-- GIS44. Les 4 noyaux du modèle de prix : auto-excitation des trades, retour à la moyenne des prix, impact des trades sur le prix, rétroaction du prix sur l'activité.
-- GIS45. L'auto-excitation capture naturellement le FRACTIONNEMENT d'ordres → détecteur d'iceberg/TWAP de leader.
-- GIS46. La cross-excitation capture la RÉSILIENCE (reconstitution de liquidité après un gros trade) → savoir quand le carnet se referme.
-- GIS47. Noyaux en loi de puissance (plutôt qu'exponentiels) reproduisent mieux l'intensité des jumps (mémoire longue).
-- GIS48. Estimer le profil d'impact ENTIER d'un méta-ordre depuis des données anonymes via les intensités conditionnelles empiriques.
-- GIS49. Réentraîner le Hawkes chaque seconde en fenêtre glissante (coût de calcul à mesurer — viabilité HF à vérifier).
-- GIS50. Utiliser l'intensité de Hawkes sur les JUMPS détectés comme régresseur de volatilité (gain mesuré faible : −1,16 % log MSE — honnête).
-- GIS51. GARDE-FOU : la variance récente toutes-observations (dernière heure, EWMA) capture −12/−13 % de MSE, soit ~10× le gain de l'intensité → mettre la variance récente dans le benchmark AVANT d'ajouter Hawkes.
-
-**TE — APPRENTISSAGE PROFOND SUR CARNET (et sa leçon économique décisive)**
-- GIS52. LA LEÇON (fait mesuré) : un DeepLOB atteint ~60 % de hit rate, brut +3850 bps, MAIS spread −8091 bps → NET −4242 bps. La prédictibilité sub-minute est RÉELLE mais meurt au spread.
-- GIS53. Conclusion directe : profiter exige d'être FOURNISSEUR DE LIQUIDITÉ (gagner le spread) ou d'avoir un vrai avantage de latence/file — pas « un bon classifieur ». → confirme notre chantier maker comme seul débouché.
-- GIS54. N'utiliser un signal appris QUE pour décider où POSER un ordre maker, jamais pour traverser le spread.
-- GIS55. Architecture DeepLOB (CNN multi-échelle + LSTM) sur fenêtres de 100 événements × 40 features de carnet.
-- GIS56. Tester aussi un transformer compact (fait : meilleur à l'horizon le plus court ; fenêtres courtes favorisent l'attention).
-- GIS57. Métrique = MACRO-F1, jamais l'accuracy (fait : la classe « stationnaire » domine ; 70 % d'accuracy avec F1 up/down ≈ 0 est un piège).
-- GIS58. Horizon « sweet spot » mesuré autour de h=5 événements (h=1 dominé par le stationnaire, h=10 brouillé par la reconstitution et le retour à la moyenne).
-- GIS59. Extraire des features UNIVERSELLES qui transfèrent à des instruments non vus (propriété démontrée) → entraîner multi-coins.
-- GIS60. Étiquetage à 3 classes (hausse/stationnaire/baisse) avec seuil, + poids de classe dans la perte.
-- GIS61. Stride ≥ taille de fenêtre pour réduire la dépendance sérielle entre échantillons.
-- GIS62. Split respectant les jours (train j1-7 / val j8 / test j9-10), jamais de split i.i.d.
-- GIS63. Les embeddings gelés de l'encodeur portent aussi de l'information de RISQUE (fait : RMSE de volatilité réalisée réduite ~19 %) → réutiliser l'encodeur pour prévoir la volatilité.
-
-**TF — HIP-3 : LE GISEMENT LE PLUS SOUS-EXPLOITÉ (perps déployés par des builders)**
-- GIS64. Fait massif : HIP-3 = ~30 % de l'open interest de Hyperliquid, 119 marchés, actions/commodités/pré-IPO (CL pétrole, TSLA, SpaceX, XYZ100).
-- GIS65. **EFFET WEEK-END (le plus exploitable)** : quand le CME ferme (vendredi 22:00 UTC), HIP-3 devient le SEUL lieu de découverte de prix.
-- GIS66. Conséquence mesurée : part du retail 12 % → 28 %, les bots stat-arb DISPARAISSENT (plus de référence cross-venue), part des MM 12 % → 18 %.
-- GIS67. Donc : adverse selection RÉDUITE le week-end → conditions idéales pour faire du maker / fournir de la liquidité.
-- GIS68. Fenêtre exacte à exploiter : 1-2 h après la fermeture CME le vendredi ; retour à la normale dimanche 23:00 UTC.
-- GIS69. Funding EXTRÊME sur HIP-3 (fait : jusqu'à ~8700 % APY annualisé sur certains contrats actions) → gisement de carry, direction couverte.
-- GIS70. Crowding des shorts sur certaines commodités → funding très négatif → carry inverse.
-- GIS71. Illiquidité localisée → slippage élevé à l'entrée/sortie : dimensionner petit (notre 350 USD est un AVANTAGE ici).
-- GIS72. Oracle fixé par le DÉPLOYEUR via `setOracle` → surveiller les mises à jour d'oracle comme source de dislocation mark/oracle.
-- GIS73. Le déployeur peut `haltTrading` (annule tous les ordres, règle au mark) → risque opérationnel à modéliser, ne jamais être surexposé.
-- GIS74. Concentration : TradeXYZ = >95 % du volume/OI HIP-3 → un seul point de défaillance à surveiller.
-- GIS75. Les MM HIP-3 placent ~19 ordres par fill (requotation intense) → mesurer si on peut tenir ce rythme, sinon viser des coins moins requotés.
-- GIS76. Convergence retardée avec le sous-jacent traditionnel (roll CME → perp on-chain) → inefficience structurelle à mesurer.
-
-**TG — PRÉVISION DE VOLATILITÉ (HAR-RV, semivariance, jumps)**
-- GIS77. Modèle HAR-RV : régresser la volatilité réalisée future sur ses composantes journalière/hebdomadaire/mensuelle (mémoire longue).
-- GIS78. HAR-J (composante de jumps) : meilleur à l'horizon 1 jour (fait).
-- GIS79. HAR-RS (semivariance de baisse) : meilleur aux horizons hebdo/mensuel (risque de baisse persistant).
-- GIS80. Le workhorse : variance réalisée de la DERNIÈRE HEURE + EWMA (fait : −12/−13 % de MSE, l'essentiel du gain) → l'implémenter en premier.
-- GIS81. RV calculée sur rendements 5 minutes (standard sourcé) depuis nos bougies/trades.
-- GIS82. Tests de jumps : BNS (Barndorff-Nielsen–Shephard) pour les jours de jump, Lee-Mykland pour l'intraday.
-- GIS83. Décomposer RV en continu vs discontinu (jumps) et en semivariances positive/négative signées.
-- GIS84. Fait exploitable : effet de RALLYE POST-KRACH — après de fortes baisses, la probabilité de jumps POSITIFS dépasse celle des négatifs.
-- GIS85. Intensité de jumps qui monte fortement AVANT les épisodes de stress majeurs → signal défensif précoce.
-- GIS86. HAR surpasse GARCH(1,1) aux horizons courts ; GARCH reprend l'avantage aux horizons longs → utiliser chacun à sa place.
-- GIS87. Alimenter σ du modèle Avellaneda-Stoikov avec la prévision HAR (et non la vol historique brute).
-- GIS88. Alimenter le dimensionnement ciblé-volatilité et les portes de régime avec la même prévision (cohérence σ unique).
-
-**TH — ALLOCATION HRP (robustesse hors échantillon)**
-- GIS89. HRP (López de Prado) : clustering hiérarchique de la corrélation → quasi-diagonalisation → bisection récursive.
-- GIS90. Avantage décisif : pas besoin d'inverser la matrice de covariance (fonctionne même singulière) → évite la « malédiction de Markowitz ».
-- GIS91. Variance hors échantillon plus faible que la min-variance ET que la parité de risque classique (Monte Carlo sourcé).
-- GIS92. Sur crypto : HRP navigue mieux la volatilité et le risque de queue que inverse-vol / min-variance / max-diversification.
-- GIS93. HRP évite les deux travers : min-variance trop concentrée, inverse-vol trop statique.
-- GIS94. HRP ADAPTATIF (basé matrice de distance) : surpasse les autres variantes car les ruptures structurelles de corrélation crypto sont FRÉQUENTES.
-- GIS95. Appliquer HRP aux LEADERS (traités comme actifs) pour répartir le risque entre clusters de leaders corrélés.
-- GIS96. Appliquer HRP aux COINS et aux STRATÉGIES (copie/carry/liquidation/MM) à trois niveaux emboîtés.
-- GIS97. Suivre visuellement le dendrogramme dans le temps : un changement de clustering = signal de rupture de régime.
-- GIS98. Métrique de distance alternative (pas seulement √(0,5(1−ρ))) : tester son effet sur la stabilité.
-- GIS99. GARDE-FOU HONNÊTE : HRP et min-variance restent sensibles à l'instabilité de la covariance (tendance à surpondérer les actifs les plus instables) → borner les poids.
-- GIS100. GARDE-FOU 2 : sur certaines fenêtres, TOUTES les techniques d'allocation ont sous-performé le simple buy-and-hold BTC (0/25 combinaisons de paramètres au-dessus du benchmark) → HRP améliore le RISQUE, pas forcément le rendement. Ne pas vendre HRP comme une source d'alpha.
-
-**TI — LIQUIDATIONS & OPEN INTEREST (aimants de prix)**
-- GIS101. Construire NOTRE carte de liquidations : OI par coin + niveau de prix où l'OI a bondi + paliers de levier usuels (5x/10x/20x) + signe du funding.
-- GIS102. Formule du prix de liquidation : entrée × (1 − 1/levier + marge de maintenance) pour les longs ; (1 + 1/levier − mm) pour les shorts.
-- GIS103. Contrainte de cohérence : l'OI ne peut pas varier de plus que le volume échangé sur la période → écrêter les variations aberrantes.
-- GIS104. Zone « aimant » = plage de ~1 % avec l'exposition de liquidation estimée la plus forte.
-- GIS105. Mécanique de cascade : le prix atteint un cluster → fermetures forcées (ordres marché opposés) → consomment la liquidité → poussent plus loin → cluster suivant.
-- GIS106. Après épuisement du cluster, le prix se RETOURNE souvent → fenêtre de fade (lien avec `fade_liquidation_backtest`).
-- GIS107. Clusters des deux côtés = environnement volatil (cascade possible dans les deux sens) → réduire la taille.
-- GIS108. Zones VIDES de liquidations : le prix les traverse vite (pas de flux forcé) → ne pas y placer d'ordres d'attente.
-- GIS109. Divergence OI/prix (le signal le plus actionnable) : prix en nouveaux sommets + OI en baisse = rallye sans conviction à levier → pullback probable.
-- GIS110. Prix en baisse + OI en forte baisse = capitulation des longs → souvent la FIN de la vente.
-- GIS111. Hausse de l'OI avec hausse du prix = argent neuf côté long ; hausse de l'OI avec baisse du prix = argent neuf côté short.
-- GIS112. Nos liquidations RÉELLES (flux WS `WsLiquidation`) servent à CALIBRER le modèle de clusters estimés (on a la vérité terrain, pas seulement l'estimation).
-- GIS113. GARDE-FOU : les heatmaps sont des ESTIMATIONS (les bourses ne publient pas les prix de liquidation individuels) → lire « cette zone a probablement plus d'exposition que ses voisines », jamais « ce prix exact liquide ce montant exact ».
-
-**TJ — SMART MONEY & SÉLECTION DE LEADERS (critères sourcés)**
-- GIS114. Critères de « smart money » : win rate élevé + profits réalisés substantiels + performance À TRAVERS LES CYCLES (pas une fenêtre).
-- GIS115. Indicateurs de compétence : diversité des actifs tradés, timing stratégique, gestion du risque.
-- GIS116. Indicateurs avancés : prise de position précoce, anticipation de tendance.
-- GIS117. Méthode rigoureuse (backtest de performance) : calculer le PnL de chaque wallet, filtrer win rate + gains, puis VÉRIFIER que ce n'est pas de la chance (nombre minimum de trades + consistance dans le temps).
-- GIS118. Seuils indicatifs sourcés pour le copytrading : ROI réalisé > 50 %, win rate > 0,6, nombre de trades suffisant.
-- GIS119. Multi-fenêtres (30 j / 90 j / 180 j / 2 ans) : exiger la présence dans PLUSIEURS fenêtres, pas seulement 30 jours (anti-chance).
-- GIS120. Netflow de capital des leaders (entrées/sorties nettes) comme signal d'accumulation/distribution.
-- GIS121. Piège SYBIL : une entité peut contrôler des milliers de wallets → dédupliquer les entités avant de compter les « leaders indépendants ».
-- GIS122. Piège WASH TRADING : le volume peut être fabriqué entre wallets contrôlés → exiger des motifs d'échange organiques.
-- GIS123. Piège « early buyer » : certains sont des initiés ou des farmeurs d'airdrop, pas des traders compétents.
-- GIS124. Détecter les wallets liés (plusieurs adresses du même acteur achetant le même actif) → renforcer le signal au lieu de le compter 5 fois.
-- GIS125. Il existe des labels publics de traders perp Hyperliquid profitables → à utiliser comme RÉFÉRENCE EXTERNE pour valider notre propre sélection (jamais comme vérité).
-
-**TK — ORDONNANCEMENT D'EXÉCUTION (Almgren-Chriss)**
-- GIS126. Séparer impact PERMANENT (reste, γX², INDÉPENDANT du découpage) et impact TEMPORAIRE (décroît, η̃Σnk², SENSIBLE au découpage).
-- GIS127. Conséquence capitale : on ne peut PAS ordonnancer l'impact permanent ; on ne peut réduire QUE le temporaire, en étalant.
-- GIS128. Erreur à ne pas commettre : confondre temporaire et permanent → soit on croit à tort que trader lentement est inutile, soit on attend un retour du prix qui ne viendra jamais.
-- GIS129. Trajectoire optimale en forme close : interpole entre taux constant (neutre au risque) et FRONT-LOADED (averse au risque).
-- GIS130. Plus on est averse au risque, plus on liquide tôt (réduire la variance du coût réalisé) → calibrer κ sur notre aversion.
-- GIS131. Frontière efficiente coût espéré vs risque de timing : choisir le point, ne pas le subir.
-- GIS132. L-VaR (VaR ajustée de la liquidité) : intégrer le coût de liquidation dans la mesure de risque.
-- GIS133. Extension « changement de paramètres » : l'exécution optimale = stratégie statique PONCTUÉE de bascules quand le régime change → brancher sur notre détection de régime (BOCPD, GIS176).
-- GIS134. Pré-calculer une trajectoire par régime possible et basculer dès que le régime est identifié.
-- GIS135. Face à l'incertitude imprévisible, approximer en relevant artificiellement σ (approche sourcée).
-- GIS136. Le coût réalisé (impact VWAP) se situe entre l'impact permanent et le pic instantané : c'est EXACTEMENT ce que notre algorithme contrôle → en faire la métrique de l'exécution.
-- GIS137. Résilience du carnet (vitesse de reconstitution) détermine la part temporaire récupérable → la mesurer par coin (lien Hawkes GIS46).
-
-**TL — CONFORMAL PREDICTION : DIMENSIONNEMENT ET PORTE DE NON-TRADE**
-- GIS138. Intervalles de prédiction SANS hypothèse de distribution, avec garantie de couverture en échantillon fini (90 % demandé → ≥90 % obtenu).
-- GIS139. Dimensionnement inverse-largeur : taille ∝ 1/largeur de l'intervalle → on réduit l'exposition automatiquement quand le modèle est incertain.
-- GIS140. Différence clé vs ciblage-volatilité : la largeur conformale est une mesure d'incertitude PRÉDICTIVE sans hypothèse, pas une variance paramétrique.
-- GIS141. Ratio d'edge e = |μ̂| / largeur = analogue conformal du rapport signal/bruit → l'utiliser pour la taille ET pour filtrer.
-- GIS142. PORTE DE NON-TRADE principielle : si l'intervalle enjambe zéro, le rendement réalisé peut plausiblement avoir le SIGNE OPPOSÉ → ne pas copier.
-- GIS143. Géométrie exacte : l'intervalle quitte zéro quand e > 1/2 ; calibrer le seuil θ par backtest (sur données journalières e est souvent bien < 1/2).
-- GIS144. ATTENTION : les séries financières ne sont PAS échangeables (clustering de volatilité, régimes) → un split conformal aléatoire casse la garantie.
-- GIS145. Utiliser ACI (adaptive conformal inference) ou EnbPI : garantie de couverture à long terme sur données non stationnaires.
-- GIS146. CQR (conformalized quantile regression) : intervalles à largeur ADAPTATIVE (mieux que largeur fixe).
-- GIS147. Fait mesuré : CQR+ACI réduit l'écart de couverture conditionnelle en haute volatilité (82,3 % → 88,1 % pour une cible de 90 %).
-- GIS148. « Conformal Kelly » : lire la demi-largeur comme l'échelle d'une règle Kelly fractionnée plafonnée.
-- GIS149. Limite à respecter : la couverture est MARGINALE, pas conditionnelle → localement elle peut être sous/sur-couvrante.
-- GIS150. Limite 2 : la largeur n'est pas une densité ; dériver un p et un b de Kelly exige une hypothèse EXPLICITE supplémentaire — l'écrire, ne pas la cacher.
-
-**TM — FACTEURS CROSS-SECTION (et leur honnêteté brutale)**
-- GIS151. Fait fort : la BASE est le signal cross-sectionnel le PLUS puissant sur les futures crypto (bien plus que le momentum).
-- GIS152. Paramètres sourcés qui marchent : lookback 5 jours / détention 1 jour ; la prime DISPARAÎT à 1 semaine et 1 mois.
-- GIS153. Interprétation : régimes crypto changeant vite → l'information passée se périme en jours, pas en mois (contraire aux commodités).
-- GIS154. Rendements de facteurs journaliers >> hebdomadaires ; mensuels non significatifs → travailler en journalier.
-- GIS155. Basis-momentum : significatif seul, mais DISPARAÎT une fois la base prise en compte → ne pas double-compter.
-- GIS156. Momentum cross-sectionnel pur : prime non robuste, très sensible au choix lookback/détention.
-- GIS157. GARDE-FOU MAJEUR (réplication nette de coûts) : spread brut +0,573 %/semaine ≈ coûts 0,40 pp → NET non distinguable de zéro, et le signe CHANGE selon le lundi de départ du rebalancement (choix arbitraire sans information de marché).
-- GIS158. Donc : tout facteur doit être testé NET, avec plusieurs phases de rebalancement — un résultat qui change de signe selon la phase n'est pas un edge.
-- GIS159. Sur 864 configurations testées par un tiers, 1 SEULE était robuste (Sharpe > 0,5 sur deux périodes, 70 % des univers en profit, t ≥ 2) → attendre un taux de réussite très faible.
-- GIS160. Primes faibles mais persistantes sur 3 périodes (t < 2) à explorer : distance à l'EMA 200, proximité du plus haut 90 jours, carry de funding hors jeunes listings, illiquidité.
-- GIS161. Piège de survivorship : un momentum cross-sectionnel « à 72 %/an » reposait sur le SHORT de listings récents ; sans les tokens de moins d'un an → ~6 %/an.
-- GIS162. Fait utile : il n'y a PAS de momentum cross-sectionnel parmi les 11 majors → chercher ailleurs que sur BTC/ETH pour ce facteur.
-
-**TN — FUNDING & CARRY (ce qui est mort, ce qui vit)**
-- GIS163. Le funding est un PROXY DE POSITIONNEMENT en temps réel, plus difficile à manipuler que le prix (capital réellement engagé).
-- GIS164. Seuil sourcé : funding > 0,10 % par 8 h = longs payant > 100 % annualisé → position encombrée à levier.
-- GIS165. Les lectures EXTRÊMES précèdent historiquement des retours à la moyenne — non parce que le taux cause le retournement, mais parce qu'il marque une foule à levier.
-- GIS166. Funding NÉGATIF en marché HAUSSIER = conviction baissière qui combat la tendance → short covering potentiellement violent.
-- GIS167. Combiner funding extrême + open interest + action du prix (le signal seul est peu fiable).
-- GIS168. Fait brutal : le carry de NIVEAU (cash-and-carry delta-neutre) est MORT — Sharpe affiché 8,5 = artefact de la quasi-absence de volatilité du funding ; rendement net +5,6 %/an décroissant vers négatif, sous les T-bills, et son vrai risque (base/liquidation/de-peg) n'est même pas capté par un modèle funding-only.
-- GIS169. Ce qui VIT : le facteur de carry CROSS-SECTIONNEL (dollar-neutre, long bas-funding / short haut-funding) → Sharpe IS 0,71, OOS purgé 0,39, deflated 0,63, positif sur 36/36 configurations.
-- GIS170. Mais PBO = 0,81 sur ce facteur : les configurations sont statistiquement indiscernables → impossible de choisir « la meilleure » ; espérer ~0,4, pas 1,5. Drawdown max −35 %.
-- GIS171. Son edge vient de la DISPERSION relative et du retour à la moyenne des longs encombrés, pas du niveau de funding (qui a décru).
-- GIS172. Le funding extrême prédit TRÈS faiblement le prix : rank-IC −0,005 (t = −0,89) — correctement signé (longs encombrés sous-performent) mais NON significatif → l'utiliser comme filtre, jamais comme signal principal.
-- GIS173. Prévisibilité du funding : à cadence 15 min il est proche d'une MARCHE ALÉATOIRE ; la marche naïve bat ou égale OU/ARIMA/SETAR presque partout. Demi-vies OU de 0,5-4 h réelles mais faibles.
-- GIS174. Parcimonie : la sélection d'ordre choisit p=1 sur 10/12 actifs ; ajouter des lags n'apporte rien ; le régime-switching (SETAR) est significativement PIRE plus souvent que meilleur.
-- GIS175. Structure par terme : un spread de termes (yield implicite long − court) est un signal plus fort que le niveau de yield pour anticiper le régime de funding.
-
-**TO — DÉTECTION DE RUPTURE DE RÉGIME EN LIGNE (BOCPD)**
-- GIS176. BOCPD (Adams-MacKay) : filtrage sur un HMM à états infinis ; la postérieure de longueur de run donne la probabilité de rupture en TEMPS RÉEL.
-- GIS177. Paramètre de hasard λ : petit λ = ruptures fréquentes supposées (plus sensible), grand λ = ruptures rares (plus lisse).
-- GIS178. Fait sourcé : la règle maxCPs avec λ = 100 a donné la meilleure performance ; BOCPD surpasse nettement GLR et Kolmogorov-Smirnov.
-- GIS179. Trois règles d'extraction à tester : maximum local (colmax), seuil sur P(rt=0), maximum global (maxCPs).
-- GIS180. Brancher la sortie BOCPD sur : re-validation des leaders, bascule de stratégie, bascule de trajectoire d'exécution (GIS133).
-- GIS181. Extension autorégressive avec paramètres variant dans le temps : capte les dépendances temporelles (mieux que i.i.d. par régime).
-- GIS182. Version MULTIVARIÉE : détecter les ruptures dans les CORRÉLATIONS entre actifs (risque systémique, lien HRP GIS97).
-- GIS183. Limite 1 : latence de détection intrinsèque — BOCPD a besoin d'accumuler l'évidence, il RETARDE légèrement la vraie rupture. Ne pas promettre l'instantané.
-- GIS184. Limite 2 : prior gaussien-NIG suppose la normalité intra-régime ; les rendements crypto sont leptokurtiques → tester un modèle d'observation à queues lourdes (Student-t).
-- GIS185. Limite 3 : l'hypothèse i.i.d. intra-régime est violée par le clustering de volatilité → en être conscient dans la lecture de la postérieure.
-- GIS186. Appliquer BOCPD au FLUX D'ORDRES (pas seulement aux prix) — fait : testé sur l'order flow d'actions liquides.
-- GIS187. Historiser les ruptures détectées et ce qui a marché après chacune (mémoire de régime, lien I178/I224).
-
-**TP — HONNÊTETÉ & GARDE-FOUS NOUVEAUX (ce que ces recherches imposent)**
-- GIS188. Toute métrique de classification se lit en MACRO-F1 (ou par classe), jamais en accuracy brute — la classe stationnaire domine.
-- GIS189. Tout résultat brut se double obligatoirement du NET : la leçon DeepLOB (brut +3850 / spread −8091) est la règle, pas l'exception.
-- GIS190. Tout facteur se teste sur PLUSIEURS phases de rebalancement : un signe qui bascule selon la phase = pas d'edge (GIS157).
-- GIS191. Tout Sharpe se DÉFLATE du nombre d'essais, et on rapporte le PBO à côté (fait : PBO 0,81 rend le « meilleur » inchoisissable).
-- GIS192. Un Sharpe spectaculaire sur un actif à très faible volatilité (funding) est un ARTEFACT : lire le rendement net, pas le ratio.
-- GIS193. Toujours rapporter le drawdown max à côté du Sharpe (le carry cross-sectionnel vit avec −35 %).
-- GIS194. Les risques non capturés par le modèle (base, liquidation, de-peg, halt du déployeur HIP-3) doivent être NOMMÉS, même non quantifiés.
-- GIS195. Les estimations (heatmap de liquidations, GEX, positionnement des dealers) sont des MODÈLES, pas des données — les étiqueter comme telles dans les rapports.
-- GIS196. Avant d'ajouter un modèle sophistiqué, mettre le benchmark simple dans la course (variance récente avant Hawkes, marche aléatoire avant OU/ARIMA, 1/N avant HRP).
-- GIS197. La parcimonie gagne souvent (p=1 bat p>1 ; HRP améliore le risque pas le rendement ; le no-attention FFN reste compétitif) → préférer simple et prouvé.
-- GIS198. Vérifier les artefacts d'horodatage AVANT de croire tout signal de lead-lag (un lead de 700 ms est trivial à fabriquer par dérive d'horloge).
-- GIS199. Séparer ce qui est MÉCANIQUE de ce qui est INFORMATIONNEL (fait : l'impact en racine carrée semble essentiellement mécanique) — ça change l'interprétation et la durabilité de l'edge.
-- GIS200. Conclusion transversale de ces 20 recherches : la prédictibilité court terme EXISTE et est mesurable, mais presque tout l'edge brut est mangé par le spread et les frais. Les seules voies crédibles restantes pour nous : (1) devenir MAKER (gagner le spread au lieu de le payer), (2) exploiter des RÉGIMES où l'adverse selection chute (week-end HIP-3), (3) capter des primes STRUCTURELLES (carry cross-sectionnel, base), (4) anticiper via un MENEUR (Binance → HL, ordres en attente). Tout le reste est du bruit coûteux.
-
 ### C-quindecies-bis. CERTIFIER MEME APRES UN ARRET BRUTAL (13/11)
 
 **Demande de Florent : « meme si il crash il faut quand meme certifier les donnees collectees ».**
@@ -2175,6 +971,1529 @@ reprend entiere. Le certificateur etait donc deja concu pour des rubans qui gros
 maintenant : on ne modifie JAMAIS un `.cmd` en cours d'execution** (Windows le lit au fur et a
 mesure ; l'offset se decale et la reprise tombe au milieu d'une ligne). D'ici la, le lanceur
 `CERTIFIER_EN_CONTINU.cmd` couvre le besoin a la main.
+
+### C-sexdecies. LE DEFAUT COMPTABLE DES FRAIS D'ENTREE EST CORRIGE (14/11)
+
+**Il etait ouvert depuis le 12/11 et documente par DEUX TESTS VOLONTAIREMENT ROUGES.** Ils sont
+verts maintenant, et ils avaient raison depuis le debut.
+
+**CE QUI ETAIT FAUX.** Deux modeles comptables coexistaient :
+```
+close_delta_pnl    = gross - sortie - funding            (modele CAISSE : entree payee a l'ouverture)
+round_trip_net_pnl = gross - entree - sortie - funding   (modele COMPLET)
+```
+Le modele CAISSE n'est valide que si l'ouverture DEBITE reellement. Verification ligne par ligne :
+la branche OPEN/ADD se contente de ranger le cout sur la position (`entry_costs`) ; `entry_costs_paid`
+etait calcule, publie dans `entry_costs_paid_usdc` et `total_costs_paid_usdc`, et n'entrait NI dans
+`total_pnl` NI dans l'equite. **Rien ne facturait les frais d'entree, nulle part.** Deux commentaires
+affirmaient pourtant « already booked as realized cash cost at OPEN/ADD » et « charging them again
+would double-count » : FAUX tous les deux. C'est « MENTION != PORTE » applique a la comptabilite —
+un cout mesure, affiche, et jamais preleve.
+
+**CE QUI A ETE CORRIGE.** Modele COMPLET : chaque frais compte UNE FOIS, la ou il se voit.
+* `ui/status_routes.py` — le coeur du defaut : `entry_cost_usdc=0.0` etait **force a zero** dans
+  `_mark_to_market_positions`. Desormais le vrai cout est passe. Une position ouverte vaut ce
+  qu'elle rapporterait NETTE si on la fermait maintenant — c'est d'ailleurs ce que dit la formule
+  publiee juste en dessous : `(mark-entry)*size-entry_cost-exit_cost`.
+* `ui/routes.py` — le mark des positions ouvertes deduit `entry_costs` ; la fermeture publie
+  l'aller-retour complet ; et `total_pnl` ne soustrait RIEN separement (le frais migre de
+  l'unrealized vers le realise au moment exact de la fermeture, donc le soustraire une seconde
+  fois recreerait le double comptage que le durcissement avait, lui, correctement supprime).
+
+**PREUVE** : `-0,24` au lieu de `-0,12` sur le mark, equite `999,76` au lieu de `999,88`,
+`0.7388` au lieu de `0.7588`. **83 tests comptables passent**, le test d'aller-retour est stable 3/3.
+
+**DEFAUT D'ISOLATION DECOUVERT EN CHEMIN — important.** `test_ui_simulation_status_fast.py` lit
+`runtime/data/hl_allmids.json`, que la campagne ECRIT EN DIRECT : le test recevait `mark_price=1889.0`
+(le prix ETH reel du moment) au lieu de `2010.0` (sa fixture). **Lancer ces tests pendant une collecte
+donne des resultats faux**, dans les deux sens. Cela explique aussi les lots « 44 echecs groupes,
+tout vert en isolation » observes le 13/11. A isoler.
+
+### C-septdecies. LE TAUX DE REMPLISSAGE MAKER EST MESURE : 47,1 % (14/11)
+
+**C'etait LE chiffre manquant du seul levier jamais ouvert.** Tout edge mesure ici meurt dans les
+couts : `fast_follow` REJETE a tous les horizons <= 300 s **meme a spread nul**, DeepLOB a
+**-4 242 bps net**, 67 % des fills de leaders passifs et valant ~0 avant frais. L'entree MAKER
+(encaisser le spread au lieu de le payer) n'avait jamais pu etre evaluee.
+
+**POURQUOI ELLE ETAIT BLOQUEE.** Le moteur savait deja modeliser l'economie maker :
+`robustness.maker_adjust_net` gere l'economie d'un trade rempli ET la selection adverse
+(`adverse=True` garde les PIRES trades : les gagnants filent avant que l'ordre passif soit
+touche), et `microstructure_extras.maker_queue_fill_prob` donne une probabilite de file.
+**Mais les deux PRENNENT `fill_rate` EN PARAMETRE** — personne ne l'avait mesure. D'ou
+`native_cross_venue_replay` publiant `maker_fill_proven: False` en dur et des cles nommees
+`..._unproven_fill`. Le moteur refusait de conclure, et il avait raison.
+
+**CE QUI A ETE CONSTRUIT.** `backtesting/maker_fill_probe.py` (17 tests) + `tools/mesurer_remplissage_maker.py`. Pour chaque fill de leader, on simule un ordre PASSIF pose
+au touch au moment ou NOUS l'observons (delai de copie compris) et on regarde si le marche
+l'aurait consomme dans l'horizon.
+
+**TROIS CHOIX QUI RENDENT LA MESURE HONNETE** (et non flatteuse) :
+1. on se met **DERNIER dans la file** — toute la taille affichee a notre prix est devant nous ;
+2. seul le volume au **prix OU MIEUX** consomme la file ;
+3. **« je ne sais pas » n'est JAMAIS « rempli »** — carnet absent, niveau absent ou fenetre sans
+   trade sortent en NON MESURABLE et n'entrent dans aucun numerateur ; le taux porte toujours
+   son denominateur. Couvrir la file SANS couvrir notre propre taille n'est pas un remplissage.
+
+**RESULTAT MESURE : 47,1 % sur 603 cas jugeables** (38 non mesurables, 2 094 ecartes comme hors
+de la fenetre couverte par les trades). Les hypotheses etant pessimistes, **le vrai taux ne peut
+qu'etre SUPERIEUR**. `maker_adjust_net(fill_rate=...)` cesse d'etre alimente au doigt mouille.
+
+**DEUX PIEGES DE LECTURE CORRIGES EN CHEMIN** (tous deux auraient fait conclure « maker
+impossible ») :
+* **fenetre de couverture par coin** : le ruban des trades pese 3,7 Go, sa queue ne couvre que
+  ~28 min alors que les fills remontent a 237 min. Juger hors de cette fenetre produisait un
+  artefact de LECTURE. Meme piege que la reconciliation des carnets (fenetre globale accusant a
+  tort 114 fills sur 687).
+* **noms de champs reels** : les trades portent `received_at_ms` / `exchange_ts_ms` et
+  `price` / `size`, PAS `ts_ms` / `px` / `sz`. Ne chercher que `ts_ms` revenait a ignorer
+  SILENCIEUSEMENT 100 % des trades. La RECEPTION prime (instant ou nous aurions pu agir), choix
+  canonique du projet. Verrouille par deux tests.
+
+**LA SECONDE HYPOTHESE ETAIT PIRE QUE LA PREMIERE.** L'appel historique
+(`tools/analysis/_optim_analysis.py`) ecrivait `spread_saving_usd=0.20` **EN DUR**, toutes
+tailles et tous coins confondus. Mesure sur 719 carnets reels : **0,0421 USD de mediane**.
+**La constante etait 4,75x trop genereuse** — toute evaluation maker anterieure etait gonflee
+d'autant. Et le meme appel n'utilisait que `adverse=False`, c'est-a-dire la borne HAUTE.
+
+ `economie_de_spread(carnet, notionnel)` mesure le DEMI-SPREAD reel par
+coin, et `encadrement_maker(...)` publie desormais les DEUX bornes avec un verdict en trois
+etats : `POSITIF_MEME_AU_PIRE` / `POSITIF_SEULEMENT_AU_MIEUX` / `NEGATIF_DANS_LES_DEUX_CAS`.
+Un canari AST interdit toute valeur chiffree en dur pour `fill_rate` et `spread_saving_usd` :
+l'hypothese ne peut plus revenir par la petite porte. **22 tests.**
+
+**MESURE CONSOLIDEE : remplissage 48,2 % sur 674 cas ; economie 0,0421 USD sur 719 carnets.**
+
+**PROCHAIN PAS** : brancher ce taux mesure dans `maker_adjust_net` et relancer les familles
+declarees mortes en taker — `fast_follow` en tete, puisqu'il etait rejete *meme a spread nul*,
+donc par les FRAIS et non par le spread.
+
+### C-novodecies. LECON DE MICROSTRUCTURE — le remplissage n'est que la MOITIE (14/11)
+
+**CORRECTION D'UNE CONCLUSION DU MATIN MEME.** `maker_fill_probe` a mesure 48,2 % de remplissage
+et 0,0421 USD de gain de spread. **C'est la moitie FAVORABLE de l'equation.** La decomposition
+complete d'un remplissage passif est :
+
+```
+net(t) = capture + adverse(t) - frais
+capture    = e * (m0 - p) / m0      demi-spread encaisse, TOUJOURS >= 0, fige au fill
+adverse(t) = e * (mt - m0) / m0     derive du mid APRES le fill, <= 0 en moyenne
+```
+
+**CE QUE LA LITTERATURE MESURE, SUR HYPERLIQUID.** Daru Finance, *Quoting the Touch Does Not Pay
+Its Adverse Selection* : 9 983 jours-coin, **125,8 M de remplissages simules**, avec la MEME
+hypothese de file que la notre (« queues behind all visible size »). Sur Hyperliquid :
+capture **+0,56 bp**, derive a 10 s **-1,02 bp**, **net -0,46 bp AVANT frais**, intervalle a 95 %
+(groupe par mois ET par coin) excluant zero. Sur Bybit -0,84 bp, sur Binance USD-M -0,39 bp.
+**Conclure « le maker est viable » depuis le seul taux de remplissage aurait ete une erreur.**
+
+**CE QUI CHANGE LE SIGNE : LA PLACE DANS LA FILE.** Albers, Cucuringu, Howison & Shestopaloff,
+sur le perp BTC d'Hyperliquid a 5 s : remplissage maker moyen **-0,48 bp**, mais ceux qui gagnent
+la **PREMIERE PLACE** de la file **+0,32 bp** — ecart **~0,8 bp**, plus grand que deux des trois
+nets ci-dessus. **Ce n'est pas la prediction qui separe le gagnant du perdant, c'est la place
+dans la file.** Toute conclusion maker doit donc dire A QUELLE PLACE elle vaut ;
+`maker_fill_probe` suppose la DERNIERE, c'est-a-dire le pire cas, et c'est volontaire.
+
+**L'AVANTAGE STRUCTUREL D'HYPERLIQUID, A EXPLOITER.** Chaque bloc valide est REORDONNE pour que
+les annulations et les ordres post-only s'executent EN PREMIER (blocs de ~100-200 ms). Un maker
+qui detecte un mouvement peut donc annuler et **battre un preneur plus rapide que lui** — une
+defense qui n'existe pas sur les venues centralisees. Effet mesure : markout a 1 s d'environ
+**1,1 bp sur Hyperliquid contre ~2 bp** sur les grandes CEX.
+
+**TROIS LEVIERS OPERATIONNELS** (praticiens, convergents) : raccourcir le temps de detention (le
+mal se fait dans les secondes qui suivent le fill) ; plafonner l'inventaire (seul le cote qui
+REDUIT continue de coter) ; recoter souvent (ne jamais etre l'ordre le plus perime du carnet).
+Et un contre-sens a eviter : **coter plus loin ne protege pas** — on se fait remplir uniquement
+quand le marche bouge fort, donc precisement quand c'est toxique.
+
+**CE QUI A ETE CONSTRUIT** : `backtesting/markout.py` (11 tests). Tous les pieges connus sont
+refuses explicitement : jointure **as-of** et jamais « au plus proche » (sinon un markout a
+100 ms devient un markout a 1,9 s sans prevenir) ; horizon hors donnees = **TRONQUE, jamais
+zero** (prolonger par le dernier prix fabrique « aucune derive ») ; aucun regard vers le futur
+pour le mid de reference ; peremption bornee **sans valeur par defaut** (le module refuse d'en
+deviner une) ; fills **passifs uniquement** ; signe inverse cote vente ; **distribution publiee**
+et pas seulement la moyenne ; un horizon sans donnee **ne vote pas** ; et surtout **« rien mesure »
+n'est JAMAIS « flux sain »**.
+
+**FAIT — ET LE VERDICT TOMBE.** Markout branche sur les fills reels d'Alina :
+
+```
+ALINA (mesure)                    REFERENCE (125,8 M fills, Hyperliquid)
+capture   : +0,02 bp              capture   : +0,56 bp
+net  1 s  : -0,16 bp
+net  5 s  : -2,53 bp
+net 10 s  : -3,42 bp              net 10 s  : -0,46 bp
+net 30 s  : -2,38 bp
+-> FLUX TOXIQUE (n = 236 remplissages)
+```
+
+**LA DECOUVERTE DU JOUR, ET ELLE INVALIDE MA MESURE DU MATIN.** L'economie de spread mesuree a
+l'instant de l'ORDRE valait 0,0310 USD, soit ~2 bp. La capture mesuree a l'instant du FILL vaut
+**+0,02 bp** : un rapport d'environ **100x**.
+
+La raison est structurelle et vaut pour toute strategie passive : **un ordre passif n'est rempli
+QUE si le marche vient a son prix.** A cet instant, le mid a deja baisse jusqu'a notre bid, donc
+`(m0 - p) ~ 0`. **Le demi-spread visible au moment de poser l'ordre n'est pas encaissable** ; il
+n'est encaisse que dans les etats du monde ou le prix a bouge CONTRE nous. C'est exactement ce
+que la litterature formule : `capture ~ -adverse`, donc `net ~ 0` — et ici pire que zero.
+
+**CONSEQUENCE POUR LE MOTEUR : le chemin maker NAIF (poser au touch, dernier dans la file) est
+PIRE que le taker.** Il ne sauvera pas `fast_follow`. Toute evaluation maker qui alimente
+`maker_adjust_net` avec une economie mesuree A L'ORDRE surestime le gain d'environ deux ordres de
+grandeur. **`spread_saving_usd` doit venir de la CAPTURE AU FILL, jamais du spread affiche.**
+
+**CE QUI RESTE OUVERT** — les deux seules voies que la litterature laisse :
+1. **la place dans la file** : premiere place +0,32 bp contre -0,48 bp en moyenne (ecart 0,8 bp).
+   Mesurer ce que coute/rapporte d'etre devant, au lieu de supposer la derniere place ;
+2. **l'annulation prioritaire d'Hyperliquid** : les blocs reordonnent cancels et post-only EN
+   PREMIER, donc un maker qui detecte le mouvement peut annuler et battre un preneur plus
+   rapide. C'est la seule defense structurelle disponible, et elle n'existe pas ailleurs.
+
+Tant que l'une des deux n'est pas mesuree, **le maker reste REFUTE sur nos donnees**.
+
+**PROCHAIN PAS** : brancher ce markout sur les fills reels pour obtenir le net maker d'Alina, et
+le comparer au -0,46 bp de reference. Si notre net est pire, le maker ne sauvera pas
+`fast_follow` ; s'il est meilleur, il faudra dire POURQUOI avant d'y croire.
+
+### C-vicies. APPRENDRE A TRADER COMME UN SENIOR — la duree avant le signal (14/11)
+
+**LA QUESTION N'EST PAS « le signal est-il positif ? » MAIS « puis-je tenir assez longtemps pour
+payer le trade ? »** Tout ce que ce labo a mesure meurt dans les couts : `fast_follow` rejete a
+tous les horizons <= 300 s **meme a spread nul** (donc tue par les FRAIS, pas par le spread),
+DeepLOB -4 242 bps, maker naif -3,42 bp de markout. Le seul edge vivant est le carry de funding.
+
+**TROIS RESULTATS DE LA LITTERATURE, ET LE TROISIEME GOUVERNE TOUT.**
+
+1. **Le seuil est une DUREE, pas un taux** : `N* = C / mu`. Un aller-retour de 0,38 % a
+   0,01 %/8 h demande **38 periodes, soit 12,7 jours**. « La duree de detention, pas le taux
+   affiche, determine si un carry gagne de l'argent. »
+2. **`N*` est un PILE OU FACE** : c'est exactement le point ou P(profit) = 50 %, ce que les
+   calculateurs ne disent jamais. Le seuil a 95 % resout `mu·N - z·sigma·sqrt(N) - C = 0` et vaut
+   **~4,2x plus long** en i.i.d., **~6,4x** avec une persistance AR(1) faible (phi = 0,3) —
+   verifie par Monte-Carlo sur 200 000 trajectoires.
+3. **Trader le signal le DETRUIT.** Mesure sur deux ans : la regle a seuil produit **le plus de
+   revenu BRUT de toutes les regles testees** et finit a **-9 % a -15 % net** — l'execution
+   consomme **trois fois le brut**. La regle qui tient en continu et ne revise que sur une
+   horloge de 30 jours (**1 a 5 allers-retours en DEUX ANS**) rend **+2,7 % a +5,4 % net**,
+   drawdown sous 2 %. **La direction du signal est un regime qui dure des mois ; son niveau est
+   du bruit horaire. Confondre les deux, c'est tout le piege.** Marge d'erreur : la regle
+   patiente supporte un cout d'aller-retour de plus de **250 bps**, la regle active meurt
+   au-dela de **8 bps**.
+
+**APPLIQUE A NOS CHIFFRES REELS** (`backtesting/carry_horizon.py`, 10 tests) :
+
+```
+cout aller-retour (4 jambes taker a 4,5 bps) : 0,180 % du notionnel
+horizon disponible : 144 h (la campagne de 6 jours)
+
+regime 2026 faible (mu=0,001 %/h)  seuil 95 % = 296 h  ->  NON TENABLE
+regime median      (mu=0,003 %/h)  seuil 95 % = 139 h  ->  tenable, de justesse
+regime riche       (mu=0,010 %/h)  seuil 95 % =  77 h  ->  TENABLE
+```
+
+**CONSEQUENCE MAJEURE POUR LA CAMPAGNE.** Le regime de funding 2026 mesure est FAIBLE : sur
+708 relevés, le funding BTC n'a **jamais** depasse 0,01 %/8 h, et 29,4 % etaient negatifs ; le
+funding annualise brut est tombe de 30,61 % (2021) a **2,43 % (2026)**. Dans ce regime, **6 jours
+ne suffisent pas a tenir UNE position de carry jusqu'a son seuil de confiance a 95 %**. La duree
+de campagne n'est donc pas seulement une question de puissance statistique (racine de n) : c'est
+une question de **duree de detention**. Le moteur ne peut pas valider un trade qu'il ne peut pas
+tenir.
+
+**CE QUE LE MODULE REFUSE** : un taux nul ou de signe contraire (aucune duree ne corrige un
+signe — on refuse au lieu de renvoyer un grand nombre) ; une volatilite inconnue (se rabattre sur
+le seuil naif dirait « confiant » la ou l'on est a pile ou face) ; un horizon de donnees plus
+court que la duree requise (`NON_TENABLE`).
+
+**RISQUE A NE PAS OUBLIER** : « delta-neutre » n'est pas « a l'abri d'une liquidation ». Les
+excursions adverses mesurees sur la jambe short vont de **+116 % (BTC) a +400 % (SOL)** sur des
+detentions de 31 a 98 jours. La marge de portefeuille est un **prerequis**, pas une optimisation.
+
+### C-vicies-bis. LA COUCHE DE SURVIE — placable ? survivable ? AVANT rentable (14/11)
+
+**C'est la couche qui manquait.** Tout l'appareil de ce labo repondait a « cet edge survit-il aux
+couts ? ». **Aucune ligne** ne repondait a « cet ordre serait-il accepte par la venue, et la
+position tiendrait-elle jusqu'a l'echeance ? ». Une analyse d'edge sur une position liquidee en
+route ne vaut rien. `backtesting/survie_position.py`, 18 tests.
+
+**LES CONTRAINTES DURES D'HYPERLIQUID** (documentation de la venue) :
+* **notionnel minimum 10 USD** par ordre. Une regle de dimensionnement qui sort 4 USD ne produit
+  pas une petite position : elle produit un **ordre REJETE**.
+* **mmr = moitie de la marge initiale au levier max** : de **1,25 %** (40x, BTC) a **16,7 %** (3x).
+* **prix de liquidation** : `liq = p - side * marge_dispo / taille / (1 - l*side)`, `l = 1/lev_mnt`.
+  **Verifie** : un long a 1x rend liq = 0 (jamais liquidable) — la formule est bien implementee.
+* **la liquidation de secours coute EN PLUS** : sous 2/3 de la marge de maintenance, « the
+  maintenance margin is not returned to the user ». Terme de perte que personne ne modelise.
+
+**LE CALCUL QUI CHANGE LE DIMENSIONNEMENT.** En inversant la formule de la venue :
+`L_max = 1 / (e*(1+mmr) + mmr)`. Applique aux excursions adverses **REELLEMENT OBSERVEES** sur
+31-98 jours de detention (+116 % BTC, +400 % SOL) et a 350 USD de capital :
+
+```
+actif     lev.max    mmr   excursion   lev.max survivable   notionnel
+BTC         40x    1,25 %    +116 %          0,84x           295 USD
+ETH         25x    2,00 %    +200 %          0,49x           170 USD
+SOL         20x    2,50 %    +400 %          0,24x            85 USD
+alt 10x     10x    5,00 %    +400 %          0,24x            82 USD
+```
+
+**Un levier superieur a 1x sur une jambe de carry n'est pas « agressif » : il est MATHEMATIQUEMENT
+INCOMPATIBLE avec les excursions deja mesurees.** Sur SOL, la jambe short doit rester sous
+**85 USD de notionnel sur 350 USD** de capital.
+
+**ET LA CONSEQUENCE EST ENCOURAGEANTE, pour une fois.** Sur ces 85 USD survivables, regime median
+(0,003 %/h) : carry brut 2,55 USD / 1 000 h, cout d'aller-retour 0,153 USD, net ~2,40 USD, soit
+**~6 % annualises sur le capital**. **Ce chiffre, obtenu independamment par nos propres formules,
+tombe exactement dans la fourchette publiee pour la regle patiente (+2,7 % a +5,4 % net).** Deux
+chemins de calcul separes qui convergent : c'est le meilleur signe de validite qu'on ait eu.
+En regime FAIBLE (celui mesure pour 2026), le meme calcul rend **NON_TENABLE**.
+
+**CE QUE LE MODULE REFUSE** : un notionnel sous le minimum (`REJETE`, jamais « petite position ») ;
+un `mmr` inconnu (supposer 1,25 %, reserve a BTC, autoriserait un levier mortel sur un alt) ;
+une excursion non fournie — **l'ABSENCE de scenario adverse n'est pas un scenario favorable**.
+
+### C-vicies-ter. LE PREMIER PnL POSITIF MESURE — et le chemin pour y arriver (14/11)
+
+**Donnees** : `funding_history` (90 coins) + `candle` 1h (263 coins), **211 jours** (17/04 au
+14/11), tier **LOCAL** (pont local, pas corpus SAFE reconcilie). `backtesting/carry_patient.py`,
+20 tests. Cout retenu : **13 bps par jambe et par aller-retour** (4,5 taker x2 + 2 slippage x2).
+
+**ETAPE 1 — LE CARRY SEUL DISAIT +15,44 %/an. C'ETAIT UNE DEMI-MESURE.** Le funding rapportait
++1,399 % par revision. **Je n'avais pas mesure le prix** — exactement la faute du demi-spread
+commise le matin meme. Avec le prix : **-9,687 %**, sept fois plus gros et de l'autre signe.
+
+**ETAPE 2 — POURQUOI.** Le prix du livre vaut `(rendement des bas-funding - rendement des
+hauts-funding)/2`. Les coins a funding eleve ont **surperforme de 19,4 % par 30 jours** : un
+funding eleve signale une **foule deja longue**, donc un gagnant recent. **Shorter le funding
+eleve, c'est shorter le momentum.**
+
+**ETAPE 3 — UNE INVERSION D'ABORD FAUSSE, RATTRAPEE.** Ma premiere inversion niait les VALEURS
+de funding, ce qui fabrique un revenu fictif : la strategie et son exact oppose affichaient
+**+1,840 % et +1,845 %**, impossible. Signe de l'artefact. L'inversion correcte retourne les
+**POSITIONS** en laissant le funding intact ; un test le verrouille (`funding_moyen < 0` dans le
+sens inverse, car on PAIE sur les deux jambes).
+
+**ETAPE 4 — 6 OBSERVATIONS NE DECIDENT RIEN.** A 30 jours d'horloge sur 211 jours, on n'a que
+**6 detentions disjointes**, et une seule a **-22,8 %** ecrasait les cinq autres. Ajout de `pas_h`
+(detention de 30 j demarree chaque semaine) : **25 detentions**. Elles **CHEVAUCHENT** (29 j
+partages sur 30), donc **pas de t de Student** — declare par `fenetres_independantes: False`, et
+l'annualise se lit sur la MOYENNE par detention, jamais sur la somme (sinon on compte le meme
+gain plusieurs fois).
+
+**ETAPE 5 — TRAIN / TEST (106 j chacun), les deux sens, k=4 (impose, voir plus bas) :**
+
+```
+                 funding     prix    net/det   annualise   positives   pire
+TRAIN  carry     +2,025 %  -2,377 %  -0,482 %    -5,9 %      6/10
+TEST   carry     +1,567 %  -6,452 %  -5,015 %   -61,0 %      2/10
+TOUT   carry     +1,635 %  -4,901 %  -3,396 %   -41,3 %      8/25
+TRAIN  inverse   -2,164 %  +2,964 %  +0,670 %    +8,2 %      5/10     -11,18 %
+TEST   inverse   -1,775 %  +7,217 %  +5,312 %   +64,6 %      9/10     -13,69 %
+TOUT   inverse   -1,803 %  +5,327 %  +3,394 %   +41,3 %     18/25     -15,89 %
+```
+
+**LE CARRY EST REFUTE** : negatif dans les deux moities. **Le livre inverse est positif en TEST a
+tous les k testes (2, 3, 4, 5) et sur l'ensemble.**
+
+**ETAPE 6 — LE SOUPCON DE BETA, LEVE.** Un livre dollar-neutre long/short pourrait n'etre qu'un
+pari sur la direction du marche. Mesure : **rho de Spearman livre <-> marche = +0,266, p = 0,20
+contre un seuil corrige de 0,025 -> lien NON retenu**. Et surtout, le livre gagne dans les DEUX
+regimes : **marche en baisse (11 det.) net +1,676 %, 7/11 positives** ; marche en hausse (14 det.)
++4,283 %, 10/14. La fenetre contenait un vrai choc (**-23,3 % de marche en 30 j**), traverse a
+-7,98 % au pire. **Ce n'est donc pas du beta mal couvert.**
+
+**ETAPE 7 — LA CONFIGURATION JOUABLE, imposee par les portes et non choisie.** Le palier le plus
+contraignant du livre decide : alt 10x, mmr 5 %, excursion observee +400 % -> **levier maximum
+0,235x**, soit **82,4 USD de notionnel sur 350**. Par jambe : k=5 donne 8,2 USD -> **REJETE**
+(minimum 10 USD de la venue) ; **k=4 donne 10,3 USD -> PLACABLE**. **C'est la contrainte de
+placement qui impose k=4, pas le backtest** — et k=4 a ete verifie APRES, pas choisi pour son
+chiffre.
+
+```
++41,3 %/an sur notionnel  x  0,235 de levier  =  +8,99 %/an sur capital
+                                              =  +31,46 USD/an sur 350 USD (PAPER)
+cout si liquidation : 4,12 USD (marge de maintenance non rendue)
+```
+
+**CE QUE CE CHIFFRE N'EST PAS.** Ce n'est pas une prevision : c'est ce que 211 jours ont contenu,
+et **l'essentiel vient de la seconde moitie** (TRAIN +8,2 % contre TEST +64,6 %, et k=3 est meme
+negatif en TRAIN). Un effet stable donnerait deux moities franchement positives. Reserves a
+garder au clair : 25 fenetres chevauchantes valent ~7 observations independantes ; un seul regime
+(avril-novembre 2026) ; **et la nature du livre est d'etre LONG LA FOULE** — or la venue a connu
+une cascade qui a detruit 7,4 Md USD d'OI et liquide integralement plus de 1 000 comptes. C'est
+precisement le scenario ou ce livre est le combustible. La fenetre mesuree n'en contient pas.
+
+### C-vicies-quater. LE MAKER EST REFUTE, MEME EN TETE DE FILE (14/11)
+
+L'experience annoncee d'avance a rendu son verdict, sur **31 863 cas jugeables** tires de
+**191 743 remplissages** du coffre (6 lots de scellement communs aux quatre familles) :
+
+```
+                   remplissage   net 5 s   net 10 s   net 30 s
+DERNIERE place        37,8 %     -5,76 bp  -6,03 bp   -7,22 bp
+PREMIERE place        63,1 %     -3,40 bp  -3,56 bp   -3,61 bp
+litterature (BTC)                +0,32 bp
+```
+
+**Gagner la file aide enormement** : le remplissage passe de 37,8 % a 63,1 % et le net gagne
+2,4 bp. **Mais il reste NEGATIF.** Le critere avait ete ecrit AVANT la mesure : « si le bras
+PREMIER reste negatif, le signe appartient au fait de coter au touch, pas a la place dans la
+file ». **Le maker est donc refute sur nos donnees, en tete de file comme en queue.**
+
+L'ecart avec la litterature (-3,40 contre +0,32 bp a 5 s) s'explique vraisemblablement par
+l'univers : la reference porte sur le seul perp BTC, le carnet le plus profond de la venue, la
+ou nous mesurons sur **187 coins** dont des alts peu liquides, ou le demi-spread est large mais
+la selection adverse pire encore.
+
+**UNE MAUVAISE ATTRIBUTION TROUVEE ET CORRIGEE AU PASSAGE.** La capture sortait **negative**
+(-6,01 bp), ce qui est impossible par construction : on place toujours SOUS le mid a l'achat. La
+cause : `m0` etait pris a l'instant du REMPLISSAGE, repliant la derive d'attente dans la capture.
+`markout_d_un_fill` accepte desormais `instant_ordre_ms` et rend une decomposition a trois
+termes : `capture` (demi-spread verrouille au placement, >= 0) + `attente` (ce que la derive a
+coute pendant l'attente) + `adverse` (la selection apres le fill). Sur l'exemple de controle, la
+capture repasse de -50,5 bp a **+50,0 bp**, et la recomposition est exacte.
+**Le NET est inchange** : il vaut `eps(m_tau - p)/reference`, dont le numerateur ne depend pas de
+la reference — un test verrouille cette invariance, car si le net bougeait, la correction serait
+une falsification. **Le verdict de refutation tient donc tel quel.**
+
+### C-vicies-quinquies. DE 31 A 282 USD/AN — deux erreurs de ma part, corrigees (14/11)
+
+**LES +31 USD/AN VENAIENT DE DEUX FAUTES QUE J'AVAIS COMMISES, pas d'une limite du marche.**
+
+**FAUTE 1 — UN PLAFOND DE LEVIER FAUX D'UN FACTEUR 20.** `survie_position` plafonnait a
+**0,235x** en exigeant qu'une **jambe NUE** survive a une excursion de +400 %. Ce chiffre venait
+d'une etude de *cash-and-carry* ou le short etait **couvert par un long spot**, et je l'ai
+applique a un livre **long/short dollar-neutre en MARGE CROISEE**. La venue est explicite :
+« Cross positions are liquidated when **the account value (including unrealized pnl)** is less
+than the maintenance margin times the total open notional », et une lecture independante du
+moteur de risque ajoute : « Positive unrealized PnL on one position supports others, so **a
+hedged book is much harder to liquidate than either leg alone** ».
+La nuance qui empeche de sur-corriger : la marge croisee mutualise les **PnL**, elle ne reduit
+**pas l'EXIGENCE** (« Standard margin sums position-level requirements and gives no hedge
+benefit »). D'ou `maintenance = SOMME(notionnel_i x mmr_i)` sans remise, `valeur = capital +
+SOMME(PnL)` avec compensation, donc **`N < C / (D + mmr)`**.
+`backtesting/dimensionnement_croise.py`, 10 tests. Le `facteur_de_securite` est **obligatoire et
+sans defaut** : dimensionner sur le pire repli OBSERVE garantit une liquidation au premier
+evenement pire. Et c'est **le palier le plus contraignant du livre** qui fixe le mmr, jamais la
+moyenne.
+
+**FAUTE 2 — L'HORIZON, UN PARAMETRE JAMAIS EXPLORE.** Tout ce labo avait teste soit **<= 300 s**
+(fast_follow, tue par les frais meme a spread nul), soit **720 h**. La bande 1 h - 48 h etait
+VIERGE. Balayage sur 211 jours, livre inverse, k=4 :
+
+```
+horizon  rot./an |  TRAIN    pos. |  TEST     pos.    n
+    6h     1460  |  -62,6 %   44% | -142,4 %   42%  415   <- 1460 x 13 bps = 190 %/an de frais
+   12h      730  |  +82,2 %   52% |  -33,0 %   46%  415
+   24h      365  | +110,5 %   59% |  +57,0 %   54%  415
+   48h      182  | +100,5 %   54% |  +47,1 %   50%  204
+   96h       91  |  +66,0 %   67% |  +64,6 %   57%   98   <- TRAIN et TEST se REJOIGNENT
+  168h       52  |  +49,5 %   55% |  +44,6 %   70%   53
+  336h       26  |  +55,6 %   72% |  +46,9 %   60%   25
+  720h       12  |  +25,3 %   50% |  +32,4 %   70%   10   <- mon point de depart, le PIRE
+```
+
+**La forme est un PLATEAU LISSE sur 24-336 h, pas un pic** — un pic isole serait du bruit, un
+plateau large est la signature d'une structure. Et le comportement des frais valide la lecture :
+ils ecrasent exactement la ou la theorie l'exige.
+
+**CRITERE DE CHOIX, ENONCE AVANT DE REGARDER LES USD** : l'ecart TRAIN/TEST le plus faible avec
+n >= 50 — un critere qui ne recompense **PAS** le rendement. Ecarts : 24 h **53,5 pts**, 48 h
+53,4, **96 h 1,4**, 168 h 4,9, 336 h 8,7. **96 h retenu.** Il se trouve que 96 h est aussi le
+meilleur TEST (+64,6 %), ce qui rassure au lieu d'inquieter : le critere n'a rien coute.
+
+**LE LIVRE RETENU** — detention 96 h (4 j), depart toutes les 24 h, k=4, 204 detentions
+chevauchantes : funding **-0,278 %** (on PAIE), prix **+0,881 %**, cout 0,130 % -> net
+**+0,474 % par detention**, mediane +0,651 %, **118/204 positives (58 %)**, pire **-12,14 %**,
+**annualise +43,22 %**.
+
+```
+facteur  levier  notionnel  /jambe  liquide si  rdt/capital   USD/an
+   2,0    3,41x    1195 U    149 U     29,3 %     +147,6 %     +517
+   3,0    2,41x     845 U    106 U     41,4 %     +104,3 %     +365
+   4,0    1,87x     653 U     82 U     53,6 %      +80,7 %     +282
+   6,0    1,28x     449 U     56 U     77,9 %      +55,5 %     +194
+```
+
+**A facteur 4 — il faut que le livre perde 53,6 % pour liquider — on passe de +31 a +282 USD/an**,
+soit **x9**, sans toucher au signal : uniquement en corrigeant mes deux fautes.
+
+**CE QUI RESTE FAIBLE, ET QU'IL FAUT DIRE** : 58 % de detentions positives, c'est mince ; les 204
+fenetres chevauchent 4 fois, donc ~50 observations independantes ; un seul regime (avril-novembre
+2026) ; et le livre reste **LONG LA FOULE**, donc combustible d'une cascade — la venue en a connu
+une a 7,4 Md USD d'OI detruits.
+
+**LE SIGNAL COPYVAULT RESTE NON TESTE, ET C'EST LE VRAI CHANTIER.** Le coffre contient
+`position` (`szi` signe par vault et par coin, **46 vaults, 179 coins**) et `leader_orders`
+(`notionnel_par_coin` avec les deux cotes) — mais seulement **45 heures d'historique**
+(11/11 17h -> 14/11 15h). Impossible de tester une detention de 96 h dessus : on aurait moins de
+5 observations. **A la fin de la campagne (19/11, ~192 h), le signal de positionnement des
+leaders devient testable a 24 h de detention avec des departs toutes les 6 h, soit ~28
+observations.** C'est le premier test a lancer ce jour-la.
+
+### C-vicies-sexies. QUATRE LEVIERS TESTES, TROIS REFUTES — et la refutation la plus utile
+de la session (14/11)
+
+**LEVIER 1 — `k` PLUS GRAND : REFUTE.** La contrainte qui imposait k=4 (jambes sous 10 USD a
+0,235x) avait disparu avec la marge croisee. Mais a horizon 96 h, TEST : **k=4 +64,6 %**, k=6
++31,3 %, k=8 +23,5 %, k=12 +24,7 %. **L'edge est concentre dans les EXTREMES du classement** ;
+diversifier le dilue plus vite que ca ne reduit le repli. Verifie APRES dimensionnement : k=12
+(repli 3,9 % -> 4,85x) rend +120 %/an contre k=4 (repli 5,9 % -> 3,50x) a +226 %. **k=4 gagne.**
+
+**LEVIER 2 — PONDERER PAR 1/VOLATILITE : REFUTE, partout.** funding/egal/k=4 TEST +64,6 % contre
+funding/1-vol/k=4 **+24,3 %**. **L'edge VIT dans les coins volatils** — les alts speculatifs au
+positionnement encombre. Les sous-ponderer sous-pondere le signal lui-meme.
+
+**LEVIER 3 — LE MOMENTUM DIRECT : REFUTE LOURDEMENT, et c'est la decouverte la plus utile.**
+Hypothese testee : « le funding n'est qu'un PROXY du momentum, donc classer directement sur le
+rendement passe garderait le gain de prix SANS payer le funding ». Resultat : **-44,2 % en TEST**
+a k=4, et **negatif a tous les k et toutes les ponderations**. **C'est l'inverse qui est vrai :
+le funding porte une information que le rendement passe ne contient pas.** Le funding mesure
+**l'ENCOMBREMENT DU POSITIONNEMENT**, pas la performance passee — et le momentum a 96 h est en
+fait legerement moyen-reversif.
+**C'EST LE MEILLEUR ARGUMENT DISPONIBLE POUR LE SIGNAL COPYVAULT** : si l'encombrement *deduit*
+du funding fonctionne, l'encombrement *directement observe* dans les positions des leaders
+devrait fonctionner au moins aussi bien, et avec moins de bruit.
+(Le signal combine funding+momentum donne TEST +65,7 % mais TRAIN **-25,0 %** : 90 points
+d'ecart, instable, ecarte par le critere.)
+
+**LEVIER 4 — LA COMPOSITION : REELLE.** `annualise` etait SIMPLE. 91 rotations par an
+reinvestissent le gain. `_compose()` ajoute, et les deux sont publies : la version simple reste
+la bonne pour COMPARER des horizons, la composee pour dire ce que le capital devient.
+
+**UNE ERREUR DE MA PART, ATTRAPEE EN ROUTE.** J'ai d'abord dimensionne sur le pire repli des
+fenetres **NON CHEVAUCHANTES** (-6,07 %), ce qui donnait 5,84x de levier et un annualise a quatre
+chiffres. Mais l'echantillon complet contient une fenetre de 96 h a **-12,14 %** : elle a
+REELLEMENT existe, je l'avais seulement manquee en ne gardant qu'une detention sur quatre.
+**Le dimensionnement doit venir de TOUTES les fenetres.** Et le vrai risque n'est pas la pire
+detention isolee mais le **REPLI CUMULE** de la courbe, car plusieurs mauvaises detentions
+d'affilee se composent.
+
+**LA COURBE DE CAPITAL REELLE** — 51 detentions disjointes de 96 h, 204 jours, depart 350 USD,
+dimensionnement sur le pire des 204 fenetres (-12,14 %) :
+
+```
+facteur  levier   final   compose/an   pire pas   REPLI CUMULE   liquide ?
+   2,0    3,41x    977 U    +528,1 %     -20,7 %      -33,7 %       non
+   3,0    2,41x    766 U    +305,9 %     -14,6 %      -24,5 %       non
+   4,0    1,87x    657 U    +208,6 %     -11,3 %      -19,2 %       non
+   6,0    1,28x    550 U    +124,2 %      -7,8 %      -13,5 %       non
+   8,0    0,98x    497 U     +87,4 %      -5,9 %      -10,3 %       non
+```
+
+**A facteur 4 : 350 -> 657 USD en 204 jours, repli cumule maximum -19,2 %, aucune liquidation.**
+
+**CE QUE CES CHIFFRES NE SONT PAS.** 51 detentions, **un seul regime** (avril-novembre 2026),
+57 % de pas positifs. Un annualise a trois chiffres n'est **pas une prevision** : c'est
+l'extrapolation d'un edge mince a fort levier. **La colonne a regarder est le REPLI CUMULE**, pas
+le capital final. Et le livre reste **LONG LA FOULE**, donc combustible d'une cascade.
+
+**LA FILE, DECOMPOSITION CORRIGEE** (3 lots, 28 013 cas) : avec `instant_ordre_ms`, la **capture
+repasse POSITIVE a +0,69 bp** — l'attribution est reparee. Le net reste negatif (**-5,84 bp a
+5 s**, remplissage 66,2 %). **La refutation du maker tient**, et son diagnostic est maintenant
+lisible : ce n'est pas le demi-spread qui manque, c'est la derive qui le reprend.
+
+### C-vicies-septies. CHASSE AUX LEVIERS, SUITE — et la correction de mon chiffre de tete
+(14/11)
+
+**LE LEVIER TROUVE : L'EDGE EST ENTIEREMENT DANS LA JAMBE SHORT — et il faut quand meme garder
+la jambe longue.**
+
+```
+livre              funding    prix   net/det  annual.  pos.   pire   rho marche
+LONG (fdg haut)    -0,247 % +0,276 % -0,101 %  -9,2 %  48%  -17,0 %   +0,781
+SHORT (fdg bas)    -0,308 % +1,485 % +1,047 % +95,5 %  64%  -42,7 %   -0,797
+LES DEUX           -0,278 % +0,881 % +0,474 % +43,2 %  58%  -12,1 %   +0,190
+```
+
+La jambe longue **perd -9,2 %/an**. Mais la supprimer fait passer le repli de -12,1 % a
+**-42,7 %** et le rho au marche de +0,190 a **-0,797**. Apres dimensionnement : **les deux jambes
++80,8 %/an contre +54,4 % pour le short seul**. **La jambe longue ne se paie pas en rendement,
+elle se paie en RISQUE** — c'est une assurance, et elle vaut plus que son cout. Le livre
+dollar-neutre est donc justifie **par la mesure**, plus par hypothese.
+
+**BALAYAGE DU TAUX DE COUVERTURE, juge APRES dimensionnement** (juger sur le brut elirait 0 %) :
+
+```
+couv.  net/det  brut/an    pire     rho  levier  APRES DIM.  USD/an | TRAIN    TEST
+   0%  +1,047%  +95,5 %  -42,7 %  -0,797  0,57x    +54,4 %    +190  | +159,9 %  +31,1 %
+  50%  +0,664%  +60,6 %  -22,3 %  -0,368  1,06x    +64,3 %    +225  |  +91,8 %  +29,4 %
+ 100%  +0,473%  +43,1 %  -12,1 %  +0,190  1,87x    +80,5 %    +282  |  +57,7 %  +28,6 %
+```
+
+**Monotone : la couverture COMPLETE gagne.** Le brut chute, mais le repli chute PLUS VITE, donc
+le levier autorise compense au-dela.
+
+**MAIS LA COLONNE TEST EST PLATE** (+28,6 a +31,1 %) alors que TRAIN va de +57,7 a +159,9 % :
+**le +95,5 % du short seul est un artefact du TRAIN.**
+
+**CORRECTION DE MON CHIFFRE DE TETE.** Recalcul en ne gardant que les detentions dont la DECISION
+tombe dans la seconde moitie, et en dimensionnant sur le repli de cette moitie :
+
+```
+              n    net/det   brut/an    pire    pos.  levier   sur capital   USD/an
+TRAIN       102   +0,632 %  +57,7 %   -7,2 %   65 %   2,96x    +170,7 %      +598
+TEST        102   +0,315 %  +28,8 %  -12,1 %   51 %   1,87x     +53,7 %      +188
+```
+
+**L'ESTIMATION HONNETE HORS ECHANTILLON EST +188 USD/AN, pas +282.** La degradation TRAIN->TEST
+d'un facteur 3 est la signature d'un surapprentissage partiel. Et **51 % de detentions positives
+en TEST : c'est un pile ou face** — l'edge vient de l'ASYMETRIE (gains plus gros que pertes), pas
+de la frequence. La variante « disjointe » afficherait +640 USD/an, mais elle manque les pires
+fenetres (-6,1 % contre -12,1 %) : c'est le piege deja attrape plus haut.
+
+**CE QUI RESTE SOLIDE, ET CE QUI NE L'EST PAS.** Les gains obtenus en corrigeant la **marge
+croisee** et l'**horizon** sont des faits STRUCTURELS sur la venue et sur le cout — ils ne
+dependent d'aucun parametre ajuste. Le SIGNAL, lui, se degrade hors echantillon.
+
+**AUTRES LEVIERS TESTES CETTE SESSION, TOUS REFUTES :**
+* **fenetre de classement** (24/48/96/168/336 h) : motif qui ALTERNE (24 bon, 48 mauvais, 96 bon,
+  168 mauvais) — du bruit, pas une structure. Aucun gagnant a elire.
+* **variation du funding** au lieu du niveau : +4,8 % a 96 h, -13,2 % a 24 h -> c'est le NIVEAU
+  d'encombrement qui predit, pas son acceleration.
+* **demoyennage transversal** : **mon test etait VIDE PAR CONSTRUCTION**. Soustraire la moyenne
+  transversale a une heure donnee retire la MEME constante a tous les coins, donc ne change AUCUN
+  rang. Les ecarts minuscules observes ne venaient que des coins a heures manquantes. Un vrai
+  demoyennage devrait normaliser par la DISPERSION transversale, ou se faire par groupes.
+
+### C-vicies-octies. LE COUT MESURE AU LIEU D'ETRE SUPPOSE — une correction contre moi, un
+levier pour moi (14/11)
+
+**CIBLAGE DE VOLATILITE : REFUTE comme levier robuste.** A levier MOYEN identique (1,87x), le
+repli cumule passe de -50,3 % (statique) a -47,1 % avec une fenetre de 8 detentions, mais
+**-59,2 % a 16 et -55,1 % a 24**. Une fenetre sur trois ameliore : c'est du bruit, pas un levier.
+Et le levier maximum grimpe a **4,71x** dans les moments calmes, ce qui creverait le budget de
+marge. (Ces courbes composent des fenetres chevauchantes, donc les montants absolus sont gonfles ;
+le biais etant identique sur toutes les lignes, la COMPARAISON reste valide.)
+
+**LE SLIPPAGE : MESURE, ET PIRE QUE SUPPOSE.** Je le supposais a 2 bps depuis le debut. Mesure sur
+**60 000 instantanes de carnet** (les carnets trop minces sur 5 niveaux sont ECARTES, jamais
+comptes comme slippage nul) :
+
+```
+notionnel        n    ecartes   median    moyen     p90      p99
+      50U  119 997        3    3,097b   4,276b   9,453b  21,862b
+     100U  119 843      157    3,160b   4,363b   9,616b  22,385b
+     500U  118 637    1 363    3,696b   4,994b  10,723b  27,129b
+```
+
+**4,36 bps en moyenne, pas 2.** Et il bouge a peine avec la taille (3,10 b a 50 USD contre 3,70 b
+a 500 USD) : **ce n'est donc PAS un probleme de profondeur, c'est le DEMI-SPREAD** d'un univers de
+187 coins dont des alts peu liquides. Mon cout taker reel vaut **17,7 bps**, pas 13.
+
+**ET CE DIAGNOSTIC OUVRE LE LEVIER COMPENSATEUR.** Si le cout est domine par le spread, **un ordre
+passif ne le paie pas : il l'encaisse.** Le maker n'avait ete refute que comme **STRATEGIE A 30 s**
+(markout net -5,84 bps). Comme **METHODE D'ENTREE** d'une position tenue 96 h, le calcul s'inverse :
+* taker : 4,5 b de frais + 4,36 b de demi-spread = **8,86 b par franchissement** ;
+* maker : 1,5 b de frais - 0,69 b de capture mesuree + 2,16 b de selection adverse a 10 s =
+  **~2,97 b**.
+La selection adverse est un cout **PONCTUEL a l'entree**, exactement comme le spread, et sur un
+signal a 96 h ses quelques bps sont du bruit. **Surtout, l'attente est GRATUITE** : le remplissage
+mesure de 66,2 % portait sur 30 s, quand un signal a 96 h peut patienter des heures.
+**Le maker refute a 30 s et justifie a 96 h n'est pas une contradiction : c'est le meme chiffre lu
+au bon horizon.**
+
+```
+scenario                      cout/jambe  TEST brut/an  levier  sur capital  USD/an
+suppose (2 b de slippage)        13,0b      +28,8 %     1,87x    +53,7 %     +188
+taker MESURE (4,36 b)            17,7b      +24,4 %     1,86x    +45,5 %     +159
+maker entree, taker sortie       11,8b      +29,8 %     1,87x    +55,7 %     +195
+maker aux DEUX bouts              5,9b      +35,2 %     1,88x    +66,0 %     +231
+```
+
+**L'ESTIMATION HONNETE TOUT TAKER TOMBE A +159 USD/AN** (mon +188 reposait sur un slippage
+sous-estime). **Avec l'entree passive aux deux bouts : +231 USD/AN.**
+
+**LE RISQUE QUE CE CALCUL NE CHIFFRE PAS, ET QU'IL FAUT MESURER LE 19/11** : le taux de
+remplissage passif **a l'echelle de l'HEURE** n'est pas mesure — seuls 30 s l'ont ete. Un ordre
+passif non rempli, c'est une jambe absente, donc un livre desequilibre et un beta de marche
+reintroduit. Tant que ce taux n'est pas mesure, le **+231 est un plafond, pas une estimation**.
+
+### C-undetricies. LE DECOUPAGE EN TRANCHES — x2,4, et c'est structurel (14/11)
+
+**LE BON CADRAGE, QUE JE N'AVAIS PAS.** L'identite du PnL est
+`USD/an = capital x brut / (D x facteur + mmr)`. **La quantite a maximiser est donc `brut/D`, pas
+le brut.** Tout ce que j'avais teste qui augmentait le brut en gonflant le repli etait perdu
+d'avance (le short seul : +95,5 % de brut, mais -42,7 % de repli).
+
+**LE LEVIER TROUVE.** Je posais tout le livre **a un seul instant** : une mauvaise entree frappait
+100 % du capital. En **4 tranches d'un quart entrees a 24 h d'ecart**, chacune tenue 96 h, le
+capital reste INTEGRALEMENT deploye et le rendement moyen est **INCHANGE** — seul le MOMENT de
+l'entree change. Mais le repli s'effondre, et c'est lui qui fixe le levier.
+
+```
+TEST (hors echantillon), taker MESURE 17,7 b
+1 bloc, entree unique   brut +24,4 %/an   D 12,19 %   1,86x   ->  +159 USD/an
+4 tranches /24 h        brut +24,4 %/an   D  4,34 %   4,47x   ->  +382 USD/an   x2,40
+
+TEST, maker aux deux bouts 5,9 b
+4 tranches /24 h        brut +35,2 %/an   D  4,23 %   4,57x   ->  +562 USD/an   x2,43
+```
+
+**Le gain est de x2,4 en TRAIN comme en TEST et sous LES DEUX hypotheses de cout.** Cette
+stabilite signe un effet **structurel**, pas un ajustement — et c'est attendu, puisque le
+decoupage ne touche pas au signal.
+
+**DEUX PIEGES TRAVERSES POUR DE VRAI, MAINTENANT VERROUILLES PAR DES TESTS**
+(`dimensionnement_croise.repli_tranche`, 5 tests) :
+1. **Ne pas diviser la perte par 4.** Mon premier calcul divisait la perte par le nombre de
+   tranches TOUT EN gardant le capital deploye : il comptait la diversification **deux fois** et
+   annoncait +792 USD/an. Les tranches detiennent des actifs semblables sur des periodes qui se
+   recouvrent, donc **elles peuvent perdre ENSEMBLE**. Le repli correct est le pire de la
+   **MOYENNE MOBILE de 4 detentions consecutives**.
+2. **Juger les deux structures sur les MEMES fenetres.** Ma ligne « 1 bloc » lisait son repli sur
+   une detention sur quatre (D = 7,47 %), ce qui lui laissait **CHOISIR son moment d'entree** — ce
+   qu'aucun livre ne peut faire. Son vrai D est le pire de TOUTES les fenetres : **12,19 %**.
+
+**TRAJECTOIRE DE LA SESSION, en estimation HORS ECHANTILLON :**
+```
+point de depart (jambe nue, 720 h, slippage suppose)      +31 USD/an
+marge croisee corrigee + horizon 96 h                    +188
+slippage MESURE a 4,36 b (correction CONTRE moi)         +159
+decoupage en 4 tranches                                  +382
+plafond si l'execution passive tient                     +562
+```
+
+**LE LEVIER SUIVANT, IDENTIFIE MAIS PAS TESTABLE AUJOURD'HUI : LA LARGEUR DE L'UNIVERS.** Le
+coffre contient le funding de **90 coins** alors qu'il y a des bougies pour **263** et que la venue
+liste plus de **200 perps**. Elargir la collecte de funding elargirait la section transversale —
+donc des queues plus extremes (signal plus fort) ET plus de diversification (D plus bas), les deux
+termes de `brut/D` dans le bon sens. **C'est un manque de COLLECTE, pas de strategie**, et c'est
+actionnable sur la campagne.
+
+### C-duotricies. MISSION « 5 USD/JOUR PROUVE » — ce que la mesure donne, et le protocole
+gele (14/11)
+
+**L'EQUATION, D'ABORD.** 5 USD/jour sur 350 USD = 1 825 USD/an = **521 %/an**. Avec
+`levier <= 1/(D x facteur + mmr)` et `mmr = 5 %`, **meme un repli NUL plafonne a 20x**. Au
+dimensionnement le plus imprudent possible (facteur 1, qui garantit la liquidation au premier
+evenement pire que l'historique), le signal de depart donnait **3,6 USD/jour**. La cible ne se
+comble donc PAS par le levier.
+
+**DEUX DIMENSIONS NON EPUISEES, EXPLOREES.** `k=2` et `k=3` n'avaient jamais ete testes a 96 h, et
+le nombre de tranches non plus. Resultat a 8 tranches : `k=3` donne **+80,4 %/an** quand `k=2`
+donne +28,8 % et `k=4` +44,0 %.
+
+**J'AI D'ABORD CRU A UN PIC DE BRUIT — ET JE ME TROMPAIS.** Un pic isole entoure de valeurs basses
+est la signature du bruit (mon propre critere, enonce pour le balayage d'horizon). Verification sur
+**TROIS TIERS** au lieu de deux moities :
+
+```
+  k | tiers 1 | tiers 2 | tiers 3 | ecart-type
+  1 | +250,3% |  +52,6% |  +47,9% |   94,4     <- LE vrai bruit
+  2 | +154,0% |  +22,4% |  +51,9% |   56,4
+  3 | +106,6% |  +91,4% |  +63,3% |   17,9     <- le plus STABLE
+  4 |  +79,4% |  +64,3% |  +19,4% |   25,5
+  6 |  +39,8% |  +44,8% |   +0,8% |   19,7
+```
+
+`k=3` est positif sur les trois tiers avec la plus faible dispersion des `k` rentables : **retenu
+pour sa STABILITE, pas pour son sommet.** Le pic apparent n'etait qu'un artefact de la coupe en
+deux.
+
+**CE QUE LA MESURE DONNE** (k=3, 8 tranches, 96 h, D = 6,24 % sur 407 fenetres) :
+
+```
+hypothese de brut          brut/an |   f=4      |   f=3      |   f=2
+tiers le plus FAIBLE       +63,3 % | 2,03 U/j   | 2,56 U/j   | 3,47 U/j
+moyenne des trois tiers    +87,1 % | 2,79 U/j   | 3,52 U/j   | 4,78 U/j
+tiers le plus fort        +106,6 % | 3,41 U/j   | 4,31 U/j   | 5,85 U/j
+```
+
+**AUCUNE ligne n'atteint 5 USD/jour au facteur 4.** La cible n'apparait qu'en cumulant le
+dimensionnement le plus agressif (facteur 2, liquidation a -17,5 %) ET l'hypothese de rendement la
+plus favorable. **La fourchette honnete au dimensionnement prudent est 2,0 a 3,5 USD/jour.**
+
+**ET LE PROBLEME PLUS GRAVE QUE CE CHIFFRE : LA SECONDE MOITIE N'EST PLUS HORS ECHANTILLON.**
+Je l'ai consultee pour choisir l'horizon, `k`, la ponderation, le taux de couverture et le nombre
+de tranches. **A force de regards, un temoin devient un complice** : le mot « prouve » n'a plus de
+sens sur ces donnees. C'est exactement le mecanisme qui produit un PBO de 0,81.
+
+**D'OU LE PROTOCOLE GELE** : `docs/PREENREGISTREMENT_5USD.md`, empreinte SHA-256
+**1228b273d9ec7d3bd79e1d3d64baafde**, ecrit AVANT tout regard sur la fenetre de jugement. Il fixe
+les 12 parametres, le cout retenu (**taker 17,7 bps mesure**, PAS l'hypothese maker dont le
+remplissage horaire n'est pas mesure), et **les attentes chiffrees d'avance** (2,03 / 2,79 /
+3,41 USD/jour au facteur 4).
+`tools/juger_preenregistrement.py` l'execute **une fois, sans aucune option reglable** — un outil
+qui laisserait regler `k` apres avoir vu le resultat transformerait le jugement en recherche. Il
+**verifie l'empreinte** et REFUSE de juger si le protocole a ete reecrit entre-temps.
+
+**DATE REELLE DU PREMIER VERDICT : PAS LE 19/11.** L'outil a refuse de juger, et son refus est
+instructif : une fenetre demande 96 h de classement **plus** 96 h de detention, et le resultat
+n'existe qu'une fois la detention terminee. Huit tranches a 12 h d'intervalle exigent donc
+**~18 jours posterieurs au gel**. La campagne en donne six. **Premier verdict vers le 23-25/11,
+verdict robuste debut decembre** ; le funding s'accumule tout seul tant que le collecteur tourne.
+
+**LES TROIS VOIES POUR COMBLER L'ECART, par ordre d'effet attendu :**
+1. **Elargir l'univers de funding de 90 a plus de 200 coins** — il y a des bougies pour 263 coins
+   et la venue liste plus de 200 perps. Queues plus extremes (signal) ET plus de diversification
+   (D plus bas) : **les deux termes de `brut/D`**. C'est un manque de COLLECTE.
+2. **Le signal des leaders**, si l'encombrement directement observe bat l'encombrement deduit du
+   funding.
+3. **Le capital** : a 161 %/an sur capital, 5 USD/jour demande **1 134 USD** au lieu de 350.
+   C'est une decision, pas une mesure.
+
+### C-tritricies. ELARGISSEMENT DE L'UNIVERS DE FUNDING — le levier mis en oeuvre (14/11)
+
+**LE DIAGNOSTIC.** `coins_suivis()` rend **261 coins**, tous abonnables sur la venue. Les bougies
+en couvrent 263. Mais le funding n'en couvre que **90 : 171 coins n'ont JAMAIS ete servis.**
+Ce n'etait pas une limite de conception, c'etait un **budget de temps** : dans
+`backfill_candles_vaults`, la passe bougies consomme ses 3 000 s **avant** que la passe funding
+n'obtienne ses 1 500 s, et le tout ne tourne que toutes les 4 h.
+
+**POURQUOI C'EST LE BON LEVIER.** La largeur de la section transversale joue sur les **deux**
+termes du rapport `brut/repli` qui fixe le resultat : des queues plus extremes (signal plus fort)
+ET plus de diversification (repli plus bas). C'etait le levier n°1 de la liste du
+preenregistrement, et c'est un manque de COLLECTE, pas de strategie.
+
+**CE QUI A ETE FAIT.**
+1. **Option `--seulement-funding`** dans `tools/backfill_candles_vaults.py` (3 tests, dont un qui
+   verrouille que le comportement PAR DEFAUT est inchange — la campagne reexecute ce fichier
+   toutes les 4 h — et un qui refuse la combinaison contradictoire avec `--sans-funding`).
+2. **Budget funding porte de 1 500 a 7 200 s** dans l'entree `backfill-candles-vaults` du
+   REGISTRE. Bornes verifiees : 3 000 + 7 200 = **10 200 s < 14 400 s** d'intervalle, et
+   l'invariant anti-relance `limite_minutes x 60 > intervalle_s x 1,5` (28 800 > 21 600) tient.
+   136 tests de registre passent.
+
+**POURQUOI PAS DE PASSE CONCURRENTE, bien qu'elle ait ete preparee.** `sauver_etat` est atomique
+(`write_text` puis `os.replace`) et fusionne l'etat existant, donc le CONTENU ne se corrompt pas.
+**Mais les deux processus partageraient le meme chemin `.tmp`** : P1 ouvre le tmp, P2 le tronque,
+P1 ecrit, P2 ecrit, P1 remplace — et un etat partiel devient l'etat officiel. On laisse donc la
+campagne faire ses passes seule.
+
+**DELAI ATTENDU.** Au debit reserve au rattrapage (**100 de poids/min**, soit 27 s par page et
+~270 s par coin pour 10 pages), les 171 coins manquants demandent **~12,8 h de passe**. A 7 200 s
+de funding par cycle de 4 h, cela fait **~7 cycles, soit un peu plus d'une journee** — donc bien
+avant la date de jugement du 23-25/11. La campagne prend le nouveau budget a sa prochaine
+relance de ce collecteur, sous 4 h.
+
+**CE QUI RESTE A MESURER APRES L'ELARGISSEMENT** : l'univers passant de 90 a 261 coins, le
+`brut/repli` doit etre **remesure**, et le protocole gele l'a ete sur 90 coins. **Si
+l'elargissement change le resultat, c'est un NOUVEAU protocole** : il devra etre juge sur une
+fenetre encore jamais regardee, pas sur celle du preenregistrement actuel.
+
+### C-quattuortricies. DIVERSIFICATION PAR HORIZON — x2,07, et consolidation de l'outillage
+(14/11)
+
+**LE LEVIER : DIVERSIFIER L'HORIZON, pas seulement le moment d'entree.** Le decoupage en
+8 tranches diversifiait le MOMENT a horizon fixe. Mais le balayage avait trouve **24, 48, 96, 168
+et 336 h TOUS positifs** : ce sont donc cinq livres imparfaitement correles.
+
+```
+96 h seul            brut +68,8 %   repli 6,35 %   3,29x   ->  +2,17 USD/jour
+les CINQ horizons    brut +70,5 %   repli 2,79 %   6,19x   ->  +4,18 USD/jour
+```
+
+**Le repli tombe d'un facteur 2,3 pendant que le brut ne bouge pas** : le levier double. Et le
+gain tient PARTOUT — TRAIN x1,79, TEST x2,07, tiers1 x2,27, tiers2 x1,52, tiers3 x2,26 : **jamais
+moins de x1,5**, ce qui signe un effet structurel.
+
+**AUCUNE SELECTION, et c'est ce qui rend le chiffre credible** : les cinq horizons sont
+equiponderes, et le meilleur sous-ensemble trie a la main (24+96+336) ne fait que **3 % de mieux**
+(+4,32 contre +4,18). Il n'y a rien a cueillir.
+
+**LE PIEGE ECARTE** : on ne somme pas les replis des horizons (ce serait supposer qu'ils perdent
+toujours ensemble) et on ne les divise pas par leur nombre (ce serait supposer qu'ils ne perdent
+jamais ensemble). A tout instant la valeur du livre est la moyenne ponderee des detentions
+**ACTIVES** de chaque horizon : c'est cette serie-la que la marge regarde, et c'est elle qu'on
+mesure.
+
+**RESULTAT OFFICIEL** (`tools/mesurer_strategie.py`, facteur 4, slippage mesure et persiste) :
+```
+periode                taker (retenu)     maker (plafond)
+pire tiers (BORNE BASSE)   +3,78 U/j          +4,89 U/j
+hors echantillon (TEST)    +4,56 U/j          +5,69 U/j
+meilleur tiers             +5,19 U/j          +6,34 U/j
+```
+**La cible de 5 USD/jour est ATTEINTE dans le meilleur tiers et dans le scenario maker, et
+MANQUEE de 9 % dans le cas de reference.**
+
+**TROIS DEFAUTS D'OUTILLAGE CORRIGES, qui comptent autant que le levier :**
+1. **Le depot contredisait le protocole gele.** `tools/mesurer_carry_patient.py` tournait encore
+   avec `k=5`, une detention de **720 h** (le PIRE point du plateau rentable) et un slippage
+   **SUPPOSE a 2 bps** : quiconque le lancait obtenait un autre chiffre que le preenregistrement.
+   Il **refuse desormais de tourner** et renvoie vers l'outil officiel ; son code reste lisible,
+   car c'est lui qui a refute le carry et une refutation doit pouvoir etre reverifiee.
+   *(Ma premiere tentative de neutralisation a echoue sur une ancre erronee — le fichier commence
+   par un shebang — et l'outil a continue d'afficher ses vieux chiffres jusqu'au second essai.)*
+2. **Les mesures vivaient dans des scripts jetables.** Elles sont desormais dans
+   `tools/mesurer_strategie.py` (chaine complete, aucun parametre de strategie reglable) et
+   `tools/mesurer_slippage.py` (mesure **et PERSISTE** le slippage, lu ensuite par l'outil
+   officiel : tant qu'un chiffre reste une constante en dur, il ne se corrige jamais seul).
+3. **Le repli etait calcule par periode.** Une periode courte et chanceuse gagnait donc du levier
+   par hasard — `TEST` affichait 4,53 % contre 6,36 % pour l'histoire entiere. Le repli vient
+   maintenant de **TOUTE l'histoire**, impose a chaque periode. **Troisieme occurrence de ce
+   piege dans la session**, sous une troisieme forme. La correction a FAIT BAISSER le chiffre de
+   reference de +2,89 a +2,20 USD/jour en mono-horizon : elle fonctionne.
+
+**PROTOCOLE v2 GELE** : `docs/PREENREGISTREMENT_5USD_V2.md`, empreinte
+**a8643d8233e0c4540c5eece6f117cbc8**. Il **remplace la v1**, exactement comme la v1 l'exigeait
+(« si l'elargissement change le resultat, c'est un NOUVEAU protocole a juger sur une fenetre
+jamais regardee »). La v1 reste au depot comme trace de ce qui avait ete promis avant de mesurer.
+**Premier verdict pas avant le 1er decembre** : l'horizon le plus long (336 h = 14 j) plus la
+fenetre de classement et 8 tranches l'exigent.
+
+### C-quintricies. POURQUOI LE VERDICT COMPLET N'EST PAS AVANT LE 2 DECEMBRE (14/11)
+
+**TROIS CONTRAINTES S'ENCHAINENT, et la troisieme commande.**
+1. **Le gel est le 14/11** : toute decision anterieure a servi a CHOISIR les parametres, donc la
+   premiere decision propre est le 15/11. Non negociable.
+2. **8 tranches a 12 h d'intervalle** : la 8e decision tombe le 18/11 a midi. C'est mon seuil —
+   on pourrait juger sur moins, avec moins de confiance.
+3. **Un resultat n'est jugeable que COMPLET** : decision + horizon. Et l'horizon le plus long du
+   portefeuille vaut **336 h = 14 jours**.
+
+```
+horizon   8e decision   resultat complet   nature du verdict
+    24h    18/11 12h       19/11 12h       partiel
+    48h    18/11 12h       20/11 12h       partiel
+    96h    18/11 12h       22/11 12h       partiel (l'horizon de la v1)
+   168h    18/11 12h       25/11 12h       partiel
+   336h    18/11 12h       02/12 12h       LE PORTEFEUILLE COMPLET
+```
+
+**LE CALENDRIER EST DESORMAIS PREENREGISTRE** (ajout a la v2, ecrit alors que l'outil de jugement
+comptait ZERO fenetre — il ne change aucun parametre, il declare QUAND regarder). Nouvelle
+empreinte v2 : **f42302daa601849273864e86f80fde4d**.
+Preenregistrer le calendrier evite qu'un verdict partiel du 19/11 ressemble a un coup d'oeil
+opportuniste.
+
+**LA REGLE QUI REND LES PARTIELS LEGITIMES** : ils sont **rapportes, JAMAIS utilises pour
+re-choisir**. Si le 24 h decevait le 19/11 et que je l'enlevais de la configuration, je reprendrais
+la selection sur des donnees de jugement — exactement ce que le preenregistrement existe pour
+empecher. Et un horizon seul porte un repli bien plus eleve que le portefeuille (6,35 % pour le
+96 h contre 2,79 % pour les cinq) : **un partiel faible n'infirme PAS le portefeuille complet, et
+un partiel fort ne le confirme pas.**
+
+**LE JUGE A ETE REALIGNE SUR LE PROTOCOLE.** `tools/juger_preenregistrement.py` jugeait encore un
+SEUL horizon de 96 h alors que la v2 porte cinq horizons : le juge et le juge-able divergeaient.
+Il importe desormais `series_par_horizon`, `juger_multi` **et les constantes de cout** depuis
+l'outil officiel — deux definitions du meme cout finiraient par divulguer, et le juge annoncerait
+un chiffre que l'outil de mesure ne reproduirait pas. Il affiche l'etat de chaque horizon, et
+refuse le verdict complet tant qu'un seul manque.
+
+**EFFET DEJA VISIBLE DE L'ELARGISSEMENT** : l'univers de funding est passe de **90 a 94 coins**
+depuis le relevement du budget. La cible est 261.
+
+**ET LE PROCHAIN LEVIER EST IDENTIFIE PAR L'IDENTITE ELLE-MEME.** Avec D tombe a 2,79 %, le
+denominateur `D x facteur + mmr` vaut `0,1116 + 0,05` : **le mmr est passe de 16 % a 31 % du
+total**. En faisant baisser le repli, le multi-horizons a PROMU la marge de maintenance au rang de
+deuxieme contrainte — et je l'ai SUPPOSEE a 5 % en appliquant le palier le plus dur a tout le
+livre. Or c'est une somme ponderee par jambe, donc **mesurable** : a 2,5 %, le levier passerait de
+6,19x a 7,32x, soit **+18 % et la cible de 5 USD/jour franchie**. Mesure a faire : le levier
+maximum de chaque coin effectivement retenu (famille `asset_ctx` du coffre).
+
+### C-sextricies. LE MMR MESURE : -34 % SUR LE RESULTAT, et le filtre qui ne sauve rien
+(14/11)
+
+**J'AVAIS PREDIT UN MMR PLUS BAS. LA MESURE DIT L'INVERSE, ET BIEN PLUS HAUT.**
+Le levier maximum par coin n'etait ni dans `asset_ctx` ni dans `hl_univers_perps.json` : il vient
+de l'endpoint public `meta` (`universe[].maxLeverage`), **une seule requete**, persistee dans
+`runtime/data/levier_max_par_coin.json` (179 coins). Sur **11 514 jambes reellement ouvertes** :
+
+```
+mmr SUPPOSE (palier alt 10x)       :  5,00 %
+mmr MESURE, pondere par frequence  : 12,32 %
+pire coin retenu                    : 16,67 %
+
+coin     jambes   part  lev.max     mmr
+XMR        1302  11,3%      5x   10,00%
+VVV         664   5,8%      3x   16,67%
+GRASS       560   4,9%      3x   16,67%
+MOVE        481   4,2%      3x   16,67%
+```
+
+**ET LA CAUSE ETAIT DEJA DANS MES PROPRES MESURES.** J'avais etabli que **l'edge vit dans les
+coins volatils** (la ponderation 1/volatilite le detruisait : +24,3 % contre +64,6 %). Or la venue
+assigne a ces coins le levier maximum le PLUS BAS, **parce qu'**ils sont volatils. Les deux faits
+sont le meme fait, et je ne l'avais pas vu.
+
+**UNE PHRASE DE MOI A CORRIGER AU PASSAGE** : j'avais ecrit que le mmr a retenir est celui du PIRE
+coin. C'est faux. La maintenance vaut `somme(notionnel_i x mmr_i)`, soit `notionnel x
+moyenne(mmr_i)` pour un livre equipondere : c'est la **MOYENNE PONDEREE** (12,32 %). Retenir le
+pire coin sur-dimensionnerait la marge d'un tiers.
+
+**EFFET** : le chiffre de reference passe de **+4,56 a +3,02 USD/jour** (-34 %). Mesurer une
+hypothese l'a rendue defavorable, et c'est le resultat qui compte.
+
+**LE FILTRE SUR LE PALIER : REFUTE, et de la facon la plus nette.** Le mmr pesant desormais 52 %
+du denominateur, ecarter les coins a 3x semblait evident. Mesure :
+
+```
+seuil  coins  brut/an   repli     mmr  levier   USD/j TEST
+   3x     94   +68,8%   2,79%  12,32%   4,26x     +3,02U
+   5x     68   -44,9%   5,62%   8,38%   3,24x     -1,09U
+  10x     31    +2,4%   3,73%   4,94%   5,04x     +0,94U
+```
+
+**Retirer le palier 3x n'affaiblit pas le signal : il l'INVERSE (-44,9 %).** L'edge vit
+entierement la, et la venue exige la marge la plus haute precisement la. **Les deux sont
+inseparables : aucun filtre ne les separe.**
+
+**UN DEFAUT DE MON OUTIL, TROUVE EN VOULANT LIRE SES CHIFFRES** : la sortie `--json` se terminait
+AVANT le bloc multi-horizons, donc le JSON et le texte ne disaient pas la meme chose. Deux sorties
+du meme outil qui divergent, c'est la porte ouverte a citer un chiffre que l'outil n'a jamais
+affiche. Corrige : le multi est calcule une fois, avant toute sortie. *(J'avais d'ailleurs commence
+par recopier a la main un brut de 90,1 % en le croyant taker alors qu'il etait maker — raison de
+plus pour lire les chiffres depuis l'outil et jamais a la main.)*
+
+### MISSION « 5 USD NET PAR JOUR SUR 350 USD » — l'arithmetique complete
+
+```
+ETAT MESURE, facteur 4 : taker +3,02 | maker +3,76 | pire tiers +2,42 USD/jour
+
+VOIE 1 — baisser la prudence (choix de RISQUE, pas une mesure)
+  facteur  levier  liquide si   taker   maker
+      4,0   4,26x      23,5%   +3,02U  +3,68U
+      3,0   4,84x      20,7%   +3,42U  +4,18U
+      2,0   5,59x      17,9%   +3,95U  +4,83U
+      1,5   6,06x      16,5%   +4,29U  +5,24U   <- la cible, en maker seulement
+      1,0   6,62x      15,1%   +4,68U  +5,72U
+
+VOIE 2 — du capital (regle de trois sur le taux MESURE)
+  facteur 4 : taker 580 USD | maker 475 USD
+  facteur 3 : taker 511 USD | maker 419 USD
+  facteur 2 : taker 443 USD | maker 362 USD
+
+VOIE 3 — la BORNE DURE : repli NUL, mmr mesure inchange
+  taker 5,74 | maker 7,01 USD/jour
+  => meme en annulant TOUT le repli, 5 USD/jour exige 305 USD en taker.
+
+VOIE 4 — cote repli, a 350 USD et facteur 4 : il faudrait 0,46 % contre 2,79 % mesure (-84 %).
+```
+
+**CONCLUSION HONNETE.** **5 USD/jour n'est pas atteignable sur 350 USD au dimensionnement
+prudent.** Il l'est : en maker au facteur 1,5 (liquidation a -16,5 %), ou **avec 443 a 580 USD de
+capital** selon la prudence retenue. La voie du capital est la seule qui ne demande ni de baisser
+la garde ni de supposer une execution non mesuree.
+Restent deux inconnues qui peuvent encore deplacer le chiffre, toutes deux en cours : **l'univers**
+(94 coins sur 261 vises) et **le signal des leaders**.
+
+### C-septtricies. LA STRATEGIE EST ENFIN DANS LE MOTEUR — et une decouverte sur ce qu'il
+faisait (15/11)
+
+**LA QUESTION ETAIT : « si j'ouvre le moteur, gagne-t-on de l'argent ? » LA REPONSE ETAIT NON.**
+Verification faite : `carry_patient`, `dimensionnement_croise` et `mesurer_strategie` **n'etaient
+cables NULLE PART** dans le moteur, l'interface ou le chemin live. Les +3,02 USD/jour etaient une
+MESURE sur 211 jours d'historique, pas une simulation qui avait tourne.
+
+**ET LE MOTEUR PORTAIT LA MAUVAISE DIRECTION.** `strategies/carry_ranking.py` classe par **carry
+net predit par heure**, donc il LONGE le funding bas et SHORTE le haut : **c'est exactement le
+sens refute** (-41,3 %/an, 8 detentions positives sur 25, le prix reprenant -4,901 % contre
++1,635 % de funding). Le moteur aurait ouvert la direction perdante.
+
+**CE QUI A ETE LIVRE**
+
+1. **`strategies/carry_transversal_inverse.py`** (10 tests) — le livre dans le sens qui mesure
+   positif, ecrit selon le contrat de `strategies/` : **pur, il PROPOSE, le noyau dispose**. Il
+   refuse explicitement (a) moins de `2k` coins classables — un livre tronque en silence changerait
+   la strategie ; (b) une jambe sous le notionnel minimum — proposer un livre non placable serait
+   proposer un livre qui n'existera pas ; (c) une fenetre qui touche l'instant de decision. Sa
+   `confidence` vaut **0,58**, le taux de detentions positives mesure : l'edge vient de
+   l'ASYMETRIE, et annoncer 0,9 serait un mensonge. Un test interdit toute surface d'execution.
+2. **`tools/paper_carry_inverse.py`** (6 tests) — l'executeur paper EN AVANT, avec grand livre
+   atomique. Il **DECIDE au fil du temps** : sa decision est ecrite AVANT que le resultat
+   n'existe. **C'est la difference entre « la strategie aurait gagne » et « la strategie a
+   gagne »**, et c'est la seule mesure qui verifiera aussi le remplissage passif reel.
+3. **Entree `paper-carry-inverse` au REGISTRE**, cadence 12 h (le pas de tranche du protocole).
+   Invariant anti-relance verifie : 72 000 > 64 800. 136 tests de registre verts.
+
+**POURQUOI PAS UNE GREFFE DANS LE MOTEUR, ET C'EST UN CHOIX ASSUME.** `LANCER_HYPERSMART` n'est
+pas une boucle : c'est un menu de ~32 commandes qui demarre, par defaut, un **serveur UI**
+(`python -m hl_observer ui`) plus un poller, via `tools/start_hypersmart_simulation.ps1`, au-dessus
+des collecteurs **dont la campagne en cours depend**. Greffer une strategie dans ce chemin de
+decision sans l'avoir compris entierement risquait la collecte — **et une collecte perdue ne se
+rattrape pas**. L'executeur fait le meme travail a cote, sans rien toucher.
+
+**PREMIERE EXECUTION REELLE** (15/11) : **6 positions ouvertes**, 248,50 USD par jambe sur un
+notionnel de 1 491 USD (350 x 4,26) — **LONG XMR, NEAR, VIRTUAL / SHORT AVAX, JUP, MELANIA**.
+Relance immediate : **aucune position dupliquee** (« instant deja decide »), l'idempotence est
+prouvee et non supposee. Zero position fermee, et c'est voulu : **il faut 96 h pour un premier
+resultat, un PnL avant l'echeance serait une marque, pas un gain.**
+
+**EFFET SECONDAIRE UTILE** : l'univers de funding est passe de 90 (14/11 matin) a **114 coins**.
+Le relevement du budget funding a 7 200 s produit son effet, cible 261.
+
+**CE QUE LA CAMPAGNE NE PRENDRA PAS** : le lanceur lit `DEFAULT_NAMES` de
+`watch_economic_collectors.py` **au demarrage**, et on ne redemarre pas une collecte vivante.
+L'entree du registre agira a la prochaine campagne ; en attendant, la commande manuelle est
+`python tools/paper_carry_inverse.py --root . --capital 350`.
+
+**PREMIER RESULTAT PAPER ATTENDU : le 19/11** (96 h apres la premiere decision). Il se croisera
+avec le verdict du protocole gele du 2 decembre. **Si les deux convergent, c'est une preuve ; si
+elles divergent, la divergence dit ou l'execution mange le gain.**
+
+### C-octotricies. LA PORTE DE PROMOTION — le labo parle au moteur, sans en faire une machine
+a surapprendre (15/11)
+
+**LA QUESTION : « si le labo trouve une meilleure strategie, le moteur doit s'en servir tout de
+suite, c'est logique. » OUI — mais l'automatiser naivement serait la pire chose a construire.**
+
+Le labo **SELECTIONNE**. Le meilleur de `N` candidats parait bon **par pur hasard** : c'est le
+mecanisme exact du PBO de 0,81 mesure sur ce labo. Promouvoir le mieux mesure, c'est promouvoir
+**le plus chanceux**. La session du 14/11 l'a prouve trois fois : `k=3` ressemblait a un pic de
+bruit jusqu'a verification sur trois tiers ; le `mmr` suppose a 5 % valait 12,32 % une fois mesure
+(**-34 %**) ; le repli calcule par periode offrait du levier par chance.
+
+**`strategies/porte_de_promotion.py`, 15 tests. QUATRE CONDITIONS, SIX REFUS.**
+1. **Le nombre d'essais est DECLARE** — meme contrat que `test_transversal.tester(..., essais=)`.
+   Ne pas le declarer est un refus, **jamais un `essais=1` suppose**.
+2. **La fenetre de jugement commence APRES le gel** — un candidat ne se juge pas sur les donnees
+   qui l'ont choisi.
+3. **Assez d'observations INDEPENDANTES** (8 minimum) — en dessous, une seule periode defavorable
+   decide, ce qui s'est produit pour de vrai (une detention a -22,8 % ecrasait les cinq autres).
+   Rend **`PAS_ENCORE`**, pas `REFUSE` : « pas encore mesurable » n'est pas « refute ».
+4. **Le resultat doit etre positif ET COHERENT avec l'annonce.** Le refus le moins intuitif et
+   l'un des plus utiles : **faire 5x MIEUX que promis est aussi un refus** — ce n'est pas une
+   bonne nouvelle, c'est une fuite ou une erreur de mesure a trouver.
+Plus l'**empreinte** : un candidat retouche a la main devient illisible, pas plus beau.
+
+**LA CHAINE COMPLETE, COTE LABO INCLUS** (c'est la remarque juste de l'utilisateur : il fallait
+aussi modifier le labo) :
+* `ecrire_proposition()` — **COTE LABO**, gele un candidat et calcule son empreinte. Si `essais`
+  manque, on ecrit quand meme pour que le refus soit **TRACE au lieu d'etre silencieux** ;
+* `juger()` — **LA PORTE**, rend `PROMU` / `REFUSE` / `PAS_ENCORE` ;
+* `enregistrer_promotion()` — **seul un `PROMU` est ecrit** ;
+* `strategies_autorisees()` — **COTE MOTEUR, deny-by-default** : dossier absent, vide ou illisible
+  -> `{}`, donc rien. Un systeme qui ouvre quand il ne sait pas est un systeme qui trade sur une
+  erreur de lecture de fichier.
+Aucune des trois couches ne peut court-circuiter les deux autres.
+
+**UNE ERREUR D'ARITHMETIQUE DANS MA PROPRE FORMULE, ATTRAPEE PAR DEUX TESTS.** La premiere
+version exigeait `0,5 + 0,5 x (1 - 1/sqrt(N))` plafonne a 0,75, et ma documentation annoncait
+« a 4 essais -> 0,625 ». **C'etait faux** : cela vaut **0,75**, donc la formule tapait son plafond
+**des 4 essais** et rendait la barre infranchissable pour tout candidat reel. Corrigee en
+`min(0,65 ; 0,50 + 0,20 x (1 - 1/sqrt(N)))` : 1 essai -> 0,500 | 4 -> 0,600 | 9 -> 0,633 |
+25+ -> 0,650. **Un seuil infranchissable ne protege de rien — il fait seulement qu'on finit par
+le contourner.**
+
+**ET LA PORTE REFUSERAIT MA PROPRE STRATEGIE. C'est le point le plus important de cette section.**
+Candidat gele (empreinte `c853398229ab98328cfc4c427c3aadf9`) avec **450 essais declares** — le
+compte reel du 14/11 : 5 horizons x 5 valeurs de `k` x 3 signaux x 2 ponderations x 3 taux de
+couverture. Seuil exige : **0,650**. Part positive mesuree du livre : **0,58**.
+**Elle ne passe pas.** Trois issues possibles, et une seule est honnete : que la part positive
+hors echantillon se revele plus haute (elle allait de 57 a 68 % selon la periode), ou que le
+candidat soit refute. **Affaiblir la formule pour y faire passer mon travail serait exactement la
+corruption que cette porte existe pour empecher**, et c'est pourquoi le chiffre reste a 0,650.
+
+**ETAT DE LA CHAINE AU 15/11** : labo a propose -> porte dit `PAS_ENCORE` (0 observation
+independante, il en faut 8) -> moteur autorise `{}`. **Fermee et correcte.**
+
+### C-novatricies. LE LABO NE MANQUAIT PAS DE DONNEES — IL EN JETAIT 80 % (15/11)
+
+**LA CRAINTE ETAIT : « j'ai peur que le labo ne trouve pas de meilleure strategie alors que je
+fais une enorme collecte de 6 jours ». Elle etait fondee, mais la cause etait ailleurs.**
+
+**D'ABORD, UN DEFAUT DE MA PORTE, TROUVE EN LA TESTANT SUR MA PROPRE STRATEGIE.** Elle jugeait sur
+la **PART POSITIVE**, croissante avec le nombre d'essais. C'etait un mauvais critere : j'avais
+moi-meme mesure que l'edge de ce livre vient de l'**ASYMETRIE** (part positive 0,58, a peine mieux
+qu'un pile ou face) et non de la frequence. **Un suiveur de tendance gagne 40 % du temps et fait
+fortune** : juger sur la frequence penalise exactement le bon type d'edge. Remplace par le **`t` de
+Student**, qui utilise la moyenne ET la dispersion, avec un seuil **Bonferroni** (`alpha = 0,05/N`,
+quantile normal par dichotomie — pas de dependance a scipy). 1 essai -> **1,96** | 5 -> 2,58 |
+450 -> **3,86**. C'est la correction STANDARD : un seuil invente se discute, un Bonferroni non.
+La part positive reste **publiee comme diagnostic** mais ne ferme plus la porte. 19 tests.
+
+**LE `t` HONNETE DE MA STRATEGIE, ET IL EST FAIBLE** (TEST, detentions DISJOINTES) :
+```
+horizon  n chevauch.  t (gonfle)  n disjoint  t HONNETE
+    24h          211        2,43         106       2,21
+    48h          209        1,77          53       0,98
+    96h          205        1,51          26       1,04
+   168h          199        3,78          15       1,05
+   336h          185        5,09           7       1,62
+```
+**Les fenetres chevauchantes gonflaient le `t` d'un facteur TROIS** (336 h : 5,09 contre 1,62).
+A 450 essais declares, **aucun horizon ne passe**. **En balayant 450 configurations le 14/11, j'ai
+rendu la porte infranchissable pour mon propre travail.**
+
+**ET LA VRAIE CAUSE : LA PROFONDEUR DU FUNDING ETAIT BORNEE PAR UNE LIMITE INVENTEE.**
+`PROFONDEUR_FUNDING_MS` etait calee sur `CAP_CANDLES` (5 000 bougies 1 h = 208 jours) « par
+symetrie ». Or `candleSnapshot` plafonne a 5 000 points, mais `fundingHistory` est pagine par 500
+et **ne plafonne pas la**. Sonde du 15/11 sur BTC, une requete par palier :
+```
+il y a  211 j : 500 points   |   il y a  730 j : 500 points
+il y a  365 j : 500 points   |   il y a 1095 j : 500 points
+il y a  550 j : 500 points   |   il y a 1460 j : AUCUN -> limite
+```
+**La profondeur reelle est d'environ TROIS ANS. Nous en collections 211 jours.**
+`PROFONDEUR_FUNDING_JOURS = 1100` (juste sous la limite, pour ne pas depenser de requetes a vide).
+**x5,3 d'historique -> x2,3 sur le `t`**, et le nombre d'observations independantes vaut
+`historique / duree_de_detention` : a 96 h, on passerait de **26 a ~137**.
+
+**LA RESERVE, ET ELLE EST ESSENTIELLE** : plus d'historique couvre plus de REGIMES. L'effet mesure
+sur avril-novembre 2026 peut etre plus faible, nul ou inverse en 2024. **Plus d'historique ne
+garantit pas un verdict positif — il donne le POUVOIR DE TRANCHER**, ce qui manquait. Un `t` qui
+s'effondre sur trois ans serait une refutation, et une refutation est un resultat.
+
+**LA LISTE COURTE EST GELEE** : `docs/CINQ_HYPOTHESES_19_NOVEMBRE.md`, empreinte
+`c561520f8995db7405c9881243d189de`. **Cinq hypotheses, pas 450**, toutes a **24 h de detention**
+(le seul horizon ou ces donnees parlent : 106 observations disjointes contre 26 a 96 h). Seuil `t`
+a 5 hypotheses : **2,58**, contre 2,21 mesure — il manque 0,37, franchissable.
+H1 positionnement des leaders | H2 ordres en attente (prerequis : le taux d'annulation) |
+H3 funding a 24 h, **le temoin** | H4 encombrement normalise par l'interet ouvert |
+H5 proximite de liquidation comme filtre de RISQUE.
+**Distinction qui compte** : une MESURE sans alternative (remplissage passif, `mmr`, slippage) ne
+compte PAS comme essai — c'est la SELECTION qui coute, pas le calcul. Ces mesures sont a faire
+sans retenue.
+
+**PRIORITE DE COLLECTE REVISEE** : le rattrapage des ~890 jours de funding manquants passe
+**DEVANT** l'elargissement de l'univers. Le premier multiplie la puissance statistique par 2,3 ;
+le second ne reduit que la dispersion.
+
+### C-quadragies. RATTRAPAGE DES 890 JOURS LANCE — et le verrou qui l'empechait, leve (15/11)
+
+**LE VERROU ETAIT UN NOM DE FICHIER.** Le 14/11 j'avais renonce a lancer une passe de funding
+dediee, et la raison etait juste : `sauver_etat` ecrivait son brouillon dans un `.tmp` au nom
+**FIXE**. Avec deux passes concurrentes — celle de la campagne toutes les 4 h et une passe de
+rattrapage — les deux ouvrent le MEME brouillon : P1 ecrit, P2 le tronque, P1 remplace, et un etat
+**PARTIEL** devient l'etat officiel. Le `os.replace` est atomique, mais **il ne protege pas de deux
+ecrivains sur le meme brouillon**.
+
+**CORRIGE** : le temporaire porte desormais le **PID**, et un `finally` nettoie le brouillon
+oublie. Les deux passes peuvent donc tourner ensemble ; la derniere a ecrire gagne pour les coins
+qu'elle a traites, et comme la boucle sert **les coins les plus en retard d'abord**, aucun coin
+n'est affame. Verifie : etat relu a l'identique, **zero brouillon laisse**.
+
+**L'AMPLEUR DU TRAVAIL, mesuree et non estimee** :
+```
+261 coins | cible 1 100 jours = 26 400 h = 53 pages par coin
+27 s par page (debit auto-limite a 100 de poids/min, par politesse pour l'IP partagee)
+-> 0,4 h par coin, soit ~103 h de passe au total
+
+114 coins ont deja leurs 211 jours recents (il leur manque les 890 anciens)
+147 coins partent de ZERO
+```
+**La passe de la campagne seule** (7 200 s toutes les 4 h, soit 50 % du temps) demanderait **8
+jours**. Une passe dediee continue le fait en **~4**. D'ou le lancement d'une passe dediee avec un
+budget de 28 800 s, en arriere-plan.
+
+**POURQUOI LE RISQUE EST ACCEPTABLE** : la passe appelle `CF.ceder_au_direct()`, donc elle **cede
+la priorite aux collecteurs en direct** — c'est exactement le cas pour lequel ce mecanisme existe.
+Et l'etat etant sauve **apres chaque coin**, une interruption (le reaper memoire de ce PC coupe les
+runs longs) ne perd rien : la passe suivante reprend ou l'autre s'est arretee.
+
+**CE QUE CELA DEBLOQUE** : le nombre d'observations independantes vaut
+`historique / duree_de_detention`. A 24 h de detention — le seul horizon ou ces donnees parlent —
+on passerait de **211 a ~1 100 observations**, et le `t` croit en racine de `n`.
+**Reserve inchangee et essentielle** : trois ans couvrent plus de REGIMES. Un `t` qui s'effondre
+serait une refutation, et une refutation est un resultat.
+
+### C-unquadragies. LE DEFAUT LE PLUS GRAVE DE LA SESSION, ET LE PAS QUI LE RACHETE (15/11)
+
+**TROIS DEFAUTS ENCHAINES, trouves en une heure parce que l'utilisateur a doute a voix haute.**
+
+**1. LE LABO ALLAIT MOURIR SOUS SES PROPRES DONNEES.** Chronometre : `une_revision` recalculait la
+moyenne des 96 h **a partir de zero**, pour chaque coin et chaque instant. **31 ms par revision,
+11 min par lancement, et 1,6 h projetee** a 1 100 jours et 261 coins — alors que le reaper memoire
+de ce PC coupe les runs au-dela de ~30 min. Corrige par un **index de sommes prefixes**
+(`index_glissant` / `moyenne_indexee`) : la moyenne sur n'importe quelle fenetre devient une
+soustraction trouvee par dichotomie. **29,6 ms -> ~0 ms par revision ; 11 min -> 25 s de bout en
+bout.** Les trous sont preserves (on cumule la somme ET le compte, sinon une serie a trous serait
+divisee par trop et diluee vers zero) et la borne haute reste EXCLUE (`bisect_left`, sinon l'heure
+de decision entrerait dans le classement). 5 tests comparent l'index au calcul direct sur des
+series a trous, aux bords de fenetre.
+
+**2. LES PERIODES ETAIENT DECOUPEES SUR LE FUNDING SEUL — et le rattrapage les a deplacees.**
+Les deux sources n'ont pas la meme profondeur : funding ~1 100 jours, bougies HORAIRES 208.
+Pendant que le rattrapage allongeait le funding de 211 a 1 059 jours, **les bornes de TRAIN / TEST
+/ tiers ont glisse** et le chiffre de reference est passe de **+3,02 a +1,27 USD/jour** — sans
+qu'une ligne de la strategie change, et **sans le moindre avertissement**.
+**Un labo dont les resultats bougent quand les donnees grandissent ne mesure rien.** Corrige :
+`heures_exploitables()` rend l'**INTERSECTION funding ∩ prix**, et l'outil affiche desormais
+separement ce qui est COLLECTE et ce qui est MESURABLE. 6 tests, dont **le garde-fou central** :
+allonger le funding de 10x vers le passe ne doit PAS deplacer la fenetre.
+
+**3. ET LA DECOUVERTE QUI RACHETE LE RATTRAPAGE.** J'avais conclu « les prix s'arretent a
+211 jours » **apres n'avoir sonde que le pas HORAIRE**, et j'allais recommander de reduire la
+profondeur du funding. L'utilisateur a demande pourquoi. Le plafond de `candleSnapshot` est de
+**5 000 BOUGIES, pas de 211 jours** : il depend donc du PAS.
+```
+1h -> 5 001 bougies =   208 jours (avril 2026)
+4h -> 5 001 bougies =   833 jours (aout 2024)
+1d -> 1 101 bougies = 1 101 jours (novembre 2023)  <- exactement la profondeur du funding
+```
+**Et la strategie tient 24 h : une bougie journaliere correspond a une detention ENTIERE.** Le pas
+`1d` n'etait **pas collecte du tout** (le collecteur ne connaissait que `5m` et `1h`). Ajoute sur
+les **quatre** maillons, car en oublier un suffit a tout annuler :
+* `INTERVALLES_MS` et `SORTIES` du collecteur ;
+* le **certificateur** (`candles_1d.jsonl` -> `FAMILLE_CANDLE`) — sans quoi la donnee serait
+  produite puis **ignoree**, le labo ne lisant que le coffre : le piege « donnee presente mais
+  jamais rendue » ;
+* le **contrat de couverture** — et son test a **attrape mon oubli** : un fichier connu du
+  certificateur sans producteur declare est un fichier qu'on ne sait pas expliquer ;
+* le **registre**, dont les args passent a `--intervalles 1h,5m,1d`.
+
+**ETAT APRES LES TROIS CORRECTIFS** (univers passe de 90 au gel a **116 coins**) :
+```
+collecte : funding 25 416 h (1 059 j) | prix 5 095 h (212 j)
+MESURABLE : 5 095 h (212 j) = l'intersection
+847 jours de funding sans prix en face -> c'est le pas JOURNALIER qui leur en donnera un
+
+multi-taker/TEST    brut  +95,8 %  repli 7,44 %  levier 2,38x  +2,18 USD/j
+multi-maker/TEST    brut +112,1 %  repli 7,32 %  levier 2,40x  +2,58 USD/j
+multi-taker/tiers3  brut   -9,5 %  repli 7,44 %  levier 2,38x  **-0,22 USD/j**
+```
+
+**ET LE RESULTAT LE PLUS UTILE EST CELUI-LA, meme s'il deplait** : le chiffre est passe de +3,02 a
++2,18 en ajoutant 22 coins, et **le tiers le plus RECENT est devenu NEGATIF**. Une strategie dont
+le resultat bouge d'un tiers quand l'univers s'elargit, et dont la periode la plus proche de
+maintenant perd de l'argent, **n'est pas robuste**. C'est exactement ce que la porte de promotion
+est censee refuser — et elle le refuserait.
+
+### C-duoquadragies. TROIS TENTATIVES DE ROBUSTESSE, TROIS REFUTATIONS — et ce que le signal
+de funding vaut vraiment (15/11)
+
+**LA DEMANDE ETAIT : « trouve une strategie robuste ». TROIS VOIES ESSAYEES, TOUTES REFUTEES.**
+
+**1. PONDERER PAR LE RANG** (supprimer `k`, donc supprimer la fragilite qu'il cause) :
+**-53,8 %/an, t = -3,36, negatif dans les SIX periodes.** Explication mesuree : avec des poids
+proportionnels au rang, les trois coins extremes ne portent que **5 % du livre** — les 95 %
+restants sont dans le milieu de la section, ou il n'y a pas de signal. **Diluer ne robustifie pas,
+ca remplace la strategie par une autre, qui perd.** L'edge est bien dans les POINTES seulement.
+
+**2. SELECTIONNER PAR FRACTION** (2,6 % de l'univers au lieu de `k=3` fixe, pour que le livre soit
+invariant d'echelle) :
+```
+univers   brut/an      t      USD/j    tiers 1 / 2 / 3
+     40    -84,1 %  -1,06   -1,38U   +69% / -188% / -126%
+     60    +16,0 %   0,16   +0,40U  +103% /  -44% /   -6%
+     80    +54,9 %   1,02   +1,14U  +140% /  -22% /  +52%
+    100    +39,4 %   0,72   +0,84U  +112% /  +26% /  -16%
+    116    +31,3 %   0,54   +0,64U  +106% /  +79% /  -88%
+```
+Le resultat oscille de **-84 % a +55 %** selon la taille de l'univers, et **aucune configuration
+n'a ses trois tiers positifs**. Refute.
+
+**3. ET LE CONSTAT QUI COMPTE PLUS QUE LES DEUX PREMIERS : TOUS LES `t` SONT ENTRE -1,06 ET
++1,02.** Le seuil minimum est **1,96**, et c'est celui qui s'applique a **un seul essai declare**.
+**A 24 h de detention, ce signal n'est pas distinguable du bruit, dans aucun univers.**
+
+**POURQUOI LE +2,21 DE CE MATIN A DISPARU.** Il avait ete mesure avec (a) les anciennes bornes de
+periode, decoupees sur le funding seul et donc deplacees par le rattrapage, (b) un univers de
+94 coins, (c) une fenetre de classement de 96 h. **Les trois correctifs de la journee — l'index,
+l'intersection funding ∩ prix, et l'univers elargi — ont retire les illusions, pas le signal.**
+Le `t` est tombe de 2,21 a **0,54**.
+
+**CE QU'IL FAUT EN CONCLURE, ET JE NE VAIS PAS L'ADOUCIR.** J'ai essaye de sauver le signal de
+funding par trois voies differentes : `k` fixe (fragile), pondere par le rang (refute), fraction
+d'univers (refute). **La bonne reponse n'est plus « cherchons une quatrieme voie » — chaque
+tentative en plus monte la barre de la porte pour toutes les autres.** Le signal de funding, tel
+qu'on le mesure aujourd'hui sur une fenetre honnete, **ne porte pas d'edge demontrable**.
+
+**CE QUI RESTE, ET POURQUOI CE N'EST PAS RIEN**
+* **Le signal des LEADERS (H1)**, jamais teste, et c'est le seul dont la motivation vienne d'une
+  MESURE : le momentum direct echoue (-44,2 %) alors que le funding reussissait, donc le funding
+  mesurait **l'encombrement du positionnement**. Les positions des leaders le mesurent
+  **directement**. Testable le 19/11 avec 192 h d'historique.
+* **Le pas JOURNALIER** ajoute aujourd'hui : il ouvre **1 101 jours** de fenetre mesurable contre
+  212 — soit **x5,2 d'observations**, donc **x2,3 sur tous les `t`**. Un signal a `t = 0,54` sur
+  212 jours donnerait `t = 1,24` sur 1 101 : toujours insuffisant. Mais un signal a `t = 1,2`
+  passerait a 2,8. **C'est le pas journalier qui decidera si quelque chose existe.**
+
+**L'INFRASTRUCTURE, ELLE, EST DEVENUE SOLIDE** : l'index (11 min -> 25 s) evite au labo de mourir
+sous ses donnees ; l'intersection empeche les resultats de bouger quand les donnees grandissent ;
+la porte de promotion refuse ce qui ne se distingue pas de la chance — **y compris mon propre
+travail**. Ce sont ces trois choses qui ont permis de decouvrir, en une journee, que le signal ne
+valait pas ce qu'il semblait valoir. **C'est exactement a cela qu'un labo sert.**
+
+### C-trequadragies. LA BASE (`premium_bps`) — bon signe, donnees insuffisantes, et deux
+defauts trouves en route (15/11)
+
+**POURQUOI CETTE CLASSE EST DIFFERENTE DU FUNDING.** Le funding est le taux **DEJA REGLE** ; la
+prime est l'ecart **INSTANTANE** entre le mark du perp et son oracle. Jamais teste ici.
+
+**PRECAUTION QUE LA MESURE IMPOSE** : une prime revient a zero soit parce que le mark baisse, soit
+parce que l'oracle monte. **Un short de perp seul ne gagne que dans le premier cas** — sans jambe
+spot on ne capture pas la convergence, on fait un pari directionnel. D'ou un livre TRANSVERSAL.
+
+**DEFAUT 1 — MON PREMIER TEST MESURAIT DES MARCHES MORTS.** Le filtre « |prime| > 50 bps »
+selectionnait **STRAX a +370 505 bps**, FRIEND a +88 881, SHIA, NFTI — tous a **ZERO volume 24 h**,
+mark fige loin de l'oracle. Le livre shortait des coins qu'on ne peut ni vendre ni racheter, et le
+resultat (-787 %/an, t = -3,06) ne mesurait que cette absurdite.
+**Univers propre** : volume 24 h > 1 M **et** |prime mediane| < 500 bps -> **72 coins sur 235**.
+Les vraies dislocations y valent des dizaines de bps (p95 = **+69**), pas des milliers.
+
+**CE QUE LA MESURE PROPRE DONNE**
+```
+1) LA PRIME REVIENT : 60 a 68 % des primes extremes se resserrent.
+   Mais la MOYENNE ne bouge pas (-130 -> -129 bps) : c'est un COMPTE, pas une amplitude.
+
+2) LE PRIX SUIT, et les deux livres sont des miroirs EXACTS :
+   long prime BASSE    2h  +95 %/an  t=0,15 (nd=50) | 4h +328 %  t=0,58 (nd=24)
+   long prime HAUTE    2h -1613 %/an t=-3,72        | 4h -1088 %  t=-2,52
+```
+**Le SENS est bon et CONSTANT sur les cinq horizons**, et les deux livres sont des miroirs — cette
+coherence est un bon signe, contrairement au funding dont le signe basculait entre periodes.
+**Mais aux tailles d'echantillon utilisables, `t` vaut 0,15 a 0,58 : loin du 1,96 minimum.**
+**4,6 jours de donnees ne permettent pas de conclure.** C'est une PISTE, pas un resultat.
+
+**DEFAUT 2 — ET IL ETAIT DANS MON PROPRE OUTIL.** `t_de_student` acceptait **2 points**. Il a donc
+affiche sans reserve un **t = 4,25 sur TROIS observations disjointes** (et son miroir a -4,74) :
+avec si peu de degres de liberte, un ecart-type minuscule fait exploser le `t`. La porte exigeait
+deja 8 observations independantes, **mais l'AFFICHAGE montrait le 4,25** — et **un chiffre
+spectaculaire qu'on ne peut pas croire est plus dangereux qu'un refus.** Minimum porte a
+`OBSERVATIONS_MINIMUM` (8), avec un test.
+
+**CE QU'IL FAUT POUR TRANCHER** : `asset_ctx` est une famille VIVANTE (4,6 jours). A 24 h de
+detention il faut 8 observations disjointes, donc **au moins 8 jours** — soit le 19/11 si la
+campagne tient, et beaucoup mieux au 23. **C'est la classe la plus prometteuse des six non
+testees, et la seule dont le signe soit coherent sur tous les horizons.**
+
+### C-quindecies-ter. TROIS CHANTIERS NES D'AUDITS DE LIENS EXTERNES (14/11)
+
+Point de depart : un fil X (@RohOnChain) soumis par Florent. Le fil lui-meme n'apporte rien —
+sa seule strategie verifiable, testee en aveugle par un tiers (TheTapeTest, « RohOnChain ranking
+book »), passe d'un **Sharpe ~1,0 sur les coins survivants a un Sharpe 0,2-0,3 avec 50-70 % de
+drawdown en test point-in-time incluant les coins delistes** ; le bot est aujourd'hui RETIRE. Le
+modele qu'il promeut (Kronos, « predit la prochaine bougie ») a ete evalue independamment quatre
+fois : IC +0,086 a 5 min sur BTC qui disparait a 30 min, **0 cellule rentable sur 43 apres frais**
+(avantage espere ~0,01 % contre 0,2 % d'aller-retour), 50,2 % de reussite directionnelle sur
+749 previsions hors echantillon, et un intervalle cense couvrir 80 % des issues qui en couvre 21 %.
+C'est exactement le defaut que ce labo mesure deja sur DeepLOB : **-4 242 bps net, l'edge meurt
+dans le spread**.
+
+**MAIS la recherche menee autour a produit deux chantiers reels.**
+
+#### R7 — LE REGIME DOIT AUSSI DECIDER, PAS SEULEMENT JUGER
+
+`regime_label.py` se termine par : « Aucune decision, aucun ordre : ce module ETIQUETTE. » Le
+regime est aujourd'hui **defensif** : `regime_shift_stress_receipt` refuse le label « robuste »
+tant qu'une strategie n'a pas ete stressee sur plusieurs regimes (`fail_closed=not valid`). C'est
+une porte de validation, et elle est bonne.
+
+Ce qui manque est la moitie **offensive** : activer une strategie SEULEMENT dans le regime ou elle
+fonctionne, et redimensionner selon ce regime. C'est le chantier deja inscrit comme
+« conditionnement / replication : a batir » dans les 4 chantiers vers un PnL positif.
+
+Pourquoi c'est le bon moment : le carry de funding cross-sectionnel est **vivant mais avec un
+PBO de 0,81** — un edge reel qui ne survit pas a la selection. Conditionner par regime est
+precisement le levier qui peut transformer un edge globalement plat en edge conditionnellement
+positif. Et l'etiquetage existe deja, **causal et sans lookahead** : `garch11_variance_causale`
+(l'historique lisait le futur deux fois) et un seuil haute/basse vol calcule sur le TRAIN seul.
+
+PIEGES A NE PAS REOUVRIR :
+* conditionner multiplie les essais -> la penalite de multiplicite doit compter CHAQUE regime
+  teste, sinon on fabrique un faux PROVEN par decoupage ;
+* un regime estime a l'instant t ne doit utiliser que l'information disponible a t (le module le
+  garantit deja : ne pas le contourner en relisant une etiquette calculee plus tard) ;
+* « INCONNU » doit rester INCONNU : ne jamais forcer un label pour pouvoir trader.
+
+PREMIER PAS MESURABLE : par regime etiquete, le PnL net par jour actif du carry cross-sectionnel,
+avec son intervalle, et le nombre de jours actifs PAR REGIME (si un regime a 2 jours, il n'est pas
+mesurable et doit etre declare tel — jamais « valide »).
+
+#### R8 — COPIER PENDANT UN TWAP ANNONCE N'A PAS LE MEME COUT
+
+Barone & Lillo, *Trading in the Sunshine or in the Shade: Market Impact and Adverse Selection on
+Hyperliquid* (arXiv 2606.15715, juin 2026) — **sur la venue exacte de ce projet**, 4,3 millions de
+metaordres caches reconstruits contre 465 000 executions TWAP visibles :
+
+* les TWAP visibles ont des couts d'execution **plus faibles** et un impact permanent **plus petit**
+  que des metaordres caches comparables ;
+* ceux qui executent **a cote** d'un flux TWAP visible de meme sens subissent des couts permanents
+  **plus eleves** : le cout de selection adverse se DEPLACE vers ceux qui n'annoncent pas ;
+* un TWAP visible **attire de la liquidite** : la profondeur affichee augmente et le carnet penche
+  du cote absorbant, d'autant plus que l'ordre annonce est gros.
+
+CE QUE CA CHANGE POUR LA COPIE. Le collecteur `contexte-leaders` capte deja, pour les leaders,
+**positions + TWAP + ordres en attente** (mesure du 13/11 : « 212 positions, 23 portefeuilles,
+90 TWAP, 24 carnets d'ordres »). On peut donc separer les fills d'un leader selon qu'ils
+appartiennent a un TWAP ANNONCE (visible pendant son execution) ou a un metaordre cache, et
+mesurer le cout de copie des deux populations separement. Hypothese testable : copier pendant le
+TWAP annonce d'un leader coute moins cher — ou, lecture inverse et plus probable pour un copieur
+qui arrive APRES, coute PLUS cher parce qu'on devient le non-annonceur qui absorbe la selection
+adverse.
+
+PIEGE : le champ `twapId` existe deja sur les fills (vu dans les rubans). Ne PAS en deduire la
+visibilite sans verifier que le TWAP etait actif et affiche AU MOMENT du fill copie — sinon on
+etiquette a posteriori ce que le marche ne voyait pas, et on refait du lookahead.
+
+PREMIER PAS MESURABLE : sur le corpus de la campagne, la part des fills de leaders rattachables a
+un TWAP actif, puis le cout d'execution simule des deux populations, avec la meme sonde
+d'executabilite que le reste (reference -30 s, entree +delai, sortie +horizon, meme identite de
+connexion).
+
+#### R9 — LE STYLE D'EXECUTION D'UN LEADER PREDIT-IL SA COPIABILITE ?
+
+Source : un fil X (@zostaff, 08/11/2026) presentant un bot de copie pumpfun open source. Le bot
+lui-meme ne sert a rien ici (Solana, memecoins, autre venue). **Sa mesure, si.**
+
+CE QUI EST RECEVABLE. Le depot a retro-analyse **666 wallets de bots pumpfun**. Les **344** qui
+faisaient tourner des bots routeurs sophistiques affichent un resultat combine de **-69,14 SOL
+pour 38 % de trades gagnants**. Grande cohorte, non triee, resultat negatif : c'est une mesure.
+Sa conclusion — *« tu n'as pas besoin d'un bot plus intelligent, tu as besoin de meilleurs wallets
+a suivre »* — est **mot pour mot la these de ce projet** : la selection bat la sophistication.
+
+CE QUI N'EST PAS RECEVABLE, et qu'il ne faut surtout pas reprendre. « Les 5 meilleurs wallets ont
+80 % de reussite » : prendre le top 5 sur 666 et publier leur taux est du **biais de selection
+pur**. C'est exactement ce que `survivorship_wallet_receipt` refuse ici. (A son credit, l'auteur
+l'admet : « 5 wallets is a tiny sample and past wins mean nothing ».) La cohorte de 344 vaut ;
+le top 5 ne vaut rien. Retenir cette distinction, pas le chiffre flatteur.
+
+IL NOMME AUSSI LE MUR. *« a copy always lands after the original, so you buy a bit higher and sell
+a bit lower than the wallet you follow. »* C'est precisement pourquoi ce labo a REJETE fast_follow
+a tous les horizons <= 300 s **meme a spread nul**. Il decrit le mur ; nous l'avons mesure.
+
+**L'HYPOTHESE A TESTER ICI.** Sur pumpfun, les wallets SIMPLES battaient les wallets SOPHISTIQUES.
+Transposee a Hyperliquid : **le style d'execution d'un leader predit-il sa copiabilite nette ?**
+
+Caracteristiques de style deja collectees, aucune collecte supplementaire necessaire :
+* part agressive — `taker_notional_share`, deja un critere (C86, `copie_leader_trop_passif`) ;
+* usage de TWAP — mesure du 13/11 : 90 TWAP actifs suivis (`copy_vault_twap_lane`) ;
+* ordres en attente et types d'ordres — `copy_vault_orders_lane`, agregats `par_genre`
+  (ENTREE_LIMITE / SORTIE_LIMITE) et `notionnel_par_coin` deja presents dans le coffre ;
+* cadence, taille et dispersion des fills par leader.
+
+**FORME DU TEST — c'est le point le plus important.** La question se pose **A TRAVERS les
+209 leaders a la fois**, pas leader par leader. Tester « ce leader est-il rentable ? » 209 fois,
+c'est 209 essais et une penalite de multiplicite ecrasante qui garantit de ne rien prouver.
+Tester « la part agressive predit-elle la copiabilite nette ? » est **UNE** hypothese evaluee sur
+209 observations : la section transversale devient une force au lieu d'une penalite. C'est la meme
+logique que le carry cross-sectionnel, qui est le seul edge encore vivant ici (PBO 0,81).
+
+PIEGES :
+* le style se mesure **avant** la periode jugee, jamais sur la meme fenetre que le resultat,
+  sinon le classement connait son propre test ;
+* un leader peut changer de style : la caracteristique doit etre datee et recalculee par fenetre ;
+* « part inconnue » n'est pas « part nulle » (deja verrouille par les tests de C86) ;
+* le resultat attendu peut tres bien etre NUL — c'est une reponse, pas un echec.
+
+PREMIER PAS MESURABLE : sur le corpus du 19/11, la correlation de rang entre une caracteristique
+de style (commencer par la part agressive, deja calculee) et le PnL NET copiable par leader, avec
+son intervalle et le nombre de leaders reellement scorables (>= 3 jours actifs). Si moins d'une
+dizaine de leaders sont scorables, le dire : non mesurable, et non « pas de lien ».
+
+### C-octodecies. R7/R8/R9 — OUTILLAGE CONSTRUIT, ET DEUX MESURES INATTENDUES (14/11)
+
+**Noyau commun** : `backtesting/test_transversal.py` (14 tests). UNE hypothese evaluee a travers
+N observations — jamais N hypotheses. Poser « ce leader est-il rentable ? » 209 fois, c'est
+209 essais et la certitude de ne rien prouver ; poser « la part agressive predit-elle la
+copiabilite ? », c'est UNE hypothese sur 209 observations. `essais` est un parametre OBLIGATOIRE
+(Bonferroni) : la multiplicite est portee, pas cachee. Trois refus verrouilles : trop peu
+d'observations -> NON MESURABLE et **jamais « aucun lien »** ; caracteristique constante -> refus ;
+observations incompletes -> ECARTEES et comptees, **jamais imputees** (imputer, c'est inventer).
+`comparer_groupes` ajoute pour R7 et R8, avec le meme refus : un groupe trop petit est NOMME non
+mesurable, et un seul groupe mesurable **n'est pas une egalite**.
+
+**MESURE 1 — LES LEADERS SONT MASSIVEMENT PASSIFS.** Sur **90 702 fills certifies**, part
+agressive connue pour **157 leaders sur 161** : **mediane 7,9 %**, de 0 % a 100 %. Le leader
+typique est donc **~92 % passif**. Le projet avait mesure « 67 % des fills sont passifs et valent
+~0 avant frais » ; a l'echelle des 161 leaders c'est pire encore. **Consequence** : la population
+reellement copiable est bien plus petite que le compte brut de fills, et le critere C86
+(`copie_leader_trop_passif`) devient central plutot qu'accessoire. **Et la dispersion 0-100 % est
+une bonne nouvelle pour R9** : une caracteristique constante aurait rendu le test impossible.
+
+**MESURE 2 — R8 NE PEUT PAS PARTIR DES FILLS.** **0 fill sur 88 353** porte un `twapId`. Le lien
+avec les TWAP doit donc se faire depuis `copy_vault_twap_lane` par appariement (leader, coin,
+fenetre de temps), et non par un champ sur le fill. **Le premier pas de R8 change** : construire
+l'appariement avant toute comparaison de couts. Rappel du piege : un `twapId` dirait
+l'APPARTENANCE, pas qu'un TWAP etait AFFICHE au moment ou un copieur aurait agi — conclure la
+visibilite sans verifier serait un lookahead.
+
+**CE QUI RESTE SUSPENDU A LA CAMPAGNE** : les trois chantiers visent la meme cible, le **PnL NET
+COPIABLE par leader**, qui sort du moteur. `tools/mesurer_r789.py` extrait tout le reste
+maintenant et **refuse explicitement** de conclure sans elle — pour que le 19/11 soit un jour de
+mesure et non de developpement.
 
 ### C-quaterdecies. K1 — DE 8 A ~120 LEADERS : le collecteur REST enfin cable (12/11)
 
@@ -2290,134 +2609,6 @@ fixtures masquerait la surevaluation si la production ne deduit rien. **Un test 
 question comptable ouverte vaut infiniment mieux qu'un test vert qui la cache.**
 
 **Verification finale : 137 passent, 2 echouent (les deux ci-dessus, volontairement).**
-
-### C-duodecies. 100 AMÉLIORATIONS DU COLLECTEUR AU SERVICE DU LABO (K1–K100, 12/11)
-
-**Ancrées sur les mesures du jour, pas sur des intuitions.** Chiffres de référence obtenus en
-réconciliant les rubans réels : **97 % des fills ont déjà leurs trois carnets** (560/576) ; cadence
-médiane des carnets **10,3 s** (p90 ≈ 11 s) avec **UN seul trou > 30 s sur 30 coins** ; mais seulement
-**8 leaders distincts, dont un à 63 % des fills** ; **14 refus** pour carnets de connexions différentes
-(STRK, SEI) ; **27 coins sur 30** portent plusieurs époques de trou ; le ruban local **n'a pas** de
-champ `crossed`. Conclusion qui ordonne tout ce qui suit : **la couverture des carnets n'est plus le
-goulot — le VOLUME et la DIVERSITÉ des signaux le sont.**
-
-**A — VOLUME ET DIVERSITÉ DES SIGNAUX (le vrai goulot : 8 leaders, un seul à 63 %)**
-- K1 ⚡ Câbler `collecter_userfills_poll.py` au registre + profil harvest : il existe pour « casser le plafond WS (~10 userFills/IP) » via REST et il ne tournait pas. C'est LA raison des 8 leaders.
-- K2 ⚡ Réserver son poids dans le budget PARTAGÉ avant chaque requête (fait ce jour) : sans cela il recrée les 429.
-- K3 ⚡ Mesurer, après câblage, le nombre de leaders distincts par jour — c'est l'indicateur de progrès n°1.
-- K4 ⚡ Plafonner la part d'un seul leader dans les signaux retenus : à 63 %, le labo mesure un trader, pas une stratégie.
-- K5 🔬 Cadence de poll proportionnelle à l'activité récente du leader (celui qui vient d'émettre est repollé plus vite).
-- K6 🔬 Dégrader la cadence des leaders inactifs plutôt que les retirer (ils peuvent revenir).
-- K7 ⚡ Répartir les 10 slots WS sur les leaders les plus ACTIFS, laisser le reste au REST.
-- K8 🔬 Rotation équitable des slots WS pour que chaque leader ait des fenêtres d'observation directe.
-- K9 🔬 Découverte continue de nouveaux leaders actifs, filtrée sur copiabilité (pas sur PnL affiché).
-- K10 🔬 Détecter et fusionner les clones (mêmes fills décalés) pour ne pas compter un acteur plusieurs fois.
-- K11 🔬 Dédupliquer les ENTITÉS (plusieurs adresses d'un même acteur) avant de compter « n leaders ».
-- K12 🔬 Garder les leaders devenus inactifs dans l'univers historique (mesure du biais de survie).
-- K13 📊 Journal « couverture leaders » : vus actifs vs effectivement collectés (l'écart est le manque à gagner).
-- K14 🔬 Prioriser les leaders dont les fills sont majoritairement AGRESSIFS (le filtre C86 existe désormais).
-- K15 ⚡ Objectif chiffré : passer de 8 à ≥ 40 leaders distincts par jour avant de juger un résultat statistiquement.
-
-**B — EXÉCUTABILITÉ : LES TROIS CARNETS (déjà à 97 %, protéger l'acquis)**
-- K16 ⚡ Garder la cadence de 10,3 s par coin : c'est elle qui donne les 97 % — toute régression ici détruit la mesure.
-- K17 ⚡ Carnet de SORTIE garanti jusqu'à l'horizon MAX (TTL corrigé le 12/11) : ne jamais revenir au min.
-- K18 ⚡ Abonnement déclenché par l'activité : dès le premier fill sur un coin, s'abonner sans attendre la régénération de liste.
-- K19 ⚡ Pré-chauffage par coins habituels (fait) : vérifier à chaque passe qu'aucun coin tradé n'est hors liste.
-- K20 📊 Alerte si un coin tradé n'a aucun carnet depuis N minutes (`coins_sans_aucun_carnet` existe).
-- K21 🔬 Mesurer la couverture PAR COIN et non globalement (correctif du 12/11 : la fenêtre globale accusait 114 fills à tort).
-- K22 🔬 Prolonger l'abonnement d'un coin tant qu'un leader y a une position OUVERTE (lanes « sortie »).
-- K23 🔧 Ne jamais désabonner un coin pendant qu'un métaordre est en cours dessus.
-- K24 📊 Publier le % de fills à trois carnets à chaque passe (la jauge existe : `reconciliation_executabilite`).
-- K25 🔬 Suivre FARTCOIN/ZEC et les coins à 1-2 fills : ils échouent faute de couverture au bon moment.
-- K26 🔧 Vérifier que la liste de coins n'est jamais saturée au point de bloquer les ajouts (bug corrigé le 12/11 : 0 ajout sur 117 demandes).
-- K27 🔬 Mesurer le délai entre premier fill sur un coin nouveau et premier carnet de ce coin (temps d'amorçage).
-
-**C — CONTINUITÉ D'IDENTITÉ DE CONNEXION (14 refus mesurés, STRK et SEI)**
-- K28 ⚡ Comprendre pourquoi 27 coins sur 30 portent plusieurs époques de trou : c'est le dernier défaut mesurable.
-- K29 ⚡ Réduire la fréquence des réabonnements (chaque réabonnement incrémente l'époque et casse la continuité).
-- K30 🔧 Grouper les coins par socket de façon STABLE : un coin ne doit pas changer de connexion en cours de session.
-- K31 🔧 Ne pas incrémenter l'époque quand la reconnexion n'a causé AUCUNE perte (trou nul = continuité réelle).
-- K32 🔬 Mesurer la durée de vie moyenne d'une connexion : plus elle est longue, plus de fills deviennent mesurables.
-- K33 🔧 Reprise au watermark exact après reconnexion (ni trou ni doublon).
-- K34 📊 Journaliser chaque incrément d'époque avec sa cause (déconnexion, trame rejetée, réabonnement).
-- K35 🔬 Préférer N sockets stables à 1 socket qui se réabonne souvent.
-- K36 🔧 Heartbeat ping/pong par socket : détecter un pong manquant avant de perdre des trames.
-- K37 📊 Mesurer, par coin, le nombre d'époques traversées par heure (STRK et SEI en tête aujourd'hui).
-
-**D — DÉBIT ET BUDGET PARTAGÉ (218 → 16 refus ; viser 0)**
-- K38 ⚡ Tous les collecteurs REST passent par `reserver_poids` : un seul cloisonné recrée les rafales.
-- K39 🔬 Poids EXACT par type de requête (`clearinghouseState` 2, `l2Book` 2, `frontendOpenOrders` 20, `userFills` 20+1/20).
-- K40 ⚡ Exploiter `clearinghouseState` à poids 2 : les POSITIONS de nombreux leaders sont quasi gratuites.
-- K41 🔬 Brancher `userRateLimit` pour piloter la cadence au réel, pas à l'estime.
-- K42 🔧 Respecter `Retry-After` partout (le module `backoff` le gère déjà : l'utiliser uniformément).
-- K43 🔧 Jitter au démarrage de chaque collecteur (supprime la rafale synchronisée du lancement).
-- K44 🔬 Priorité de budget déclarée : fills causaux > carnets des coins actifs > ordres > rattrapages.
-- K45 🔧 Mode dégradé sous pression : ralentir les non critiques, jamais les fills causaux.
-- K46 📊 Historiser le nombre de 429 par lancement (218 → 16 ; objectif ~0).
-- K47 🔬 Multi-IP pour dépasser les 10 users WS et les 1200 poids/min (lanes cloud sur IP séparées).
-
-**E — FIABILITÉ, REPRISE, ZÉRO PERTE**
-- K48 ⚡ Écriture atomique (tmp + rename) de TOUS les rubans et curseurs : un arrêt brutal ne corrompt rien.
-- K49 ⚡ Tampons en mémoire PLAFONNÉS avec flush disque (jamais de croissance illimitée).
-- K50 🔧 Reprise après kill -9 sans perte ni double comptage (test de mort brutale).
-- K51 🔧 Nettoyage des `.pid` orphelins + détection de double instance au démarrage.
-- K52 🔧 Watchdog qui relance un collecteur mort en < 5 s AVEC reprise d'état.
-- K53 ⚡ Ligne de vie périodique pour tout collecteur sans heartbeat (sinon le superviseur relance un vivant = double collecte).
-- K54 🔧 Détecter le « marché silencieux » et marquer un TROU, pas « aucune activité » (le labo doit savoir).
-- K55 🔧 Déduplication inter-sources par identité stable de fill (WS, REST, nœud) sur TOUS les flux.
-- K56 🔬 Ordonnancement déterministe des fills de même instant (sinon deux runs donnent deux résultats).
-- K57 🔧 Archivage sans perte (déplacer, jamais supprimer) et certifier avant d'archiver.
-- K58 🔧 Rotation des rubans à la TAILLE, pas à la session.
-- K59 🛡️ Adapter l'ampleur à la RAM via le gouverneur (fait) : ralentir, jamais crasher.
-
-**F — QUALITÉ ET HONNÊTETÉ DES DONNÉES**
-- K60 ⚡ `data_origin` = OBSERVÉ_RÉEL vs RECONSTRUIT partout ; interdire la confusion.
-- K61 ⚡ Horodatage de RÉCEPTION à l'instant exact de lecture du socket (le labo s'en sert comme horloge causale).
-- K62 ⚡ Refuser tout carnet `received < exchange` ou lag > 30 s, et AUDITER les rejets (pas seulement les compter).
-- K63 🔧 Vérifier la monotonie de l'horloge de réception par socket (détecte une dérive d'horloge).
-- K64 🔬 Ne jamais transformer une donnée obtenue après coup en donnée « disponible à la décision ».
-- K65 🔧 Provenance de tier (LOCAL vs SAFE) jamais perdue dans le pont vers le labo.
-- K66 🔧 Chaque nouveau flux a une règle de certification OU un motif explicite d'exclusion (jamais ignoré en silence).
-- K67 ⚡ Empreinte SHA-256 des shards scellés et refus d'écrasement (le tier LOCAL n'en a aucune aujourd'hui).
-- K68 🔧 Quarantaine horodatée avec motif LISIBLE pour chaque ligne écartée.
-- K69 🔧 Ne jamais baisser les exigences de qualité pour gonfler le nombre de shards.
-- K70 📊 Rapport de couverture par famille : scellé / réparé / écarté / inconnu.
-- K71 🔬 Revérifier par rotation que le magasin de ticks natifs est bien immuable.
-
-**G — NOUVELLES DONNÉES DIRECTEMENT UTILES AU LABO**
-- K72 ⚡ `crossed` (agressif/passif) dans le ruban LOCAL : absent aujourd'hui, alors que le filtre C86 en dépend.
-- K73 ⚡ Ordres en attente des leaders ALIGNÉS sur les fills (fait le 12/11) : sans alignement, l'étude maker reste vide.
-- K74 ⚡ `activeAssetData` : levier et capacité disponible du leader = mesure de CONVICTION par trade.
-- K75 🔬 Ledger non-funding : dépôts/retraits = flux de capital, signal d'intention avant une série de trades.
-- K76 🔬 `userTwapSliceFills` : détecter les TWAP et anticiper les tranches suivantes.
-- K77 🔬 Trades publics par coin : indispensables à l'OFI et à l'impact de marché réel.
-- K78 🔬 Open interest et premium mark/oracle par coin (overshoot, positionnement).
-- K79 🔬 Liquidations confirmées reliées aux carnets (fade de liquidation).
-- K80 🔬 Funding horaire de TOUS les coins tradés, pas d'un sous-ensemble.
-- K81 🔬 Bougies 1 h sur long historique, incrémental, pour la volatilité réalisée (HAR).
-- K82 🔬 Profondeur de carnet au-delà de 5 niveaux (impact des tailles réelles).
-- K83 🔬 Flux d'une venue MENEUSE (Binance) : le module de mesure du décalage existe et attend ses données.
-
-**H — OBSERVABILITÉ ET BOUCLE DE RETOUR (de 6 jours à 2 secondes)**
-- K84 ⚡ Lancer `reconciliation_executabilite` à chaque passe : savoir en 2 s si la collecte sera mesurable.
-- K85 ⚡ Toujours mesurer la couverture PAR COIN : une fenêtre globale mentait de 114 fills.
-- K86 📊 Tableau de bord par flux : lignes/s, fraîcheur, trous, 429, reconnexions.
-- K87 📊 Reçu de couverture par lane (coins, fenêtre, reconnexions, trous).
-- K88 📊 Score « carburant » : combien de signaux deviendront scoreables au rythme actuel.
-- K89 📊 Suivre le nombre de JOURS DENSES accumulés (le seuil des 6 jours est le vrai compte à rebours).
-- K90 📊 Publier l'écart entre ce que le labo demande et ce que la collecte fournit (la boucle est déjà câblée).
-- K91 🔬 Mesurer la latence réception − bourse par flux (distribution, pas moyenne).
-- K92 📊 Alerter dès qu'un indicateur régresse (cadence, leaders, part à trois carnets).
-
-**I — PERFORMANCE ET COÛT**
-- K93 🔧 Index temporel des carnets par coin pour un chargement O(log n) côté labo.
-- K94 🔧 Interning des chaînes répétées dans les gros rubans (mémoire).
-- K95 🔧 Ne jamais garder deux copies d'un carnet en mémoire pendant le scellage.
-- K96 🔧 Compression des shards certifiés + vérification d'intégrité.
-- K97 🔧 Purge sûre des rubans de travail du labo après usage.
-- K98 🔬 Lecture BORNÉE de la queue des rubans pour toute jauge (coût indépendant de la taille du fichier).
-- K99 🔧 Timeout de requête adaptatif à la latence observée (p95 glissant).
-- K100 ⚡ **Règle d'or** : une amélioration de collecteur ne compte que si elle augmente le nombre de signaux MESURABLES par le labo. Toute autre optimisation attend. C'est la mesure du jour qui tranche, pas l'intuition : la couverture des carnets était déjà à 97 %, donc tout effort supplémentaire y aurait été gaspillé — le gain est dans les LEADERS.
 
 ### D. PROCHAIN PAS CRITIQUE (dans l'ordre)
 

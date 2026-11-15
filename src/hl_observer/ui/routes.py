@@ -2628,7 +2628,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                     {
                         "bot_replay_action": replay_action,
                         "status": "LOCAL_REPLAY",
-                        "estimated_net_pnl_usdc": round(close_delta_pnl, 6) if close_delta_pnl is not None else None,
+                        # ALLER-RETOUR COMPLET, pas le delta de caisse : le frais d'entree
+                        # quitte `entry_costs` (donc l'unrealized) a cet instant precis, il
+                        # doit donc entrer ici. C'est ce qui rend STRICT_ROUND_TRIP_COSTS_KNOWN vrai.
+                        "estimated_net_pnl_usdc": round(round_trip_net_pnl, 6) if round_trip_net_pnl is not None else None,
                         "known_cost_net_pnl_usdc": round(gross_pnl - allocated_entry_cost - exit_cost, 6),
                         "round_trip_net_pnl_usdc": round(round_trip_net_pnl, 6) if round_trip_net_pnl is not None else None,
                         "pnl_strict": close_delta_pnl is not None and round_trip_net_pnl is not None,
@@ -2712,7 +2715,11 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 gross_unrealized = (position["avg_price"] - mark_price) * position["size"]
             exit_cost_estimate = abs(position["size"] * mark_price) * cost_bps / 10_000.0
             # Entry fees are already booked in realized cash at OPEN/ADD.
-            net_unrealized = gross_unrealized - exit_cost_estimate
+            # Les frais d'ENTREE ont deja ete payes : une position ouverte vaut ce qu'elle
+            # rapporterait NETTE si on la fermait maintenant, donc entree ET sortie deduites.
+            # Sans cela, le mark annoncait -0,12 la ou la fermeture donnait -0,24.
+            entry_cost_borne = float(position.get("entry_costs") or 0.0)
+            net_unrealized = gross_unrealized - entry_cost_borne - exit_cost_estimate
             unrealized_pnl += net_unrealized
             open_positions.append(
                 {
@@ -2815,6 +2822,10 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         reproduced_entries = int(existing_reproduced_entries_total or 0) + new_reproduced_entries
         reproduced_exits = int(existing_reproduced_exits_total or 0) + new_reproduced_exits
         refused = sum(1 for row in ledger_events if row.get("status") == "REFUSED")
+        # Chaque cout est deja compte UNE FOIS dans son chiffre : les frais d'ENTREE sont
+        # dans l'unrealized tant que la position est ouverte, puis dans le realise des
+        # qu'elle est fermee. Ne RIEN soustraire ici : `entry_costs_paid` est un indicateur
+        # d'affichage, pas une charge supplementaire. (Le soustraire ici doublerait.)
         total_pnl = realized_net_pnl + unrealized_pnl
         current_equity_usdt = starting_equity_usdt + total_pnl
         free_equity_usdt = current_equity_usdt - open_exposure_usdt

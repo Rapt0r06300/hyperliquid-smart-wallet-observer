@@ -1077,9 +1077,17 @@ def _mark_to_market_positions(
             entry_cost = separate_entry_cost_usdc(normalized)
             net_unrealized = round_trip_net_pnl_usdc(
                 gross_pnl_usdc=gross_unrealized,
-                # Entry fees are already realized in the ledger at OPEN/ADD.
-                # Charging them again in open MTM would double-count the same fee.
-                entry_cost_usdc=0.0 if entry_cost is not None else None,
+                # 14/11/2026 — LE COUT D'ENTREE ETAIT FORCE A ZERO ICI, sur une premisse
+                # FAUSSE : « already realized in the ledger at OPEN/ADD ». Verifie ligne par
+                # ligne : la branche OPEN/ADD range le cout sur la position (`entry_costs`)
+                # et ne debite NI le realise NI l'equite ; `entry_costs_paid` etait calcule,
+                # publie, et n'entrait dans aucun total. Rien ne le facturait donc nulle part.
+                # Mesure : le mark annoncait -0,12 la ou la fermeture donnait -0,24, et
+                # l'equite 999,88 au lieu de 999,76 — en affichant STRICT_ROUND_TRIP_COSTS_KNOWN.
+                # Une position ouverte vaut ce qu'elle rapporterait NETTE si on la fermait
+                # maintenant : les frais deja payes en font partie. C'est d'ailleurs ce que dit
+                # la formule publiee juste en dessous : (mark-entry)*size-entry_cost-exit_cost.
+                entry_cost_usdc=entry_cost,
                 exit_cost_usdc=exit_cost_estimate,
             )
             if net_unrealized is not None:
