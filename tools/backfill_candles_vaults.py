@@ -454,7 +454,7 @@ def passe_funding(root: Path, *, now_ms: int | None = None, poster=_post_funding
         if gagnes:
             ecoule = time.time() - debut_heure
             print(f"[funding] prolonge {rang:>4}/{total_coins} {coin:<12} +{gagnes:>6} points | "
-                  f"{compte['points']:>8} au total | {ecoule / 60:.0f} min", flush=True)
+                  f"{compte['points']:>8} ajoutes ce passage | {ecoule / 60:.0f} min", flush=True)
 
     # ─────────────── FRONT ARRIERE : creuser, une page par coin et par ronde ───────────────
     # Un coin est a creuser si son point le plus ANCIEN est encore au-dessus du plancher.
@@ -532,7 +532,7 @@ def passe_funding(root: Path, *, now_ms: int | None = None, poster=_post_funding
             reste = (budget_s - ecoule) if budget_s else 0.0
             print(f"[funding] R{compte['rondes']} {rang:>4}/{len(restants)} {coin:<12} "
                   f"+{len(nouvelles):>5} points | remonte a {jours:>6.0f} j | "
-                  f"{compte['points']:>8} au total | {ecoule / 60:.0f} min ecoulees, "
+                  f"{compte['points']:>8} ajoutes ce passage | {ecoule / 60:.0f} min ecoulees, "
                   f"{max(0, reste) / 60:.0f} restantes", flush=True)
         restants = encore
 
@@ -735,8 +735,10 @@ def passe(root: Path, *, intervalles: tuple[str, ...] = ("1h", "5m"), now_ms: in
                 jours = (now_ms - min(x["t_ms"] for x in nouvelles)) / 86_400_000
                 ecoule = time.time() - debut_heure
                 print(f"[candles] {intervalle} {rang:>4}/{total} {coin:<12} "
-                      f"+{len(nouvelles):>5} bougies | remonte a {jours:>6.0f} j | "
-                      f"{compte['bougies']:>8} au total | {ecoule / 60:.0f} min", flush=True)
+                      # 17/11/2026 : « remonte a 0 j | 1 au total » se lisait comme le STOCK, alors
+                      # que ces chiffres ne comptent que ce que CE passage vient d'ajouter.
+                      f"+{len(nouvelles):>5} bougies | ce lot remonte a {jours:>6.0f} j | "
+                      f"{compte['bougies']:>8} ajoutees ce passage | {ecoule / 60:.0f} min", flush=True)
             if tronque:
                 compte["tronques"].append(coin)
             # Le coût d'une réponse dépend du NOMBRE de bougies rendues : une page pleine se paie

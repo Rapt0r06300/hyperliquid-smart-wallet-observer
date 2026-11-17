@@ -71,6 +71,13 @@ LEADERS_DU_POLL = Path("runtime") / "data" / "userfills_poll_watermarks.json"
 FENETRE_MS = 45 * 60_000
 #: Mesuré le 17/11 : 40 Mo de queue couvrent 77 min de poll, lus et filtrés en ~0,3 s.
 BUDGET_OCTETS_POLL = 32 * 1024 * 1024
+#: Nombre de cycles pendant lesquels un candidat NON couvert par le poll garde l'emplacement de
+#: découverte avant de le céder au suivant. 12 cycles de 150 s = 30 minutes.
+#: MESURÉ EN PRODUCTION le 17/11 à 19:21 : deux candidats non couverts pour UN emplacement libre
+#: alternaient à chaque cycle, et chaque alternance reconstruisait les dix connexions — le défaut
+#: même que ce module devait supprimer. En simulation il y avait trois emplacements libres.
+PALIER_ROTATION_HORS_POLL = 12
+
 #: Le poll écrit des centaines de lignes par minute. Sans ligne depuis 10 min, il ne voit plus rien :
 #: son silence ne prouve alors l'inactivité de personne.
 FRAICHEUR_POLL_MS = 10 * 60_000
@@ -261,7 +268,10 @@ def choisir_les_libres(silencieux: Sequence[Mapping[str, Any]], *, libres: int, 
     titulaire garde sa place, pour que la page reste identique d'un cycle à l'autre.
 
     Sans liste des leaders du poll (absente, illisible, poll périmé), TOUS les silencieux sont
-    « non couverts » : c'est exactement la rotation historique.
+    « non couverts » : c'est exactement la rotation historique, cycle par cycle.
+
+    Quand le poll couvre les autres, les non-couverts tournent par PALIERS
+    (`PALIER_ROTATION_HORS_POLL` cycles) : une rotation à chaque cycle reconstruirait toute la page.
     """
     libres = max(0, int(libres))
     if not libres or not silencieux:
@@ -274,7 +284,8 @@ def choisir_les_libres(silencieux: Sequence[Mapping[str, Any]], *, libres: int, 
         if len(hors) <= libres:
             choisis = list(hors)
         else:
-            depart = (max(0, int(rotation_index)) * libres) % len(hors)
+            palier = PALIER_ROTATION_HORS_POLL if suivis else 1
+            depart = ((max(0, int(rotation_index)) // palier) * libres) % len(hors)
             choisis = [hors[(depart + k) % len(hors)] for k in range(libres)]
     reste = libres - len(choisis)
     if reste > 0 and couverts:
@@ -325,7 +336,7 @@ def journaliser_page(root: Path, *, page: int, roles: Sequence[Sequence[Any]], m
 
 __all__ = [
     "SCHEMA_PAGES", "RUBAN_POLL", "BESOINS_COLLECTE", "JOURNAL_PAGES", "LEADERS_DU_POLL", "FENETRE_MS",
-    "BUDGET_OCTETS_POLL", "FRAICHEUR_POLL_MS", "MOTIF_OK", "MOTIF_ABSENT", "MOTIF_ILLISIBLE", "MOTIF_VIDE",
+    "BUDGET_OCTETS_POLL", "FRAICHEUR_POLL_MS", "PALIER_ROTATION_HORS_POLL", "MOTIF_OK", "MOTIF_ABSENT", "MOTIF_ILLISIBLE", "MOTIF_VIDE",
     "MOTIF_PARTIEL", "MOTIF_PERIME", "RANG_CLASSE", "RANG_PAR_DEFAUT",
     "charger_plan", "activite_poll_par_vault", "leaders_suivis_par_le_poll", "indice_d_attribution", "classe_du_labo",
     "activite_effective", "ordonner_les_actifs", "choisir_les_libres", "ordre_stable", "journaliser_page",
