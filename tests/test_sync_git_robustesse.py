@@ -36,8 +36,14 @@ def _module():
     return m
 
 
-def _espionner(module):
-    """Remplace subprocess.run et retourne la liste des appels observes."""
+def _espionner(module, monkeypatch):
+    """Remplace subprocess.run LE TEMPS DU TEST et retourne la liste des appels observes.
+
+    17/11/2026 — FUITE CORRIGEE. L'ancienne version faisait `module.subprocess.run = faux_run`.
+    `module.subprocess` EST le module `subprocess` global : le faux (returncode=0, stdout="ok")
+    restait donc installe pour tout le processus, et chaque test suivant recevait un faux succes
+    a la place de son vrai sous-processus. `monkeypatch` defait le remplacement a la fin du test.
+    """
     vus: list[dict] = []
 
     def faux_run(cmd, **kw):
@@ -50,16 +56,16 @@ def _espionner(module):
 
         return Resultat()
 
-    module.subprocess.run = faux_run
+    monkeypatch.setattr(module.subprocess, "run", faux_run)
     return vus
 
 
 # ------------------------------------------------------------------ entree fermee
 
-def test_git_ne_peut_JAMAIS_attendre_une_entree():
+def test_git_ne_peut_JAMAIS_attendre_une_entree(monkeypatch):
     """LE correctif du blocage : sans cela, git herite du stdin d'un parent qui peut mourir."""
     m = _module()
-    vus = _espionner(m)
+    vus = _espionner(m, monkeypatch)
     m._git(Path("."), "rev-parse", "HEAD")
     m._git(Path("."), "merge", "--ff-only", "x")
     assert vus, "aucun appel observe"
@@ -69,9 +75,9 @@ def test_git_ne_peut_JAMAIS_attendre_une_entree():
 
 # ------------------------------------------------------------------ delai maximal
 
-def test_toute_commande_porte_un_delai():
+def test_toute_commande_porte_un_delai(monkeypatch):
     m = _module()
-    vus = _espionner(m)
+    vus = _espionner(m, monkeypatch)
     m._git(Path("."), "rev-parse", "HEAD")
     m._git(Path("."), "fetch", "--no-tags", "origin", "main")
     for appel in vus:
@@ -79,23 +85,23 @@ def test_toute_commande_porte_un_delai():
         assert appel["timeout"] > 0
 
 
-def test_le_reseau_a_un_delai_PLUS_LARGE_que_le_local():
+def test_le_reseau_a_un_delai_PLUS_LARGE_que_le_local(monkeypatch):
     """Un fetch de plusieurs Go est lent par nature : lui imposer le delai local le tuerait."""
     m = _module()
-    vus = _espionner(m)
+    vus = _espionner(m, monkeypatch)
     m._git(Path("."), "rev-parse", "HEAD")
     m._git(Path("."), "fetch", "origin", "main")
     local, reseau = vus[0]["timeout"], vus[1]["timeout"]
     assert reseau > local
 
 
-def test_un_depassement_leve_une_erreur_au_lieu_de_se_figer():
+def test_un_depassement_leve_une_erreur_au_lieu_de_se_figer(monkeypatch):
     m = _module()
 
     def run_qui_traine(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 1.0))
 
-    m.subprocess.run = run_qui_traine
+    monkeypatch.setattr(m.subprocess, "run", run_qui_traine)
     with pytest.raises(m.SyncError) as capture:
         m._git(Path("."), "merge", "--ff-only", "x")
     message = str(capture.value)
@@ -107,19 +113,19 @@ def test_un_depassement_leve_une_erreur_au_lieu_de_se_figer():
 
 # ------------------------------------------------------------------ verrous
 
-def test_les_lectures_n_entrent_PAS_en_conflit_sur_le_verrou():
+def test_les_lectures_n_entrent_PAS_en_conflit_sur_le_verrou(monkeypatch):
     m = _module()
-    vus = _espionner(m)
+    vus = _espionner(m, monkeypatch)
     for lecture in ("rev-parse", "rev-list", "ls-files", "config"):
         m._git(Path("."), lecture, "HEAD")
     for appel in vus:
         assert "--no-optional-locks" in appel["cmd"], appel["cmd"]
 
 
-def test_une_ECRITURE_prend_bien_le_verrou():
+def test_une_ECRITURE_prend_bien_le_verrou(monkeypatch):
     """L'inverse compte autant : une fusion DOIT verrouiller, sinon elle corromprait l'index."""
     m = _module()
-    vus = _espionner(m)
+    vus = _espionner(m, monkeypatch)
     m._git(Path("."), "merge", "--ff-only", "x")
     assert "--no-optional-locks" not in vus[0]["cmd"]
 

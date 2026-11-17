@@ -32,11 +32,34 @@ def _watchdog():
     return module
 
 
-def test_tout_ce_que_le_lanceur_demande_existe_dans_le_registre():
-    """Un nom mal orthographie ici ne lancerait rien, sans erreur visible."""
-    connus = {c["nom"] for c in R.REGISTRE}
-    inconnus = [n for n in _watchdog().DEFAULT_NAMES if n not in connus]
-    assert inconnus == [], f"noms absents du registre : {inconnus}"
+def test_tout_ce_que_le_lanceur_demande_est_RESOLVABLE_en_script():
+    """Un nom mal orthographie ici ne lancerait rien, sans erreur visible.
+
+    16/11/2026 — ce test ne regardait que `REGISTRE` et rougissait sur `copy-vault-checkpoints`,
+    alors que ce collecteur TOURNE (battement frais, present dans la liste `active` du watchdog).
+    Raison : la resolution reelle, `bounded_collection._registry`, lit
+    `REGISTRE + COLLECTEURS_CAMPAGNE`. Le test etait donc trop etroit — il accusait le registre au
+    lieu de lui-meme. On interroge desormais la MEME union que le code qui lance, en l'important,
+    pour que les deux ne puissent plus diverger.
+    """
+    from hl_observer.ops.bounded_collection import _registry
+
+    resolvables = _registry()
+    inconnus = [n for n in _watchdog().DEFAULT_NAMES if n not in resolvables]
+    assert inconnus == [], f"noms que la resolution ne trouve PAS : {inconnus}"
+    sans_script = [n for n in _watchdog().DEFAULT_NAMES if not resolvables[n].get("script")]
+    assert sans_script == [], f"noms sans script : {sans_script} — ils ne lanceraient rien"
+
+
+def test_un_collecteur_de_CAMPAGNE_reste_hors_des_profils_du_registre():
+    """`copy-vault-checkpoints` est resolvable SANS etre dans REGISTRE : c'est voulu (campagne de
+    preuve seulement). Si un jour il entrait dans REGISTRE, il entrerait aussi dans les profils du
+    lanceur ordinaire — ce test oblige a relire cette decision."""
+    noms_registre = {c["nom"] for c in R.REGISTRE}
+    noms_campagne = {c["nom"] for c in R.COLLECTEURS_CAMPAGNE}
+    assert "copy-vault-checkpoints" in noms_campagne
+    assert not (noms_registre & noms_campagne), (
+        f"un collecteur declare DEUX fois : {noms_registre & noms_campagne}")
 
 
 def test_les_collecteurs_de_LEADERS_sont_bien_lances_par_la_campagne():

@@ -22,10 +22,54 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
     OUTPUT_RELPATH,
     STATE_RELPATH,
     CopyVaultCheckpointTail,
+    coverage_receipt,
 )
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 
 VAULT = "0x" + "a" * 40
+
+
+@pytest.mark.parametrize("incident", ("checkpoints_expired", "pending_overflow_rejected", "input_rotations"))
+def test_recu_couverture_refuse_les_incidents_meme_si_lignes_completes(incident: str) -> None:
+    counters = {
+        "complete_lines": 10, "checkpoints_captured": 20,
+        "reconnect_backfill_blocked": 0, "invalid_rejected": 0,
+        "input_rotations": 0, "checkpoints_expired": 0,
+        "pending_overflow_rejected": 0,
+    }
+    assert coverage_receipt(counters, expected_lines=10)["status"] == "PROVEN"
+    counters[incident] = 1
+    result = coverage_receipt(counters, expected_lines=10)
+    assert result["status"] == "UNMEASURABLE"
+    assert result["gap_count"] == 1
+
+
+def test_recu_couverture_refuse_un_compteur_manquant_ou_invalide() -> None:
+    counters = {
+        "complete_lines": 10, "checkpoints_captured": 20,
+        "reconnect_backfill_blocked": 0, "invalid_rejected": 0,
+        "input_rotations": 0, "checkpoints_expired": 0,
+        "pending_overflow_rejected": 0,
+    }
+    for value in (None, True, -1):
+        damaged = dict(counters)
+        if value is None:
+            damaged.pop("checkpoints_expired")
+        else:
+            damaged["checkpoints_expired"] = value
+        result = coverage_receipt(damaged, expected_lines=10)
+        assert result["status"] == "UNMEASURABLE"
+        assert result["reason"] == "COUNTERS_INCOMPLETE_OR_INVALID"
+
+
+def test_recu_couverture_ne_compte_pas_deux_fois_une_rotation() -> None:
+    counters = {
+        "complete_lines": 10, "checkpoints_captured": 20,
+        "reconnect_backfill_blocked": 1, "invalid_rejected": 0,
+        "input_rotations": 1, "checkpoints_expired": 0,
+        "pending_overflow_rejected": 0,
+    }
+    assert coverage_receipt(counters, expected_lines=10)["gap_count"] == 1
 
 
 def _fill(
@@ -525,7 +569,19 @@ def test_checkpoint_rejette_un_etat_persistant_corrompu(tmp_path: Path) -> None:
     assert reloaded.state["pending"] == []
 
 
-def test_file_replacement_is_recovered_but_invalidates_clean_epoch(tmp_path: Path) -> None:
+def test_file_replacement_is_recovered_and_SEGMENTS_the_clean_epoch(tmp_path: Path) -> None:
+    """16/11/2026 — CONTRAT CHANGE, ET RESSERRE.
+
+    AVANT : ce test exigeait `receipt_valid is False` apres une rotation, c'est-a-dire que le
+    moindre incident ferme l'epoque ENTIERE. C'etait le bloqueur P0 de l'audit du 15/11 : la
+    campagne reelle comptait 43 expirations et une rotation, donc 100 % des 25 875 checkpoints
+    etaient non certifiables, y compris ceux des minutes sans incident. Zero trade executable.
+
+    MAINTENANT : la spec autorise des trous globaux a condition de ne certifier que des intervalles
+    `EXECUTION_REPLAY_SAFE`. L'ecrivain publie la FENETRE de chaque trou, et on verifie ici la
+    propriete qui compte vraiment, plus forte que l'ancienne assertion : la ligne recue DANS la
+    fenetre de rotation est refusee, celle recue APRES est certifiee, et le trou reste compte.
+    """
     now = [6_000_000]
     engine = CopyVaultCheckpointTail(
         tmp_path,
@@ -556,8 +612,18 @@ def test_file_replacement_is_recovered_but_invalidates_clean_epoch(tmp_path: Pat
     assert post_reconnect["lines"] == 1
     assert post_reconnect["captured"] == 1
     _, audit = load_observed_books(tmp_path, coins={"BTC"})
-    assert audit["clean_epoch_receipt"]["receipt_valid"] is False
-    assert audit["clean_epoch_receipt"]["collector_gap_count"] == 1
+    recu = audit["clean_epoch_receipt"]
+    # Le trou n'est PAS effacé : il reste compté, et sa position est connue.
+    assert recu["collector_gap_count"] == 1
+    assert recu["gap_segmentation_reason"] == "OK", (
+        "la position du trou doit etre expliquee, sinon la porte doit rester fermee")
+    assert recu["safe_interval_count"] >= 1
+    # La ligne d'AVANT la rotation tombe dans la fenetre du trou : elle est refusee.
+    assert recu["rows_inside_gap_window"] >= 1, (
+        "la ligne capturee juste avant la rotation est dans la fenetre : elle ne peut pas etre "
+        "certifiee, sinon la segmentation ne servirait a rien")
+    # Celle d'apres est une observation legitime : elle, elle compte.
+    assert recu["checkpoint_rows"] >= 1 and recu["receipt_valid"] is True
 
 
 def test_pending_overflow_retains_existing_work_and_fails_closed(
@@ -586,3 +652,74 @@ def test_pending_overflow_retains_existing_work_and_fails_closed(
     _, audit = load_observed_books(tmp_path, coins={"BTC", "ETH"})
     assert audit["clean_epoch_receipt"]["receipt_valid"] is False
     assert audit["clean_epoch_receipt"]["collector_gap_count"] == 2
+
+
+# ───────── 17/11/2026 : l'arret de l'ecrivain est un trou declare, meme sans checkpoint en attente ─────────
+
+def test_un_arret_SANS_checkpoint_en_attente_est_declare(tmp_path: Path) -> None:
+    """Avant : une coupure sans checkpoint en attente ne laissait aucune fenetre de trou."""
+    from hl_observer.collection import copy_vault_gap_windows as GAPS
+
+    now = [5_000_000]
+    engine = CopyVaultCheckpointTail(tmp_path, fetch_book=lambda _coin: _book(now[0]),
+                                     clock_ms=lambda: now[0])
+    engine.poll_once()
+    assert engine.state["counters"]["writer_outages"] == 0 and not engine.state.get("gap_windows")
+
+    now[0] += 42 * 60_000                                   # la veille du PC
+    engine.poll_once()
+    assert engine.state["counters"]["writer_outages"] == 1
+    fenetres = engine.state["gap_windows"]
+    assert len(fenetres) == 1 and fenetres[0]["nature"] == GAPS.TROU_ARRET
+    assert fenetres[0]["debut_ms"] == 5_000_000 + GAPS.MARGE_MS + 1
+    assert fenetres[0]["fin_ms"] == now[0] - MAX_TARGET_LAG_MS
+    assert GAPS.journal_coherent(engine.state) == (True, "OK")
+    intervalles, raison = GAPS.intervalles_depuis_etat(engine.state, fin_ms=now[0])
+    assert raison == "OK"
+    assert GAPS.est_sur(5_000_000, intervalles), "la derniere passe d'avant la coupure reste sure"
+    assert not GAPS.est_sur(5_000_000 + 20 * 60_000, intervalles)
+    assert GAPS.est_sur(now[0], intervalles), "la passe de reprise est sure"
+
+
+def test_une_cadence_normale_ne_declare_aucun_arret(tmp_path: Path) -> None:
+    now = [5_000_000]
+    engine = CopyVaultCheckpointTail(tmp_path, fetch_book=lambda _coin: _book(now[0]),
+                                     clock_ms=lambda: now[0])
+    for _ in range(40):
+        engine.poll_once()
+        now[0] += MAX_TARGET_LAG_MS                         # pile la tolerance : pas un arret
+    assert engine.state["counters"]["writer_outages"] == 0 and not engine.state.get("gap_windows")
+
+
+def test_un_arret_compte_dans_les_trous_du_collecteur(tmp_path: Path) -> None:
+    now = [5_000_000]
+    engine = CopyVaultCheckpointTail(tmp_path, fetch_book=lambda _coin: _book(now[0]),
+                                     clock_ms=lambda: now[0])
+    assert engine.poll_once()["replay_evidence_complete"] is True
+    now[0] += 10 * 60_000
+    resultat = engine.poll_once()
+    assert resultat["collector_gap_count"] == 1 and resultat["replay_evidence_complete"] is False
+
+
+def test_au_chargement_le_journal_d_une_coupure_est_ramene_a_un_intervalle(tmp_path: Path) -> None:
+    """L'etat reel du 17/11 : 302 fenetres pour une seule coupure, dans un journal plafonne a 512."""
+    from hl_observer.collection import copy_vault_gap_windows as GAPS
+
+    now = [5_000_000]
+    engine = CopyVaultCheckpointTail(tmp_path, fetch_book=lambda _coin: _book(now[0]),
+                                     clock_ms=lambda: now[0])
+    engine.poll_once()
+    etat = json.loads((tmp_path / STATE_RELPATH).read_text(encoding="utf-8"))
+    etat["gap_windows_schema"] = GAPS.SCHEMA_FENETRES
+    etat["gap_windows_dropped"] = 0
+    etat["gap_windows"] = [{"nature": GAPS.TROU_EXPIRATION, "debut_ms": 5_100_000 + i * 1_000,
+                            "fin_ms": 7_700_000, "n": 1} for i in range(302)]
+    etat["counters"]["checkpoints_expired"] = 302
+    (tmp_path / STATE_RELPATH).write_text(json.dumps(etat), encoding="utf-8")
+
+    now[0] += 1_000
+    repris = CopyVaultCheckpointTail(tmp_path, fetch_book=lambda _coin: _book(now[0]),
+                                     clock_ms=lambda: now[0])
+    assert len(repris.state["gap_windows"]) == 1
+    assert repris.state["gap_windows"][0]["n"] == 302
+    assert GAPS.journal_coherent(repris.state) == (True, "OK")

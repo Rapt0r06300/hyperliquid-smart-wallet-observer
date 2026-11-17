@@ -948,7 +948,7 @@ def test_status_marks_existing_paper_position_with_latest_hyperliquid_snapshot(t
         session.add(MarketSnapshot(source="allMids", exchange_ts=now_ms(), raw_json={"ETH": "2010"}))
         session.commit()
 
-    payload = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=False).get("/api/simulation/status").json()
+    payload = TestClient(create_ui_app(settings, state=state), raise_server_exceptions=True).get("/api/simulation/status").json()
 
     # LONG 0.1 ETH from 2000 to 2010 = +1.00 gross.
     # Fast status uses the same conservative exit-cost model: 201 USDT * 12 bps = 0.2412.

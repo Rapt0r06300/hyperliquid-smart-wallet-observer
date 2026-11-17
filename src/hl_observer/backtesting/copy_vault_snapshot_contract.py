@@ -15,6 +15,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import PAPER_EQUITY_USD
+
 SCHEMA = "hypersmart.copy_vault_restoration_snapshot.v1"
 PROVEN = "PROVEN"
 NOT_PROVEN = "NOT_PROVEN"
@@ -132,7 +134,13 @@ def verify_snapshot_contract(snapshot: Mapping[str, Any] | object) -> dict[str, 
         capital = search.get("paper_capital_usd")
         if capital is None:
             missing.append("search.paper_capital_usd")
-        elif capital != 200.0:
+        # 17/11/2026 — CE CONTRAT EXIGEAIT ENCORE 200,0 USD. Le labo écrit dans l'instantané
+        # `PAPER_CAPITAL_USD = PAPER_EQUITY_USD`, soit 350,0 USD depuis le changement de capital
+        # paper ; AGENTS.md déclare les 200 USD « historiques et inactifs ». Tout instantané émis
+        # par le labo actuel était donc refusé par son propre validateur, et le test de ce
+        # validateur ne passait que parce que sa fixture portait le montant historique.
+        # Le capital exigé est lu de la source unique du protocole : plus de seconde valeur.
+        elif isinstance(capital, bool) or capital != PAPER_EQUITY_USD:
             invalid.append("search.paper_capital_usd")
 
     trial = require("trial_accounting", lambda value: isinstance(value, Mapping))

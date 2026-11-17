@@ -118,6 +118,15 @@ def parser_ctxs(payload: Any) -> dict[str, dict]:
     for i, actif in enumerate(univers if isinstance(univers, list) else []):
         if i >= len(ctxs) or not isinstance(actif, dict) or not isinstance(ctxs[i], dict):
             continue
+        # 17/11/2026 — UN PERP DELISTE N'EST PAS UN EVENEMENT. Mesure sur le coffre : **67,3 % des
+        # 175 238 lignes `overshoot` ont leurs quatre prix futurs identiques au prix de
+        # l'evenement**. Les coins touches a 100 % — RNDR, FTM, FXS, HPOS, UNIBOT, OX, FRIEND, SHIA,
+        # exactement 3 693 lignes chacun — sont des perps delistes : mark et oracle y sont FIGES
+        # avec un ecart permanent (RNDR : -191,75 bps), donc le seuil etait franchi a chaque cycle
+        # et le collecteur ecrivait un « depassement » toutes les 2 minutes, pour toujours.
+        # Meme regle que `collection/univers_perps.py` : un marche deliste n'entre pas.
+        if actif.get("isDelisted") is True:
+            continue
         nom = str(actif.get("name") or "").upper()
         try:
             oracle = float(ctxs[i]["oraclePx"])
@@ -127,6 +136,16 @@ def parser_ctxs(payload: Any) -> dict[str, dict]:
         if nom and oracle > 0:
             out[nom] = {"oracle": oracle, "mark": mark}
     return out
+
+
+def coins_delistes(payload: Any) -> list[str]:
+    """Les perps que la venue declare delistes. Sert a DIRE ce qu'on a ecarte, et aux tests."""
+    try:
+        univers = payload[0]["universe"]
+    except (TypeError, KeyError, IndexError):
+        return []
+    return sorted(str(a.get("name") or "").upper() for a in univers
+                  if isinstance(a, dict) and a.get("isDelisted") is True and a.get("name"))
 
 
 def lire_ctxs(*, timeout_s: float = 10.0) -> dict[str, dict]:
@@ -178,9 +197,21 @@ def avancer(ouverts: dict[str, dict], mids: dict[str, float], now: float, *,
         if age >= hmax:
             # réversion = mouvement du mid VERS l'oracle, dans le sens du fade (bps du mid initial)
             m0 = ev["mid_at_event"]
-            mf = ev.get("mid_fwd_%gs" % hmax) or m0
+            mf = ev.get("mid_fwd_%gs" % hmax)
             signe = 1.0 if ev["overshoot_bps"] < 0 else -1.0   # fade : on parie le retour vers l'oracle
-            ev["reversion_bps"] = round(signe * (mf - m0) / m0 * 1e4, 3) if m0 > 0 else 0.0
+            # 17/11/2026 — UN PRIX FUTUR ABSENT N'EST PAS UNE REVERSION NULLE. L'ancien code
+            # ecrivait `mf = ev.get(...) or m0` : si le coin avait disparu des mids a l'echeance,
+            # le prix de l'evenement etait recopie et la reversion valait 0,0 — une observation
+            # MANQUANTE devenait une mesure. Elle est maintenant inconnue, et dite.
+            if mf is None or not m0 > 0:
+                ev["reversion_bps"] = None
+                ev["reversion_inconnue"] = True
+            else:
+                ev["reversion_bps"] = round(signe * (mf - m0) / m0 * 1e4, 3)
+            # Prix reste EXACTEMENT egal sur tout le chemin : marque, jamais ecarte en silence.
+            # C'est la signature d'un marche fige ; l'etude decide quoi en faire, mais elle le sait.
+            chemin = [ev.get("mid_fwd_%gs" % h) for h in horizons_s]
+            ev["prix_fige"] = bool(chemin and all(v is not None and v == m0 for v in chemin))
             ev["ts_fin_ms"] = int(now * 1000)
             finis.append(ev)
             del ouverts[coin]

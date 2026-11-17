@@ -144,6 +144,10 @@ def run_replication(
     n = {"ordres": 0, "refus_min": 0, "refus_min_usd": 0.0, "cible_inconnue": 0,
          "funding_inconnu": 0.0, "funding_connu": 0.0}
     non_negociables: dict[str, str] = {}
+    # 17/11 : notionnel traité PAR COIN. Aucun calcul de PnL n'en dépend ; il sert à confronter la
+    # réplication à la capacité mesurée du marché (une minute médiane n'échange que 1,51 fois
+    # l'ordre paper sur le coin médian), que le coût « frais + demi-écart » ne voit pas.
+    volume_par_coin: dict[str, float] = {}
     points: list[tuple[int, float, bool]] = []      # (instant, valeur du compte, valorisation sûre)
     cible_connue: dict[int, bool] = {}
     expositions: list[float] = []
@@ -213,8 +217,11 @@ def run_replication(
             cumul["frais"] += frais
             cumul["ecart"] += cout_ecart
             cumul["volume"] += abs(ecart)
+            volume_par_coin[coin] = volume_par_coin.get(coin, 0.0) + abs(ecart)
             n["ordres"] += 1
-    return _bilan(points, expositions, cumul, n, non_negociables, config, cible_connue)
+    bilan = _bilan(points, expositions, cumul, n, non_negociables, config, cible_connue)
+    bilan["volume_usd_par_coin"] = {c: round(v, 4) for c, v in sorted(volume_par_coin.items())}
+    return bilan
 
 
 def _bilan(points: list[tuple[int, float, bool]], expositions: list[float], cumul: Mapping[str, float],

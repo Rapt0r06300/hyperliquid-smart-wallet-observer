@@ -1,7 +1,6 @@
 """Replay Copy-Vault causal et exécutable en PAPER sur carnets observés."""
 from __future__ import annotations
 
-import bisect
 import hashlib
 import json
 import math
@@ -10,7 +9,14 @@ from collections.abc import Iterable, Mapping
 from decimal import ROUND_FLOOR, Decimal, localcontext
 from typing import Any
 
-from hl_observer.backtesting.copy_vault_book_index import index_des_carnets, liste_des_carnets
+from hl_observer.backtesting.copy_vault_book_index import (
+    _first_at_or_after,
+    _last_at_or_before,
+    _strict_nonnegative_int,
+    _strict_positive_timestamp,
+    index_des_carnets,
+    liste_des_carnets,
+)
 from hl_observer.backtesting.copy_vault_book_loader import load_observed_books
 from hl_observer.backtesting.copy_vault_causal_selection import (
     cluster_metaorders,
@@ -80,20 +86,6 @@ def causal_book_receipt(
     return {"allowed": allowed, "status": "PROVEN" if allowed else "REJECTED", "reason": "OK" if allowed else "BOOK_NOT_CAUSAL"}
 
 
-def _strict_positive_timestamp(value: object) -> int | None:
-    """Require an observed integer timestamp; do not parse or truncate input."""
-    if type(value) is not int or value <= 0:
-        return None
-    return value
-
-
-def _strict_nonnegative_int(value: object) -> int | None:
-    """Require an exact integer for causal lag/age parameters."""
-    if type(value) is not int or value < 0:
-        return None
-    return value
-
-
 def _valid_observed_book_top(row: Mapping[str, Any]) -> bool:
     """Validate the common top-of-book fields before any economic arithmetic."""
 
@@ -118,36 +110,6 @@ def _valid_observed_book_top(row: Mapping[str, Any]) -> bool:
         and ask > bid
         and capacity > 0.0
     )
-
-
-def _first_at_or_after(
-    rows: list[dict[str, Any]], target_ms: int, max_lag_ms: int, book_index: Any = None,
-) -> tuple[dict[str, Any] | None, int | None]:
-    target = _strict_positive_timestamp(target_ms)
-    max_lag = _strict_nonnegative_int(max_lag_ms)
-    exact_timestamps = (book_index or index_des_carnets(rows)).horodatages_exacts()
-    if target is None or max_lag is None or exact_timestamps is None:
-        return None, None
-    index = bisect.bisect_left(exact_timestamps, target)
-    if index >= len(rows):
-        return None, None
-    lag = exact_timestamps[index] - target
-    return (rows[index], lag) if 0 <= lag <= max_lag else (None, lag)
-
-
-def _last_at_or_before(
-    rows: list[dict[str, Any]], target_ms: int, max_age_ms: int, book_index: Any = None,
-) -> tuple[dict[str, Any] | None, int | None]:
-    target = _strict_positive_timestamp(target_ms)
-    max_age = _strict_nonnegative_int(max_age_ms)
-    exact_timestamps = (book_index or index_des_carnets(rows)).horodatages_exacts()
-    if target is None or max_age is None or exact_timestamps is None:
-        return None, None
-    index = bisect.bisect_right(exact_timestamps, target) - 1
-    if index < 0:
-        return None, None
-    age = target - exact_timestamps[index]
-    return (rows[index], age) if 0 <= age <= max_age else (None, age)
 
 
 def _observed_book_epoch_rejection(
@@ -186,6 +148,7 @@ def _exact_checkpoint_triplet(
     copy_delay_ms: int,
     max_reference_lag_ms: int,
     max_target_lag_ms: int,
+    require_explicit_receive_time: bool = False,
 ) -> tuple[
     tuple[dict[str, Any], dict[str, Any], dict[str, Any], int, int, int] | None,
     str | None,
@@ -222,11 +185,24 @@ def _exact_checkpoint_triplet(
     )
     lags: list[int] = []
     for index, (row, expected_target) in enumerate(zip(selected, expected_targets, strict=True)):
+        if require_explicit_receive_time:
+            received_at = row.get("received_at_ms")
+            if type(received_at) is not int or received_at <= 0:
+                return None, "MISSING_CHECKPOINT_RECEIVE_TIME"
+            if received_at != row.get("ts_ms"):
+                return None, "CHECKPOINT_RECEIVE_TIME_MISMATCH"
         target = int(row.get("checkpoint_target_ms") or 0)
         if target != expected_target:
             return None, "CHECKPOINT_TARGET_BINDING_MISMATCH"
         if index == 0:
-            lag = target - int(row["ts_ms"])
+            # The book's exchange clock may precede the signal even when the
+            # observation arrived afterwards.  A reference must have been
+            # available locally at signal time, including direct callers that
+            # did not go through load_observed_books (which maps ts_ms to recv).
+            received = row.get("received_at_ms", row["ts_ms"])
+            if type(received) is not int or received > signal_ms or received < int(row["ts_ms"]):
+                return None, "REFERENCE_NOT_AVAILABLE_AT_SIGNAL"
+            lag = target - received
             allowed = max_reference_lag_ms
         else:
             lag = int(row["ts_ms"]) - target
@@ -314,10 +290,14 @@ def execute_metaorder(
             copy_delay_ms=int(copy_delay_ms),
             max_reference_lag_ms=int(max_reference_lag_ms),
             max_target_lag_ms=int(max_target_lag_ms),
+            require_explicit_receive_time=is_certifiable_mode(economic_mode),
         )
     except (KeyError, TypeError, ValueError, OverflowError):
         return None, "INVALID_OBSERVED_BOOK"
-    if checkpoint_reason is not None:
+    if checkpoint_reason is not None and (
+        checkpoint_reason != "REFERENCE_NOT_AVAILABLE_AT_SIGNAL"
+        or is_certifiable_mode(economic_mode)
+    ):
         return None, checkpoint_reason
     if checkpoint_triplet is not None:
         reference, entry, exit_book, reference_lag, entry_lag, exit_lag = checkpoint_triplet
@@ -328,6 +308,8 @@ def execute_metaorder(
         # forward episode look causal.  The explicit guard below must diagnose
         # and reject the selected triplet instead.
         continuous_books, continuous_refusal = index_des_carnets(books).continus()
+        if not continuous_books and checkpoint_reason is not None:
+            return None, checkpoint_reason
         if continuous_refusal is not None:   # mêmes refus, dans le même ordre, qu'un parcours complet
             return None, continuous_refusal
         continuous_index = index_des_carnets(continuous_books)

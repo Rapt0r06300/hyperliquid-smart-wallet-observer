@@ -38,6 +38,14 @@ def test_le_livre_se_charge_vide_quand_le_schema_ne_correspond_PAS(tmp_path):
     assert livre["positions"] == []
 
 
+def test_carry_paper_refuse_le_scope_avant_toute_ecriture(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HYPERSMART_ACTIVE_STRATEGY_SCOPE", "carry")
+    m = _mod()
+    assert m.main(["--root", str(tmp_path)]) == 2
+    assert "DISABLED_BY_SCOPE:carry" in capsys.readouterr().out
+    assert not (tmp_path / m.GRAND_LIVRE).exists()
+
+
 def test_un_fichier_illisible_ne_fait_PAS_perdre_le_programme(tmp_path):
     m = _mod()
     f = tmp_path / "livre.json"

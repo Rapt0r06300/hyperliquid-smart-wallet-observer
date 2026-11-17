@@ -388,12 +388,20 @@ def test_shard_du_coffre_modifie_apres_scellage_est_ecarte(tmp_path):
                         "shard": f"runtime/coffre_certifie/local/shards/fills_forward/{name}"})
     entries.append({"famille": "fills_forward", "sha256": "0" * 64,
                     "shard": "runtime/coffre_certifie/local/shards/fills_forward/absent__vault_fills_poll.jsonl.gz"})
+    outside = tmp_path / "runtime" / "ailleurs" / "outside__vault_fills_poll.jsonl.gz"
+    outside.parent.mkdir(parents=True)
+    with gzip.open(outside, "wt", encoding="utf-8") as handle:
+        handle.write("{}\n")
+    entries.append({"famille": "fills_forward", "sha256": hashlib.sha256(outside.read_bytes()).hexdigest(),
+                    "shard": "runtime/ailleurs/outside__vault_fills_poll.jsonl.gz"})
     (tmp_path / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json").write_text(json.dumps({"shards": entries}), encoding="utf-8")
     with gzip.open(shards / "b__vault_fills_poll.jsonl.gz", "wt", encoding="utf-8") as handle:
         handle.write("{}\n")                                           # altération après scellage
     selected, excluded = outil.select_shards(tmp_path)
     assert [Path(item["path"]).name for item in selected["fills_forward"]] == ["a__vault_fills_poll.jsonl.gz"]
-    assert sorted(item["reason"] for item in excluded) == ["fichier_absent", "sha256_different_de_l_index"]
+    assert sorted(item["reason"] for item in excluded) == [
+        "chemin_hors_coffre_local", "fichier_absent", "sha256_different_de_l_index"
+    ]
 
 
 # ─────────────── bougies, étude rétrospective, portefeuilles observés ───────────────

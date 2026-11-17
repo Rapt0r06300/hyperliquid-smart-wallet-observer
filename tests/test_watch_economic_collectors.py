@@ -24,7 +24,33 @@ def test_requested_names_preserve_full_campaign_state(tmp_path: Path) -> None:
     assert WATCH._requested_names(tmp_path) == [
         "bbo-collector",
         "userfills-live",
+        "copy-vault-checkpoints",
     ]
+
+
+def test_copy_vault_checkpoint_writer_cannot_be_omitted_from_live_profile() -> None:
+    assert "copy-vault-checkpoints" in WATCH.DEFAULT_NAMES
+    assert WATCH._copy_vault_required_names(["userfills-live"]) == [
+        "userfills-live", "copy-vault-checkpoints",
+    ]
+    assert WATCH._copy_vault_required_names(["bbo-collector"]) == ["bbo-collector"]
+
+
+def test_checkpoint_gap_health_is_separate_from_collector_liveness(tmp_path: Path) -> None:
+    heartbeat_path = tmp_path / "runtime/research_lab/heartbeats/copy-vault-checkpoints.json"
+    heartbeat_path.parent.mkdir(parents=True)
+    heartbeat_path.write_text(json.dumps({
+        "pid": 123,
+        "ts_ms": 1_000_000,
+        "protocol": WATCH.CHECKPOINT_COLLECTOR_PROTOCOL,
+        "metriques": {"gaps_critiques": 45},
+    }), encoding="utf-8")
+    assert WATCH._checkpoint_evidence_health(
+        tmp_path, {"copy-vault-checkpoints": 123}, now_ms=1_000_001,
+    ) == {"status": "GAPS_REPORTED", "reported_gaps": 45}
+    assert WATCH._checkpoint_evidence_health(
+        tmp_path, {"copy-vault-checkpoints": 124}, now_ms=1_000_001,
+    )["status"] == "HEARTBEAT_UNVERIFIED"
 
 
 def test_watchdog_repairs_and_logs_without_stopping_after_one_pass(
@@ -98,6 +124,33 @@ def test_watchdog_displays_the_latest_line_for_each_worker(tmp_path: Path, monke
     output = capsys.readouterr().out
     assert "[WORKER] bbo-collector — PID 101 — received=42 coin=kPEPE" in output
     assert "[WORKER] userfills-live — PID 202 — journal absent ou illisible" in output
+
+
+def test_watchdog_allows_extra_attached_collector(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        WATCH, "renew_bounded_collection_lease",
+        lambda *_args, **_kwargs: {"renewed": True, "reason": "OK"},
+    )
+    WATCH.run_watchdog(
+        tmp_path,
+        interval_s=30.0,
+        duration_s=60.0,
+        requested_names=["bbo-collector"],
+        ensure_fn=lambda *_args, **_kwargs: {
+            "actifs": {"bbo-collector": 101, "copy-vault-checkpoints": 202},
+            "manquants": [], "lease": {"lease_id": "lease-test"},
+            "paper_read_only": True,
+        },
+        monotonic_fn=iter((0.0, 0.0)).__next__,
+        max_passes=1,
+    )
+    log = json.loads(
+        (tmp_path / "runtime/logs/economic-collector-watchdog.jsonl").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert log["status"] == "STARTING"
+    assert log["missing"] == []
 
 
 def test_watchdog_log_rotation_is_bounded_and_keeps_recent_records(tmp_path: Path, monkeypatch) -> None:

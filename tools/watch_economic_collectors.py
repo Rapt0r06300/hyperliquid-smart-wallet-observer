@@ -41,6 +41,7 @@ DEFAULT_NAMES = (
     "backfill-fills",
     "backfill-candles-vaults",
     "userfills-live",
+    "copy-vault-checkpoints",  # sole bound REFERENCE/ENTRY/EXIT writer for causal proof
     "native-venues",
     "lab-microstructure",
     "l2-leaders",
@@ -75,7 +76,47 @@ def _requested_names(root: Path) -> list[str]:
         requested = [str(name) for name in state.get("requested") or () if name]
     except (OSError, TypeError, ValueError):
         requested = []
-    return list(dict.fromkeys(requested or DEFAULT_NAMES))
+    return _copy_vault_required_names(requested or DEFAULT_NAMES)
+
+
+def _copy_vault_required_names(names: Sequence[str]) -> list[str]:
+    """Keep the causal checkpoint writer with every live Copy-Vault fill source."""
+    selected = list(dict.fromkeys(str(name) for name in names if name))
+    if "userfills-live" in selected and "copy-vault-checkpoints" not in selected:
+        selected.append("copy-vault-checkpoints")
+    return selected
+
+
+def _checkpoint_evidence_health(
+    root: Path, active: Mapping[str, Any], *, now_ms: int
+) -> dict[str, Any]:
+    """Expose proof gaps separately from process and protocol liveness."""
+    expected_pid = active.get("copy-vault-checkpoints")
+    if type(expected_pid) is not int:
+        return {"status": "MISSING", "reported_gaps": None}
+    path = root / "runtime/research_lab/heartbeats/copy-vault-checkpoints.json"
+    try:
+        heartbeat = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return {"status": "HEARTBEAT_UNAVAILABLE", "reported_gaps": None}
+    if not isinstance(heartbeat, Mapping):
+        return {"status": "HEARTBEAT_INVALID", "reported_gaps": None}
+    ts_ms = heartbeat.get("ts_ms")
+    if (
+        heartbeat.get("pid") != expected_pid
+        or heartbeat.get("protocol") != CHECKPOINT_COLLECTOR_PROTOCOL
+        or type(ts_ms) is not int
+        or not 0 <= now_ms - ts_ms <= 120_000
+    ):
+        return {"status": "HEARTBEAT_UNVERIFIED", "reported_gaps": None}
+    metrics = heartbeat.get("metriques")
+    gaps = metrics.get("gaps_critiques") if isinstance(metrics, Mapping) else None
+    if type(gaps) is not int or gaps < 0:
+        return {"status": "GAP_COUNT_UNVERIFIED", "reported_gaps": None}
+    return {
+        "status": "GAPS_REPORTED" if gaps else "NO_REPORTED_GAP",
+        "reported_gaps": gaps,
+    }
 
 
 def _append_log(root: Path, payload: dict[str, Any]) -> None:
@@ -251,7 +292,7 @@ def run_watchdog(
         now = monotonic_fn()
         if now >= deadline:
             break
-        names = (
+        names = _copy_vault_required_names(
             list(dict.fromkeys(str(name) for name in requested_names if name))
             if requested_names is not None
             else _requested_names(root)
@@ -300,7 +341,9 @@ def run_watchdog(
                 else "EN COURS"
             )
             workers_ready = (
-                not missing and len(active) == len(names) and renewal.get("renewed")
+                not missing
+                and set(names).issubset(active_map)
+                and renewal.get("renewed")
             )
             status = (
                 "DEGRADED"
@@ -311,6 +354,9 @@ def run_watchdog(
                 if protocol_status in {"ATTENTE HEARTBEATS", "EN COURS"}
                 else "DEGRADED"
             )
+            evidence_health = _checkpoint_evidence_health(
+                root, active_map, now_ms=int(time.time() * 1000)
+            )
             record = {
                 "ts_ms": int(time.time() * 1000),
                 "status": status,
@@ -320,6 +366,8 @@ def run_watchdog(
                 "lease_id": lease_id or None,
                 "lease_renewal": renewal.get("reason"),
                 "causal_protocol_status": protocol_status,
+                "causal_evidence_status": evidence_health["status"],
+                "causal_evidence_reported_gaps": evidence_health["reported_gaps"],
                 "observed_protocols": {
                     "userfills-live": fills_protocol or None,
                     "copy-vault-checkpoints": checkpoint_protocol or None,
@@ -340,6 +388,12 @@ def run_watchdog(
                 ),
                 flush=True,
             )
+            if evidence_health["status"] == "GAPS_REPORTED":
+                print(
+                    "  [PREUVE COPY-VAULT] %d gaps signales; collector actif ne vaut pas preuve SAFE"
+                    % evidence_health["reported_gaps"],
+                    flush=True,
+                )
             if missing:
                 print(
                     "  MANQUANTS: %s" % ", ".join(missing),

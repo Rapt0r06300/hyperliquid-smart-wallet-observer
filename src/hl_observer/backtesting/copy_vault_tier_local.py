@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.collection.forward_poll_fills import CADENCE_ARCHIVE, cadence_plan, is_causal_live_source
+from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE
 
 #: plan publié par l'étude de copiabilité : classe de chaque adresse suivie (voir ``cadence_plan``)
 PLAN_DE_COLLECTE = Path("runtime") / "data" / "copy_vault_besoins_collecte.json"
@@ -27,7 +28,7 @@ _COFFRE_FAMILLES_FILLS = {"fills_forward", "fills_backfill", "snapshot"}
 #: sont mises à DISPOSITION de la recherche exploratoire, séparées du calcul PnL SAFE.
 _COFFRE_FAMILLES_SIGNAUX = {
     "liquidation", "overshoot", "asset_ctx", "allmids",
-    "venue_book", "venue_dispersion", "trades_marche", "candle", "position",
+    "trades_marche", "candle", "position",
     # 2026-11-12 : flux AUPARAVANT collectés + certifiés mais JAMAIS chargés par le labo (gâchés).
     # Branchés comme signaux de contexte : disponibles à la recherche exploratoire (comptés sans coût
     # mémoire dans le labo principal via garder_signaux=False). Chacun a une valeur propre :
@@ -36,6 +37,35 @@ _COFFRE_FAMILLES_SIGNAUX = {
     "vault_ledger",        # dépôts/retraits LOCAUX -> NAV as-of, détection de retrait
     "vault_portfolio",     # portefeuille complet des leaders (dex réunis) -> réplication par position
     "micro_bbo", "micro_l2", "micro_trades",   # microstructure fine -> OFI, lead-lag, horloges séparées
+}
+
+
+#: 16/11/2026 — FAMILLES EXCLUES AVEC MOTIF, et non laissées en limbe.
+#:
+#: Le chantier 10 de l'audit exige que toute famille du coffre soit « consommée avec un rôle
+#: justifié OU explicitement exclue ». La matrice du coffre a trouvé `explorer_tx` dans un
+#: troisième état : 196 shards, 7 914 792 lignes, 9 jours — indexée, et sans aucun chemin de
+#: chargement ici. Son rôle EST documenté ailleurs (`tools/auditer_donnees_collectees.py` :
+#: « découverte de leaders actifs — métadonnée, pas un signal de marché ») : c'est une source de
+#: DÉCOUVERTE, pas une observation de marché datée au tick.
+#:
+#: On l'inscrit donc ici comme exclusion MOTIVÉE du pont de replay. L'exclure explicitement n'est
+#: pas l'enterrer : c'est rendre son absence lisible dans la matrice, pour que personne ne la
+#: confonde avec un oubli de câblage — et pour qu'une réadmission exige un motif économique écrit.
+FAMILLES_EXCLUES_DU_REPLAY: dict[str, str] = {
+    # Cross-Venue est DISABLED_BY_SCOPE par la constitution : ces deux familles décrivent
+    # explicitement une autre venue. Les lire pour Copy-Vault reviendrait à réactiver un scope
+    # fermé par un chemin détourné.
+    "venue_book": (
+        "DISABLED_BY_SCOPE:cross_venue — carnet d'une AUTRE venue ; la constitution ferme cette "
+        "famille economique, seule une modification revue du scope canonique peut la rouvrir"),
+    "venue_dispersion": (
+        "DISABLED_BY_SCOPE:cross_venue — dispersion entre venues ; meme verrou constitutionnel, "
+        "sa readmission exige un changement de scope revu, pas un branchement"),
+    "explorer_tx": (
+        "DECOUVERTE_DE_LEADERS : metadonnee d'activite on-chain, sans horloge de marche par coin ; "
+        "sa readmission exige une fonction economique ecrite et une jointure as-of prouvee"
+    ),
 }
 
 
@@ -84,7 +114,18 @@ _CHAMPS_REPETES = (
 #: jeté, il laisse sa mémoire entremêlée à celle des lignes gardées, et le système ne la récupère jamais
 #: (mesuré : 5 millions de fills écartés, mémoire inchangée à 20 Go).
 _VAULT_DANS_LA_LIGNE = re.compile(r'"vault":\s*"(0x[0-9a-fA-F]{40})"')
-_HORODATAGE_DANS_LA_LIGNE = re.compile(r'"(?:snapshot_)?ts_ms":\s*(?!null|\s)')   # horodatage présent et non nul
+_CHAMPS_HORODATAGE_SIGNAL = (
+    "ts_ms", "snapshot_ts_ms", "received_at_ms", "open_ts_ms",
+    "exchange_ts_ms", "ts_ex",
+)
+_HORODATAGE_DANS_LA_LIGNE = re.compile(
+    r'"(?:ts_ms|snapshot_ts_ms|received_at_ms|open_ts_ms|exchange_ts_ms|ts_ex)":\s*[1-9][0-9]*'
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _signal_horodate(row: Mapping[str, Any]) -> bool:
+    return any(type(row.get(field)) is int and row[field] > 0 for field in _CHAMPS_HORODATAGE_SIGNAL)
 
 
 def _partager_les_chaines(row: dict[str, Any]) -> None:
@@ -114,8 +155,21 @@ def adresses_archivees(repository_root: Path) -> set[str] | None:
     return {adresse for adresse, classe in classes.items() if classe == CADENCE_ARCHIVE}
 
 
+#: Plafond de lignes materialisees par le pont. MESURE DU 16/11 : les familles de replay
+#: (fills + carnets) totalisent 59 832 338 lignes, soit ~13,9 Go de dictionnaires Python — sur une
+#: machine de 31,9 Go dont 9 etaient libres. Il n'existait AUCUNE garde : le pont chargeait, et la
+#: machine mourait. 8 millions de lignes tiennent dans ~2 Go, ce qui laisse de la place au reste.
+MAX_LIGNES_MATERIALISEES = 8_000_000
+
+#: Tous les N shards, on redemande au gouverneur memoire s'il faut s'arreter. Assez souvent pour
+#: reagir, assez rare pour ne pas payer la mesure a chaque fichier.
+SHARDS_ENTRE_CONTROLES_RAM = 20
+
+
 def _charger_tier_local(
     repository_root: Path, *, progress: Callable[[str], None] | None = None, garder_signaux: bool = True,
+    depuis_ms: int | None = None, jusqu_ms: int | None = None,
+    max_lignes: int = MAX_LIGNES_MATERIALISEES,
 ) -> dict[str, Any]:
     """Charge le tier LOCAL du coffre-fort (certifie) EN MEMOIRE pour la recherche.
 
@@ -134,7 +188,12 @@ def _charger_tier_local(
     vide = {"statut": "ABSENT", "_fills": [], "_books": [], "_bbo": [], "_signaux": {},
             "fills_causaux": 0, "fills_backfill": 0, "carnets": 0, "bbo": 0,
             "bbo_adaptees": 0, "bbo_denses_non_retenues": 0,
-            "signaux_par_famille": {}, "signaux_total": 0,
+            "signaux_par_famille": {}, "signaux_total": 0, "signaux_non_horodates": {},
+            "familles_indexees": {}, "familles_non_chargees": {},
+            "signaux_gardes_en_memoire": garder_signaux,
+            "chargement_arrete": None, "shards_hors_fenetre": 0, "shards_non_lus": 0,
+            "plafond_lignes": int(max_lignes), "fenetre_depuis_ms": depuis_ms,
+            "fenetre_jusqu_ms": jusqu_ms,
             "shards_injectes": 0, "shards_rejetes": 0,
             "fills_archive_non_rejoues": 0, "adresses_archive": None}
     index_path = repository_root / "runtime" / "coffre_certifie" / "LOCAL_INDEX.json"
@@ -147,6 +206,28 @@ def _charger_tier_local(
     shards = index.get("shards") if isinstance(index, dict) else None
     if not isinstance(shards, list) or not shards:
         return {**vide, "statut": "VIDE"}
+    coffre_root = (repository_root / "runtime" / "coffre_certifie" / "local" / "shards").resolve()
+
+    familles_indexees: dict[str, dict[str, int]] = {}
+    familles_non_chargees: dict[str, dict[str, Any]] = {}
+    familles_chargeables = _COFFRE_FAMILLES_FILLS | _COFFRE_FAMILLES_SIGNAUX | {"book_l2", "bbo"}
+    for entree in shards:
+        if not isinstance(entree, dict):
+            continue
+        famille = str(entree.get("famille") or "INCONNUE")
+        compte = familles_indexees.setdefault(famille, {"shards": 0, "lignes_declarees": 0})
+        compte["shards"] += 1
+        n = entree.get("deposes")
+        if type(n) is int and n >= 0:
+            compte["lignes_declarees"] += n
+        if famille not in familles_chargeables:
+            autres = familles_non_chargees.setdefault(famille, {
+                "shards": 0, "lignes_declarees": 0,
+                "motif": "AUCUN_ADAPTATEUR_COPY_VAULT_DANS_LE_PONT_LOCAL",
+            })
+            autres["shards"] += 1
+            if type(n) is int and n >= 0:
+                autres["lignes_declarees"] += n
 
     _fills: list[dict[str, Any]] = []
     _books: list[dict[str, Any]] = []
@@ -160,37 +241,90 @@ def _charger_tier_local(
     archivees = adresses_archivees(repository_root)
     fills_archive = 0
     signaux_comptes: dict[str, int] = {}
+    signaux_non_horodates: dict[str, int] = {}
     shards_ok = 0
     shards_rejetes = 0
-    for entree in shards:
+    # 16/11/2026 — TROIS GARDES, parce qu'il n'y en avait AUCUNE.
+    shards_hors_fenetre = 0
+    arret_chargement: str | None = None
+    shards_non_lus = 0
+    memoire_attendue_s, memoire_incidents, memoire_detail = 0.0, 0, None
+    for index_shard, entree in enumerate(shards):
+        if arret_chargement is not None:
+            shards_non_lus += 1
+            continue
         if not isinstance(entree, dict):
             continue
         famille = str(entree.get("famille") or "")
         est_signal = famille in _COFFRE_FAMILLES_SIGNAUX
-        if (famille not in _COFFRE_FAMILLES_FILLS
-                and famille not in ("book_l2", "bbo") and not est_signal):
+        if famille not in familles_chargeables:
             continue
+        # GARDE 1 — FENETRE. L'index porte les bornes de chaque shard (completees par le
+        # reindexage du 16/11) : un shard entierement anterieur a la fenetre etudiee n'a aucune
+        # raison d'etre decompresse ni hashe.
+        if depuis_ms is not None:
+            borne = entree.get("ts_max_ms")
+            if type(borne) is int and borne < int(depuis_ms):
+                shards_hors_fenetre += 1
+                continue
+        # 16/11 (2e passe) — BORNE HAUTE. Sans elle, une fenêtre n'avait pas de fin : le pont ne
+        # pouvait pas être conduit galerie par galerie (`plan_de_fouille`), donc le corpus entier
+        # restait inaccessible autrement qu'en une seule charge tronquée à 8 M lignes.
+        if jusqu_ms is not None:
+            borne_basse = entree.get("ts_min_ms")
+            if type(borne_basse) is int and borne_basse > int(jusqu_ms):
+                shards_hors_fenetre += 1
+                continue
+        # GARDE 2 — PLAFOND DE LIGNES. Une troncature silencieuse ferait mesurer sur un
+        # echantillon inconnu : on s'arrete et on le DIT.
+        if len(_fills) + len(_books) + len(_bbo) >= int(max_lignes):
+            arret_chargement = "PLAFOND_LIGNES"
+            shards_non_lus += 1
+            continue
+        # GARDE 3 — MEMOIRE. « On ralentit ou on retrecit, on ne crashe JAMAIS. »
+        if index_shard % SHARDS_ENTRE_CONTROLES_RAM == 0:
+            # 17/11/2026 : a la premiere alerte le pont abandonnait TOUT le reste (60 shards lus,
+            # 6 349 non lus) alors que la memoire revenait au vert trente secondes plus tard. On
+            # attend si la pression vient d'ailleurs ; on ne s'arrete que si elle persiste, ou si
+            # c'est notre propre charge.
+            souffle = _FENETRE.patienter_sous_pression(progress=progress)
+            memoire_attendue_s += float(souffle["attendu_s"])
+            memoire_incidents += 1 if souffle["incident"] else 0
+            if not souffle["continuer"]:
+                arret_chargement, memoire_detail = _FENETRE.ARRET_MEMOIRE, souffle["detail"]
+                shards_non_lus += 1
+                continue
         rel = entree.get("shard")
         if not isinstance(rel, str):
+            shards_rejetes += 1
             continue
         sha_attendu = str(entree.get("sha256") or "").lower()
         shard_path = repository_root / rel
-        if shard_path.is_symlink() or not shard_path.is_file():
+        if _SHA256_RE.fullmatch(sha_attendu) is None:
+            shards_rejetes += 1
+            continue
+        if (not shard_path.resolve().is_relative_to(coffre_root)
+                or shard_path.is_symlink() or not shard_path.is_file()):
             shards_rejetes += 1
             continue
         # fail-closed : le SHA du shard doit correspondre a l'index certifie.
-        if sha_attendu:
-            h = hashlib.sha256()
-            try:
-                with shard_path.open("rb") as fb:
-                    for bloc in iter(lambda: fb.read(1 << 20), b""):
-                        h.update(bloc)
-            except OSError:
-                shards_rejetes += 1
-                continue
-            if h.hexdigest() != sha_attendu:
-                shards_rejetes += 1
-                continue
+        h = hashlib.sha256()
+        try:
+            with shard_path.open("rb") as fb:
+                for bloc in iter(lambda: fb.read(1 << 20), b""):
+                    h.update(bloc)
+        except OSError:
+            shards_rejetes += 1
+            continue
+        if h.hexdigest() != sha_attendu:
+            shards_rejetes += 1
+            continue
+        # Aucun fragment d'un gzip incomplet ne doit survivre au rejet du shard.
+        debut_fills, debut_books, debut_bbo = len(_fills), len(_books), len(_bbo)
+        debut_signaux = len(_signaux.get(famille, ()))
+        debut_compte = signaux_comptes.get(famille, 0)
+        debut_non_horodate = signaux_non_horodates.get(famille, 0)
+        debut_archive, debut_adaptees, debut_denses = fills_archive, bbo_adaptees, bbo_denses_non_retenues
         try:
             with _gzip.open(shard_path, "rt", encoding="utf-8") as src:
                 for ligne in src:
@@ -205,13 +339,15 @@ def _charger_tier_local(
                     if est_signal and not garder_signaux:
                         if _HORODATAGE_DANS_LA_LIGNE.search(ligne) is not None:
                             signaux_comptes[famille] = signaux_comptes.get(famille, 0) + 1
+                        else:
+                            signaux_non_horodates[famille] = signaux_non_horodates.get(famille, 0) + 1
                         continue
                     try:
                         row = json.loads(ligne)
                     except (ValueError, TypeError):
-                        continue
+                        raise ValueError("ligne JSON invalide dans le shard certifie")
                     if not isinstance(row, dict):
-                        continue
+                        raise ValueError("ligne JSON non objet dans le shard certifie")
                     row["provenance_tier"] = "LOCAL"
                     if famille in _COFFRE_FAMILLES_FILLS:
                         if isinstance(row.get("ts_ms"), int) and row.get("vault") and row.get("coin"):
@@ -243,11 +379,32 @@ def _charger_tier_local(
                                     bbo_adaptees += 1
                     elif est_signal:
                         # Signal de contexte LOCAL : tout enregistrement certifié avec
-                        # un horodatage (ts_ms ou snapshot_ts_ms) est mis à disposition.
-                        if row.get("ts_ms") is not None or row.get("snapshot_ts_ms") is not None:
+                        # un horodatage explicite est mis à disposition de la recherche.
+                        if _signal_horodate(row):
                             _signaux.setdefault(famille, []).append(row)
                             signaux_comptes[famille] = signaux_comptes.get(famille, 0) + 1
-        except OSError:
+                        else:
+                            signaux_non_horodates[famille] = signaux_non_horodates.get(famille, 0) + 1
+        except (OSError, EOFError, UnicodeError, ValueError):
+            del _fills[debut_fills:]
+            del _books[debut_books:]
+            for row in _bbo[debut_bbo:]:
+                if row.get("adapte_depuis") == "bbo_tape":
+                    _bbo_secondes.discard((row["coin"], row["received_at_ms"] // 1000))
+            del _bbo[debut_bbo:]
+            if est_signal:
+                del _signaux.setdefault(famille, [])[debut_signaux:]
+                if debut_compte:
+                    signaux_comptes[famille] = debut_compte
+                else:
+                    signaux_comptes.pop(famille, None)
+                if debut_non_horodate:
+                    signaux_non_horodates[famille] = debut_non_horodate
+                else:
+                    signaux_non_horodates.pop(famille, None)
+            fills_archive, bbo_adaptees, bbo_denses_non_retenues = (
+                debut_archive, debut_adaptees, debut_denses
+            )
             shards_rejetes += 1
             continue
         shards_ok += 1
@@ -259,7 +416,8 @@ def _charger_tier_local(
         if r.get("isSnapshot") is False and is_causal_live_source(r.get("source"))
     )
     return {
-        "statut": "OK", "shards_injectes": shards_ok, "shards_rejetes": shards_rejetes,
+        "statut": ("REJECTED" if shards_ok == 0 else "PARTIAL" if shards_rejetes else "OK"),
+        "shards_injectes": shards_ok, "shards_rejetes": shards_rejetes,
         "_fills": _fills, "_books": _books, "_bbo": _bbo,
         # familles présentes même quand les lignes ne sont pas gardées (le labo en publie la liste)
         "_signaux": {famille: _signaux.get(famille, []) for famille in signaux_comptes},
@@ -268,7 +426,70 @@ def _charger_tier_local(
         "bbo_adaptees": bbo_adaptees, "bbo_denses_non_retenues": bbo_denses_non_retenues,
         "signaux_par_famille": dict(sorted(signaux_comptes.items())),
         "signaux_total": sum(signaux_comptes.values()),
+        "signaux_non_horodates": dict(sorted(signaux_non_horodates.items())),
+        "familles_indexees": dict(sorted(familles_indexees.items())),
+        "familles_non_chargees": dict(sorted(familles_non_chargees.items())),
+        "signaux_gardes_en_memoire": garder_signaux,
+        # Ce que le pont a DELIBEREMENT laisse de cote, et pourquoi. Jamais de coupe muette.
+        "chargement_arrete": arret_chargement,
+        "memoire": {"incidents": memoire_incidents, "attendu_s": round(memoire_attendue_s, 1),
+                    "arret_detail": memoire_detail},
+        "shards_hors_fenetre": shards_hors_fenetre,
+        "shards_non_lus": shards_non_lus,
+        "plafond_lignes": int(max_lignes),
+        "fenetre_depuis_ms": depuis_ms,
+        "fenetre_jusqu_ms": jusqu_ms,
         # fills des adresses classées ARCHIVE par le plan du labo : au coffre, mais non rejoués
         "fills_archive_non_rejoues": fills_archive,
         "adresses_archive": None if archivees is None else len(archivees),
     }
+
+#: 17/11/2026 — CHAQUE FAMILLE SANS CONSOMMATEUR DE REPLAY A DÉSORMAIS UN RÔLE MESURÉ.
+#:
+#: Historique. Au run du 12/11, dix familles étaient comptées sans que personne sache qu'elles
+#: dormaient. Le 16/11 elles ont reçu un état déclaré, ``A_CABLER`` : la fonction qu'elles
+#: serviraient et la condition pour les brancher. C'était mieux que le silence, mais c'était encore
+#: un état d'ATTENTE, et l'objectif exige pour chaque famille un rôle « consommé et mesuré » ou
+#: une « exclusion motivée ».
+#:
+#: « Utiliser tout » ne veut toujours pas dire injecter tout dans un modèle : brancher une famille
+#: sans hypothèse préenregistrée ajoute des essais multiples, et les lois mesurées n'ont pas besoin
+#: d'un degré de liberté de plus. La réponse est une MESURE DESCRIPTIVE par famille, qui tranche la
+#: seule question utile : cette famille peut-elle seulement changer quelque chose ?
+#:
+#: Chaque fiche nomme le rôle, la fonction qui le mesure (elle doit EXISTER : un test l'importe),
+#: et la limite — ce que la famille ne fait PAS, pour qu'un rôle mesuré ne soit jamais lu comme un
+#: branchement dans la décision.
+FAMILLES_A_ROLE_MESURE: dict[str, dict[str, str]] = {
+    "trades_marche": {
+        "role": "CAPACITE_MESUREE",
+        "mesure": "capacite_par_coin",
+        "limite": "decrit ce que le marche echange par minute ; n'entre dans aucun signal d'entree",
+    },
+    "liquidation": {
+        "role": "RISQUE_MESURE",
+        "mesure": "risque_de_liquidation",
+        "limite": "frequence observee des liquidations et ADL ; aucun filtre de risque n'est gele",
+    },
+    "vault_ledger": {
+        "role": "FLUX_DE_CAPITAL_MESURE",
+        "mesure": "flux_de_capital",
+        "limite": "compte les jours-compte avec depot ou retrait ; la correction reste celle de Dietz",
+    },
+    "overshoot": {
+        "role": "RESULTAT_SEULEMENT_EXCLUE_COMME_ENTREE",
+        "mesure": "resultat_overshoot",
+        "limite": ("porte mid_fwd_* et reversion_bps, des valeurs du FUTUR de l'evenement : "
+                   "look-ahead par construction, donc jamais une entree de decision"),
+    },
+    "micro_l2": {
+        "role": "APPLICABILITE_MESUREE",
+        "mesure": "applicabilite_microstructure",
+        "limite": "quelques coins seulement ; un conditionnement OFI exige un preenregistrement",
+    },
+    "micro_trades": {
+        "role": "APPLICABILITE_MESUREE",
+        "mesure": "applicabilite_microstructure",
+        "limite": "meme couverture que micro_l2 ; horloge fine disponible, aucune hypothese gelee",
+    },
+}

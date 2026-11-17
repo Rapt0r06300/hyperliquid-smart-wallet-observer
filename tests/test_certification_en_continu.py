@@ -103,7 +103,7 @@ def test_sans_boucle_le_comportement_d_origine_est_INTACT():
     """Non-regression : tous les appels existants (lanceur, .cmd, tests) ne changent pas."""
     m = _module()
     appels = _compteur(m)
-    m._point_d_entree(["--root", ".", "--tout"])
+    m._point_d_entree(["--root", ".", "--tout"], verrouiller=False)
     assert appels == [["--root", ".", "--tout"]]
 
 
@@ -112,7 +112,7 @@ def test_l_option_boucle_est_RETIREE_avant_d_appeler_main():
     m = _module()
     appels = _compteur(m)
     m.boucler = lambda argv, intervalle, **k: appels.append(list(argv)) or 0
-    m._point_d_entree(["--root", ".", "--boucle-s", "1800"])
+    m._point_d_entree(["--root", ".", "--boucle-s", "1800"], verrouiller=False)
     assert appels == [["--root", "."]]
 
 
@@ -120,7 +120,7 @@ def test_la_forme_avec_egal_marche_aussi():
     m = _module()
     appels = _compteur(m)
     m.boucler = lambda argv, intervalle, **k: appels.append(list(argv)) or 0
-    m._point_d_entree(["--boucle-s=900", "--root", "."])
+    m._point_d_entree(["--boucle-s=900", "--root", "."], verrouiller=False)
     assert appels == [["--root", "."]]
 
 

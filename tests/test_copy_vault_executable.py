@@ -1412,6 +1412,7 @@ def _checkpoint_book(
     )
     return {
         **_book(ts_ms, 99.0 + line, 101.0 + line, line=line, causal=True),
+        "received_at_ms": ts_ms,
         "metaorder_id": metaorder_id,
         "checkpoint_stage": stage,
         "checkpoint_id": f"{metaorder_id}:{checkpoint_suffix}",
@@ -1454,7 +1455,61 @@ def test_executeur_refuse_un_checkpoint_reference_recu_apres_le_signal() -> None
     trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
 
     assert trade is None
-    assert reason == "STALE_EXACT_METAORDER_CHECKPOINT"
+    assert reason == "REFERENCE_NOT_AVAILABLE_AT_SIGNAL"
+
+
+def test_executeur_refuse_reference_exchange_ancienne_mais_recue_apres_signal() -> None:
+    metaorder = cluster_metaorders([_entry("late-receipt", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    reference = _checkpoint_book(identifier, "REFERENCE", 995, 1_000, line=1)
+    reference["received_at_ms"] = 1_005
+    books = [
+        reference,
+        _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+
+    trade, reason = execute_metaorder(metaorder, books, horizon_ms=300_000)
+
+    assert trade is None
+    assert reason == "REFERENCE_NOT_AVAILABLE_AT_SIGNAL"
+
+
+def test_reference_checkpoint_tardive_ne_masque_pas_un_flux_continu_causal() -> None:
+    metaorder = cluster_metaorders([_entry("continuous-fallback", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    books = [
+        _book(990, 100.0, 102.0, line=1, causal=True),
+        _checkpoint_book(identifier, "REFERENCE", 1_001, 1_000, line=4),
+        _book(61_005, 101.0, 103.0, line=2, causal=True),
+        _checkpoint_book(identifier, "ENTRY", 61_005, 61_000, line=5),
+        _book(361_005, 110.0, 112.0, line=3, causal=True),
+        _checkpoint_book(identifier, "EXIT_300000", 361_005, 361_005, line=6),
+    ]
+
+    trade, reason = execute_metaorder(
+        metaorder, books, horizon_ms=300_000, require_causal_books=True,
+    )
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["book_binding_method"] == "CONTINUOUS_CAUSAL_BOOK"
+    assert trade["checkpoint_writer_run_id"] is None
+
+    books[2]["connection_id"] = "different-l2-connection"
+    rejected, rejection_reason = execute_metaorder(
+        metaorder, books, horizon_ms=300_000, require_causal_books=True,
+    )
+    assert rejected is None
+    assert rejection_reason == "L2_CONNECTION_GAP_CROSSED"
+
+    books[2]["connection_id"] = books[0]["connection_id"]
+    certified, certified_reason = execute_metaorder(
+        metaorder, books, horizon_ms=300_000, require_causal_books=True,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+    assert certified is None
+    assert certified_reason == "REFERENCE_NOT_AVAILABLE_AT_SIGNAL"
 
 
 def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
@@ -1485,6 +1540,35 @@ def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
     assert trade["cost_component_receipts"]["slippage"]["zero_reason"] == (
         "MEASURED_ZERO"
     )
+
+
+@pytest.mark.parametrize(
+    ("stage_index", "received_at_ms", "expected_reason"),
+    [
+        (0, None, "MISSING_CHECKPOINT_RECEIVE_TIME"),
+        (1, 61_001, "CHECKPOINT_RECEIVE_TIME_MISMATCH"),
+    ],
+)
+def test_executeur_certifiable_exige_heure_reception_explicite_et_coherente(
+    stage_index: int, received_at_ms: int | None, expected_reason: str,
+) -> None:
+    metaorder = cluster_metaorders([_entry("receive-proof", 1_000, action="OPEN")])[0][0]
+    identifier = metaorder["metaorder_id"]
+    books = [
+        _checkpoint_book(identifier, "REFERENCE", 1_000, 1_000, line=1),
+        _checkpoint_book(identifier, "ENTRY", 61_000, 61_000, line=2),
+        _checkpoint_book(identifier, "EXIT_300000", 361_000, 361_000, line=3),
+    ]
+    if received_at_ms is None:
+        books[stage_index].pop("received_at_ms")
+    else:
+        books[stage_index]["received_at_ms"] = received_at_ms
+    trade, reason = execute_metaorder(
+        metaorder, books, horizon_ms=300_000, require_causal_books=True,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+    assert trade is None
+    assert reason == expected_reason
 
 
 def test_executeur_certifiable_refuse_un_override_local_de_frais() -> None:

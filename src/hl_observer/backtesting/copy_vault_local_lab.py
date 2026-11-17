@@ -54,6 +54,12 @@ from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.simulation.economic_freeze_registry import parameter_hash
 from tools.copy_vault_continuity import load_release_history_audits
 from hl_observer.backtesting.copy_vault_tier_local import _charger_tier_local
+from hl_observer.backtesting import copy_vault_fenetre_locale as _FENETRE_LOCALE
+from hl_observer.backtesting.copy_vault_contexte_tranchable import publier_le_contexte_tranchable
+from hl_observer.backtesting.copy_vault_chargeurs_safe import (
+    charger_asset_ctx_safe as _charger_asset_ctx_safe,
+    charger_leader_fills_safe as _charger_leader_fills_safe,
+)
 from hl_observer.backtesting.copy_vault_signal_alignment import evaluable_signals
 
 OBJECTIVE_USD_PER_DAY = PAPER_TARGET_NET_USD_PER_DAY
@@ -1580,12 +1586,18 @@ def materialize_safe_workspace(
                 f"Reconstruction SAFE {asset_number:,}/{len(assets):,} · "
                 f"{raw_frames:,} enveloppes · {len(fills):,} fills · {len(books):,} carnets"
             )
+    safe_replay_inputs_available = bool(fills and books)
     # --- Tier LOCAL du coffre-fort (certifie, replayable/backtestable) injecte AVANT le
     # tri : ses fills causaux deviennent des SIGNAUX pour la recherche EXPLORATOIRE. Les
     # rangees sont etiquetees provenance_tier=LOCAL et N'ONT PAS quality=SAFE -> elles
     # nourrissent la recherche mais NE PEUVENT JAMAIS etre « prouvees » (la preuve exige
     # SAFE). L'audit SAFE ci-dessus (fail-closed) n'est pas touche.
-    coffre_local_resume = _charger_tier_local(repository_root, progress=progress, garder_signaux=False)
+    # 17/11/2026 : sans fenetre, le pont lisait le DEBUT du coffre et ne depassait jamais le 10/11 ;
+    # la chaine causale complete n'existe qu'a partir du premier jour liable (voir le module).
+    fenetre_locale = _FENETRE_LOCALE.choisir_la_fenetre(repository_root)
+    coffre_local_resume = _charger_tier_local(repository_root, progress=progress, garder_signaux=False,
+                                              depuis_ms=fenetre_locale["depuis_ms"])
+    coffre_local_resume["fenetre_choisie"] = fenetre_locale
     for _row in coffre_local_resume.pop("_fills", ()):
         _id = (_row.get("vault"), _row.get("coin"), _row.get("ts_ms"), _row.get("tid"),
                _row.get("hash"), _row.get("oid"), _row.get("px"), _row.get("sz"), _row.get("signe"))
@@ -1605,11 +1617,7 @@ def materialize_safe_workspace(
         except KeyError:
             continue
         bbo_rows.setdefault(_id, _row)
-    # Signaux de contexte LOCAL (liquidations/overshoots/OI-funding/prix/cross-venue) :
-    # retirés du résumé (pour ne pas gonfler le résultat) et mis à DISPOSITION de la
-    # recherche exploratoire. Les COMPTES restent dans coffre_local_resume (visibles).
-    signaux_locaux = coffre_local_resume.pop("_signaux", {})
-    coffre_local_resume["signaux_familles_disponibles"] = sorted(signaux_locaux.keys())
+    publier_le_contexte_tranchable(coffre_local_resume, repository_root)
     fill_rows = sorted(fills.values(), key=lambda row: (row["ts_ms"], row["vault"], str(row.get("tid"))))
     book_rows = sorted(books.values(), key=lambda row: (row["received_at_ms"], row["coin"]))
     bbo_tape_rows = sorted(
@@ -1706,7 +1714,7 @@ def materialize_safe_workspace(
     )
     replay_inputs_available = bool(fill_rows and book_rows)
     status = (
-        "READY" if replay_inputs_available and data_complete
+        "READY" if safe_replay_inputs_available and data_complete
         else "MORE_DATA" if replay_inputs_available
         else "UNMEASURABLE"
     )
@@ -1773,6 +1781,7 @@ def materialize_safe_workspace(
             "heartbeat_evidence_missing_dataset_ids", []
         ),
         "replay_inputs_available": replay_inputs_available,
+        "safe_replay_inputs_available": safe_replay_inputs_available,
         "verified_source_assets": verified_source_assets,
         "source_asset_inventory_count": len(verified_source_assets),
         "source_asset_inventory_sha256": source_asset_inventory_sha256,
@@ -1787,91 +1796,10 @@ def materialize_safe_workspace(
         },
     }
     result["coffre_local"] = coffre_local_resume
-    if coffre_local_resume.get("fills_causaux", 0) > 0:
-        result["replay_inputs_available"] = True
-        if result.get("status") == "UNMEASURABLE":
-            result["status"] = "MORE_DATA"
     _atomic_json(workspace / "SAFE_INPUT_MANIFEST.json", result)
     if audit.get("_watch_files") is not None:
         result["_watch_files"] = audit["_watch_files"]
     return result
-
-
-def _charger_asset_ctx_safe(workspace: Path) -> list[dict[str, Any]]:
-    """Charge l'asset_ctx SAFE matérialisé et l'adapte en ``{coin, ts_ms, mark, oracle}``
-    pour le signal overshoot. Robuste aux deux shapes (``context.markPx/oraclePx`` ou
-    direct). Fail-soft : ``[]`` si absent/illisible (l'exploration tourne sans planter)."""
-    chemin = workspace / "copy_vault_active_asset_ctx_tape.jsonl"
-    if chemin.is_symlink() or not chemin.is_file():
-        return []
-    out: list[dict[str, Any]] = []
-    try:
-        with chemin.open("r", encoding="utf-8") as fh:
-            for ligne in fh:
-                ligne = ligne.strip()
-                if not ligne:
-                    continue
-                try:
-                    row = json.loads(ligne)
-                except (ValueError, TypeError):
-                    continue
-                if not isinstance(row, dict):
-                    continue
-                ctx = row.get("context") if isinstance(row.get("context"), Mapping) else row
-                coin = row.get("coin") or ctx.get("coin")
-                ts = row.get("ts_ms") or row.get("received_at_ms") or row.get("exchange_ts_ms")
-                mark = ctx.get("markPx", ctx.get("mark", row.get("mark")))
-                oracle = ctx.get("oraclePx", ctx.get("oracle", row.get("oracle")))
-                if coin is None or ts is None or mark is None or oracle is None:
-                    continue
-                try:
-                    out.append({
-                        "coin": str(coin), "ts_ms": int(ts),
-                        "mark": float(mark), "oracle": float(oracle),
-                    })
-                except (TypeError, ValueError):
-                    continue
-    except OSError:
-        return []
-    return out
-
-
-def _charger_leader_fills_safe(workspace: Path) -> list[dict[str, Any]]:
-    """Charge les fills leaders SAFE matérialisés (``vault_fills.jsonl`` + live) réduits
-    à ``{vault, ts_ms, closed_pnl}`` pour le signal de qualité leader (#10). Fail-soft :
-    ignore les fichiers absents/illisibles et les lignes invalides (l'exploration tourne
-    sans planter)."""
-    out: list[dict[str, Any]] = []
-    for nom in ("vault_fills.jsonl", "vault_fills_live.jsonl"):
-        chemin = workspace / nom
-        if chemin.is_symlink() or not chemin.is_file():
-            continue
-        try:
-            with chemin.open("r", encoding="utf-8") as fh:
-                for ligne in fh:
-                    ligne = ligne.strip()
-                    if not ligne:
-                        continue
-                    try:
-                        row = json.loads(ligne)
-                    except (ValueError, TypeError):
-                        continue
-                    if not isinstance(row, dict):
-                        continue
-                    vault = row.get("vault")
-                    ts = row.get("ts_ms")
-                    cp = row.get("closed_pnl")
-                    if vault is None or ts is None or cp is None:
-                        continue
-                    try:
-                        out.append({
-                            "vault": str(vault), "ts_ms": int(ts), "closed_pnl": float(cp),
-                        })
-                    except (TypeError, ValueError):
-                        continue
-        except OSError:
-            continue
-    return out
 
 
 def _source_asset_inventory_sha256(assets: Sequence[Mapping[str, Any]]) -> str:

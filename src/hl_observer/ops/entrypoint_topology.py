@@ -35,6 +35,12 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "RAPPORT-COLLECTEURS.cmd": EntrypointRole.MAINTENANCE,
     "Noeud-HL.cmd": EntrypointRole.MAINTENANCE,
     "Installer Noeud HL.cmd": EntrypointRole.MAINTENANCE,
+    # 16/11/2026 — DEUX .cmd RACINE N'ETAIENT PAS CLASSES, et le test de politique etait donc
+    # ROUGE sur origin/main (pas seulement en local) : CERTIFIER_EN_CONTINU.cmd est publie sur
+    # le HEAD distant sans role declare, et RATTRAPAGE.cmd a ete ajoute le 15/11. La politique
+    # n'interdit pas un lanceur d'appoint a la racine : elle interdit un lanceur NON CLASSE.
+    "CERTIFIER_EN_CONTINU.cmd": EntrypointRole.MAINTENANCE,
+    "RATTRAPAGE.cmd": EntrypointRole.MAINTENANCE,
     # AlinaSync is also a supported root entrypoint, separate from the four main CMD roles.
     # Remaining commands are support/compatibility tools kept under tools/launchers/.
     "tools/launchers/Alina-restore.cmd": EntrypointRole.COMPAT,
@@ -93,6 +99,14 @@ ROOT_SUPPORT_ENTRYPOINTS = {
     "RAPPORT-COLLECTEURS.cmd",
     "Noeud-HL.cmd",
     "Installer Noeud HL.cmd",
+    # 17/11/2026 — LE CLASSEMENT DU 16/11 ETAIT RESTE A MOITIE FAIT. Ces deux lanceurs avaient
+    # recu leur role MAINTENANCE dans `ENTRYPOINT_ROLES`, mais l'audit lit CET ensemble-ci : le
+    # test de topologie est donc reste rouge alors que le commentaire du 16/11 le disait repare.
+    # Verifie par la suite complete du 17/11 (18 697 verts, ce test parmi les 12 echecs reels).
+    # Meme statut que les cinq lanceurs d'appoint ci-dessus : utilises directement par
+    # l'operateur depuis la racine, classes, et rien d'autre n'y est tolere.
+    "CERTIFIER_EN_CONTINU.cmd",
+    "RATTRAPAGE.cmd",
 }
 
 OFFICIAL_ENTRYPOINTS = {

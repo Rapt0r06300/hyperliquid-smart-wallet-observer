@@ -76,6 +76,13 @@ def sauver_livre(chemin: Path, livre: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Preserve historical research code without permitting a second economic
+    # runtime/ledger while Copy-Vault is the sole active strategy family.
+    from hl_observer.strategies.active_scope import strategy_can_materialize
+
+    if not strategy_can_materialize("carry"):
+        print("DISABLED_BY_SCOPE:carry")
+        return 2
     for flux in (sys.stdout, sys.stderr):
         with contextlib.suppress(AttributeError, ValueError):
             flux.reconfigure(encoding="utf-8", errors="replace")

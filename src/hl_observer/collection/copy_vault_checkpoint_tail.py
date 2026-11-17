@@ -14,7 +14,6 @@ import os
 import re
 import secrets
 import time
-import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,21 @@ from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_WRITER_STATE_SCHEMA,
     INSTRUMENT_IDENTITY_SCHEMA,
 )
+from hl_observer.collection import copy_vault_gap_windows as GAPS
+from hl_observer.collection.copy_vault_checkpoint_socle import (
+    INFO_URL,
+    MAX_TARGET_LAG_MS,
+    _append_jsonl,
+    _file_identity,
+    _parse_book,
+    _strict_int,
+    fetch_hyperliquid_l2_book,
+)
+from hl_observer.collection.copy_vault_presignal_lane import (
+    LANE_RELPATH,
+    VoiePreSignal,
+)
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id
-from hl_observer.normalization.l2_book import normalize_l2_levels
 from hl_observer.instrument_identity import preserve_native_instrument_symbol
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
@@ -39,11 +51,9 @@ COMPANION_PROTOCOL = CHECKPOINT_COLLECTOR_PROTOCOL
 INPUT_RELPATH = Path("runtime") / "data" / "vault_fills_live.jsonl"
 OUTPUT_RELPATH = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
 STATE_RELPATH = Path("runtime") / "data" / "copy_vault_checkpoint_tail_state.json"
-INFO_URL = "https://api.hyperliquid.xyz/info"
 
 COPY_DELAY_MS = 60_000
 HORIZONS_MS = (30_000, 60_000, 120_000, 180_000, 300_000, 900_000, 1_800_000, 3_600_000)
-MAX_TARGET_LAG_MS = 30_000
 METAORDER_GAP_MS = 60_000
 CONTINUATION_SIGNAL_FILL_COUNT = 3
 MAX_EVENT_IDS = 20_000
@@ -53,24 +63,6 @@ ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 BookFetcher = Callable[[str], Mapping[str, Any] | None]
 Clock = Callable[[], int]
-
-
-def _strict_int(value: Any, field: str) -> int:
-    if type(value) is bool or value is None:
-        raise ValueError(f"{field} missing or boolean")
-    if isinstance(value, float) and not value.is_integer():
-        raise ValueError(f"{field} must be integral")
-    try:
-        return int(value)
-    except (TypeError, ValueError, OverflowError):
-        raise ValueError(f"{field} invalid") from None
-
-
-def _exact_positive_timestamp(value: Any, field: str) -> int:
-    """Require an observed positive integer timestamp with no coercion."""
-    if type(value) is not int or value <= 0:
-        raise ValueError(f"{field} must be a positive integer")
-    return value
 
 
 def _snapshot_marker(fill: Mapping[str, Any]) -> Any:
@@ -110,38 +102,6 @@ def _atomic_write(path: Path, payload: Mapping[str, Any]) -> None:
             _noter_echec("collection/copy_vault_checkpoint_tail.py:temporary_unlink", exc)
 
 
-def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-
-
-def fetch_hyperliquid_l2_book(coin: str, *, timeout_s: float = 2.0) -> dict[str, Any] | None:
-    """Fetch one public read-only Hyperliquid L2 book.
-
-    The only network destination is the official ``/info`` endpoint.  No
-    credential, signature or write payload exists in this module.
-    """
-
-    body = json.dumps({"type": "l2Book", "coin": preserve_native_instrument_symbol(coin)}).encode("utf-8")
-    request = urllib.request.Request(
-        INFO_URL,
-        data=body,
-        headers={"Content-Type": "application/json", "User-Agent": "HyperSmart/read-only"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=max(0.2, float(timeout_s))) as response:
-            if int(response.status) != 200:
-                return None
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, ValueError, TypeError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
 def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -154,6 +114,16 @@ def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str,
         "clean_epoch_ms": int(now_ms),
         "input_offset": max(0, int(offset)),
         "output_start_offset": max(0, int(output_offset)),
+        # 16/11/2026 — JOURNAL DES FENETRES DE TROU. Les compteurs ci-dessous sont cumulatifs
+        # sur tout le run : un seul incident fermait l'epoque entiere cote lecteur. On publie
+        # desormais OU se situe chaque trou, pour que le lecteur segmente au lieu de tout refuser.
+        # Les compteurs ne sont JAMAIS remis a zero : un trou historique reste un trou historique.
+        "gap_windows_schema": GAPS.SCHEMA_FENETRES,
+        "gap_windows": [],
+        "gap_windows_dropped": 0,
+        "last_input_received_ms": 0,
+        "lane_offset": 0,
+        "lane_file_identity": None,
         "recent_event_ids": [],
         "captured_checkpoint_ids": [],
         "metaorder_state": {},
@@ -175,8 +145,13 @@ def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str,
             "fetch_retries": 0,
             "input_rotations": 0,
             "reconnect_backfill_blocked": 0,
+            "writer_outages": 0,
             "pending_overflow_rejected": 0,
             "identity_migration_resets": 0,
+            # 16/11/2026 — liaison du carnet de REFERENCE pré-signal (bloqueur P0).
+            "reference_bound_presignal": 0,
+            "reference_no_presignal_book": 0,
+            "reference_presignal_too_old": 0,
         },
     }
 
@@ -189,13 +164,36 @@ def coverage_receipt(counters: Mapping[str, Any], *, expected_lines: int) -> dic
     """Summarize exact checkpoint coverage without assuming missing lines."""
     if isinstance(expected_lines, bool) or not isinstance(expected_lines, int) or expected_lines < 0:
         return {"status": "UNMEASURABLE", "reason": "EXPECTED_LINES_INVALID", "paper_read_only": True}
-    actual = counters.get("complete_lines")
-    captured = counters.get("checkpoints_captured")
-    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in (actual, captured)):
+    required = (
+        "complete_lines", "checkpoints_captured", "reconnect_backfill_blocked",
+        "invalid_rejected", "input_rotations", "checkpoints_expired",
+        "pending_overflow_rejected",
+    )
+    values = {name: counters.get(name) for name in required}
+    actual = values["complete_lines"]
+    captured = values["checkpoints_captured"]
+    if any(type(value) is not int or value < 0 for value in (actual, captured)):
         return {"status": "UNMEASURABLE", "reason": "COUNTER_INVALID", "paper_read_only": True}
-    gaps = int(counters.get("reconnect_backfill_blocked") or 0) + int(counters.get("invalid_rejected") or 0)
+    complete_counters = all(type(value) is int and value >= 0 for value in values.values())
+    valid_incidents = {
+        name: value if type(value) is int and value >= 0 else 0
+        for name, value in values.items()
+        if name not in ("complete_lines", "checkpoints_captured")
+    }
+    # Une rotation incrémente aussi reconnect_backfill_blocked : compter
+    # l'incident une seule fois, sans masquer les expirations et débordements.
+    gaps = (
+        max(valid_incidents["reconnect_backfill_blocked"], valid_incidents["input_rotations"])
+        + valid_incidents["invalid_rejected"]
+        + valid_incidents["checkpoints_expired"]
+        + valid_incidents["pending_overflow_rejected"]
+        # Compteur ne le 17/11 : absent d'un etat anterieur, il vaut zero.
+        + (counters.get("writer_outages") if type(counters.get("writer_outages")) is int
+           and counters.get("writer_outages") > 0 else 0)
+    )
     return {
-        "status": "PROVEN" if actual == expected_lines and gaps == 0 else "UNMEASURABLE",
+        "status": "PROVEN" if complete_counters and actual == expected_lines and gaps == 0 else "UNMEASURABLE",
+        "reason": None if complete_counters else "COUNTERS_INCOMPLETE_OR_INVALID",
         "expected_lines": expected_lines,
         "complete_lines": actual,
         "checkpoints_captured": captured,
@@ -209,60 +207,11 @@ def _trim(values: list[str], limit: int) -> list[str]:
     return values[-max(1, int(limit)) :]
 
 
-def _file_identity(stat: os.stat_result) -> list[int]:
-    """Stable identity for replacement detection; size/mtime change on append."""
-
-    return [int(stat.st_dev), int(stat.st_ino)]
-
-
 def _valid_state_nonnegative_int(value: Any) -> bool:
     return type(value) is int and value >= 0
 
 
-def _parse_book(raw: Mapping[str, Any], *, received_at_ms: int) -> dict[str, Any] | None:
-    try:
-        exchange_ts_ms = _exact_positive_timestamp(raw["time"], "time")
-        received_at_ms = _exact_positive_timestamp(received_at_ms, "received_at_ms")
-        raw_bids, raw_asks = raw["levels"][0], raw["levels"][1]
-        bids = normalize_l2_levels(
-            [[row["px"], row["sz"]] for row in raw_bids], side="bid"
-        )
-        asks = normalize_l2_levels(
-            [[row["px"], row["sz"]] for row in raw_asks], side="ask"
-        )
-        if bids is not None:
-            bids = bids[:5]
-        if asks is not None:
-            asks = asks[:5]
-    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
-        return None
-    if (
-        exchange_ts_ms <= 0
-        or received_at_ms < exchange_ts_ms
-        or received_at_ms - exchange_ts_ms > MAX_TARGET_LAG_MS
-        or not bids
-        or not asks
-        or any(px <= 0 or size <= 0 for px, size in bids + asks)
-        or bids[0][0] >= asks[0][0]
-    ):
-        return None
-    capacity_usd = min(
-        sum(px * size for px, size in bids),
-        sum(px * size for px, size in asks),
-    )
-    if capacity_usd <= 0:
-        return None
-    return {
-        "exchange_ts_ms": exchange_ts_ms,
-        "bid": bids[0][0],
-        "ask": asks[0][0],
-        "bids5": bids,
-        "asks5": asks,
-        "capacity_usd": capacity_usd,
-    }
-
-
-class CopyVaultCheckpointTail:
+class CopyVaultCheckpointTail(VoiePreSignal):
     """Durable forward-only tail and causal checkpoint scheduler."""
 
     def __init__(
@@ -276,8 +225,12 @@ class CopyVaultCheckpointTail:
         self.input_path = self.root / INPUT_RELPATH
         self.output_path = self.root / OUTPUT_RELPATH
         self.state_path = self.root / STATE_RELPATH
+        self.lane_path = self.root / LANE_RELPATH
         self.fetch_book = fetch_book
         self.clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        # Carnets WS récents par coin, en MEMOIRE seulement : au redémarrage on repart du bout du
+        # ruban, ce qui refuse des liaisons pendant quelques secondes au lieu d'en inventer.
+        self._dernier_carnet: dict[str, list[dict[str, Any]]] = {}
         self.state = self._load_or_initialize()
 
     def _load_or_initialize(self) -> dict[str, Any]:
@@ -329,6 +282,29 @@ class CopyVaultCheckpointTail:
                     loaded["input_file_identity"] = _file_identity(self.input_path.stat())
                 except OSError:
                     loaded["input_file_identity"] = None
+            # 16/11/2026 — MIGRATION HONNETE VERS LE JOURNAL DE FENETRES. Un etat ecrit par
+            # l'ancien code n'a pas de journal. Deux cas, et un seul est certifiable :
+            #  * les trois compteurs de trou sont EXACTEMENT a zero -> il n'y a rien a expliquer,
+            #    on peut ouvrir le journal vide sans mentir ;
+            #  * un compteur est non nul -> les trous existent mais leur POSITION est perdue. On
+            #    n'ouvre PAS le journal : le lecteur restera ferme, et la raison le dira. Aucune
+            #    reparation retroactive : c'est exactement le cas du run du 16/11 (43 expirations,
+            #    1 rotation) et il doit rester non certifiable.
+            if loaded.get("gap_windows_schema") != GAPS.SCHEMA_FENETRES:
+                anciens = [loaded["counters"].get(nom) for nom in GAPS.COMPTEUR_PAR_NATURE.values()]
+                if all(type(v) is int and v == 0 for v in anciens):
+                    loaded["gap_windows_schema"] = GAPS.SCHEMA_FENETRES
+                    loaded["gap_windows"] = []
+                    loaded["gap_windows_dropped"] = 0
+                else:
+                    loaded["gap_windows_unavailable_reason"] = (
+                        "TROUS_ANTERIEURS_SANS_FENETRE:" + ",".join(
+                            f"{nom}={loaded['counters'].get(nom)}"
+                            for nom in GAPS.COMPTEUR_PAR_NATURE.values()))
+            loaded.setdefault("last_input_received_ms", 0)
+            if isinstance(loaded.get("gap_windows"), list):
+                # Un incident = un intervalle (union et sommes conservees) : voir GAPS.compacter.
+                loaded["gap_windows"] = GAPS.compacter(loaded["gap_windows"])
             return loaded
         try:
             offset = self.input_path.stat().st_size
@@ -382,7 +358,17 @@ class CopyVaultCheckpointTail:
                 self.state["input_offset"] = size
                 self.state["counters"]["input_rotations"] += 1
                 self.state["counters"]["reconnect_backfill_blocked"] += 1
-                self.state["last_reconnect_epoch_ms"] = self.clock_ms()
+                detecte_ms = self.clock_ms()
+                # Les octets entre l'ancien offset et la taille du remplacant ne seront JAMAIS
+                # lus. On ne sait pas ce qu'ils contenaient : la fenetre va donc de la derniere
+                # ligne reellement ingeree (ou du debut de l'epoque, si on n'en a aucune) a
+                # l'instant de la detection. C'est conservateur, et c'est le point : on ne
+                # certifie pas une periode dont on ignore ce qu'on a manque.
+                depuis = int(self.state.get("last_input_received_ms") or 0) or int(
+                    self.state.get("clean_epoch_ms") or detecte_ms)
+                GAPS.ajouter_fenetre(self.state, GAPS.fenetre(
+                    GAPS.TROU_ROTATION, debut_ms=depuis, fin_ms=detecte_ms))
+                self.state["last_reconnect_epoch_ms"] = detecte_ms
                 self.state["input_file_identity"] = identity
                 return []
             self.state["input_file_identity"] = identity
@@ -410,6 +396,9 @@ class CopyVaultCheckpointTail:
                 continue
             if isinstance(row, dict):
                 rows.append(row)
+                recu = row.get("received_at_ms")
+                if type(recu) is int and recu > int(self.state.get("last_input_received_ms") or 0):
+                    self.state["last_input_received_ms"] = recu
             else:
                 self.state["counters"]["invalid_rejected"] += 1
         return rows
@@ -423,6 +412,17 @@ class CopyVaultCheckpointTail:
             counters["pending_overflow_rejected"] = int(
                 counters.get("pending_overflow_rejected") or 0
             ) + len(additions)
+            # Ce lot de checkpoints n'existera jamais : la fenetre couvre les instants qu'il
+            # devait observer. `n` vaut le nombre d'unites de compteur, pour que la
+            # reconciliation « somme des fenetres == compteur » tienne exactement.
+            cibles = [int(x.get("target_wall_ms") or 0) for x in additions
+                      if type(x.get("target_wall_ms")) is int]
+            maintenant = self.clock_ms()
+            GAPS.ajouter_fenetre(self.state, GAPS.fenetre(
+                GAPS.TROU_DEBORDEMENT,
+                debut_ms=min(cibles) if cibles else maintenant,
+                fin_ms=max(cibles) if cibles else maintenant,
+                n=len(additions)))
             return False
         pending.extend(additions)
         self.state["pending"] = pending
@@ -514,20 +514,29 @@ class CopyVaultCheckpointTail:
                     "metaorder_id": continuation_id,
                     "attempts": 0,
                 }
-                self._enqueue_checkpoints([
-                    {
+                # REFERENCE : carnet DEJA RECU avant le signal, ecrit tout de suite (bloqueur
+                # P0). ENTRY/EXIT restent des observations posterieures a leur cible, ce que la
+                # spec autorise explicitement.
+                #
+                # REPLI : si aucun carnet pre-signal n'est eligible, on programme l'ancienne
+                # requete REST. Elle sera refusee par l'executeur (`REFERENCE_NOT_AVAILABLE_AT_
+                # SIGNAL`) — c'est le point : le refus reste VISIBLE avec son motif, au lieu de
+                # disparaitre en « aucune reference ». Un seul des deux chemins s'execute, donc
+                # l'identifiant de checkpoint reste unique.
+                a_venir = [{
+                    **base,
+                    "stage": "ENTRY",
+                    "checkpoint_id": f"{continuation_id}:ENTRY",
+                    "target_wall_ms": received_at_ms + COPY_DELAY_MS,
+                }]
+                if not self._emettre_reference_liee(base, signal_received_ms=received_at_ms):
+                    a_venir.insert(0, {
                         **base,
                         "stage": "REFERENCE",
                         "checkpoint_id": f"{continuation_id}:REFERENCE",
                         "target_wall_ms": received_at_ms,
-                    },
-                    {
-                        **base,
-                        "stage": "ENTRY",
-                        "checkpoint_id": f"{continuation_id}:ENTRY",
-                        "target_wall_ms": received_at_ms + COPY_DELAY_MS,
-                    },
-                ])
+                    })
+                self._enqueue_checkpoints(a_venir)
                 counters = self.state["counters"]
                 counters["continuation_signals_started"] = int(
                     counters.get("continuation_signals_started") or 0
@@ -562,20 +571,21 @@ class CopyVaultCheckpointTail:
             "metaorder_id": identifier,
             "attempts": 0,
         }
-        self._enqueue_checkpoints([
-            {
+        # REFERENCE liée à un carnet DEJA RECU (bloqueur P0 du 16/11), avec repli REST visible.
+        a_venir = [{
+            **base,
+            "stage": "ENTRY",
+            "checkpoint_id": f"{identifier}:ENTRY",
+            "target_wall_ms": received_at_ms + COPY_DELAY_MS,
+        }]
+        if not self._emettre_reference_liee(base, signal_received_ms=received_at_ms):
+            a_venir.insert(0, {
                 **base,
                 "stage": "REFERENCE",
                 "checkpoint_id": f"{identifier}:REFERENCE",
                 "target_wall_ms": received_at_ms,
-            },
-            {
-                **base,
-                "stage": "ENTRY",
-                "checkpoint_id": f"{identifier}:ENTRY",
-                "target_wall_ms": received_at_ms + COPY_DELAY_MS,
-            },
-        ])
+            })
+        self._enqueue_checkpoints(a_venir)
 
     @staticmethod
     def _exit_checkpoints(entry: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -623,6 +633,10 @@ class CopyVaultCheckpointTail:
                 continue
             if now_ms - target_ms > MAX_TARGET_LAG_MS:
                 expired_now += 1
+                # Le carnet de cette cible n'a jamais ete capture. La periode entre la cible et
+                # maintenant est donc sans observation pour ce metaordre : on la declare.
+                GAPS.ajouter_fenetre(self.state, GAPS.fenetre(
+                    GAPS.TROU_EXPIRATION, debut_ms=target_ms, fin_ms=now_ms))
                 continue
             coin = preserve_native_instrument_symbol(checkpoint["coin"])
             cached = fetch_cache.get(coin)
@@ -691,8 +705,31 @@ class CopyVaultCheckpointTail:
         self.state["counters"]["checkpoints_expired"] += expired_now
         return captured_now, expired_now
 
+    def _declarer_un_arret(self, now_ms: int) -> None:
+        """Arrete, endormi ou bloque plus de MAX_TARGET_LAG_MS, l'ecrivain n'a rien observe.
+
+        17/11/2026 : la veille du PC n'etait visible que par les checkpoints qu'elle faisait
+        expirer. Sans checkpoint en attente, aucun trou n'etait declare.
+        """
+        precedent = self.state.get("updated_at_ms")
+        if type(precedent) is not int or precedent <= 0:
+            return
+        # Un fill recu a l'instant r est encore accepte a cette passe si now - r <= MAX_TARGET_LAG_MS :
+        # l'intervalle reellement aveugle est donc ]precedent, now - MAX_TARGET_LAG_MS[. Le debut
+        # est decale de la marge de garde pour ne pas avaler les lignes de la passe precedente.
+        debut, fin = precedent + GAPS.MARGE_MS + 1, now_ms - MAX_TARGET_LAG_MS
+        if fin <= debut:
+            return
+        counters = self.state["counters"]
+        counters["writer_outages"] = int(counters.get("writer_outages") or 0) + 1
+        GAPS.ajouter_fenetre(self.state, GAPS.fenetre(GAPS.TROU_ARRET, debut_ms=debut, fin_ms=fin))
+
     def poll_once(self) -> dict[str, Any]:
         now_ms = self.clock_ms()
+        self._declarer_un_arret(now_ms)
+        # Le ruban WS d'abord : la liaison de REFERENCE exige un carnet déjà reçu, et l'éligibilité
+        # est jugée sur l'horodatage de réception de chaque carnet, pas sur l'ordre de lecture.
+        self._lire_carnets_du_ruban()
         rows = self._read_appended_lines()
         for row in rows:
             self._schedule_fill(row, now_ms=now_ms)
@@ -707,6 +744,7 @@ class CopyVaultCheckpointTail:
                 "reconnect_backfill_blocked",
                 "checkpoints_expired",
                 "pending_overflow_rejected",
+                "writer_outages",
             )
         )
         return {

@@ -134,6 +134,11 @@ _FICHIERS_CONNUS: dict[str, tuple[str, str]] = {
     # présente mais jamais rendue ». Le pas 1 j remonte à 1 101 jours (contre 208 en horaire), donc
     # c'est LUI qui donne un prix aux 890 jours de funding rattrapés.
     "candles_1d.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_1D"),
+    # 15/11/2026 — LE PAS 4 h, 833 JOURS : il comble le trou entre l'horaire (208 j) et le
+    # journalier (1 101 j). Le journalier est profond mais GROSSIER : un horizon de 96 h n'y tient
+    # que 4 points et l'heure d'entrée y disparaît. Le pas 4 h donne 6 points par jour sur
+    # 833 jours — assez fin pour placer une entrée, assez profond pour quadrupler l'échantillon.
+    "candles_4h.jsonl": (FAMILLE_CANDLE, "REST_BACKFILL_4H"),
     "funding_1h.jsonl": (FAMILLE_FUNDING_HISTORY, "REST_FUNDING_HISTORY"),   # funding horaire, même profondeur
 }
 
@@ -173,6 +178,7 @@ class StatsCertif:
             "repares": self.repares,
             "quarantaine": self.quarantaine,
             "doublons": self.doublons,
+            "raisons": dict(sorted(self.raisons.items())),
             "raisons_top": top,
         }
 

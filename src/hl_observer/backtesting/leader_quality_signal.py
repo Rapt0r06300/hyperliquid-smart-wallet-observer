@@ -9,10 +9,10 @@ GELABLE permet de ne copier qu'un leader dont le track-record prouvé dépasse u
 
 INTÉGRITÉ (freeze-eligible)
 ---------------------------
-- PUREMENT CAUSAL : au signal ``ts_ms``, on ne somme QUE les ``closed_pnl`` des fills du
-  leader d'horodatage ``<= ts_ms`` (le PnL réalisé n'est connu qu'au moment de la clôture ;
-  l'entrée qu'on copie n'est pas encore clôturée → jamais incluse). Aucune fuite look-ahead.
-- Source = fills leaders matérialisés SAFE (``vault_fills.jsonl``). Prouvable → gelable.
+- Le chargeur du labo fournit ``ts_ms`` comme heure de réception vérifiée du fill,
+  jamais comme seule heure de transaction ; l'index ne garantit pas cette provenance
+  lorsqu'il est appelé avec une autre liste de lignes.
+- Source du labo = fills live SAFE avec manifeste vérifié et heure de réception.
 
 Module PUR (parsing + préfixes cumulés + bisect) : testable sans réseau, sans état.
 """
@@ -39,11 +39,11 @@ def _fini(x: Any) -> float | None:
 def build_leader_quality_index(
     fills: Sequence[Mapping[str, Any]] | None,
 ) -> dict[str, tuple[list[int], list[float]]]:
-    """``{vault: ([ts_ms triés], [closed_pnl CUMULÉ])}``.
+    """``{vault: ([ts_ms de disponibilité triés], [closed_pnl CUMULÉ])}``.
 
     Chaque entrée donne, à chaque horodatage de fill du leader, la somme de ses
-    ``closed_pnl`` jusque-là (préfixe cumulé). Lignes sans vault/ts/closed_pnl valides
-    ignorées. Les fills d'un même leader sont triés par ``ts_ms``.
+    ``closed_pnl`` jusque-là (préfixe cumulé). L'appelant doit fournir l'heure de
+    disponibilité dans ``ts_ms``. Lignes sans vault/ts/closed_pnl valides ignorées.
     """
     tmp: dict[str, list[tuple[int, float]]] = {}
     for r in fills or ():

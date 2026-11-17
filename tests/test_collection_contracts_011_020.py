@@ -13,8 +13,31 @@ from hl_observer.collection.weight_budgeter import merge_readonly_budget_plans
 
 
 def test_eco_011_checkpoint_coverage_requires_exact_counts() -> None:
-    result = coverage_receipt({"complete_lines": 10, "checkpoints_captured": 2, "reconnect_backfill_blocked": 0, "invalid_rejected": 0}, expected_lines=10)
-    assert result["status"] == "PROVEN"
+    """16/11/2026 — ce test etait ROUGE : il encodait le contrat LACHE d'avant l'audit du 15/11.
+
+    `coverage_receipt` a ete resserre pour refuser `PROVEN` en presence d'expirations, de
+    debordement de file, de rotation/reconnexion OU d'un compteur manquant. Le test, lui, passait
+    encore un jeu de compteurs INCOMPLET (sans `input_rotations`, `checkpoints_expired` ni
+    `pending_overflow_rejected`) et exigeait `PROVEN` : un correctif avait atterri sans mettre son
+    test de contrat a jour. On verifie maintenant les DEUX sens.
+    """
+    complets = {
+        "complete_lines": 10, "checkpoints_captured": 2, "reconnect_backfill_blocked": 0,
+        "invalid_rejected": 0, "input_rotations": 0, "checkpoints_expired": 0,
+        "pending_overflow_rejected": 0,
+    }
+    assert coverage_receipt(complets, expected_lines=10)["status"] == "PROVEN"
+
+    incomplets = {k: v for k, v in complets.items() if k != "checkpoints_expired"}
+    refus = coverage_receipt(incomplets, expected_lines=10)
+    assert refus["status"] == "UNMEASURABLE"
+    assert refus["reason"] == "COUNTERS_INCOMPLETE_OR_INVALID", (
+        "un compteur absent n'est pas un compteur a zero : une couverture inconnue doit fermer")
+
+    avec_trou = {**complets, "checkpoints_expired": 1}
+    assert coverage_receipt(avec_trou, expected_lines=10)["status"] == "UNMEASURABLE", (
+        "ce recu est un diagnostic de COUVERTURE : un checkpoint expire est un trou, meme si la "
+        "segmentation permet par ailleurs de certifier les intervalles sans trou")
 
 
 def test_eco_012_receive_clock_and_native_identity_are_preserved() -> None:

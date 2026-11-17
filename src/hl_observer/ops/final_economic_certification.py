@@ -193,7 +193,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     if not positive_proof or proof_net is None or proof_net <= 0.0:
         reasons.append("PROOF_NET_NOT_POSITIVE")
     certifiable_net = proof_net if quality_passed and positive_proof else None
-    reference_reached = recomputed.get("historical_target_reached") is True
+    reference_reached = recomputed.get("reference_target_reached") is True
 
     oos = payload.get("oos") if isinstance(payload.get("oos"), Mapping) else {}
     forward = payload.get("forward") if isinstance(payload.get("forward"), Mapping) else {}

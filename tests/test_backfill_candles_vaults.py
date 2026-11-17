@@ -111,7 +111,13 @@ def test_passage_1h_rattrape_puis_n_ajoute_que_les_bougies_nouvelles_et_closes(t
     assert len({(x["coin"], x["t_ms"]) for x in lignes}) == len(lignes)
 
 
-def test_refus_de_debit_on_n_insiste_pas_et_un_echec_ne_bloque_pas_les_autres(tmp_path):
+def test_refus_de_debit_on_RECULE_puis_on_renonce_et_un_echec_ne_bloque_pas_les_autres(tmp_path):
+    """17/11/2026 — CONTRAT CHANGÉ, ET DURCI. L'ancien test s'appelait « on n'insiste pas » et
+    exigeait `siestes == [ATTENTE_REFUS_S]` : une attente, un essai, arrêt. C'est ce contrat qui a
+    coûté la passe de la nuit du 16 au 17/11 — arrêt après 37 minutes sur un refus, 334 minutes de
+    budget inutilisées. La règle est maintenant celle du funding (`avec_recul`) : attentes qui
+    S'ALLONGENT, abandon après `REFUS_AVANT_ABANDON` refus CONSÉCUTIFS seulement, et le nombre de
+    refus est publié."""
     import urllib.error
 
     root = _racine(tmp_path, ["AAA", "BBB", "CCC"])
@@ -121,7 +127,10 @@ def test_refus_de_debit_on_n_insiste_pas_et_un_echec_ne_bloque_pas_les_autres(tm
 
     siestes = []
     bilan = BC.passe(root, intervalles=("1h",), now_ms=NOW, poster=refuse, dormir=siestes.append, univers=None)
-    assert bilan["arret"] == "LIMITE_DEBIT" and siestes == [BC.ATTENTE_REFUS_S]      # une attente, un essai, arrêt
+    attendues = [BC.ATTENTE_REFUS_S * k for k in range(1, BC.REFUS_AVANT_ABANDON + 1)]
+    assert bilan["arret"] == "LIMITE_DEBIT"
+    assert siestes == attendues, "attentes croissantes, une par refus, ni plus ni moins"
+    assert bilan["refus_consecutifs"] == BC.REFUS_AVANT_ABANDON
     assert not (root / BC.SORTIES["1h"]).exists()
 
     bon = _serveur([])
@@ -188,10 +197,16 @@ def test_funding_pagine_jusqu_au_bout_puis_n_ajoute_que_les_heures_nouvelles(tmp
     par_coin = {c: [x["ts_ms"] for x in lignes if x["coin"] == c] for c in ("BTC", "xyz:XYZ100")}
     attendu = list(range(NOW - 1300 * HEURE, NOW + 1, HEURE))
     assert all(v == attendu for v in par_coin.values())                 # 1 301 heures, 3 pages, aucun trou ni doublon
-    assert bilan["demandes"] == 6 and bilan["points"] == 2 * len(attendu) and bilan["arret"] is None
+    # 15/11/2026 — 10 REQUETES, PAS 6 : la passe a DEUX fronts depuis le correctif de profondeur.
+    # 6 pour prolonger (3 par coin : 500 + 500 + 301), puis 4 pour creuser — une page arriere par
+    # coin, chacune suivie d'une SONDE depuis le plancher avant de conclure « plus rien avant ».
+    # Le serveur de test ne publie rien avant `debut`, donc les deux coins sont declares au bout de
+    # leur histoire et ne seront plus jamais redemandes.
+    assert bilan["demandes"] == 10 and bilan["points"] == 2 * len(attendu) and bilan["arret"] is None
+    assert bilan["origines"] == 2 and bilan["creuses"] == 0 and bilan["trous"] == []
     assert all(x["funding"] == 0.0000125 and x["interval"] == "1h" and x["source"] == "REST_FUNDING_HISTORY"
                and x["recv_ms"] == NOW for x in lignes)
-    assert len(siestes) == 6 and all(s >= 2.0 for s in siestes)          # cadence respectée à chaque page
+    assert len(siestes) == 8 and all(s >= 2.0 for s in siestes)          # cadence respectée à chaque page
     # deux heures plus tard : deux points par coin, rien de réécrit
     appels.clear()
     encore = BC.passe_funding(root, now_ms=NOW + 2 * HEURE, poster=_serveur_funding(appels), dormir=siestes.append,
@@ -200,7 +215,12 @@ def test_funding_pagine_jusqu_au_bout_puis_n_ajoute_que_les_heures_nouvelles(tmp
     # l'état des bougies et celui du funding cohabitent dans le même fichier sans s'écraser
     BC.passe(root, intervalles=("1h",), now_ms=NOW + 2 * HEURE, poster=_serveur([]), dormir=lambda s: None, univers=None)
     etat = json.loads((root / BC.ETAT).read_text(encoding="utf-8"))["intervalles"]
-    assert set(etat) == {"1h", BC.SERIE_FUNDING} and set(etat[BC.SERIE_FUNDING]) == {"BTC", "xyz:XYZ100"}
+    assert set(etat) == {"1h", BC.SERIE_FUNDING, BC.SERIE_FUNDING_ANCIEN}
+    assert set(etat[BC.SERIE_FUNDING]) == {"BTC", "xyz:XYZ100"}
+    # Le front ARRIERE est une serie A PART, et c'est ce qui rend la profondeur rattrapable : la
+    # serie historique ne portait que l'horodatage le plus RECENT, donc un coin « a jour » restait
+    # a jamais a sa profondeur de depart.
+    assert set(etat[BC.SERIE_FUNDING_ANCIEN]) == {"BTC", "xyz:XYZ100"}
 
 
 def test_funding_point_illisible_ecarte_et_certification_stricte():
@@ -297,3 +317,104 @@ def test_le_comportement_par_defaut_est_INCHANGE(tmp_path):
     m.passe, m.passe_funding = fausse_passe, fausse_passe_funding
     assert m.main(["--root", str(tmp_path)]) == 0
     assert appels == {"bougies": 1, "funding": 1}
+
+
+# ─────────────── 16/11 : l'etat ne doit plus TUER la passe sous Windows ───────────────
+def test_un_remplacement_refuse_par_windows_est_RETENTE_et_non_fatal(tmp_path, monkeypatch):
+    """`PermissionError: [WinError 5]` tuait la passe de backfill de la campagne.
+
+    Cause : Windows refuse `os.replace` quand la CIBLE est ouverte, meme en lecture seule — et
+    l'autre passe (campagne toutes les 4 h / rattrapage a la main) lit ce meme etat au debut de son
+    propre `sauver_etat`. Elle ne le tient que quelques millisecondes.
+    """
+    import os as _os
+
+    cible = tmp_path / "etat.json"
+    tmp = tmp_path / "etat.json.tmp"
+    tmp.write_text("{}", encoding="utf-8")
+    essais = []
+    vrai = _os.replace
+
+    def refuse_deux_fois(src, dst):
+        essais.append(1)
+        if len(essais) < 3:
+            raise PermissionError(5, "Acces refuse")
+        return vrai(src, dst)
+
+    monkeypatch.setattr(BC.os, "replace", refuse_deux_fois)
+    siestes = []
+    assert BC.remplacer_avec_patience(tmp, cible, dormir=siestes.append) is True
+    assert len(essais) == 3 and cible.exists(), "le 3e essai doit passer, sans exception"
+    assert siestes and all(s > 0 for s in siestes), "il faut ATTENDRE entre deux essais"
+
+
+def test_un_refus_PERSISTANT_rend_False_au_lieu_de_perdre_la_passe(tmp_path, monkeypatch, capsys):
+    cible = tmp_path / "etat.json"
+    tmp = tmp_path / "etat.json.tmp"
+    tmp.write_text("{}", encoding="utf-8")
+
+    def toujours_refuse(src, dst):
+        raise PermissionError(5, "Acces refuse")
+
+    monkeypatch.setattr(BC.os, "replace", toujours_refuse)
+    assert BC.remplacer_avec_patience(tmp, cible, dormir=lambda s: None) is False
+    sortie = capsys.readouterr().out
+    assert "etat NON sauve" in sortie and "ruban" in sortie, (
+        "perdre un ETAT n'est pas perdre des DONNEES : il faut le dire, pas mourir")
+
+
+def test_sauver_etat_ne_leve_plus_quand_le_remplacement_est_refuse(tmp_path, monkeypatch):
+    """Le test qui compte : la passe continue. Une page d'etat perdue se resauve ; une passe tuee
+    fait perdre des heures de requetes."""
+    monkeypatch.setattr(BC, "remplacer_avec_patience", lambda tmp, cible, **kw: False)
+    BC.sauver_etat(tmp_path, {"1h": {"BTC": 123}})      # ne doit pas lever
+
+
+# ─────────── 16/11 : deux refus ne doivent plus tuer une passe de funding ───────────
+def test_le_funding_RECULE_geometriquement_au_lieu_d_abandonner_au_deuxieme_refus(tmp_path):
+    """Mesure du 16/11 : la passe s'est arrêtée sur LIMITE_DEBIT après 40 min, laissant
+    **24 494 s de budget inutilisées**. L'AIMD existe pour reculer : chaque refus divise le débit
+    par deux (600 -> 300 -> 150 -> 100, le plancher). Renoncer au deuxième refus, c'est abandonner
+    avant même d'avoir atteint le débit prudent d'origine.
+    """
+    import urllib.error
+
+    root = _racine(tmp_path, ["AAA"])
+    appels = []
+    bon = _serveur_funding(appels)
+    refus = {"restants": 3}
+
+    def refuse_puis_accepte(coin, a, b):
+        if refus["restants"] > 0:
+            refus["restants"] -= 1
+            raise urllib.error.HTTPError("u", 429, "Too Many Requests", None, None)
+        return bon(coin, a, b)
+
+    siestes = []
+    bilan = BC.passe_funding(root, now_ms=NOW, poster=refuse_puis_accepte,
+                             dormir=siestes.append, univers=None)
+    assert bilan["arret"] != "LIMITE_DEBIT", (
+        "trois refus suivis d'un succes ne doivent pas arreter la passe : c'est exactement ce que "
+        "l'AIMD est cense absorber")
+    attentes = [s for s in siestes if s in (BC.ATTENTE_REFUS_S, 2 * BC.ATTENTE_REFUS_S,
+                                            3 * BC.ATTENTE_REFUS_S)]
+    assert attentes[:3] == [BC.ATTENTE_REFUS_S, 2 * BC.ATTENTE_REFUS_S, 3 * BC.ATTENTE_REFUS_S], (
+        f"les attentes doivent CROITRE a chaque refus, obtenu {attentes[:3]}")
+
+
+def test_une_venue_durablement_fermee_arrete_quand_meme_la_passe(tmp_path):
+    """On recule, on ne s'acharne pas : au-delà de `REFUS_AVANT_ABANDON`, on rend la main."""
+    import urllib.error
+
+    root = _racine(tmp_path, ["AAA"])
+
+    def refuse_toujours(coin, a, b):
+        raise urllib.error.HTTPError("u", 429, "Too Many Requests", None, None)
+
+    siestes = []
+    bilan = BC.passe_funding(root, now_ms=NOW, poster=refuse_toujours,
+                             dormir=siestes.append, univers=None)
+    assert bilan["arret"] == "LIMITE_DEBIT"
+    assert bilan.get("refus_consecutifs") == BC.REFUS_AVANT_ABANDON, (
+        f"on doit abandonner APRES {BC.REFUS_AVANT_ABANDON} refus consecutifs, "
+        f"pas avant : {bilan.get('refus_consecutifs')}")

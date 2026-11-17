@@ -49,10 +49,12 @@ def test_marks_ecrits_dans_le_flux_replay(tmp_path):
     assert coins == {"HYPE", "PURR"} and all(r["mid"] > 0 and r["ts"] == 1000.0 for r in rows)
 
 
-def test_le_runtime_carry_ECRIT_des_marks(tmp_path):
+def test_le_runtime_carry_ECRIT_des_marks(tmp_path, monkeypatch):
     """Bout-en-bout : un tick du runtime carry doit produire des MARKS (sinon replay mort)."""
-    import json, os, time
-    os.environ["HYPERSMART_CARRY_HYPE_PAPER"] = "1"
+    import json, time
+    # 17/11/2026 : ce drapeau (une famille hors scope) etait pose par `os.environ[...] = "1"` et
+    # jamais retire. `monkeypatch.setenv` le defait a la fin du test.
+    monkeypatch.setenv("HYPERSMART_CARRY_HYPE_PAPER", "1")
     from hl_observer.funding import carry_paper_runtime as C
     data = Path(str(tmp_path)) / "runtime" / "data"
     data.mkdir(parents=True, exist_ok=True)

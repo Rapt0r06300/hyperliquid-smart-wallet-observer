@@ -210,3 +210,289 @@ plusieurs mois — pas avant.
 dimensionnement, jamais sur le brut. Et tout nouveau signal retenu change la configuration, donc
 **exige un nouveau preenregistrement sur une fenetre jamais regardee** — exactement comme la v2 a
 remplace la v1.
+
+---
+
+# AJOUT DU 15/11 (soir) — LA PROFONDEUR ETAIT GELEE, ET LA PRIME DORMAIT DANS LE FUNDING
+
+Quatre trouvailles de la soiree, dont deux changent le plan ci-dessus.
+
+## T1. Le funding ne pouvait PLUS JAMAIS s'approfondir (defaut, repare)
+
+`passe_funding` ne connaissait qu'un front : l'horodatage le plus RECENT par coin, et elle ne savait
+qu'AVANCER (`a = max(now - PROFONDEUR, dernier + 1)`). Pour un coin deja tenu a jour sous l'ancien
+plafond de 208 jours, `dernier` vaut ~maintenant, donc `a` vaut ~maintenant, donc le coin etait
+declare « a jour »... **a 211 jours de profondeur**.
+
+Etat mesure du coffre ce soir-la : **118 coins avec du funding, profondeur mediane 211 jours, et 3
+coins seulement a 1 100 jours** — exactement les trois partis de zero. Porter
+`PROFONDEUR_FUNDING_JOURS` de 208 a 1 100 le 15/11 au matin n'avait donc servi qu'aux coins neufs,
+et la fenetre mesurable du livre (l'INTERSECTION des historiques) etait condamnee a rester a
+211 jours quoi qu'on collecte.
+
+**Repare** : un second front (`funding_ancien`), qui CREUSE page par page vers le passe, se
+reconstruit du ruban au premier passage, et s'arrete sur une sonde quand le coin est au bout de son
+histoire. Verrouille par `tests/test_funding_profondeur_deux_fronts.py` (9 tests).
+
+## T2. Le creusage se fait EN RONDES, et c'est ce qui le rend utile
+
+L'ancienne boucle vidait un coin entierement avant de passer au suivant : **41 minutes pour 2 coins
+sur 261**. Or ce qu'une strategie transversale peut mesurer est l'INTERSECTION des historiques de
+son livre : trois coins parfaits et 258 coins pauvres laissent la fenetre **inchangee**. Les
+41 minutes n'avaient donc rien rapporte de mesurable.
+
+Une page par coin et par ronde fait monter le plancher commun **des la premiere ronde**, et un arret
+a n'importe quel moment laisse une profondeur UNIFORME. Meme cout total, valeur immediate.
+
+## T3. La PRIME (`premium_bps`) a la meme profondeur que le funding — pas 4,6 jours
+
+**C'est la trouvaille qui change le plan du 19.** Le test de la base (`premium_bps`) etait repousse
+au 19/11 « faute d'historique », parce que je le lisais depuis `asset_ctx` (4,6 jours de collecte).
+
+Or `fundingHistory` rend `premium` **dans la meme reponse que le taux**, et le collecteur l'ecrit
+depuis toujours : verifie ce soir, **100 000 lignes sur 100 000 de `funding_1h.jsonl` portent un
+`premium` non nul**. La base est donc deja mesurable sur **211 jours x 118 coins** aujourd'hui, et
+sur ~1 100 jours quand T1 aura creuse.
+
+| | avant | reellement disponible |
+|---|---|---|
+| source | `asset_ctx_tape` | `funding_1h.jsonl` (champ `premium`) |
+| profondeur | 4,6 jours | **211 j (mediane), 1 100 j a terme** |
+| coins | 72 liquides | 118, puis 263 |
+| `t` possible | 0,15-0,58 | a mesurer — l'echantillon est x46 |
+
+**Action** : remonter le test de la base en tete de liste du 19 ; il ne depend plus de la collecte.
+Le `t` croit en racine de `n` : x46 d'echantillon, c'est **x6,8 sur le `t`** si l'effet tient.
+
+## T4. Le pas 4 h existait et n'etait pas collecte (833 jours)
+
+Le plafond de `candleSnapshot` est de **5 000 BOUGIES**, donc il depend du pas. Il manquait le pas
+intermediaire entre l'horaire (208 j) et le journalier (1 101 j) : **4 h = 833 jours a 6 points par
+jour**. Le journalier est profond mais grossier — un horizon de 96 h n'y tient que 4 points et
+l'HEURE d'entree y disparait. Le 4 h garde l'heure sur ~2,3 ans.
+
+Ajoute partout (collecteur, certificateur, contrat de couverture, campagne) : **219 167 jours-coins
+manquants pour 4,5 h de requetes**, le meilleur rendement du plan de rattrapage.
+
+## Ce qui est branche pour y arriver
+
+* `tools/rattrapage_complet.py` — le rattrapage COMPLET en une commande, appele par le
+  **certificateur** (etape 1/2 : completer ; etape 2/2 : sceller). Ordre calcule en **jours-coins
+  gagnes par seconde de requete**, precedences respectees (un funding sans prix ne mesure rien),
+  **une tache a la fois**, garde memoire active, une ligne par coin a l'ecran.
+* `src/hl_observer/ops/rattrapage_plan.py` — le plan, pur et teste (18 tests).
+* `src/hl_observer/collection/debit_adaptatif.py` — le debit n'est plus fige a 10 % du plafond : il
+  monte par paliers tant que la venue ne refuse pas, et se divise sur un refus (AIMD, 11 tests).
+  **112 h de requetes a 100 u/min deviennent ~19 h a 600 u/min.**
+* Univers suivi : un coin dont l'historique est commence **reste suivi** meme apres l'archivage de
+  session, qui faisait tomber l'univers de 261 a 216 coins en silence.
+
+---
+
+# 16/11/2026 — LE COFFRE EST LE MAGASIN PRINCIPAL, ET IL MANQUAIT UNE PORTE
+
+## T5. Le rattrapage ecrivait a cote du coffre quand la campagne etait fermee
+
+Le labo et le moteur ne lisent QUE le coffre certifie : une donnee ecrite dans `runtime/history`
+et non scellee leur est **invisible**, quelle que soit sa taille. La certification tournait bien
+toutes les 30 min — mais comme **collecteur de la campagne** (`coffre-certificateur`), donc
+seulement pendant qu'elle tourne. Un rattrapage lance collecteurs fermes, ou dont la fenetre se
+ferme en cours de route (15/11 21 h 32), laissait ses milliers de jours-coins dehors jusqu'a ce que
+quelqu'un relance la campagne.
+
+**Fait** : `tools/rattrapage_complet.py` scelle lui-meme a la fin de son passage
+(`sceller_le_coffre`, `decider_scellement`), et l'avancement porte le resultat
+(`scellement.fait`). `--sans-scellement` existe pour « Certificateur Coffre Fort.cmd », qui scelle
+de toute facon a son etape 2/2. Un scellage qui echoue est **dit** : « ces donnees restent HORS du
+coffre, donc invisibles pour le labo ».
+
+## T6. Deux scelleurs, un seul registre d'octets
+
+Consequence immediate du T5 : le scellage du rattrapage et le periodique peuvent tomber ensemble.
+Ils ecrivent le MEME `SOURCES_TRAITEES.json`, qui porte pour chaque ruban le dernier octet scelle.
+Le dernier a ecrire efface les decalages de l'autre : la donnee survit, le **registre de ce qui est
+scelle** non — et c'est lui qui dit au labo ce qu'il peut lire. `sceller_coffre_local.py` n'avait
+aucun verrou.
+
+**Fait** : `src/hl_observer/ops/verrou_pid.py` (verrou PID partage, Windows-safe : `os.kill(pid,0)`
+TUERAIT le processus, `tasklist` se lit en OCTETS sur un Windows francais). Le scelleur le prend
+dans `_point_d_entree`, et **rend 0** s'il est deja pris : rien n'a echoue, un autre passage couvre
+les memes octets, et rougir ferait croire a une panne du coffre a chaque superposition. 12 tests
+(`tests/test_scellement_rattrapage.py`), dont « le verrou est rendu meme si la passe echoue ».
+
+## T7. La fermeture accidentelle du 15/11 : le trou MESURE
+
+Mesure sur le ruban `micro_bbo_1794776458794933400.jsonl.gz`, qui couvre 21 h 17 -> 22 h 00 :
+
+| minute | messages | | minute | messages |
+|---|---|---|---|---|
+| 21:30 | 4 832 | | 21:38 | 3 896 |
+| 21:31 | 5 369 | | 21:39 | 3 495 |
+| 21:32 | **1 603** (partielle) | | 21:40 | 3 608 |
+| 21:33 -> 21:37 | **absentes** | | 21:41 | 4 601 |
+
+**Trou = 5 minutes et quelques secondes, et rien d'autre.** Jours scelles au coffre :
+13/11 **27 671 328**, 14/11 **23 353 989**, 15/11 **22 062 757**, 16/11 **11 117 722** — 20
+familles chaque jour, sur 150 522 571 enregistrements et 2 282 jours distincts au total.
+
+## T8. Le correctif du battement de microstructure est SUR LE DISQUE, pas EN VIE
+
+`heartbeats/lab-microstructure.json` est fige depuis 16,9 h avec `n_ecrites_cumul = 0`, alors que
+le collecteur ecrit normalement (5,7 M messages, 93,9 msg/s, fichiers touches a la seconde).
+Pourquoi : `tools/collecter_lab_microstructure.py` a ete corrige a **21 h 43** le 15/11, et le
+processus qui tourne a demarre a **21 h 37** — six minutes avant le correctif. Il ne se relance pas
+tout seul tant qu'il vit.
+
+**Reste a faire** : relancer CE collecteur (quelques secondes de microstructure perdues) pour que
+la detection de mort fonctionne jusqu'au 19/11. Decision de Florent : on ne touche pas a une
+collecte autorisee en cours sans son mot.
+
+## T9. `lab-ctx` : un battement ORPHELIN qui fait un faux mort
+
+`heartbeats/lab-ctx.json` est fige depuis 112 jours — mais `lab-ctx` **n'est pas au registre des
+collecteurs**. Ce n'est pas un collecteur mort, c'est un fichier laisse par un collecteur retire.
+Un controle qui lit tout le dossier `heartbeats/` le compte comme une panne. A nettoyer ou a
+ignorer explicitement, sinon le signal de sante contient un faux positif permanent.
+
+## T10. Ctrl+C sur le rattrapage : la garantie est maintenant TENUE et DITE
+
+Exigence de Florent (16/11) : « le rattrapage doit pouvoir etre ferme via Ctrl+C sans perdre
+aucune donnee ». Ce qui etait deja vrai : chaque page s'ecrit en **lignes entieres** sur le ruban
+avant la suivante (`_ecrire_funding` ferme son `with`, donc vide son tampon), et l'etat du backfill
+est remplace **atomiquement** (`tmp` par PID puis `os.replace`), apres chaque page.
+
+Ce qui etait FAUX : aucun des deux outils n'attrapait `KeyboardInterrupt`. Ctrl+C remontait une
+pile d'erreur et sautait l'ecriture du bilan — le fichier d'avancement restait sur `EN_COURS`
+**pour toujours**. Les donnees etaient saines, l'etat MENTAIT.
+
+**Fait** : `rattrapage_complet.py` attrape le Ctrl+C, ecrit `etat: CTRL_C`, rend le verrou
+(sinon six heures de blocage), rend **130** pour que le lanceur le distingue d'un succes, et ne
+lance PAS de scellage — on ne fait pas attendre plusieurs minutes celui qui vient d'interrompre ;
+il est DIT ou en sont les donnees. `backfill_candles_vaults.py` a son propre point d'entree propre.
+`RATTRAPAGE.cmd` reconnait le code 130. 6 tests, dont un bout en bout qui interrompt une tache et
+verifie l'etat ecrit, le verrou rendu et le code de sortie.
+
+## T11. Battement de microstructure : le correctif tourne enfin
+
+Diagnostic du jour : le correctif etait **sur le disque** (fichier modifie a 21 h 43 le 15/11) mais
+le processus tournait depuis 21 h 37 — six minutes avant. Il ne se relance pas tant qu'il vit.
+
+Chaine verifiee avant de toucher a quoi que ce soit : `watch_economic_collectors.py` ->
+`run_bounded_collector.py --name lab-microstructure` -> le collecteur. Le wrapper est une boucle
+infinie qui relance l'enfant 30 s apres sa mort, avec le code du disque. Donc tuer l'ENFANT suffit
+— et une assertion sur l'identite du parent a d'ailleurs arrete une premiere tentative qui visait
+le mauvais PID.
+
+**Resultat mesure** : enfant 97320 arrete a 14:43:45, relance en 57024 a 14:44:15, puis 4
+battements canoniques distincts a 20 s d'intervalle, ecritures 0 -> 2 928 -> 5 148 -> 7 296, `ack
+True`, horodatage d'echange present, 0 reconnexion. C'est exactement ce que `preuve_de_vie` exige.
+
+## T12. PIEGE : un bail qui « expire dans 90 secondes » est l'etat NORMAL
+
+Je me suis alarme a tort, et ca valait d'etre ecrit. `economic_collection_lease.json` montrait
+`expires_at_ms` a deux minutes devant, et `issued_at_ms` dix-sept heures en arriere : lu comme une
+photo, ca ressemble a une campagne qui meurt dans la minute. C'est l'inverse.
+
+Le watcher passe `--lease-duration-s 120` : **TTL de 2 minutes, renouvele toutes les 30 s**. C'est
+la SECURITE : les collecteurs s'arretent d'eux-memes peu apres la fermeture de la fenetre — c'est
+precisement ce qui a arrete la collecte a 21 h 32 le 15/11. `renew_bounded_collection_lease` ne
+touche que `expires_at_ms` et laisse `issued_at_ms` fige : le delta entre les deux ne mesure donc
+RIEN.
+
+**Ce qu'il faut lire a la place** : `lease_renewal` dans `runtime/logs/economic-collector-watchdog.jsonl`
+(`OK` = le bail roule). Toute alarme batie sur `expires_at_ms` seul sera un faux positif permanent.
+
+## T13. Le rapport collecteurs crie au loup : 163 lignes CRITIQUE sur une campagne saine
+
+`RAPPORT-COLLECTEURS.cmd` classe en `[CRITIQUE]` 136 `ConnectionResetError` de `native-venues` et
+une trentaine de `ResourceWarning`, pendant que ce collecteur a 2,78 M d'ecritures et un battement
+de 26 s. Une reconnexion WebSocket n'est pas une panne : c'est le fonctionnement normal d'un flux
+public. A re-etiqueter (AVERT, avec un seuil par minute), sinon le signal critique ne veut plus
+rien dire — et c'est ce bruit qui fait rater une vraie panne.
+
+## T14. `lab-ctx` : range, pas supprime — et correction de ce que j'ai ecrit en T9
+
+Correction d'abord : en T9 j'ai ecrit qu'un controle comptant ce battement le prenait pour une
+panne. Verifie depuis : **`preuve_de_vie` ne balaie PAS le dossier**, il lit une liste EXPLICITE de
+sources (`lire_heartbeats_reels(root, sources)`). Il n'etait donc pas trompe. Ce qui l'etait : ma
+propre sonde ad hoc — et surtout, le rapport collecteurs n'avait **aucune** vue des battements.
+
+`lab-ctx` est un vrai collecteur (`tools/collecter_lab_ctx.py`), mais d'un AUTRE lanceur
+(`tools/launchers/LANCER-RECHERCHE-14H.cmd`) ; il n'est pas dans les 26 noms du registre, et son
+role dans la campagne copy-vault est tenu par `contexte-leaders`.
+
+**Fait** : le fichier est deplace dans `runtime/research_lab/heartbeats/inactifs/` avec un
+`LISEZ-MOI.txt` qui dit d'ou il vient (rien n'est supprime), et le rapport porte desormais une
+section BATTEMENTS qui **ne juge que les collecteurs declares au registre** et range les autres
+sous « HORS REGISTRE — PAS des pannes ». Si le registre est illisible, aucun verdict n'est rendu :
+on ne declare pas mort ce qu'on ne sait pas lire.
+
+## T15. Le rapport ne crie plus au loup — et il a aussitot deterre une VRAIE panne
+
+Trois defauts mesures, trois corrections dans `tools/rapport_collecteurs.py` :
+
+1. **Aucune fenetre de temps.** Il balayait tout `runtime/logs` en `rglob`, donc un journal du
+   **12/11** remontait en tete de « A CORRIGER EN PRIORITE » le 16/11. Desormais `--depuis-h`
+   (defaut 24 h) ; au-dela, le journal passe en section ARCHIVES avec ses compteurs, hors priorites.
+2. **Un avertissement n'est pas un plantage.** `MOTIF_GRAVE` attrapait `ResourceWarning` par le mot
+   « traceback » present dans son propre texte, et `ConnectionResetError` par `[a-z]+error`.
+   Nouvelle classe **ROUTINE** (`MOTIF_ROUTINE`), evaluee AVANT « grave » : de-escalade voulue,
+   avec sa propre section et un seuil — au-dela de **200** lignes de routine sur un journal recent,
+   c'est signale, parce qu'une tempete de reconnexions EST un symptome.
+3. **Le resume console mentait.** Il comptait `contenu.count("\n  [")`, soit toutes les lignes
+   commencant par un crochet — routine et archives comprises : « ~120 erreurs » sur une campagne
+   saine. Il lit maintenant les compteurs reellement ecrits dans le rapport.
+
+**Resultat sur les memes journaux : 163 lignes critiques -> 8 erreurs graves.** Et parmi ces 8,
+celle-ci, qui etait enterree :
+
+```
+PermissionError: [WinError 5] Acces refuse:
+  runtime\data\backfill_candles_etat.json.85588.tmp -> runtime\data\backfill_candles_etat.json
+```
+
+## T16. L'etat du backfill ne tue plus la passe (la panne que T15 a deterree)
+
+Windows refuse `os.replace` quand la **cible** est ouverte, meme en lecture seule (pas de
+`FILE_SHARE_DELETE` sur un `open()` Python). Or les deux passes de backfill — celle de la campagne
+toutes les 4 h et celle du rattrapage — lisent ce meme etat au debut de leur propre `sauver_etat`.
+Collision de quelques millisecondes, `PermissionError`, et la passe **mourait** : des heures de
+budget de requetes perdues pour une page d'etat.
+
+Le brouillon porte deja le PID (15/11) : la concurrence est un choix ASSUME, je ne reviens pas
+dessus. **Fait** : `remplacer_avec_patience` retente 6 fois avec une attente croissante, puis rend
+`False` en le DISANT plutot que de lever. Perdre un etat n'est pas perdre des donnees — les lignes
+sont deja sur le ruban, completes, et la page suivante resauve. 3 tests.
+
+## T17. Le rapport, suite : cinq faux positifs de plus, et un VRAI trou
+
+En rejouant le rapport apres chaque correction, quatre autres sources de bruit sont tombees — et
+un defaut qui, lui, cachait de vraies pannes :
+
+1. **`429 restantes` lu comme un HTTP 429.** Les lignes de progression du rattrapage disent
+   « 19 min ecoulees, **429** restantes » : le motif `429` NU les comptait en signaux et
+   declenchait meme la recommandation « reduire le debit du poll » — sur une campagne qui n'avait
+   encaisse AUCUN refus. Le `429` exige desormais un contexte HTTP (`status=429`, `429 too many
+   requests`, `erreur 429`...).
+2. **Les compteurs a ZERO comptes comme alertes.** « 0 reconnexions », « (echecs 0) », « 0 refus
+   encaisse(s) » : 458 « petits signaux » etaient en majorite des lignes de BONNE SANTE. Compter
+   les bonnes nouvelles comme des alertes fait le meme mal que crier au loup.
+3. **`status="SUCCESS"` classe GRAVE** a cause du mot « critical » dans
+   `operation="python-version-dependencies-critical"`. Un succes n'est pas une panne.
+4. **Journaux CUMULATIFS.** `ALL_LAUNCHERS.log` est append-only : son mtime est de ce matin, son
+   contenu remonte au 12/11. Une fenetre par FICHIER n'y peut rien. Les lignes de lanceur portent
+   `timestamp_local="JJ/MM/AAAA HH:MM:SS"` : la fenetre se lit donc **par ligne** quand la ligne
+   porte sa date. Piege dans le piege : avant 10 h, l'heure est **cadree par un espace**
+   (« 14/11/2026  1:18:44 »), et un `\d{2}` ne la reconnait pas — la ligne retombait sur le mtime
+   du fichier et repassait en priorite deux jours plus tard.
+5. **TROU PREEXISTANT, l'inverse du bruit** : une ligne `status="FAILURE"` n'etait attrapee par
+   AUCUN motif (« failure » n'est ni « failed » ni « error »). Un echec de lanceur passait donc
+   totalement inapercu. Ajoute — mais sur le STATUT, pas sur le mot : `run_id="runtime-audit-
+   failure-2"` n'est pas un echec.
+
+**Bilan mesure, sur les memes journaux : 163 lignes critiques -> 4 formes / 5 lignes graves.**
+Et les quatre sont explicables : `HTTPError` de meta sur l'explorer (transitoire), le
+`PermissionError` du backfill (corrige en T16), et un traceback de `coffre_session.log` qui s'est
+revele etre un **`KeyboardInterrupt`** du 12/11 — quelqu'un avait interrompu un scellage. Le
+scelleur attrape maintenant le Ctrl+C sur sa passe unique comme sur sa boucle : il DIT que tout ce
+qui etait scelle le reste, et rend 130. 21 tests (`tests/test_rapport_sans_crier_au_loup.py`).

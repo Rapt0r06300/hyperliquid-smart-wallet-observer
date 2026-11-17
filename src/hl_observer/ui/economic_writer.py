@@ -73,7 +73,7 @@ def latest_local_market_marks(
     except Exception as exc:  # DB projection is best-effort; BBO remains authoritative.
         _noter_echec("hl_observer/ui/economic_writer.py:market_snapshot_read", exc)
         return bbo
-    db_marks = status_helpers._latest_market_marks_from_snapshots(snapshots)
+    db_marks = status_helpers._latest_market_marks_from_snapshots(snapshots, current_ms=current_ms)
     return status_helpers._merge_market_marks(bbo, db_marks)
 
 

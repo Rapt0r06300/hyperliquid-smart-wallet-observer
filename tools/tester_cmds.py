@@ -37,10 +37,16 @@ REGISTRE: list[tuple[str, str, list[str], float, str]] = [
     ("SUIVI_COFFRE",          "SUIVI_COFFRE.cmd",                  [],            45,   "sur"),
     ("RAPPORT_COLLECTEURS",   "RAPPORT-COLLECTEURS.cmd",           [],           150,   "sur"),
     ("Certificateur_data",    "Certificateur Coffre Fort.cmd",     ["--data"],   360,   "sur"),
-    ("ALINA_SYNC_preflight",  "ALINA_SYNC_COMPLETE.cmd",           [],           900,   "sur"),
+    ("ALINA_SYNC_preflight",  "ALINA_SYNC_COMPLETE.cmd", ["--preflight-only"], 900,  "sur"),
     ("COLLECTEUR",            "LANCER_COLLECTEURS_COPY_VAULT.cmd", [],          1800,   "long"),
     ("LABO",                  "LANCER_LAB_QUANT_COPY_VAULT.cmd",   ["once"],    1800,   "long"),
     ("MOTEUR_HYPERSMART",     "LANCER_HYPERSMART.cmd",             [],          1800,   "long"),
+    # 16/11/2026 — ajoutes : ils existaient a la racine sans etre testes par personne.
+    # RATTRAPAGE en `--plan` est strictement sur : il mesure et affiche, zero requete reseau.
+    ("RATTRAPAGE_plan",       "RATTRAPAGE.cmd",                    ["--plan"],    240,   "sur"),
+    # CERTIFIER_EN_CONTINU est une BOUCLE de 30 min : la tuer en plein scellage laisserait son
+    # verrou en place. Categorie `long`, jamais dans la passe sure.
+    ("CERTIFIER_EN_CONTINU",  "CERTIFIER_EN_CONTINU.cmd",          [],          1800,   "long"),
     # Dangereux : effets externes -> jamais en auto.
     ("POUSSER_GITHUB",        "POUSSER-GITHUB-FORCE.cmd",          [],             0,   "danger"),
     ("Installer_Noeud_HL",    "Installer Noeud HL.cmd",            [],             0,   "danger"),
@@ -79,10 +85,44 @@ MOTIFS = [
 ]
 
 
+def _tri_partage():
+    """Le tri de `rapport_collecteurs`, IMPORTE — pas recopie.
+
+    16/11/2026 — LE VERDICT DU HARNAIS ETAIT ILLISIBLE. Les cinq lanceurs de la passe sure
+    ressortaient « A VOIR » avec 5 a 12 lignes CRITIQUE chacun, et aucune n'etait reelle :
+
+    * `[candles] 1d termine : ... | 0 refus encaisse(s)` -> attrape par `refus` ;
+    * `log_schema="3" ... operation="python-version-dependencies-critical"` -> par `CRITICAL`,
+      alors que la ligne porte `status="SUCCESS"` et date du 12/11 ;
+    * les rapports qui PARLENT d'erreurs (RAPPORT-COLLECTEURS imprime le journal d'erreurs) ->
+      comptes comme erreurs du lanceur lui-meme.
+
+    Cinq lanceurs « A VOIR » dont zero en panne, c'est un verdict qu'on cesse de lire. Le meme mal
+    a ete corrige le matin meme dans `rapport_collecteurs` ; on importe sa regle au lieu d'en
+    entretenir une seconde, pour qu'elles ne puissent pas diverger.
+    """
+    import importlib.util
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "rapport_pour_tri", RACINE / "tools" / "rapport_collecteurs.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.classer
+    except Exception:                      # noqa: BLE001 — le harnais ne doit jamais planter
+        return None
+
+
+_CLASSER = _tri_partage()
+
+
 def scanner(texte: str) -> tuple[dict[str, int], dict[str, list[str]]]:
     comptes = {k: 0 for k, _ in MOTIFS}
     lignes: dict[str, list[str]] = {k: [] for k, _ in MOTIFS}
     for ln in texte.splitlines():
+        # Filtre partage : bruit attendu, compteurs a zero, lignes de succes, routine WS.
+        if _CLASSER is not None and _CLASSER(ln) is None:
+            continue
         for k, rx in MOTIFS:
             if rx.search(ln):
                 comptes[k] += 1

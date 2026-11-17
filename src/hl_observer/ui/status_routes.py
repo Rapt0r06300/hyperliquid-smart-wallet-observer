@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from collections import deque
 import json
+import math
 import os
 import re
 import threading
@@ -125,7 +126,7 @@ def create_status_router(state: UiState, settings: Settings | None = None) -> AP
                 )
         except (OSError, SQLAlchemyError, RuntimeError) as exc:
             return _empty_market_marks("MARKET_SNAPSHOT_READ_FAILED", error=str(exc))
-        db_marks = _latest_market_marks_from_snapshots(snapshots)
+        db_marks = _latest_market_marks_from_snapshots(snapshots, current_ms=current_ms)
         if live_marks.get("error"):
             db_marks["live_read_status"] = live_marks.get("read_status")
             db_marks["live_error"] = live_marks.get("error")
@@ -493,8 +494,10 @@ def _local_bbo_marks(
     state_path = simulation_state_path(settings).resolve()
     if state_path.parent.name.lower() == "data" and state_path.parent.parent.name.lower() == "runtime":
         root = state_path.parent.parent.parent
+    elif state_path.parent.name.lower() == "runtime":
+        root = state_path.parent.parent
     else:
-        root = Path.cwd().resolve()
+        return _empty_market_marks("LOCAL_BBO_ROOT_UNRESOLVED")
     tape = root / "runtime" / "data" / "bbo_tape.jsonl"
     if not tape.exists():
         return _empty_market_marks("LOCAL_BBO_MISSING")
@@ -991,27 +994,32 @@ def _latest_mid_prices_from_snapshot(raw_snapshot: dict[str, Any] | None) -> dic
             price = float(value)
         except (TypeError, ValueError):
             continue
-        if price > 0:
+        if math.isfinite(price) and price > 0:
             prices[str(coin).upper()] = price
     return prices
 
 
-def _latest_market_marks_from_snapshots(snapshots: list[MarketSnapshot]) -> dict[str, Any]:
+def _latest_market_marks_from_snapshots(
+    snapshots: list[MarketSnapshot], *, current_ms: int
+) -> dict[str, Any]:
     prices: dict[str, float] = {}
     sources: dict[str, str] = {}
-    latest_exchange_ts: int | None = None
+    timestamps: dict[str, int] = {}
     for snapshot in sorted(snapshots, key=lambda row: (row.exchange_ts or 0, row.id or 0), reverse=True):
-        if snapshot.exchange_ts is not None and latest_exchange_ts is None:
-            latest_exchange_ts = int(snapshot.exchange_ts)
+        snapshot_ts = _safe_int(snapshot.exchange_ts)
+        if snapshot_ts is None or not 0 <= current_ms - snapshot_ts <= LIVE_MARKS_MAX_STALE_MS:
+            continue
         for coin, price in _latest_mid_prices_from_snapshot(snapshot.raw_json).items():
             if coin in prices:
                 continue
             prices[coin] = price
             sources[coin] = snapshot.source or "market_snapshot"
+            timestamps[coin] = snapshot_ts
+    latest_exchange_ts = max(timestamps.values()) if timestamps else None
     return {
         "prices": prices,
         "sources": sources,
-        "timestamps": {coin: latest_exchange_ts for coin in prices if latest_exchange_ts is not None},
+        "timestamps": timestamps,
         "latest_exchange_ts": latest_exchange_ts,
         "read_status": "OK" if prices else "NO_USABLE_MARK",
         "error": None,
