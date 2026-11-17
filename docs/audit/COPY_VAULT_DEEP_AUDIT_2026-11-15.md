@@ -1966,3 +1966,65 @@ lirait comme une sortie absente ; (b) évaluer jour par jour (`plan_de_fouille`)
 refusant les moyennes de moyennes. Tant que ce n'est pas fait, le verdict du labo porte la mention
 de lecture interrompue.
 
+### Suivi en production de la correction du collecteur (17/11, 18:38 → 19:34) — et un défaut de MA correction
+
+Journal des pages, 23 cycles après le redémarrage : 11 reconduits, 12 reconstruits, 8 pages
+distinctes. Les changements, un par un :
+
+| heure | entre | sort | lecture |
+|---|---|---|---|
+| 18:48, 19:01 | un leader retenu | l'autre leader retenu | le 2ᵉ « retenu » du classement alterne entre deux vaults : comportement antérieur, hors de cette correction |
+| 18:56, 19:03, 19:08, 19:21 | un leader actif au poll | un leader dont les fills sont sortis de la fenêtre de 45 min | voulu : la place va à qui trade |
+| **19:21 → 19:33, à chaque cycle** | `feab64` puis `e67dbf` puis `feab64`… | l'autre | **défaut de ma correction** |
+
+Ces deux candidats sont les seuls que le poll ne couvre pas. Ma règle les faisait tourner entre
+eux sur les emplacements libres — mais avec **un seul** emplacement libre ils alternaient à chaque
+cycle, et chaque alternance reconstruisait les dix connexions : le défaut même que la correction
+devait supprimer. La simulation ne l'avait pas montré (trois emplacements libres ce jour-là, les
+deux y tenaient).
+
+**Corrigé** : quand le poll couvre les autres, les non-couverts tournent par paliers de 12 cycles
+(30 minutes). Sans liste du poll, la rotation reste celle d'origine, cycle par cycle. Deux tests
+ajoutés, dont le cas exact de 19:21 (130 verts sur les suites du collecteur).
+
+**Non actif** : il faut un second redémarrage du collecteur de fills (~38 s). En attendant, la
+découverte par le poll fonctionne ; seule la stabilité de page est perdue quand les non-couverts
+sont plus nombreux que les emplacements libres.
+
+### Commit local
+
+`770943331fc` sur la branche locale `alina/objectif-20261117` (130 fichiers, parent `b206107b04b`),
+à la demande de l'opérateur, **non poussé**. `main` est inchangé. `git commit` relit les 1,9 million
+de fichiers de données modifiés : 12 minutes et 2,7 Go ; le harnais a coupé son enveloppe pour
+mémoire critique, le processus a fini seul.
+
+### Arrêt et relance de la campagne par l'opérateur (17/11, 19:58 → 20:06)
+
+L'opérateur a arrêté ses collecteurs (touche `q`) : scellement terminé à 20:01:31, 35 rubans
+archivés dans `runtime/archive/session_20261117_200154`, `runtime/data` reparti à zéro. À sa
+demande j'ai relancé `LANCER_COLLECTEURS_COPY_VAULT.cmd` : nouveau bail à 20:06:41, 20 collecteurs
+actifs. **Trou de collecte : 19:58:32 → 20:06:41, environ 8 minutes.**
+
+| contrôle | résultat |
+|---|---|
+| données de la session au coffre | index LOCAL passé de 6 409 à 6 524 shards ; fills, carnets L2, BBO et positions scellés jusqu'à 19:58 |
+| trou déclaré par le compagnon | `writer_outages = 1` et sa fenêtre `writer_outage`, plus 67 checkpoints expirés (une fenêtre) : nouveau code, premier arrêt réel |
+| redémarrage À FROID du collecteur de fills | rubans remis à zéro, journal des liquidations archivé (plus de leader épinglé) : à 20:06:40 le poll ne voyait qu'1 leader actif ; **à 20:09:10 il en voyait 9 et a fait entrer le plus actif (89 fills) dans la page**. Fills en direct à 20:11. Avec l'ancienne règle, cette redécouverte passait par la rotation des silencieux |
+| second correctif (paliers) | chargé à 19:57, puis de nouveau à la relance |
+
+**Ce qui se rattrape, et ce qui ne se rattrape pas** (question de l'opérateur) :
+
+| donnée du labo | rattrapable ? | par qui |
+|---|---|---|
+| fills des leaders, par heure d'échange | oui | collecteur `backfill-fills` de la campagne |
+| bougies, funding | oui | `backfill-candles-vaults` (campagne) et `RATTRAPAGE.cmd` (profondeur) |
+| carnets L2 / BBO | **non** | l'API ne redonne pas un carnet passé |
+| heure de réception en direct d'un fill | **non** | vue en direct ou jamais |
+
+`RATTRAPAGE.cmd` ne lit donc pas le coffre : c'est normal. Son affichage prêtait à confusion
+(« remonte à 0 j | 1 au total » ne comptait que l'ajout du passage) : libellés corrigés.
+
+**Mémoire de la machine** : des `git status` reviennent en boucle sur le dépôt (1 à 1,7 Go chacun,
+plusieurs minutes sur 1,9 million de fichiers, parfois deux à la fois). Ils sont lancés par
+l'application ChatGPT de bureau. Alina n'y touche pas ; c'est à l'opérateur d'en décider.
+

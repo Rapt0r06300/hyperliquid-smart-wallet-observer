@@ -263,15 +263,29 @@ def test_les_non_couverts_tournent_les_couverts_restent():
     assert pages[0][2] == "0xsil0"
 
 
-def test_plus_de_non_couverts_que_de_places_ils_tournent_entre_eux():
+def test_plus_de_non_couverts_que_de_places_ils_tournent_entre_eux_PAR_PALIERS():
     silencieux = [{"vault": f"0xsil{i}"} for i in range(9)]
     indice = {"leaders_du_poll": {"0xsil0", "0xsil1"}}
-    vus = set()
-    for k in range(12):
+    vus, changements, precedent = set(), 0, None
+    for k in range(12 * S.PALIER_ROTATION_HORS_POLL):
         choisis = [c["vault"] for c in S.choisir_les_libres(silencieux, libres=2, rotation_index=k, indice=indice)]
         assert len(choisis) == 2 and not {"0xsil0", "0xsil1"} & set(choisis)
         vus.update(choisis)
+        changements += precedent is not None and choisis != precedent
+        precedent = choisis
     assert vus == {f"0xsil{i}" for i in range(2, 9)}, "aucun non-couvert n'est oublié par la rotation"
+    assert changements == 11, "un changement par palier, pas un par cycle"
+
+
+def test_PRODUCTION_19h21_deux_non_couverts_pour_UN_emplacement_n_alternent_plus_a_chaque_cycle():
+    """Mesuré le 17/11 : `feab64` et `e67dbf` alternaient toutes les 150 s, et chaque alternance
+    reconstruisait les dix connexions."""
+    silencieux = [{"vault": "0xfeab64"}, {"vault": "0xe67dbf"}, {"vault": "0xcouvert"}]
+    indice = {"leaders_du_poll": {"0xcouvert"}}
+    choix = [S.choisir_les_libres(silencieux, libres=1, rotation_index=4_800 + k, indice=indice)[0]["vault"]
+             for k in range(2 * S.PALIER_ROTATION_HORS_POLL)]
+    assert set(choix) == {"0xfeab64", "0xe67dbf"}, "les deux gardent leur tour de découverte"
+    assert sum(1 for a, b in zip(choix, choix[1:]) if a != b) == 1,         "un seul passage de relais en deux paliers (30 min chacun), au lieu d'un par cycle"
 
 
 def test_parmi_les_couverts_le_titulaire_garde_sa_place():
